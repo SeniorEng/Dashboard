@@ -33,7 +33,7 @@ export const SERVICE_TYPES: ServiceType[] = [
 export const PFLEGEGRAD_OPTIONS = [1, 2, 3, 4, 5] as const;
 export type Pflegegrad = typeof PFLEGEGRAD_OPTIONS[number];
 
-export const DURATION_OPTIONS = [15, 30, 45, 60, 75, 90, 105, 120] as const;
+export const DURATION_OPTIONS = [15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180, 195, 210, 225, 240] as const;
 export type DurationOption = typeof DURATION_OPTIONS[number];
 
 export const SERVICE_OPTIONS = [
