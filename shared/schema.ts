@@ -35,14 +35,15 @@ export const appointments = pgTable("appointments", {
   alltagsbegleitungDauer: integer("alltagsbegleitung_dauer"), // null if not selected
   // Legacy serviceType field (for display compatibility)
   serviceType: text("service_type"),
-  date: date("date").notNull(), // Proper SQL date type
-  time: time("time").notNull(), // Proper SQL time type
-  endTime: time("end_time"), // Proper SQL time type
+  date: date("date").notNull(),
+  // Scheduled times (planned appointment slot)
+  scheduledStart: time("scheduled_start").notNull(),
+  scheduledEnd: time("scheduled_end"),
   durationPromised: integer("duration_promised").notNull(),
   status: text("status").notNull().default("scheduled"),
-  // Actual visit times (set during visit)
-  startTime: timestamp("start_time"),
-  actualEndTime: timestamp("actual_end_time"),
+  // Actual visit times (recorded during visit)
+  actualStart: timestamp("actual_start"),
+  actualEnd: timestamp("actual_end"),
   kilometers: text("kilometers"),
   notes: text("notes"),
   servicesDone: text("services_done").array().default([]),
@@ -76,7 +77,7 @@ const baseAppointmentSchema = createInsertSchema(appointments).omit({
 export const insertKundenterminSchema = z.object({
   customerId: z.number(),
   date: z.string(),
-  time: z.string(),
+  scheduledStart: z.string(),
   hauswirtschaftDauer: z.number().min(15).multipleOf(15).nullable().optional(),
   alltagsbegleitungDauer: z.number().min(15).multipleOf(15).nullable().optional(),
   notes: z.string().max(255).optional(),
@@ -89,8 +90,8 @@ export const insertKundenterminSchema = z.object({
 export const insertErstberatungSchema = z.object({
   customer: insertErstberatungCustomerSchema,
   date: z.string(),
-  time: z.string(), // Von
-  endTime: z.string(), // Bis
+  scheduledStart: z.string(),
+  scheduledEnd: z.string(),
   notes: z.string().max(255).optional(),
 });
 
