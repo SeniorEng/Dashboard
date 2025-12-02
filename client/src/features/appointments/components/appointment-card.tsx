@@ -27,17 +27,70 @@ interface AppointmentCardProps {
   appointment: AppointmentWithCustomer;
 }
 
-function getTypeColor(appointmentType: string, serviceType: string | null): string {
-  if (appointmentType === "Erstberatung") {
-    return "bg-purple-500";
+interface ServiceInfo {
+  hasBoth: boolean;
+  label: string;
+  borderClass: string;
+}
+
+function getServiceInfo(appointment: AppointmentWithCustomer): ServiceInfo {
+  if (appointment.appointmentType === "Erstberatung") {
+    return {
+      hasBoth: false,
+      label: "Erstberatung",
+      borderClass: "bg-purple-500"
+    };
   }
-  if (serviceType === "Hauswirtschaft") {
-    return "bg-amber-500";
+  
+  const hasHauswirtschaft = !!appointment.hauswirtschaftDauer;
+  const hasAlltagsbegleitung = !!appointment.alltagsbegleitungDauer;
+  
+  if (hasHauswirtschaft && hasAlltagsbegleitung) {
+    return {
+      hasBoth: true,
+      label: "Hauswirtschaft & Alltagsbegleitung",
+      borderClass: "" // Will use split border
+    };
   }
-  if (serviceType === "Alltagsbegleitung") {
-    return "bg-sky-500";
+  
+  if (hasHauswirtschaft) {
+    return {
+      hasBoth: false,
+      label: "Hauswirtschaft",
+      borderClass: "bg-amber-500"
+    };
   }
-  return "bg-teal-500";
+  
+  if (hasAlltagsbegleitung) {
+    return {
+      hasBoth: false,
+      label: "Alltagsbegleitung",
+      borderClass: "bg-sky-500"
+    };
+  }
+  
+  // Fallback based on serviceType field (legacy)
+  if (appointment.serviceType === "Hauswirtschaft") {
+    return {
+      hasBoth: false,
+      label: "Hauswirtschaft",
+      borderClass: "bg-amber-500"
+    };
+  }
+  
+  if (appointment.serviceType === "Alltagsbegleitung") {
+    return {
+      hasBoth: false,
+      label: "Alltagsbegleitung",
+      borderClass: "bg-sky-500"
+    };
+  }
+  
+  return {
+    hasBoth: false,
+    label: "Kundentermin",
+    borderClass: "bg-teal-500"
+  };
 }
 
 function getStatusIcon(status: string) {
@@ -63,7 +116,7 @@ function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
   
   const isCompleted = appointment.status === "completed";
   const canModify = !isCompleted;
-  const typeColor = getTypeColor(appointment.appointmentType, appointment.serviceType);
+  const serviceInfo = getServiceInfo(appointment);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     if (!canModify) return;
@@ -171,7 +224,14 @@ function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
         >
           <div className="flex items-stretch">
             {/* Color-coded Left Border */}
-            <div className={`w-1.5 ${typeColor} rounded-l-xl`} />
+            {serviceInfo.hasBoth ? (
+              <div className="w-1.5 flex flex-col rounded-l-xl overflow-hidden">
+                <div className="flex-1 bg-amber-500" />
+                <div className="flex-1 bg-sky-500" />
+              </div>
+            ) : (
+              <div className={`w-1.5 ${serviceInfo.borderClass} rounded-l-xl`} />
+            )}
 
             {/* Time */}
             <div className="w-20 flex flex-col items-center justify-center py-4 px-2 text-center border-r border-border/30">
@@ -235,8 +295,7 @@ function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
 
               {/* Subtle Type Indicator */}
               <div className="mt-2 text-[11px] text-muted-foreground">
-                {appointment.appointmentType}
-                {appointment.serviceType && ` · ${appointment.serviceType}`}
+                {serviceInfo.label}
               </div>
             </div>
           </div>
