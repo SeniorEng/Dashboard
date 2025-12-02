@@ -61,6 +61,47 @@ export default function NewAppointment() {
   // Validation errors
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // Computed summary for Kundentermin
+  const ktSummary = useMemo(() => {
+    const services: { name: string; duration: number }[] = [];
+    if (ktHauswirtschaft) {
+      services.push({ name: "Hauswirtschaft", duration: ktHauswirtschaftDauer });
+    }
+    if (ktAlltagsbegleitung) {
+      services.push({ name: "Alltagsbegleitung", duration: ktAlltagsbegleitungDauer });
+    }
+    
+    const totalMinutes = services.reduce((sum, s) => sum + s.duration, 0);
+    
+    // Calculate end time
+    let endTime = "";
+    if (ktTime && totalMinutes > 0) {
+      const [hours, mins] = ktTime.split(":").map(Number);
+      const totalMins = hours * 60 + mins + totalMinutes;
+      const endHours = Math.floor(totalMins / 60) % 24;
+      const endMins = totalMins % 60;
+      endTime = `${endHours.toString().padStart(2, "0")}:${endMins.toString().padStart(2, "0")}`;
+    }
+    
+    // Format duration as hours and minutes
+    const formatDuration = (mins: number) => {
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      if (h === 0) return `${m} Min.`;
+      if (m === 0) return `${h} Std.`;
+      return `${h} Std. ${m} Min.`;
+    };
+    
+    return {
+      services,
+      totalMinutes,
+      totalFormatted: formatDuration(totalMinutes),
+      startTime: ktTime,
+      endTime,
+      hasServices: services.length > 0
+    };
+  }, [ktTime, ktHauswirtschaft, ktHauswirtschaftDauer, ktAlltagsbegleitung, ktAlltagsbegleitungDauer]);
+
   // Create Kundentermin mutation
   const createKundentermin = useMutation({
     mutationFn: async (data: any) => {
@@ -324,6 +365,40 @@ export default function NewAppointment() {
 
                 {errors.ktServices && <p className="text-destructive text-sm">{errors.ktServices}</p>}
               </div>
+
+              {/* Real-time Summary */}
+              {ktSummary.hasServices && (
+                <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 space-y-3" data-testid="summary-panel">
+                  <div className="flex items-center gap-2 text-primary font-semibold">
+                    <Clock className="w-4 h-4" />
+                    <span>Terminübersicht</span>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-muted-foreground">Von</span>
+                      <p className="font-medium text-lg">{ktSummary.startTime} Uhr</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Bis</span>
+                      <p className="font-medium text-lg">{ktSummary.endTime} Uhr</p>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-primary/10 pt-3 space-y-1">
+                    {ktSummary.services.map((s, i) => (
+                      <div key={i} className="flex justify-between text-sm">
+                        <span>{s.name}</span>
+                        <span className="text-muted-foreground">{s.duration} Min.</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between font-medium pt-1 border-t border-primary/10">
+                      <span>Gesamt</span>
+                      <span className="text-primary">{ktSummary.totalFormatted}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Notes */}
               <div className="space-y-2">
