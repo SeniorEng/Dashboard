@@ -1,6 +1,15 @@
 import { Router } from "express";
 import { storage } from "../storage";
-import { updateAppointmentSchema, insertAppointmentSchema } from "@shared/schema";
+import { 
+  updateAppointmentSchema, 
+  insertKundenterminSchema,
+  insertErstberatungSchema 
+} from "@shared/schema";
+import { 
+  doTimesOverlap, 
+  addMinutesToTime, 
+  calculateTotalDuration 
+} from "@shared/types";
 import { fromError } from "zod-validation-error";
 
 const router = Router();
@@ -35,16 +44,192 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-router.post("/", async (req, res) => {
+// Result type for overlap checking
+type OverlapCheckResult = {
+  hasOverlap: boolean;
+  hasUnreliableData: boolean;
+  unreliableAppointmentId?: number;
+};
+
+// Check for overlapping appointments
+// Returns detailed result including whether data is reliable for scheduling decisions
+async function checkOverlap(date: string, startTime: string, endTime: string, excludeId?: number): Promise<OverlapCheckResult> {
+  const existingAppointments = await storage.getAppointmentsByDate(date);
+  
+  for (const apt of existingAppointments) {
+    // Skip the appointment being edited
+    if (excludeId && apt.id === excludeId) continue;
+    
+    // COMPLETED APPOINTMENTS: Must have actualEndTime to be considered reliable
+    // (durationPromised may be a placeholder from seed data, not the real visit duration)
+    if (apt.status === "completed") {
+      if (apt.actualEndTime) {
+        // Use verified actual end time
+        if (doTimesOverlap(startTime, endTime, apt.time, apt.actualEndTime)) {
+          return { hasOverlap: true, hasUnreliableData: false };
+        }
+        continue;
+      }
+      // Completed without actualEndTime - cannot trust duration data
+      return { 
+        hasOverlap: false, 
+        hasUnreliableData: true,
+        unreliableAppointmentId: apt.id
+      };
+    }
+    
+    // SCHEDULED/IN_PROGRESS APPOINTMENTS: Use planned end time
+    // For these, endTime or durationPromised represents the booking intention
+    const hasReliableEndTime = apt.endTime !== null;
+    const hasReliableDuration = apt.durationPromised !== null && apt.durationPromised > 0;
+    
+    if (!hasReliableEndTime && !hasReliableDuration) {
+      // Cannot determine when this appointment is scheduled to end
+      return { 
+        hasOverlap: false, 
+        hasUnreliableData: true,
+        unreliableAppointmentId: apt.id
+      };
+    }
+    
+    // Calculate end time using available data
+    const aptEndTime = apt.endTime || addMinutesToTime(apt.time, apt.durationPromised!);
+    
+    if (doTimesOverlap(startTime, endTime, apt.time, aptEndTime)) {
+      return { hasOverlap: true, hasUnreliableData: false };
+    }
+  }
+  
+  return { hasOverlap: false, hasUnreliableData: false };
+}
+
+// Create Kundentermin (existing customer)
+router.post("/kundentermin", async (req, res) => {
   try {
-    const validatedData = insertAppointmentSchema.parse(req.body);
-    const appointment = await storage.createAppointment(validatedData);
+    const validatedData = insertKundenterminSchema.parse(req.body);
+    
+    // Calculate total duration
+    const totalDuration = calculateTotalDuration(
+      validatedData.hauswirtschaftDauer,
+      validatedData.alltagsbegleitungDauer
+    );
+    
+    const endTime = addMinutesToTime(validatedData.time, totalDuration);
+    
+    // Check for overlap
+    const overlapResult = await checkOverlap(validatedData.date, validatedData.time, endTime);
+    if (overlapResult.hasUnreliableData) {
+      return res.status(409).json({ 
+        error: "Datenprüfung erforderlich",
+        message: `Termin #${overlapResult.unreliableAppointmentId} hat unvollständige Zeitdaten. Bitte vervollständigen Sie die Termindaten bevor Sie neue Termine planen.`
+      });
+    }
+    if (overlapResult.hasOverlap) {
+      return res.status(409).json({ 
+        error: "Terminüberschneidung",
+        message: "Es gibt bereits einen Termin zu dieser Zeit"
+      });
+    }
+    
+    // Determine serviceType for display (legacy support)
+    let serviceType = null;
+    if (validatedData.hauswirtschaftDauer && validatedData.alltagsbegleitungDauer) {
+      serviceType = "Hauswirtschaft"; // Both services
+    } else if (validatedData.hauswirtschaftDauer) {
+      serviceType = "Hauswirtschaft";
+    } else if (validatedData.alltagsbegleitungDauer) {
+      serviceType = "Alltagsbegleitung";
+    }
+    
+    const appointment = await storage.createAppointment({
+      customerId: validatedData.customerId,
+      appointmentType: "Kundentermin",
+      serviceType,
+      hauswirtschaftDauer: validatedData.hauswirtschaftDauer || null,
+      alltagsbegleitungDauer: validatedData.alltagsbegleitungDauer || null,
+      date: validatedData.date,
+      time: validatedData.time,
+      endTime,
+      durationPromised: totalDuration,
+      notes: validatedData.notes || null,
+      status: "scheduled",
+    });
+    
     res.status(201).json(appointment);
   } catch (error: any) {
     if (error.name === "ZodError") {
       return res.status(400).json({ error: fromError(error).toString() });
     }
-    console.error("Failed to create appointment:", error);
+    console.error("Failed to create Kundentermin:", error);
+    res.status(500).json({ error: "Failed to create appointment" });
+  }
+});
+
+// Create Erstberatung (new customer)
+router.post("/erstberatung", async (req, res) => {
+  try {
+    const validatedData = insertErstberatungSchema.parse(req.body);
+    
+    // Check for overlap
+    const overlapResult = await checkOverlap(validatedData.date, validatedData.time, validatedData.endTime);
+    if (overlapResult.hasUnreliableData) {
+      return res.status(409).json({ 
+        error: "Datenprüfung erforderlich",
+        message: `Termin #${overlapResult.unreliableAppointmentId} hat unvollständige Zeitdaten. Bitte vervollständigen Sie die Termindaten bevor Sie neue Termine planen.`
+      });
+    }
+    if (overlapResult.hasOverlap) {
+      return res.status(409).json({ 
+        error: "Terminüberschneidung",
+        message: "Es gibt bereits einen Termin zu dieser Zeit"
+      });
+    }
+    
+    // Create the new customer first
+    const fullName = `${validatedData.customer.vorname} ${validatedData.customer.nachname}`;
+    const fullAddress = `${validatedData.customer.strasse} ${validatedData.customer.nr}, ${validatedData.customer.plz} ${validatedData.customer.stadt}`;
+    
+    const customer = await storage.createCustomer({
+      name: fullName,
+      vorname: validatedData.customer.vorname,
+      nachname: validatedData.customer.nachname,
+      telefon: validatedData.customer.telefon,
+      address: fullAddress,
+      strasse: validatedData.customer.strasse,
+      nr: validatedData.customer.nr,
+      plz: validatedData.customer.plz,
+      stadt: validatedData.customer.stadt,
+      pflegegrad: validatedData.customer.pflegegrad,
+      avatar: "person",
+      needs: [],
+    });
+    
+    // Calculate duration from start to end time
+    const startMinutes = parseInt(validatedData.time.split(":")[0]) * 60 + parseInt(validatedData.time.split(":")[1]);
+    const endMinutes = parseInt(validatedData.endTime.split(":")[0]) * 60 + parseInt(validatedData.endTime.split(":")[1]);
+    const duration = endMinutes - startMinutes;
+    
+    // Create the appointment
+    const appointment = await storage.createAppointment({
+      customerId: customer.id,
+      appointmentType: "Erstberatung",
+      serviceType: null,
+      hauswirtschaftDauer: null,
+      alltagsbegleitungDauer: null,
+      date: validatedData.date,
+      time: validatedData.time,
+      endTime: validatedData.endTime,
+      durationPromised: duration,
+      notes: validatedData.notes || null,
+      status: "scheduled",
+    });
+    
+    res.status(201).json({ appointment, customer });
+  } catch (error: any) {
+    if (error.name === "ZodError") {
+      return res.status(400).json({ error: fromError(error).toString() });
+    }
+    console.error("Failed to create Erstberatung:", error);
     res.status(500).json({ error: "Failed to create appointment" });
   }
 });

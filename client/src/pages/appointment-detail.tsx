@@ -72,7 +72,7 @@ export default function AppointmentDetail() {
     setEndTime(now);
     updateMutation.mutate({
       id: appointment.id,
-      data: { status: "documenting", endTime: now }
+      data: { status: "documenting", actualEndTime: now }
     });
   }, [appointment, updateMutation]);
 

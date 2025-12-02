@@ -10,7 +10,7 @@ import {
 import type { AppointmentWithCustomer } from "@shared/types";
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
-import { eq } from "drizzle-orm";
+import { eq, and, or, gte, lte } from "drizzle-orm";
 
 const sql = neon(process.env.DATABASE_URL!);
 const db = drizzle(sql);
@@ -26,6 +26,7 @@ export interface IStorage {
   getAppointment(id: number): Promise<Appointment | undefined>;
   createAppointment(appointment: InsertAppointment): Promise<Appointment>;
   updateAppointment(id: number, appointment: UpdateAppointment): Promise<Appointment | undefined>;
+  getAppointmentsByDate(date: string): Promise<Appointment[]>;
   
   // Appointments - With Customer (optimized)
   getAppointmentsWithCustomers(): Promise<AppointmentWithCustomer[]>;
@@ -58,6 +59,10 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
+  async getAppointmentsByDate(date: string): Promise<Appointment[]> {
+    return await db.select().from(appointments).where(eq(appointments.date, date));
+  }
+
   async createAppointment(appointment: InsertAppointment): Promise<Appointment> {
     const result = await db.insert(appointments).values(appointment).returning();
     return result[0];
@@ -79,12 +84,15 @@ export class DatabaseStorage implements IStorage {
         customerId: appointments.customerId,
         appointmentType: appointments.appointmentType,
         serviceType: appointments.serviceType,
+        hauswirtschaftDauer: appointments.hauswirtschaftDauer,
+        alltagsbegleitungDauer: appointments.alltagsbegleitungDauer,
         date: appointments.date,
         time: appointments.time,
+        endTime: appointments.endTime,
         durationPromised: appointments.durationPromised,
         status: appointments.status,
         startTime: appointments.startTime,
-        endTime: appointments.endTime,
+        actualEndTime: appointments.actualEndTime,
         kilometers: appointments.kilometers,
         notes: appointments.notes,
         servicesDone: appointments.servicesDone,
@@ -93,7 +101,15 @@ export class DatabaseStorage implements IStorage {
         customer: {
           id: customers.id,
           name: customers.name,
+          vorname: customers.vorname,
+          nachname: customers.nachname,
+          telefon: customers.telefon,
           address: customers.address,
+          strasse: customers.strasse,
+          nr: customers.nr,
+          plz: customers.plz,
+          stadt: customers.stadt,
+          pflegegrad: customers.pflegegrad,
           avatar: customers.avatar,
           needs: customers.needs,
         }
@@ -106,12 +122,15 @@ export class DatabaseStorage implements IStorage {
       customerId: row.customerId,
       appointmentType: row.appointmentType,
       serviceType: row.serviceType,
+      hauswirtschaftDauer: row.hauswirtschaftDauer,
+      alltagsbegleitungDauer: row.alltagsbegleitungDauer,
       date: row.date,
       time: row.time,
+      endTime: row.endTime,
       durationPromised: row.durationPromised,
       status: row.status,
       startTime: row.startTime,
-      endTime: row.endTime,
+      actualEndTime: row.actualEndTime,
       kilometers: row.kilometers,
       notes: row.notes,
       servicesDone: row.servicesDone,
@@ -128,12 +147,15 @@ export class DatabaseStorage implements IStorage {
         customerId: appointments.customerId,
         appointmentType: appointments.appointmentType,
         serviceType: appointments.serviceType,
+        hauswirtschaftDauer: appointments.hauswirtschaftDauer,
+        alltagsbegleitungDauer: appointments.alltagsbegleitungDauer,
         date: appointments.date,
         time: appointments.time,
+        endTime: appointments.endTime,
         durationPromised: appointments.durationPromised,
         status: appointments.status,
         startTime: appointments.startTime,
-        endTime: appointments.endTime,
+        actualEndTime: appointments.actualEndTime,
         kilometers: appointments.kilometers,
         notes: appointments.notes,
         servicesDone: appointments.servicesDone,
@@ -142,7 +164,15 @@ export class DatabaseStorage implements IStorage {
         customer: {
           id: customers.id,
           name: customers.name,
+          vorname: customers.vorname,
+          nachname: customers.nachname,
+          telefon: customers.telefon,
           address: customers.address,
+          strasse: customers.strasse,
+          nr: customers.nr,
+          plz: customers.plz,
+          stadt: customers.stadt,
+          pflegegrad: customers.pflegegrad,
           avatar: customers.avatar,
           needs: customers.needs,
         }
@@ -159,12 +189,15 @@ export class DatabaseStorage implements IStorage {
       customerId: row.customerId,
       appointmentType: row.appointmentType,
       serviceType: row.serviceType,
+      hauswirtschaftDauer: row.hauswirtschaftDauer,
+      alltagsbegleitungDauer: row.alltagsbegleitungDauer,
       date: row.date,
       time: row.time,
+      endTime: row.endTime,
       durationPromised: row.durationPromised,
       status: row.status,
       startTime: row.startTime,
-      endTime: row.endTime,
+      actualEndTime: row.actualEndTime,
       kilometers: row.kilometers,
       notes: row.notes,
       servicesDone: row.servicesDone,

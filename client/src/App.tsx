@@ -7,12 +7,14 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
 import AppointmentDetail from "@/pages/appointment-detail";
+import NewAppointment from "@/pages/new-appointment";
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
       <Route path="/appointment/:id" component={AppointmentDetail} />
+      <Route path="/new-appointment" component={NewAppointment} />
       <Route component={NotFound} />
     </Switch>
   );
