@@ -62,3 +62,8 @@ export function formatTime(date: Date | null): string {
   if (!date) return "--:--";
   return date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
 }
+
+export function formatTimeSlot(time: string | null): string {
+  if (!time) return "--:--";
+  return time.slice(0, 5);
+}

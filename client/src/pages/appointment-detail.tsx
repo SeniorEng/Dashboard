@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useRoute, useLocation } from "wouter";
 import { Layout } from "@/components/layout";
-import { useAppointment, useUpdateAppointment, calculateDuration, formatTime, getAppointmentTypeColor, getServiceColor } from "@/features/appointments";
+import { useAppointment, useUpdateAppointment, calculateDuration, formatTime, formatTimeSlot, getAppointmentTypeColor, getServiceColor } from "@/features/appointments";
 import { SERVICE_OPTIONS } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
@@ -150,7 +150,7 @@ export default function AppointmentDetail() {
               <div>
                 <h3 className="font-semibold text-foreground text-lg">Bereit zum Starten?</h3>
                 <p className="text-muted-foreground text-sm mt-1">
-                  Geplant für {appointment.scheduledStart} Uhr • {appointment.durationPromised} Min.
+                  Geplant für {formatTimeSlot(appointment.scheduledStart)} Uhr • {appointment.durationPromised} Min.
                 </p>
               </div>
               <Button 
