@@ -1,4 +1,4 @@
-import { pgTable, text, integer, timestamp, serial, time } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, timestamp, serial, time, date } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -35,9 +35,9 @@ export const appointments = pgTable("appointments", {
   alltagsbegleitungDauer: integer("alltagsbegleitung_dauer"), // null if not selected
   // Legacy serviceType field (for display compatibility)
   serviceType: text("service_type"),
-  date: text("date").notNull(),
-  time: time("time").notNull(), // Start time (Von) - proper SQL time type
-  endTime: time("end_time"), // End time (Bis) - proper SQL time type
+  date: date("date").notNull(), // Proper SQL date type
+  time: time("time").notNull(), // Proper SQL time type
+  endTime: time("end_time"), // Proper SQL time type
   durationPromised: integer("duration_promised").notNull(),
   status: text("status").notNull().default("scheduled"),
   // Actual visit times (set during visit)

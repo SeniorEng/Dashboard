@@ -135,6 +135,7 @@ CareConnect is a full-stack web application designed to help caregivers manage a
 
 **Current schema uses:**
 ```typescript
+date: date("date").notNull(),        // Appointment date (proper SQL date)
 time: time("time").notNull(),        // Scheduled start time (e.g., "09:00")
 endTime: time("end_time"),           // Scheduled end time (e.g., "12:00")
 startTime: timestamp("start_time"),  // Actual visit start (full timestamp)
