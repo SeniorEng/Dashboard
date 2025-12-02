@@ -33,6 +33,11 @@ export const appointments = pgTable("appointments", {
   // Service durations in minutes (15-min increments) - for Kundentermin
   hauswirtschaftDauer: integer("hauswirtschaft_dauer"), // null if not selected
   alltagsbegleitungDauer: integer("alltagsbegleitung_dauer"), // null if not selected
+  // Service documentation - actual duration and details (max 55 chars)
+  hauswirtschaftActualDauer: integer("hauswirtschaft_actual_dauer"),
+  hauswirtschaftDetails: text("hauswirtschaft_details"),
+  alltagsbegleitungActualDauer: integer("alltagsbegleitung_actual_dauer"),
+  alltagsbegleitungDetails: text("alltagsbegleitung_details"),
   // Legacy serviceType field (for display compatibility)
   serviceType: text("service_type"),
   date: date("date").notNull(),
@@ -44,6 +49,12 @@ export const appointments = pgTable("appointments", {
   // Actual visit times (recorded during visit)
   actualStart: timestamp("actual_start"),
   actualEnd: timestamp("actual_end"),
+  // Travel documentation
+  travelOriginType: text("travel_origin_type"), // "home" | "appointment"
+  travelFromAppointmentId: integer("travel_from_appointment_id"),
+  travelKilometers: integer("travel_kilometers"),
+  travelMinutes: integer("travel_minutes"),
+  // Legacy kilometers field (kept for backwards compatibility)
   kilometers: text("kilometers"),
   notes: text("notes"),
   servicesDone: text("services_done").array().default([]),
@@ -109,6 +120,33 @@ export const insertAppointmentSchema = baseAppointmentSchema.superRefine((data, 
 });
 
 export const updateAppointmentSchema = baseAppointmentSchema.partial();
+
+// Schema for documenting a Kundentermin
+export const documentKundenterminSchema = z.object({
+  // Service documentation (at least one required based on what was scheduled)
+  hauswirtschaftActualDauer: z.number().min(1).nullable().optional(),
+  hauswirtschaftDetails: z.string().max(55, "Maximal 55 Zeichen").nullable().optional(),
+  alltagsbegleitungActualDauer: z.number().min(1).nullable().optional(),
+  alltagsbegleitungDetails: z.string().max(55, "Maximal 55 Zeichen").nullable().optional(),
+  // Travel documentation
+  travelOriginType: z.enum(["home", "appointment"]),
+  travelFromAppointmentId: z.number().nullable().optional(),
+  travelKilometers: z.number().min(0, "Kilometer müssen positiv sein"),
+  travelMinutes: z.number().min(0).nullable().optional(), // Only required if origin is appointment
+  // Optional notes
+  notes: z.string().max(255).nullable().optional(),
+}).refine(
+  (data) => {
+    // If origin is "appointment", travelMinutes is required
+    if (data.travelOriginType === "appointment" && (data.travelMinutes === null || data.travelMinutes === undefined)) {
+      return false;
+    }
+    return true;
+  },
+  { message: "Fahrzeit ist erforderlich wenn Sie von einem anderen Termin kommen", path: ["travelMinutes"] }
+);
+
+export type DocumentKundentermin = z.infer<typeof documentKundenterminSchema>;
 
 export type Customer = typeof customers.$inferSelect;
 export type InsertCustomer = z.infer<typeof insertCustomerSchema>;

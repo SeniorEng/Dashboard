@@ -285,6 +285,21 @@ export default function AppointmentDetail() {
         </Card>
       )}
 
+      {/* Documentation Button - Only for Kundentermin in documenting status */}
+      {appointment.status === "documenting" && appointment.appointmentType === "Kundentermin" && (
+        <div className="mt-6">
+          <Button 
+            className="w-full" 
+            size="lg"
+            onClick={() => setLocation(`/document-appointment/${appointment.id}`)}
+            data-testid="button-document"
+          >
+            <FileText className="w-4 h-4 mr-2" />
+            Jetzt dokumentieren
+          </Button>
+        </div>
+      )}
+
       {/* Action Buttons */}
       {canModify && (
         <div className="flex gap-3 mt-6">

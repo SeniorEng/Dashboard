@@ -3,10 +3,12 @@ import type { Appointment } from "../schema";
 export type AppointmentStatus = "scheduled" | "in-progress" | "documenting" | "completed";
 export type AppointmentType = "Erstberatung" | "Kundentermin";
 export type ServiceType = "Hauswirtschaft" | "Alltagsbegleitung";
+export type TravelOriginType = "home" | "appointment";
 
 export const APPOINTMENT_STATUSES: AppointmentStatus[] = ["scheduled", "in-progress", "documenting", "completed"];
 export const APPOINTMENT_TYPES: AppointmentType[] = ["Erstberatung", "Kundentermin"];
 export const SERVICE_TYPES: ServiceType[] = ["Hauswirtschaft", "Alltagsbegleitung"];
+export const TRAVEL_ORIGIN_TYPES: TravelOriginType[] = ["home", "appointment"];
 
 export const STATUS_ORDER: Record<AppointmentStatus, number> = {
   "scheduled": 0,
@@ -260,4 +262,105 @@ export function getCardServiceInfo(
   }
   
   return { ...info, borderClass };
+}
+
+export interface TravelOriginSuggestion {
+  suggestedOrigin: TravelOriginType;
+  previousAppointment: Appointment | null;
+  previousCustomerName?: string;
+}
+
+export function suggestTravelOrigin(
+  currentAppointment: Appointment,
+  sameDayAppointments: (Appointment & { customerName?: string })[]
+): TravelOriginSuggestion {
+  const currentStartMinutes = timeToMinutes(currentAppointment.scheduledStart);
+  
+  const completedBefore = sameDayAppointments
+    .filter(apt => 
+      apt.id !== currentAppointment.id &&
+      apt.status === "completed" &&
+      apt.actualEnd !== null
+    )
+    .map(apt => ({
+      ...apt,
+      endMinutes: apt.actualEnd ? new Date(apt.actualEnd).getHours() * 60 + new Date(apt.actualEnd).getMinutes() : 0
+    }))
+    .filter(apt => apt.endMinutes < currentStartMinutes)
+    .sort((a, b) => b.endMinutes - a.endMinutes);
+
+  if (completedBefore.length > 0) {
+    const previous = completedBefore[0];
+    return {
+      suggestedOrigin: "appointment",
+      previousAppointment: previous,
+      previousCustomerName: previous.customerName,
+    };
+  }
+
+  return {
+    suggestedOrigin: "home",
+    previousAppointment: null,
+  };
+}
+
+export interface ServiceDocumentation {
+  serviceType: ServiceType;
+  plannedDuration: number;
+  actualDuration: number | null;
+  details: string | null;
+}
+
+export function getServicesToDocument(appointment: Appointment): ServiceDocumentation[] {
+  const services: ServiceDocumentation[] = [];
+  
+  if (appointment.hauswirtschaftDauer) {
+    services.push({
+      serviceType: "Hauswirtschaft",
+      plannedDuration: appointment.hauswirtschaftDauer,
+      actualDuration: appointment.hauswirtschaftActualDauer,
+      details: appointment.hauswirtschaftDetails,
+    });
+  }
+  
+  if (appointment.alltagsbegleitungDauer) {
+    services.push({
+      serviceType: "Alltagsbegleitung",
+      plannedDuration: appointment.alltagsbegleitungDauer,
+      actualDuration: appointment.alltagsbegleitungActualDauer,
+      details: appointment.alltagsbegleitungDetails,
+    });
+  }
+  
+  return services;
+}
+
+export function validateServiceDocumentation(
+  appointment: Appointment,
+  hauswirtschaftActualDauer: number | null | undefined,
+  hauswirtschaftDetails: string | null | undefined,
+  alltagsbegleitungActualDauer: number | null | undefined,
+  alltagsbegleitungDetails: string | null | undefined
+): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  
+  if (appointment.hauswirtschaftDauer) {
+    if (!hauswirtschaftActualDauer || hauswirtschaftActualDauer < 1) {
+      errors.push("Bitte geben Sie die tatsächliche Dauer für Hauswirtschaft an");
+    }
+    if (hauswirtschaftDetails && hauswirtschaftDetails.length > 55) {
+      errors.push("Hauswirtschaft Details dürfen maximal 55 Zeichen haben");
+    }
+  }
+  
+  if (appointment.alltagsbegleitungDauer) {
+    if (!alltagsbegleitungActualDauer || alltagsbegleitungActualDauer < 1) {
+      errors.push("Bitte geben Sie die tatsächliche Dauer für Alltagsbegleitung an");
+    }
+    if (alltagsbegleitungDetails && alltagsbegleitungDetails.length > 55) {
+      errors.push("Alltagsbegleitung Details dürfen maximal 55 Zeichen haben");
+    }
+  }
+  
+  return { valid: errors.length === 0, errors };
 }

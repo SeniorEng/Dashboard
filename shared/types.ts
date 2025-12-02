@@ -3,14 +3,18 @@ export {
   type AppointmentStatus,
   type AppointmentType,
   type ServiceType,
+  type TravelOriginType,
   type Pflegegrad,
   type DurationOption,
   type ServiceOption,
   type ServiceInfo,
   type CardServiceInfo,
+  type TravelOriginSuggestion,
+  type ServiceDocumentation,
   APPOINTMENT_TYPES,
   APPOINTMENT_STATUSES,
   SERVICE_TYPES,
+  TRAVEL_ORIGIN_TYPES,
   PFLEGEGRAD_OPTIONS,
   DURATION_OPTIONS,
   SERVICE_OPTIONS,
@@ -41,6 +45,9 @@ export {
   getAppointmentTypeColor,
   getServiceColor,
   getServiceBorderColor,
+  suggestTravelOrigin,
+  getServicesToDocument,
+  validateServiceDocumentation,
 } from "./domain/appointments";
 
 export interface AppointmentWithCustomer extends Appointment {

@@ -3,9 +3,11 @@ import { storage } from "../storage";
 import { 
   updateAppointmentSchema, 
   insertKundenterminSchema,
-  insertErstberatungSchema 
+  insertErstberatungSchema,
+  documentKundenterminSchema
 } from "@shared/schema";
 import { appointmentService } from "../services/appointments";
+import { suggestTravelOrigin, validateServiceDocumentation } from "@shared/domain/appointments";
 import { 
   ErrorMessages, 
   handleRouteError, 
@@ -154,6 +156,96 @@ router.patch("/:id", async (req, res) => {
     res.json(appointment);
   } catch (error) {
     handleRouteError(res, error, ErrorMessages.updateAppointmentFailed, "Failed to update appointment");
+  }
+});
+
+router.get("/:id/travel-suggestion", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
+    }
+    
+    const appointment = await storage.getAppointmentWithCustomer(id);
+    if (!appointment) {
+      return sendNotFound(res, ErrorMessages.appointmentNotFound);
+    }
+    
+    const sameDayAppointments = await storage.getAppointmentsWithCustomers(appointment.date);
+    
+    const appointmentsWithNames = sameDayAppointments.map(apt => ({
+      ...apt,
+      customerName: apt.customer?.name
+    }));
+    
+    const suggestion = suggestTravelOrigin(appointment, appointmentsWithNames);
+    
+    res.json({
+      suggestedOrigin: suggestion.suggestedOrigin,
+      previousAppointmentId: suggestion.previousAppointment?.id ?? null,
+      previousCustomerName: suggestion.previousCustomerName ?? null,
+    });
+  } catch (error) {
+    handleRouteError(res, error, "Fehler beim Laden der Fahrvorschläge", "Failed to get travel suggestion");
+  }
+});
+
+router.post("/:id/document", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
+    }
+    
+    const appointment = await storage.getAppointment(id);
+    if (!appointment) {
+      return sendNotFound(res, ErrorMessages.appointmentNotFound);
+    }
+    
+    if (appointment.appointmentType !== "Kundentermin") {
+      return sendForbidden(res, "INVALID_TYPE", "Nur Kundentermine können dokumentiert werden");
+    }
+    
+    if (appointment.status !== "documenting") {
+      return sendForbidden(res, "INVALID_STATUS", "Der Termin muss im Status 'Dokumentation' sein");
+    }
+    
+    const validatedData = documentKundenterminSchema.parse(req.body);
+    
+    const serviceValidation = validateServiceDocumentation(
+      appointment,
+      validatedData.hauswirtschaftActualDauer,
+      validatedData.hauswirtschaftDetails,
+      validatedData.alltagsbegleitungActualDauer,
+      validatedData.alltagsbegleitungDetails
+    );
+    
+    if (!serviceValidation.valid) {
+      return sendBadRequest(res, serviceValidation.errors.join(", "));
+    }
+    
+    const updateData = {
+      hauswirtschaftActualDauer: validatedData.hauswirtschaftActualDauer ?? null,
+      hauswirtschaftDetails: validatedData.hauswirtschaftDetails ?? null,
+      alltagsbegleitungActualDauer: validatedData.alltagsbegleitungActualDauer ?? null,
+      alltagsbegleitungDetails: validatedData.alltagsbegleitungDetails ?? null,
+      travelOriginType: validatedData.travelOriginType,
+      travelFromAppointmentId: validatedData.travelFromAppointmentId ?? null,
+      travelKilometers: validatedData.travelKilometers,
+      travelMinutes: validatedData.travelMinutes ?? null,
+      notes: validatedData.notes ?? appointment.notes,
+      status: "completed" as const,
+    };
+    
+    const updatedAppointment = await storage.updateAppointment(id, updateData);
+    
+    if (!updatedAppointment) {
+      return sendServerError(res, "Fehler beim Speichern der Dokumentation");
+    }
+    
+    res.json(updatedAppointment);
+  } catch (error) {
+    handleRouteError(res, error, "Fehler beim Speichern der Dokumentation", "Failed to document appointment");
   }
 });
 

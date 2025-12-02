@@ -9,6 +9,7 @@ import Dashboard from "@/pages/dashboard";
 import AppointmentDetail from "@/pages/appointment-detail";
 import NewAppointment from "@/pages/new-appointment";
 import EditAppointment from "@/pages/edit-appointment";
+import DocumentAppointment from "@/pages/document-appointment";
 import Customers from "@/pages/customers";
 
 function Router() {
@@ -19,6 +20,7 @@ function Router() {
       <Route path="/appointment/:id" component={AppointmentDetail} />
       <Route path="/new-appointment" component={NewAppointment} />
       <Route path="/edit-appointment/:id" component={EditAppointment} />
+      <Route path="/document-appointment/:id" component={DocumentAppointment} />
       <Route component={NotFound} />
     </Switch>
   );

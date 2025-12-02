@@ -1,0 +1,493 @@
+import { useState, useEffect, useCallback } from "react";
+import { useRoute, useLocation } from "wouter";
+import { Layout } from "@/components/layout";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Slider } from "@/components/ui/slider";
+import { 
+  ChevronLeft, ChevronRight, Loader2, Clock, 
+  Home, MapPin, Car, Check, AlertCircle
+} from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { 
+  formatDuration, 
+  getServicesToDocument,
+  type TravelOriginType,
+  type ServiceType
+} from "@shared/types";
+import type { AppointmentWithCustomer } from "@shared/types";
+
+interface TravelSuggestion {
+  suggestedOrigin: TravelOriginType;
+  previousAppointmentId: number | null;
+  previousCustomerName: string | null;
+}
+
+interface ServiceFormData {
+  serviceType: ServiceType;
+  plannedDuration: number;
+  actualDuration: number;
+  details: string;
+}
+
+interface DocumentationFormData {
+  services: ServiceFormData[];
+  travelOriginType: TravelOriginType;
+  travelFromAppointmentId: number | null;
+  travelKilometers: number;
+  travelMinutes: number;
+  notes: string;
+}
+
+export default function DocumentAppointment() {
+  const [, params] = useRoute("/document-appointment/:id");
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const id = params?.id ? parseInt(params.id) : 0;
+
+  const [step, setStep] = useState(1);
+  const [formData, setFormData] = useState<DocumentationFormData>({
+    services: [],
+    travelOriginType: "home",
+    travelFromAppointmentId: null,
+    travelKilometers: 0,
+    travelMinutes: 0,
+    notes: "",
+  });
+
+  const { data: appointment, isLoading: appointmentLoading } = useQuery<AppointmentWithCustomer>({
+    queryKey: ["appointment", id],
+    queryFn: async () => {
+      const res = await fetch(`/api/appointments/${id}`);
+      if (!res.ok) throw new Error("Termin nicht gefunden");
+      return res.json();
+    },
+    enabled: id > 0,
+  });
+
+  const { data: travelSuggestion } = useQuery<TravelSuggestion>({
+    queryKey: ["travel-suggestion", id],
+    queryFn: async () => {
+      const res = await fetch(`/api/appointments/${id}/travel-suggestion`);
+      if (!res.ok) throw new Error("Fahrvorschlag nicht verfügbar");
+      return res.json();
+    },
+    enabled: id > 0,
+  });
+
+  useEffect(() => {
+    if (appointment) {
+      const services = getServicesToDocument(appointment);
+      setFormData(prev => ({
+        ...prev,
+        services: services.map(s => ({
+          serviceType: s.serviceType,
+          plannedDuration: s.plannedDuration,
+          actualDuration: s.actualDuration ?? s.plannedDuration,
+          details: s.details ?? "",
+        })),
+        notes: appointment.notes ?? "",
+      }));
+    }
+  }, [appointment]);
+
+  useEffect(() => {
+    if (travelSuggestion) {
+      setFormData(prev => ({
+        ...prev,
+        travelOriginType: travelSuggestion.suggestedOrigin,
+        travelFromAppointmentId: travelSuggestion.previousAppointmentId,
+      }));
+    }
+  }, [travelSuggestion]);
+
+  const submitMutation = useMutation({
+    mutationFn: async (data: DocumentationFormData) => {
+      const payload: Record<string, unknown> = {
+        travelOriginType: data.travelOriginType,
+        travelKilometers: data.travelKilometers,
+        notes: data.notes || null,
+      };
+
+      if (data.travelOriginType === "appointment") {
+        payload.travelFromAppointmentId = data.travelFromAppointmentId;
+        payload.travelMinutes = data.travelMinutes;
+      }
+
+      const hwService = data.services.find(s => s.serviceType === "Hauswirtschaft");
+      const abService = data.services.find(s => s.serviceType === "Alltagsbegleitung");
+
+      if (hwService) {
+        payload.hauswirtschaftActualDauer = hwService.actualDuration;
+        payload.hauswirtschaftDetails = hwService.details || null;
+      }
+      if (abService) {
+        payload.alltagsbegleitungActualDauer = abService.actualDuration;
+        payload.alltagsbegleitungDetails = abService.details || null;
+      }
+
+      const res = await fetch(`/api/appointments/${id}/document`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || "Dokumentation fehlgeschlagen");
+      }
+
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      queryClient.invalidateQueries({ queryKey: ["appointment", id] });
+      toast({
+        title: "Dokumentation abgeschlossen",
+        description: "Der Termin wurde erfolgreich dokumentiert.",
+      });
+      setLocation("/");
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Fehler",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updateService = useCallback((index: number, field: keyof ServiceFormData, value: number | string) => {
+    setFormData(prev => ({
+      ...prev,
+      services: prev.services.map((s, i) => 
+        i === index ? { ...s, [field]: value } : s
+      ),
+    }));
+  }, []);
+
+  const handleNext = useCallback(() => {
+    const isStep1Valid = formData.services.every(s => s.actualDuration > 0);
+    if (!isStep1Valid) {
+      toast({
+        title: "Bitte alle Felder ausfüllen",
+        description: "Die tatsächliche Dauer muss für jeden Service angegeben werden.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setStep(2);
+  }, [formData.services, toast]);
+
+  const handleSubmit = useCallback(() => {
+    if (formData.travelKilometers <= 0) {
+      toast({
+        title: "Kilometer fehlt",
+        description: "Bitte geben Sie die gefahrenen Kilometer an.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (formData.travelOriginType === "appointment" && formData.travelMinutes <= 0) {
+      toast({
+        title: "Fahrzeit fehlt",
+        description: "Bitte geben Sie die Fahrzeit vom vorherigen Kunden an.",
+        variant: "destructive",
+      });
+      return;
+    }
+    submitMutation.mutate(formData);
+  }, [formData, submitMutation, toast]);
+
+  if (appointmentLoading) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center min-h-[50vh]">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      </Layout>
+    );
+  }
+
+  if (!appointment) {
+    return (
+      <Layout>
+        <Card className="border-destructive">
+          <CardContent className="pt-6 text-center">
+            <AlertCircle className="w-12 h-12 mx-auto text-destructive mb-4" />
+            <p className="text-destructive font-medium">Termin nicht gefunden</p>
+          </CardContent>
+        </Card>
+      </Layout>
+    );
+  }
+
+  if (appointment.status !== "documenting") {
+    return (
+      <Layout>
+        <Card className="border-amber-200 bg-amber-50">
+          <CardContent className="pt-6 text-center">
+            <AlertCircle className="w-12 h-12 mx-auto text-amber-600 mb-4" />
+            <p className="text-amber-800 font-medium">
+              Dieser Termin kann nicht dokumentiert werden
+            </p>
+            <p className="text-amber-600 text-sm mt-2">
+              Der Termin muss zuerst beendet werden, um in den Dokumentationsmodus zu wechseln.
+            </p>
+            <Button 
+              variant="outline" 
+              className="mt-4"
+              onClick={() => setLocation(`/appointment/${id}`)}
+            >
+              Zurück zum Termin
+            </Button>
+          </CardContent>
+        </Card>
+      </Layout>
+    );
+  }
+
+  return (
+    <Layout>
+      <div className="mb-6">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => step === 1 ? setLocation(`/appointment/${id}`) : setStep(1)}
+          className="mb-2 -ml-2"
+          data-testid="button-back"
+        >
+          <ChevronLeft className="w-4 h-4 mr-1" />
+          {step === 1 ? "Zurück" : "Schritt 1"}
+        </Button>
+        
+        <h1 className="text-2xl font-bold text-foreground" data-testid="text-title">
+          Dokumentation
+        </h1>
+        <p className="text-muted-foreground text-sm">
+          {appointment.customer?.name} • Schritt {step} von 2
+        </p>
+        
+        <div className="flex gap-2 mt-3">
+          <div className={`h-1 flex-1 rounded-full ${step >= 1 ? "bg-primary" : "bg-muted"}`} />
+          <div className={`h-1 flex-1 rounded-full ${step >= 2 ? "bg-primary" : "bg-muted"}`} />
+        </div>
+      </div>
+
+      {step === 1 ? (
+        <div className="space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Clock className="w-5 h-5 text-primary" />
+                Services dokumentieren
+              </CardTitle>
+              <CardDescription>
+                Überprüfen Sie die Dauer und fügen Sie Details hinzu
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {formData.services.map((service, index) => (
+                <div key={service.serviceType} className="space-y-4 pb-4 border-b last:border-b-0 last:pb-0">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-medium text-foreground">{service.serviceType}</h3>
+                    <span className="text-sm text-muted-foreground">
+                      Geplant: {formatDuration(service.plannedDuration)}
+                    </span>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label>Tatsächliche Dauer</Label>
+                      <span className="text-sm font-medium text-primary">
+                        {formatDuration(service.actualDuration)}
+                      </span>
+                    </div>
+                    <Slider
+                      value={[service.actualDuration]}
+                      onValueChange={([value]) => updateService(index, "actualDuration", value)}
+                      min={15}
+                      max={240}
+                      step={15}
+                      className="w-full"
+                      data-testid={`slider-duration-${service.serviceType.toLowerCase()}`}
+                    />
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>15 Min.</span>
+                      <span>4 Std.</span>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor={`details-${index}`}>Servicedetails</Label>
+                      <span className={`text-xs ${service.details.length > 55 ? "text-destructive" : "text-muted-foreground"}`}>
+                        {service.details.length}/55
+                      </span>
+                    </div>
+                    <Input
+                      id={`details-${index}`}
+                      value={service.details}
+                      onChange={(e) => updateService(index, "details", e.target.value.slice(0, 55))}
+                      placeholder="z.B. Wäsche gewaschen, Boden gewischt"
+                      maxLength={55}
+                      data-testid={`input-details-${service.serviceType.toLowerCase()}`}
+                    />
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+          
+          <Button 
+            className="w-full" 
+            size="lg"
+            onClick={handleNext}
+            data-testid="button-next"
+          >
+            Weiter
+            <ChevronRight className="w-4 h-4 ml-2" />
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Car className="w-5 h-5 text-primary" />
+                Anfahrt dokumentieren
+              </CardTitle>
+              <CardDescription>
+                Woher kamen Sie zu diesem Termin?
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <RadioGroup
+                value={formData.travelOriginType}
+                onValueChange={(value: TravelOriginType) => setFormData(prev => ({
+                  ...prev,
+                  travelOriginType: value,
+                  travelMinutes: value === "home" ? 0 : prev.travelMinutes,
+                }))}
+                className="space-y-3"
+              >
+                <div className={`flex items-center space-x-3 p-3 rounded-lg border ${formData.travelOriginType === "home" ? "border-primary bg-primary/5" : "border-border"}`}>
+                  <RadioGroupItem value="home" id="origin-home" data-testid="radio-origin-home" />
+                  <Label htmlFor="origin-home" className="flex items-center gap-2 cursor-pointer flex-1">
+                    <Home className="w-4 h-4 text-muted-foreground" />
+                    <div>
+                      <span className="font-medium">Von zu Hause</span>
+                      <p className="text-xs text-muted-foreground">Erster Termin des Tages</p>
+                    </div>
+                  </Label>
+                </div>
+                
+                <div className={`flex items-center space-x-3 p-3 rounded-lg border ${formData.travelOriginType === "appointment" ? "border-primary bg-primary/5" : "border-border"}`}>
+                  <RadioGroupItem value="appointment" id="origin-appointment" data-testid="radio-origin-appointment" />
+                  <Label htmlFor="origin-appointment" className="flex items-center gap-2 cursor-pointer flex-1">
+                    <MapPin className="w-4 h-4 text-muted-foreground" />
+                    <div>
+                      <span className="font-medium">Vom vorherigen Kunden</span>
+                      {travelSuggestion?.previousCustomerName && (
+                        <p className="text-xs text-muted-foreground">
+                          {travelSuggestion.previousCustomerName}
+                        </p>
+                      )}
+                    </div>
+                  </Label>
+                </div>
+              </RadioGroup>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="kilometers">Gefahrene Kilometer</Label>
+                  <div className="relative">
+                    <Input
+                      id="kilometers"
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={formData.travelKilometers || ""}
+                      onChange={(e) => setFormData(prev => ({
+                        ...prev,
+                        travelKilometers: parseFloat(e.target.value) || 0,
+                      }))}
+                      placeholder="0"
+                      className="pr-12"
+                      data-testid="input-kilometers"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
+                      km
+                    </span>
+                  </div>
+                </div>
+                
+                {formData.travelOriginType === "appointment" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="travelMinutes">Fahrzeit</Label>
+                    <div className="relative">
+                      <Input
+                        id="travelMinutes"
+                        type="number"
+                        min="0"
+                        value={formData.travelMinutes || ""}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          travelMinutes: parseInt(e.target.value) || 0,
+                        }))}
+                        placeholder="0"
+                        className="pr-12"
+                        data-testid="input-travel-minutes"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
+                        Min.
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="notes">Zusätzliche Notizen (optional)</Label>
+                <Textarea
+                  id="notes"
+                  value={formData.notes}
+                  onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+                  placeholder="Weitere Anmerkungen zum Termin..."
+                  rows={3}
+                  data-testid="textarea-notes"
+                />
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Button 
+            className="w-full" 
+            size="lg"
+            onClick={handleSubmit}
+            disabled={submitMutation.isPending}
+            data-testid="button-submit"
+          >
+            {submitMutation.isPending ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Wird gespeichert...
+              </>
+            ) : (
+              <>
+                <Check className="w-4 h-4 mr-2" />
+                Dokumentation abschließen
+              </>
+            )}
+          </Button>
+        </div>
+      )}
+    </Layout>
+  );
+}
