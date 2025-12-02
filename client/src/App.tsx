@@ -9,11 +9,13 @@ import Dashboard from "@/pages/dashboard";
 import AppointmentDetail from "@/pages/appointment-detail";
 import NewAppointment from "@/pages/new-appointment";
 import EditAppointment from "@/pages/edit-appointment";
+import Customers from "@/pages/customers";
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
+      <Route path="/customers" component={Customers} />
       <Route path="/appointment/:id" component={AppointmentDetail} />
       <Route path="/new-appointment" component={NewAppointment} />
       <Route path="/edit-appointment/:id" component={EditAppointment} />
