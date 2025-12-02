@@ -135,16 +135,16 @@ CareConnect is a full-stack web application designed to help caregivers manage a
 
 **Current schema uses:**
 ```typescript
-date: date("date").notNull(),        // Appointment date (proper SQL date)
-time: time("time").notNull(),        // Scheduled start time (e.g., "09:00")
-endTime: time("end_time"),           // Scheduled end time (e.g., "12:00")
-startTime: timestamp("start_time"),  // Actual visit start (full timestamp)
-actualEndTime: timestamp("actual_end_time"), // Actual visit end
+date: date("date").notNull(),              // Appointment date (proper SQL date)
+scheduledStart: time("scheduled_start").notNull(),  // Planned start time (e.g., "09:00")
+scheduledEnd: time("scheduled_end"),       // Planned end time (e.g., "12:00")
+actualStart: timestamp("actual_start"),    // When visit actually started
+actualEnd: timestamp("actual_end"),        // When visit actually ended
 ```
 
 ### Overlap Checking Logic
 
 **Business rules for appointment scheduling:**
-- **Completed appointments**: Check against documented `actualEndTime`. Skip if no actual end time recorded (visit is done).
-- **Scheduled appointments**: Check against planned `endTime` or calculate from `durationPromised`.
+- **Completed appointments**: Check against documented `actualEnd` timestamp. Skip if no actual end time recorded (visit is done).
+- **Scheduled appointments**: Check against planned `scheduledEnd` or calculate from `durationPromised`.
 - Always provide clear German error messages for scheduling conflicts.
