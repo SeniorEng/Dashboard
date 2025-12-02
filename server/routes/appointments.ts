@@ -268,4 +268,36 @@ router.patch("/:id", async (req, res) => {
   }
 });
 
+router.delete("/:id", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "Ungültige Termin-ID" });
+    }
+    
+    // Check if appointment exists and is not completed
+    const appointment = await storage.getAppointment(id);
+    if (!appointment) {
+      return res.status(404).json({ error: "Termin nicht gefunden" });
+    }
+    
+    if (appointment.status === "completed") {
+      return res.status(403).json({ 
+        error: "Löschen nicht möglich",
+        message: "Abgeschlossene Termine können nicht gelöscht werden."
+      });
+    }
+    
+    const deleted = await storage.deleteAppointment(id);
+    if (!deleted) {
+      return res.status(500).json({ error: "Termin konnte nicht gelöscht werden" });
+    }
+    
+    res.json({ success: true, message: "Termin erfolgreich gelöscht" });
+  } catch (error) {
+    console.error("Failed to delete appointment:", error);
+    res.status(500).json({ error: "Termin konnte nicht gelöscht werden" });
+  }
+});
+
 export default router;

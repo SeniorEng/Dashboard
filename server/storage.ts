@@ -26,6 +26,7 @@ export interface IStorage {
   getAppointment(id: number): Promise<Appointment | undefined>;
   createAppointment(appointment: InsertAppointment): Promise<Appointment>;
   updateAppointment(id: number, appointment: UpdateAppointment): Promise<Appointment | undefined>;
+  deleteAppointment(id: number): Promise<boolean>;
   getAppointmentsByDate(date: string): Promise<Appointment[]>;
   
   // Appointments - With Customer (optimized)
@@ -74,6 +75,11 @@ export class DatabaseStorage implements IStorage {
       .where(eq(appointments.id, id))
       .returning();
     return result[0];
+  }
+
+  async deleteAppointment(id: number): Promise<boolean> {
+    const result = await db.delete(appointments).where(eq(appointments.id, id)).returning();
+    return result.length > 0;
   }
 
   // Appointments - With Customer (single query with LEFT JOIN for performance)
