@@ -111,3 +111,39 @@ CareConnect is a full-stack web application designed to help caregivers manage a
 3. **Error Boundaries**: Graceful error recovery
 4. **Feature Modules**: Self-contained feature code
 5. **Shared Types**: Single source of truth for TypeScript types
+
+## Key Learnings & Rules
+
+### Database Schema Design
+
+**ALWAYS use proper SQL types - never use text for structured data:**
+
+| Data Type | WRONG | CORRECT |
+|-----------|-------|---------|
+| Time slots (09:00) | `text("time")` | `time("time")` |
+| Dates | `text("date")` | `date("date")` |
+| Timestamps | `text("created_at")` | `timestamp("created_at")` |
+| Boolean | `text("active")` | `boolean("active")` |
+| Numbers | `text("amount")` | `integer("amount")` or `numeric("amount")` |
+
+**Why this matters:**
+- Text columns provide no validation (you can store "banana" in a time field)
+- No native sorting or comparison
+- No database-level arithmetic or calculations
+- Causes runtime errors when the application expects proper types
+- Makes migrations painful when you need to fix it later
+
+**Current schema uses:**
+```typescript
+time: time("time").notNull(),        // Scheduled start time (e.g., "09:00")
+endTime: time("end_time"),           // Scheduled end time (e.g., "12:00")
+startTime: timestamp("start_time"),  // Actual visit start (full timestamp)
+actualEndTime: timestamp("actual_end_time"), // Actual visit end
+```
+
+### Overlap Checking Logic
+
+**Business rules for appointment scheduling:**
+- **Completed appointments**: Check against documented `actualEndTime`. Skip if no actual end time recorded (visit is done).
+- **Scheduled appointments**: Check against planned `endTime` or calculate from `durationPromised`.
+- Always provide clear German error messages for scheduling conflicts.
