@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { MapPin, ChevronRight, CheckCircle2, PlayCircle, FileText, User } from "lucide-react";
+import { MapPin, ChevronRight, CheckCircle2, PlayCircle, FileText } from "lucide-react";
 import { Link } from "wouter";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { getStatusColor, getTypeColor, getDisplayLabel, getStatusLabel } from "../utils";
@@ -49,16 +49,11 @@ function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
               </div>
 
               {appointment.customer && (
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center ring-2 ring-background shadow-sm">
-                    <User className="w-5 h-5 text-primary" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-foreground leading-tight">{appointment.customer.name}</h3>
-                    <div className="flex items-center text-xs text-muted-foreground mt-0.5">
-                      <MapPin className="w-3 h-3 mr-1" />
-                      <span className="truncate max-w-[150px]">{appointment.customer.address}</span>
-                    </div>
+                <div className="mb-1">
+                  <h3 className="font-bold text-foreground leading-tight">{appointment.customer.name}</h3>
+                  <div className="flex items-center text-xs text-muted-foreground mt-1">
+                    <MapPin className="w-3 h-3 mr-1" />
+                    <span className="truncate max-w-[200px]">{appointment.customer.address}</span>
                   </div>
                 </div>
               )}

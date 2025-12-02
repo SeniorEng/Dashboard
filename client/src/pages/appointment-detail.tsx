@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { 
   MapPin, Clock, Navigation, 
-  CheckCircle2, Play, StopCircle, FileText, Save, ChevronLeft, Loader2, User
+  CheckCircle2, Play, StopCircle, FileText, Save, ChevronLeft, Loader2
 } from "lucide-react";
 import SignatureCanvas from "react-signature-canvas";
 import { useToast } from "@/hooks/use-toast";
@@ -360,19 +360,14 @@ export default function AppointmentDetail() {
         </Button>
 
         {appointment.customer && (
-          <div className="flex items-start gap-4 mb-6">
-            <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center shadow-md ring-1 ring-border">
-              <User className="w-8 h-8 text-primary" />
-            </div>
-            <div>
-              <Badge variant="secondary" className="mb-2">{displayLabel}</Badge>
-              <h1 className="text-2xl font-bold leading-tight" data-testid="text-customer-name">
-                {appointment.customer.name}
-              </h1>
-              <div className="flex items-center text-muted-foreground text-sm mt-1">
-                <MapPin className="w-3.5 h-3.5 mr-1 text-primary" />
-                {appointment.customer.address}
-              </div>
+          <div className="mb-6">
+            <Badge variant="secondary" className="mb-2">{displayLabel}</Badge>
+            <h1 className="text-2xl font-bold leading-tight" data-testid="text-customer-name">
+              {appointment.customer.name}
+            </h1>
+            <div className="flex items-center text-muted-foreground text-sm mt-1">
+              <MapPin className="w-3.5 h-3.5 mr-1 text-primary" />
+              {appointment.customer.address}
             </div>
           </div>
         )}
