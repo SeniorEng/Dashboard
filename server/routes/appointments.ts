@@ -64,8 +64,10 @@ async function checkOverlap(date: string, startTime: string, endTime: string, ex
     // (durationPromised may be a placeholder from seed data, not the real visit duration)
     if (apt.status === "completed") {
       if (apt.actualEndTime) {
+        // Convert timestamp to time string "HH:MM" for comparison
+        const actualEndTimeStr = apt.actualEndTime.toTimeString().slice(0, 5);
         // Use verified actual end time
-        if (doTimesOverlap(startTime, endTime, apt.time, apt.actualEndTime)) {
+        if (doTimesOverlap(startTime, endTime, apt.time, actualEndTimeStr)) {
           return { hasOverlap: true, hasUnreliableData: false };
         }
         continue;
