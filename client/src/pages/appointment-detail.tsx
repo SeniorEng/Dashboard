@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useRoute, useLocation } from "wouter";
 import { Layout } from "@/components/layout";
-import { useAppointment, useUpdateAppointment } from "@/lib/api";
+import { useAppointment, useUpdateAppointment, calculateDuration, formatTime } from "@/features/appointments";
+import { SERVICE_OPTIONS } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,11 +15,11 @@ import {
   MapPin, Clock, Navigation, 
   CheckCircle2, Play, StopCircle, FileText, Save, ChevronLeft, Loader2, User
 } from "lucide-react";
-import SignatureCanvas from 'react-signature-canvas';
+import SignatureCanvas from "react-signature-canvas";
 import { useToast } from "@/hooks/use-toast";
 
 export default function AppointmentDetail() {
-  const [match, params] = useRoute("/appointment/:id");
+  const [, params] = useRoute("/appointment/:id");
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const id = params?.id ? parseInt(params.id) : 0;
@@ -36,39 +37,20 @@ export default function AppointmentDetail() {
   // Initialize state when appointment loads
   useEffect(() => {
     if (appointment) {
-      if (appointment.startTime) {
-        setStartTime(new Date(appointment.startTime));
-      }
-      if (appointment.endTime) {
-        setEndTime(new Date(appointment.endTime));
-      }
-      if (appointment.kilometers) {
-        setKilometers(appointment.kilometers);
-      }
-      if (appointment.notes) {
-        setNotes(appointment.notes);
-      }
-      if (appointment.servicesDone) {
-        setServicesDone(appointment.servicesDone);
-      }
+      if (appointment.startTime) setStartTime(new Date(appointment.startTime));
+      if (appointment.endTime) setEndTime(new Date(appointment.endTime));
+      if (appointment.kilometers) setKilometers(appointment.kilometers);
+      if (appointment.notes) setNotes(appointment.notes);
+      if (appointment.servicesDone) setServicesDone(appointment.servicesDone);
     }
   }, [appointment]);
 
-  if (isLoading) {
-    return (
-      <Layout>
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
-        </div>
-      </Layout>
-    );
-  }
+  // Memoized duration calculation
+  const duration = useMemo(() => calculateDuration(startTime, endTime), [startTime, endTime]);
 
-  if (!appointment) {
-    return <Layout><div>Appointment not found</div></Layout>;
-  }
-
-  const handleStartVisit = () => {
+  // Callbacks for handlers
+  const handleStartVisit = useCallback(() => {
+    if (!appointment) return;
     const now = new Date();
     setStartTime(now);
     updateMutation.mutate({
@@ -78,22 +60,24 @@ export default function AppointmentDetail() {
       onSuccess: () => {
         toast({
           title: "Visit Started",
-          description: `Started visit with ${appointment.customer?.name} at ${now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`,
+          description: `Started visit with ${appointment.customer?.name} at ${formatTime(now)}`,
         });
       }
     });
-  };
+  }, [appointment, updateMutation, toast]);
 
-  const handleFinishVisit = () => {
+  const handleFinishVisit = useCallback(() => {
+    if (!appointment) return;
     const now = new Date();
     setEndTime(now);
     updateMutation.mutate({
       id: appointment.id,
       data: { status: "documenting", endTime: now }
     });
-  };
+  }, [appointment, updateMutation]);
 
-  const handleComplete = () => {
+  const handleComplete = useCallback(() => {
+    if (!appointment) return;
     if (!sigPad.current || sigPad.current.isEmpty()) {
       toast({
         variant: "destructive",
@@ -123,49 +107,77 @@ export default function AppointmentDetail() {
         setTimeout(() => setLocation("/"), 1500);
       }
     });
-  };
+  }, [appointment, kilometers, notes, servicesDone, updateMutation, toast, setLocation]);
+
+  const handleServiceToggle = useCallback((service: string, checked: boolean) => {
+    setServicesDone(prev => 
+      checked ? [...prev, service] : prev.filter(s => s !== service)
+    );
+  }, []);
+
+  if (isLoading) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center py-12" data-testid="loading-appointment">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      </Layout>
+    );
+  }
+
+  if (!appointment) {
+    return (
+      <Layout>
+        <div className="text-center py-12" data-testid="not-found-appointment">
+          Appointment not found
+        </div>
+      </Layout>
+    );
+  }
 
   const renderContent = () => {
     switch (appointment.status) {
       case "scheduled":
         return (
           <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
-             <div className="bg-primary/5 border border-primary/10 rounded-2xl p-6 text-center space-y-4">
-                <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto text-primary mb-2">
-                  <Clock className="w-8 h-8" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-foreground text-lg">Ready to start?</h3>
-                  <p className="text-muted-foreground text-sm mt-1">Scheduled for {appointment.time} • {appointment.durationPromised} mins</p>
-                </div>
-                <Button 
-                  size="lg" 
-                  className="w-full font-bold shadow-lg shadow-primary/20" 
-                  onClick={handleStartVisit}
-                  disabled={updateMutation.isPending}
-                  data-testid="button-start-visit"
-                >
-                  <Play className="w-4 h-4 mr-2 fill-current" /> Start Visit
-                </Button>
-             </div>
+            <div className="bg-primary/5 border border-primary/10 rounded-2xl p-6 text-center space-y-4">
+              <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto text-primary mb-2">
+                <Clock className="w-8 h-8" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-foreground text-lg">Ready to start?</h3>
+                <p className="text-muted-foreground text-sm mt-1">
+                  Scheduled for {appointment.time} • {appointment.durationPromised} mins
+                </p>
+              </div>
+              <Button 
+                size="lg" 
+                className="w-full font-bold shadow-lg shadow-primary/20" 
+                onClick={handleStartVisit}
+                disabled={updateMutation.isPending}
+                data-testid="button-start-visit"
+              >
+                <Play className="w-4 h-4 mr-2 fill-current" /> Start Visit
+              </Button>
+            </div>
 
-             {appointment.customer && (
-               <Card>
-                 <CardHeader>
-                   <CardTitle className="text-base">Service Plan</CardTitle>
-                 </CardHeader>
-                 <CardContent>
-                   <ul className="space-y-3">
-                     {appointment.customer.needs.map((need, i) => (
-                       <li key={i} className="flex items-center gap-3 text-sm">
-                         <div className="w-1.5 h-1.5 rounded-full bg-primary/60" />
-                         {need}
-                       </li>
-                     ))}
-                   </ul>
-                 </CardContent>
-               </Card>
-             )}
+            {appointment.customer && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Service Plan</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ul className="space-y-3">
+                    {appointment.customer.needs.map((need, i) => (
+                      <li key={i} className="flex items-center gap-3 text-sm">
+                        <div className="w-1.5 h-1.5 rounded-full bg-primary/60" />
+                        {need}
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            )}
           </div>
         );
 
@@ -173,40 +185,38 @@ export default function AppointmentDetail() {
         return (
           <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
             <div className="bg-blue-50 border border-blue-100 rounded-2xl p-8 text-center space-y-6 relative overflow-hidden">
-               <div className="absolute top-0 left-0 w-full h-1 bg-blue-200 animate-pulse"></div>
-               <div className="space-y-2">
-                  <span className="text-blue-600 text-sm font-bold uppercase tracking-wider">Visit in Progress</span>
-                  <div className="text-4xl font-bold text-blue-900 font-mono">
-                    Active
-                  </div>
-                  <p className="text-blue-600/80 text-sm">Started at {startTime?.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
-               </div>
-               <Button 
-                 size="lg" 
-                 variant="destructive" 
-                 className="w-full font-bold" 
-                 onClick={handleFinishVisit}
-                 disabled={updateMutation.isPending}
-                 data-testid="button-finish-visit"
-               >
-                 <StopCircle className="w-4 h-4 mr-2 fill-current" /> Finish Visit
-               </Button>
+              <div className="absolute top-0 left-0 w-full h-1 bg-blue-200 animate-pulse" />
+              <div className="space-y-2">
+                <span className="text-blue-600 text-sm font-bold uppercase tracking-wider">Visit in Progress</span>
+                <div className="text-4xl font-bold text-blue-900 font-mono">Active</div>
+                <p className="text-blue-600/80 text-sm">Started at {formatTime(startTime)}</p>
+              </div>
+              <Button 
+                size="lg" 
+                variant="destructive" 
+                className="w-full font-bold" 
+                onClick={handleFinishVisit}
+                disabled={updateMutation.isPending}
+                data-testid="button-finish-visit"
+              >
+                <StopCircle className="w-4 h-4 mr-2 fill-current" /> Finish Visit
+              </Button>
             </div>
 
-             {appointment.customer && (
-               <Card className="opacity-80">
-                 <CardHeader>
-                   <CardTitle className="text-base">Customer Needs</CardTitle>
-                 </CardHeader>
-                 <CardContent>
-                   <ul className="space-y-2 text-sm text-muted-foreground">
-                     {appointment.customer.needs.map((need, i) => (
-                       <li key={i}>• {need}</li>
-                     ))}
-                   </ul>
-                 </CardContent>
-               </Card>
-             )}
+            {appointment.customer && (
+              <Card className="opacity-80">
+                <CardHeader>
+                  <CardTitle className="text-base">Customer Needs</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ul className="space-y-2 text-sm text-muted-foreground">
+                    {appointment.customer.needs.map((need, i) => (
+                      <li key={i}>• {need}</li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            )}
           </div>
         );
 
@@ -216,10 +226,8 @@ export default function AppointmentDetail() {
             <div className="bg-orange-50 border border-orange-100 p-4 rounded-xl flex items-center gap-3 text-orange-800 text-sm">
               <Clock className="w-5 h-5 shrink-0" />
               <div>
-                <span className="font-bold">Visit Duration:</span> 
-                {startTime && endTime 
-                  ? ` ${Math.round((endTime.getTime() - startTime.getTime()) / 60000)} minutes` 
-                  : " --"}
+                <span className="font-bold">Visit Duration:</span>
+                {duration !== null ? ` ${duration} minutes` : " --"}
               </div>
             </div>
 
@@ -234,16 +242,13 @@ export default function AppointmentDetail() {
                 <div className="space-y-3">
                   <Label className="text-base">Services Performed</Label>
                   <div className="grid grid-cols-1 gap-3">
-                    {["Vital Signs Check", "Medication Administered", "Personal Hygiene", "Meal Preparation", "Housekeeping", "Social Activity"].map((service) => (
+                    {SERVICE_OPTIONS.map((service) => (
                       <div key={service} className="flex items-center space-x-3 p-3 rounded-lg border border-input hover:bg-accent/50 transition-colors">
                         <Checkbox 
                           id={service} 
                           checked={servicesDone.includes(service)}
-                          onCheckedChange={(checked) => {
-                            if (checked) setServicesDone([...servicesDone, service]);
-                            else setServicesDone(servicesDone.filter(s => s !== service));
-                          }}
-                          data-testid={`checkbox-${service.toLowerCase().replace(/\s+/g, '-')}`}
+                          onCheckedChange={(checked) => handleServiceToggle(service, !!checked)}
+                          data-testid={`checkbox-${service.toLowerCase().replace(/\s+/g, "-")}`}
                         />
                         <Label htmlFor={service} className="font-normal cursor-pointer flex-1">{service}</Label>
                       </div>
@@ -289,7 +294,7 @@ export default function AppointmentDetail() {
                     <SignatureCanvas 
                       ref={sigPad}
                       penColor="black"
-                      canvasProps={{width: 300, height: 150, className: 'w-full h-[150px]'}} 
+                      canvasProps={{ width: 300, height: 150, className: "w-full h-[150px]" }} 
                     />
                   </div>
                   <Button 
@@ -328,11 +333,14 @@ export default function AppointmentDetail() {
             <p className="text-muted-foreground max-w-xs mx-auto">
               Visit successfully documented and saved. Great job, Sarah!
             </p>
-            <Button size="lg" variant="outline" onClick={() => setLocation("/")}>
+            <Button size="lg" variant="outline" onClick={() => setLocation("/")} data-testid="button-back-dashboard">
               Back to Dashboard
             </Button>
           </div>
         );
+
+      default:
+        return null;
     }
   };
 
@@ -356,7 +364,9 @@ export default function AppointmentDetail() {
             </div>
             <div>
               <Badge variant="secondary" className="mb-2">{appointment.type}</Badge>
-              <h1 className="text-2xl font-bold leading-tight">{appointment.customer.name}</h1>
+              <h1 className="text-2xl font-bold leading-tight" data-testid="text-customer-name">
+                {appointment.customer.name}
+              </h1>
               <div className="flex items-center text-muted-foreground text-sm mt-1">
                 <MapPin className="w-3.5 h-3.5 mr-1 text-primary" />
                 {appointment.customer.address}

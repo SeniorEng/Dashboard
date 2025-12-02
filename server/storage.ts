@@ -7,6 +7,7 @@ import {
   customers, 
   appointments 
 } from "@shared/schema";
+import type { AppointmentWithCustomer } from "@shared/types";
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { eq } from "drizzle-orm";
@@ -20,11 +21,15 @@ export interface IStorage {
   getCustomer(id: number): Promise<Customer | undefined>;
   createCustomer(customer: InsertCustomer): Promise<Customer>;
   
-  // Appointments
+  // Appointments - Basic
   getAppointments(): Promise<Appointment[]>;
   getAppointment(id: number): Promise<Appointment | undefined>;
   createAppointment(appointment: InsertAppointment): Promise<Appointment>;
   updateAppointment(id: number, appointment: UpdateAppointment): Promise<Appointment | undefined>;
+  
+  // Appointments - With Customer (optimized)
+  getAppointmentsWithCustomers(): Promise<AppointmentWithCustomer[]>;
+  getAppointmentWithCustomer(id: number): Promise<AppointmentWithCustomer | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -43,7 +48,7 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  // Appointments
+  // Appointments - Basic
   async getAppointments(): Promise<Appointment[]> {
     return await db.select().from(appointments);
   }
@@ -64,6 +69,105 @@ export class DatabaseStorage implements IStorage {
       .where(eq(appointments.id, id))
       .returning();
     return result[0];
+  }
+
+  // Appointments - With Customer (single query with LEFT JOIN for performance)
+  async getAppointmentsWithCustomers(): Promise<AppointmentWithCustomer[]> {
+    const results = await db
+      .select({
+        id: appointments.id,
+        customerId: appointments.customerId,
+        type: appointments.type,
+        date: appointments.date,
+        time: appointments.time,
+        durationPromised: appointments.durationPromised,
+        status: appointments.status,
+        startTime: appointments.startTime,
+        endTime: appointments.endTime,
+        kilometers: appointments.kilometers,
+        notes: appointments.notes,
+        servicesDone: appointments.servicesDone,
+        signatureData: appointments.signatureData,
+        createdAt: appointments.createdAt,
+        customer: {
+          id: customers.id,
+          name: customers.name,
+          address: customers.address,
+          avatar: customers.avatar,
+          needs: customers.needs,
+        }
+      })
+      .from(appointments)
+      .leftJoin(customers, eq(appointments.customerId, customers.id));
+    
+    return results.map(row => ({
+      id: row.id,
+      customerId: row.customerId,
+      type: row.type,
+      date: row.date,
+      time: row.time,
+      durationPromised: row.durationPromised,
+      status: row.status,
+      startTime: row.startTime,
+      endTime: row.endTime,
+      kilometers: row.kilometers,
+      notes: row.notes,
+      servicesDone: row.servicesDone,
+      signatureData: row.signatureData,
+      createdAt: row.createdAt,
+      customer: row.customer?.id ? row.customer : null
+    }));
+  }
+
+  async getAppointmentWithCustomer(id: number): Promise<AppointmentWithCustomer | undefined> {
+    const results = await db
+      .select({
+        id: appointments.id,
+        customerId: appointments.customerId,
+        type: appointments.type,
+        date: appointments.date,
+        time: appointments.time,
+        durationPromised: appointments.durationPromised,
+        status: appointments.status,
+        startTime: appointments.startTime,
+        endTime: appointments.endTime,
+        kilometers: appointments.kilometers,
+        notes: appointments.notes,
+        servicesDone: appointments.servicesDone,
+        signatureData: appointments.signatureData,
+        createdAt: appointments.createdAt,
+        customer: {
+          id: customers.id,
+          name: customers.name,
+          address: customers.address,
+          avatar: customers.avatar,
+          needs: customers.needs,
+        }
+      })
+      .from(appointments)
+      .leftJoin(customers, eq(appointments.customerId, customers.id))
+      .where(eq(appointments.id, id));
+    
+    if (results.length === 0) return undefined;
+    
+    const row = results[0];
+    return {
+      id: row.id,
+      customerId: row.customerId,
+      type: row.type,
+      date: row.date,
+      time: row.time,
+      durationPromised: row.durationPromised,
+      status: row.status,
+      startTime: row.startTime,
+      endTime: row.endTime,
+      kilometers: row.kilometers,
+      notes: row.notes,
+      servicesDone: row.servicesDone,
+      signatureData: row.signatureData,
+      createdAt: row.createdAt,
+      customer: row.customer?.id ? row.customer : null
+    };
   }
 }
 
