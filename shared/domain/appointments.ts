@@ -110,6 +110,10 @@ export interface ServiceInfo {
   primaryType: ServiceType | null;
 }
 
+export interface CardServiceInfo extends ServiceInfo {
+  borderClass: string;
+}
+
 export function getServiceInfo(
   appointmentType: string,
   hauswirtschaftDauer: number | null | undefined,
@@ -182,4 +186,78 @@ export function canEditDocumentationFields(status: AppointmentStatus): boolean {
 
 export function canEditNotes(status: AppointmentStatus): boolean {
   return status === "scheduled" || status === "documenting";
+}
+
+export const STATUS_COLORS: Record<AppointmentStatus, string> = {
+  "scheduled": "bg-muted text-muted-foreground border-muted-foreground/20",
+  "in-progress": "bg-blue-50 text-blue-700 border-blue-200 animate-pulse",
+  "documenting": "bg-orange-50 text-orange-700 border-orange-200",
+  "completed": "bg-green-50 text-green-700 border-green-200",
+};
+
+export const APPOINTMENT_TYPE_COLORS: Record<AppointmentType, string> = {
+  "Erstberatung": "bg-purple-100 text-purple-800 border-purple-200",
+  "Kundentermin": "bg-teal-100 text-teal-800 border-teal-200",
+};
+
+export const SERVICE_TYPE_COLORS: Record<ServiceType, string> = {
+  "Hauswirtschaft": "bg-amber-50 text-amber-700 border-amber-200",
+  "Alltagsbegleitung": "bg-sky-50 text-sky-700 border-sky-200",
+};
+
+export const SERVICE_BORDER_COLORS: Record<ServiceType, string> = {
+  "Hauswirtschaft": "border-amber-400",
+  "Alltagsbegleitung": "border-sky-400",
+};
+
+export function getStatusColor(status: string): string {
+  return STATUS_COLORS[status as AppointmentStatus] ?? STATUS_COLORS.scheduled;
+}
+
+export function getStatusLabel(status: string): string {
+  return STATUS_LABELS[status as AppointmentStatus] ?? status;
+}
+
+export function getAppointmentTypeColor(appointmentType: string): string {
+  return APPOINTMENT_TYPE_COLORS[appointmentType as AppointmentType] ?? APPOINTMENT_TYPE_COLORS.Kundentermin;
+}
+
+export function getServiceColor(serviceType: string | null): string {
+  if (!serviceType) return "bg-gray-100 text-gray-600 border-gray-200";
+  return SERVICE_TYPE_COLORS[serviceType as ServiceType] ?? "bg-gray-100 text-gray-600 border-gray-200";
+}
+
+export function getServiceBorderColor(serviceType: ServiceType): string {
+  return SERVICE_BORDER_COLORS[serviceType];
+}
+
+export const STATUS_PRIORITY: Record<AppointmentStatus, number> = {
+  "in-progress": 0,
+  "documenting": 1,
+  "scheduled": 2,
+  "completed": 3,
+};
+
+export function getCardServiceInfo(
+  appointmentType: string,
+  hauswirtschaftDauer: number | null | undefined,
+  alltagsbegleitungDauer: number | null | undefined,
+  legacyServiceType?: string | null
+): CardServiceInfo {
+  const info = getServiceInfo(appointmentType, hauswirtschaftDauer, alltagsbegleitungDauer, legacyServiceType);
+  
+  let borderClass: string;
+  if (appointmentType === "Erstberatung") {
+    borderClass = "bg-purple-500";
+  } else if (info.hasBoth) {
+    borderClass = "";
+  } else if (info.primaryType === "Hauswirtschaft") {
+    borderClass = "bg-amber-500";
+  } else if (info.primaryType === "Alltagsbegleitung") {
+    borderClass = "bg-sky-500";
+  } else {
+    borderClass = "bg-teal-500";
+  }
+  
+  return { ...info, borderClass };
 }

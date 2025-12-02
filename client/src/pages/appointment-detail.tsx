@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useRoute, useLocation } from "wouter";
 import { Layout } from "@/components/layout";
 import { useAppointment } from "@/features/appointments";
@@ -21,38 +21,37 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { formatTimeSlot, getEndTime } from "@/features/appointments/utils";
-
-function formatDuration(minutes: number): string {
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  if (h === 0) return `${m} Min.`;
-  if (m === 0) return `${h} Std.`;
-  return `${h} Std. ${m} Min.`;
-}
+import { 
+  formatDuration, 
+  getStatusLabel, 
+  getStatusColor,
+  canModifyAppointment,
+  type AppointmentStatus
+} from "@shared/types";
 
 function getStatusInfo(status: string): { label: string; color: string; icon: React.ReactNode } {
   switch (status) {
     case "completed":
       return { 
-        label: "Abgeschlossen", 
+        label: getStatusLabel(status), 
         color: "bg-green-100 text-green-800 border-green-200",
         icon: <CheckCircle2 className="w-4 h-4" />
       };
     case "in-progress":
       return { 
-        label: "Läuft", 
+        label: getStatusLabel(status), 
         color: "bg-blue-100 text-blue-800 border-blue-200",
         icon: <Clock className="w-4 h-4" />
       };
     case "documenting":
       return { 
-        label: "Dokumentation", 
+        label: getStatusLabel(status), 
         color: "bg-orange-100 text-orange-800 border-orange-200",
         icon: <FileText className="w-4 h-4" />
       };
     default:
       return { 
-        label: "Geplant", 
+        label: getStatusLabel(status), 
         color: "bg-gray-100 text-gray-800 border-gray-200",
         icon: <Calendar className="w-4 h-4" />
       };
@@ -107,8 +106,7 @@ export default function AppointmentDetail() {
     );
   }
 
-  const isCompleted = appointment.status === "completed";
-  const canModify = !isCompleted;
+  const canModify = canModifyAppointment(appointment.status as AppointmentStatus);
   const statusInfo = getStatusInfo(appointment.status);
   const isErstberatung = appointment.appointmentType === "Erstberatung";
 
@@ -271,7 +269,7 @@ export default function AppointmentDetail() {
       )}
 
       {/* Completed Info */}
-      {isCompleted && (
+      {!canModify && (
         <Card className="mb-4 border-green-200 bg-green-50/50">
           <CardContent className="py-4">
             <div className="flex items-center gap-3 text-green-800">
@@ -312,7 +310,7 @@ export default function AppointmentDetail() {
       )}
 
       {/* Completed - Back Button */}
-      {isCompleted && (
+      {!canModify && (
         <div className="mt-6">
           <Button 
             variant="outline" 

@@ -11,12 +11,14 @@ CareConnect is a full-stack web application designed to help caregivers manage a
 
 ## Recent Changes (December 2025)
 
-- Refactored for speed, modularization, and maintainability
-- Implemented optimized SQL joins instead of in-memory joins
-- Created feature-based frontend architecture
-- Added optimistic updates for better UX
-- Implemented centralized error boundary
-- Memoized expensive computations
+### Major Refactoring
+- **Shared Domain Module**: Consolidated all business logic into `shared/domain/` eliminating duplication across frontend/backend
+- **Service Layer**: Extracted scheduling validation, overlap checking, and status transition enforcement into `server/services/appointments.ts`
+- **Centralized Error Handling**: Created `server/lib/errors.ts` with standardized error codes and German messages
+- **Database Optimizations**: Added composite indexes on frequently-queried columns (date, customer_id, status)
+- **Pagination Support**: Added `getAppointmentsWithCustomersPaginated()` for future list performance
+- **Application-Level Rollback**: Implemented atomic Erstberatung creation with rollback (Neon HTTP driver doesn't support transactions)
+- **Frontend Domain Layer**: Components now use shared domain helpers for status/service colors, labels, and calculations
 
 ## Project Structure
 
@@ -31,7 +33,7 @@ CareConnect is a full-stack web application designed to help caregivers manage a
 │       │   └── appointments/
 │       │       ├── components/  # Feature-specific components
 │       │       ├── hooks/       # Feature-specific hooks
-│       │       ├── utils.ts     # Feature utilities
+│       │       ├── domain.ts    # Frontend domain (uses shared)
 │       │       └── index.ts     # Public exports
 │       ├── pages/               # Route pages
 │       ├── hooks/               # Shared hooks
@@ -41,9 +43,16 @@ CareConnect is a full-stack web application designed to help caregivers manage a
 │   │   ├── appointments.ts
 │   │   ├── customers.ts
 │   │   └── index.ts
+│   ├── services/
+│   │   └── appointments.ts      # Business logic & validation
+│   ├── lib/
+│   │   └── errors.ts            # Centralized error handling
 │   ├── storage.ts               # Database layer
 │   └── routes.ts                # Route registration
 └── shared/
+    ├── domain/
+    │   ├── index.ts             # Public exports
+    │   └── appointments.ts      # Canonical business logic
     ├── schema.ts                # Drizzle schema + Zod
     └── types.ts                 # Shared TypeScript types
 ```
@@ -69,7 +78,7 @@ CareConnect is a full-stack web application designed to help caregivers manage a
 
 **Feature-Based Architecture**
 - Each feature exports hooks, components, and utilities
-- Shared types imported from `@shared/types`
+- Shared domain logic imported from `@shared/domain`
 - Clear separation of concerns
 
 ### Backend Architecture
@@ -77,17 +86,18 @@ CareConnect is a full-stack web application designed to help caregivers manage a
 **Server Framework**
 - Express.js with TypeScript
 - Modular route organization (`server/routes/`)
+- Service layer for business logic (`server/services/`)
 
 **API Design**
 - RESTful endpoints under `/api` prefix
 - Routes: `/api/customers`, `/api/appointments`
-- Zod validation with error handling
+- Zod validation with structured error responses
 - Optimized SQL joins for data fetching
 
-**Performance Optimizations**
-- Single-query data fetching with LEFT JOIN
-- Structured error responses
-- Request validation middleware
+**Error Handling**
+- Centralized error codes: VALIDATION_ERROR, NOT_FOUND, FORBIDDEN, CONFLICT, SERVER_ERROR
+- All error messages in German for end users
+- `handleRouteError()` helper for consistent error formatting
 
 ### Data Storage
 
@@ -96,21 +106,45 @@ CareConnect is a full-stack web application designed to help caregivers manage a
 - Drizzle ORM for type-safe queries
 
 **Schema**
-- `customers`: id, name, address, avatar, needs[]
-- `appointments`: id, customerId, type, date, time, status, startTime, endTime, kilometers, notes, servicesDone[], signatureData
+- `customers`: id, name, vorname, nachname, telefon, address (legacy + structured fields), pflegegrad, needs[]
+- `appointments`: id, customerId, appointmentType, date, scheduledStart, scheduledEnd, status, actualStart, actualEnd, kilometers, notes, servicesDone[], signatureData
+
+**Indexes**
+- `idx_appointments_date` on date column
+- `idx_appointments_customer_id` on customerId column  
+- `idx_appointments_status` on status column
+- `idx_appointments_date_customer` composite index
 
 **Data Layer**
 - IStorage interface for abstraction
 - DatabaseStorage with optimized join queries
-- AppointmentWithCustomer type for hydrated data
+- Pagination support with total counts
+- Application-level rollback for atomic operations
+
+### Business Rules (shared/domain/appointments.ts)
+
+**Status Transitions**
+- Sequential only: scheduled → in-progress → documenting → completed
+- Completed appointments are immutable
+
+**Field Editing Rules**
+- Scheduling fields (date, times, durations): Only in "scheduled" status
+- Notes: Editable in "scheduled" or "documenting" status
+- Documentation fields (kilometers, servicesDone, signature): Only in "documenting" or "completed" status
+
+**Overlap Checking**
+- Completed appointments: Check against actualEnd timestamp
+- Scheduled appointments: Check against scheduledEnd or calculate from duration
+- Unreliable data detection: Flag appointments without proper end times
 
 ### Key Patterns
 
-1. **Optimistic Updates**: UI updates immediately, rolls back on error
-2. **Memoization**: Expensive sorts/calculations cached
-3. **Error Boundaries**: Graceful error recovery
-4. **Feature Modules**: Self-contained feature code
-5. **Shared Types**: Single source of truth for TypeScript types
+1. **Shared Domain Logic**: Single source of truth for business rules
+2. **Service Layer**: Thin routes, business logic in services
+3. **Optimistic Updates**: UI updates immediately, rolls back on error
+4. **Memoization**: Expensive sorts/calculations cached
+5. **Error Boundaries**: Graceful error recovery
+6. **Centralized Errors**: Consistent error codes and German messages
 
 ## Key Learnings & Rules
 
@@ -148,3 +182,9 @@ actualEnd: timestamp("actual_end"),        // When visit actually ended
 - **Completed appointments**: Check against documented `actualEnd` timestamp. Skip if no actual end time recorded (visit is done).
 - **Scheduled appointments**: Check against planned `scheduledEnd` or calculate from `durationPromised`.
 - Always provide clear German error messages for scheduling conflicts.
+
+### Neon Database Limitations
+
+- Neon HTTP driver doesn't support transactions
+- Use application-level rollback for atomic operations (create customer, if appointment fails, delete customer)
+- Always clean up on failure to maintain data consistency

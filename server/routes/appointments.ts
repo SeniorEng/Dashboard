@@ -5,12 +5,16 @@ import {
   insertKundenterminSchema,
   insertErstberatungSchema 
 } from "@shared/schema";
+import { appointmentService } from "../services/appointments";
 import { 
-  doTimesOverlap, 
-  addMinutesToTime, 
-  calculateTotalDuration 
-} from "@shared/types";
-import { fromError } from "zod-validation-error";
+  ErrorMessages, 
+  handleRouteError, 
+  sendBadRequest, 
+  sendConflict, 
+  sendForbidden, 
+  sendNotFound,
+  sendServerError
+} from "../lib/errors";
 
 const router = Router();
 
@@ -20,8 +24,7 @@ router.get("/", async (req, res) => {
     const appointments = await storage.getAppointmentsWithCustomers(date);
     res.json(appointments);
   } catch (error) {
-    console.error("Failed to fetch appointments:", error);
-    res.status(500).json({ error: "Failed to fetch appointments" });
+    handleRouteError(res, error, ErrorMessages.fetchAppointmentsFailed, "Failed to fetch appointments");
   }
 });
 
@@ -29,218 +32,97 @@ router.get("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
-      return res.status(400).json({ error: "Invalid appointment ID" });
+      return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
     }
     
     const appointment = await storage.getAppointmentWithCustomer(id);
     
     if (!appointment) {
-      return res.status(404).json({ error: "Appointment not found" });
+      return sendNotFound(res, ErrorMessages.appointmentNotFound);
     }
     
     res.json(appointment);
   } catch (error) {
-    console.error("Failed to fetch appointment:", error);
-    res.status(500).json({ error: "Failed to fetch appointment" });
+    handleRouteError(res, error, ErrorMessages.fetchAppointmentFailed, "Failed to fetch appointment");
   }
 });
 
-// Result type for overlap checking
-type OverlapCheckResult = {
-  hasOverlap: boolean;
-  hasUnreliableData: boolean;
-  unreliableAppointmentId?: number;
-};
-
-// Helper to format timestamp to "HH:MM" time string
-function formatTimeFromTimestamp(timestamp: Date): string {
-  return timestamp.toTimeString().slice(0, 5);
-}
-
-// Check for overlapping appointments
-// Returns detailed result including whether data is reliable for scheduling decisions
-async function checkOverlap(date: string, startTime: string, endTime: string, excludeId?: number): Promise<OverlapCheckResult> {
-  const existingAppointments = await storage.getAppointmentsByDate(date);
-  
-  for (const apt of existingAppointments) {
-    // Skip the appointment being edited
-    if (excludeId && apt.id === excludeId) continue;
-    
-    // COMPLETED APPOINTMENTS: Check against documented actual times
-    // If no actualEnd recorded, skip - the appointment is done and no longer blocks time
-    if (apt.status === "completed") {
-      if (apt.actualEnd) {
-        // Use the actual documented start/end times
-        const actualStart = apt.actualStart ? formatTimeFromTimestamp(apt.actualStart) : apt.scheduledStart;
-        const actualEnd = formatTimeFromTimestamp(apt.actualEnd);
-        
-        if (doTimesOverlap(startTime, endTime, actualStart, actualEnd)) {
-          return { hasOverlap: true, hasUnreliableData: false };
-        }
-      }
-      // No actualEnd = appointment is done, skip it
-      continue;
-    }
-    
-    // SCHEDULED/IN_PROGRESS APPOINTMENTS: Use planned end time
-    // For these, scheduledEnd or durationPromised represents the booking intention
-    const hasReliableEndTime = apt.scheduledEnd !== null;
-    const hasReliableDuration = apt.durationPromised !== null && apt.durationPromised > 0;
-    
-    if (!hasReliableEndTime && !hasReliableDuration) {
-      // Cannot determine when this appointment is scheduled to end
-      return { 
-        hasOverlap: false, 
-        hasUnreliableData: true,
-        unreliableAppointmentId: apt.id
-      };
-    }
-    
-    // Calculate end time using available data
-    const aptEndTime = apt.scheduledEnd || addMinutesToTime(apt.scheduledStart, apt.durationPromised!);
-    
-    if (doTimesOverlap(startTime, endTime, apt.scheduledStart, aptEndTime)) {
-      return { hasOverlap: true, hasUnreliableData: false };
-    }
-  }
-  
-  return { hasOverlap: false, hasUnreliableData: false };
-}
-
-// Create Kundentermin (existing customer)
 router.post("/kundentermin", async (req, res) => {
   try {
     const validatedData = insertKundenterminSchema.parse(req.body);
     
-    // Calculate total duration
-    const totalDuration = calculateTotalDuration(
-      validatedData.hauswirtschaftDauer,
-      validatedData.alltagsbegleitungDauer
-    );
-    
-    const scheduledEnd = addMinutesToTime(validatedData.scheduledStart, totalDuration);
-    
-    // Check for overlap
-    const overlapResult = await checkOverlap(validatedData.date, validatedData.scheduledStart, scheduledEnd);
-    if (overlapResult.hasUnreliableData) {
-      return res.status(409).json({ 
-        error: "Datenprüfung erforderlich",
-        message: `Termin #${overlapResult.unreliableAppointmentId} hat unvollständige Zeitdaten. Bitte vervollständigen Sie die Termindaten bevor Sie neue Termine planen.`
-      });
-    }
-    if (overlapResult.hasOverlap) {
-      return res.status(409).json({ 
-        error: "Terminüberschneidung",
-        message: "Es gibt bereits einen Termin zu dieser Zeit"
-      });
-    }
-    
-    // Determine serviceType for display (legacy support)
-    let serviceType = null;
-    if (validatedData.hauswirtschaftDauer && validatedData.alltagsbegleitungDauer) {
-      serviceType = "Hauswirtschaft"; // Both services
-    } else if (validatedData.hauswirtschaftDauer) {
-      serviceType = "Hauswirtschaft";
-    } else if (validatedData.alltagsbegleitungDauer) {
-      serviceType = "Alltagsbegleitung";
-    }
-    
-    const appointment = await storage.createAppointment({
+    const { appointmentData, scheduledEnd } = appointmentService.prepareKundenterminData({
       customerId: validatedData.customerId,
-      appointmentType: "Kundentermin",
-      serviceType,
-      hauswirtschaftDauer: validatedData.hauswirtschaftDauer || null,
-      alltagsbegleitungDauer: validatedData.alltagsbegleitungDauer || null,
       date: validatedData.date,
       scheduledStart: validatedData.scheduledStart,
-      scheduledEnd,
-      durationPromised: totalDuration,
-      notes: validatedData.notes || null,
-      status: "scheduled",
+      hauswirtschaftDauer: validatedData.hauswirtschaftDauer ?? null,
+      alltagsbegleitungDauer: validatedData.alltagsbegleitungDauer ?? null,
+      notes: validatedData.notes,
     });
     
-    res.status(201).json(appointment);
-  } catch (error: any) {
-    if (error.name === "ZodError") {
-      return res.status(400).json({ error: fromError(error).toString() });
+    const overlapResult = await appointmentService.checkOverlap(
+      validatedData.date, 
+      validatedData.scheduledStart, 
+      scheduledEnd
+    );
+    
+    if (overlapResult.hasUnreliableData) {
+      return sendConflict(
+        res, 
+        "Datenprüfung erforderlich",
+        ErrorMessages.unreliableData(overlapResult.unreliableAppointmentId!)
+      );
     }
-    console.error("Failed to create Kundentermin:", error);
-    res.status(500).json({ 
-      error: "Serverfehler",
-      message: "Der Termin konnte nicht erstellt werden. Bitte versuchen Sie es erneut."
-    });
+    
+    if (overlapResult.hasOverlap) {
+      return sendConflict(res, "Terminüberschneidung", ErrorMessages.timeOverlap);
+    }
+    
+    const appointment = await storage.createAppointment(appointmentData);
+    res.status(201).json(appointment);
+  } catch (error) {
+    handleRouteError(res, error, ErrorMessages.createAppointmentFailed, "Failed to create Kundentermin");
   }
 });
 
-// Create Erstberatung (new customer)
 router.post("/erstberatung", async (req, res) => {
   try {
     const validatedData = insertErstberatungSchema.parse(req.body);
     
-    // Check for overlap
-    const overlapResult = await checkOverlap(validatedData.date, validatedData.scheduledStart, validatedData.scheduledEnd);
+    const overlapResult = await appointmentService.checkOverlap(
+      validatedData.date, 
+      validatedData.scheduledStart, 
+      validatedData.scheduledEnd
+    );
+    
     if (overlapResult.hasUnreliableData) {
-      return res.status(409).json({ 
-        error: "Datenprüfung erforderlich",
-        message: `Termin #${overlapResult.unreliableAppointmentId} hat unvollständige Zeitdaten. Bitte vervollständigen Sie die Termindaten bevor Sie neue Termine planen.`
-      });
+      return sendConflict(
+        res, 
+        "Datenprüfung erforderlich",
+        ErrorMessages.unreliableData(overlapResult.unreliableAppointmentId!)
+      );
     }
+    
     if (overlapResult.hasOverlap) {
-      return res.status(409).json({ 
-        error: "Terminüberschneidung",
-        message: "Es gibt bereits einen Termin zu dieser Zeit"
-      });
+      return sendConflict(res, "Terminüberschneidung", ErrorMessages.timeOverlap);
     }
     
-    // Create the new customer first
-    const fullName = `${validatedData.customer.vorname} ${validatedData.customer.nachname}`;
-    const fullAddress = `${validatedData.customer.strasse} ${validatedData.customer.nr}, ${validatedData.customer.plz} ${validatedData.customer.stadt}`;
-    
-    const customer = await storage.createCustomer({
-      name: fullName,
-      vorname: validatedData.customer.vorname,
-      nachname: validatedData.customer.nachname,
-      telefon: validatedData.customer.telefon,
-      address: fullAddress,
-      strasse: validatedData.customer.strasse,
-      nr: validatedData.customer.nr,
-      plz: validatedData.customer.plz,
-      stadt: validatedData.customer.stadt,
-      pflegegrad: validatedData.customer.pflegegrad,
-      avatar: "person",
-      needs: [],
-    });
-    
-    // Calculate duration from start to end time
-    const startMinutes = parseInt(validatedData.scheduledStart.split(":")[0]) * 60 + parseInt(validatedData.scheduledStart.split(":")[1]);
-    const endMinutes = parseInt(validatedData.scheduledEnd.split(":")[0]) * 60 + parseInt(validatedData.scheduledEnd.split(":")[1]);
-    const duration = endMinutes - startMinutes;
-    
-    // Create the appointment
-    const appointment = await storage.createAppointment({
-      customerId: customer.id,
-      appointmentType: "Erstberatung",
-      serviceType: null,
-      hauswirtschaftDauer: null,
-      alltagsbegleitungDauer: null,
+    const { customerData, appointmentData } = appointmentService.prepareErstberatungData({
+      customer: validatedData.customer,
       date: validatedData.date,
       scheduledStart: validatedData.scheduledStart,
       scheduledEnd: validatedData.scheduledEnd,
-      durationPromised: duration,
-      notes: validatedData.notes || null,
-      status: "scheduled",
+      notes: validatedData.notes,
     });
     
+    const { customer, appointment } = await storage.createErstberatungWithCustomer(
+      customerData,
+      appointmentData
+    );
+    
     res.status(201).json({ appointment, customer });
-  } catch (error: any) {
-    if (error.name === "ZodError") {
-      return res.status(400).json({ error: fromError(error).toString() });
-    }
-    console.error("Failed to create Erstberatung:", error);
-    res.status(500).json({ 
-      error: "Serverfehler",
-      message: "Die Erstberatung konnte nicht erstellt werden. Bitte versuchen Sie es erneut."
-    });
+  } catch (error) {
+    handleRouteError(res, error, ErrorMessages.createErstberatungFailed, "Failed to create Erstberatung");
   }
 });
 
@@ -248,117 +130,30 @@ router.patch("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
-      return res.status(400).json({ error: "Invalid appointment ID" });
+      return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
     }
     
-    // Check if appointment exists and can be edited
     const existingAppointment = await storage.getAppointment(id);
     if (!existingAppointment) {
-      return res.status(404).json({ error: "Termin nicht gefunden" });
+      return sendNotFound(res, ErrorMessages.appointmentNotFound);
     }
     
     const validatedData = updateAppointmentSchema.parse(req.body);
-    const currentStatus = existingAppointment.status;
-    const targetStatus = validatedData.status || currentStatus;
     
-    // Completed appointments cannot be modified at all
-    if (currentStatus === "completed") {
-      return res.status(403).json({ 
-        error: "Bearbeitung nicht möglich",
-        message: "Abgeschlossene Termine können nicht mehr geändert werden."
-      });
-    }
-    
-    // Valid status transitions (one-way workflow, step by step):
-    // scheduled → in-progress → documenting → completed
-    const STATUS_ORDER = ["scheduled", "in-progress", "documenting", "completed"];
-    const currentIndex = STATUS_ORDER.indexOf(currentStatus);
-    const targetIndex = STATUS_ORDER.indexOf(targetStatus);
-    
-    // Status can only advance by exactly one step (or stay the same)
-    if (targetIndex !== -1 && (targetIndex < currentIndex || targetIndex > currentIndex + 1)) {
-      return res.status(400).json({ 
-        error: "Ungültiger Statuswechsel",
-        message: "Der Status kann nur schrittweise vorwärts geändert werden."
-      });
-    }
-    
-    // Define field categories
-    const hasSchedulingChanges = validatedData.date !== undefined || validatedData.scheduledStart !== undefined || 
-                                  validatedData.scheduledEnd !== undefined || validatedData.hauswirtschaftDauer !== undefined || 
-                                  validatedData.alltagsbegleitungDauer !== undefined || validatedData.durationPromised !== undefined || 
-                                  validatedData.serviceType !== undefined;
-    
-    const hasVisitTimeChanges = validatedData.actualStart !== undefined || validatedData.actualEnd !== undefined;
-    
-    // Documentation fields (NOT including notes - notes are editable in planning and documenting)
-    const hasDocumentationChanges = validatedData.kilometers !== undefined ||
-                                     validatedData.servicesDone !== undefined || validatedData.signatureData !== undefined;
-    
-    // Scheduling changes only allowed when STAYING in scheduled status (not when transitioning)
-    if (hasSchedulingChanges) {
-      if (currentStatus !== "scheduled" || targetStatus !== "scheduled") {
-        return res.status(403).json({ 
-          error: "Bearbeitung nicht möglich",
-          message: "Zeit und Datum können nur bei geplanten Terminen geändert werden. Dieser Termin wurde bereits gestartet."
-        });
-      }
-    }
-    
-    // Notes can be edited in scheduled status (planning notes) or documenting status (visit notes)
-    if (validatedData.notes !== undefined) {
-      if (currentStatus !== "scheduled" && currentStatus !== "documenting") {
-        return res.status(403).json({ 
-          error: "Bearbeitung nicht möglich",
-          message: "Notizen können nur bei geplanten oder dokumentierten Terminen bearbeitet werden."
-        });
-      }
-    }
-    
-    // Visit time changes (actualStart/actualEnd) only during workflow transitions
-    // actualStart: only when transitioning scheduled → in-progress
-    // actualEnd: only when transitioning in-progress → documenting
-    if (validatedData.actualStart !== undefined) {
-      if (!(currentStatus === "scheduled" && targetStatus === "in-progress")) {
-        return res.status(403).json({ 
-          error: "Ungültige Aktion",
-          message: "Der Besuch kann nur bei einem geplanten Termin gestartet werden."
-        });
-      }
-    }
-    
-    if (validatedData.actualEnd !== undefined) {
-      if (!(currentStatus === "in-progress" && targetStatus === "documenting")) {
-        return res.status(403).json({ 
-          error: "Ungültige Aktion",
-          message: "Der Besuch kann nur bei einem laufenden Termin beendet werden."
-        });
-      }
-    }
-    
-    // Documentation changes (kilometers, services done, signature) only in documenting status
-    if (hasDocumentationChanges) {
-      if (currentStatus !== "documenting") {
-        return res.status(403).json({ 
-          error: "Bearbeitung nicht möglich",
-          message: "Kilometer, erledigte Services und Unterschrift können erst nach dem Besuch dokumentiert werden."
-        });
-      }
+    const validation = appointmentService.validateAllUpdateRules(existingAppointment, validatedData);
+    if (!validation.valid) {
+      return sendForbidden(res, validation.error!, validation.message!);
     }
     
     const appointment = await storage.updateAppointment(id, validatedData);
     
     if (!appointment) {
-      return res.status(404).json({ error: "Termin nicht gefunden" });
+      return sendNotFound(res, ErrorMessages.appointmentNotFound);
     }
     
     res.json(appointment);
-  } catch (error: any) {
-    if (error.name === "ZodError") {
-      return res.status(400).json({ error: fromError(error).toString() });
-    }
-    console.error("Failed to update appointment:", error);
-    res.status(500).json({ error: "Failed to update appointment" });
+  } catch (error) {
+    handleRouteError(res, error, ErrorMessages.updateAppointmentFailed, "Failed to update appointment");
   }
 });
 
@@ -366,31 +161,27 @@ router.delete("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
-      return res.status(400).json({ error: "Ungültige Termin-ID" });
+      return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
     }
     
-    // Check if appointment exists and is not completed
     const appointment = await storage.getAppointment(id);
     if (!appointment) {
-      return res.status(404).json({ error: "Termin nicht gefunden" });
+      return sendNotFound(res, ErrorMessages.appointmentNotFound);
     }
     
-    if (appointment.status === "completed") {
-      return res.status(403).json({ 
-        error: "Löschen nicht möglich",
-        message: "Abgeschlossene Termine können nicht gelöscht werden."
-      });
+    const canDelete = appointmentService.canDeleteAppointment(appointment);
+    if (!canDelete.valid) {
+      return sendForbidden(res, canDelete.error!, canDelete.message!);
     }
     
     const deleted = await storage.deleteAppointment(id);
     if (!deleted) {
-      return res.status(500).json({ error: "Termin konnte nicht gelöscht werden" });
+      return sendServerError(res, ErrorMessages.deleteAppointmentFailed);
     }
     
     res.json({ success: true, message: "Termin erfolgreich gelöscht" });
   } catch (error) {
-    console.error("Failed to delete appointment:", error);
-    res.status(500).json({ error: "Termin konnte nicht gelöscht werden" });
+    handleRouteError(res, error, ErrorMessages.deleteAppointmentFailed, "Failed to delete appointment");
   }
 });
 

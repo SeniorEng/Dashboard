@@ -1,4 +1,4 @@
-import { memo, useState, useCallback, useRef } from "react";
+import { memo, useState, useCallback, useRef, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import {
   AlertDialog,
@@ -13,6 +13,7 @@ import {
 import { MapPin, CheckCircle2, Clock, FileText, Pencil, Trash2, MoreVertical } from "lucide-react";
 import { useLocation } from "wouter";
 import type { AppointmentWithCustomer } from "@shared/types";
+import { getCardServiceInfo, canModifyAppointment } from "@shared/types";
 import { formatTimeSlot, getEndTime } from "../utils";
 import { useDeleteAppointment } from "../hooks";
 import { useToast } from "@/hooks/use-toast";
@@ -25,72 +26,6 @@ import {
 
 interface AppointmentCardProps {
   appointment: AppointmentWithCustomer;
-}
-
-interface ServiceInfo {
-  hasBoth: boolean;
-  label: string;
-  borderClass: string;
-}
-
-function getServiceInfo(appointment: AppointmentWithCustomer): ServiceInfo {
-  if (appointment.appointmentType === "Erstberatung") {
-    return {
-      hasBoth: false,
-      label: "Erstberatung",
-      borderClass: "bg-purple-500"
-    };
-  }
-  
-  const hasHauswirtschaft = !!appointment.hauswirtschaftDauer;
-  const hasAlltagsbegleitung = !!appointment.alltagsbegleitungDauer;
-  
-  if (hasHauswirtschaft && hasAlltagsbegleitung) {
-    return {
-      hasBoth: true,
-      label: "Hauswirtschaft & Alltagsbegleitung",
-      borderClass: "" // Will use split border
-    };
-  }
-  
-  if (hasHauswirtschaft) {
-    return {
-      hasBoth: false,
-      label: "Hauswirtschaft",
-      borderClass: "bg-amber-500"
-    };
-  }
-  
-  if (hasAlltagsbegleitung) {
-    return {
-      hasBoth: false,
-      label: "Alltagsbegleitung",
-      borderClass: "bg-sky-500"
-    };
-  }
-  
-  // Fallback based on serviceType field (legacy)
-  if (appointment.serviceType === "Hauswirtschaft") {
-    return {
-      hasBoth: false,
-      label: "Hauswirtschaft",
-      borderClass: "bg-amber-500"
-    };
-  }
-  
-  if (appointment.serviceType === "Alltagsbegleitung") {
-    return {
-      hasBoth: false,
-      label: "Alltagsbegleitung",
-      borderClass: "bg-sky-500"
-    };
-  }
-  
-  return {
-    hasBoth: false,
-    label: "Kundentermin",
-    borderClass: "bg-teal-500"
-  };
 }
 
 function getStatusIcon(status: string) {
@@ -114,9 +49,16 @@ function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
   const { toast } = useToast();
   const [, navigate] = useLocation();
   
-  const isCompleted = appointment.status === "completed";
-  const canModify = !isCompleted;
-  const serviceInfo = getServiceInfo(appointment);
+  const canModify = canModifyAppointment(appointment.status as any);
+  const serviceInfo = useMemo(() => 
+    getCardServiceInfo(
+      appointment.appointmentType,
+      appointment.hauswirtschaftDauer,
+      appointment.alltagsbegleitungDauer,
+      appointment.serviceType
+    ),
+    [appointment.appointmentType, appointment.hauswirtschaftDauer, appointment.alltagsbegleitungDauer, appointment.serviceType]
+  );
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     if (!canModify) return;
