@@ -291,7 +291,8 @@ router.patch("/:id", async (req, res) => {
     
     const hasVisitTimeChanges = validatedData.actualStart !== undefined || validatedData.actualEnd !== undefined;
     
-    const hasDocumentationChanges = validatedData.kilometers !== undefined || validatedData.notes !== undefined ||
+    // Documentation fields (NOT including notes - notes are editable in planning and documenting)
+    const hasDocumentationChanges = validatedData.kilometers !== undefined ||
                                      validatedData.servicesDone !== undefined || validatedData.signatureData !== undefined;
     
     // Scheduling changes only allowed when STAYING in scheduled status (not when transitioning)
@@ -299,7 +300,17 @@ router.patch("/:id", async (req, res) => {
       if (currentStatus !== "scheduled" || targetStatus !== "scheduled") {
         return res.status(403).json({ 
           error: "Bearbeitung nicht möglich",
-          message: "Termindetails können nur bei geplanten Terminen geändert werden."
+          message: "Zeit und Datum können nur bei geplanten Terminen geändert werden. Dieser Termin wurde bereits gestartet."
+        });
+      }
+    }
+    
+    // Notes can be edited in scheduled status (planning notes) or documenting status (visit notes)
+    if (validatedData.notes !== undefined) {
+      if (currentStatus !== "scheduled" && currentStatus !== "documenting") {
+        return res.status(403).json({ 
+          error: "Bearbeitung nicht möglich",
+          message: "Notizen können nur bei geplanten oder dokumentierten Terminen bearbeitet werden."
         });
       }
     }
@@ -311,7 +322,7 @@ router.patch("/:id", async (req, res) => {
       if (!(currentStatus === "scheduled" && targetStatus === "in-progress")) {
         return res.status(403).json({ 
           error: "Ungültige Aktion",
-          message: "Besuchsstart kann nur beim Starten eines geplanten Termins gesetzt werden."
+          message: "Der Besuch kann nur bei einem geplanten Termin gestartet werden."
         });
       }
     }
@@ -320,17 +331,17 @@ router.patch("/:id", async (req, res) => {
       if (!(currentStatus === "in-progress" && targetStatus === "documenting")) {
         return res.status(403).json({ 
           error: "Ungültige Aktion",
-          message: "Besuchsende kann nur beim Beenden eines laufenden Termins gesetzt werden."
+          message: "Der Besuch kann nur bei einem laufenden Termin beendet werden."
         });
       }
     }
     
-    // Documentation changes only in documenting status
+    // Documentation changes (kilometers, services done, signature) only in documenting status
     if (hasDocumentationChanges) {
       if (currentStatus !== "documenting") {
         return res.status(403).json({ 
           error: "Bearbeitung nicht möglich",
-          message: "Dokumentation kann nur im Dokumentationsmodus erfasst werden."
+          message: "Kilometer, erledigte Services und Unterschrift können erst nach dem Besuch dokumentiert werden."
         });
       }
     }
