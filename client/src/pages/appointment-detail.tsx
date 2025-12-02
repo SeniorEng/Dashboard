@@ -1,7 +1,7 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRoute, useLocation } from "wouter";
 import { Layout } from "@/components/layout";
-import { MOCK_APPOINTMENTS, Appointment } from "@/lib/mock-data";
+import { useAppointment, useUpdateAppointment } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,8 +11,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { 
-  ArrowLeft, MapPin, Clock, Phone, Navigation, 
-  CheckCircle2, Play, StopCircle, FileText, Save, ChevronLeft
+  MapPin, Clock, Navigation, 
+  CheckCircle2, Play, StopCircle, FileText, Save, ChevronLeft, Loader2
 } from "lucide-react";
 import ladyAvatar from "@assets/generated_images/portrait_of_an_elderly_lady_smiling.png";
 import manAvatar from "@assets/generated_images/portrait_of_an_elderly_man_smiling.png";
@@ -23,40 +23,78 @@ export default function AppointmentDetail() {
   const [match, params] = useRoute("/appointment/:id");
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const id = params?.id;
+  const id = params?.id ? parseInt(params.id) : 0;
   
-  // In a real app, this would be a query/api call.
-  // Here we initialize state from the mock data but keep it local to simulate the flow
-  const initialApt = MOCK_APPOINTMENTS.find(a => a.id === id);
+  const { data: appointment, isLoading } = useAppointment(id);
+  const updateMutation = useUpdateAppointment();
   
-  if (!initialApt) {
-    return <Layout><div>Appointment not found</div></Layout>;
-  }
-
-  const [appointment, setAppointment] = useState<Appointment>(initialApt);
-  const [startTime, setStartTime] = useState<Date | null>(
-    initialApt.status === 'in-progress' ? new Date(new Date().getTime() - 30 * 60000) : null
-  );
+  const [startTime, setStartTime] = useState<Date | null>(null);
   const [endTime, setEndTime] = useState<Date | null>(null);
   const [kilometers, setKilometers] = useState("");
   const [notes, setNotes] = useState("");
   const [servicesDone, setServicesDone] = useState<string[]>([]);
   const sigPad = useRef<SignatureCanvas>(null);
 
-  const avatarSrc = appointment.customer.avatar === 'lady' ? ladyAvatar : manAvatar;
+  // Initialize state when appointment loads
+  useEffect(() => {
+    if (appointment) {
+      if (appointment.startTime) {
+        setStartTime(new Date(appointment.startTime));
+      }
+      if (appointment.endTime) {
+        setEndTime(new Date(appointment.endTime));
+      }
+      if (appointment.kilometers) {
+        setKilometers(appointment.kilometers);
+      }
+      if (appointment.notes) {
+        setNotes(appointment.notes);
+      }
+      if (appointment.servicesDone) {
+        setServicesDone(appointment.servicesDone);
+      }
+    }
+  }, [appointment]);
+
+  if (isLoading) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      </Layout>
+    );
+  }
+
+  if (!appointment) {
+    return <Layout><div>Appointment not found</div></Layout>;
+  }
+
+  const avatarSrc = appointment.customer?.avatar === 'lady' ? ladyAvatar : manAvatar;
 
   const handleStartVisit = () => {
-    setAppointment({ ...appointment, status: "in-progress" });
-    setStartTime(new Date());
-    toast({
-      title: "Visit Started",
-      description: `Started visit with ${appointment.customer.name} at ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`,
+    const now = new Date();
+    setStartTime(now);
+    updateMutation.mutate({
+      id: appointment.id,
+      data: { status: "in-progress", startTime: now }
+    }, {
+      onSuccess: () => {
+        toast({
+          title: "Visit Started",
+          description: `Started visit with ${appointment.customer?.name} at ${now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`,
+        });
+      }
     });
   };
 
   const handleFinishVisit = () => {
-    setAppointment({ ...appointment, status: "documenting" });
-    setEndTime(new Date());
+    const now = new Date();
+    setEndTime(now);
+    updateMutation.mutate({
+      id: appointment.id,
+      data: { status: "documenting", endTime: now }
+    });
   };
 
   const handleComplete = () => {
@@ -68,15 +106,29 @@ export default function AppointmentDetail() {
       });
       return;
     }
-    setAppointment({ ...appointment, status: "completed" });
-    toast({
-      title: "Visit Completed",
-      description: "Documentation saved successfully.",
+
+    const signatureData = sigPad.current.toDataURL();
+    
+    updateMutation.mutate({
+      id: appointment.id,
+      data: { 
+        status: "completed",
+        kilometers,
+        notes,
+        servicesDone,
+        signatureData
+      }
+    }, {
+      onSuccess: () => {
+        toast({
+          title: "Visit Completed",
+          description: "Documentation saved successfully.",
+        });
+        setTimeout(() => setLocation("/"), 1500);
+      }
     });
-    setTimeout(() => setLocation("/"), 1500);
   };
 
-  // Helper to render different views based on status
   const renderContent = () => {
     switch (appointment.status) {
       case "scheduled":
@@ -90,26 +142,34 @@ export default function AppointmentDetail() {
                   <h3 className="font-semibold text-foreground text-lg">Ready to start?</h3>
                   <p className="text-muted-foreground text-sm mt-1">Scheduled for {appointment.time} • {appointment.durationPromised} mins</p>
                 </div>
-                <Button size="lg" className="w-full font-bold shadow-lg shadow-primary/20" onClick={handleStartVisit}>
+                <Button 
+                  size="lg" 
+                  className="w-full font-bold shadow-lg shadow-primary/20" 
+                  onClick={handleStartVisit}
+                  disabled={updateMutation.isPending}
+                  data-testid="button-start-visit"
+                >
                   <Play className="w-4 h-4 mr-2 fill-current" /> Start Visit
                 </Button>
              </div>
 
-             <Card>
-               <CardHeader>
-                 <CardTitle className="text-base">Service Plan</CardTitle>
-               </CardHeader>
-               <CardContent>
-                 <ul className="space-y-3">
-                   {appointment.customer.needs.map((need, i) => (
-                     <li key={i} className="flex items-center gap-3 text-sm">
-                       <div className="w-1.5 h-1.5 rounded-full bg-primary/60" />
-                       {need}
-                     </li>
-                   ))}
-                 </ul>
-               </CardContent>
-             </Card>
+             {appointment.customer && (
+               <Card>
+                 <CardHeader>
+                   <CardTitle className="text-base">Service Plan</CardTitle>
+                 </CardHeader>
+                 <CardContent>
+                   <ul className="space-y-3">
+                     {appointment.customer.needs.map((need, i) => (
+                       <li key={i} className="flex items-center gap-3 text-sm">
+                         <div className="w-1.5 h-1.5 rounded-full bg-primary/60" />
+                         {need}
+                       </li>
+                     ))}
+                   </ul>
+                 </CardContent>
+               </Card>
+             )}
           </div>
         );
 
@@ -121,27 +181,36 @@ export default function AppointmentDetail() {
                <div className="space-y-2">
                   <span className="text-blue-600 text-sm font-bold uppercase tracking-wider">Visit in Progress</span>
                   <div className="text-4xl font-bold text-blue-900 font-mono">
-                    {startTime ? "Active" : "00:00"}
+                    Active
                   </div>
                   <p className="text-blue-600/80 text-sm">Started at {startTime?.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
                </div>
-               <Button size="lg" variant="destructive" className="w-full font-bold" onClick={handleFinishVisit}>
+               <Button 
+                 size="lg" 
+                 variant="destructive" 
+                 className="w-full font-bold" 
+                 onClick={handleFinishVisit}
+                 disabled={updateMutation.isPending}
+                 data-testid="button-finish-visit"
+               >
                  <StopCircle className="w-4 h-4 mr-2 fill-current" /> Finish Visit
                </Button>
             </div>
 
-             <Card className="opacity-80">
-               <CardHeader>
-                 <CardTitle className="text-base">Customer Needs</CardTitle>
-               </CardHeader>
-               <CardContent>
-                 <ul className="space-y-2 text-sm text-muted-foreground">
-                   {appointment.customer.needs.map((need, i) => (
-                     <li key={i}>• {need}</li>
-                   ))}
-                 </ul>
-               </CardContent>
-             </Card>
+             {appointment.customer && (
+               <Card className="opacity-80">
+                 <CardHeader>
+                   <CardTitle className="text-base">Customer Needs</CardTitle>
+                 </CardHeader>
+                 <CardContent>
+                   <ul className="space-y-2 text-sm text-muted-foreground">
+                     {appointment.customer.needs.map((need, i) => (
+                       <li key={i}>• {need}</li>
+                     ))}
+                   </ul>
+                 </CardContent>
+               </Card>
+             )}
           </div>
         );
 
@@ -166,17 +235,19 @@ export default function AppointmentDetail() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* Services Done */}
                 <div className="space-y-3">
                   <Label className="text-base">Services Performed</Label>
                   <div className="grid grid-cols-1 gap-3">
                     {["Vital Signs Check", "Medication Administered", "Personal Hygiene", "Meal Preparation", "Housekeeping", "Social Activity"].map((service) => (
                       <div key={service} className="flex items-center space-x-3 p-3 rounded-lg border border-input hover:bg-accent/50 transition-colors">
-                        <Checkbox id={service} 
+                        <Checkbox 
+                          id={service} 
+                          checked={servicesDone.includes(service)}
                           onCheckedChange={(checked) => {
                             if (checked) setServicesDone([...servicesDone, service]);
                             else setServicesDone(servicesDone.filter(s => s !== service));
                           }}
+                          data-testid={`checkbox-${service.toLowerCase().replace(/\s+/g, '-')}`}
                         />
                         <Label htmlFor={service} className="font-normal cursor-pointer flex-1">{service}</Label>
                       </div>
@@ -186,7 +257,6 @@ export default function AppointmentDetail() {
 
                 <Separator />
 
-                {/* Notes */}
                 <div className="space-y-2">
                   <Label htmlFor="notes">Notes / Observations</Label>
                   <Textarea 
@@ -195,10 +265,10 @@ export default function AppointmentDetail() {
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                     className="min-h-[100px]"
+                    data-testid="textarea-notes"
                   />
                 </div>
 
-                {/* Travel */}
                 <div className="space-y-2">
                   <Label htmlFor="km">Travel Distance (km)</Label>
                   <div className="relative">
@@ -209,6 +279,7 @@ export default function AppointmentDetail() {
                       value={kilometers}
                       onChange={(e) => setKilometers(e.target.value)}
                       className="pl-10"
+                      data-testid="input-kilometers"
                     />
                     <Navigation className="w-4 h-4 absolute left-3 top-3 text-muted-foreground" />
                   </div>
@@ -216,7 +287,6 @@ export default function AppointmentDetail() {
 
                 <Separator />
 
-                {/* Signature */}
                 <div className="space-y-3">
                   <Label>Customer Signature</Label>
                   <div className="border rounded-lg overflow-hidden bg-white shadow-inner">
@@ -226,13 +296,25 @@ export default function AppointmentDetail() {
                       canvasProps={{width: 300, height: 150, className: 'w-full h-[150px]'}} 
                     />
                   </div>
-                  <Button variant="ghost" size="sm" onClick={() => sigPad.current?.clear()} className="text-xs text-muted-foreground">
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={() => sigPad.current?.clear()} 
+                    className="text-xs text-muted-foreground"
+                    data-testid="button-clear-signature"
+                  >
                     Clear Signature
                   </Button>
                 </div>
               </CardContent>
               <CardFooter className="bg-muted/20 p-6">
-                <Button size="lg" className="w-full font-bold text-lg h-12" onClick={handleComplete}>
+                <Button 
+                  size="lg" 
+                  className="w-full font-bold text-lg h-12" 
+                  onClick={handleComplete}
+                  disabled={updateMutation.isPending}
+                  data-testid="button-complete-documentation"
+                >
                   <Save className="w-5 h-5 mr-2" /> Complete Documentation
                 </Button>
               </CardFooter>
@@ -261,22 +343,29 @@ export default function AppointmentDetail() {
   return (
     <Layout>
       <div className="mb-6">
-        <Button variant="ghost" size="sm" className="pl-0 text-muted-foreground hover:text-foreground mb-4" onClick={() => setLocation("/")}>
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          className="pl-0 text-muted-foreground hover:text-foreground mb-4" 
+          onClick={() => setLocation("/")}
+          data-testid="button-back"
+        >
           <ChevronLeft className="w-4 h-4 mr-1" /> Back to Schedule
         </Button>
 
-        {/* Header Info */}
-        <div className="flex items-start gap-4 mb-6">
-          <img src={avatarSrc} alt={appointment.customer.name} className="w-16 h-16 rounded-2xl object-cover shadow-md ring-1 ring-border" />
-          <div>
-            <Badge variant="secondary" className="mb-2">{appointment.type}</Badge>
-            <h1 className="text-2xl font-bold leading-tight">{appointment.customer.name}</h1>
-            <div className="flex items-center text-muted-foreground text-sm mt-1">
-              <MapPin className="w-3.5 h-3.5 mr-1 text-primary" />
-              {appointment.customer.address}
+        {appointment.customer && (
+          <div className="flex items-start gap-4 mb-6">
+            <img src={avatarSrc} alt={appointment.customer.name} className="w-16 h-16 rounded-2xl object-cover shadow-md ring-1 ring-border" />
+            <div>
+              <Badge variant="secondary" className="mb-2">{appointment.type}</Badge>
+              <h1 className="text-2xl font-bold leading-tight">{appointment.customer.name}</h1>
+              <div className="flex items-center text-muted-foreground text-sm mt-1">
+                <MapPin className="w-3.5 h-3.5 mr-1 text-primary" />
+                {appointment.customer.address}
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
       {renderContent()}

@@ -1,14 +1,29 @@
-import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Appointment } from "@/lib/mock-data";
-import { Clock, MapPin, ChevronRight, CheckCircle2, PlayCircle, FileText } from "lucide-react";
+import { MapPin, ChevronRight, CheckCircle2, PlayCircle, FileText } from "lucide-react";
 import { Link } from "wouter";
 import ladyAvatar from "@assets/generated_images/portrait_of_an_elderly_lady_smiling.png";
 import manAvatar from "@assets/generated_images/portrait_of_an_elderly_man_smiling.png";
 
+type Appointment = {
+  id: number;
+  customerId: number;
+  type: string;
+  date: string;
+  time: string;
+  durationPromised: number;
+  status: string;
+  customer: {
+    id: number;
+    name: string;
+    address: string;
+    avatar: string;
+    needs: string[];
+  } | null;
+};
+
 export function AppointmentCard({ appointment }: { appointment: Appointment }) {
-  const avatarSrc = appointment.customer.avatar === 'lady' ? ladyAvatar : manAvatar;
+  const avatarSrc = appointment.customer?.avatar === 'lady' ? ladyAvatar : manAvatar;
 
   const statusColors = {
     "scheduled": "bg-muted text-muted-foreground border-muted-foreground/20",
@@ -17,7 +32,7 @@ export function AppointmentCard({ appointment }: { appointment: Appointment }) {
     "completed": "bg-green-50 text-green-700 border-green-200"
   };
 
-  const typeColors = {
+  const typeColors: Record<string, string> = {
     "First Visit": "bg-purple-100 text-purple-800 border-purple-200",
     "Customer Appointment": "bg-teal-100 text-teal-800 border-teal-200",
     "Hauswirtschaft": "bg-amber-100 text-amber-800 border-amber-200",
@@ -39,10 +54,10 @@ export function AppointmentCard({ appointment }: { appointment: Appointment }) {
               {/* Main Content */}
               <div className="flex-1 p-4">
                 <div className="flex justify-between items-start mb-2">
-                  <Badge variant="outline" className={`rounded-full text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 ${typeColors[appointment.type]}`}>
+                  <Badge variant="outline" className={`rounded-full text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 ${typeColors[appointment.type] || 'bg-gray-100 text-gray-800'}`}>
                     {appointment.type}
                   </Badge>
-                  <div className={`text-[10px] px-2 py-0.5 rounded-full border font-medium flex items-center gap-1 ${statusColors[appointment.status]}`}>
+                  <div className={`text-[10px] px-2 py-0.5 rounded-full border font-medium flex items-center gap-1 ${statusColors[appointment.status as keyof typeof statusColors] || statusColors.scheduled}`}>
                     {appointment.status === 'completed' && <CheckCircle2 className="w-3 h-3" />}
                     {appointment.status === 'in-progress' && <PlayCircle className="w-3 h-3" />}
                     {appointment.status === 'documenting' && <FileText className="w-3 h-3" />}
@@ -50,16 +65,18 @@ export function AppointmentCard({ appointment }: { appointment: Appointment }) {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3 mb-3">
-                  <img src={avatarSrc} alt={appointment.customer.name} className="w-10 h-10 rounded-full object-cover ring-2 ring-background shadow-sm" />
-                  <div>
-                    <h3 className="font-bold text-foreground leading-tight">{appointment.customer.name}</h3>
-                    <div className="flex items-center text-xs text-muted-foreground mt-0.5">
-                      <MapPin className="w-3 h-3 mr-1" />
-                      <span className="truncate max-w-[150px]">{appointment.customer.address}</span>
+                {appointment.customer && (
+                  <div className="flex items-center gap-3 mb-3">
+                    <img src={avatarSrc} alt={appointment.customer.name} className="w-10 h-10 rounded-full object-cover ring-2 ring-background shadow-sm" />
+                    <div>
+                      <h3 className="font-bold text-foreground leading-tight">{appointment.customer.name}</h3>
+                      <div className="flex items-center text-xs text-muted-foreground mt-0.5">
+                        <MapPin className="w-3 h-3 mr-1" />
+                        <span className="truncate max-w-[150px]">{appointment.customer.address}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
               </div>
               
               {/* Action Arrow */}
