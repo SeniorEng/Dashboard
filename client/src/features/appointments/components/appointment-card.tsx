@@ -1,6 +1,5 @@
-import { memo, useState, useCallback } from "react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { memo, useState, useCallback, useRef } from "react";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -12,10 +11,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { MapPin, ChevronRight, CheckCircle2, PlayCircle, FileText, Pencil, Trash2 } from "lucide-react";
+import { MapPin, CheckCircle2, Clock, FileText, Pencil, Trash2 } from "lucide-react";
 import { Link } from "wouter";
 import type { AppointmentWithCustomer } from "@shared/types";
-import { getStatusColor, getAppointmentTypeColor, getServiceColor, getStatusLabel, formatTimeSlot, getEndTime } from "../utils";
+import { formatTimeSlot, getEndTime } from "../utils";
 import { useDeleteAppointment } from "../hooks";
 import { useToast } from "@/hooks/use-toast";
 
@@ -23,18 +22,58 @@ interface AppointmentCardProps {
   appointment: AppointmentWithCustomer;
 }
 
+function getTypeColor(appointmentType: string, serviceType: string | null): string {
+  if (appointmentType === "Erstberatung") {
+    return "bg-purple-500";
+  }
+  if (serviceType === "Hauswirtschaft") {
+    return "bg-amber-500";
+  }
+  if (serviceType === "Alltagsbegleitung") {
+    return "bg-sky-500";
+  }
+  return "bg-teal-500";
+}
+
+function getStatusIcon(status: string) {
+  switch (status) {
+    case "completed":
+      return <CheckCircle2 className="w-5 h-5 text-green-500" />;
+    case "in-progress":
+      return <Clock className="w-5 h-5 text-blue-500 animate-pulse" />;
+    case "documenting":
+      return <FileText className="w-5 h-5 text-orange-500" />;
+    default:
+      return null;
+  }
+}
+
 function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [swiped, setSwiped] = useState(false);
+  const startX = useRef(0);
   const deleteMutation = useDeleteAppointment();
   const { toast } = useToast();
   
-  const statusColor = getStatusColor(appointment.status);
-  const typeColor = getAppointmentTypeColor(appointment.appointmentType);
-  const serviceColor = getServiceColor(appointment.serviceType);
-  const statusLabel = getStatusLabel(appointment.status);
-  
   const isCompleted = appointment.status === "completed";
   const canModify = !isCompleted;
+  const typeColor = getTypeColor(appointment.appointmentType, appointment.serviceType);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (!canModify) return;
+    startX.current = e.touches[0].clientX;
+  }, [canModify]);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (!canModify) return;
+    const endX = e.changedTouches[0].clientX;
+    const diff = startX.current - endX;
+    if (diff > 50) {
+      setSwiped(true);
+    } else if (diff < -50) {
+      setSwiped(false);
+    }
+  }, [canModify]);
 
   const handleDeleteClick = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -59,99 +98,98 @@ function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
     setShowDeleteDialog(false);
   }, [deleteMutation, appointment.id, toast]);
 
+  const handleCloseSwipe = useCallback(() => {
+    setSwiped(false);
+  }, []);
+
   return (
     <>
-      <div className="block group transition-all duration-200 hover:-translate-y-1">
-        <Card className="overflow-hidden border-border/60 shadow-sm hover:shadow-md hover:border-primary/30 transition-all bg-card">
-          <CardContent className="p-0">
-            <div className="flex items-stretch">
-              {/* Time Column */}
-              <Link 
-                href={`/appointment/${appointment.id}`}
-                className="w-24 flex flex-col items-center justify-center bg-secondary/30 border-r border-border/50 p-3 text-center cursor-pointer"
-                data-testid={`card-appointment-${appointment.id}`}
+      <div 
+        className="relative overflow-hidden rounded-xl"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
+        {/* Swipe Actions Background */}
+        {canModify && (
+          <div className="absolute inset-y-0 right-0 flex items-stretch">
+            <Link href={`/edit-appointment/${appointment.id}`}>
+              <button 
+                className="h-full w-16 bg-primary flex items-center justify-center text-primary-foreground"
+                data-testid={`button-edit-${appointment.id}`}
               >
-                <span className="text-base font-bold text-foreground">{formatTimeSlot(appointment.scheduledStart)}</span>
-                <span className="text-xs text-muted-foreground">bis</span>
-                <span className="text-base font-bold text-foreground">{getEndTime(appointment)}</span>
-              </Link>
+                <Pencil className="w-5 h-5" />
+              </button>
+            </Link>
+            <button 
+              className="h-full w-16 bg-destructive flex items-center justify-center text-destructive-foreground"
+              onClick={handleDeleteClick}
+              data-testid={`button-delete-${appointment.id}`}
+            >
+              <Trash2 className="w-5 h-5" />
+            </button>
+          </div>
+        )}
 
-              {/* Main Content */}
-              <Link 
-                href={`/appointment/${appointment.id}`}
-                className="flex-1 p-4 cursor-pointer"
-              >
-                <div className="flex justify-between items-start mb-2">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Badge 
-                      variant="outline" 
-                      className={`rounded-full text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 ${typeColor}`}
-                    >
-                      {appointment.appointmentType}
-                    </Badge>
-                    {appointment.serviceType && (
-                      <Badge 
-                        variant="outline" 
-                        className={`rounded-full text-[10px] font-medium px-2 py-0.5 ${serviceColor}`}
-                      >
-                        {appointment.serviceType}
-                      </Badge>
-                    )}
+        {/* Main Card */}
+        <Card 
+          className={`relative transition-transform duration-200 ease-out border-0 shadow-sm ${
+            swiped ? "-translate-x-32" : "translate-x-0"
+          }`}
+          onClick={swiped ? handleCloseSwipe : undefined}
+        >
+          <Link 
+            href={`/appointment/${appointment.id}`}
+            className="block"
+            data-testid={`card-appointment-${appointment.id}`}
+          >
+            <div className="flex items-stretch">
+              {/* Color-coded Left Border */}
+              <div className={`w-1.5 ${typeColor} rounded-l-xl`} />
+
+              {/* Time */}
+              <div className="w-20 flex flex-col items-center justify-center py-4 px-2 text-center border-r border-border/30">
+                <span className="text-lg font-bold text-foreground leading-none">
+                  {formatTimeSlot(appointment.scheduledStart)}
+                </span>
+                <span className="text-[10px] text-muted-foreground mt-0.5">bis</span>
+                <span className="text-sm font-medium text-muted-foreground leading-none">
+                  {getEndTime(appointment)}
+                </span>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 py-3 px-4 min-w-0">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-semibold text-foreground truncate">
+                      {appointment.customer?.name}
+                    </h3>
+                    <div className="flex items-center text-xs text-muted-foreground mt-1">
+                      <MapPin className="w-3 h-3 mr-1 shrink-0" />
+                      <span className="truncate">{appointment.customer?.address}</span>
+                    </div>
                   </div>
-                  <div className={`text-[10px] px-2 py-0.5 rounded-full border font-medium flex items-center gap-1 shrink-0 ${statusColor}`}>
-                    {appointment.status === "completed" && <CheckCircle2 className="w-3 h-3" />}
-                    {appointment.status === "in-progress" && <PlayCircle className="w-3 h-3" />}
-                    {appointment.status === "documenting" && <FileText className="w-3 h-3" />}
-                    {statusLabel}
+                  
+                  {/* Status Icon */}
+                  <div className="shrink-0">
+                    {getStatusIcon(appointment.status)}
                   </div>
                 </div>
 
-                {appointment.customer && (
-                  <div className="mb-1">
-                    <h3 className="font-bold text-foreground leading-tight">{appointment.customer.name}</h3>
-                    <div className="flex items-center text-xs text-muted-foreground mt-1">
-                      <MapPin className="w-3 h-3 mr-1" />
-                      <span className="truncate max-w-[200px]">{appointment.customer.address}</span>
-                    </div>
-                  </div>
-                )}
-              </Link>
-
-              {/* Action Column */}
-              <div className="flex flex-col items-center justify-center px-2 border-l border-border/30">
-                {canModify ? (
-                  <div className="flex flex-col gap-1">
-                    <Link href={`/edit-appointment/${appointment.id}`}>
-                      <Button 
-                        variant="ghost" 
-                        size="icon"
-                        className="h-8 w-8"
-                        data-testid={`button-edit-${appointment.id}`}
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </Button>
-                    </Link>
-                    <Button 
-                      variant="ghost" 
-                      size="icon"
-                      className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                      onClick={handleDeleteClick}
-                      data-testid={`button-delete-${appointment.id}`}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ) : (
-                  <Link href={`/appointment/${appointment.id}`}>
-                    <div className="text-muted-foreground/30 hover:text-primary transition-colors p-2">
-                      <ChevronRight className="w-6 h-6" />
-                    </div>
-                  </Link>
-                )}
+                {/* Subtle Type Indicator */}
+                <div className="mt-2 text-[11px] text-muted-foreground">
+                  {appointment.appointmentType}
+                  {appointment.serviceType && ` · ${appointment.serviceType}`}
+                </div>
               </div>
             </div>
-          </CardContent>
+          </Link>
         </Card>
+
+        {/* Swipe Hint for Desktop */}
+        {canModify && !swiped && (
+          <div className="absolute inset-y-0 right-0 w-1 bg-gradient-to-l from-muted/50 to-transparent pointer-events-none" />
+        )}
       </div>
 
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
