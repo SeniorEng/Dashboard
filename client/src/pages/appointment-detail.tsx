@@ -1,22 +1,63 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useRoute, useLocation } from "wouter";
 import { Layout } from "@/components/layout";
-import { useAppointment, useUpdateAppointment, calculateDuration, formatTime, formatTimeSlot, getAppointmentTypeColor, getServiceColor } from "@/features/appointments";
-import { SERVICE_OPTIONS } from "@shared/types";
+import { useAppointment } from "@/features/appointments";
+import { useDeleteAppointment } from "@/features/appointments/hooks";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
-  MapPin, Clock, Navigation, 
-  CheckCircle2, Play, StopCircle, FileText, Save, ChevronLeft, Loader2
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { 
+  MapPin, Clock, Calendar, FileText, ChevronLeft, Loader2, 
+  Pencil, Trash2, CheckCircle2, AlertTriangle, Phone
 } from "lucide-react";
-import SignatureCanvas from "react-signature-canvas";
 import { useToast } from "@/hooks/use-toast";
+import { formatTimeSlot, getEndTime } from "@/features/appointments/utils";
+
+function formatDuration(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m} Min.`;
+  if (m === 0) return `${h} Std.`;
+  return `${h} Std. ${m} Min.`;
+}
+
+function getStatusInfo(status: string): { label: string; color: string; icon: React.ReactNode } {
+  switch (status) {
+    case "completed":
+      return { 
+        label: "Abgeschlossen", 
+        color: "bg-green-100 text-green-800 border-green-200",
+        icon: <CheckCircle2 className="w-4 h-4" />
+      };
+    case "in-progress":
+      return { 
+        label: "Läuft", 
+        color: "bg-blue-100 text-blue-800 border-blue-200",
+        icon: <Clock className="w-4 h-4" />
+      };
+    case "documenting":
+      return { 
+        label: "Dokumentation", 
+        color: "bg-orange-100 text-orange-800 border-orange-200",
+        icon: <FileText className="w-4 h-4" />
+      };
+    default:
+      return { 
+        label: "Geplant", 
+        color: "bg-gray-100 text-gray-800 border-gray-200",
+        icon: <Calendar className="w-4 h-4" />
+      };
+  }
+}
 
 export default function AppointmentDetail() {
   const [, params] = useRoute("/appointment/:id");
@@ -25,95 +66,26 @@ export default function AppointmentDetail() {
   const id = params?.id ? parseInt(params.id) : 0;
   
   const { data: appointment, isLoading } = useAppointment(id);
-  const updateMutation = useUpdateAppointment();
-  
-  const [actualStart, setActualStart] = useState<Date | null>(null);
-  const [actualEnd, setActualEnd] = useState<Date | null>(null);
-  const [kilometers, setKilometers] = useState("");
-  const [notes, setNotes] = useState("");
-  const [servicesDone, setServicesDone] = useState<string[]>([]);
-  const sigPad = useRef<SignatureCanvas>(null);
+  const deleteMutation = useDeleteAppointment();
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
-  // Initialize state when appointment loads
-  useEffect(() => {
-    if (appointment) {
-      if (appointment.actualStart) setActualStart(new Date(appointment.actualStart));
-      if (appointment.actualEnd) setActualEnd(new Date(appointment.actualEnd));
-      if (appointment.kilometers) setKilometers(appointment.kilometers);
-      if (appointment.notes) setNotes(appointment.notes);
-      if (appointment.servicesDone) setServicesDone(appointment.servicesDone);
-    }
-  }, [appointment]);
-
-  // Memoized duration calculation
-  const duration = useMemo(() => calculateDuration(actualStart, actualEnd), [actualStart, actualEnd]);
-
-  // Callbacks for handlers
-  const handleStartVisit = useCallback(() => {
-    if (!appointment) return;
-    const now = new Date();
-    setActualStart(now);
-    updateMutation.mutate({
-      id: appointment.id,
-      data: { status: "in-progress", actualStart: now }
-    }, {
-      onSuccess: () => {
-        toast({
-          title: "Besuch gestartet",
-          description: `Besuch bei ${appointment.customer?.name} um ${formatTime(now)} gestartet`,
-        });
-      }
-    });
-  }, [appointment, updateMutation, toast]);
-
-  const handleFinishVisit = useCallback(() => {
-    if (!appointment) return;
-    const now = new Date();
-    setActualEnd(now);
-    updateMutation.mutate({
-      id: appointment.id,
-      data: { status: "documenting", actualEnd: now }
-    });
-  }, [appointment, updateMutation]);
-
-  const handleComplete = useCallback(() => {
-    if (!appointment) return;
-    if (!sigPad.current || sigPad.current.isEmpty()) {
+  const handleDelete = useCallback(async () => {
+    try {
+      await deleteMutation.mutateAsync(id);
+      toast({
+        title: "Termin gelöscht",
+        description: "Der Termin wurde erfolgreich gelöscht.",
+      });
+      setLocation("/");
+    } catch (error: any) {
       toast({
         variant: "destructive",
-        title: "Unterschrift erforderlich",
-        description: "Bitte lassen Sie den Kunden unterschreiben.",
+        title: "Fehler",
+        description: error.message || "Der Termin konnte nicht gelöscht werden.",
       });
-      return;
     }
-
-    const signatureData = sigPad.current.toDataURL();
-    
-    updateMutation.mutate({
-      id: appointment.id,
-      data: { 
-        status: "completed",
-        kilometers,
-        notes,
-        servicesDone,
-        signatureData
-      }
-    }, {
-      onSuccess: () => {
-        toast({
-          title: "Besuch abgeschlossen",
-          description: "Dokumentation erfolgreich gespeichert.",
-        });
-        setTimeout(() => setLocation("/"), 1500);
-      }
-    });
-  }, [appointment, kilometers, notes, servicesDone, updateMutation, toast, setLocation]);
-
-  const handleServiceToggle = useCallback((service: string, checked: boolean) => {
-    setServicesDone(prev => 
-      checked ? [...prev, service] : prev.filter(s => s !== service)
-    );
-  }, []);
+    setShowDeleteDialog(false);
+  }, [deleteMutation, id, toast, setLocation]);
 
   if (isLoading) {
     return (
@@ -135,217 +107,13 @@ export default function AppointmentDetail() {
     );
   }
 
-  const typeColor = getAppointmentTypeColor(appointment.appointmentType);
-  const serviceColor = getServiceColor(appointment.serviceType);
+  const isCompleted = appointment.status === "completed";
+  const canModify = !isCompleted;
+  const statusInfo = getStatusInfo(appointment.status);
+  const isErstberatung = appointment.appointmentType === "Erstberatung";
 
-  const renderContent = () => {
-    switch (appointment.status) {
-      case "scheduled":
-        return (
-          <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
-            <div className="bg-primary/5 border border-primary/10 rounded-2xl p-6 text-center space-y-4">
-              <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto text-primary mb-2">
-                <Clock className="w-8 h-8" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-foreground text-lg">Bereit zum Starten?</h3>
-                <p className="text-muted-foreground text-sm mt-1">
-                  Geplant für {formatTimeSlot(appointment.scheduledStart)} Uhr • {appointment.durationPromised} Min.
-                </p>
-              </div>
-              <Button 
-                size="lg" 
-                className="w-full font-bold shadow-lg shadow-primary/20" 
-                onClick={handleStartVisit}
-                disabled={updateMutation.isPending}
-                data-testid="button-start-visit"
-              >
-                <Play className="w-4 h-4 mr-2 fill-current" /> Besuch starten
-              </Button>
-            </div>
-
-            {appointment.customer && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Leistungsplan</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ul className="space-y-3">
-                    {appointment.customer.needs.map((need, i) => (
-                      <li key={i} className="flex items-center gap-3 text-sm">
-                        <div className="w-1.5 h-1.5 rounded-full bg-primary/60" />
-                        {need}
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-        );
-
-      case "in-progress":
-        return (
-          <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
-            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-8 text-center space-y-6 relative overflow-hidden">
-              <div className="absolute top-0 left-0 w-full h-1 bg-blue-200 animate-pulse" />
-              <div className="space-y-2">
-                <span className="text-blue-600 text-sm font-bold uppercase tracking-wider">Besuch läuft</span>
-                <div className="text-4xl font-bold text-blue-900 font-mono">Aktiv</div>
-                <p className="text-blue-600/80 text-sm">Gestartet um {formatTime(actualStart)}</p>
-              </div>
-              <Button 
-                size="lg" 
-                variant="destructive" 
-                className="w-full font-bold" 
-                onClick={handleFinishVisit}
-                disabled={updateMutation.isPending}
-                data-testid="button-finish-visit"
-              >
-                <StopCircle className="w-4 h-4 mr-2 fill-current" /> Besuch beenden
-              </Button>
-            </div>
-
-            {appointment.customer && (
-              <Card className="opacity-80">
-                <CardHeader>
-                  <CardTitle className="text-base">Kundenbedürfnisse</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ul className="space-y-2 text-sm text-muted-foreground">
-                    {appointment.customer.needs.map((need, i) => (
-                      <li key={i}>• {need}</li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-        );
-
-      case "documenting":
-        return (
-          <div className="space-y-6 animate-in slide-in-from-bottom-8 duration-500">
-            <div className="bg-orange-50 border border-orange-100 p-4 rounded-xl flex items-center gap-3 text-orange-800 text-sm">
-              <Clock className="w-5 h-5 shrink-0" />
-              <div>
-                <span className="font-bold">Besuchsdauer:</span>
-                {duration !== null ? ` ${duration} Minuten` : " --"}
-              </div>
-            </div>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-primary" />
-                  Dokumentation
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="space-y-3">
-                  <Label className="text-base">Erbrachte Leistungen</Label>
-                  <div className="grid grid-cols-1 gap-3">
-                    {SERVICE_OPTIONS.map((service) => (
-                      <div key={service} className="flex items-center space-x-3 p-3 rounded-lg border border-input hover:bg-accent/50 transition-colors">
-                        <Checkbox 
-                          id={service} 
-                          checked={servicesDone.includes(service)}
-                          onCheckedChange={(checked) => handleServiceToggle(service, !!checked)}
-                          data-testid={`checkbox-${service.toLowerCase().replace(/\s+/g, "-")}`}
-                        />
-                        <Label htmlFor={service} className="font-normal cursor-pointer flex-1">{service}</Label>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <Separator />
-
-                <div className="space-y-2">
-                  <Label htmlFor="notes">Notizen / Beobachtungen</Label>
-                  <Textarea 
-                    id="notes" 
-                    placeholder="Beschreiben Sie kurz, was gemacht wurde..." 
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    className="min-h-[100px]"
-                    data-testid="textarea-notes"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="km">Fahrtstrecke (km)</Label>
-                  <div className="relative">
-                    <Input 
-                      id="km" 
-                      type="number" 
-                      placeholder="0" 
-                      value={kilometers}
-                      onChange={(e) => setKilometers(e.target.value)}
-                      className="pl-10"
-                      data-testid="input-kilometers"
-                    />
-                    <Navigation className="w-4 h-4 absolute left-3 top-3 text-muted-foreground" />
-                  </div>
-                </div>
-
-                <Separator />
-
-                <div className="space-y-3">
-                  <Label>Kundenunterschrift</Label>
-                  <div className="border rounded-lg overflow-hidden bg-white shadow-inner">
-                    <SignatureCanvas 
-                      ref={sigPad}
-                      penColor="black"
-                      canvasProps={{ width: 300, height: 150, className: "w-full h-[150px]" }} 
-                    />
-                  </div>
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    onClick={() => sigPad.current?.clear()} 
-                    className="text-xs text-muted-foreground"
-                    data-testid="button-clear-signature"
-                  >
-                    Unterschrift löschen
-                  </Button>
-                </div>
-              </CardContent>
-              <CardFooter className="bg-muted/20 p-6">
-                <Button 
-                  size="lg" 
-                  className="w-full font-bold text-lg h-12" 
-                  onClick={handleComplete}
-                  disabled={updateMutation.isPending}
-                  data-testid="button-complete-documentation"
-                >
-                  <Save className="w-5 h-5 mr-2" /> Dokumentation abschließen
-                </Button>
-              </CardFooter>
-            </Card>
-          </div>
-        );
-
-      case "completed":
-        return (
-          <div className="text-center py-12 space-y-6 animate-in zoom-in-90 duration-500">
-            <div className="w-24 h-24 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
-              <CheckCircle2 className="w-12 h-12" />
-            </div>
-            <h2 className="text-2xl font-bold text-foreground">Alles erledigt!</h2>
-            <p className="text-muted-foreground max-w-xs mx-auto">
-              Besuch erfolgreich dokumentiert und gespeichert. Gut gemacht!
-            </p>
-            <Button size="lg" variant="outline" onClick={() => setLocation("/")} data-testid="button-back-dashboard">
-              Zurück zur Übersicht
-            </Button>
-          </div>
-        );
-
-      default:
-        return null;
-    }
-  };
+  const hasHauswirtschaft = !!appointment.hauswirtschaftDauer;
+  const hasAlltagsbegleitung = !!appointment.alltagsbegleitungDauer;
 
   return (
     <Layout>
@@ -357,33 +125,230 @@ export default function AppointmentDetail() {
           onClick={() => setLocation("/")}
           data-testid="button-back"
         >
-          <ChevronLeft className="w-4 h-4 mr-1" /> Zurück zum Tagesplan
+          <ChevronLeft className="w-4 h-4 mr-1" /> Zurück
         </Button>
 
+        {/* Status Badge */}
+        <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium border ${statusInfo.color} mb-4`}>
+          {statusInfo.icon}
+          {statusInfo.label}
+        </div>
+
+        {/* Customer Info */}
         {appointment.customer && (
           <div className="mb-6">
-            <div className="flex items-center gap-2 mb-2">
-              <Badge variant="outline" className={`${typeColor}`}>
-                {appointment.appointmentType}
-              </Badge>
-              {appointment.serviceType && (
-                <Badge variant="outline" className={`${serviceColor}`}>
-                  {appointment.serviceType}
-                </Badge>
-              )}
-            </div>
             <h1 className="text-2xl font-bold leading-tight" data-testid="text-customer-name">
               {appointment.customer.name}
             </h1>
-            <div className="flex items-center text-muted-foreground text-sm mt-1">
-              <MapPin className="w-3.5 h-3.5 mr-1 text-primary" />
-              {appointment.customer.address}
+            <div className="flex items-center text-muted-foreground text-sm mt-2">
+              <MapPin className="w-4 h-4 mr-1.5 text-primary shrink-0" />
+              <span>{appointment.customer.address}</span>
             </div>
+            {appointment.customer.telefon && (
+              <div className="flex items-center text-muted-foreground text-sm mt-1">
+                <Phone className="w-4 h-4 mr-1.5 text-primary shrink-0" />
+                <a href={`tel:${appointment.customer.telefon}`} className="hover:text-primary">
+                  {appointment.customer.telefon}
+                </a>
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {renderContent()}
+      {/* Appointment Details Card */}
+      <Card className="mb-4">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-primary" />
+            Termindetails
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Date & Time */}
+          <div className="flex items-center justify-between py-2 border-b border-border/50">
+            <span className="text-muted-foreground">Datum</span>
+            <span className="font-medium">
+              {new Date(appointment.date).toLocaleDateString("de-DE", { 
+                weekday: "long", 
+                day: "numeric", 
+                month: "long", 
+                year: "numeric" 
+              })}
+            </span>
+          </div>
+          
+          <div className="flex items-center justify-between py-2 border-b border-border/50">
+            <span className="text-muted-foreground">Uhrzeit</span>
+            <span className="font-medium">
+              {formatTimeSlot(appointment.scheduledStart)} - {getEndTime(appointment)} Uhr
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between py-2 border-b border-border/50">
+            <span className="text-muted-foreground">Dauer</span>
+            <span className="font-medium">
+              {appointment.durationPromised ? formatDuration(appointment.durationPromised) : "—"}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between py-2">
+            <span className="text-muted-foreground">Art</span>
+            <span className="font-medium">
+              {isErstberatung ? "Erstberatung" : "Kundentermin"}
+            </span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Services Card - Only for Kundentermin */}
+      {!isErstberatung && (hasHauswirtschaft || hasAlltagsbegleitung) && (
+        <Card className="mb-4">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <FileText className="w-4 h-4 text-primary" />
+              Geplante Leistungen
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {hasHauswirtschaft && (
+              <div className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-amber-500" />
+                  <span>Hauswirtschaft</span>
+                </div>
+                <span className="text-muted-foreground">
+                  {formatDuration(appointment.hauswirtschaftDauer!)}
+                </span>
+              </div>
+            )}
+            {hasAlltagsbegleitung && (
+              <div className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-sky-500" />
+                  <span>Alltagsbegleitung</span>
+                </div>
+                <span className="text-muted-foreground">
+                  {formatDuration(appointment.alltagsbegleitungDauer!)}
+                </span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Customer Needs - for Erstberatung or if customer has needs */}
+      {appointment.customer?.needs && appointment.customer.needs.length > 0 && (
+        <Card className="mb-4">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Kundenbedürfnisse</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="space-y-2">
+              {appointment.customer.needs.map((need, i) => (
+                <li key={i} className="flex items-center gap-2 text-sm">
+                  <div className="w-1.5 h-1.5 rounded-full bg-primary/60" />
+                  {need}
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Notes Card */}
+      {appointment.notes && (
+        <Card className="mb-4">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Notizen</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+              {appointment.notes}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Completed Info */}
+      {isCompleted && (
+        <Card className="mb-4 border-green-200 bg-green-50/50">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3 text-green-800">
+              <CheckCircle2 className="w-5 h-5" />
+              <div>
+                <p className="font-medium">Termin abgeschlossen</p>
+                {appointment.kilometers && (
+                  <p className="text-sm text-green-700">Gefahrene Kilometer: {appointment.kilometers} km</p>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Action Buttons */}
+      {canModify && (
+        <div className="flex gap-3 mt-6">
+          <Button 
+            variant="outline" 
+            className="flex-1"
+            onClick={() => setLocation(`/edit-appointment/${appointment.id}`)}
+            data-testid="button-edit"
+          >
+            <Pencil className="w-4 h-4 mr-2" />
+            Bearbeiten
+          </Button>
+          <Button 
+            variant="outline" 
+            className="flex-1 text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
+            onClick={() => setShowDeleteDialog(true)}
+            data-testid="button-delete"
+          >
+            <Trash2 className="w-4 h-4 mr-2" />
+            Löschen
+          </Button>
+        </div>
+      )}
+
+      {/* Completed - Back Button */}
+      {isCompleted && (
+        <div className="mt-6">
+          <Button 
+            variant="outline" 
+            className="w-full"
+            onClick={() => setLocation("/")}
+            data-testid="button-back-dashboard"
+          >
+            Zurück zur Übersicht
+          </Button>
+        </div>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-destructive" />
+              Termin löschen?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Möchten Sie den Termin bei {appointment.customer?.name} wirklich löschen? 
+              Diese Aktion kann nicht rückgängig gemacht werden.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Abbrechen</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Löschen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Layout>
   );
 }
