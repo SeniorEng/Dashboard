@@ -251,11 +251,94 @@ router.patch("/:id", async (req, res) => {
       return res.status(400).json({ error: "Invalid appointment ID" });
     }
     
+    // Check if appointment exists and can be edited
+    const existingAppointment = await storage.getAppointment(id);
+    if (!existingAppointment) {
+      return res.status(404).json({ error: "Termin nicht gefunden" });
+    }
+    
     const validatedData = updateAppointmentSchema.parse(req.body);
+    const currentStatus = existingAppointment.status;
+    const targetStatus = validatedData.status || currentStatus;
+    
+    // Completed appointments cannot be modified at all
+    if (currentStatus === "completed") {
+      return res.status(403).json({ 
+        error: "Bearbeitung nicht möglich",
+        message: "Abgeschlossene Termine können nicht mehr geändert werden."
+      });
+    }
+    
+    // Valid status transitions (one-way workflow, step by step):
+    // scheduled → in-progress → documenting → completed
+    const STATUS_ORDER = ["scheduled", "in-progress", "documenting", "completed"];
+    const currentIndex = STATUS_ORDER.indexOf(currentStatus);
+    const targetIndex = STATUS_ORDER.indexOf(targetStatus);
+    
+    // Status can only advance by exactly one step (or stay the same)
+    if (targetIndex !== -1 && (targetIndex < currentIndex || targetIndex > currentIndex + 1)) {
+      return res.status(400).json({ 
+        error: "Ungültiger Statuswechsel",
+        message: "Der Status kann nur schrittweise vorwärts geändert werden."
+      });
+    }
+    
+    // Define field categories
+    const hasSchedulingChanges = validatedData.date !== undefined || validatedData.scheduledStart !== undefined || 
+                                  validatedData.scheduledEnd !== undefined || validatedData.hauswirtschaftDauer !== undefined || 
+                                  validatedData.alltagsbegleitungDauer !== undefined || validatedData.durationPromised !== undefined || 
+                                  validatedData.serviceType !== undefined;
+    
+    const hasVisitTimeChanges = validatedData.actualStart !== undefined || validatedData.actualEnd !== undefined;
+    
+    const hasDocumentationChanges = validatedData.kilometers !== undefined || validatedData.notes !== undefined ||
+                                     validatedData.servicesDone !== undefined || validatedData.signatureData !== undefined;
+    
+    // Scheduling changes only allowed when STAYING in scheduled status (not when transitioning)
+    if (hasSchedulingChanges) {
+      if (currentStatus !== "scheduled" || targetStatus !== "scheduled") {
+        return res.status(403).json({ 
+          error: "Bearbeitung nicht möglich",
+          message: "Termindetails können nur bei geplanten Terminen geändert werden."
+        });
+      }
+    }
+    
+    // Visit time changes (actualStart/actualEnd) only during workflow transitions
+    // actualStart: only when transitioning scheduled → in-progress
+    // actualEnd: only when transitioning in-progress → documenting
+    if (validatedData.actualStart !== undefined) {
+      if (!(currentStatus === "scheduled" && targetStatus === "in-progress")) {
+        return res.status(403).json({ 
+          error: "Ungültige Aktion",
+          message: "Besuchsstart kann nur beim Starten eines geplanten Termins gesetzt werden."
+        });
+      }
+    }
+    
+    if (validatedData.actualEnd !== undefined) {
+      if (!(currentStatus === "in-progress" && targetStatus === "documenting")) {
+        return res.status(403).json({ 
+          error: "Ungültige Aktion",
+          message: "Besuchsende kann nur beim Beenden eines laufenden Termins gesetzt werden."
+        });
+      }
+    }
+    
+    // Documentation changes only in documenting status
+    if (hasDocumentationChanges) {
+      if (currentStatus !== "documenting") {
+        return res.status(403).json({ 
+          error: "Bearbeitung nicht möglich",
+          message: "Dokumentation kann nur im Dokumentationsmodus erfasst werden."
+        });
+      }
+    }
+    
     const appointment = await storage.updateAppointment(id, validatedData);
     
     if (!appointment) {
-      return res.status(404).json({ error: "Appointment not found" });
+      return res.status(404).json({ error: "Termin nicht gefunden" });
     }
     
     res.json(appointment);

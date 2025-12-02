@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useState, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { MapPin, ChevronRight, CheckCircle2, PlayCircle, FileText, Pencil, Trash2 } from "lucide-react";
-import { Link, useLocation } from "wouter";
+import { Link } from "wouter";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { getStatusColor, getAppointmentTypeColor, getServiceColor, getStatusLabel, formatTimeSlot, getEndTime } from "../utils";
 import { useDeleteAppointment } from "../hooks";
@@ -24,7 +24,6 @@ interface AppointmentCardProps {
 }
 
 function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
-  const [, setLocation] = useLocation();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const deleteMutation = useDeleteAppointment();
   const { toast } = useToast();
@@ -37,19 +36,13 @@ function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
   const isCompleted = appointment.status === "completed";
   const canModify = !isCompleted;
 
-  const handleEdit = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setLocation(`/edit-appointment/${appointment.id}`);
-  };
-
-  const handleDeleteClick = (e: React.MouseEvent) => {
+  const handleDeleteClick = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setShowDeleteDialog(true);
-  };
+  }, []);
 
-  const handleConfirmDelete = async () => {
+  const handleConfirmDelete = useCallback(async () => {
     try {
       await deleteMutation.mutateAsync(appointment.id);
       toast({
@@ -64,27 +57,30 @@ function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
       });
     }
     setShowDeleteDialog(false);
-  };
+  }, [deleteMutation, appointment.id, toast]);
 
   return (
     <>
-      <Link 
-        href={`/appointment/${appointment.id}`} 
-        className="block group transition-all duration-200 hover:-translate-y-1"
-        data-testid={`card-appointment-${appointment.id}`}
-      >
+      <div className="block group transition-all duration-200 hover:-translate-y-1">
         <Card className="overflow-hidden border-border/60 shadow-sm hover:shadow-md hover:border-primary/30 transition-all bg-card">
           <CardContent className="p-0">
             <div className="flex items-stretch">
               {/* Time Column */}
-              <div className="w-24 flex flex-col items-center justify-center bg-secondary/30 border-r border-border/50 p-3 text-center">
+              <Link 
+                href={`/appointment/${appointment.id}`}
+                className="w-24 flex flex-col items-center justify-center bg-secondary/30 border-r border-border/50 p-3 text-center cursor-pointer"
+                data-testid={`card-appointment-${appointment.id}`}
+              >
                 <span className="text-base font-bold text-foreground">{formatTimeSlot(appointment.scheduledStart)}</span>
                 <span className="text-xs text-muted-foreground">bis</span>
                 <span className="text-base font-bold text-foreground">{getEndTime(appointment)}</span>
-              </div>
+              </Link>
 
               {/* Main Content */}
-              <div className="flex-1 p-4">
+              <Link 
+                href={`/appointment/${appointment.id}`}
+                className="flex-1 p-4 cursor-pointer"
+              >
                 <div className="flex justify-between items-start mb-2">
                   <div className="flex items-center gap-2 flex-wrap">
                     <Badge 
@@ -119,40 +115,44 @@ function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
                     </div>
                   </div>
                 )}
+              </Link>
 
-                {/* Action Buttons - Only for non-completed appointments */}
-                {canModify && (
-                  <div className="flex gap-2 mt-3 pt-2 border-t border-border/30">
+              {/* Action Column */}
+              <div className="flex flex-col items-center justify-center px-2 border-l border-border/30">
+                {canModify ? (
+                  <div className="flex flex-col gap-1">
+                    <Link href={`/edit-appointment/${appointment.id}`}>
+                      <Button 
+                        variant="ghost" 
+                        size="icon"
+                        className="h-8 w-8"
+                        data-testid={`button-edit-${appointment.id}`}
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </Button>
+                    </Link>
                     <Button 
                       variant="ghost" 
-                      size="sm" 
-                      className="h-8 px-3 text-xs"
-                      onClick={handleEdit}
-                      data-testid={`button-edit-${appointment.id}`}
-                    >
-                      <Pencil className="w-3 h-3 mr-1" /> Bearbeiten
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="h-8 px-3 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                      size="icon"
+                      className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
                       onClick={handleDeleteClick}
                       data-testid={`button-delete-${appointment.id}`}
                     >
-                      <Trash2 className="w-3 h-3 mr-1" /> Löschen
+                      <Trash2 className="w-4 h-4" />
                     </Button>
                   </div>
+                ) : (
+                  <Link href={`/appointment/${appointment.id}`}>
+                    <div className="text-muted-foreground/30 hover:text-primary transition-colors p-2">
+                      <ChevronRight className="w-6 h-6" />
+                    </div>
+                  </Link>
                 )}
-              </div>
-              
-              {/* Action Arrow */}
-              <div className="w-10 flex items-center justify-center text-muted-foreground/30 group-hover:text-primary transition-colors">
-                <ChevronRight className="w-6 h-6" />
               </div>
             </div>
           </CardContent>
         </Card>
-      </Link>
+      </div>
 
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
