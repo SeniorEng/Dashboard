@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useRoute, useLocation } from "wouter";
 import { Layout } from "@/components/layout";
-import { useAppointment, useUpdateAppointment, calculateDuration, formatTime } from "@/features/appointments";
+import { useAppointment, useUpdateAppointment, calculateDuration, formatTime, getDisplayLabel } from "@/features/appointments";
 import { SERVICE_OPTIONS } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
@@ -59,8 +59,8 @@ export default function AppointmentDetail() {
     }, {
       onSuccess: () => {
         toast({
-          title: "Visit Started",
-          description: `Started visit with ${appointment.customer?.name} at ${formatTime(now)}`,
+          title: "Besuch gestartet",
+          description: `Besuch bei ${appointment.customer?.name} um ${formatTime(now)} gestartet`,
         });
       }
     });
@@ -81,8 +81,8 @@ export default function AppointmentDetail() {
     if (!sigPad.current || sigPad.current.isEmpty()) {
       toast({
         variant: "destructive",
-        title: "Signature Required",
-        description: "Please ask the customer to sign before completing.",
+        title: "Unterschrift erforderlich",
+        description: "Bitte lassen Sie den Kunden unterschreiben.",
       });
       return;
     }
@@ -101,8 +101,8 @@ export default function AppointmentDetail() {
     }, {
       onSuccess: () => {
         toast({
-          title: "Visit Completed",
-          description: "Documentation saved successfully.",
+          title: "Besuch abgeschlossen",
+          description: "Dokumentation erfolgreich gespeichert.",
         });
         setTimeout(() => setLocation("/"), 1500);
       }
@@ -129,11 +129,13 @@ export default function AppointmentDetail() {
     return (
       <Layout>
         <div className="text-center py-12" data-testid="not-found-appointment">
-          Appointment not found
+          Termin nicht gefunden
         </div>
       </Layout>
     );
   }
+
+  const displayLabel = getDisplayLabel(appointment);
 
   const renderContent = () => {
     switch (appointment.status) {
@@ -145,9 +147,9 @@ export default function AppointmentDetail() {
                 <Clock className="w-8 h-8" />
               </div>
               <div>
-                <h3 className="font-semibold text-foreground text-lg">Ready to start?</h3>
+                <h3 className="font-semibold text-foreground text-lg">Bereit zum Starten?</h3>
                 <p className="text-muted-foreground text-sm mt-1">
-                  Scheduled for {appointment.time} • {appointment.durationPromised} mins
+                  Geplant für {appointment.time} Uhr • {appointment.durationPromised} Min.
                 </p>
               </div>
               <Button 
@@ -157,14 +159,14 @@ export default function AppointmentDetail() {
                 disabled={updateMutation.isPending}
                 data-testid="button-start-visit"
               >
-                <Play className="w-4 h-4 mr-2 fill-current" /> Start Visit
+                <Play className="w-4 h-4 mr-2 fill-current" /> Besuch starten
               </Button>
             </div>
 
             {appointment.customer && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Service Plan</CardTitle>
+                  <CardTitle className="text-base">Leistungsplan</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <ul className="space-y-3">
@@ -187,9 +189,9 @@ export default function AppointmentDetail() {
             <div className="bg-blue-50 border border-blue-100 rounded-2xl p-8 text-center space-y-6 relative overflow-hidden">
               <div className="absolute top-0 left-0 w-full h-1 bg-blue-200 animate-pulse" />
               <div className="space-y-2">
-                <span className="text-blue-600 text-sm font-bold uppercase tracking-wider">Visit in Progress</span>
-                <div className="text-4xl font-bold text-blue-900 font-mono">Active</div>
-                <p className="text-blue-600/80 text-sm">Started at {formatTime(startTime)}</p>
+                <span className="text-blue-600 text-sm font-bold uppercase tracking-wider">Besuch läuft</span>
+                <div className="text-4xl font-bold text-blue-900 font-mono">Aktiv</div>
+                <p className="text-blue-600/80 text-sm">Gestartet um {formatTime(startTime)}</p>
               </div>
               <Button 
                 size="lg" 
@@ -199,14 +201,14 @@ export default function AppointmentDetail() {
                 disabled={updateMutation.isPending}
                 data-testid="button-finish-visit"
               >
-                <StopCircle className="w-4 h-4 mr-2 fill-current" /> Finish Visit
+                <StopCircle className="w-4 h-4 mr-2 fill-current" /> Besuch beenden
               </Button>
             </div>
 
             {appointment.customer && (
               <Card className="opacity-80">
                 <CardHeader>
-                  <CardTitle className="text-base">Customer Needs</CardTitle>
+                  <CardTitle className="text-base">Kundenbedürfnisse</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <ul className="space-y-2 text-sm text-muted-foreground">
@@ -226,8 +228,8 @@ export default function AppointmentDetail() {
             <div className="bg-orange-50 border border-orange-100 p-4 rounded-xl flex items-center gap-3 text-orange-800 text-sm">
               <Clock className="w-5 h-5 shrink-0" />
               <div>
-                <span className="font-bold">Visit Duration:</span>
-                {duration !== null ? ` ${duration} minutes` : " --"}
+                <span className="font-bold">Besuchsdauer:</span>
+                {duration !== null ? ` ${duration} Minuten` : " --"}
               </div>
             </div>
 
@@ -235,12 +237,12 @@ export default function AppointmentDetail() {
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
                   <FileText className="w-5 h-5 text-primary" />
-                  Documentation
+                  Dokumentation
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="space-y-3">
-                  <Label className="text-base">Services Performed</Label>
+                  <Label className="text-base">Erbrachte Leistungen</Label>
                   <div className="grid grid-cols-1 gap-3">
                     {SERVICE_OPTIONS.map((service) => (
                       <div key={service} className="flex items-center space-x-3 p-3 rounded-lg border border-input hover:bg-accent/50 transition-colors">
@@ -259,10 +261,10 @@ export default function AppointmentDetail() {
                 <Separator />
 
                 <div className="space-y-2">
-                  <Label htmlFor="notes">Notes / Observations</Label>
+                  <Label htmlFor="notes">Notizen / Beobachtungen</Label>
                   <Textarea 
                     id="notes" 
-                    placeholder="Describe briefly what was done..." 
+                    placeholder="Beschreiben Sie kurz, was gemacht wurde..." 
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                     className="min-h-[100px]"
@@ -271,7 +273,7 @@ export default function AppointmentDetail() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="km">Travel Distance (km)</Label>
+                  <Label htmlFor="km">Fahrtstrecke (km)</Label>
                   <div className="relative">
                     <Input 
                       id="km" 
@@ -289,7 +291,7 @@ export default function AppointmentDetail() {
                 <Separator />
 
                 <div className="space-y-3">
-                  <Label>Customer Signature</Label>
+                  <Label>Kundenunterschrift</Label>
                   <div className="border rounded-lg overflow-hidden bg-white shadow-inner">
                     <SignatureCanvas 
                       ref={sigPad}
@@ -304,7 +306,7 @@ export default function AppointmentDetail() {
                     className="text-xs text-muted-foreground"
                     data-testid="button-clear-signature"
                   >
-                    Clear Signature
+                    Unterschrift löschen
                   </Button>
                 </div>
               </CardContent>
@@ -316,7 +318,7 @@ export default function AppointmentDetail() {
                   disabled={updateMutation.isPending}
                   data-testid="button-complete-documentation"
                 >
-                  <Save className="w-5 h-5 mr-2" /> Complete Documentation
+                  <Save className="w-5 h-5 mr-2" /> Dokumentation abschließen
                 </Button>
               </CardFooter>
             </Card>
@@ -329,12 +331,12 @@ export default function AppointmentDetail() {
             <div className="w-24 h-24 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
               <CheckCircle2 className="w-12 h-12" />
             </div>
-            <h2 className="text-2xl font-bold text-foreground">All Done!</h2>
+            <h2 className="text-2xl font-bold text-foreground">Alles erledigt!</h2>
             <p className="text-muted-foreground max-w-xs mx-auto">
-              Visit successfully documented and saved. Great job, Sarah!
+              Besuch erfolgreich dokumentiert und gespeichert. Gut gemacht!
             </p>
             <Button size="lg" variant="outline" onClick={() => setLocation("/")} data-testid="button-back-dashboard">
-              Back to Dashboard
+              Zurück zur Übersicht
             </Button>
           </div>
         );
@@ -354,7 +356,7 @@ export default function AppointmentDetail() {
           onClick={() => setLocation("/")}
           data-testid="button-back"
         >
-          <ChevronLeft className="w-4 h-4 mr-1" /> Back to Schedule
+          <ChevronLeft className="w-4 h-4 mr-1" /> Zurück zum Tagesplan
         </Button>
 
         {appointment.customer && (
@@ -363,7 +365,7 @@ export default function AppointmentDetail() {
               <User className="w-8 h-8 text-primary" />
             </div>
             <div>
-              <Badge variant="secondary" className="mb-2">{appointment.type}</Badge>
+              <Badge variant="secondary" className="mb-2">{displayLabel}</Badge>
               <h1 className="text-2xl font-bold leading-tight" data-testid="text-customer-name">
                 {appointment.customer.name}
               </h1>

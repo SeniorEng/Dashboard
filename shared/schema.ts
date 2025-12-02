@@ -1,4 +1,4 @@
-import { pgTable, text, integer, timestamp, serial, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, timestamp, serial } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -13,7 +13,8 @@ export const customers = pgTable("customers", {
 export const appointments = pgTable("appointments", {
   id: serial("id").primaryKey(),
   customerId: integer("customer_id").notNull().references(() => customers.id),
-  type: text("type").notNull(),
+  appointmentType: text("appointment_type").notNull(), // "Erstberatung" | "Kundentermin"
+  serviceType: text("service_type"), // "Hauswirtschaft" | "Alltagsbegleitung" (only for Kundentermin)
   date: text("date").notNull(),
   time: text("time").notNull(),
   durationPromised: integer("duration_promised").notNull(),
@@ -31,16 +32,35 @@ export const insertCustomerSchema = createInsertSchema(customers).omit({
   id: true,
 });
 
-export const insertAppointmentSchema = createInsertSchema(appointments).omit({
+// Base appointment insert schema with refinement for conditional serviceType
+const baseAppointmentSchema = createInsertSchema(appointments).omit({
   id: true,
   createdAt: true,
 });
 
-export const updateAppointmentSchema = insertAppointmentSchema.partial();
+// Refined schema: serviceType required for Kundentermin, null for Erstberatung
+export const insertAppointmentSchema = baseAppointmentSchema.superRefine((data, ctx) => {
+  if (data.appointmentType === "Kundentermin" && !data.serviceType) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "serviceType is required for Kundentermin appointments",
+      path: ["serviceType"],
+    });
+  }
+  if (data.appointmentType === "Erstberatung" && data.serviceType) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "serviceType must be null for Erstberatung appointments",
+      path: ["serviceType"],
+    });
+  }
+});
+
+export const updateAppointmentSchema = baseAppointmentSchema.partial();
 
 export type Customer = typeof customers.$inferSelect;
 export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
 
 export type Appointment = typeof appointments.$inferSelect;
-export type InsertAppointment = z.infer<typeof insertAppointmentSchema>;
+export type InsertAppointment = z.infer<typeof baseAppointmentSchema>;
 export type UpdateAppointment = z.infer<typeof updateAppointmentSchema>;

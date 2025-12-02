@@ -77,7 +77,8 @@ export class DatabaseStorage implements IStorage {
       .select({
         id: appointments.id,
         customerId: appointments.customerId,
-        type: appointments.type,
+        appointmentType: appointments.appointmentType,
+        serviceType: appointments.serviceType,
         date: appointments.date,
         time: appointments.time,
         durationPromised: appointments.durationPromised,
@@ -103,7 +104,8 @@ export class DatabaseStorage implements IStorage {
     return results.map(row => ({
       id: row.id,
       customerId: row.customerId,
-      type: row.type,
+      appointmentType: row.appointmentType,
+      serviceType: row.serviceType,
       date: row.date,
       time: row.time,
       durationPromised: row.durationPromised,
@@ -124,7 +126,8 @@ export class DatabaseStorage implements IStorage {
       .select({
         id: appointments.id,
         customerId: appointments.customerId,
-        type: appointments.type,
+        appointmentType: appointments.appointmentType,
+        serviceType: appointments.serviceType,
         date: appointments.date,
         time: appointments.time,
         durationPromised: appointments.durationPromised,
@@ -154,7 +157,8 @@ export class DatabaseStorage implements IStorage {
     return {
       id: row.id,
       customerId: row.customerId,
-      type: row.type,
+      appointmentType: row.appointmentType,
+      serviceType: row.serviceType,
       date: row.date,
       time: row.time,
       durationPromised: row.durationPromised,

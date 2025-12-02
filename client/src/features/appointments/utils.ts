@@ -25,14 +25,42 @@ export function getStatusColor(status: string): string {
   return colors[status] || colors.scheduled;
 }
 
-export function getTypeColor(type: string): string {
-  const colors: Record<string, string> = {
-    "First Visit": "bg-purple-100 text-purple-800 border-purple-200",
-    "Customer Appointment": "bg-teal-100 text-teal-800 border-teal-200",
-    "Hauswirtschaft": "bg-amber-100 text-amber-800 border-amber-200",
-    "Alltagsbegleitung": "bg-pink-100 text-pink-800 border-pink-200"
+export function getTypeColor(appointmentType: string, serviceType: string | null): string {
+  // Erstberatung (First Consultation) - purple
+  if (appointmentType === "Erstberatung") {
+    return "bg-purple-100 text-purple-800 border-purple-200";
+  }
+  
+  // Kundentermin with service types
+  if (serviceType === "Hauswirtschaft") {
+    return "bg-amber-100 text-amber-800 border-amber-200";
+  }
+  if (serviceType === "Alltagsbegleitung") {
+    return "bg-teal-100 text-teal-800 border-teal-200";
+  }
+  
+  // Default Kundentermin
+  return "bg-gray-100 text-gray-800 border-gray-200";
+}
+
+export function getDisplayLabel(appointment: { appointmentType: string; serviceType: string | null }): string {
+  if (appointment.appointmentType === "Erstberatung") {
+    return "Erstberatung";
+  }
+  if (appointment.serviceType) {
+    return appointment.serviceType;
+  }
+  return "Kundentermin";
+}
+
+export function getStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    "scheduled": "Geplant",
+    "in-progress": "Läuft",
+    "documenting": "Dokumentation",
+    "completed": "Abgeschlossen"
   };
-  return colors[type] || "bg-gray-100 text-gray-800";
+  return labels[status] || status;
 }
 
 export function calculateDuration(startTime: Date | null, endTime: Date | null): number | null {
@@ -42,5 +70,5 @@ export function calculateDuration(startTime: Date | null, endTime: Date | null):
 
 export function formatTime(date: Date | null): string {
   if (!date) return "--:--";
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
 }

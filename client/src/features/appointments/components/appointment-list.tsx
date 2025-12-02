@@ -27,7 +27,7 @@ function AppointmentListComponent({ appointments, isLoading, error }: Appointmen
   if (error) {
     return (
       <div className="text-center py-12 text-destructive" data-testid="error-appointments">
-        <p>Failed to load appointments. Please try again.</p>
+        <p>Termine konnten nicht geladen werden. Bitte versuchen Sie es erneut.</p>
       </div>
     );
   }
@@ -35,7 +35,7 @@ function AppointmentListComponent({ appointments, isLoading, error }: Appointmen
   if (sortedAppointments.length === 0) {
     return (
       <div className="text-center py-12 text-muted-foreground" data-testid="empty-appointments">
-        <p>No appointments scheduled for today.</p>
+        <p>Keine Termine für heute geplant.</p>
       </div>
     );
   }

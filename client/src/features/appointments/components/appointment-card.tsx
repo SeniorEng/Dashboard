@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { MapPin, ChevronRight, CheckCircle2, PlayCircle, FileText, User } from "lucide-react";
 import { Link } from "wouter";
 import type { AppointmentWithCustomer } from "@shared/types";
-import { getStatusColor, getTypeColor } from "../utils";
+import { getStatusColor, getTypeColor, getDisplayLabel, getStatusLabel } from "../utils";
 
 interface AppointmentCardProps {
   appointment: AppointmentWithCustomer;
@@ -12,7 +12,9 @@ interface AppointmentCardProps {
 
 function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
   const statusColor = getStatusColor(appointment.status);
-  const typeColor = getTypeColor(appointment.type);
+  const typeColor = getTypeColor(appointment.appointmentType, appointment.serviceType);
+  const displayLabel = getDisplayLabel(appointment);
+  const statusLabel = getStatusLabel(appointment.status);
 
   return (
     <Link 
@@ -36,13 +38,13 @@ function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
                   variant="outline" 
                   className={`rounded-full text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 ${typeColor}`}
                 >
-                  {appointment.type}
+                  {displayLabel}
                 </Badge>
                 <div className={`text-[10px] px-2 py-0.5 rounded-full border font-medium flex items-center gap-1 ${statusColor}`}>
                   {appointment.status === "completed" && <CheckCircle2 className="w-3 h-3" />}
                   {appointment.status === "in-progress" && <PlayCircle className="w-3 h-3" />}
                   {appointment.status === "documenting" && <FileText className="w-3 h-3" />}
-                  {appointment.status.replace("-", " ")}
+                  {statusLabel}
                 </div>
               </div>
 

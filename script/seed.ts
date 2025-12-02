@@ -8,25 +8,25 @@ const db = drizzle(sql);
 async function seed() {
   console.log("Seeding database...");
 
-  // Insert customers
+  // Insert customers with German needs descriptions
   const customerData = [
     {
       name: "Gerda Müller",
       address: "Lindenstraße 42, 10969 Berlin",
       avatar: "lady",
-      needs: ["Mobility assistance", "Medication reminder"]
+      needs: ["Mobilitätshilfe", "Medikamentenerinnerung"]
     },
     {
       name: "Hans Schmidt",
       address: "Bergmannstraße 12, 10961 Berlin",
       avatar: "man",
-      needs: ["Companionship", "Light housekeeping"]
+      needs: ["Gesellschaft", "Leichte Hausarbeit"]
     },
     {
       name: "Elfriede Weber",
       address: "Gneisenaustraße 88, 10961 Berlin",
       avatar: "lady",
-      needs: ["Grocery shopping", "Cooking help"]
+      needs: ["Einkaufshilfe", "Kochhilfe"]
     }
   ];
 
@@ -39,7 +39,8 @@ async function seed() {
   const appointmentData = [
     {
       customerId: insertedCustomers[0].id,
-      type: "Customer Appointment",
+      appointmentType: "Kundentermin",
+      serviceType: "Alltagsbegleitung",
       date: today,
       time: "09:00",
       durationPromised: 45,
@@ -47,7 +48,8 @@ async function seed() {
     },
     {
       customerId: insertedCustomers[1].id,
-      type: "Alltagsbegleitung",
+      appointmentType: "Kundentermin",
+      serviceType: "Alltagsbegleitung",
       date: today,
       time: "11:30",
       durationPromised: 60,
@@ -55,7 +57,8 @@ async function seed() {
     },
     {
       customerId: insertedCustomers[2].id,
-      type: "Hauswirtschaft",
+      appointmentType: "Kundentermin",
+      serviceType: "Hauswirtschaft",
       date: today,
       time: "14:00",
       durationPromised: 90,
@@ -63,7 +66,8 @@ async function seed() {
     },
     {
       customerId: insertedCustomers[0].id,
-      type: "First Visit",
+      appointmentType: "Erstberatung",
+      serviceType: null,
       date: today,
       time: "16:30",
       durationPromised: 60,

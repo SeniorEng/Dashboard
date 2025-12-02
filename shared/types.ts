@@ -2,7 +2,9 @@ import type { Appointment, Customer } from "./schema";
 
 export type AppointmentStatus = "scheduled" | "in-progress" | "documenting" | "completed";
 
-export type AppointmentType = "First Visit" | "Customer Appointment" | "Hauswirtschaft" | "Alltagsbegleitung";
+export type AppointmentType = "Erstberatung" | "Kundentermin";
+
+export type ServiceType = "Hauswirtschaft" | "Alltagsbegleitung";
 
 export interface AppointmentWithCustomer extends Appointment {
   customer: Customer | null;
@@ -19,19 +21,32 @@ export interface UpdateAppointmentPayload {
 }
 
 export const APPOINTMENT_TYPES: AppointmentType[] = [
-  "First Visit",
-  "Customer Appointment", 
+  "Erstberatung",
+  "Kundentermin"
+];
+
+export const SERVICE_TYPES: ServiceType[] = [
   "Hauswirtschaft",
   "Alltagsbegleitung"
 ];
 
 export const SERVICE_OPTIONS = [
-  "Vital Signs Check",
-  "Medication Administered", 
-  "Personal Hygiene",
-  "Meal Preparation",
-  "Housekeeping",
-  "Social Activity"
+  "Vitalzeichen prüfen",
+  "Medikamente verabreicht", 
+  "Körperpflege",
+  "Mahlzeit zubereitet",
+  "Haushaltsarbeiten",
+  "Soziale Aktivität"
 ] as const;
 
 export type ServiceOption = typeof SERVICE_OPTIONS[number];
+
+export function getDisplayLabel(appointment: { appointmentType: string; serviceType: string | null }): string {
+  if (appointment.appointmentType === "Erstberatung") {
+    return "Erstberatung";
+  }
+  if (appointment.serviceType) {
+    return appointment.serviceType;
+  }
+  return "Kundentermin";
+}

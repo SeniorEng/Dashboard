@@ -13,7 +13,7 @@ export default function Dashboard() {
     <Layout>
       <div className="mb-8 animate-in slide-in-from-top-4 duration-500">
         <h1 className="text-3xl font-bold text-foreground tracking-tight mb-1" data-testid="text-greeting">
-          Hello, Sarah!
+          Hallo, Sarah!
         </h1>
         <div className="flex items-center text-muted-foreground">
           <CalendarIcon className="w-4 h-4 mr-2 text-primary" />
@@ -23,10 +23,10 @@ export default function Dashboard() {
 
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-foreground/90">Your Schedule</h2>
+          <h2 className="text-lg font-semibold text-foreground/90">Dein Tagesplan</h2>
           {!isLoading && appointments && (
             <span className="text-xs font-medium px-2.5 py-1 bg-primary/10 text-primary rounded-full" data-testid="text-visit-count">
-              {appointments.length} visits
+              {appointments.length} {appointments.length === 1 ? 'Termin' : 'Termine'}
             </span>
           )}
         </div>
