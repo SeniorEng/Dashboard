@@ -40,9 +40,8 @@ export function AppointmentCard({ appointment }: { appointment: Appointment }) {
   };
 
   return (
-    <Link href={`/appointment/${appointment.id}`}>
-      <a className="block group transition-all duration-200 hover:-translate-y-1">
-        <Card className="overflow-hidden border-border/60 shadow-sm hover:shadow-md hover:border-primary/30 transition-all bg-card">
+    <Link href={`/appointment/${appointment.id}`} className="block group transition-all duration-200 hover:-translate-y-1">
+      <Card className="overflow-hidden border-border/60 shadow-sm hover:shadow-md hover:border-primary/30 transition-all bg-card">
           <CardContent className="p-0">
             <div className="flex items-stretch">
               {/* Time Column */}
@@ -86,7 +85,6 @@ export function AppointmentCard({ appointment }: { appointment: Appointment }) {
             </div>
           </CardContent>
         </Card>
-      </a>
     </Link>
   );
 }
