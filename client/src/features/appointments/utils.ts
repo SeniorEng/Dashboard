@@ -1,20 +1,21 @@
 import type { AppointmentWithCustomer } from "@shared/types";
 
+const STATUS_PRIORITY: Record<string, number> = {
+  "in-progress": 0,
+  "documenting": 1,
+  "scheduled": 2,
+  "completed": 3,
+};
+
 export function sortAppointmentsByPriority(appointments: AppointmentWithCustomer[]): AppointmentWithCustomer[] {
   return [...appointments].sort((a, b) => {
-    // In-progress first
-    if (a.status === "in-progress" && b.status !== "in-progress") return -1;
-    if (b.status === "in-progress" && a.status !== "in-progress") return 1;
+    const priorityA = STATUS_PRIORITY[a.status] ?? 2;
+    const priorityB = STATUS_PRIORITY[b.status] ?? 2;
     
-    // Then documenting
-    if (a.status === "documenting" && b.status !== "documenting") return -1;
-    if (b.status === "documenting" && a.status !== "documenting") return 1;
+    if (priorityA !== priorityB) {
+      return priorityA - priorityB;
+    }
     
-    // Completed appointments go to bottom
-    if (a.status === "completed" && b.status !== "completed") return 1;
-    if (b.status === "completed" && a.status !== "completed") return -1;
-    
-    // Then by time
     return a.scheduledStart.localeCompare(b.scheduledStart);
   });
 }
