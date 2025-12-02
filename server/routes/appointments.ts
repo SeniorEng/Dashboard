@@ -66,24 +66,24 @@ async function checkOverlap(date: string, startTime: string, endTime: string, ex
     if (excludeId && apt.id === excludeId) continue;
     
     // COMPLETED APPOINTMENTS: Check against documented actual times
-    // If no actualEndTime recorded, skip - the appointment is done and no longer blocks time
+    // If no actualEnd recorded, skip - the appointment is done and no longer blocks time
     if (apt.status === "completed") {
-      if (apt.actualEndTime) {
+      if (apt.actualEnd) {
         // Use the actual documented start/end times
-        const actualStart = apt.startTime ? formatTimeFromTimestamp(apt.startTime) : apt.time;
-        const actualEnd = formatTimeFromTimestamp(apt.actualEndTime);
+        const actualStart = apt.actualStart ? formatTimeFromTimestamp(apt.actualStart) : apt.scheduledStart;
+        const actualEnd = formatTimeFromTimestamp(apt.actualEnd);
         
         if (doTimesOverlap(startTime, endTime, actualStart, actualEnd)) {
           return { hasOverlap: true, hasUnreliableData: false };
         }
       }
-      // No actualEndTime = appointment is done, skip it
+      // No actualEnd = appointment is done, skip it
       continue;
     }
     
     // SCHEDULED/IN_PROGRESS APPOINTMENTS: Use planned end time
-    // For these, endTime or durationPromised represents the booking intention
-    const hasReliableEndTime = apt.endTime !== null;
+    // For these, scheduledEnd or durationPromised represents the booking intention
+    const hasReliableEndTime = apt.scheduledEnd !== null;
     const hasReliableDuration = apt.durationPromised !== null && apt.durationPromised > 0;
     
     if (!hasReliableEndTime && !hasReliableDuration) {
@@ -96,9 +96,9 @@ async function checkOverlap(date: string, startTime: string, endTime: string, ex
     }
     
     // Calculate end time using available data
-    const aptEndTime = apt.endTime || addMinutesToTime(apt.time, apt.durationPromised!);
+    const aptEndTime = apt.scheduledEnd || addMinutesToTime(apt.scheduledStart, apt.durationPromised!);
     
-    if (doTimesOverlap(startTime, endTime, apt.time, aptEndTime)) {
+    if (doTimesOverlap(startTime, endTime, apt.scheduledStart, aptEndTime)) {
       return { hasOverlap: true, hasUnreliableData: false };
     }
   }
@@ -117,10 +117,10 @@ router.post("/kundentermin", async (req, res) => {
       validatedData.alltagsbegleitungDauer
     );
     
-    const endTime = addMinutesToTime(validatedData.time, totalDuration);
+    const scheduledEnd = addMinutesToTime(validatedData.scheduledStart, totalDuration);
     
     // Check for overlap
-    const overlapResult = await checkOverlap(validatedData.date, validatedData.time, endTime);
+    const overlapResult = await checkOverlap(validatedData.date, validatedData.scheduledStart, scheduledEnd);
     if (overlapResult.hasUnreliableData) {
       return res.status(409).json({ 
         error: "Datenprüfung erforderlich",
@@ -151,8 +151,8 @@ router.post("/kundentermin", async (req, res) => {
       hauswirtschaftDauer: validatedData.hauswirtschaftDauer || null,
       alltagsbegleitungDauer: validatedData.alltagsbegleitungDauer || null,
       date: validatedData.date,
-      time: validatedData.time,
-      endTime,
+      scheduledStart: validatedData.scheduledStart,
+      scheduledEnd,
       durationPromised: totalDuration,
       notes: validatedData.notes || null,
       status: "scheduled",
@@ -177,7 +177,7 @@ router.post("/erstberatung", async (req, res) => {
     const validatedData = insertErstberatungSchema.parse(req.body);
     
     // Check for overlap
-    const overlapResult = await checkOverlap(validatedData.date, validatedData.time, validatedData.endTime);
+    const overlapResult = await checkOverlap(validatedData.date, validatedData.scheduledStart, validatedData.scheduledEnd);
     if (overlapResult.hasUnreliableData) {
       return res.status(409).json({ 
         error: "Datenprüfung erforderlich",
@@ -211,8 +211,8 @@ router.post("/erstberatung", async (req, res) => {
     });
     
     // Calculate duration from start to end time
-    const startMinutes = parseInt(validatedData.time.split(":")[0]) * 60 + parseInt(validatedData.time.split(":")[1]);
-    const endMinutes = parseInt(validatedData.endTime.split(":")[0]) * 60 + parseInt(validatedData.endTime.split(":")[1]);
+    const startMinutes = parseInt(validatedData.scheduledStart.split(":")[0]) * 60 + parseInt(validatedData.scheduledStart.split(":")[1]);
+    const endMinutes = parseInt(validatedData.scheduledEnd.split(":")[0]) * 60 + parseInt(validatedData.scheduledEnd.split(":")[1]);
     const duration = endMinutes - startMinutes;
     
     // Create the appointment
@@ -223,8 +223,8 @@ router.post("/erstberatung", async (req, res) => {
       hauswirtschaftDauer: null,
       alltagsbegleitungDauer: null,
       date: validatedData.date,
-      time: validatedData.time,
-      endTime: validatedData.endTime,
+      scheduledStart: validatedData.scheduledStart,
+      scheduledEnd: validatedData.scheduledEnd,
       durationPromised: duration,
       notes: validatedData.notes || null,
       status: "scheduled",

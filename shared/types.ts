@@ -12,8 +12,8 @@ export interface AppointmentWithCustomer extends Appointment {
 
 export interface UpdateAppointmentPayload {
   status?: AppointmentStatus;
-  startTime?: Date;
-  actualEndTime?: Date;
+  actualStart?: Date;
+  actualEnd?: Date;
   kilometers?: string;
   notes?: string;
   servicesDone?: string[];
