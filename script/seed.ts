@@ -27,16 +27,23 @@ async function seed() {
       address: "Gneisenaustraße 88, 10961 Berlin",
       avatar: "lady",
       needs: ["Einkaufshilfe", "Kochhilfe"]
+    },
+    {
+      name: "Werner Braun",
+      address: "Oranienstraße 55, 10969 Berlin",
+      avatar: "man",
+      needs: ["Begleitung zu Arztterminen", "Dokumentenorganisation"]
     }
   ];
 
   const insertedCustomers = await db.insert(customers).values(customerData).returning();
   console.log(`✓ Inserted ${insertedCustomers.length} customers`);
 
-  // Insert appointments for today
+  // Insert appointments for today - balanced between Erstberatung and Kundentermin
   const today = new Date().toISOString().split('T')[0];
   
   const appointmentData = [
+    // Kundentermin with Alltagsbegleitung (completed)
     {
       customerId: insertedCustomers[0].id,
       appointmentType: "Kundentermin",
@@ -46,37 +53,52 @@ async function seed() {
       durationPromised: 45,
       status: "completed"
     },
+    // Kundentermin with Hauswirtschaft (scheduled)
+    {
+      customerId: insertedCustomers[1].id,
+      appointmentType: "Kundentermin",
+      serviceType: "Hauswirtschaft",
+      date: today,
+      time: "10:30",
+      durationPromised: 60,
+      status: "scheduled"
+    },
+    // Erstberatung (scheduled) - no service type
+    {
+      customerId: insertedCustomers[2].id,
+      appointmentType: "Erstberatung",
+      serviceType: null,
+      date: today,
+      time: "13:00",
+      durationPromised: 60,
+      status: "scheduled"
+    },
+    // Kundentermin with Alltagsbegleitung (scheduled)
     {
       customerId: insertedCustomers[1].id,
       appointmentType: "Kundentermin",
       serviceType: "Alltagsbegleitung",
       date: today,
-      time: "11:30",
-      durationPromised: 60,
+      time: "15:00",
+      durationPromised: 45,
       status: "scheduled"
     },
+    // Erstberatung (completed) - no service type
     {
-      customerId: insertedCustomers[2].id,
-      appointmentType: "Kundentermin",
-      serviceType: "Hauswirtschaft",
-      date: today,
-      time: "14:00",
-      durationPromised: 90,
-      status: "scheduled"
-    },
-    {
-      customerId: insertedCustomers[0].id,
+      customerId: insertedCustomers[3].id,
       appointmentType: "Erstberatung",
       serviceType: null,
       date: today,
       time: "16:30",
       durationPromised: 60,
-      status: "scheduled"
+      status: "completed"
     }
   ];
 
   const insertedAppointments = await db.insert(appointments).values(appointmentData).returning();
   console.log(`✓ Inserted ${insertedAppointments.length} appointments`);
+  console.log("  - 2 Erstberatung appointments");
+  console.log("  - 3 Kundentermin appointments (2 Alltagsbegleitung, 1 Hauswirtschaft)");
 
   console.log("Database seeded successfully!");
 }

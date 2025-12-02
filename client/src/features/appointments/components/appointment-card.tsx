@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { MapPin, ChevronRight, CheckCircle2, PlayCircle, FileText } from "lucide-react";
 import { Link } from "wouter";
 import type { AppointmentWithCustomer } from "@shared/types";
-import { getStatusColor, getTypeColor, getDisplayLabel, getStatusLabel } from "../utils";
+import { getStatusColor, getAppointmentTypeColor, getServiceColor, getStatusLabel } from "../utils";
 
 interface AppointmentCardProps {
   appointment: AppointmentWithCustomer;
@@ -12,8 +12,8 @@ interface AppointmentCardProps {
 
 function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
   const statusColor = getStatusColor(appointment.status);
-  const typeColor = getTypeColor(appointment.appointmentType, appointment.serviceType);
-  const displayLabel = getDisplayLabel(appointment);
+  const typeColor = getAppointmentTypeColor(appointment.appointmentType);
+  const serviceColor = getServiceColor(appointment.serviceType);
   const statusLabel = getStatusLabel(appointment.status);
 
   return (
@@ -34,13 +34,25 @@ function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
             {/* Main Content */}
             <div className="flex-1 p-4">
               <div className="flex justify-between items-start mb-2">
-                <Badge 
-                  variant="outline" 
-                  className={`rounded-full text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 ${typeColor}`}
-                >
-                  {displayLabel}
-                </Badge>
-                <div className={`text-[10px] px-2 py-0.5 rounded-full border font-medium flex items-center gap-1 ${statusColor}`}>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Primary badge: Appointment Type */}
+                  <Badge 
+                    variant="outline" 
+                    className={`rounded-full text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 ${typeColor}`}
+                  >
+                    {appointment.appointmentType}
+                  </Badge>
+                  {/* Secondary badge: Service Type (only for Kundentermin) */}
+                  {appointment.serviceType && (
+                    <Badge 
+                      variant="outline" 
+                      className={`rounded-full text-[10px] font-medium px-2 py-0.5 ${serviceColor}`}
+                    >
+                      {appointment.serviceType}
+                    </Badge>
+                  )}
+                </div>
+                <div className={`text-[10px] px-2 py-0.5 rounded-full border font-medium flex items-center gap-1 shrink-0 ${statusColor}`}>
                   {appointment.status === "completed" && <CheckCircle2 className="w-3 h-3" />}
                   {appointment.status === "in-progress" && <PlayCircle className="w-3 h-3" />}
                   {appointment.status === "documenting" && <FileText className="w-3 h-3" />}

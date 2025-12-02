@@ -1,4 +1,4 @@
-import type { AppointmentWithCustomer, AppointmentStatus } from "@shared/types";
+import type { AppointmentWithCustomer } from "@shared/types";
 
 export function sortAppointmentsByPriority(appointments: AppointmentWithCustomer[]): AppointmentWithCustomer[] {
   return [...appointments].sort((a, b) => {
@@ -25,32 +25,22 @@ export function getStatusColor(status: string): string {
   return colors[status] || colors.scheduled;
 }
 
-export function getTypeColor(appointmentType: string, serviceType: string | null): string {
-  // Erstberatung (First Consultation) - purple
+export function getAppointmentTypeColor(appointmentType: string): string {
   if (appointmentType === "Erstberatung") {
     return "bg-purple-100 text-purple-800 border-purple-200";
   }
-  
-  // Kundentermin with service types
-  if (serviceType === "Hauswirtschaft") {
-    return "bg-amber-100 text-amber-800 border-amber-200";
-  }
-  if (serviceType === "Alltagsbegleitung") {
-    return "bg-teal-100 text-teal-800 border-teal-200";
-  }
-  
-  // Default Kundentermin
-  return "bg-gray-100 text-gray-800 border-gray-200";
+  // Kundentermin
+  return "bg-teal-100 text-teal-800 border-teal-200";
 }
 
-export function getDisplayLabel(appointment: { appointmentType: string; serviceType: string | null }): string {
-  if (appointment.appointmentType === "Erstberatung") {
-    return "Erstberatung";
+export function getServiceColor(serviceType: string | null): string {
+  if (serviceType === "Hauswirtschaft") {
+    return "bg-amber-50 text-amber-700 border-amber-200";
   }
-  if (appointment.serviceType) {
-    return appointment.serviceType;
+  if (serviceType === "Alltagsbegleitung") {
+    return "bg-sky-50 text-sky-700 border-sky-200";
   }
-  return "Kundentermin";
+  return "bg-gray-100 text-gray-600 border-gray-200";
 }
 
 export function getStatusLabel(status: string): string {

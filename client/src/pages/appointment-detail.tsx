@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useRoute, useLocation } from "wouter";
 import { Layout } from "@/components/layout";
-import { useAppointment, useUpdateAppointment, calculateDuration, formatTime, getDisplayLabel } from "@/features/appointments";
+import { useAppointment, useUpdateAppointment, calculateDuration, formatTime, getAppointmentTypeColor, getServiceColor } from "@/features/appointments";
 import { SERVICE_OPTIONS } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
@@ -135,7 +135,8 @@ export default function AppointmentDetail() {
     );
   }
 
-  const displayLabel = getDisplayLabel(appointment);
+  const typeColor = getAppointmentTypeColor(appointment.appointmentType);
+  const serviceColor = getServiceColor(appointment.serviceType);
 
   const renderContent = () => {
     switch (appointment.status) {
@@ -361,7 +362,16 @@ export default function AppointmentDetail() {
 
         {appointment.customer && (
           <div className="mb-6">
-            <Badge variant="secondary" className="mb-2">{displayLabel}</Badge>
+            <div className="flex items-center gap-2 mb-2">
+              <Badge variant="outline" className={`${typeColor}`}>
+                {appointment.appointmentType}
+              </Badge>
+              {appointment.serviceType && (
+                <Badge variant="outline" className={`${serviceColor}`}>
+                  {appointment.serviceType}
+                </Badge>
+              )}
+            </div>
             <h1 className="text-2xl font-bold leading-tight" data-testid="text-customer-name">
               {appointment.customer.name}
             </h1>
