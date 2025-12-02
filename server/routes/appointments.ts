@@ -16,7 +16,8 @@ const router = Router();
 
 router.get("/", async (req, res) => {
   try {
-    const appointments = await storage.getAppointmentsWithCustomers();
+    const date = req.query.date as string | undefined;
+    const appointments = await storage.getAppointmentsWithCustomers(date);
     res.json(appointments);
   } catch (error) {
     console.error("Failed to fetch appointments:", error);

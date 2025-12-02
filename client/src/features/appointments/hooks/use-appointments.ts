@@ -4,8 +4,9 @@ import type { Appointment } from "@shared/schema";
 
 const QUERY_KEY = "appointments";
 
-async function fetchAppointments(): Promise<AppointmentWithCustomer[]> {
-  const response = await fetch("/api/appointments");
+async function fetchAppointments(date?: string): Promise<AppointmentWithCustomer[]> {
+  const url = date ? `/api/appointments?date=${date}` : "/api/appointments";
+  const response = await fetch(url);
   if (!response.ok) {
     throw new Error("Failed to fetch appointments");
   }
@@ -32,11 +33,11 @@ async function updateAppointment(id: number, data: UpdateAppointmentPayload): Pr
   return response.json();
 }
 
-export function useAppointments() {
+export function useAppointments(date?: string) {
   return useQuery({
-    queryKey: [QUERY_KEY],
-    queryFn: fetchAppointments,
-    staleTime: 30000, // Consider data fresh for 30 seconds
+    queryKey: date ? [QUERY_KEY, { date }] : [QUERY_KEY],
+    queryFn: () => fetchAppointments(date),
+    staleTime: 30000,
   });
 }
 
@@ -56,15 +57,11 @@ export function useUpdateAppointment() {
     mutationFn: ({ id, data }: { id: number; data: UpdateAppointmentPayload }) =>
       updateAppointment(id, data),
     onMutate: async ({ id, data }) => {
-      // Cancel any outgoing refetches
       await queryClient.cancelQueries({ queryKey: [QUERY_KEY] });
       await queryClient.cancelQueries({ queryKey: [QUERY_KEY, id] });
       
-      // Snapshot the previous value
       const previousAppointment = queryClient.getQueryData<AppointmentWithCustomer>([QUERY_KEY, id]);
-      const previousAppointments = queryClient.getQueryData<AppointmentWithCustomer[]>([QUERY_KEY]);
       
-      // Optimistically update single appointment
       if (previousAppointment) {
         queryClient.setQueryData<AppointmentWithCustomer>([QUERY_KEY, id], {
           ...previousAppointment,
@@ -72,30 +69,15 @@ export function useUpdateAppointment() {
         });
       }
       
-      // Optimistically update list
-      if (previousAppointments) {
-        queryClient.setQueryData<AppointmentWithCustomer[]>([QUERY_KEY], 
-          previousAppointments.map(apt => 
-            apt.id === id ? { ...apt, ...data } : apt
-          )
-        );
-      }
-      
-      return { previousAppointment, previousAppointments };
+      return { previousAppointment };
     },
     onError: (err, { id }, context) => {
-      // Rollback on error
       if (context?.previousAppointment) {
         queryClient.setQueryData([QUERY_KEY, id], context.previousAppointment);
       }
-      if (context?.previousAppointments) {
-        queryClient.setQueryData([QUERY_KEY], context.previousAppointments);
-      }
     },
-    onSettled: (_, __, { id }) => {
-      // Always refetch after error or success
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEY, id] });
     },
   });
 }

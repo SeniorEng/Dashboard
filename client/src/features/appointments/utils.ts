@@ -10,6 +10,10 @@ export function sortAppointmentsByPriority(appointments: AppointmentWithCustomer
     if (a.status === "documenting" && b.status !== "documenting") return -1;
     if (b.status === "documenting" && a.status !== "documenting") return 1;
     
+    // Completed appointments go to bottom
+    if (a.status === "completed" && b.status !== "completed") return 1;
+    if (b.status === "completed" && a.status !== "completed") return -1;
+    
     // Then by time
     return a.scheduledStart.localeCompare(b.scheduledStart);
   });
@@ -66,4 +70,18 @@ export function formatTime(date: Date | null): string {
 export function formatTimeSlot(time: string | null): string {
   if (!time) return "--:--";
   return time.slice(0, 5);
+}
+
+export function getEndTime(appointment: AppointmentWithCustomer): string {
+  if (appointment.scheduledEnd) {
+    return formatTimeSlot(appointment.scheduledEnd);
+  }
+  if (appointment.scheduledStart && appointment.durationPromised) {
+    const [hours, mins] = appointment.scheduledStart.split(":").map(Number);
+    const totalMins = hours * 60 + mins + appointment.durationPromised;
+    const endHours = Math.floor(totalMins / 60) % 24;
+    const endMins = totalMins % 60;
+    return `${endHours.toString().padStart(2, "0")}:${endMins.toString().padStart(2, "0")}`;
+  }
+  return "--:--";
 }

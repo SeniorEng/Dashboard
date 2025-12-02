@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { MapPin, ChevronRight, CheckCircle2, PlayCircle, FileText } from "lucide-react";
 import { Link } from "wouter";
 import type { AppointmentWithCustomer } from "@shared/types";
-import { getStatusColor, getAppointmentTypeColor, getServiceColor, getStatusLabel, formatTimeSlot } from "../utils";
+import { getStatusColor, getAppointmentTypeColor, getServiceColor, getStatusLabel, formatTimeSlot, getEndTime } from "../utils";
 
 interface AppointmentCardProps {
   appointment: AppointmentWithCustomer;
@@ -26,9 +26,10 @@ function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
         <CardContent className="p-0">
           <div className="flex items-stretch">
             {/* Time Column */}
-            <div className="w-20 flex flex-col items-center justify-center bg-secondary/30 border-r border-border/50 p-3 text-center">
-              <span className="text-lg font-bold text-foreground">{formatTimeSlot(appointment.scheduledStart)}</span>
-              <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Uhr</span>
+            <div className="w-24 flex flex-col items-center justify-center bg-secondary/30 border-r border-border/50 p-3 text-center">
+              <span className="text-base font-bold text-foreground">{formatTimeSlot(appointment.scheduledStart)}</span>
+              <span className="text-xs text-muted-foreground">bis</span>
+              <span className="text-base font-bold text-foreground">{getEndTime(appointment)}</span>
             </div>
 
             {/* Main Content */}

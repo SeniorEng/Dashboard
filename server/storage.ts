@@ -29,7 +29,7 @@ export interface IStorage {
   getAppointmentsByDate(date: string): Promise<Appointment[]>;
   
   // Appointments - With Customer (optimized)
-  getAppointmentsWithCustomers(): Promise<AppointmentWithCustomer[]>;
+  getAppointmentsWithCustomers(date?: string): Promise<AppointmentWithCustomer[]>;
   getAppointmentWithCustomer(id: number): Promise<AppointmentWithCustomer | undefined>;
 }
 
@@ -77,8 +77,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Appointments - With Customer (single query with LEFT JOIN for performance)
-  async getAppointmentsWithCustomers(): Promise<AppointmentWithCustomer[]> {
-    const results = await db
+  async getAppointmentsWithCustomers(date?: string): Promise<AppointmentWithCustomer[]> {
+    let query = db
       .select({
         id: appointments.id,
         customerId: appointments.customerId,
@@ -116,6 +116,11 @@ export class DatabaseStorage implements IStorage {
       })
       .from(appointments)
       .leftJoin(customers, eq(appointments.customerId, customers.id));
+    
+    // Apply date filter if provided
+    const results = date 
+      ? await query.where(eq(appointments.date, date))
+      : await query;
     
     return results.map(row => ({
       id: row.id,
