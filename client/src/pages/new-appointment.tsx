@@ -112,7 +112,7 @@ export default function NewAppointment() {
       });
       if (!res.ok) {
         const error = await res.json();
-        throw new Error(error.message || error.error || "Failed to create appointment");
+        throw new Error(error.message || error.error || "Kundentermin konnte nicht erstellt werden");
       }
       return res.json();
     },
@@ -136,7 +136,7 @@ export default function NewAppointment() {
       });
       if (!res.ok) {
         const error = await res.json();
-        throw new Error(error.message || error.error || "Failed to create appointment");
+        throw new Error(error.message || error.error || "Erstberatung konnte nicht erstellt werden");
       }
       return res.json();
     },

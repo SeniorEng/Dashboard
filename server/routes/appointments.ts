@@ -164,7 +164,10 @@ router.post("/kundentermin", async (req, res) => {
       return res.status(400).json({ error: fromError(error).toString() });
     }
     console.error("Failed to create Kundentermin:", error);
-    res.status(500).json({ error: "Failed to create appointment" });
+    res.status(500).json({ 
+      error: "Serverfehler",
+      message: "Der Termin konnte nicht erstellt werden. Bitte versuchen Sie es erneut."
+    });
   }
 });
 
@@ -233,7 +236,10 @@ router.post("/erstberatung", async (req, res) => {
       return res.status(400).json({ error: fromError(error).toString() });
     }
     console.error("Failed to create Erstberatung:", error);
-    res.status(500).json({ error: "Failed to create appointment" });
+    res.status(500).json({ 
+      error: "Serverfehler",
+      message: "Die Erstberatung konnte nicht erstellt werden. Bitte versuchen Sie es erneut."
+    });
   }
 });
 
