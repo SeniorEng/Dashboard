@@ -12,10 +12,8 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { 
   MapPin, Clock, Navigation, 
-  CheckCircle2, Play, StopCircle, FileText, Save, ChevronLeft, Loader2
+  CheckCircle2, Play, StopCircle, FileText, Save, ChevronLeft, Loader2, User
 } from "lucide-react";
-import ladyAvatar from "@assets/generated_images/portrait_of_an_elderly_lady_smiling.png";
-import manAvatar from "@assets/generated_images/portrait_of_an_elderly_man_smiling.png";
 import SignatureCanvas from 'react-signature-canvas';
 import { useToast } from "@/hooks/use-toast";
 
@@ -69,8 +67,6 @@ export default function AppointmentDetail() {
   if (!appointment) {
     return <Layout><div>Appointment not found</div></Layout>;
   }
-
-  const avatarSrc = appointment.customer?.avatar === 'lady' ? ladyAvatar : manAvatar;
 
   const handleStartVisit = () => {
     const now = new Date();
@@ -355,7 +351,9 @@ export default function AppointmentDetail() {
 
         {appointment.customer && (
           <div className="flex items-start gap-4 mb-6">
-            <img src={avatarSrc} alt={appointment.customer.name} className="w-16 h-16 rounded-2xl object-cover shadow-md ring-1 ring-border" />
+            <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center shadow-md ring-1 ring-border">
+              <User className="w-8 h-8 text-primary" />
+            </div>
             <div>
               <Badge variant="secondary" className="mb-2">{appointment.type}</Badge>
               <h1 className="text-2xl font-bold leading-tight">{appointment.customer.name}</h1>

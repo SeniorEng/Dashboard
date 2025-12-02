@@ -1,9 +1,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { MapPin, ChevronRight, CheckCircle2, PlayCircle, FileText } from "lucide-react";
+import { MapPin, ChevronRight, CheckCircle2, PlayCircle, FileText, User } from "lucide-react";
 import { Link } from "wouter";
-import ladyAvatar from "@assets/generated_images/portrait_of_an_elderly_lady_smiling.png";
-import manAvatar from "@assets/generated_images/portrait_of_an_elderly_man_smiling.png";
 
 type Appointment = {
   id: number;
@@ -23,7 +21,6 @@ type Appointment = {
 };
 
 export function AppointmentCard({ appointment }: { appointment: Appointment }) {
-  const avatarSrc = appointment.customer?.avatar === 'lady' ? ladyAvatar : manAvatar;
 
   const statusColors = {
     "scheduled": "bg-muted text-muted-foreground border-muted-foreground/20",
@@ -66,7 +63,9 @@ export function AppointmentCard({ appointment }: { appointment: Appointment }) {
 
                 {appointment.customer && (
                   <div className="flex items-center gap-3 mb-3">
-                    <img src={avatarSrc} alt={appointment.customer.name} className="w-10 h-10 rounded-full object-cover ring-2 ring-background shadow-sm" />
+                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center ring-2 ring-background shadow-sm">
+                      <User className="w-5 h-5 text-primary" />
+                    </div>
                     <div>
                       <h3 className="font-bold text-foreground leading-tight">{appointment.customer.name}</h3>
                       <div className="flex items-center text-xs text-muted-foreground mt-0.5">
