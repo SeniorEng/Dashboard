@@ -11,7 +11,7 @@ export function sortAppointmentsByPriority(appointments: AppointmentWithCustomer
     if (b.status === "documenting" && a.status !== "documenting") return 1;
     
     // Then by time
-    return a.time.localeCompare(b.time);
+    return a.scheduledStart.localeCompare(b.scheduledStart);
   });
 }
 

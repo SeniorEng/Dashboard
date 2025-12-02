@@ -27,7 +27,7 @@ function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
           <div className="flex items-stretch">
             {/* Time Column */}
             <div className="w-20 flex flex-col items-center justify-center bg-secondary/30 border-r border-border/50 p-3 text-center">
-              <span className="text-lg font-bold text-foreground">{appointment.time}</span>
+              <span className="text-lg font-bold text-foreground">{appointment.scheduledStart}</span>
               <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Uhr</span>
             </div>
 

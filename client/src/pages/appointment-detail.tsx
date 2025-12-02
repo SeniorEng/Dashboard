@@ -27,8 +27,8 @@ export default function AppointmentDetail() {
   const { data: appointment, isLoading } = useAppointment(id);
   const updateMutation = useUpdateAppointment();
   
-  const [startTime, setStartTime] = useState<Date | null>(null);
-  const [endTime, setEndTime] = useState<Date | null>(null);
+  const [actualStart, setActualStart] = useState<Date | null>(null);
+  const [actualEnd, setActualEnd] = useState<Date | null>(null);
   const [kilometers, setKilometers] = useState("");
   const [notes, setNotes] = useState("");
   const [servicesDone, setServicesDone] = useState<string[]>([]);
@@ -37,8 +37,8 @@ export default function AppointmentDetail() {
   // Initialize state when appointment loads
   useEffect(() => {
     if (appointment) {
-      if (appointment.startTime) setStartTime(new Date(appointment.startTime));
-      if (appointment.endTime) setEndTime(new Date(appointment.endTime));
+      if (appointment.actualStart) setActualStart(new Date(appointment.actualStart));
+      if (appointment.actualEnd) setActualEnd(new Date(appointment.actualEnd));
       if (appointment.kilometers) setKilometers(appointment.kilometers);
       if (appointment.notes) setNotes(appointment.notes);
       if (appointment.servicesDone) setServicesDone(appointment.servicesDone);
@@ -46,16 +46,16 @@ export default function AppointmentDetail() {
   }, [appointment]);
 
   // Memoized duration calculation
-  const duration = useMemo(() => calculateDuration(startTime, endTime), [startTime, endTime]);
+  const duration = useMemo(() => calculateDuration(actualStart, actualEnd), [actualStart, actualEnd]);
 
   // Callbacks for handlers
   const handleStartVisit = useCallback(() => {
     if (!appointment) return;
     const now = new Date();
-    setStartTime(now);
+    setActualStart(now);
     updateMutation.mutate({
       id: appointment.id,
-      data: { status: "in-progress", startTime: now }
+      data: { status: "in-progress", actualStart: now }
     }, {
       onSuccess: () => {
         toast({
@@ -69,10 +69,10 @@ export default function AppointmentDetail() {
   const handleFinishVisit = useCallback(() => {
     if (!appointment) return;
     const now = new Date();
-    setEndTime(now);
+    setActualEnd(now);
     updateMutation.mutate({
       id: appointment.id,
-      data: { status: "documenting", actualEndTime: now }
+      data: { status: "documenting", actualEnd: now }
     });
   }, [appointment, updateMutation]);
 
@@ -150,7 +150,7 @@ export default function AppointmentDetail() {
               <div>
                 <h3 className="font-semibold text-foreground text-lg">Bereit zum Starten?</h3>
                 <p className="text-muted-foreground text-sm mt-1">
-                  Geplant für {appointment.time} Uhr • {appointment.durationPromised} Min.
+                  Geplant für {appointment.scheduledStart} Uhr • {appointment.durationPromised} Min.
                 </p>
               </div>
               <Button 
@@ -192,7 +192,7 @@ export default function AppointmentDetail() {
               <div className="space-y-2">
                 <span className="text-blue-600 text-sm font-bold uppercase tracking-wider">Besuch läuft</span>
                 <div className="text-4xl font-bold text-blue-900 font-mono">Aktiv</div>
-                <p className="text-blue-600/80 text-sm">Gestartet um {formatTime(startTime)}</p>
+                <p className="text-blue-600/80 text-sm">Gestartet um {formatTime(actualStart)}</p>
               </div>
               <Button 
                 size="lg" 

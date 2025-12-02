@@ -179,7 +179,7 @@ export default function NewAppointment() {
     createKundentermin.mutate({
       customerId: parseInt(ktCustomerId),
       date: ktDate,
-      time: ktTime,
+      scheduledStart: ktTime,
       hauswirtschaftDauer: ktHauswirtschaft ? ktHauswirtschaftDauer : null,
       alltagsbegleitungDauer: ktAlltagsbegleitung ? ktAlltagsbegleitungDauer : null,
       notes: ktNotes || undefined,
@@ -201,8 +201,8 @@ export default function NewAppointment() {
         pflegegrad: parseInt(ebPflegegrad),
       },
       date: ebDate,
-      time: ebStartTime,
-      endTime: ebEndTime,
+      scheduledStart: ebStartTime,
+      scheduledEnd: ebEndTime,
       notes: ebNotes || undefined,
     });
   };
