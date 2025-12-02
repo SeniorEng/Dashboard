@@ -51,6 +51,11 @@ type OverlapCheckResult = {
   unreliableAppointmentId?: number;
 };
 
+// Helper to format timestamp to "HH:MM" time string
+function formatTimeFromTimestamp(timestamp: Date): string {
+  return timestamp.toTimeString().slice(0, 5);
+}
+
 // Check for overlapping appointments
 // Returns detailed result including whether data is reliable for scheduling decisions
 async function checkOverlap(date: string, startTime: string, endTime: string, excludeId?: number): Promise<OverlapCheckResult> {
@@ -60,24 +65,20 @@ async function checkOverlap(date: string, startTime: string, endTime: string, ex
     // Skip the appointment being edited
     if (excludeId && apt.id === excludeId) continue;
     
-    // COMPLETED APPOINTMENTS: Must have actualEndTime to be considered reliable
-    // (durationPromised may be a placeholder from seed data, not the real visit duration)
+    // COMPLETED APPOINTMENTS: Check against documented actual times
+    // If no actualEndTime recorded, skip - the appointment is done and no longer blocks time
     if (apt.status === "completed") {
       if (apt.actualEndTime) {
-        // Convert timestamp to time string "HH:MM" for comparison
-        const actualEndTimeStr = apt.actualEndTime.toTimeString().slice(0, 5);
-        // Use verified actual end time
-        if (doTimesOverlap(startTime, endTime, apt.time, actualEndTimeStr)) {
+        // Use the actual documented start/end times
+        const actualStart = apt.startTime ? formatTimeFromTimestamp(apt.startTime) : apt.time;
+        const actualEnd = formatTimeFromTimestamp(apt.actualEndTime);
+        
+        if (doTimesOverlap(startTime, endTime, actualStart, actualEnd)) {
           return { hasOverlap: true, hasUnreliableData: false };
         }
-        continue;
       }
-      // Completed without actualEndTime - cannot trust duration data
-      return { 
-        hasOverlap: false, 
-        hasUnreliableData: true,
-        unreliableAppointmentId: apt.id
-      };
+      // No actualEndTime = appointment is done, skip it
+      continue;
     }
     
     // SCHEDULED/IN_PROGRESS APPOINTMENTS: Use planned end time
