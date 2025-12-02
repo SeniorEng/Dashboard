@@ -33,6 +33,16 @@ async function updateAppointment(id: number, data: UpdateAppointmentPayload): Pr
   return response.json();
 }
 
+async function deleteAppointment(id: number): Promise<void> {
+  const response = await fetch(`/api/appointments/${id}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || "Termin konnte nicht gelöscht werden");
+  }
+}
+
 export function useAppointments(date?: string) {
   return useQuery({
     queryKey: date ? [QUERY_KEY, { date }] : [QUERY_KEY],
@@ -77,6 +87,17 @@ export function useUpdateAppointment() {
       }
     },
     onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
+    },
+  });
+}
+
+export function useDeleteAppointment() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (id: number) => deleteAppointment(id),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
     },
   });
