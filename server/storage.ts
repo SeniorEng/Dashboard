@@ -160,7 +160,10 @@ export class DatabaseStorage implements IStorage {
           name: customers.name,
           vorname: customers.vorname,
           nachname: customers.nachname,
+          email: customers.email,
+          festnetz: customers.festnetz,
           telefon: customers.telefon,
+          geburtsdatum: customers.geburtsdatum,
           address: customers.address,
           strasse: customers.strasse,
           nr: customers.nr,
@@ -171,6 +174,9 @@ export class DatabaseStorage implements IStorage {
           backupEmployeeId: customers.backupEmployeeId,
           avatar: customers.avatar,
           needs: customers.needs,
+          createdAt: customers.createdAt,
+          updatedAt: customers.updatedAt,
+          createdByUserId: customers.createdByUserId,
         }
       })
       .from(appointments)
@@ -265,7 +271,10 @@ export class DatabaseStorage implements IStorage {
         name: customers.name,
         vorname: customers.vorname,
         nachname: customers.nachname,
+        email: customers.email,
+        festnetz: customers.festnetz,
         telefon: customers.telefon,
+        geburtsdatum: customers.geburtsdatum,
         address: customers.address,
         strasse: customers.strasse,
         nr: customers.nr,
@@ -276,6 +285,9 @@ export class DatabaseStorage implements IStorage {
         backupEmployeeId: customers.backupEmployeeId,
         avatar: customers.avatar,
         needs: customers.needs,
+        createdAt: customers.createdAt,
+        updatedAt: customers.updatedAt,
+        createdByUserId: customers.createdByUserId,
       }
     };
 
@@ -365,7 +377,10 @@ export class DatabaseStorage implements IStorage {
           name: customers.name,
           vorname: customers.vorname,
           nachname: customers.nachname,
+          email: customers.email,
+          festnetz: customers.festnetz,
           telefon: customers.telefon,
+          geburtsdatum: customers.geburtsdatum,
           address: customers.address,
           strasse: customers.strasse,
           nr: customers.nr,
@@ -376,6 +391,9 @@ export class DatabaseStorage implements IStorage {
           backupEmployeeId: customers.backupEmployeeId,
           avatar: customers.avatar,
           needs: customers.needs,
+          createdAt: customers.createdAt,
+          updatedAt: customers.updatedAt,
+          createdByUserId: customers.createdByUserId,
         }
       })
       .from(appointments)
