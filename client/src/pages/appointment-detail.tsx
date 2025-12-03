@@ -111,6 +111,7 @@ export default function AppointmentDetail() {
 
   const hasHauswirtschaft = !!appointment.hauswirtschaftDauer;
   const hasAlltagsbegleitung = !!appointment.alltagsbegleitungDauer;
+  const hasErstberatung = !!appointment.erstberatungDauer;
 
   return (
     <Layout>
@@ -198,8 +199,8 @@ export default function AppointmentDetail() {
         </CardContent>
       </Card>
 
-      {/* Services Card - Only for Kundentermin */}
-      {!isErstberatung && (hasHauswirtschaft || hasAlltagsbegleitung) && (
+      {/* Services Card */}
+      {(hasHauswirtschaft || hasAlltagsbegleitung || hasErstberatung) && (
         <Card className="mb-4">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
@@ -227,6 +228,17 @@ export default function AppointmentDetail() {
                 </div>
                 <span className="text-muted-foreground">
                   {formatDuration(appointment.alltagsbegleitungDauer!)}
+                </span>
+              </div>
+            )}
+            {hasErstberatung && (
+              <div className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-purple-500" />
+                  <span>Erstberatung</span>
+                </div>
+                <span className="text-muted-foreground">
+                  {formatDuration(appointment.erstberatungDauer!)}
                 </span>
               </div>
             )}

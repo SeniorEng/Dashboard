@@ -11,6 +11,13 @@ CareConnect is a full-stack web application designed to help caregivers manage a
 
 ## Recent Changes (December 2025)
 
+### Unified Service Model (Latest)
+- **Erstberatung as Service Type**: Erstberatung is now a service type like Hauswirtschaft/Alltagsbegleitung
+- **Unified Documentation Flow**: Both appointment types (Erstberatung and Kundentermin) now use the same 2-step documentation wizard (Step 1: Services, Step 2: Travel)
+- **New Schema Columns**: Added `erstberatung_dauer`, `erstberatung_actual_dauer`, `erstberatung_details` to appointments table
+- **Creation Flow**: Erstberatung appointments now pick a duration like other services (no more separate end time picker)
+- **Service Colors**: Erstberatung uses purple theme (bg-purple-500) to match appointment type color
+
 ### Major Refactoring
 - **Shared Domain Module**: Consolidated all business logic into `shared/domain/` eliminating duplication across frontend/backend
 - **Service Layer**: Extracted scheduling validation, overlap checking, and status transition enforcement into `server/services/appointments.ts`
@@ -107,7 +114,7 @@ CareConnect is a full-stack web application designed to help caregivers manage a
 
 **Schema**
 - `customers`: id, name, vorname, nachname, telefon, address (legacy + structured fields), pflegegrad, needs[]
-- `appointments`: id, customerId, appointmentType, date, scheduledStart, scheduledEnd, status, actualStart, actualEnd, kilometers, notes, servicesDone[], signatureData
+- `appointments`: id, customerId, appointmentType, date, scheduledStart, scheduledEnd, status, actualStart, actualEnd, kilometers, notes, servicesDone[], signatureData, hauswirtschaftDauer, hauswirtschaftActualDauer, hauswirtschaftDetails, alltagsbegleitungDauer, alltagsbegleitungActualDauer, alltagsbegleitungDetails, erstberatungDauer, erstberatungActualDauer, erstberatungDetails
 
 **Indexes**
 - `idx_appointments_date` on date column

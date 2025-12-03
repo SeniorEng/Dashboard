@@ -122,6 +122,7 @@ export default function DocumentAppointment() {
 
       const hwService = data.services.find(s => s.serviceType === "Hauswirtschaft");
       const abService = data.services.find(s => s.serviceType === "Alltagsbegleitung");
+      const ebService = data.services.find(s => s.serviceType === "Erstberatung");
 
       if (hwService) {
         payload.hauswirtschaftActualDauer = hwService.actualDuration;
@@ -130,6 +131,10 @@ export default function DocumentAppointment() {
       if (abService) {
         payload.alltagsbegleitungActualDauer = abService.actualDuration;
         payload.alltagsbegleitungDetails = abService.details || null;
+      }
+      if (ebService) {
+        payload.erstberatungActualDauer = ebService.actualDuration;
+        payload.erstberatungDetails = ebService.details || null;
       }
 
       const res = await fetch(`/api/appointments/${id}/document`, {
@@ -228,8 +233,6 @@ export default function DocumentAppointment() {
     );
   }
 
-  const isErstberatung = appointment.appointmentType === "Erstberatung";
-
   if (appointment.status === "completed") {
     return (
       <Layout>
@@ -258,31 +261,28 @@ export default function DocumentAppointment() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => (isErstberatung || step === 1) ? setLocation(`/appointment/${id}`) : setStep(1)}
+          onClick={() => step === 1 ? setLocation(`/appointment/${id}`) : setStep(1)}
           className="mb-2 -ml-2"
           data-testid="button-back"
         >
           <ChevronLeft className="w-4 h-4 mr-1" />
-          {(isErstberatung || step === 1) ? "Zurück" : "Schritt 1"}
+          {step === 1 ? "Zurück" : "Schritt 1"}
         </Button>
         
         <h1 className="text-2xl font-bold text-foreground" data-testid="text-title">
           Dokumentation
         </h1>
         <p className="text-muted-foreground text-sm">
-          {appointment.customer?.name}
-          {!isErstberatung && ` • Schritt ${step} von 2`}
+          {appointment.customer?.name} • Schritt {step} von 2
         </p>
         
-        {!isErstberatung && (
-          <div className="flex gap-2 mt-3">
-            <div className={`h-1 flex-1 rounded-full ${step >= 1 ? "bg-primary" : "bg-muted"}`} />
-            <div className={`h-1 flex-1 rounded-full ${step >= 2 ? "bg-primary" : "bg-muted"}`} />
-          </div>
-        )}
+        <div className="flex gap-2 mt-3">
+          <div className={`h-1 flex-1 rounded-full ${step >= 1 ? "bg-primary" : "bg-muted"}`} />
+          <div className={`h-1 flex-1 rounded-full ${step >= 2 ? "bg-primary" : "bg-muted"}`} />
+        </div>
       </div>
 
-      {!isErstberatung && step === 1 ? (
+      {step === 1 ? (
         <div className="space-y-4">
           <Card>
             <CardHeader className="pb-3">

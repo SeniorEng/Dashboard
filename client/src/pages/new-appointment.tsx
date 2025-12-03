@@ -55,7 +55,7 @@ export default function NewAppointment() {
   const [ebPflegegrad, setEbPflegegrad] = useState<string>("1");
   const [ebDate, setEbDate] = useState<string>(new Date().toISOString().split("T")[0]);
   const [ebStartTime, setEbStartTime] = useState<string>("09:00");
-  const [ebEndTime, setEbEndTime] = useState<string>("10:00");
+  const [ebErstberatungDauer, setEbErstberatungDauer] = useState<number>(60);
   const [ebNotes, setEbNotes] = useState<string>("");
 
   // Validation errors
@@ -168,7 +168,6 @@ export default function NewAppointment() {
     if (!ebNr.trim()) newErrors.ebNr = "Hausnummer ist erforderlich";
     if (!/^\d{5}$/.test(ebPlz)) newErrors.ebPlz = "PLZ muss 5 Ziffern haben";
     if (!ebStadt.trim()) newErrors.ebStadt = "Stadt ist erforderlich";
-    if (ebStartTime >= ebEndTime) newErrors.ebTime = "Endzeit muss nach Startzeit liegen";
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -202,10 +201,39 @@ export default function NewAppointment() {
       },
       date: ebDate,
       scheduledStart: ebStartTime,
-      scheduledEnd: ebEndTime,
+      erstberatungDauer: ebErstberatungDauer,
       notes: ebNotes || undefined,
     });
   };
+  
+  // Computed summary for Erstberatung
+  const ebSummary = useMemo(() => {
+    // Calculate end time
+    let endTime = "";
+    if (ebStartTime && ebErstberatungDauer > 0) {
+      const [hours, mins] = ebStartTime.split(":").map(Number);
+      const totalMins = hours * 60 + mins + ebErstberatungDauer;
+      const endHours = Math.floor(totalMins / 60) % 24;
+      const endMins = totalMins % 60;
+      endTime = `${endHours.toString().padStart(2, "0")}:${endMins.toString().padStart(2, "0")}`;
+    }
+    
+    // Format duration as hours and minutes
+    const formatDuration = (mins: number) => {
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      if (h === 0) return `${m} Min.`;
+      if (m === 0) return `${h} Std.`;
+      return `${h} Std. ${m} Min.`;
+    };
+    
+    return {
+      totalMinutes: ebErstberatungDauer,
+      totalFormatted: formatDuration(ebErstberatungDauer),
+      startTime: ebStartTime,
+      endTime,
+    };
+  }, [ebStartTime, ebErstberatungDauer]);
 
   const isPending = createKundentermin.isPending || createErstberatung.isPending;
 
@@ -547,23 +575,22 @@ export default function NewAppointment() {
               </div>
 
               {/* Date & Time */}
-              <div className="space-y-2">
-                <Label htmlFor="eb-date">
-                  <Calendar className="w-4 h-4 inline mr-1" /> Datum *
-                </Label>
-                <Input
-                  id="eb-date"
-                  type="date"
-                  value={ebDate}
-                  onChange={(e) => setEbDate(e.target.value)}
-                  data-testid="input-eb-date"
-                />
-              </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
+                  <Label htmlFor="eb-date">
+                    <Calendar className="w-4 h-4 inline mr-1" /> Datum *
+                  </Label>
+                  <Input
+                    id="eb-date"
+                    type="date"
+                    value={ebDate}
+                    onChange={(e) => setEbDate(e.target.value)}
+                    data-testid="input-eb-date"
+                  />
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="eb-start">
-                    <Clock className="w-4 h-4 inline mr-1" /> Von *
+                    <Clock className="w-4 h-4 inline mr-1" /> Startzeit *
                   </Label>
                   <Input
                     id="eb-start"
@@ -573,18 +600,58 @@ export default function NewAppointment() {
                     data-testid="input-eb-start"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="eb-end">Bis *</Label>
-                  <Input
-                    id="eb-end"
-                    type="time"
-                    value={ebEndTime}
-                    onChange={(e) => setEbEndTime(e.target.value)}
-                    data-testid="input-eb-end"
-                  />
+              </div>
+
+              {/* Service (Erstberatung) */}
+              <div className="space-y-4">
+                <Label>Service</Label>
+                <div className="flex items-center justify-between p-4 rounded-lg border bg-purple-50 border-purple-200">
+                  <div className="flex-1">
+                    <span className="font-medium text-purple-800">Erstberatung</span>
+                  </div>
+                  <Select
+                    value={ebErstberatungDauer.toString()}
+                    onValueChange={(v) => setEbErstberatungDauer(parseInt(v))}
+                  >
+                    <SelectTrigger className="w-28" data-testid="select-erstberatung-dauer">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DURATION_OPTIONS.map((d) => (
+                        <SelectItem key={d} value={d.toString()}>
+                          {d} Min.
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
-              {errors.ebTime && <p className="text-destructive text-sm">{errors.ebTime}</p>}
+
+              {/* Summary */}
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 space-y-3" data-testid="eb-summary-panel">
+                <div className="flex items-center gap-2 text-purple-700 font-semibold">
+                  <Clock className="w-4 h-4" />
+                  <span>Terminübersicht</span>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <span className="text-purple-600">Von</span>
+                    <p className="font-medium text-lg text-purple-800">{ebSummary.startTime} Uhr</p>
+                  </div>
+                  <div>
+                    <span className="text-purple-600">Bis</span>
+                    <p className="font-medium text-lg text-purple-800">{ebSummary.endTime} Uhr</p>
+                  </div>
+                </div>
+
+                <div className="border-t border-purple-200 pt-3">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-purple-700">Erstberatung</span>
+                    <span className="font-medium text-purple-800">{ebSummary.totalFormatted}</span>
+                  </div>
+                </div>
+              </div>
 
               {/* Notes */}
               <div className="space-y-2">

@@ -37,7 +37,7 @@ export interface ErstberatungInput {
   customer: InsertErstberatungCustomer;
   date: string;
   scheduledStart: string;
-  scheduledEnd: string;
+  erstberatungDauer: number;
   notes?: string;
 }
 
@@ -278,14 +278,12 @@ export class AppointmentService {
       needs: string[];
     };
     appointmentData: Omit<InsertAppointment, 'customerId'>;
-    duration: number;
+    scheduledEnd: string;
   } {
     const fullName = `${input.customer.vorname} ${input.customer.nachname}`;
     const fullAddress = `${input.customer.strasse} ${input.customer.nr}, ${input.customer.plz} ${input.customer.stadt}`;
     
-    const startMinutes = timeToMinutes(input.scheduledStart);
-    const endMinutes = timeToMinutes(input.scheduledEnd);
-    const duration = endMinutes - startMinutes;
+    const scheduledEnd = addMinutesToTime(input.scheduledStart, input.erstberatungDauer);
     
     const customerData = {
       name: fullName,
@@ -307,15 +305,16 @@ export class AppointmentService {
       serviceType: null,
       hauswirtschaftDauer: null,
       alltagsbegleitungDauer: null,
+      erstberatungDauer: input.erstberatungDauer,
       date: input.date,
       scheduledStart: input.scheduledStart,
-      scheduledEnd: input.scheduledEnd,
-      durationPromised: duration,
+      scheduledEnd,
+      durationPromised: input.erstberatungDauer,
       notes: input.notes || null,
       status: "scheduled",
     };
     
-    return { customerData, appointmentData, duration };
+    return { customerData, appointmentData, scheduledEnd };
   }
 
   canDeleteAppointment(appointment: Appointment): ValidationResult {

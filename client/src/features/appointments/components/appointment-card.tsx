@@ -55,9 +55,10 @@ function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
       appointment.appointmentType,
       appointment.hauswirtschaftDauer,
       appointment.alltagsbegleitungDauer,
+      appointment.erstberatungDauer,
       appointment.serviceType
     ),
-    [appointment.appointmentType, appointment.hauswirtschaftDauer, appointment.alltagsbegleitungDauer, appointment.serviceType]
+    [appointment.appointmentType, appointment.hauswirtschaftDauer, appointment.alltagsbegleitungDauer, appointment.erstberatungDauer, appointment.serviceType]
   );
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {

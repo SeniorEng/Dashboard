@@ -91,10 +91,18 @@ router.post("/erstberatung", async (req, res) => {
   try {
     const validatedData = insertErstberatungSchema.parse(req.body);
     
+    const { customerData, appointmentData, scheduledEnd } = appointmentService.prepareErstberatungData({
+      customer: validatedData.customer,
+      date: validatedData.date,
+      scheduledStart: validatedData.scheduledStart,
+      erstberatungDauer: validatedData.erstberatungDauer,
+      notes: validatedData.notes,
+    });
+    
     const overlapResult = await appointmentService.checkOverlap(
       validatedData.date, 
       validatedData.scheduledStart, 
-      validatedData.scheduledEnd
+      scheduledEnd
     );
     
     if (overlapResult.hasUnreliableData) {
@@ -108,14 +116,6 @@ router.post("/erstberatung", async (req, res) => {
     if (overlapResult.hasOverlap) {
       return sendConflict(res, "Terminüberschneidung", ErrorMessages.timeOverlap);
     }
-    
-    const { customerData, appointmentData } = appointmentService.prepareErstberatungData({
-      customer: validatedData.customer,
-      date: validatedData.date,
-      scheduledStart: validatedData.scheduledStart,
-      scheduledEnd: validatedData.scheduledEnd,
-      notes: validatedData.notes,
-    });
     
     const { customer, appointment } = await storage.createErstberatungWithCustomer(
       customerData,
@@ -262,18 +262,18 @@ router.post("/:id/document", async (req, res) => {
     
     const validatedData = documentKundenterminSchema.parse(req.body);
     
-    if (appointment.appointmentType === "Kundentermin") {
-      const serviceValidation = validateServiceDocumentation(
-        appointment,
-        validatedData.hauswirtschaftActualDauer,
-        validatedData.hauswirtschaftDetails,
-        validatedData.alltagsbegleitungActualDauer,
-        validatedData.alltagsbegleitungDetails
-      );
-      
-      if (!serviceValidation.valid) {
-        return sendBadRequest(res, serviceValidation.errors.join(", "));
-      }
+    const serviceValidation = validateServiceDocumentation(
+      appointment,
+      validatedData.hauswirtschaftActualDauer,
+      validatedData.hauswirtschaftDetails,
+      validatedData.alltagsbegleitungActualDauer,
+      validatedData.alltagsbegleitungDetails,
+      validatedData.erstberatungActualDauer,
+      validatedData.erstberatungDetails
+    );
+    
+    if (!serviceValidation.valid) {
+      return sendBadRequest(res, serviceValidation.errors.join(", "));
     }
     
     const updateData = {
@@ -281,6 +281,8 @@ router.post("/:id/document", async (req, res) => {
       hauswirtschaftDetails: validatedData.hauswirtschaftDetails ?? null,
       alltagsbegleitungActualDauer: validatedData.alltagsbegleitungActualDauer ?? null,
       alltagsbegleitungDetails: validatedData.alltagsbegleitungDetails ?? null,
+      erstberatungActualDauer: validatedData.erstberatungActualDauer ?? null,
+      erstberatungDetails: validatedData.erstberatungDetails ?? null,
       travelOriginType: validatedData.travelOriginType,
       travelFromAppointmentId: validatedData.travelFromAppointmentId ?? null,
       travelKilometers: validatedData.travelKilometers,

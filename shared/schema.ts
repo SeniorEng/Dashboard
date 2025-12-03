@@ -33,11 +33,15 @@ export const appointments = pgTable("appointments", {
   // Service durations in minutes (15-min increments) - for Kundentermin
   hauswirtschaftDauer: integer("hauswirtschaft_dauer"), // null if not selected
   alltagsbegleitungDauer: integer("alltagsbegleitung_dauer"), // null if not selected
+  // Service durations in minutes (15-min increments) - for Erstberatung
+  erstberatungDauer: integer("erstberatung_dauer"), // null if not Erstberatung
   // Service documentation - actual duration and details (max 55 chars)
   hauswirtschaftActualDauer: integer("hauswirtschaft_actual_dauer"),
   hauswirtschaftDetails: text("hauswirtschaft_details"),
   alltagsbegleitungActualDauer: integer("alltagsbegleitung_actual_dauer"),
   alltagsbegleitungDetails: text("alltagsbegleitung_details"),
+  erstberatungActualDauer: integer("erstberatung_actual_dauer"),
+  erstberatungDetails: text("erstberatung_details"),
   // Legacy serviceType field (for display compatibility)
   serviceType: text("service_type"),
   date: date("date").notNull(),
@@ -102,7 +106,7 @@ export const insertErstberatungSchema = z.object({
   customer: insertErstberatungCustomerSchema,
   date: z.string(),
   scheduledStart: z.string(),
-  scheduledEnd: z.string(),
+  erstberatungDauer: z.number().min(15).multipleOf(15),
   notes: z.string().max(255).optional(),
 });
 
@@ -121,13 +125,15 @@ export const insertAppointmentSchema = baseAppointmentSchema.superRefine((data, 
 
 export const updateAppointmentSchema = baseAppointmentSchema.partial();
 
-// Schema for documenting a Kundentermin
-export const documentKundenterminSchema = z.object({
+// Schema for documenting any appointment (Kundentermin or Erstberatung)
+export const documentAppointmentSchema = z.object({
   // Service documentation (at least one required based on what was scheduled)
   hauswirtschaftActualDauer: z.number().min(1).nullable().optional(),
   hauswirtschaftDetails: z.string().max(55, "Maximal 55 Zeichen").nullable().optional(),
   alltagsbegleitungActualDauer: z.number().min(1).nullable().optional(),
   alltagsbegleitungDetails: z.string().max(55, "Maximal 55 Zeichen").nullable().optional(),
+  erstberatungActualDauer: z.number().min(1).nullable().optional(),
+  erstberatungDetails: z.string().max(55, "Maximal 55 Zeichen").nullable().optional(),
   // Travel documentation
   travelOriginType: z.enum(["home", "appointment"]),
   travelFromAppointmentId: z.number().nullable().optional(),
@@ -146,7 +152,11 @@ export const documentKundenterminSchema = z.object({
   { message: "Fahrzeit ist erforderlich wenn Sie von einem anderen Termin kommen", path: ["travelMinutes"] }
 );
 
-export type DocumentKundentermin = z.infer<typeof documentKundenterminSchema>;
+// Alias for backward compatibility
+export const documentKundenterminSchema = documentAppointmentSchema;
+
+export type DocumentAppointment = z.infer<typeof documentAppointmentSchema>;
+export type DocumentKundentermin = DocumentAppointment;
 
 export type Customer = typeof customers.$inferSelect;
 export type InsertCustomer = z.infer<typeof insertCustomerSchema>;

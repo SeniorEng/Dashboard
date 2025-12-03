@@ -2,12 +2,14 @@ import type { Appointment } from "../schema";
 
 export type AppointmentStatus = "scheduled" | "in-progress" | "documenting" | "completed";
 export type AppointmentType = "Erstberatung" | "Kundentermin";
-export type ServiceType = "Hauswirtschaft" | "Alltagsbegleitung";
+export type ServiceType = "Hauswirtschaft" | "Alltagsbegleitung" | "Erstberatung";
 export type TravelOriginType = "home" | "appointment";
 
 export const APPOINTMENT_STATUSES: AppointmentStatus[] = ["scheduled", "in-progress", "documenting", "completed"];
 export const APPOINTMENT_TYPES: AppointmentType[] = ["Erstberatung", "Kundentermin"];
-export const SERVICE_TYPES: ServiceType[] = ["Hauswirtschaft", "Alltagsbegleitung"];
+export const SERVICE_TYPES: ServiceType[] = ["Hauswirtschaft", "Alltagsbegleitung", "Erstberatung"];
+export const KUNDENTERMIN_SERVICE_TYPES: ServiceType[] = ["Hauswirtschaft", "Alltagsbegleitung"];
+export const ERSTBERATUNG_SERVICE_TYPES: ServiceType[] = ["Erstberatung"];
 export const TRAVEL_ORIGIN_TYPES: TravelOriginType[] = ["home", "appointment"];
 
 export const STATUS_ORDER: Record<AppointmentStatus, number> = {
@@ -85,9 +87,10 @@ export function doTimesOverlap(
 
 export function calculateTotalDuration(
   hauswirtschaftDauer: number | null | undefined,
-  alltagsbegleitungDauer: number | null | undefined
+  alltagsbegleitungDauer: number | null | undefined,
+  erstberatungDauer: number | null | undefined = 0
 ): number {
-  return (hauswirtschaftDauer || 0) + (alltagsbegleitungDauer || 0);
+  return (hauswirtschaftDauer || 0) + (alltagsbegleitungDauer || 0) + (erstberatungDauer || 0);
 }
 
 export function getEndTime(
@@ -107,6 +110,7 @@ export function getEndTime(
 export interface ServiceInfo {
   hasHauswirtschaft: boolean;
   hasAlltagsbegleitung: boolean;
+  hasErstberatung: boolean;
   hasBoth: boolean;
   label: string;
   primaryType: ServiceType | null;
@@ -120,15 +124,17 @@ export function getServiceInfo(
   appointmentType: string,
   hauswirtschaftDauer: number | null | undefined,
   alltagsbegleitungDauer: number | null | undefined,
+  erstberatungDauer?: number | null | undefined,
   legacyServiceType?: string | null
 ): ServiceInfo {
   if (appointmentType === "Erstberatung") {
     return {
       hasHauswirtschaft: false,
       hasAlltagsbegleitung: false,
+      hasErstberatung: !!erstberatungDauer,
       hasBoth: false,
       label: "Erstberatung",
-      primaryType: null,
+      primaryType: "Erstberatung",
     };
   }
 
@@ -159,7 +165,7 @@ export function getServiceInfo(
     primaryType = null;
   }
 
-  return { hasHauswirtschaft, hasAlltagsbegleitung, hasBoth, label, primaryType };
+  return { hasHauswirtschaft, hasAlltagsbegleitung, hasErstberatung: false, hasBoth, label, primaryType };
 }
 
 export function isValidStatusTransition(
@@ -205,11 +211,13 @@ export const APPOINTMENT_TYPE_COLORS: Record<AppointmentType, string> = {
 export const SERVICE_TYPE_COLORS: Record<ServiceType, string> = {
   "Hauswirtschaft": "bg-amber-50 text-amber-700 border-amber-200",
   "Alltagsbegleitung": "bg-sky-50 text-sky-700 border-sky-200",
+  "Erstberatung": "bg-purple-50 text-purple-700 border-purple-200",
 };
 
 export const SERVICE_BORDER_COLORS: Record<ServiceType, string> = {
   "Hauswirtschaft": "border-amber-400",
   "Alltagsbegleitung": "border-sky-400",
+  "Erstberatung": "border-purple-400",
 };
 
 export function getStatusColor(status: string): string {
@@ -244,9 +252,10 @@ export function getCardServiceInfo(
   appointmentType: string,
   hauswirtschaftDauer: number | null | undefined,
   alltagsbegleitungDauer: number | null | undefined,
+  erstberatungDauer?: number | null | undefined,
   legacyServiceType?: string | null
 ): CardServiceInfo {
-  const info = getServiceInfo(appointmentType, hauswirtschaftDauer, alltagsbegleitungDauer, legacyServiceType);
+  const info = getServiceInfo(appointmentType, hauswirtschaftDauer, alltagsbegleitungDauer, erstberatungDauer, legacyServiceType);
   
   let borderClass: string;
   if (appointmentType === "Erstberatung") {
@@ -343,6 +352,15 @@ export function getServicesToDocument(appointment: Appointment): ServiceDocument
     });
   }
   
+  if (appointment.erstberatungDauer) {
+    services.push({
+      serviceType: "Erstberatung",
+      plannedDuration: appointment.erstberatungDauer,
+      actualDuration: appointment.erstberatungActualDauer,
+      details: appointment.erstberatungDetails,
+    });
+  }
+  
   return services;
 }
 
@@ -351,7 +369,9 @@ export function validateServiceDocumentation(
   hauswirtschaftActualDauer: number | null | undefined,
   hauswirtschaftDetails: string | null | undefined,
   alltagsbegleitungActualDauer: number | null | undefined,
-  alltagsbegleitungDetails: string | null | undefined
+  alltagsbegleitungDetails: string | null | undefined,
+  erstberatungActualDauer?: number | null | undefined,
+  erstberatungDetails?: string | null | undefined
 ): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
   
@@ -370,6 +390,15 @@ export function validateServiceDocumentation(
     }
     if (alltagsbegleitungDetails && alltagsbegleitungDetails.length > 55) {
       errors.push("Alltagsbegleitung Details dürfen maximal 55 Zeichen haben");
+    }
+  }
+  
+  if (appointment.erstberatungDauer) {
+    if (!erstberatungActualDauer || erstberatungActualDauer < 1) {
+      errors.push("Bitte geben Sie die tatsächliche Dauer für Erstberatung an");
+    }
+    if (erstberatungDetails && erstberatungDetails.length > 55) {
+      errors.push("Erstberatung Details dürfen maximal 55 Zeichen haben");
     }
   }
   
