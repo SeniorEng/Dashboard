@@ -70,8 +70,18 @@ CareConnect is a full-stack web application designed to help caregivers manage a
 │   └── src/
 │       ├── components/          # Shared UI components
 │       │   ├── ui/              # shadcn/ui primitives
+│       │   ├── patterns/        # Layout pattern components
+│       │   │   ├── page-shell.tsx      # Page wrapper with bg
+│       │   │   ├── page-header.tsx     # Consistent page headers
+│       │   │   ├── section-card.tsx    # Card with header/actions
+│       │   │   ├── data-list.tsx       # List styling primitives
+│       │   │   ├── empty-state.tsx     # Empty state display
+│       │   │   └── status-badge.tsx    # Semantic status badges
 │       │   ├── layout.tsx       # App layout wrapper
 │       │   └── error-boundary.tsx
+│       ├── design-system/       # Centralized design tokens
+│       │   ├── tokens.ts        # Colors, typography, spacing
+│       │   └── index.ts         # Public exports
 │       ├── features/            # Feature-based modules
 │       │   ├── appointments/
 │       │   │   ├── components/  # Feature-specific components
@@ -198,6 +208,109 @@ CareConnect is a full-stack web application designed to help caregivers manage a
 4. **Memoization**: Expensive sorts/calculations cached
 5. **Error Boundaries**: Graceful error recovery
 6. **Centralized Errors**: Consistent error codes and German messages
+
+## Design System
+
+### Overview
+
+The design system provides centralized tokens and reusable patterns for consistent UI across the application. All styling decisions should use tokens from `@/design-system` rather than hardcoded values.
+
+### Design Tokens (`client/src/design-system/tokens.ts`)
+
+**Icon Sizes**: Use `iconSize` for consistent icon sizing
+```typescript
+import { iconSize } from "@/design-system";
+
+<Search className={iconSize.sm} />  // h-4 w-4
+<User2 className={iconSize.md} />   // h-5 w-5
+<Heart className={iconSize.lg} />   // h-6 w-6
+```
+
+**Component Styles**: Pre-defined class combinations
+```typescript
+import { componentStyles } from "@/design-system";
+
+<Button className={componentStyles.btnPrimary}>Save</Button>
+<div className={componentStyles.avatarContainer}>...</div>
+```
+
+**Color Utilities**: Semantic color functions
+```typescript
+import { getStatusColors, getServiceColors, getPflegegradColors } from "@/design-system";
+
+const colors = getStatusColors("scheduled");
+// { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", icon: "text-blue-500" }
+```
+
+### Layout Patterns (`client/src/components/patterns/`)
+
+**PageHeader**: Consistent page headers with back button and actions
+```tsx
+<PageHeader
+  title="Kundenverwaltung"
+  subtitle="15 Kunden gefunden"
+  backHref="/admin"
+  actions={<Button>Neu</Button>}
+/>
+```
+
+**SectionCard**: Cards with optional header, icon, and actions
+```tsx
+<SectionCard
+  title="Kontaktdaten"
+  icon={<User2 className={iconSize.sm} />}
+  actions={<Button size="sm">Bearbeiten</Button>}
+>
+  {/* Content */}
+</SectionCard>
+```
+
+**DataList & DataListItem**: Consistent list styling
+```tsx
+<DataList>
+  <DataListItem onClick={() => navigate(url)}>
+    {/* Item content */}
+  </DataListItem>
+</DataList>
+```
+
+**EmptyState**: Consistent empty state display
+```tsx
+<EmptyState
+  icon={<Users className={iconSize.xl} />}
+  title="Keine Kontakte"
+  description="Noch keine Kontakte hinterlegt"
+  action={<Button>Hinzufügen</Button>}
+/>
+```
+
+**StatusBadge**: Semantic badges for status, service type, and Pflegegrad
+```tsx
+<StatusBadge type="status" value="scheduled" />
+<StatusBadge type="service" value="hauswirtschaft" />
+<StatusBadge type="pflegegrad" value={3} />
+```
+
+### Color Palette
+
+| Category | Colors |
+|----------|--------|
+| **Primary** | Teal (bg-teal-600, hover:bg-teal-700) |
+| **Status: Scheduled** | Blue (bg-blue-50, text-blue-700) |
+| **Status: In Progress** | Amber (bg-amber-50, text-amber-700) |
+| **Status: Documenting** | Orange (bg-orange-50, text-orange-700) |
+| **Status: Completed** | Green (bg-green-50, text-green-700) |
+| **Service: Hauswirtschaft** | Emerald (bg-emerald-500) |
+| **Service: Alltagsbegleitung** | Sky (bg-sky-500) |
+| **Service: Erstberatung** | Purple (bg-purple-500) |
+| **Page Background** | Warm beige gradient (from-[#f5e6d3] to-[#e8d4c4]) |
+
+### Usage Guidelines
+
+1. **Always import from design system** - Use `@/design-system` for colors, spacing, and icon sizes
+2. **Use pattern components** - PageHeader, SectionCard, DataList for consistent layouts
+3. **Semantic color functions** - Use getStatusColors(), getServiceColors() instead of hardcoded classes
+4. **Icon sizes from tokens** - Use iconSize.sm/.md/.lg instead of h-4 w-4 directly
 
 ## Key Learnings & Rules
 

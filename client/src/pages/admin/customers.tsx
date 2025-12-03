@@ -2,11 +2,11 @@
  * Admin Customer List Page
  * 
  * Displays paginated list of customers with search, filtering, and navigation.
+ * Uses design system patterns for consistent styling.
  */
 
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,9 +14,14 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Layout } from "@/components/layout";
+import { PageHeader } from "@/components/patterns/page-header";
+import { SectionCard } from "@/components/patterns/section-card";
+import { DataList, DataListItem } from "@/components/patterns/data-list";
+import { EmptyState } from "@/components/patterns/empty-state";
+import { StatusBadge } from "@/components/patterns/status-badge";
 import { useCustomers, useEmployees } from "@/features/customers";
+import { iconSize, componentStyles } from "@/design-system";
 import {
-  ArrowLeft,
   Plus,
   Loader2,
   Search,
@@ -26,7 +31,6 @@ import {
   User2,
   MapPin,
   Phone,
-  Heart,
   FileText,
   AlertCircle,
 } from "lucide-react";
@@ -49,7 +53,6 @@ export default function AdminCustomers() {
   const [currentPage, setCurrentPage] = useState(1);
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
 
-  // Debounce search input
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(searchQuery);
@@ -57,10 +60,8 @@ export default function AdminCustomers() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Fetch employees for filter dropdown
   const { data: employees } = useEmployees();
 
-  // Build query params
   const queryParams = useMemo(() => ({
     search: debouncedSearch || undefined,
     pflegegrad: pflegegradFilter || undefined,
@@ -69,10 +70,8 @@ export default function AdminCustomers() {
     limit: 15,
   }), [debouncedSearch, pflegegradFilter, employeeFilter, currentPage]);
 
-  // Fetch customers with the new hook
   const { data, isLoading, error, refetch } = useCustomers(queryParams);
 
-  // Handlers
   const handlePageChange = useCallback((page: number) => {
     setCurrentPage(page);
   }, []);
@@ -114,33 +113,23 @@ export default function AdminCustomers() {
     <Layout>
       <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
         <div className="container mx-auto px-4 py-6 max-w-4xl">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-4">
-              <Link href="/admin">
-                <Button variant="ghost" size="icon" data-testid="button-back">
-                  <ArrowLeft className="h-5 w-5" />
+          <PageHeader
+            title="Kundenverwaltung"
+            subtitle={`${total} ${total === 1 ? "Kunde" : "Kunden"} gefunden`}
+            backHref="/admin"
+            actions={
+              <Link href="/admin/customers/new">
+                <Button className={componentStyles.btnPrimary} data-testid="button-new-customer">
+                  <Plus className={iconSize.sm + " mr-2"} />
+                  Neuer Kunde
                 </Button>
               </Link>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">Kundenverwaltung</h1>
-                <p className="text-sm text-gray-600">
-                  {total} {total === 1 ? "Kunde" : "Kunden"} gefunden
-                </p>
-              </div>
-            </div>
-            <Link href="/admin/customers/new">
-              <Button className="bg-teal-600 hover:bg-teal-700" data-testid="button-new-customer">
-                <Plus className="h-4 w-4 mr-2" />
-                Neuer Kunde
-              </Button>
-            </Link>
-          </div>
+            }
+          />
 
-          {/* Search and Filters */}
           <div className="flex gap-3 mb-6">
             <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 ${iconSize.sm} text-gray-400`} />
               <Input
                 placeholder="Name, Telefon oder Adresse suchen..."
                 value={searchQuery}
@@ -152,7 +141,7 @@ export default function AdminCustomers() {
             <Sheet open={filterSheetOpen} onOpenChange={setFilterSheetOpen}>
               <SheetTrigger asChild>
                 <Button variant="outline" className="relative" data-testid="button-filter">
-                  <SlidersHorizontal className="h-4 w-4 mr-2" />
+                  <SlidersHorizontal className={iconSize.sm + " mr-2"} />
                   Filter
                   {activeFilterCount > 0 && (
                     <Badge className="absolute -top-2 -right-2 h-5 w-5 flex items-center justify-center p-0 bg-teal-600">
@@ -219,12 +208,11 @@ export default function AdminCustomers() {
             </Sheet>
           </div>
 
-          {/* Error State */}
           {error && (
-            <Card className="mb-6 border-red-200 bg-red-50">
-              <CardContent className="flex items-center justify-between p-4">
+            <SectionCard className="mb-6 border-red-200 bg-red-50">
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <AlertCircle className="h-5 w-5 text-red-600" />
+                  <AlertCircle className={`${iconSize.md} text-red-600`} />
                   <p className="text-red-800">{error.message}</p>
                 </div>
                 <Button
@@ -235,96 +223,87 @@ export default function AdminCustomers() {
                 >
                   Erneut versuchen
                 </Button>
-              </CardContent>
-            </Card>
+              </div>
+            </SectionCard>
           )}
 
-          {/* Loading State */}
           {isLoading ? (
             <div className="flex justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+              <Loader2 className={`${iconSize.lg} animate-spin text-teal-600`} />
             </div>
           ) : customers.length === 0 ? (
-            /* Empty State */
-            <Card className="bg-white/80 backdrop-blur-sm">
-              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                <User2 className="h-12 w-12 text-gray-400 mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">
-                  Keine Kunden gefunden
-                </h3>
-                <p className="text-gray-600 mb-4">
-                  {searchQuery || activeFilterCount > 0
+            <SectionCard variant="muted">
+              <EmptyState
+                icon={<User2 className={iconSize.xl} />}
+                title="Keine Kunden gefunden"
+                description={
+                  searchQuery || activeFilterCount > 0
                     ? "Versuchen Sie andere Suchbegriffe oder Filter"
-                    : "Erstellen Sie Ihren ersten Kunden"}
-                </p>
-                {(searchQuery || activeFilterCount > 0) && (
-                  <Button variant="outline" onClick={clearFilters}>
-                    Filter zurücksetzen
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
+                    : "Erstellen Sie Ihren ersten Kunden"
+                }
+                action={
+                  (searchQuery || activeFilterCount > 0) && (
+                    <Button variant="outline" onClick={clearFilters}>
+                      Filter zurücksetzen
+                    </Button>
+                  )
+                }
+              />
+            </SectionCard>
           ) : (
-            /* Customer List */
-            <div className="space-y-3">
+            <DataList>
               {customers.map((customer) => (
-                <Card
+                <DataListItem
                   key={customer.id}
-                  className="bg-white/80 backdrop-blur-sm hover:shadow-md transition-shadow cursor-pointer"
                   onClick={() => setLocation(`/admin/customers/${customer.id}`)}
+                  className="bg-white/80 backdrop-blur-sm"
                   data-testid={`card-customer-${customer.id}`}
                 >
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-start gap-3">
-                        <div className="h-10 w-10 rounded-full bg-teal-100 flex items-center justify-center">
-                          <User2 className="h-5 w-5 text-teal-600" />
-                        </div>
-                        <div>
-                          <h3 className="font-medium text-gray-900">
-                            {customer.name}
-                          </h3>
-                          {customer.address && (
-                            <div className="flex items-center gap-1 text-sm text-gray-600 mt-1">
-                              <MapPin className="h-3 w-3" />
-                              <span>{customer.address}</span>
-                            </div>
-                          )}
-                          {customer.telefon && (
-                            <div className="flex items-center gap-1 text-sm text-gray-600">
-                              <Phone className="h-3 w-3" />
-                              <span>{customer.telefon}</span>
-                            </div>
-                          )}
-                        </div>
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start gap-3">
+                      <div className={`${componentStyles.avatarContainer} bg-teal-100`}>
+                        <User2 className={`${iconSize.md} text-teal-600`} />
                       </div>
-                      <div className="flex flex-col items-end gap-2">
-                        {customer.pflegegrad !== null && customer.pflegegrad > 0 && (
-                          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                            <Heart className="h-3 w-3 mr-1" />
-                            PG {customer.pflegegrad}
-                          </Badge>
+                      <div>
+                        <h3 className="font-medium text-gray-900">
+                          {customer.name}
+                        </h3>
+                        {customer.address && (
+                          <div className="flex items-center gap-1 text-sm text-gray-600 mt-1">
+                            <MapPin className={iconSize.xs} />
+                            <span>{customer.address}</span>
+                          </div>
                         )}
-                        {customer.hasActiveContract && (
-                          <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-                            <FileText className="h-3 w-3 mr-1" />
-                            Vertrag
-                          </Badge>
+                        {customer.telefon && (
+                          <div className="flex items-center gap-1 text-sm text-gray-600">
+                            <Phone className={iconSize.xs} />
+                            <span>{customer.telefon}</span>
+                          </div>
                         )}
                       </div>
                     </div>
-                    {customer.primaryEmployee && (
-                      <div className="mt-3 pt-3 border-t border-gray-100 text-sm text-gray-600">
-                        Betreut von: {customer.primaryEmployee.displayName}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+                    <div className="flex flex-col items-end gap-2">
+                      {customer.pflegegrad !== null && customer.pflegegrad > 0 && (
+                        <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
+                      )}
+                      {customer.hasActiveContract && (
+                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                          <FileText className={`${iconSize.xs} mr-1`} />
+                          Vertrag
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                  {customer.primaryEmployee && (
+                    <div className="mt-3 pt-3 border-t border-gray-100 text-sm text-gray-600">
+                      Betreut von: {customer.primaryEmployee.displayName}
+                    </div>
+                  )}
+                </DataListItem>
               ))}
-            </div>
+            </DataList>
           )}
 
-          {/* Pagination */}
           {totalPages > 1 && (
             <div className="flex items-center justify-center gap-2 mt-6">
               <Button
@@ -334,7 +313,7 @@ export default function AdminCustomers() {
                 disabled={currentPage === 1}
                 data-testid="button-prev-page"
               >
-                <ChevronLeft className="h-4 w-4" />
+                <ChevronLeft className={iconSize.sm} />
               </Button>
               <span className="text-sm text-gray-600">
                 Seite {currentPage} von {totalPages}
@@ -346,7 +325,7 @@ export default function AdminCustomers() {
                 disabled={currentPage === totalPages}
                 data-testid="button-next-page"
               >
-                <ChevronRight className="h-4 w-4" />
+                <ChevronRight className={iconSize.sm} />
               </Button>
             </div>
           )}

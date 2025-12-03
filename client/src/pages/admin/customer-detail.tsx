@@ -3,17 +3,21 @@
  * 
  * Displays comprehensive customer information with tabbed interface
  * for contacts, insurance, budgets, and history.
+ * Uses design system patterns for consistent styling.
  */
 
 import { Link, useParams } from "wouter";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Layout } from "@/components/layout";
+import { PageHeader } from "@/components/patterns/page-header";
+import { SectionCard } from "@/components/patterns/section-card";
+import { EmptyState } from "@/components/patterns/empty-state";
+import { StatusBadge } from "@/components/patterns/status-badge";
 import { useCustomer } from "@/features/customers";
+import { iconSize, componentStyles } from "@/design-system";
 import {
-  ArrowLeft,
   Loader2,
   User2,
   MapPin,
@@ -28,7 +32,6 @@ import {
   Wallet,
 } from "lucide-react";
 
-// Helper functions
 function formatAddress(customer: {
   strasse: string | null;
   nr: string | null;
@@ -70,7 +73,7 @@ export default function AdminCustomerDetail() {
     return (
       <Layout>
         <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4] flex items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+          <Loader2 className={`${iconSize.lg} animate-spin text-teal-600`} />
         </div>
       </Layout>
     );
@@ -81,17 +84,16 @@ export default function AdminCustomerDetail() {
       <Layout>
         <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
           <div className="container mx-auto px-4 py-6 max-w-4xl">
-            <Link href="/admin/customers">
-              <Button variant="ghost" size="icon">
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
-            </Link>
-            <Card className="mt-6 border-red-200 bg-red-50">
-              <CardContent className="flex items-center justify-between p-6">
+            <PageHeader
+              title="Fehler"
+              backHref="/admin/customers"
+            />
+            <SectionCard className="border-red-200 bg-red-50">
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <AlertCircle className="h-6 w-6 text-red-600" />
+                  <AlertCircle className={`${iconSize.lg} text-red-600`} />
                   <div>
-                    <p className="font-medium text-red-800">Fehler</p>
+                    <p className="font-medium text-red-800">Fehler beim Laden</p>
                     <p className="text-red-700">
                       {error instanceof Error ? error.message : "Kunde konnte nicht geladen werden"}
                     </p>
@@ -105,8 +107,8 @@ export default function AdminCustomerDetail() {
                 >
                   Erneut versuchen
                 </Button>
-              </CardContent>
-            </Card>
+              </div>
+            </SectionCard>
           </div>
         </div>
       </Layout>
@@ -117,40 +119,30 @@ export default function AdminCustomerDetail() {
     <Layout>
       <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
         <div className="container mx-auto px-4 py-6 max-w-4xl">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-4">
-              <Link href="/admin/customers">
-                <Button variant="ghost" size="icon" data-testid="button-back">
-                  <ArrowLeft className="h-5 w-5" />
-                </Button>
-              </Link>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">
-                  {customer.vorname} {customer.nachname}
-                </h1>
-                <div className="flex items-center gap-2 mt-1">
-                  {customer.pflegegrad !== null && customer.pflegegrad > 0 && (
-                    <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                      Pflegegrad {customer.pflegegrad}
-                    </Badge>
-                  )}
-                  {customer.activeContractCount > 0 && (
-                    <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-                      {customer.activeContractCount} aktive{" "}
-                      {customer.activeContractCount === 1 ? "Vertrag" : "Verträge"}
-                    </Badge>
-                  )}
-                </div>
-              </div>
-            </div>
-            <Button variant="outline" className="bg-white" data-testid="button-edit-customer">
-              <Edit className="h-4 w-4 mr-2" />
-              Bearbeiten
-            </Button>
-          </div>
+          <PageHeader
+            title={`${customer.vorname} ${customer.nachname}`}
+            backHref="/admin/customers"
+            badge={
+              <>
+                {customer.pflegegrad !== null && customer.pflegegrad > 0 && (
+                  <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
+                )}
+                {customer.activeContractCount > 0 && (
+                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                    {customer.activeContractCount} aktive{" "}
+                    {customer.activeContractCount === 1 ? "Vertrag" : "Verträge"}
+                  </Badge>
+                )}
+              </>
+            }
+            actions={
+              <Button variant="outline" className="bg-white" data-testid="button-edit-customer">
+                <Edit className={`${iconSize.sm} mr-2`} />
+                Bearbeiten
+              </Button>
+            }
+          />
 
-          {/* Tabbed Content */}
           <Tabs defaultValue="overview" className="space-y-4">
             <TabsList className="bg-white">
               <TabsTrigger value="overview" data-testid="tab-overview">Übersicht</TabsTrigger>
@@ -160,263 +152,245 @@ export default function AdminCustomerDetail() {
               <TabsTrigger value="history" data-testid="tab-history">Historie</TabsTrigger>
             </TabsList>
 
-            {/* Overview Tab */}
             <TabsContent value="overview" className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
-                <Card className="bg-white">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-2">
-                      <User2 className="h-4 w-4" />
-                      Kontaktdaten
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
+                <SectionCard
+                  title="Kontaktdaten"
+                  icon={<User2 className={iconSize.sm} />}
+                >
+                  <div className="space-y-3">
                     <div className="flex items-center gap-2 text-gray-700">
-                      <MapPin className="h-4 w-4 text-gray-400" />
+                      <MapPin className={`${iconSize.sm} text-gray-400`} />
                       {formatAddress(customer)}
                     </div>
                     {(customer.telefon || customer.festnetz) && (
                       <div className="flex items-center gap-2 text-gray-700">
-                        <Phone className="h-4 w-4 text-gray-400" />
+                        <Phone className={`${iconSize.sm} text-gray-400`} />
                         {customer.telefon || customer.festnetz}
                       </div>
                     )}
                     {customer.email && (
                       <div className="flex items-center gap-2 text-gray-700">
-                        <Mail className="h-4 w-4 text-gray-400" />
+                        <Mail className={`${iconSize.sm} text-gray-400`} />
                         {customer.email}
                       </div>
                     )}
-                  </CardContent>
-                </Card>
+                  </div>
+                </SectionCard>
 
-                <Card className="bg-white">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-2">
-                      <Heart className="h-4 w-4" />
-                      Pflegekasse
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {customer.currentInsurance ? (
-                      <div className="space-y-2">
-                        <p className="font-medium text-gray-900">
-                          {customer.currentInsurance.providerName}
-                        </p>
-                        <p className="text-sm text-gray-600">
-                          Vers.-Nr.: {customer.currentInsurance.versichertennummer}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          Seit {formatDate(customer.currentInsurance.validFrom)}
-                        </p>
-                      </div>
-                    ) : (
-                      <p className="text-gray-500">Keine Pflegekasse hinterlegt</p>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-
-              {customer.needs && customer.needs.length > 0 && (
-                <Card className="bg-white">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-2">
-                      <Shield className="h-4 w-4" />
-                      Besondere Bedürfnisse
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex flex-wrap gap-2">
-                      {customer.needs.map((need, index) => (
-                        <Badge key={index} variant="secondary">
-                          {need}
-                        </Badge>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-            </TabsContent>
-
-            {/* Contacts Tab */}
-            <TabsContent value="contacts" className="space-y-4">
-              <Card className="bg-white">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-2">
-                    <Users className="h-4 w-4" />
-                    Ansprechpartner & Notfallkontakte
-                  </CardTitle>
-                  <Button size="sm" variant="outline" data-testid="button-add-contact">
-                    Hinzufügen
-                  </Button>
-                </CardHeader>
-                <CardContent>
-                  {customer.contacts && customer.contacts.length > 0 ? (
-                    <div className="space-y-3">
-                      {customer.contacts.map((contact) => (
-                        <div
-                          key={contact.id}
-                          className="flex items-center justify-between p-3 rounded-lg bg-gray-50"
-                        >
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <p className="font-medium">{contact.vorname} {contact.nachname}</p>
-                              {contact.isPrimary && (
-                                <Badge variant="secondary" className="text-xs">
-                                  Hauptkontakt
-                                </Badge>
-                              )}
-                            </div>
-                            <p className="text-sm text-gray-500">{contact.contactType}</p>
-                            <p className="text-sm text-gray-600">{contact.telefon}</p>
-                          </div>
-                          <Button variant="ghost" size="sm">
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-gray-500 text-center py-4">
-                      Noch keine Kontakte hinterlegt
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            {/* Insurance Tab */}
-            <TabsContent value="insurance" className="space-y-4">
-              <Card className="bg-white">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-2">
-                    <Heart className="h-4 w-4" />
-                    Aktuelle Pflegekasse
-                  </CardTitle>
-                  <Button size="sm" variant="outline" data-testid="button-change-insurance">
-                    Kasse wechseln
-                  </Button>
-                </CardHeader>
-                <CardContent>
+                <SectionCard
+                  title="Pflegekasse"
+                  icon={<Heart className={iconSize.sm} />}
+                >
                   {customer.currentInsurance ? (
-                    <div className="p-4 rounded-lg bg-blue-50 border border-blue-100">
+                    <div className="space-y-2">
                       <p className="font-medium text-gray-900">
                         {customer.currentInsurance.providerName}
                       </p>
-                      <p className="text-sm text-gray-600 mt-1">
-                        Versichertennummer: {customer.currentInsurance.versichertennummer}
+                      <p className="text-sm text-gray-600">
+                        Vers.-Nr.: {customer.currentInsurance.versichertennummer}
                       </p>
-                      <p className="text-xs text-gray-500 mt-2">
-                        Gültig seit {formatDate(customer.currentInsurance.validFrom)}
+                      <p className="text-xs text-gray-500">
+                        Seit {formatDate(customer.currentInsurance.validFrom)}
                       </p>
                     </div>
                   ) : (
-                    <div className="text-center py-6">
-                      <Heart className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                      <p className="text-gray-500">Keine Pflegekasse hinterlegt</p>
-                      <Button size="sm" className="mt-3 bg-teal-600 hover:bg-teal-700">
-                        Pflegekasse hinzufügen
-                      </Button>
-                    </div>
+                    <p className="text-gray-500">Keine Pflegekasse hinterlegt</p>
                   )}
-                </CardContent>
-              </Card>
+                </SectionCard>
+              </div>
+
+              {customer.needs && customer.needs.length > 0 && (
+                <SectionCard
+                  title="Besondere Bedürfnisse"
+                  icon={<Shield className={iconSize.sm} />}
+                >
+                  <div className="flex flex-wrap gap-2">
+                    {customer.needs.map((need, index) => (
+                      <Badge key={index} variant="secondary">
+                        {need}
+                      </Badge>
+                    ))}
+                  </div>
+                </SectionCard>
+              )}
             </TabsContent>
 
-            {/* Budgets Tab */}
+            <TabsContent value="contacts" className="space-y-4">
+              <SectionCard
+                title="Ansprechpartner & Notfallkontakte"
+                icon={<Users className={iconSize.sm} />}
+                actions={
+                  <Button size="sm" variant="outline" data-testid="button-add-contact">
+                    Hinzufügen
+                  </Button>
+                }
+              >
+                {customer.contacts && customer.contacts.length > 0 ? (
+                  <div className="space-y-3">
+                    {customer.contacts.map((contact) => (
+                      <div
+                        key={contact.id}
+                        className="flex items-center justify-between p-3 rounded-lg bg-gray-50"
+                      >
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium">{contact.vorname} {contact.nachname}</p>
+                            {contact.isPrimary && (
+                              <Badge variant="secondary" className="text-xs">
+                                Hauptkontakt
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-sm text-gray-500">{contact.contactType}</p>
+                          <p className="text-sm text-gray-600">{contact.telefon}</p>
+                        </div>
+                        <Button variant="ghost" size="sm">
+                          <Edit className={iconSize.sm} />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState
+                    icon={<Users className={iconSize.xl} />}
+                    title="Keine Kontakte"
+                    description="Noch keine Kontakte hinterlegt"
+                    className="py-6"
+                  />
+                )}
+              </SectionCard>
+            </TabsContent>
+
+            <TabsContent value="insurance" className="space-y-4">
+              <SectionCard
+                title="Aktuelle Pflegekasse"
+                icon={<Heart className={iconSize.sm} />}
+                actions={
+                  <Button size="sm" variant="outline" data-testid="button-change-insurance">
+                    Kasse wechseln
+                  </Button>
+                }
+              >
+                {customer.currentInsurance ? (
+                  <div className="p-4 rounded-lg bg-blue-50 border border-blue-100">
+                    <p className="font-medium text-gray-900">
+                      {customer.currentInsurance.providerName}
+                    </p>
+                    <p className="text-sm text-gray-600 mt-1">
+                      Versichertennummer: {customer.currentInsurance.versichertennummer}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-2">
+                      Gültig seit {formatDate(customer.currentInsurance.validFrom)}
+                    </p>
+                  </div>
+                ) : (
+                  <EmptyState
+                    icon={<Heart className={iconSize.xl} />}
+                    title="Keine Pflegekasse"
+                    description="Keine Pflegekasse hinterlegt"
+                    action={
+                      <Button size="sm" className={componentStyles.btnPrimary}>
+                        Pflegekasse hinzufügen
+                      </Button>
+                    }
+                    className="py-6"
+                  />
+                )}
+              </SectionCard>
+            </TabsContent>
+
             <TabsContent value="budgets" className="space-y-4">
-              <Card className="bg-white">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-2">
-                    <Wallet className="h-4 w-4" />
-                    Budgets & Leistungsansprüche
-                  </CardTitle>
+              <SectionCard
+                title="Budgets & Leistungsansprüche"
+                icon={<Wallet className={iconSize.sm} />}
+                actions={
                   <Button size="sm" variant="outline" data-testid="button-update-budgets">
                     Aktualisieren
                   </Button>
-                </CardHeader>
-                <CardContent>
-                  {customer.currentBudgets ? (
-                    <div className="grid gap-4 md:grid-cols-3">
-                      <div className="p-4 rounded-lg bg-green-50 border border-green-100">
-                        <p className="text-sm text-gray-600">§45b Entlastungsbetrag</p>
-                        <p className="text-xl font-semibold text-gray-900 mt-1">
-                          {formatBudget(customer.currentBudgets.entlastungsbetrag45b)}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">pro Monat</p>
-                      </div>
-                      <div className="p-4 rounded-lg bg-blue-50 border border-blue-100">
-                        <p className="text-sm text-gray-600">§39 Verhinderungspflege</p>
-                        <p className="text-xl font-semibold text-gray-900 mt-1">
-                          {formatBudget(customer.currentBudgets.verhinderungspflege39)}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">pro Jahr</p>
-                      </div>
-                      <div className="p-4 rounded-lg bg-purple-50 border border-purple-100">
-                        <p className="text-sm text-gray-600">§36 Pflegesachleistungen</p>
-                        <p className="text-xl font-semibold text-gray-900 mt-1">
-                          {formatBudget(customer.currentBudgets.pflegesachleistungen36)}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">pro Monat</p>
-                      </div>
+                }
+              >
+                {customer.currentBudgets ? (
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div className="p-4 rounded-lg bg-green-50 border border-green-100">
+                      <p className="text-sm text-gray-600">§45b Entlastungsbetrag</p>
+                      <p className="text-xl font-semibold text-gray-900 mt-1">
+                        {formatBudget(customer.currentBudgets.entlastungsbetrag45b)}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">pro Monat</p>
                     </div>
-                  ) : (
-                    <div className="text-center py-6">
-                      <Wallet className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                      <p className="text-gray-500">Keine Budgets hinterlegt</p>
-                      <Button size="sm" className="mt-3 bg-teal-600 hover:bg-teal-700">
+                    <div className="p-4 rounded-lg bg-blue-50 border border-blue-100">
+                      <p className="text-sm text-gray-600">§39 Verhinderungspflege</p>
+                      <p className="text-xl font-semibold text-gray-900 mt-1">
+                        {formatBudget(customer.currentBudgets.verhinderungspflege39)}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">pro Jahr</p>
+                    </div>
+                    <div className="p-4 rounded-lg bg-purple-50 border border-purple-100">
+                      <p className="text-sm text-gray-600">§36 Pflegesachleistungen</p>
+                      <p className="text-xl font-semibold text-gray-900 mt-1">
+                        {formatBudget(customer.currentBudgets.pflegesachleistungen36)}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">pro Monat</p>
+                    </div>
+                  </div>
+                ) : (
+                  <EmptyState
+                    icon={<Wallet className={iconSize.xl} />}
+                    title="Keine Budgets"
+                    description="Keine Budgets hinterlegt"
+                    action={
+                      <Button size="sm" className={componentStyles.btnPrimary}>
                         Budgets erfassen
                       </Button>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                    }
+                    className="py-6"
+                  />
+                )}
+              </SectionCard>
             </TabsContent>
 
-            {/* History Tab */}
             <TabsContent value="history" className="space-y-4">
-              <Card className="bg-white">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-2">
-                    <History className="h-4 w-4" />
-                    Pflegegrad-Verlauf
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {customer.careLevelHistory && customer.careLevelHistory.length > 0 ? (
-                    <div className="relative">
-                      <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200" />
-                      <div className="space-y-4">
-                        {customer.careLevelHistory.map((entry, index) => (
-                          <div key={entry.id} className="relative pl-10">
-                            <div
-                              className={`absolute left-2.5 w-3 h-3 rounded-full ${
-                                index === 0 ? "bg-teal-500" : "bg-gray-300"
-                              }`}
-                            />
-                            <div className="p-3 rounded-lg bg-gray-50">
-                              <div className="flex items-center justify-between">
-                                <Badge variant="outline">Pflegegrad {entry.pflegegrad}</Badge>
-                                <span className="text-xs text-gray-500">
-                                  {formatDate(entry.validFrom)}
-                                  {entry.validTo && ` - ${formatDate(entry.validTo)}`}
-                                </span>
-                              </div>
-                              {entry.notes && (
-                                <p className="text-sm text-gray-600 mt-2">{entry.notes}</p>
-                              )}
+              <SectionCard
+                title="Pflegegrad-Verlauf"
+                icon={<History className={iconSize.sm} />}
+              >
+                {customer.careLevelHistory && customer.careLevelHistory.length > 0 ? (
+                  <div className="relative">
+                    <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200" />
+                    <div className="space-y-4">
+                      {customer.careLevelHistory.map((entry, index) => (
+                        <div key={entry.id} className="relative pl-10">
+                          <div
+                            className={`absolute left-2.5 w-3 h-3 rounded-full ${
+                              index === 0 ? "bg-teal-500" : "bg-gray-300"
+                            }`}
+                          />
+                          <div className="p-3 rounded-lg bg-gray-50">
+                            <div className="flex items-center justify-between">
+                              <StatusBadge type="pflegegrad" value={entry.pflegegrad} />
+                              <span className="text-xs text-gray-500">
+                                {formatDate(entry.validFrom)}
+                                {entry.validTo && ` - ${formatDate(entry.validTo)}`}
+                              </span>
                             </div>
+                            {entry.notes && (
+                              <p className="text-sm text-gray-600 mt-2">{entry.notes}</p>
+                            )}
                           </div>
-                        ))}
-                      </div>
+                        </div>
+                      ))}
                     </div>
-                  ) : (
-                    <p className="text-gray-500 text-center py-4">
-                      Kein Pflegegrad-Verlauf vorhanden
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
+                  </div>
+                ) : (
+                  <EmptyState
+                    icon={<History className={iconSize.xl} />}
+                    title="Kein Verlauf"
+                    description="Kein Pflegegrad-Verlauf vorhanden"
+                    className="py-6"
+                  />
+                )}
+              </SectionCard>
             </TabsContent>
           </Tabs>
         </div>
