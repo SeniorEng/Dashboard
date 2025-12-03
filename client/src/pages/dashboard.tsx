@@ -2,12 +2,14 @@ import { useState } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/layout";
 import { useAppointments, AppointmentList } from "@/features/appointments";
+import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { format, addDays, subDays } from "date-fns";
 import { de } from "date-fns/locale";
 import { Calendar as CalendarIcon, Plus, ChevronLeft, ChevronRight } from "lucide-react";
 
 export default function Dashboard() {
+  const { user } = useAuth();
   const [selectedDate, setSelectedDate] = useState(new Date());
   const dateString = format(selectedDate, "yyyy-MM-dd");
   
@@ -26,7 +28,7 @@ export default function Dashboard() {
         <div className="flex items-start justify-between">
           <div>
             <h1 className="text-3xl font-bold text-foreground tracking-tight mb-1" data-testid="text-greeting">
-              Hallo, Sarah!
+              Hallo, {user?.displayName?.split(" ")[0] || "Mitarbeiter"}!
             </h1>
             <div className="flex items-center gap-2 mt-2">
               <Button 

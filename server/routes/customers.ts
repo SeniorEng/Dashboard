@@ -2,12 +2,22 @@ import { Router } from "express";
 import { storage } from "../storage";
 import { insertCustomerSchema } from "@shared/schema";
 import { fromError } from "zod-validation-error";
+import { requireAuth } from "../middleware/auth";
 
 const router = Router();
 
+router.use(requireAuth);
+
 router.get("/", async (req, res) => {
   try {
-    const customers = await storage.getCustomers();
+    const user = req.user!;
+    let customers = await storage.getCustomers();
+    
+    if (!user.isAdmin) {
+      const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
+      customers = customers.filter(c => assignedCustomerIds.includes(c.id));
+    }
+    
     res.json(customers);
   } catch (error) {
     console.error("Failed to fetch customers:", error);

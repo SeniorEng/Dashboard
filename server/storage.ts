@@ -33,6 +33,7 @@ export interface IStorage {
   getCustomer(id: number): Promise<Customer | undefined>;
   createCustomer(customer: InsertCustomer): Promise<Customer>;
   deleteCustomer(id: number): Promise<boolean>;
+  getAssignedCustomerIds(employeeId: number): Promise<number[]>;
   
   // Appointments - Basic
   getAppointments(): Promise<Appointment[]>;
@@ -76,6 +77,16 @@ export class DatabaseStorage implements IStorage {
   async deleteCustomer(id: number): Promise<boolean> {
     const result = await db.delete(customers).where(eq(customers.id, id)).returning();
     return result.length > 0;
+  }
+  
+  async getAssignedCustomerIds(employeeId: number): Promise<number[]> {
+    const result = await db
+      .select({ id: customers.id })
+      .from(customers)
+      .where(
+        sqlBuilder`${customers.primaryEmployeeId} = ${employeeId} OR ${customers.backupEmployeeId} = ${employeeId}`
+      );
+    return result.map(r => r.id);
   }
 
   // Appointments - Basic

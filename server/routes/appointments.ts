@@ -17,13 +17,26 @@ import {
   sendNotFound,
   sendServerError
 } from "../lib/errors";
+import { requireAuth } from "../middleware/auth";
 
 const router = Router();
+
+router.use(requireAuth);
 
 router.get("/", async (req, res) => {
   try {
     const date = req.query.date as string | undefined;
-    const appointments = await storage.getAppointmentsWithCustomers(date);
+    const user = req.user!;
+    
+    let appointments = await storage.getAppointmentsWithCustomers(date);
+    
+    if (!user.isAdmin) {
+      const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
+      appointments = appointments.filter(apt => 
+        assignedCustomerIds.includes(apt.customerId)
+      );
+    }
+    
     res.json(appointments);
   } catch (error) {
     handleRouteError(res, error, ErrorMessages.fetchAppointmentsFailed, "Failed to fetch appointments");
