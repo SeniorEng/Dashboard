@@ -228,6 +228,8 @@ export default function DocumentAppointment() {
     );
   }
 
+  const isErstberatung = appointment.appointmentType === "Erstberatung";
+
   if (appointment.status === "completed") {
     return (
       <Layout>
@@ -256,28 +258,31 @@ export default function DocumentAppointment() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => step === 1 ? setLocation(`/appointment/${id}`) : setStep(1)}
+          onClick={() => (isErstberatung || step === 1) ? setLocation(`/appointment/${id}`) : setStep(1)}
           className="mb-2 -ml-2"
           data-testid="button-back"
         >
           <ChevronLeft className="w-4 h-4 mr-1" />
-          {step === 1 ? "Zurück" : "Schritt 1"}
+          {(isErstberatung || step === 1) ? "Zurück" : "Schritt 1"}
         </Button>
         
         <h1 className="text-2xl font-bold text-foreground" data-testid="text-title">
           Dokumentation
         </h1>
         <p className="text-muted-foreground text-sm">
-          {appointment.customer?.name} • Schritt {step} von 2
+          {appointment.customer?.name}
+          {!isErstberatung && ` • Schritt ${step} von 2`}
         </p>
         
-        <div className="flex gap-2 mt-3">
-          <div className={`h-1 flex-1 rounded-full ${step >= 1 ? "bg-primary" : "bg-muted"}`} />
-          <div className={`h-1 flex-1 rounded-full ${step >= 2 ? "bg-primary" : "bg-muted"}`} />
-        </div>
+        {!isErstberatung && (
+          <div className="flex gap-2 mt-3">
+            <div className={`h-1 flex-1 rounded-full ${step >= 1 ? "bg-primary" : "bg-muted"}`} />
+            <div className={`h-1 flex-1 rounded-full ${step >= 2 ? "bg-primary" : "bg-muted"}`} />
+          </div>
+        )}
       </div>
 
-      {step === 1 ? (
+      {!isErstberatung && step === 1 ? (
         <div className="space-y-4">
           <Card>
             <CardHeader className="pb-3">

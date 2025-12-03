@@ -256,26 +256,24 @@ router.post("/:id/document", async (req, res) => {
       return sendNotFound(res, ErrorMessages.appointmentNotFound);
     }
     
-    if (appointment.appointmentType !== "Kundentermin") {
-      return sendForbidden(res, "INVALID_TYPE", "Nur Kundentermine können dokumentiert werden");
-    }
-    
     if (appointment.status === "completed") {
       return sendForbidden(res, "ALREADY_COMPLETED", "Dieser Termin wurde bereits dokumentiert");
     }
     
     const validatedData = documentKundenterminSchema.parse(req.body);
     
-    const serviceValidation = validateServiceDocumentation(
-      appointment,
-      validatedData.hauswirtschaftActualDauer,
-      validatedData.hauswirtschaftDetails,
-      validatedData.alltagsbegleitungActualDauer,
-      validatedData.alltagsbegleitungDetails
-    );
-    
-    if (!serviceValidation.valid) {
-      return sendBadRequest(res, serviceValidation.errors.join(", "));
+    if (appointment.appointmentType === "Kundentermin") {
+      const serviceValidation = validateServiceDocumentation(
+        appointment,
+        validatedData.hauswirtschaftActualDauer,
+        validatedData.hauswirtschaftDetails,
+        validatedData.alltagsbegleitungActualDauer,
+        validatedData.alltagsbegleitungDetails
+      );
+      
+      if (!serviceValidation.valid) {
+        return sendBadRequest(res, serviceValidation.errors.join(", "));
+      }
     }
     
     const updateData = {

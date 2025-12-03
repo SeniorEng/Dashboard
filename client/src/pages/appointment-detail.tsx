@@ -284,8 +284,8 @@ export default function AppointmentDetail() {
         </Card>
       )}
 
-      {/* Documentation Button - For Kundentermin that are not yet completed */}
-      {appointment.status !== "completed" && appointment.appointmentType === "Kundentermin" && (
+      {/* Documentation Button - For any appointment that is not yet completed */}
+      {appointment.status !== "completed" && (
         <div className="mt-6">
           <Button 
             className="w-full" 
