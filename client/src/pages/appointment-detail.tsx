@@ -27,6 +27,7 @@ import {
   canModifyAppointment,
   type AppointmentStatus
 } from "@shared/types";
+import { formatPhoneForDisplay } from "@shared/utils/phone";
 
 function getStatusInfo(status: string): { label: string; color: string; icon: React.ReactNode } {
   switch (status) {
@@ -146,7 +147,7 @@ export default function AppointmentDetail() {
               <div className="flex items-center text-muted-foreground text-sm mt-1">
                 <Phone className="w-4 h-4 mr-1.5 text-primary shrink-0" />
                 <a href={`tel:${appointment.customer.telefon}`} className="hover:text-primary">
-                  {appointment.customer.telefon}
+                  {formatPhoneForDisplay(appointment.customer.telefon)}
                 </a>
               </div>
             )}

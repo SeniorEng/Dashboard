@@ -1,6 +1,7 @@
 import { pgTable, text, integer, timestamp, serial, time, date, boolean, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+import { isValidPhoneNumber, parsePhoneNumber } from "libphonenumber-js";
 
 // ============================================
 // USER & AUTHENTICATION TABLES
@@ -102,7 +103,28 @@ export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 // User with roles (for API responses)
 export type UserWithRoles = User & { roles: EmployeeRole[] };
 
-// German phone number regex - supports mobile (01XX) and landline (0XX) formats
+// German phone validation using libphonenumber-js
+export const germanPhoneSchema = z.string().refine(
+  (value) => {
+    if (!value || value.trim() === "") return false;
+    try {
+      if (!isValidPhoneNumber(value, "DE")) return false;
+      const parsed = parsePhoneNumber(value, "DE");
+      return parsed?.country === "DE";
+    } catch {
+      return false;
+    }
+  },
+  { message: "Ungültige deutsche Telefonnummer" }
+);
+
+// Transform phone to E.164 format for storage
+export const germanPhoneTransformSchema = germanPhoneSchema.transform((value) => {
+  const parsed = parsePhoneNumber(value, "DE");
+  return parsed?.format("E.164") ?? value;
+});
+
+// Legacy regex (kept for backward compatibility)
 export const germanPhoneRegex = /^(\+49|0)[1-9]\d{1,14}$/;
 
 // ============================================
@@ -186,7 +208,7 @@ export const insertCustomerSchema = createInsertSchema(customers).omit({
 export const insertErstberatungCustomerSchema = z.object({
   vorname: z.string().min(1, "Vorname ist erforderlich"),
   nachname: z.string().min(1, "Nachname ist erforderlich"),
-  telefon: z.string().regex(germanPhoneRegex, "Ungültige deutsche Telefonnummer"),
+  telefon: germanPhoneTransformSchema,
   strasse: z.string().min(1, "Straße ist erforderlich"),
   nr: z.string().min(1, "Hausnummer ist erforderlich"),
   plz: z.string().regex(/^\d{5}$/, "PLZ muss 5 Ziffern haben"),

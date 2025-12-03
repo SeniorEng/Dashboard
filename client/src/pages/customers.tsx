@@ -10,20 +10,13 @@ import {
   Heart, Loader2, Users
 } from "lucide-react";
 import type { Customer } from "@shared/schema";
+import { formatPhoneForDisplay } from "@shared/utils/phone";
 
 function formatAddress(customer: Customer): string {
   if (customer.strasse && customer.nr && customer.plz && customer.stadt) {
     return `${customer.strasse} ${customer.nr}, ${customer.plz} ${customer.stadt}`;
   }
   return customer.address;
-}
-
-function formatPhone(phone: string | null): string {
-  if (!phone) return "—";
-  if (phone.startsWith("+49")) {
-    return phone.replace("+49", "0");
-  }
-  return phone;
 }
 
 function getPflegegradLabel(pflegegrad: number | null): string | null {
@@ -129,7 +122,7 @@ export default function CustomersPage() {
 
 function CustomerCard({ customer }: { customer: Customer }) {
   const address = formatAddress(customer);
-  const phone = formatPhone(customer.telefon);
+  const phone = customer.telefon ? formatPhoneForDisplay(customer.telefon) : null;
   const pflegegradLabel = getPflegegradLabel(customer.pflegegrad);
 
   return (
@@ -170,7 +163,7 @@ function CustomerCard({ customer }: { customer: Customer }) {
 
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Phone className="w-4 h-4 flex-shrink-0 text-primary/60" />
-                {customer.telefon ? (
+                {phone ? (
                   <a 
                     href={`tel:${customer.telefon}`} 
                     className="text-primary hover:underline"

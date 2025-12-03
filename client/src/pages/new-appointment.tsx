@@ -14,9 +14,7 @@ import { ChevronLeft, Loader2, Calendar, Clock, User, Home, Plus } from "lucide-
 import { useToast } from "@/hooks/use-toast";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS } from "@shared/types";
 import type { Customer } from "@shared/schema";
-
-// German phone regex
-const germanPhoneRegex = /^(\+49|0)[1-9]\d{1,14}$/;
+import { validateGermanPhone, formatPhoneAsYouType } from "@shared/utils/phone";
 
 export default function NewAppointment() {
   const [, setLocation] = useLocation();
@@ -163,7 +161,8 @@ export default function NewAppointment() {
     const newErrors: Record<string, string> = {};
     if (!ebVorname.trim()) newErrors.ebVorname = "Vorname ist erforderlich";
     if (!ebNachname.trim()) newErrors.ebNachname = "Nachname ist erforderlich";
-    if (!germanPhoneRegex.test(ebTelefon)) newErrors.ebTelefon = "Ungültige Telefonnummer";
+    const phoneValidation = validateGermanPhone(ebTelefon);
+    if (!phoneValidation.valid) newErrors.ebTelefon = phoneValidation.error;
     if (!ebStrasse.trim()) newErrors.ebStrasse = "Straße ist erforderlich";
     if (!ebNr.trim()) newErrors.ebNr = "Hausnummer ist erforderlich";
     if (!/^\d{5}$/.test(ebPlz)) newErrors.ebPlz = "PLZ muss 5 Ziffern haben";
@@ -493,11 +492,13 @@ export default function NewAppointment() {
                 <Label htmlFor="eb-telefon">Telefon *</Label>
                 <Input
                   id="eb-telefon"
+                  type="tel"
                   value={ebTelefon}
-                  onChange={(e) => setEbTelefon(e.target.value)}
-                  placeholder="+49 170 1234567 oder 030 12345678"
+                  onChange={(e) => setEbTelefon(formatPhoneAsYouType(e.target.value))}
+                  placeholder="0171 1234567"
                   data-testid="input-eb-telefon"
                 />
+                <p className="text-xs text-muted-foreground">Mobil (0171...) oder Festnetz (030...)</p>
                 {errors.ebTelefon && <p className="text-destructive text-sm">{errors.ebTelefon}</p>}
               </div>
 
