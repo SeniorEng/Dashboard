@@ -260,8 +260,8 @@ router.post("/:id/document", async (req, res) => {
       return sendForbidden(res, "INVALID_TYPE", "Nur Kundentermine können dokumentiert werden");
     }
     
-    if (appointment.status !== "documenting") {
-      return sendForbidden(res, "INVALID_STATUS", "Der Termin muss im Status 'Dokumentation' sein");
+    if (appointment.status === "completed") {
+      return sendForbidden(res, "ALREADY_COMPLETED", "Dieser Termin wurde bereits dokumentiert");
     }
     
     const validatedData = documentKundenterminSchema.parse(req.body);

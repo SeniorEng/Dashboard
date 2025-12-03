@@ -228,17 +228,14 @@ export default function DocumentAppointment() {
     );
   }
 
-  if (appointment.status !== "documenting") {
+  if (appointment.status === "completed") {
     return (
       <Layout>
-        <Card className="border-amber-200 bg-amber-50">
+        <Card className="border-green-200 bg-green-50">
           <CardContent className="pt-6 text-center">
-            <AlertCircle className="w-12 h-12 mx-auto text-amber-600 mb-4" />
-            <p className="text-amber-800 font-medium">
-              Dieser Termin kann nicht dokumentiert werden
-            </p>
-            <p className="text-amber-600 text-sm mt-2">
-              Der Termin muss zuerst beendet werden, um in den Dokumentationsmodus zu wechseln.
+            <Check className="w-12 h-12 mx-auto text-green-600 mb-4" />
+            <p className="text-green-800 font-medium">
+              Dieser Termin wurde bereits dokumentiert
             </p>
             <Button 
               variant="outline" 

@@ -1,9 +1,8 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback } from "react";
 import { useRoute, useLocation } from "wouter";
 import { Layout } from "@/components/layout";
 import { useAppointment } from "@/features/appointments";
 import { useDeleteAppointment } from "@/features/appointments/hooks";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
@@ -18,14 +17,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import { 
   MapPin, Clock, Calendar, FileText, ChevronLeft, Loader2, 
-  Pencil, Trash2, CheckCircle2, AlertTriangle, Phone, Play, Square
+  Pencil, Trash2, CheckCircle2, AlertTriangle, Phone
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { formatTimeSlot, getEndTime } from "@/features/appointments/utils";
 import { 
   formatDuration, 
   getStatusLabel, 
-  getStatusColor,
   canModifyAppointment,
   type AppointmentStatus
 } from "@shared/types";
@@ -63,64 +61,11 @@ export default function AppointmentDetail() {
   const [, params] = useRoute("/appointment/:id");
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const queryClient = useQueryClient();
   const id = params?.id ? parseInt(params.id) : 0;
   
   const { data: appointment, isLoading } = useAppointment(id);
   const deleteMutation = useDeleteAppointment();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-
-  const startVisitMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(`/api/appointments/${id}/start`, { method: "POST" });
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || "Besuch konnte nicht gestartet werden");
-      }
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["appointment", id] });
-      queryClient.invalidateQueries({ queryKey: ["appointments"] });
-      toast({
-        title: "Besuch gestartet",
-        description: "Der Besuch wurde erfolgreich gestartet.",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        variant: "destructive",
-        title: "Fehler",
-        description: error.message,
-      });
-    },
-  });
-
-  const endVisitMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(`/api/appointments/${id}/end`, { method: "POST" });
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || "Besuch konnte nicht beendet werden");
-      }
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["appointment", id] });
-      queryClient.invalidateQueries({ queryKey: ["appointments"] });
-      toast({
-        title: "Besuch beendet",
-        description: "Der Besuch wurde beendet. Sie können jetzt dokumentieren.",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        variant: "destructive",
-        title: "Fehler",
-        description: error.message,
-      });
-    },
-  });
 
   const handleDelete = useCallback(async () => {
     try {
@@ -339,47 +284,8 @@ export default function AppointmentDetail() {
         </Card>
       )}
 
-      {/* Status Transition Buttons */}
-      {appointment.status === "scheduled" && (
-        <div className="mt-6">
-          <Button 
-            className="w-full bg-blue-600 hover:bg-blue-700" 
-            size="lg"
-            onClick={() => startVisitMutation.mutate()}
-            disabled={startVisitMutation.isPending}
-            data-testid="button-start-visit"
-          >
-            {startVisitMutation.isPending ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Play className="w-4 h-4 mr-2" />
-            )}
-            Besuch starten
-          </Button>
-        </div>
-      )}
-
-      {appointment.status === "in-progress" && (
-        <div className="mt-6">
-          <Button 
-            className="w-full bg-orange-600 hover:bg-orange-700" 
-            size="lg"
-            onClick={() => endVisitMutation.mutate()}
-            disabled={endVisitMutation.isPending}
-            data-testid="button-end-visit"
-          >
-            {endVisitMutation.isPending ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Square className="w-4 h-4 mr-2" />
-            )}
-            Besuch beenden
-          </Button>
-        </div>
-      )}
-
-      {/* Documentation Button - Only for Kundentermin in documenting status */}
-      {appointment.status === "documenting" && appointment.appointmentType === "Kundentermin" && (
+      {/* Documentation Button - For Kundentermin that are not yet completed */}
+      {appointment.status !== "completed" && appointment.appointmentType === "Kundentermin" && (
         <div className="mt-6">
           <Button 
             className="w-full" 
