@@ -1,8 +1,36 @@
 import { Link, useLocation } from "wouter";
 import logo from "@assets/generated_images/friendly_elderly_care_service_logo_with_hands_and_house_icon.png";
+import { useAuth } from "@/hooks/use-auth";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Shield, LogOut, Settings, User } from "lucide-react";
+
+function getInitials(name: string): string {
+  return name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+}
 
 export function Layout({ children }: { children: React.ReactNode }) {
-  const [location] = useLocation();
+  const [location, navigate] = useLocation();
+  const { user, logout, isAuthenticated } = useAuth();
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate("/login");
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background font-sans text-foreground pb-20">
@@ -14,14 +42,46 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <span className="font-bold text-xl tracking-tight text-primary">CareConnect</span>
           </Link>
           
-          <div className="flex items-center gap-4">
-            <div className="hidden md:flex text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">Employee:</span>&nbsp;Sarah Jenkins
+          {isAuthenticated && user ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center gap-3 hover:opacity-80 transition-opacity focus:outline-none" data-testid="button-user-menu">
+                  <div className="hidden md:flex text-sm text-muted-foreground">
+                    <span className="font-medium text-foreground">{user.displayName}</span>
+                  </div>
+                  <div className="h-9 w-9 rounded-full bg-secondary flex items-center justify-center text-secondary-foreground font-bold ring-2 ring-background shadow-sm">
+                    {getInitials(user.displayName)}
+                  </div>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <div className="px-2 py-1.5">
+                  <p className="text-sm font-medium">{user.displayName}</p>
+                  <p className="text-xs text-muted-foreground">{user.email}</p>
+                </div>
+                <DropdownMenuSeparator />
+                {user.isAdmin && (
+                  <>
+                    <DropdownMenuItem onClick={() => navigate("/admin")} data-testid="menu-admin">
+                      <Shield className="mr-2 h-4 w-4" />
+                      Administration
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
+                <DropdownMenuItem onClick={handleLogout} data-testid="menu-logout">
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Abmelden
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <div className="flex items-center gap-4">
+              <Link href="/login" className="text-sm text-primary hover:underline">
+                Anmelden
+              </Link>
             </div>
-            <div className="h-9 w-9 rounded-full bg-secondary flex items-center justify-center text-secondary-foreground font-bold ring-2 ring-background shadow-sm">
-              SJ
-            </div>
-          </div>
+          )}
         </div>
       </header>
 
