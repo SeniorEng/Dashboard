@@ -88,8 +88,14 @@ router.post("/users", async (req: Request, res: Response) => {
 });
 
 const updateUserSchema = z.object({
-  displayName: z.string().min(1).optional(),
   email: z.string().email().optional(),
+  vorname: z.string().min(1).optional(),
+  nachname: z.string().min(1).optional(),
+  strasse: z.string().optional(),
+  hausnummer: z.string().optional(),
+  plz: z.string().optional(),
+  stadt: z.string().optional(),
+  geburtsdatum: z.string().optional(),
   isActive: z.boolean().optional(),
   isAdmin: z.boolean().optional(),
   roles: z.array(z.enum(EMPLOYEE_ROLES)).optional(),

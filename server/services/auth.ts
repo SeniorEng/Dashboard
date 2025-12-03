@@ -261,8 +261,14 @@ export class AuthService {
   async updateUser(
     id: number,
     updates: {
-      displayName?: string;
       email?: string;
+      vorname?: string;
+      nachname?: string;
+      strasse?: string;
+      hausnummer?: string;
+      plz?: string;
+      stadt?: string;
+      geburtsdatum?: string;
       isActive?: boolean;
       isAdmin?: boolean;
     }
@@ -278,9 +284,21 @@ export class AuthService {
       }
     }
 
+    const dbUpdates: Record<string, unknown> = { updatedAt: new Date() };
+    if (updates.email !== undefined) dbUpdates.email = updates.email;
+    if (updates.vorname !== undefined) dbUpdates.vorname = updates.vorname;
+    if (updates.nachname !== undefined) dbUpdates.nachname = updates.nachname;
+    if (updates.strasse !== undefined) dbUpdates.strasse = updates.strasse || null;
+    if (updates.hausnummer !== undefined) dbUpdates.hausnummer = updates.hausnummer || null;
+    if (updates.plz !== undefined) dbUpdates.plz = updates.plz || null;
+    if (updates.stadt !== undefined) dbUpdates.stadt = updates.stadt || null;
+    if (updates.geburtsdatum !== undefined) dbUpdates.geburtsdatum = updates.geburtsdatum || null;
+    if (updates.isActive !== undefined) dbUpdates.isActive = updates.isActive;
+    if (updates.isAdmin !== undefined) dbUpdates.isAdmin = updates.isAdmin;
+
     const [updatedUser] = await db
       .update(users)
-      .set({ ...updates, updatedAt: new Date() })
+      .set(dbUpdates)
       .where(eq(users.id, id))
       .returning();
 

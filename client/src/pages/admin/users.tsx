@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,10 +46,31 @@ interface UserData {
   id: number;
   email: string;
   displayName: string;
+  vorname: string | null;
+  nachname: string | null;
+  strasse: string | null;
+  hausnummer: string | null;
+  plz: string | null;
+  stadt: string | null;
+  geburtsdatum: string | null;
   isActive: boolean;
   isAdmin: boolean;
   roles: string[];
   createdAt: string;
+}
+
+interface UserFormData {
+  email: string;
+  password?: string;
+  vorname: string;
+  nachname: string;
+  strasse?: string;
+  hausnummer?: string;
+  plz?: string;
+  stadt?: string;
+  geburtsdatum?: string;
+  isAdmin: boolean;
+  roles: string[];
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -85,19 +106,7 @@ export default function AdminUsers() {
   });
 
   const createMutation = useMutation({
-    mutationFn: async (data: {
-      email: string;
-      password: string;
-      vorname: string;
-      nachname: string;
-      strasse?: string;
-      hausnummer?: string;
-      plz?: string;
-      stadt?: string;
-      geburtsdatum?: string;
-      isAdmin: boolean;
-      roles: string[];
-    }) => {
+    mutationFn: async (data: UserFormData & { password: string }) => {
       const res = await fetch("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -121,16 +130,7 @@ export default function AdminUsers() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: async ({
-      id,
-      ...data
-    }: {
-      id: number;
-      displayName?: string;
-      email?: string;
-      isAdmin?: boolean;
-      roles?: string[];
-    }) => {
+    mutationFn: async ({ id, ...data }: { id: number } & Partial<UserFormData>) => {
       const res = await fetch(`/api/admin/users/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -219,6 +219,15 @@ export default function AdminUsers() {
     },
   });
 
+  const handleCreateSubmit = (data: UserFormData & { password: string }) => {
+    createMutation.mutate(data);
+  };
+
+  const handleEditSubmit = (data: UserFormData) => {
+    if (!editingUser) return;
+    updateMutation.mutate({ id: editingUser.id, ...data });
+  };
+
   return (
     <Layout>
       <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
@@ -239,9 +248,10 @@ export default function AdminUsers() {
                   Neuer Benutzer
                 </Button>
               </DialogTrigger>
-              <DialogContent>
-                <CreateUserForm
-                  onSubmit={(data) => createMutation.mutate(data)}
+              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                <UserForm
+                  mode="create"
+                  onSubmit={handleCreateSubmit}
                   isLoading={createMutation.isPending}
                 />
               </DialogContent>
@@ -374,11 +384,12 @@ export default function AdminUsers() {
       </div>
 
       <Dialog open={!!editingUser} onOpenChange={() => setEditingUser(null)}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           {editingUser && (
-            <EditUserForm
+            <UserForm
+              mode="edit"
               user={editingUser}
-              onSubmit={(data) => updateMutation.mutate({ id: editingUser.id, ...data })}
+              onSubmit={handleEditSubmit}
               isLoading={updateMutation.isPending}
             />
           )}
@@ -402,42 +413,33 @@ export default function AdminUsers() {
   );
 }
 
-function CreateUserForm({
+function UserForm({
+  mode,
+  user,
   onSubmit,
   isLoading,
 }: {
-  onSubmit: (data: {
-    email: string;
-    password: string;
-    vorname: string;
-    nachname: string;
-    strasse?: string;
-    hausnummer?: string;
-    plz?: string;
-    stadt?: string;
-    geburtsdatum?: string;
-    isAdmin: boolean;
-    roles: string[];
-  }) => void;
+  mode: "create" | "edit";
+  user?: UserData;
+  onSubmit: (data: UserFormData & { password?: string }) => void;
   isLoading: boolean;
 }) {
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(user?.email ?? "");
   const [password, setPassword] = useState("");
-  const [vorname, setVorname] = useState("");
-  const [nachname, setNachname] = useState("");
-  const [strasse, setStrasse] = useState("");
-  const [hausnummer, setHausnummer] = useState("");
-  const [plz, setPlz] = useState("");
-  const [stadt, setStadt] = useState("");
-  const [geburtsdatum, setGeburtsdatum] = useState("");
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [roles, setRoles] = useState<string[]>([]);
+  const [vorname, setVorname] = useState(user?.vorname ?? "");
+  const [nachname, setNachname] = useState(user?.nachname ?? "");
+  const [strasse, setStrasse] = useState(user?.strasse ?? "");
+  const [hausnummer, setHausnummer] = useState(user?.hausnummer ?? "");
+  const [plz, setPlz] = useState(user?.plz ?? "");
+  const [stadt, setStadt] = useState(user?.stadt ?? "");
+  const [geburtsdatum, setGeburtsdatum] = useState(user?.geburtsdatum ?? "");
+  const [isAdmin, setIsAdmin] = useState(user?.isAdmin ?? false);
+  const [roles, setRoles] = useState<string[]>(user?.roles ?? []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit({
+    const data: UserFormData & { password?: string } = {
       email,
-      password,
       vorname,
       nachname,
       strasse: strasse || undefined,
@@ -447,83 +449,80 @@ function CreateUserForm({
       geburtsdatum: geburtsdatum || undefined,
       isAdmin,
       roles,
-    });
+    };
+    
+    if (mode === "create") {
+      data.password = password;
+    }
+    
+    onSubmit(data);
   };
+
+  const isCreate = mode === "create";
 
   return (
     <form onSubmit={handleSubmit}>
       <DialogHeader>
-        <DialogTitle>Neuen Benutzer erstellen</DialogTitle>
+        <DialogTitle>
+          {isCreate ? "Neuen Benutzer erstellen" : "Benutzer bearbeiten"}
+        </DialogTitle>
         <DialogDescription>
-          Erstellen Sie ein neues Benutzerkonto für einen Mitarbeiter.
+          {isCreate
+            ? "Erstellen Sie ein neues Benutzerkonto für einen Mitarbeiter."
+            : `Bearbeiten Sie die Daten von ${user?.displayName}.`}
         </DialogDescription>
       </DialogHeader>
-      <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
-        <div className="grid grid-cols-2 gap-4">
+      
+      <div className="space-y-6 py-4">
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold text-gray-700 border-b pb-2">Persönliche Daten</h3>
+          
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="vorname">Vorname *</Label>
+              <Input
+                id="vorname"
+                value={vorname}
+                onChange={(e) => setVorname(e.target.value)}
+                required
+                data-testid="input-user-vorname"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="nachname">Nachname *</Label>
+              <Input
+                id="nachname"
+                value={nachname}
+                onChange={(e) => setNachname(e.target.value)}
+                required
+                data-testid="input-user-nachname"
+              />
+            </div>
+          </div>
+          
           <div className="space-y-2">
-            <Label htmlFor="vorname">Vorname</Label>
+            <Label htmlFor="geburtsdatum">Geburtsdatum</Label>
             <Input
-              id="vorname"
-              value={vorname}
-              onChange={(e) => setVorname(e.target.value)}
-              required
-              data-testid="input-new-user-vorname"
+              id="geburtsdatum"
+              type="date"
+              value={geburtsdatum}
+              onChange={(e) => setGeburtsdatum(e.target.value)}
+              data-testid="input-user-geburtsdatum"
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="nachname">Nachname</Label>
-            <Input
-              id="nachname"
-              value={nachname}
-              onChange={(e) => setNachname(e.target.value)}
-              required
-              data-testid="input-new-user-nachname"
-            />
-          </div>
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="geburtsdatum">Geburtsdatum</Label>
-          <Input
-            id="geburtsdatum"
-            type="date"
-            value={geburtsdatum}
-            onChange={(e) => setGeburtsdatum(e.target.value)}
-            data-testid="input-new-user-geburtsdatum"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="email">E-Mail</Label>
-          <Input
-            id="email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            data-testid="input-new-user-email"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="password">Passwort</Label>
-          <Input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={8}
-            data-testid="input-new-user-password"
-          />
-        </div>
-        <div className="border-t pt-4 mt-4">
-          <p className="text-sm font-medium mb-3">Adresse</p>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="col-span-2 space-y-2">
+
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold text-gray-700 border-b pb-2">Adresse</h3>
+          
+          <div className="grid grid-cols-4 gap-4">
+            <div className="col-span-3 space-y-2">
               <Label htmlFor="strasse">Straße</Label>
               <Input
                 id="strasse"
                 value={strasse}
                 onChange={(e) => setStrasse(e.target.value)}
-                data-testid="input-new-user-strasse"
+                data-testid="input-user-strasse"
               />
             </div>
             <div className="space-y-2">
@@ -532,18 +531,19 @@ function CreateUserForm({
                 id="hausnummer"
                 value={hausnummer}
                 onChange={(e) => setHausnummer(e.target.value)}
-                data-testid="input-new-user-hausnummer"
+                data-testid="input-user-hausnummer"
               />
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-4 mt-4">
+          
+          <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label htmlFor="plz">PLZ</Label>
               <Input
                 id="plz"
                 value={plz}
                 onChange={(e) => setPlz(e.target.value)}
-                data-testid="input-new-user-plz"
+                data-testid="input-user-plz"
               />
             </div>
             <div className="col-span-2 space-y-2">
@@ -552,12 +552,47 @@ function CreateUserForm({
                 id="stadt"
                 value={stadt}
                 onChange={(e) => setStadt(e.target.value)}
-                data-testid="input-new-user-stadt"
+                data-testid="input-user-stadt"
               />
             </div>
           </div>
         </div>
-        <div className="border-t pt-4 mt-4">
+
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold text-gray-700 border-b pb-2">Zugangsdaten</h3>
+          
+          <div className="space-y-2">
+            <Label htmlFor="email">E-Mail *</Label>
+            <Input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              data-testid="input-user-email"
+            />
+          </div>
+          
+          {isCreate && (
+            <div className="space-y-2">
+              <Label htmlFor="password">Passwort *</Label>
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={8}
+                placeholder="Mindestens 8 Zeichen"
+                data-testid="input-user-password"
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold text-gray-700 border-b pb-2">Berechtigungen</h3>
+          
           <div className="flex items-center space-x-2">
             <Checkbox
               id="isAdmin"
@@ -567,141 +602,41 @@ function CreateUserForm({
             />
             <Label htmlFor="isAdmin">Administrator-Rechte</Label>
           </div>
-        </div>
-        <div className="space-y-2">
-          <Label>Berechtigungen</Label>
-          <div className="grid grid-cols-2 gap-2">
-            {AVAILABLE_ROLES.map((role) => (
-              <div key={role} className="flex items-center space-x-2">
-                <Checkbox
-                  id={`role-${role}`}
-                  checked={roles.includes(role)}
-                  onCheckedChange={(checked) => {
-                    if (checked) {
-                      setRoles([...roles, role]);
-                    } else {
-                      setRoles(roles.filter((r) => r !== role));
-                    }
-                  }}
-                  data-testid={`checkbox-role-${role}`}
-                />
-                <Label htmlFor={`role-${role}`}>{ROLE_LABELS[role]}</Label>
-              </div>
-            ))}
+          
+          <div className="space-y-2">
+            <Label>Tätigkeitsbereiche</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {AVAILABLE_ROLES.map((role) => (
+                <div key={role} className="flex items-center space-x-2">
+                  <Checkbox
+                    id={`role-${role}`}
+                    checked={roles.includes(role)}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        setRoles([...roles, role]);
+                      } else {
+                        setRoles(roles.filter((r) => r !== role));
+                      }
+                    }}
+                    data-testid={`checkbox-role-${role}`}
+                  />
+                  <Label htmlFor={`role-${role}`}>{ROLE_LABELS[role]}</Label>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
+      
       <DialogFooter>
-        <Button type="submit" disabled={isLoading} data-testid="button-submit-create-user">
+        <Button type="submit" disabled={isLoading} data-testid="button-submit-user">
           {isLoading ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Erstellen...
+              {isCreate ? "Erstellen..." : "Speichern..."}
             </>
           ) : (
-            "Erstellen"
-          )}
-        </Button>
-      </DialogFooter>
-    </form>
-  );
-}
-
-function EditUserForm({
-  user,
-  onSubmit,
-  isLoading,
-}: {
-  user: UserData;
-  onSubmit: (data: {
-    displayName?: string;
-    email?: string;
-    isAdmin?: boolean;
-    roles?: string[];
-  }) => void;
-  isLoading: boolean;
-}) {
-  const [displayName, setDisplayName] = useState(user.displayName);
-  const [email, setEmail] = useState(user.email);
-  const [isAdmin, setIsAdmin] = useState(user.isAdmin);
-  const [roles, setRoles] = useState<string[]>(user.roles);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSubmit({ displayName, email, isAdmin, roles });
-  };
-
-  return (
-    <form onSubmit={handleSubmit}>
-      <DialogHeader>
-        <DialogTitle>Benutzer bearbeiten</DialogTitle>
-        <DialogDescription>
-          Bearbeiten Sie die Daten von {user.displayName}.
-        </DialogDescription>
-      </DialogHeader>
-      <div className="space-y-4 py-4">
-        <div className="space-y-2">
-          <Label htmlFor="edit-displayName">Name</Label>
-          <Input
-            id="edit-displayName"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            required
-            data-testid="input-edit-user-name"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="edit-email">E-Mail</Label>
-          <Input
-            id="edit-email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            data-testid="input-edit-user-email"
-          />
-        </div>
-        <div className="flex items-center space-x-2">
-          <Checkbox
-            id="edit-isAdmin"
-            checked={isAdmin}
-            onCheckedChange={(checked) => setIsAdmin(!!checked)}
-            data-testid="checkbox-edit-is-admin"
-          />
-          <Label htmlFor="edit-isAdmin">Administrator-Rechte</Label>
-        </div>
-        <div className="space-y-2">
-          <Label>Berechtigungen</Label>
-          <div className="grid grid-cols-2 gap-2">
-            {AVAILABLE_ROLES.map((role) => (
-              <div key={role} className="flex items-center space-x-2">
-                <Checkbox
-                  id={`edit-role-${role}`}
-                  checked={roles.includes(role)}
-                  onCheckedChange={(checked) => {
-                    if (checked) {
-                      setRoles([...roles, role]);
-                    } else {
-                      setRoles(roles.filter((r) => r !== role));
-                    }
-                  }}
-                  data-testid={`checkbox-edit-role-${role}`}
-                />
-                <Label htmlFor={`edit-role-${role}`}>{ROLE_LABELS[role]}</Label>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-      <DialogFooter>
-        <Button type="submit" disabled={isLoading} data-testid="button-submit-edit-user">
-          {isLoading ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Speichern...
-            </>
-          ) : (
-            "Speichern"
+            isCreate ? "Erstellen" : "Speichern"
           )}
         </Button>
       </DialogFooter>
