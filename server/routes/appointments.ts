@@ -159,6 +159,60 @@ router.patch("/:id", async (req, res) => {
   }
 });
 
+router.post("/:id/start", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
+    }
+    
+    const appointment = await storage.getAppointment(id);
+    if (!appointment) {
+      return sendNotFound(res, ErrorMessages.appointmentNotFound);
+    }
+    
+    if (appointment.status !== "scheduled") {
+      return sendForbidden(res, "INVALID_STATUS", "Nur geplante Termine können gestartet werden");
+    }
+    
+    const updatedAppointment = await storage.updateAppointment(id, {
+      status: "in-progress",
+      actualStart: new Date(),
+    });
+    
+    res.json(updatedAppointment);
+  } catch (error) {
+    handleRouteError(res, error, "Fehler beim Starten des Besuchs", "Failed to start visit");
+  }
+});
+
+router.post("/:id/end", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
+    }
+    
+    const appointment = await storage.getAppointment(id);
+    if (!appointment) {
+      return sendNotFound(res, ErrorMessages.appointmentNotFound);
+    }
+    
+    if (appointment.status !== "in-progress") {
+      return sendForbidden(res, "INVALID_STATUS", "Nur laufende Termine können beendet werden");
+    }
+    
+    const updatedAppointment = await storage.updateAppointment(id, {
+      status: "documenting",
+      actualEnd: new Date(),
+    });
+    
+    res.json(updatedAppointment);
+  } catch (error) {
+    handleRouteError(res, error, "Fehler beim Beenden des Besuchs", "Failed to end visit");
+  }
+});
+
 router.get("/:id/travel-suggestion", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
