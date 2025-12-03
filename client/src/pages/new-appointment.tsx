@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { ChevronLeft, Loader2, Calendar, Clock, User, Home, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { iconSize, componentStyles } from "@/design-system";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS } from "@shared/types";
 import type { Customer } from "@shared/schema";
 import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
@@ -252,7 +253,7 @@ export default function NewAppointment() {
           onClick={() => setLocation("/")}
           data-testid="button-back"
         >
-          <ChevronLeft className="w-4 h-4 mr-1" /> Zurück
+          <ChevronLeft className={`${iconSize.sm} mr-1`} /> Zurück
         </Button>
         <h1 className="text-2xl font-bold">Neuer Termin</h1>
       </div>
@@ -260,10 +261,10 @@ export default function NewAppointment() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full grid-cols-2 mb-6">
           <TabsTrigger value="kundentermin" data-testid="tab-kundentermin">
-            <User className="w-4 h-4 mr-2" /> Kundentermin
+            <User className={`${iconSize.sm} mr-2`} /> Kundentermin
           </TabsTrigger>
           <TabsTrigger value="erstberatung" data-testid="tab-erstberatung">
-            <Plus className="w-4 h-4 mr-2" /> Erstberatung
+            <Plus className={`${iconSize.sm} mr-2`} /> Erstberatung
           </TabsTrigger>
         </TabsList>
 
@@ -300,7 +301,7 @@ export default function NewAppointment() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="kt-date">
-                    <Calendar className="w-4 h-4 inline mr-1" /> Datum
+                    <Calendar className={`${iconSize.sm} inline mr-1`} /> Datum
                   </Label>
                   <Input
                     id="kt-date"
@@ -312,7 +313,7 @@ export default function NewAppointment() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="kt-time">
-                    <Clock className="w-4 h-4 inline mr-1" /> Startzeit
+                    <Clock className={`${iconSize.sm} inline mr-1`} /> Startzeit
                   </Label>
                   <Input
                     id="kt-time"
@@ -403,7 +404,7 @@ export default function NewAppointment() {
               {ktSummary.hasServices && (
                 <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 space-y-3" data-testid="summary-panel">
                   <div className="flex items-center gap-2 text-primary font-semibold">
-                    <Clock className="w-4 h-4" />
+                    <Clock className={iconSize.sm} />
                     <span>Terminübersicht</span>
                   </div>
                   
@@ -448,13 +449,13 @@ export default function NewAppointment() {
               </div>
 
               <Button
-                className="w-full"
+                className={`w-full ${componentStyles.btnPrimary}`}
                 size="lg"
                 onClick={handleKundenterminSubmit}
                 disabled={isPending}
                 data-testid="button-create-kundentermin"
               >
-                {isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                {isPending ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : null}
                 Kundentermin erstellen
               </Button>
             </CardContent>
@@ -511,7 +512,7 @@ export default function NewAppointment() {
               {/* Address */}
               <div className="space-y-4">
                 <Label className="flex items-center gap-2">
-                  <Home className="w-4 h-4" /> Adresse
+                  <Home className={iconSize.sm} /> Adresse
                 </Label>
                 <div className="grid grid-cols-3 gap-4">
                   <div className="col-span-2 space-y-2">
@@ -585,7 +586,7 @@ export default function NewAppointment() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="eb-date">
-                    <Calendar className="w-4 h-4 inline mr-1" /> Datum *
+                    <Calendar className={`${iconSize.sm} inline mr-1`} /> Datum *
                   </Label>
                   <Input
                     id="eb-date"
@@ -597,7 +598,7 @@ export default function NewAppointment() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="eb-start">
-                    <Clock className="w-4 h-4 inline mr-1" /> Startzeit *
+                    <Clock className={`${iconSize.sm} inline mr-1`} /> Startzeit *
                   </Label>
                   <Input
                     id="eb-start"
@@ -637,7 +638,7 @@ export default function NewAppointment() {
               {/* Summary */}
               <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 space-y-3" data-testid="eb-summary-panel">
                 <div className="flex items-center gap-2 text-purple-700 font-semibold">
-                  <Clock className="w-4 h-4" />
+                  <Clock className={iconSize.sm} />
                   <span>Terminübersicht</span>
                 </div>
                 
@@ -675,13 +676,13 @@ export default function NewAppointment() {
               </div>
 
               <Button
-                className="w-full"
+                className={`w-full ${componentStyles.btnPrimary}`}
                 size="lg"
                 onClick={handleErstberatungSubmit}
                 disabled={isPending}
                 data-testid="button-create-erstberatung"
               >
-                {isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                {isPending ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : null}
                 Erstberatung erstellen
               </Button>
             </CardContent>

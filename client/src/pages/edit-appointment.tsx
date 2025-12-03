@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { ChevronLeft, Loader2, Calendar, Clock, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { iconSize, componentStyles } from "@/design-system";
 import { useAppointment } from "@/features/appointments";
 import { DURATION_OPTIONS } from "@shared/types";
 import type { Customer } from "@shared/schema";
@@ -197,7 +198,7 @@ export default function EditAppointment() {
     return (
       <Layout>
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <Loader2 className={`${iconSize.lg} animate-spin text-primary`} />
         </div>
       </Layout>
     );
@@ -215,7 +216,7 @@ export default function EditAppointment() {
     return (
       <Layout>
         <div className="text-center py-12 space-y-4">
-          <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto" />
+          <AlertTriangle className={`${iconSize.xl} text-amber-500 mx-auto`} />
           <h2 className="text-xl font-bold">Bearbeitung nicht möglich</h2>
           <p className="text-muted-foreground">Abgeschlossene Termine können nicht bearbeitet werden.</p>
           <Button variant="outline" onClick={() => setLocation("/")}>
@@ -238,7 +239,7 @@ export default function EditAppointment() {
           onClick={() => setLocation("/")}
           data-testid="button-back"
         >
-          <ChevronLeft className="w-4 h-4 mr-1" /> Zurück
+          <ChevronLeft className={`${iconSize.sm} mr-1`} /> Zurück
         </Button>
         <h1 className="text-2xl font-bold">Termin bearbeiten</h1>
         {appointment.customer && (
@@ -256,7 +257,7 @@ export default function EditAppointment() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="date">
-                <Calendar className="w-4 h-4 inline mr-1" /> Datum
+                <Calendar className={`${iconSize.sm} inline mr-1`} /> Datum
               </Label>
               <Input
                 id="date"
@@ -268,7 +269,7 @@ export default function EditAppointment() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="time">
-                <Clock className="w-4 h-4 inline mr-1" /> Startzeit
+                <Clock className={`${iconSize.sm} inline mr-1`} /> Startzeit
               </Label>
               <Input
                 id="time"
@@ -357,7 +358,7 @@ export default function EditAppointment() {
               {summary && summary.hasServices && (
                 <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 space-y-3">
                   <div className="flex items-center gap-2 text-primary font-semibold">
-                    <Clock className="w-4 h-4" />
+                    <Clock className={iconSize.sm} />
                     <span>Terminübersicht</span>
                   </div>
                   
@@ -390,7 +391,7 @@ export default function EditAppointment() {
           ) : (
             <div className="space-y-2">
               <Label htmlFor="endTime">
-                <Clock className="w-4 h-4 inline mr-1" /> Endzeit
+                <Clock className={`${iconSize.sm} inline mr-1`} /> Endzeit
               </Label>
               <Input
                 id="endTime"
@@ -417,13 +418,13 @@ export default function EditAppointment() {
           </div>
 
           <Button
-            className="w-full"
+            className={`w-full ${componentStyles.btnPrimary}`}
             size="lg"
             onClick={handleSubmit}
             disabled={updateMutation.isPending}
             data-testid="button-save"
           >
-            {updateMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+            {updateMutation.isPending ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : null}
             Änderungen speichern
           </Button>
         </CardContent>

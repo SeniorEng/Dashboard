@@ -14,6 +14,7 @@ import {
   Home, MapPin, Car, Check, AlertCircle
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { iconSize, componentStyles } from "@/design-system";
 import { 
   formatDuration, 
   getServicesToDocument,
@@ -214,7 +215,7 @@ export default function DocumentAppointment() {
     return (
       <Layout>
         <div className="flex items-center justify-center min-h-[50vh]">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <Loader2 className={`${iconSize.lg} animate-spin text-primary`} />
         </div>
       </Layout>
     );
@@ -225,7 +226,7 @@ export default function DocumentAppointment() {
       <Layout>
         <Card className="border-destructive">
           <CardContent className="pt-6 text-center">
-            <AlertCircle className="w-12 h-12 mx-auto text-destructive mb-4" />
+            <AlertCircle className={`${iconSize.xl} mx-auto text-destructive mb-4`} />
             <p className="text-destructive font-medium">Termin nicht gefunden</p>
           </CardContent>
         </Card>
@@ -238,7 +239,7 @@ export default function DocumentAppointment() {
       <Layout>
         <Card className="border-green-200 bg-green-50">
           <CardContent className="pt-6 text-center">
-            <Check className="w-12 h-12 mx-auto text-green-600 mb-4" />
+            <Check className={`${iconSize.xl} mx-auto text-green-600 mb-4`} />
             <p className="text-green-800 font-medium">
               Dieser Termin wurde bereits dokumentiert
             </p>
@@ -265,7 +266,7 @@ export default function DocumentAppointment() {
           className="mb-2 -ml-2"
           data-testid="button-back"
         >
-          <ChevronLeft className="w-4 h-4 mr-1" />
+          <ChevronLeft className={`${iconSize.sm} mr-1`} />
           {step === 1 ? "Zurück" : "Schritt 1"}
         </Button>
         
@@ -287,7 +288,7 @@ export default function DocumentAppointment() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-lg flex items-center gap-2">
-                <Clock className="w-5 h-5 text-primary" />
+                <Clock className={`${iconSize.md} text-primary`} />
                 Services dokumentieren
               </CardTitle>
               <CardDescription>
@@ -348,13 +349,13 @@ export default function DocumentAppointment() {
           </Card>
           
           <Button 
-            className="w-full" 
+            className={`w-full ${componentStyles.btnPrimary}`}
             size="lg"
             onClick={handleNext}
             data-testid="button-next"
           >
             Weiter
-            <ChevronRight className="w-4 h-4 ml-2" />
+            <ChevronRight className={`${iconSize.sm} ml-2`} />
           </Button>
         </div>
       ) : (
@@ -362,7 +363,7 @@ export default function DocumentAppointment() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-lg flex items-center gap-2">
-                <Car className="w-5 h-5 text-primary" />
+                <Car className={`${iconSize.md} text-primary`} />
                 Anfahrt dokumentieren
               </CardTitle>
               <CardDescription>
@@ -382,7 +383,7 @@ export default function DocumentAppointment() {
                 <div className={`flex items-center space-x-3 p-3 rounded-lg border ${formData.travelOriginType === "home" ? "border-primary bg-primary/5" : "border-border"}`}>
                   <RadioGroupItem value="home" id="origin-home" data-testid="radio-origin-home" />
                   <Label htmlFor="origin-home" className="flex items-center gap-2 cursor-pointer flex-1">
-                    <Home className="w-4 h-4 text-muted-foreground" />
+                    <Home className={`${iconSize.sm} text-muted-foreground`} />
                     <div>
                       <span className="font-medium">Von zu Hause</span>
                       <p className="text-xs text-muted-foreground">Erster Termin des Tages</p>
@@ -393,7 +394,7 @@ export default function DocumentAppointment() {
                 <div className={`flex items-center space-x-3 p-3 rounded-lg border ${formData.travelOriginType === "appointment" ? "border-primary bg-primary/5" : "border-border"}`}>
                   <RadioGroupItem value="appointment" id="origin-appointment" data-testid="radio-origin-appointment" />
                   <Label htmlFor="origin-appointment" className="flex items-center gap-2 cursor-pointer flex-1">
-                    <MapPin className="w-4 h-4 text-muted-foreground" />
+                    <MapPin className={`${iconSize.sm} text-muted-foreground`} />
                     <div>
                       <span className="font-medium">Vom vorherigen Kunden</span>
                       {travelSuggestion?.previousCustomerName && (
@@ -470,7 +471,7 @@ export default function DocumentAppointment() {
           </Card>
           
           <Button 
-            className="w-full" 
+            className={`w-full ${componentStyles.btnPrimary}`}
             size="lg"
             onClick={handleSubmit}
             disabled={submitMutation.isPending}
@@ -478,12 +479,12 @@ export default function DocumentAppointment() {
           >
             {submitMutation.isPending ? (
               <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
                 Wird gespeichert...
               </>
             ) : (
               <>
-                <Check className="w-4 h-4 mr-2" />
+                <Check className={`${iconSize.sm} mr-2`} />
                 Dokumentation abschließen
               </>
             )}
