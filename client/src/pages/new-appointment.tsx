@@ -14,7 +14,7 @@ import { ChevronLeft, Loader2, Calendar, Clock, User, Home, Plus } from "lucide-
 import { useToast } from "@/hooks/use-toast";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS } from "@shared/types";
 import type { Customer } from "@shared/schema";
-import { validateGermanPhone, formatPhoneAsYouType } from "@shared/utils/phone";
+import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
 
 export default function NewAppointment() {
   const [, setLocation] = useLocation();
@@ -187,11 +187,17 @@ export default function NewAppointment() {
   const handleErstberatungSubmit = () => {
     if (!validateErstberatung()) return;
     
+    const normalizedPhone = normalizePhone(ebTelefon);
+    if (!normalizedPhone) {
+      setErrors({ ebTelefon: "Ungültige Telefonnummer" });
+      return;
+    }
+    
     createErstberatung.mutate({
       customer: {
         vorname: ebVorname,
         nachname: ebNachname,
-        telefon: ebTelefon,
+        telefon: normalizedPhone,
         strasse: ebStrasse,
         nr: ebNr,
         plz: ebPlz,

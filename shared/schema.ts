@@ -200,8 +200,53 @@ export const appointments = pgTable("appointments", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-export const insertCustomerSchema = createInsertSchema(customers).omit({
+// Base customer schema from Drizzle, with phone validation override
+const baseCustomerSchema = createInsertSchema(customers).omit({
   id: true,
+});
+
+// Optional phone validation - validates and transforms to E.164 if provided
+// Handles: null, undefined, empty string, E.164 format, user input formats
+const optionalGermanPhoneSchema = z.union([
+  z.null(),
+  z.undefined(),
+  z.literal(""),
+  z.string(),
+]).transform((value, ctx) => {
+  if (value === null || value === undefined || value === "") return null;
+  
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+  
+  try {
+    if (!isValidPhoneNumber(trimmed, "DE")) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Ungültige deutsche Telefonnummer",
+      });
+      return z.NEVER;
+    }
+    const parsed = parsePhoneNumber(trimmed, "DE");
+    if (parsed?.country !== "DE") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Ungültige deutsche Telefonnummer",
+      });
+      return z.NEVER;
+    }
+    return parsed.format("E.164");
+  } catch {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Ungültige deutsche Telefonnummer",
+    });
+    return z.NEVER;
+  }
+});
+
+// Customer schema with phone validation
+export const insertCustomerSchema = baseCustomerSchema.extend({
+  telefon: optionalGermanPhoneSchema,
 });
 
 // Schema for creating new customer during Erstberatung
