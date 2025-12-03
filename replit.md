@@ -11,7 +11,26 @@ CareConnect is a full-stack web application designed to help caregivers manage a
 
 ## Recent Changes (December 2025)
 
-### Unified Service Model (Latest)
+### Comprehensive Customer Management System (Latest)
+- **New Database Tables**: insurance_providers, customer_insurance_history, customer_contacts, care_level_history, customer_budgets, customer_contracts, customer_contract_rates, service_rates
+- **Historization Pattern**: All changing data (insurance, Pflegegrad, budgets, contracts, rates) uses valid_from/valid_to timestamps for complete audit trail
+- **Admin Customer Management UI**: New pages at `/admin/customers` with:
+  - Paginated customer list with search and filters (pflegegrad, assigned employee)
+  - Multi-step customer creation wizard (Personal Data → Insurance → Contacts → Budgets → Contract)
+  - Customer detail view with tabbed layout (Overview, Contacts, Insurance, Budgets, History)
+- **Storage Layer**: `server/storage/customer-management.ts` with full CRUD operations and transactional customer creation
+- **German Validation**: IK numbers (9 digits), Versichertennummer (letter + 9 digits), phone formatting
+
+### Budget Types (stored in cents)
+- **§45b Entlastungsbetrag**: 125€/month (default)
+- **§39 Verhinderungspflege**: 1,612€/year (default)
+- **§36 Pflegesachleistungen**: Varies by Pflegegrad (PG2: 761€, PG3: 1,432€, PG4: 1,778€, PG5: 2,200€)
+
+### Service Pricing
+- Default hourly rates: Hauswirtschaft 38€, Alltagsbegleitung 42€
+- Customer-specific rate overrides via contract rates table
+
+### Unified Service Model
 - **Erstberatung as Service Type**: Erstberatung is now a service type like Hauswirtschaft/Alltagsbegleitung
 - **Unified Documentation Flow**: Both appointment types (Erstberatung and Kundentermin) now use the same 2-step documentation wizard (Step 1: Services, Step 2: Travel)
 - **New Schema Columns**: Added `erstberatung_dauer`, `erstberatung_actual_dauer`, `erstberatung_details` to appointments table

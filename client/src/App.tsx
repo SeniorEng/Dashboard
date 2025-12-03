@@ -17,6 +17,9 @@ import LoginPage from "@/pages/login";
 import AdminDashboard from "@/pages/admin/dashboard";
 import AdminUsers from "@/pages/admin/users";
 import AdminCustomerAssignments from "@/pages/admin/customer-assignments";
+import AdminCustomers from "@/pages/admin/customers";
+import AdminCustomerDetail from "@/pages/admin/customer-detail";
+import AdminCustomerNew from "@/pages/admin/customer-new";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -89,6 +92,15 @@ function Router() {
       </Route>
       <Route path="/admin/customer-assignments">
         <AdminRoute component={AdminCustomerAssignments} />
+      </Route>
+      <Route path="/admin/customers/new">
+        <AdminRoute component={AdminCustomerNew} />
+      </Route>
+      <Route path="/admin/customers/:id">
+        {() => <AdminRoute component={() => <AdminCustomerDetail />} />}
+      </Route>
+      <Route path="/admin/customers">
+        <AdminRoute component={AdminCustomers} />
       </Route>
       <Route component={NotFound} />
     </Switch>
