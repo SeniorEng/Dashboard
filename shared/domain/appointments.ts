@@ -270,32 +270,43 @@ export interface TravelOriginSuggestion {
   previousCustomerName?: string;
 }
 
+export function getScheduledEndMinutes(apt: Appointment): number {
+  if (apt.scheduledEnd) {
+    return timeToMinutes(apt.scheduledEnd);
+  }
+  if (apt.scheduledStart && apt.durationPromised) {
+    return timeToMinutes(apt.scheduledStart) + apt.durationPromised;
+  }
+  return timeToMinutes(apt.scheduledStart);
+}
+
 export function suggestTravelOrigin(
   currentAppointment: Appointment,
   sameDayAppointments: (Appointment & { customerName?: string })[]
 ): TravelOriginSuggestion {
   const currentStartMinutes = timeToMinutes(currentAppointment.scheduledStart);
   
-  const completedBefore = sameDayAppointments
-    .filter(apt => 
-      apt.id !== currentAppointment.id &&
-      apt.status === "completed" &&
-      apt.actualEnd !== null
-    )
+  const appointmentsBefore = sameDayAppointments
+    .filter(apt => apt.id !== currentAppointment.id)
     .map(apt => ({
       ...apt,
-      endMinutes: apt.actualEnd ? new Date(apt.actualEnd).getHours() * 60 + new Date(apt.actualEnd).getMinutes() : 0
+      scheduledStartMinutes: timeToMinutes(apt.scheduledStart),
+      scheduledEndMinutes: getScheduledEndMinutes(apt),
     }))
-    .filter(apt => apt.endMinutes < currentStartMinutes)
-    .sort((a, b) => b.endMinutes - a.endMinutes);
+    .filter(apt => apt.scheduledStartMinutes < currentStartMinutes)
+    .sort((a, b) => b.scheduledStartMinutes - a.scheduledStartMinutes);
 
-  if (completedBefore.length > 0) {
-    const previous = completedBefore[0];
-    return {
-      suggestedOrigin: "appointment",
-      previousAppointment: previous,
-      previousCustomerName: previous.customerName,
-    };
+  if (appointmentsBefore.length > 0) {
+    const previous = appointmentsBefore[0];
+    const gapMinutes = currentStartMinutes - previous.scheduledEndMinutes;
+    
+    if (gapMinutes >= 0 && gapMinutes <= 60) {
+      return {
+        suggestedOrigin: "appointment",
+        previousAppointment: previous,
+        previousCustomerName: previous.customerName,
+      };
+    }
   }
 
   return {
