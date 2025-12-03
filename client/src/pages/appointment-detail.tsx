@@ -4,7 +4,10 @@ import { Layout } from "@/components/layout";
 import { useAppointment } from "@/features/appointments";
 import { useDeleteAppointment } from "@/features/appointments/hooks";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionCard } from "@/components/patterns/section-card";
+import { StatusBadge } from "@/components/patterns/status-badge";
+import { iconSize, componentStyles, getServiceColors } from "@/design-system";
 import { 
   AlertDialog,
   AlertDialogAction,
@@ -23,40 +26,10 @@ import { useToast } from "@/hooks/use-toast";
 import { formatTimeSlot, getEndTime } from "@/features/appointments/utils";
 import { 
   formatDuration, 
-  getStatusLabel, 
   canModifyAppointment,
   type AppointmentStatus
 } from "@shared/types";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
-
-function getStatusInfo(status: string): { label: string; color: string; icon: React.ReactNode } {
-  switch (status) {
-    case "completed":
-      return { 
-        label: getStatusLabel(status), 
-        color: "bg-green-100 text-green-800 border-green-200",
-        icon: <CheckCircle2 className="w-4 h-4" />
-      };
-    case "in-progress":
-      return { 
-        label: getStatusLabel(status), 
-        color: "bg-blue-100 text-blue-800 border-blue-200",
-        icon: <Clock className="w-4 h-4" />
-      };
-    case "documenting":
-      return { 
-        label: getStatusLabel(status), 
-        color: "bg-orange-100 text-orange-800 border-orange-200",
-        icon: <FileText className="w-4 h-4" />
-      };
-    default:
-      return { 
-        label: getStatusLabel(status), 
-        color: "bg-gray-100 text-gray-800 border-gray-200",
-        icon: <Calendar className="w-4 h-4" />
-      };
-  }
-}
 
 export default function AppointmentDetail() {
   const [, params] = useRoute("/appointment/:id");
@@ -90,7 +63,7 @@ export default function AppointmentDetail() {
     return (
       <Layout>
         <div className="flex items-center justify-center py-12" data-testid="loading-appointment">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <Loader2 className={`${iconSize.lg} animate-spin text-primary`} />
         </div>
       </Layout>
     );
@@ -107,7 +80,6 @@ export default function AppointmentDetail() {
   }
 
   const canModify = canModifyAppointment(appointment.status as AppointmentStatus);
-  const statusInfo = getStatusInfo(appointment.status);
   const isErstberatung = appointment.appointmentType === "Erstberatung";
 
   const hasHauswirtschaft = !!appointment.hauswirtschaftDauer;
@@ -124,28 +96,25 @@ export default function AppointmentDetail() {
           onClick={() => setLocation("/")}
           data-testid="button-back"
         >
-          <ChevronLeft className="w-4 h-4 mr-1" /> Zurück
+          <ChevronLeft className={`${iconSize.sm} mr-1`} /> Zurück
         </Button>
 
-        {/* Status Badge */}
-        <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium border ${statusInfo.color} mb-4`}>
-          {statusInfo.icon}
-          {statusInfo.label}
+        <div className="mb-4">
+          <StatusBadge type="status" value={appointment.status} />
         </div>
 
-        {/* Customer Info */}
         {appointment.customer && (
           <div className="mb-6">
             <h1 className="text-2xl font-bold leading-tight" data-testid="text-customer-name">
               {appointment.customer.name}
             </h1>
             <div className="flex items-center text-muted-foreground text-sm mt-2">
-              <MapPin className="w-4 h-4 mr-1.5 text-primary shrink-0" />
+              <MapPin className={`${iconSize.sm} mr-1.5 text-primary shrink-0`} />
               <span>{appointment.customer.address}</span>
             </div>
             {appointment.customer.telefon && (
               <div className="flex items-center text-muted-foreground text-sm mt-1">
-                <Phone className="w-4 h-4 mr-1.5 text-primary shrink-0" />
+                <Phone className={`${iconSize.sm} mr-1.5 text-primary shrink-0`} />
                 <a href={`tel:${appointment.customer.telefon}`} className="hover:text-primary">
                   {formatPhoneForDisplay(appointment.customer.telefon)}
                 </a>
@@ -155,16 +124,12 @@ export default function AppointmentDetail() {
         )}
       </div>
 
-      {/* Appointment Details Card */}
-      <Card className="mb-4">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-primary" />
-            Termindetails
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Date & Time */}
+      <SectionCard
+        title="Termindetails"
+        icon={<Calendar className={iconSize.sm} />}
+        className="mb-4"
+      >
+        <div className="space-y-4">
           <div className="flex items-center justify-between py-2 border-b border-border/50">
             <span className="text-muted-foreground">Datum</span>
             <span className="font-medium">
@@ -197,23 +162,20 @@ export default function AppointmentDetail() {
               {isErstberatung ? "Erstberatung" : "Kundentermin"}
             </span>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </SectionCard>
 
-      {/* Services Card */}
       {(hasHauswirtschaft || hasAlltagsbegleitung || hasErstberatung) && (
-        <Card className="mb-4">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <FileText className="w-4 h-4 text-primary" />
-              Geplante Leistungen
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <SectionCard
+          title="Geplante Leistungen"
+          icon={<FileText className={iconSize.sm} />}
+          className="mb-4"
+        >
+          <div className="space-y-3">
             {hasHauswirtschaft && (
               <div className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-amber-500" />
+                  <div className={`w-2 h-2 rounded-full ${getServiceColors('hauswirtschaft').bg}`} />
                   <span>Hauswirtschaft</span>
                 </div>
                 <span className="text-muted-foreground">
@@ -224,7 +186,7 @@ export default function AppointmentDetail() {
             {hasAlltagsbegleitung && (
               <div className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-sky-500" />
+                  <div className={`w-2 h-2 rounded-full ${getServiceColors('alltagsbegleitung').bg}`} />
                   <span>Alltagsbegleitung</span>
                 </div>
                 <span className="text-muted-foreground">
@@ -235,7 +197,7 @@ export default function AppointmentDetail() {
             {hasErstberatung && (
               <div className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-purple-500" />
+                  <div className={`w-2 h-2 rounded-full ${getServiceColors('erstberatung').bg}`} />
                   <span>Erstberatung</span>
                 </div>
                 <span className="text-muted-foreground">
@@ -243,49 +205,36 @@ export default function AppointmentDetail() {
                 </span>
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
       )}
 
-      {/* Customer Needs - for Erstberatung or if customer has needs */}
       {appointment.customer?.needs && appointment.customer.needs.length > 0 && (
-        <Card className="mb-4">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Kundenbedürfnisse</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="space-y-2">
-              {appointment.customer.needs.map((need, i) => (
-                <li key={i} className="flex items-center gap-2 text-sm">
-                  <div className="w-1.5 h-1.5 rounded-full bg-primary/60" />
-                  {need}
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
+        <SectionCard title="Kundenbedürfnisse" className="mb-4">
+          <ul className="space-y-2">
+            {appointment.customer.needs.map((need, i) => (
+              <li key={i} className="flex items-center gap-2 text-sm">
+                <div className="w-1.5 h-1.5 rounded-full bg-primary/60" />
+                {need}
+              </li>
+            ))}
+          </ul>
+        </SectionCard>
       )}
 
-      {/* Notes Card */}
       {appointment.notes && (
-        <Card className="mb-4">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Notizen</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-              {appointment.notes}
-            </p>
-          </CardContent>
-        </Card>
+        <SectionCard title="Notizen" className="mb-4">
+          <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+            {appointment.notes}
+          </p>
+        </SectionCard>
       )}
 
-      {/* Completed Info */}
       {appointment.status === "completed" && (
         <Card className="mb-4 border-green-200 bg-green-50/50">
           <CardContent className="py-4">
             <div className="flex items-center gap-3 text-green-800">
-              <CheckCircle2 className="w-5 h-5" />
+              <CheckCircle2 className={iconSize.md} />
               <div>
                 <p className="font-medium">Termin abgeschlossen</p>
                 {appointment.travelKilometers && (
@@ -297,22 +246,20 @@ export default function AppointmentDetail() {
         </Card>
       )}
 
-      {/* Documentation Button - For any appointment that is not yet completed */}
       {appointment.status !== "completed" && (
         <div className="mt-6">
           <Button 
-            className="w-full" 
+            className={`w-full ${componentStyles.btnPrimary}`}
             size="lg"
             onClick={() => setLocation(`/document-appointment/${appointment.id}`)}
             data-testid="button-document"
           >
-            <FileText className="w-4 h-4 mr-2" />
+            <FileText className={`${iconSize.sm} mr-2`} />
             Jetzt dokumentieren
           </Button>
         </div>
       )}
 
-      {/* Action Buttons */}
       {canModify && (
         <div className="flex gap-3 mt-6">
           <Button 
@@ -321,7 +268,7 @@ export default function AppointmentDetail() {
             onClick={() => setLocation(`/edit-appointment/${appointment.id}`)}
             data-testid="button-edit"
           >
-            <Pencil className="w-4 h-4 mr-2" />
+            <Pencil className={`${iconSize.sm} mr-2`} />
             Bearbeiten
           </Button>
           <Button 
@@ -330,13 +277,12 @@ export default function AppointmentDetail() {
             onClick={() => setShowDeleteDialog(true)}
             data-testid="button-delete"
           >
-            <Trash2 className="w-4 h-4 mr-2" />
+            <Trash2 className={`${iconSize.sm} mr-2`} />
             Löschen
           </Button>
         </div>
       )}
 
-      {/* Completed - Back Button */}
       {!canModify && (
         <div className="mt-6">
           <Button 
@@ -350,12 +296,11 @@ export default function AppointmentDetail() {
         </div>
       )}
 
-      {/* Delete Confirmation Dialog */}
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-destructive" />
+              <AlertTriangle className={`${iconSize.md} text-destructive`} />
               Termin löschen?
             </AlertDialogTitle>
             <AlertDialogDescription>
