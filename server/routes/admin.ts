@@ -59,13 +59,19 @@ router.post("/users", async (req: Request, res: Response) => {
       return;
     }
 
-    const user = await authService.createUser(
-      result.data.email,
-      result.data.password,
-      result.data.displayName,
-      result.data.isAdmin,
-      result.data.roles
-    );
+    const user = await authService.createUser({
+      email: result.data.email,
+      password: result.data.password,
+      vorname: result.data.vorname,
+      nachname: result.data.nachname,
+      strasse: result.data.strasse,
+      hausnummer: result.data.hausnummer,
+      plz: result.data.plz,
+      stadt: result.data.stadt,
+      geburtsdatum: result.data.geburtsdatum,
+      isAdmin: result.data.isAdmin,
+      roles: result.data.roles,
+    });
 
     const { passwordHash, ...safeUser } = user;
     res.status(201).json(safeUser);

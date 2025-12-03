@@ -228,13 +228,19 @@ router.post("/setup", async (req: Request, res: Response) => {
       return;
     }
 
-    const user = await authService.createUser(
-      result.data.email,
-      result.data.password,
-      result.data.displayName,
-      true,
-      [...EMPLOYEE_ROLES]
-    );
+    const user = await authService.createUser({
+      email: result.data.email,
+      password: result.data.password,
+      vorname: result.data.vorname,
+      nachname: result.data.nachname,
+      strasse: result.data.strasse,
+      hausnummer: result.data.hausnummer,
+      plz: result.data.plz,
+      stadt: result.data.stadt,
+      geburtsdatum: result.data.geburtsdatum,
+      isAdmin: true,
+      roles: [...EMPLOYEE_ROLES],
+    });
 
     const loginResult = await authService.login(
       result.data.email,

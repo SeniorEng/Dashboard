@@ -47,36 +47,53 @@ function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
+export interface CreateUserData {
+  email: string;
+  password: string;
+  vorname: string;
+  nachname: string;
+  strasse?: string;
+  hausnummer?: string;
+  plz?: string;
+  stadt?: string;
+  geburtsdatum?: string;
+  isAdmin?: boolean;
+  roles?: EmployeeRole[];
+}
+
 export class AuthService {
-  async createUser(
-    email: string,
-    password: string,
-    displayName: string,
-    isAdmin: boolean = false,
-    roles: EmployeeRole[] = []
-  ): Promise<UserWithRoles> {
+  async createUser(data: CreateUserData): Promise<UserWithRoles> {
     const existingUser = await db
       .select()
       .from(users)
-      .where(eq(users.email, email.toLowerCase()));
+      .where(eq(users.email, data.email.toLowerCase()));
 
     if (existingUser.length > 0) {
       throw new Error("Ein Benutzer mit dieser E-Mail-Adresse existiert bereits");
     }
 
-    const passwordHash = hashPassword(password);
+    const passwordHash = hashPassword(data.password);
+    const displayName = `${data.vorname} ${data.nachname}`;
 
     const [newUser] = await db
       .insert(users)
       .values({
-        email: email.toLowerCase(),
+        email: data.email.toLowerCase(),
         passwordHash,
         displayName,
-        isAdmin,
+        vorname: data.vorname,
+        nachname: data.nachname,
+        strasse: data.strasse || null,
+        hausnummer: data.hausnummer || null,
+        plz: data.plz || null,
+        stadt: data.stadt || null,
+        geburtsdatum: data.geburtsdatum || null,
+        isAdmin: data.isAdmin ?? false,
         isActive: true,
       })
       .returning();
 
+    const roles = data.roles ?? [];
     if (roles.length > 0) {
       await db.insert(userRoles).values(
         roles.map((role) => ({

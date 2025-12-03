@@ -88,7 +88,13 @@ export default function AdminUsers() {
     mutationFn: async (data: {
       email: string;
       password: string;
-      displayName: string;
+      vorname: string;
+      nachname: string;
+      strasse?: string;
+      hausnummer?: string;
+      plz?: string;
+      stadt?: string;
+      geburtsdatum?: string;
       isAdmin: boolean;
       roles: string[];
     }) => {
@@ -403,7 +409,13 @@ function CreateUserForm({
   onSubmit: (data: {
     email: string;
     password: string;
-    displayName: string;
+    vorname: string;
+    nachname: string;
+    strasse?: string;
+    hausnummer?: string;
+    plz?: string;
+    stadt?: string;
+    geburtsdatum?: string;
     isAdmin: boolean;
     roles: string[];
   }) => void;
@@ -411,13 +423,31 @@ function CreateUserForm({
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
+  const [vorname, setVorname] = useState("");
+  const [nachname, setNachname] = useState("");
+  const [strasse, setStrasse] = useState("");
+  const [hausnummer, setHausnummer] = useState("");
+  const [plz, setPlz] = useState("");
+  const [stadt, setStadt] = useState("");
+  const [geburtsdatum, setGeburtsdatum] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [roles, setRoles] = useState<string[]>([]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit({ email, password, displayName, isAdmin, roles });
+    onSubmit({
+      email,
+      password,
+      vorname,
+      nachname,
+      strasse: strasse || undefined,
+      hausnummer: hausnummer || undefined,
+      plz: plz || undefined,
+      stadt: stadt || undefined,
+      geburtsdatum: geburtsdatum || undefined,
+      isAdmin,
+      roles,
+    });
   };
 
   return (
@@ -428,15 +458,37 @@ function CreateUserForm({
           Erstellen Sie ein neues Benutzerkonto für einen Mitarbeiter.
         </DialogDescription>
       </DialogHeader>
-      <div className="space-y-4 py-4">
+      <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="vorname">Vorname</Label>
+            <Input
+              id="vorname"
+              value={vorname}
+              onChange={(e) => setVorname(e.target.value)}
+              required
+              data-testid="input-new-user-vorname"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="nachname">Nachname</Label>
+            <Input
+              id="nachname"
+              value={nachname}
+              onChange={(e) => setNachname(e.target.value)}
+              required
+              data-testid="input-new-user-nachname"
+            />
+          </div>
+        </div>
         <div className="space-y-2">
-          <Label htmlFor="displayName">Name</Label>
+          <Label htmlFor="geburtsdatum">Geburtsdatum</Label>
           <Input
-            id="displayName"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            required
-            data-testid="input-new-user-name"
+            id="geburtsdatum"
+            type="date"
+            value={geburtsdatum}
+            onChange={(e) => setGeburtsdatum(e.target.value)}
+            data-testid="input-new-user-geburtsdatum"
           />
         </div>
         <div className="space-y-2">
@@ -462,14 +514,59 @@ function CreateUserForm({
             data-testid="input-new-user-password"
           />
         </div>
-        <div className="flex items-center space-x-2">
-          <Checkbox
-            id="isAdmin"
-            checked={isAdmin}
-            onCheckedChange={(checked) => setIsAdmin(!!checked)}
-            data-testid="checkbox-is-admin"
-          />
-          <Label htmlFor="isAdmin">Administrator-Rechte</Label>
+        <div className="border-t pt-4 mt-4">
+          <p className="text-sm font-medium mb-3">Adresse</p>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="col-span-2 space-y-2">
+              <Label htmlFor="strasse">Straße</Label>
+              <Input
+                id="strasse"
+                value={strasse}
+                onChange={(e) => setStrasse(e.target.value)}
+                data-testid="input-new-user-strasse"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="hausnummer">Hausnr.</Label>
+              <Input
+                id="hausnummer"
+                value={hausnummer}
+                onChange={(e) => setHausnummer(e.target.value)}
+                data-testid="input-new-user-hausnummer"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-4 mt-4">
+            <div className="space-y-2">
+              <Label htmlFor="plz">PLZ</Label>
+              <Input
+                id="plz"
+                value={plz}
+                onChange={(e) => setPlz(e.target.value)}
+                data-testid="input-new-user-plz"
+              />
+            </div>
+            <div className="col-span-2 space-y-2">
+              <Label htmlFor="stadt">Stadt</Label>
+              <Input
+                id="stadt"
+                value={stadt}
+                onChange={(e) => setStadt(e.target.value)}
+                data-testid="input-new-user-stadt"
+              />
+            </div>
+          </div>
+        </div>
+        <div className="border-t pt-4 mt-4">
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="isAdmin"
+              checked={isAdmin}
+              onCheckedChange={(checked) => setIsAdmin(!!checked)}
+              data-testid="checkbox-is-admin"
+            />
+            <Label htmlFor="isAdmin">Administrator-Rechte</Label>
+          </div>
         </div>
         <div className="space-y-2">
           <Label>Berechtigungen</Label>

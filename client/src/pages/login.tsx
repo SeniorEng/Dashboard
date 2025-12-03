@@ -149,7 +149,8 @@ function SetupPage() {
   const [, navigate] = useLocation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
+  const [vorname, setVorname] = useState("");
+  const [nachname, setNachname] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -162,7 +163,7 @@ function SetupPage() {
       const res = await fetch("/api/auth/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, displayName }),
+        body: JSON.stringify({ email, password, vorname, nachname }),
         credentials: "include",
       });
 
@@ -208,17 +209,31 @@ function SetupPage() {
               </Alert>
             )}
 
-            <div className="space-y-2">
-              <Label htmlFor="displayName">Name</Label>
-              <Input
-                id="displayName"
-                type="text"
-                placeholder="Max Mustermann"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                required
-                data-testid="input-display-name"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="vorname">Vorname</Label>
+                <Input
+                  id="vorname"
+                  type="text"
+                  placeholder="Max"
+                  value={vorname}
+                  onChange={(e) => setVorname(e.target.value)}
+                  required
+                  data-testid="input-setup-vorname"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="nachname">Nachname</Label>
+                <Input
+                  id="nachname"
+                  type="text"
+                  placeholder="Mustermann"
+                  value={nachname}
+                  onChange={(e) => setNachname(e.target.value)}
+                  required
+                  data-testid="input-setup-nachname"
+                />
+              </div>
             </div>
 
             <div className="space-y-2">
