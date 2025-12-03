@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Layout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
+import { useEmployees, useInsuranceProviders, useCreateCustomer } from "@/features/customers";
 import {
   ArrowLeft,
   Loader2,
@@ -24,17 +24,6 @@ import {
   FileText,
   Check,
 } from "lucide-react";
-
-interface InsuranceProvider {
-  id: number;
-  name: string;
-  ikNummer: string;
-}
-
-interface Employee {
-  id: number;
-  displayName: string;
-}
 
 const STEPS = [
   { id: "personal", title: "Persönliche Daten", icon: User2 },
@@ -84,7 +73,6 @@ const BUDGET_AMOUNTS_BY_PFLEGEGRAD: Record<number, { pflegesachleistungen36: num
 
 export default function AdminCustomerNew() {
   const [, setLocation] = useLocation();
-  const queryClient = useQueryClient();
   const { toast } = useToast();
   const [currentStep, setCurrentStep] = useState(0);
 
@@ -104,12 +92,12 @@ export default function AdminCustomerNew() {
     backupEmployeeId: "",
     insuranceProviderId: "",
     versichertennummer: "",
-    contactName: "",
-    contactRelationship: "familie",
+    contactVorname: "",
+    contactNachname: "",
+    contactType: "familie",
     contactTelefon: "",
-    contactMobil: "",
+    contactEmail: "",
     contactIsPrimary: true,
-    contactHasKey: false,
     entlastungsbetrag45b: DEFAULT_BUDGETS.entlastungsbetrag45b.toString(),
     verhinderungspflege39: DEFAULT_BUDGETS.verhinderungspflege39.toString(),
     pflegesachleistungen36: DEFAULT_BUDGETS.pflegesachleistungen36.toString(),
@@ -120,83 +108,86 @@ export default function AdminCustomerNew() {
     erstberatungRate: "0",
   });
 
-  const { data: insuranceProviders } = useQuery<InsuranceProvider[]>({
-    queryKey: ["admin", "insurance-providers"],
-    queryFn: async () => {
-      const res = await fetch("/api/admin/insurance-providers", { credentials: "include" });
-      if (!res.ok) throw new Error("Pflegekassen konnten nicht geladen werden");
-      return res.json();
-    },
-  });
+  const { data: insuranceProviders } = useInsuranceProviders();
+  const { data: employees } = useEmployees();
+  const createMutation = useCreateCustomer();
 
-  const { data: employees } = useQuery<Employee[]>({
-    queryKey: ["admin", "employees"],
-    queryFn: async () => {
-      const res = await fetch("/api/admin/employees", { credentials: "include" });
-      if (!res.ok) throw new Error("Mitarbeiter konnten nicht geladen werden");
-      return res.json();
-    },
-  });
+  const handleCreate = () => {
+    const today = new Date().toISOString().split("T")[0];
+    
+    // Build optional sections
+    const insurance = formData.insuranceProviderId && formData.versichertennummer.trim() 
+      ? {
+          providerId: parseInt(formData.insuranceProviderId),
+          versichertennummer: formData.versichertennummer.trim(),
+          validFrom: today,
+        } 
+      : undefined;
 
-  const createMutation = useMutation({
-    mutationFn: async (data: typeof formData) => {
-      const payload = {
-        vorname: data.vorname,
-        nachname: data.nachname,
-        email: data.email || null,
-        telefon: data.telefon || null,
-        festnetz: data.festnetz || null,
-        strasse: data.strasse,
-        nr: data.nr,
-        plz: data.plz,
-        stadt: data.stadt,
-        pflegegrad: parseInt(data.pflegegrad),
-        pflegegradSeit: data.pflegegradSeit || new Date().toISOString().split("T")[0],
-        primaryEmployeeId: data.primaryEmployeeId ? parseInt(data.primaryEmployeeId) : null,
-        backupEmployeeId: data.backupEmployeeId ? parseInt(data.backupEmployeeId) : null,
-        insuranceProviderId: data.insuranceProviderId ? parseInt(data.insuranceProviderId) : undefined,
-        versichertennummer: data.versichertennummer || undefined,
-        contacts: data.contactName ? [{
-          name: data.contactName,
-          relationship: data.contactRelationship,
-          telefon: data.contactTelefon || null,
-          mobil: data.contactMobil || null,
-          isPrimary: data.contactIsPrimary,
-          hasKey: data.contactHasKey,
-        }] : [],
-        entlastungsbetrag45b: parseFloat(data.entlastungsbetrag45b) || 0,
-        verhinderungspflege39: parseFloat(data.verhinderungspflege39) || 0,
-        pflegesachleistungen36: parseFloat(data.pflegesachleistungen36) || 0,
-        contractHours: parseFloat(data.contractHours) || 10,
-        contractPeriod: data.contractPeriod,
-        hauswirtschaftRate: parseFloat(data.hauswirtschaftRate) || undefined,
-        alltagsbegleitungRate: parseFloat(data.alltagsbegleitungRate) || undefined,
-        erstberatungRate: parseFloat(data.erstberatungRate) || undefined,
-      };
+    const contacts = formData.contactVorname.trim() && formData.contactNachname.trim() && formData.contactTelefon.trim()
+      ? [{
+          contactType: formData.contactType,
+          isPrimary: formData.contactIsPrimary,
+          vorname: formData.contactVorname.trim(),
+          nachname: formData.contactNachname.trim(),
+          telefon: formData.contactTelefon.trim(),
+          email: formData.contactEmail.trim() || undefined,
+        }]
+      : undefined;
 
-      const res = await fetch("/api/admin/customers", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        credentials: "include",
-      });
+    const budgetValues = {
+      entlastungsbetrag45b: Math.round(parseFloat(formData.entlastungsbetrag45b) * 100) || 0,
+      verhinderungspflege39: Math.round(parseFloat(formData.verhinderungspflege39) * 100) || 0,
+      pflegesachleistungen36: Math.round(parseFloat(formData.pflegesachleistungen36) * 100) || 0,
+      validFrom: today,
+    };
+    const budgets = budgetValues.entlastungsbetrag45b > 0 || budgetValues.verhinderungspflege39 > 0 || budgetValues.pflegesachleistungen36 > 0
+      ? budgetValues
+      : undefined;
 
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || "Kunde konnte nicht erstellt werden");
-      }
+    const contractHours = parseFloat(formData.contractHours);
+    const rates = [
+      { serviceCategory: "hauswirtschaft", hourlyRateCents: Math.round(parseFloat(formData.hauswirtschaftRate) * 100) || 0 },
+      { serviceCategory: "alltagsbegleitung", hourlyRateCents: Math.round(parseFloat(formData.alltagsbegleitungRate) * 100) || 0 },
+      { serviceCategory: "erstberatung", hourlyRateCents: Math.round(parseFloat(formData.erstberatungRate) * 100) || 0 },
+    ].filter(r => r.hourlyRateCents > 0);
+    const contract = contractHours > 0 && rates.length > 0
+      ? {
+          contractStart: today,
+          hoursPerPeriod: contractHours,
+          periodType: formData.contractPeriod,
+          rates,
+        }
+      : undefined;
 
-      return res.json();
-    },
-    onSuccess: (customer) => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "customers"] });
-      toast({ title: "Kunde erfolgreich erstellt" });
-      setLocation(`/admin/customers/${customer.id}`);
-    },
-    onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message, variant: "destructive" });
-    },
-  });
+    const payload = {
+      vorname: formData.vorname.trim(),
+      nachname: formData.nachname.trim(),
+      strasse: formData.strasse.trim(),
+      nr: formData.nr.trim(),
+      plz: formData.plz.trim(),
+      stadt: formData.stadt.trim(),
+      pflegegrad: parseInt(formData.pflegegrad),
+      pflegegradSeit: formData.pflegegradSeit || today,
+      email: formData.email.trim() || undefined,
+      telefon: formData.telefon.trim() || undefined,
+      festnetz: formData.festnetz.trim() || undefined,
+      insurance,
+      contacts,
+      budgets,
+      contract,
+    };
+
+    createMutation.mutate(payload, {
+      onSuccess: (customer) => {
+        toast({ title: "Kunde erfolgreich erstellt" });
+        setLocation(`/admin/customers/${customer.id}`);
+      },
+      onError: (error: Error) => {
+        toast({ title: "Fehler", description: error.message, variant: "destructive" });
+      },
+    });
+  };
 
   const handleChange = (field: string, value: string | boolean) => {
     setFormData((prev) => {
@@ -254,7 +245,7 @@ export default function AdminCustomerNew() {
       });
       return;
     }
-    createMutation.mutate(formData);
+    handleCreate();
   };
 
   const renderStepContent = () => {
@@ -511,21 +502,33 @@ export default function AdminCustomerNew() {
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="contactName">Name</Label>
+                  <Label htmlFor="contactVorname">Vorname</Label>
                   <Input
-                    id="contactName"
-                    value={formData.contactName}
-                    onChange={(e) => handleChange("contactName", e.target.value)}
-                    data-testid="input-contact-name"
+                    id="contactVorname"
+                    value={formData.contactVorname}
+                    onChange={(e) => handleChange("contactVorname", e.target.value)}
+                    data-testid="input-contact-vorname"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="contactRelationship">Beziehung</Label>
+                  <Label htmlFor="contactNachname">Nachname</Label>
+                  <Input
+                    id="contactNachname"
+                    value={formData.contactNachname}
+                    onChange={(e) => handleChange("contactNachname", e.target.value)}
+                    data-testid="input-contact-nachname"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="contactType">Kontaktart</Label>
                   <Select
-                    value={formData.contactRelationship}
-                    onValueChange={(value) => handleChange("contactRelationship", value)}
+                    value={formData.contactType}
+                    onValueChange={(value) => handleChange("contactType", value)}
                   >
-                    <SelectTrigger data-testid="select-contact-relationship">
+                    <SelectTrigger data-testid="select-contact-type">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -537,9 +540,6 @@ export default function AdminCustomerNew() {
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="contactTelefon">Telefon</Label>
                   <Input
@@ -549,36 +549,27 @@ export default function AdminCustomerNew() {
                     data-testid="input-contact-telefon"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="contactMobil">Mobil</Label>
-                  <Input
-                    id="contactMobil"
-                    value={formData.contactMobil}
-                    onChange={(e) => handleChange("contactMobil", e.target.value)}
-                    data-testid="input-contact-mobil"
-                  />
-                </div>
               </div>
 
-              <div className="flex items-center gap-6">
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="contactIsPrimary"
-                    checked={formData.contactIsPrimary}
-                    onCheckedChange={(checked) => handleChange("contactIsPrimary", !!checked)}
-                    data-testid="checkbox-contact-primary"
-                  />
-                  <Label htmlFor="contactIsPrimary">Hauptkontakt</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="contactHasKey"
-                    checked={formData.contactHasKey}
-                    onCheckedChange={(checked) => handleChange("contactHasKey", !!checked)}
-                    data-testid="checkbox-contact-has-key"
-                  />
-                  <Label htmlFor="contactHasKey">Hat Wohnungsschlüssel</Label>
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="contactEmail">E-Mail (optional)</Label>
+                <Input
+                  id="contactEmail"
+                  type="email"
+                  value={formData.contactEmail}
+                  onChange={(e) => handleChange("contactEmail", e.target.value)}
+                  data-testid="input-contact-email"
+                />
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="contactIsPrimary"
+                  checked={formData.contactIsPrimary}
+                  onCheckedChange={(checked) => handleChange("contactIsPrimary", !!checked)}
+                  data-testid="checkbox-contact-primary"
+                />
+                <Label htmlFor="contactIsPrimary">Hauptkontakt</Label>
               </div>
             </div>
           </div>

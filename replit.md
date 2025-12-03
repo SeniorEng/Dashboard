@@ -46,6 +46,23 @@ CareConnect is a full-stack web application designed to help caregivers manage a
 - **Application-Level Rollback**: Implemented atomic Erstberatung creation with rollback (Neon HTTP driver doesn't support transactions)
 - **Frontend Domain Layer**: Components now use shared domain helpers for status/service colors, labels, and calculations
 
+### Typed API Client Layer (Latest)
+- **Centralized API Client**: `client/src/lib/api/client.ts` with:
+  - Type-safe HTTP methods (`api.get`, `api.post`, `api.patch`, `api.delete`)
+  - Structured error handling with `ApiResult<T>` union type
+  - Automatic retry logic for network failures (3 retries)
+  - Consistent credential handling and abort signal support
+- **API Types**: `client/src/lib/api/types.ts` with TypeScript interfaces for all API entities
+- **Feature Hooks Module**: `client/src/features/customers/hooks/` containing:
+  - `useCustomers()` - Paginated customer list with search/filter
+  - `useCustomer(id)` - Single customer detail
+  - `useCreateCustomer()` - Customer creation mutation
+  - `useUpdateCustomer()` - Customer update mutation  
+  - `useDeleteCustomer()` - Customer deletion mutation
+  - `useEmployees()` - Employee list for dropdowns
+  - `useInsuranceProviders()` - Insurance provider list
+- **Query Key Management**: Centralized query keys for cache invalidation
+
 ## Project Structure
 
 ```
@@ -56,14 +73,24 @@ CareConnect is a full-stack web application designed to help caregivers manage a
 │       │   ├── layout.tsx       # App layout wrapper
 │       │   └── error-boundary.tsx
 │       ├── features/            # Feature-based modules
-│       │   └── appointments/
-│       │       ├── components/  # Feature-specific components
-│       │       ├── hooks/       # Feature-specific hooks
-│       │       ├── domain.ts    # Frontend domain (uses shared)
+│       │   ├── appointments/
+│       │   │   ├── components/  # Feature-specific components
+│       │   │   ├── hooks/       # Feature-specific hooks
+│       │   │   ├── domain.ts    # Frontend domain (uses shared)
+│       │   │   └── index.ts     # Public exports
+│       │   └── customers/
+│       │       ├── hooks/       # Customer/employee/insurance hooks
+│       │       │   ├── use-customers.ts
+│       │       │   ├── use-employees.ts
+│       │       │   └── use-insurance-providers.ts
+│       │       └── index.ts     # Public exports
+│       ├── lib/
+│       │   └── api/             # Typed API client
+│       │       ├── client.ts    # HTTP client with retry logic
+│       │       ├── types.ts     # API response types
 │       │       └── index.ts     # Public exports
 │       ├── pages/               # Route pages
-│       ├── hooks/               # Shared hooks
-│       └── lib/                 # Utilities
+│       └── hooks/               # Shared hooks
 ├── server/
 │   ├── routes/                  # Modular API routes
 │   │   ├── appointments.ts

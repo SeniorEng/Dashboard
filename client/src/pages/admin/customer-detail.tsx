@@ -1,10 +1,17 @@
+/**
+ * Admin Customer Detail Page
+ * 
+ * Displays comprehensive customer information with tabbed interface
+ * for contacts, insurance, budgets, and history.
+ */
+
 import { Link, useParams } from "wouter";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Layout } from "@/components/layout";
+import { useCustomer } from "@/features/customers";
 import {
   ArrowLeft,
   Loader2,
@@ -13,9 +20,7 @@ import {
   Phone,
   Mail,
   Heart,
-  FileText,
   AlertCircle,
-  Clock,
   Shield,
   Edit,
   History,
@@ -23,97 +28,43 @@ import {
   Wallet,
 } from "lucide-react";
 
-interface CustomerDetail {
-  id: number;
-  vorname: string;
-  nachname: string;
-  email: string | null;
-  telefon: string | null;
-  festnetz: string | null;
+// Helper functions
+function formatAddress(customer: {
   strasse: string | null;
   nr: string | null;
   plz: string | null;
   stadt: string | null;
-  pflegegrad: number | null;
-  needs: string[];
-  primaryEmployeeId: number | null;
-  backupEmployeeId: number | null;
-  currentInsurance: {
-    id: number;
-    providerName: string;
-    versichertennummer: string;
-    validFrom: string;
-  } | null;
-  contacts: Array<{
-    id: number;
-    name: string;
-    relationship: string;
-    telefon: string | null;
-    mobil: string | null;
-    isPrimary: boolean;
-    hasKey: boolean;
-  }>;
-  careLevelHistory: Array<{
-    id: number;
-    pflegegrad: number;
-    validFrom: string;
-    validTo: string | null;
-    notes: string | null;
-  }>;
-  currentBudgets: {
-    entlastungsbetrag45b: number;
-    verhinderungspflege39: number;
-    pflegesachleistungen36: number;
-  } | null;
-  activeContractCount: number;
+}): string {
+  const parts = [];
+  if (customer.strasse) {
+    parts.push(`${customer.strasse}${customer.nr ? ` ${customer.nr}` : ""}`);
+  }
+  if (customer.plz || customer.stadt) {
+    parts.push(`${customer.plz || ""} ${customer.stadt || ""}`.trim());
+  }
+  return parts.join(", ") || "Keine Adresse hinterlegt";
+}
+
+function formatBudget(cents: number): string {
+  return new Intl.NumberFormat("de-DE", {
+    style: "currency",
+    currency: "EUR",
+  }).format(cents / 100);
+}
+
+function formatDate(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
 }
 
 export default function AdminCustomerDetail() {
   const { id } = useParams<{ id: string }>();
   const customerId = parseInt(id || "0");
-  const queryClient = useQueryClient();
 
-  const { data: customer, isLoading, error, refetch } = useQuery<CustomerDetail>({
-    queryKey: ["admin", "customers", customerId, "details"],
-    queryFn: async () => {
-      const res = await fetch(`/api/admin/customers/${customerId}/details`, {
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.message || "Kunde konnte nicht geladen werden");
-      }
-      return res.json();
-    },
-    enabled: customerId > 0,
-  });
-
-  const formatAddress = () => {
-    if (!customer) return "";
-    const parts = [];
-    if (customer.strasse) {
-      parts.push(`${customer.strasse}${customer.nr ? ` ${customer.nr}` : ""}`);
-    }
-    if (customer.plz || customer.stadt) {
-      parts.push(`${customer.plz || ""} ${customer.stadt || ""}`.trim());
-    }
-    return parts.join(", ") || "Keine Adresse hinterlegt";
-  };
-
-  const formatBudget = (cents: number) => {
-    return new Intl.NumberFormat("de-DE", {
-      style: "currency",
-      currency: "EUR",
-    }).format(cents / 100);
-  };
-
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString("de-DE", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    });
-  };
+  const { data: customer, isLoading, error, refetch } = useCustomer(customerId);
 
   if (isLoading) {
     return (
@@ -166,6 +117,7 @@ export default function AdminCustomerDetail() {
     <Layout>
       <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
         <div className="container mx-auto px-4 py-6 max-w-4xl">
+          {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-4">
               <Link href="/admin/customers">
@@ -198,6 +150,7 @@ export default function AdminCustomerDetail() {
             </Button>
           </div>
 
+          {/* Tabbed Content */}
           <Tabs defaultValue="overview" className="space-y-4">
             <TabsList className="bg-white">
               <TabsTrigger value="overview" data-testid="tab-overview">Übersicht</TabsTrigger>
@@ -207,6 +160,7 @@ export default function AdminCustomerDetail() {
               <TabsTrigger value="history" data-testid="tab-history">Historie</TabsTrigger>
             </TabsList>
 
+            {/* Overview Tab */}
             <TabsContent value="overview" className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <Card className="bg-white">
@@ -219,7 +173,7 @@ export default function AdminCustomerDetail() {
                   <CardContent className="space-y-3">
                     <div className="flex items-center gap-2 text-gray-700">
                       <MapPin className="h-4 w-4 text-gray-400" />
-                      {formatAddress()}
+                      {formatAddress(customer)}
                     </div>
                     {(customer.telefon || customer.festnetz) && (
                       <div className="flex items-center gap-2 text-gray-700">
@@ -284,6 +238,7 @@ export default function AdminCustomerDetail() {
               )}
             </TabsContent>
 
+            {/* Contacts Tab */}
             <TabsContent value="contacts" className="space-y-4">
               <Card className="bg-white">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -296,7 +251,7 @@ export default function AdminCustomerDetail() {
                   </Button>
                 </CardHeader>
                 <CardContent>
-                  {customer.contacts.length > 0 ? (
+                  {customer.contacts && customer.contacts.length > 0 ? (
                     <div className="space-y-3">
                       {customer.contacts.map((contact) => (
                         <div
@@ -305,22 +260,15 @@ export default function AdminCustomerDetail() {
                         >
                           <div>
                             <div className="flex items-center gap-2">
-                              <p className="font-medium">{contact.name}</p>
+                              <p className="font-medium">{contact.vorname} {contact.nachname}</p>
                               {contact.isPrimary && (
                                 <Badge variant="secondary" className="text-xs">
                                   Hauptkontakt
                                 </Badge>
                               )}
-                              {contact.hasKey && (
-                                <Badge variant="outline" className="text-xs">
-                                  Hat Schlüssel
-                                </Badge>
-                              )}
                             </div>
-                            <p className="text-sm text-gray-500">{contact.relationship}</p>
-                            <p className="text-sm text-gray-600">
-                              {contact.mobil || contact.telefon}
-                            </p>
+                            <p className="text-sm text-gray-500">{contact.contactType}</p>
+                            <p className="text-sm text-gray-600">{contact.telefon}</p>
                           </div>
                           <Button variant="ghost" size="sm">
                             <Edit className="h-4 w-4" />
@@ -337,6 +285,7 @@ export default function AdminCustomerDetail() {
               </Card>
             </TabsContent>
 
+            {/* Insurance Tab */}
             <TabsContent value="insurance" className="space-y-4">
               <Card className="bg-white">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -374,6 +323,7 @@ export default function AdminCustomerDetail() {
               </Card>
             </TabsContent>
 
+            {/* Budgets Tab */}
             <TabsContent value="budgets" className="space-y-4">
               <Card className="bg-white">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -423,6 +373,7 @@ export default function AdminCustomerDetail() {
               </Card>
             </TabsContent>
 
+            {/* History Tab */}
             <TabsContent value="history" className="space-y-4">
               <Card className="bg-white">
                 <CardHeader className="pb-2">
@@ -432,7 +383,7 @@ export default function AdminCustomerDetail() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {customer.careLevelHistory.length > 0 ? (
+                  {customer.careLevelHistory && customer.careLevelHistory.length > 0 ? (
                     <div className="relative">
                       <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200" />
                       <div className="space-y-4">

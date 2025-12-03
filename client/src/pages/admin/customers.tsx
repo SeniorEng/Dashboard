@@ -1,6 +1,11 @@
+/**
+ * Admin Customer List Page
+ * 
+ * Displays paginated list of customers with search, filtering, and navigation.
+ */
+
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Layout } from "@/components/layout";
+import { useCustomers, useEmployees } from "@/features/customers";
 import {
   ArrowLeft,
   Plus,
@@ -24,35 +30,6 @@ import {
   FileText,
   AlertCircle,
 } from "lucide-react";
-
-interface CustomerListItem {
-  id: number;
-  name: string;
-  vorname: string | null;
-  nachname: string | null;
-  telefon: string | null;
-  address: string | null;
-  stadt: string | null;
-  pflegegrad: number | null;
-  primaryEmployee: { displayName: string } | null;
-  hasActiveContract: boolean;
-}
-
-interface PaginatedResponse {
-  data: CustomerListItem[];
-  total: number;
-  limit: number;
-  offset: number;
-  page: number;
-  totalPages: number;
-}
-
-interface Employee {
-  id: number;
-  displayName: string;
-  vorname: string | null;
-  nachname: string | null;
-}
 
 const PFLEGEGRAD_OPTIONS = [
   { value: "0", label: "Ohne Pflegegrad" },
@@ -71,54 +48,40 @@ export default function AdminCustomers() {
   const [employeeFilter, setEmployeeFilter] = useState<string>("");
   const [currentPage, setCurrentPage] = useState(1);
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
-  
+
+  // Debounce search input
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(searchQuery);
     }, 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
-  
-  const { data: employees } = useQuery<Employee[]>({
-    queryKey: ["admin", "employees"],
-    queryFn: async () => {
-      const res = await fetch("/api/admin/employees", { credentials: "include" });
-      if (!res.ok) throw new Error("Mitarbeiter konnten nicht geladen werden");
-      return res.json();
-    },
-  });
-  
-  const queryParams = useMemo(() => {
-    const params = new URLSearchParams();
-    if (debouncedSearch) params.set("search", debouncedSearch);
-    if (pflegegradFilter) params.set("pflegegrad", pflegegradFilter);
-    if (employeeFilter) params.set("primaryEmployeeId", employeeFilter);
-    params.set("page", currentPage.toString());
-    params.set("limit", "15");
-    return params.toString();
-  }, [debouncedSearch, pflegegradFilter, employeeFilter, currentPage]);
-  
-  const { data, isLoading, error, refetch } = useQuery<PaginatedResponse>({
-    queryKey: ["admin", "customers", queryParams],
-    queryFn: async () => {
-      const res = await fetch(`/api/admin/customers?${queryParams}`, { credentials: "include" });
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.message || "Kunden konnten nicht geladen werden");
-      }
-      return res.json();
-    },
-  });
-  
+
+  // Fetch employees for filter dropdown
+  const { data: employees } = useEmployees();
+
+  // Build query params
+  const queryParams = useMemo(() => ({
+    search: debouncedSearch || undefined,
+    pflegegrad: pflegegradFilter || undefined,
+    primaryEmployeeId: employeeFilter || undefined,
+    page: currentPage,
+    limit: 15,
+  }), [debouncedSearch, pflegegradFilter, employeeFilter, currentPage]);
+
+  // Fetch customers with the new hook
+  const { data, isLoading, error, refetch } = useCustomers(queryParams);
+
+  // Handlers
   const handlePageChange = useCallback((page: number) => {
     setCurrentPage(page);
   }, []);
-  
+
   const handleSearchChange = useCallback((value: string) => {
     setSearchQuery(value);
     setCurrentPage(1);
   }, []);
-  
+
   const handleFilterChange = useCallback((type: "pflegegrad" | "employee", value: string) => {
     if (type === "pflegegrad") {
       setPflegegradFilter(value === "all" ? "" : value);
@@ -127,7 +90,7 @@ export default function AdminCustomers() {
     }
     setCurrentPage(1);
   }, []);
-  
+
   const clearFilters = useCallback(() => {
     setPflegegradFilter("");
     setEmployeeFilter("");
@@ -135,7 +98,7 @@ export default function AdminCustomers() {
     setCurrentPage(1);
     setFilterSheetOpen(false);
   }, []);
-  
+
   const activeFilterCount = useMemo(() => {
     let count = 0;
     if (pflegegradFilter) count++;
@@ -151,6 +114,7 @@ export default function AdminCustomers() {
     <Layout>
       <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
         <div className="container mx-auto px-4 py-6 max-w-4xl">
+          {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-4">
               <Link href="/admin">
@@ -173,6 +137,7 @@ export default function AdminCustomers() {
             </Link>
           </div>
 
+          {/* Search and Filters */}
           <div className="flex gap-3 mb-6">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -220,7 +185,7 @@ export default function AdminCustomers() {
                       </SelectContent>
                     </Select>
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label>Zuständiger Mitarbeiter</Label>
                     <Select
@@ -240,7 +205,7 @@ export default function AdminCustomers() {
                       </SelectContent>
                     </Select>
                   </div>
-                  
+
                   <Button
                     variant="outline"
                     onClick={clearFilters}
@@ -254,6 +219,7 @@ export default function AdminCustomers() {
             </Sheet>
           </div>
 
+          {/* Error State */}
           {error && (
             <Card className="mb-6 border-red-200 bg-red-50">
               <CardContent className="flex items-center justify-between p-4">
@@ -273,11 +239,13 @@ export default function AdminCustomers() {
             </Card>
           )}
 
+          {/* Loading State */}
           {isLoading ? (
             <div className="flex justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
             </div>
           ) : customers.length === 0 ? (
+            /* Empty State */
             <Card className="bg-white/80 backdrop-blur-sm">
               <CardContent className="flex flex-col items-center justify-center py-12 text-center">
                 <User2 className="h-12 w-12 text-gray-400 mb-4" />
@@ -297,6 +265,7 @@ export default function AdminCustomers() {
               </CardContent>
             </Card>
           ) : (
+            /* Customer List */
             <div className="space-y-3">
               {customers.map((customer) => (
                 <Card
@@ -355,6 +324,7 @@ export default function AdminCustomers() {
             </div>
           )}
 
+          {/* Pagination */}
           {totalPages > 1 && (
             <div className="flex items-center justify-center gap-2 mt-6">
               <Button
