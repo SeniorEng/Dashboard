@@ -247,7 +247,7 @@ export class AuthService {
     const allUsers = await db
       .select()
       .from(users)
-      .where(and(eq(users.isActive, true), eq(users.isAdmin, false)));
+      .where(eq(users.isActive, true));
     const allRoles = await db.select().from(userRoles);
 
     return allUsers.map((user) => ({
