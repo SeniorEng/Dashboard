@@ -800,3 +800,78 @@ export type CustomerWithDetails = Customer & {
   primaryEmployee?: { id: number; displayName: string };
   backupEmployee?: { id: number; displayName: string };
 };
+
+// ============================================
+// EMPLOYEE TIME TRACKING
+// ============================================
+
+// Time entry types for non-client work
+export const TIME_ENTRY_TYPES = [
+  "urlaub",        // Vacation
+  "krankheit",     // Sick leave
+  "pause",         // Break
+  "bueroarbeit",   // Office/admin work
+  "vertrieb",      // Sales
+  "schulung",      // Training
+  "besprechung",   // Meeting
+  "sonstiges",     // Other
+] as const;
+
+export type TimeEntryType = typeof TIME_ENTRY_TYPES[number];
+
+// Employee time entries table
+export const employeeTimeEntries = pgTable("employee_time_entries", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  entryType: text("entry_type").notNull(), // TimeEntryType
+  entryDate: date("entry_date").notNull(),
+  startTime: time("start_time"), // Optional for full-day entries like vacation
+  endTime: time("end_time"),     // Optional for full-day entries
+  isFullDay: boolean("is_full_day").notNull().default(false),
+  durationMinutes: integer("duration_minutes"), // Calculated or manual for breaks
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Employee vacation allowance per year
+export const employeeVacationAllowance = pgTable("employee_vacation_allowance", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  year: integer("year").notNull(),
+  totalDays: integer("total_days").notNull().default(30), // Standard German vacation days
+  carryOverDays: integer("carry_over_days").notNull().default(0), // Days carried from previous year
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  unique("user_year_unique").on(table.userId, table.year),
+]);
+
+// Insert schemas
+export const insertTimeEntrySchema = z.object({
+  entryType: z.enum(TIME_ENTRY_TYPES),
+  entryDate: z.string().min(1, "Datum ist erforderlich"),
+  startTime: z.string().optional().nullable(),
+  endTime: z.string().optional().nullable(),
+  isFullDay: z.boolean().optional().default(false),
+  durationMinutes: z.number().optional().nullable(),
+  notes: z.string().max(500).optional().nullable(),
+});
+
+export const updateTimeEntrySchema = insertTimeEntrySchema.partial();
+
+export const insertVacationAllowanceSchema = z.object({
+  userId: z.number(),
+  year: z.number().min(2020).max(2100),
+  totalDays: z.number().min(0).max(365).default(30),
+  carryOverDays: z.number().min(0).max(365).default(0),
+  notes: z.string().max(500).optional().nullable(),
+});
+
+export type EmployeeTimeEntry = typeof employeeTimeEntries.$inferSelect;
+export type InsertTimeEntry = z.infer<typeof insertTimeEntrySchema>;
+export type UpdateTimeEntry = z.infer<typeof updateTimeEntrySchema>;
+
+export type EmployeeVacationAllowance = typeof employeeVacationAllowance.$inferSelect;
+export type InsertVacationAllowance = z.infer<typeof insertVacationAllowanceSchema>;
