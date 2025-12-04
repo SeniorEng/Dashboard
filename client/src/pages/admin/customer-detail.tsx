@@ -120,7 +120,7 @@ export default function AdminCustomerDetail() {
       <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
         <div className="container mx-auto px-4 py-6 max-w-4xl">
           <PageHeader
-            title={`${customer.vorname} ${customer.nachname}`}
+            title={customer.vorname && customer.nachname ? `${customer.vorname} ${customer.nachname}` : customer.name}
             backHref="/admin/customers"
             badge={
               <>
