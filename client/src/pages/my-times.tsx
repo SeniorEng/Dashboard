@@ -38,6 +38,13 @@ const TIME_ENTRY_TYPE_CONFIG: Record<TimeEntryType, { label: string; icon: React
   sonstiges: { label: "Sonstiges", icon: FileText, color: "text-gray-700", bgColor: "bg-gray-100" },
 };
 
+const formatDateString = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const WEEKDAY_NAMES = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 const MONTH_NAMES = [
   "Januar", "Februar", "März", "April", "Mai", "Juni",
@@ -53,7 +60,7 @@ export default function MyTimes() {
   const [showNewEntryDialog, setShowNewEntryDialog] = useState(false);
   const [newEntry, setNewEntry] = useState<CreateTimeEntryRequest>({
     entryType: "urlaub",
-    entryDate: today.toISOString().split("T")[0],
+    entryDate: formatDateString(today),
     isFullDay: true,
   });
 
@@ -87,7 +94,7 @@ export default function MyTimes() {
       const day = prevMonthLastDay - i;
       const date = new Date(selectedYear, selectedMonth - 2, day);
       days.push({
-        date: date.toISOString().split("T")[0],
+        date: formatDateString(date),
         day,
         isCurrentMonth: false,
         isToday: false,
@@ -95,16 +102,17 @@ export default function MyTimes() {
       });
     }
     
+    const todayStr = formatDateString(today);
+    
     // Add days from current month
     for (let day = 1; day <= daysInMonth; day++) {
       const date = new Date(selectedYear, selectedMonth - 1, day);
-      const dateStr = date.toISOString().split("T")[0];
-      const isToday = dateStr === today.toISOString().split("T")[0];
+      const dateStr = formatDateString(date);
       days.push({
         date: dateStr,
         day,
         isCurrentMonth: true,
-        isToday,
+        isToday: dateStr === todayStr,
         isWeekend: date.getDay() === 0 || date.getDay() === 6,
       });
     }
@@ -114,7 +122,7 @@ export default function MyTimes() {
     for (let day = 1; day <= remainingDays; day++) {
       const date = new Date(selectedYear, selectedMonth, day);
       days.push({
-        date: date.toISOString().split("T")[0],
+        date: formatDateString(date),
         day,
         isCurrentMonth: false,
         isToday: false,
@@ -173,7 +181,7 @@ export default function MyTimes() {
         setShowNewEntryDialog(false);
         setNewEntry({
           entryType: "urlaub",
-          entryDate: today.toISOString().split("T")[0],
+          entryDate: formatDateString(today),
           isFullDay: true,
         });
       },
