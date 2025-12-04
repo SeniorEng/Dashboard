@@ -9,4 +9,9 @@ export {
 
 export { useEmployees, employeeKeys } from './use-employees';
 
-export { useInsuranceProviders, insuranceProviderKeys } from './use-insurance-providers';
+export { 
+  useInsuranceProviders, 
+  useCreateInsuranceProvider,
+  insuranceProviderKeys,
+  type CreateInsuranceProviderData,
+} from './use-insurance-providers';
