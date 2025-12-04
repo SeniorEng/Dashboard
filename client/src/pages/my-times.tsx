@@ -469,9 +469,9 @@ export default function MyTimes() {
                       {calendarDays.map(({ date, day, isCurrentMonth, isToday, isWeekend }) => {
                         const dayEntries = entriesByDate[date] || [];
                         const dayAppointments = appointmentsByDate[date] || [];
-                        const hasEntries = dayEntries.length > 0 || dayAppointments.length > 0;
+                        const hasAppointments = dayAppointments.length > 0;
+                        const hasOtherEntries = dayEntries.length > 0;
                         const isSelected = date === selectedDate;
-                        const totalItems = dayEntries.length + dayAppointments.length;
                         
                         return (
                           <button
@@ -482,36 +482,18 @@ export default function MyTimes() {
                               ${isCurrentMonth ? "bg-white" : "bg-gray-50 text-gray-400"}
                               ${isWeekend && isCurrentMonth ? "bg-gray-100" : ""}
                               ${isToday ? "ring-2 ring-teal-500" : ""}
-                              ${isSelected ? "bg-teal-100 ring-2 ring-teal-600" : "hover:bg-gray-100"}
+                              ${isSelected ? "ring-2 ring-teal-600" : "hover:bg-gray-100"}
                             `}
                             data-testid={`calendar-day-${date}`}
                           >
                             <span className={`font-medium ${isToday ? "text-teal-700" : ""}`}>{day}</span>
-                            {hasEntries && (
-                              <div className="mt-1 space-y-0.5">
-                                {dayAppointments.slice(0, 1).map((appt) => (
-                                  <div
-                                    key={`appt-${appt.id}`}
-                                    className="text-[10px] px-1 py-0.5 rounded truncate bg-teal-100 text-teal-700"
-                                  >
-                                    {appt.customerName.split(' ')[0]}
-                                  </div>
-                                ))}
-                                {dayEntries.slice(0, dayAppointments.length > 0 ? 1 : 2).map((entry) => {
-                                  const config = TIME_ENTRY_TYPE_CONFIG[entry.entryType as TimeEntryType];
-                                  return (
-                                    <div
-                                      key={entry.id}
-                                      className={`text-[10px] px-1 py-0.5 rounded truncate ${config.bgColor} ${config.color}`}
-                                    >
-                                      {config.label}
-                                    </div>
-                                  );
-                                })}
-                                {totalItems > 2 && (
-                                  <div className="text-[10px] text-gray-500">
-                                    +{totalItems - 2} mehr
-                                  </div>
+                            {(hasAppointments || hasOtherEntries) && (
+                              <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 flex gap-0.5">
+                                {hasAppointments && (
+                                  <div className="w-1.5 h-1.5 rounded-full bg-teal-500" title="Kundentermine" />
+                                )}
+                                {hasOtherEntries && (
+                                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500" title="Andere Einträge" />
                                 )}
                               </div>
                             )}
@@ -530,11 +512,15 @@ export default function MyTimes() {
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Calendar className="h-5 w-5" />
                   {selectedDate 
-                    ? new Date(selectedDate).toLocaleDateString("de-DE", { 
-                        weekday: "long", 
-                        day: "numeric", 
-                        month: "long" 
-                      })
+                    ? (() => {
+                        const [year, month, day] = selectedDate.split("-").map(Number);
+                        const date = new Date(year, month - 1, day);
+                        return date.toLocaleDateString("de-DE", { 
+                          weekday: "long", 
+                          day: "numeric", 
+                          month: "long" 
+                        });
+                      })()
                     : "Tag auswählen"
                   }
                 </CardTitle>

@@ -188,6 +188,17 @@ export default function DocumentAppointment() {
       });
       return;
     }
+    
+    const missingDetails = formData.services.find(s => !s.details.trim());
+    if (missingDetails) {
+      toast({
+        title: "Servicedetails fehlen",
+        description: `Bitte geben Sie Details für "${missingDetails.serviceType}" an.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setStep(2);
   }, [formData.services, toast]);
 
@@ -329,7 +340,7 @@ export default function DocumentAppointment() {
                   
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <Label htmlFor={`details-${index}`}>Servicedetails</Label>
+                      <Label htmlFor={`details-${index}`}>Servicedetails *</Label>
                       <span className={`text-xs ${service.details.length > 55 ? "text-destructive" : "text-muted-foreground"}`}>
                         {service.details.length}/55
                       </span>
@@ -340,6 +351,7 @@ export default function DocumentAppointment() {
                       onChange={(e) => updateService(index, "details", e.target.value.slice(0, 55))}
                       placeholder="z.B. Wäsche gewaschen, Boden gewischt"
                       maxLength={55}
+                      className={!service.details.trim() ? "border-amber-300" : ""}
                       data-testid={`input-details-${service.serviceType.toLowerCase()}`}
                     />
                   </div>
@@ -386,7 +398,9 @@ export default function DocumentAppointment() {
                     <Home className={`${iconSize.sm} text-muted-foreground`} />
                     <div>
                       <span className="font-medium">Von zu Hause</span>
-                      <p className="text-xs text-muted-foreground">Erster Termin des Tages</p>
+                      {travelSuggestion?.suggestedOrigin === "home" && (
+                        <p className="text-xs text-muted-foreground">Erster Termin des Tages</p>
+                      )}
                     </div>
                   </Label>
                 </div>
