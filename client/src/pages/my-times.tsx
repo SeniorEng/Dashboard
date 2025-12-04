@@ -303,7 +303,7 @@ export default function MyTimes() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Palmtree className="h-5 w-5 text-green-600" />
-                  Urlaubsübersicht {selectedYear}
+                  Urlaub und Abwesenheiten {selectedYear}
                 </CardTitle>
               </CardHeader>
               <CardContent>
