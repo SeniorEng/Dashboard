@@ -65,6 +65,7 @@ router.get("/:id", async (req, res) => {
 router.post("/kundentermin", async (req, res) => {
   try {
     const validatedData = insertKundenterminSchema.parse(req.body);
+    const user = req.user!;
     
     const { appointmentData, scheduledEnd } = appointmentService.prepareKundenterminData({
       customerId: validatedData.customerId,
@@ -73,6 +74,7 @@ router.post("/kundentermin", async (req, res) => {
       hauswirtschaftDauer: validatedData.hauswirtschaftDauer ?? null,
       alltagsbegleitungDauer: validatedData.alltagsbegleitungDauer ?? null,
       notes: validatedData.notes,
+      assignedEmployeeId: user.isAdmin ? (validatedData.assignedEmployeeId ?? null) : user.id,
     });
     
     const overlapResult = await appointmentService.checkOverlap(
@@ -103,6 +105,7 @@ router.post("/kundentermin", async (req, res) => {
 router.post("/erstberatung", async (req, res) => {
   try {
     const validatedData = insertErstberatungSchema.parse(req.body);
+    const user = req.user!;
     
     const { customerData, appointmentData, scheduledEnd } = appointmentService.prepareErstberatungData({
       customer: validatedData.customer,
@@ -110,6 +113,7 @@ router.post("/erstberatung", async (req, res) => {
       scheduledStart: validatedData.scheduledStart,
       erstberatungDauer: validatedData.erstberatungDauer,
       notes: validatedData.notes,
+      assignedEmployeeId: user.isAdmin ? (validatedData.assignedEmployeeId ?? null) : user.id,
     });
     
     const overlapResult = await appointmentService.checkOverlap(

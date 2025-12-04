@@ -473,6 +473,7 @@ export const insertKundenterminSchema = z.object({
   hauswirtschaftDauer: z.number().min(15).multipleOf(15).nullable().optional(),
   alltagsbegleitungDauer: z.number().min(15).multipleOf(15).nullable().optional(),
   notes: z.string().max(255).optional(),
+  assignedEmployeeId: z.number().nullable().optional(), // Admin can assign employee
 }).refine(
   (data) => data.hauswirtschaftDauer || data.alltagsbegleitungDauer,
   { message: "Mindestens ein Service muss ausgewählt werden" }
@@ -485,6 +486,7 @@ export const insertErstberatungSchema = z.object({
   scheduledStart: z.string(),
   erstberatungDauer: z.number().min(15).multipleOf(15),
   notes: z.string().max(255).optional(),
+  assignedEmployeeId: z.number().nullable().optional(), // Admin can assign employee
 });
 
 // Refined schema for general appointment insert

@@ -364,6 +364,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
         id: appointments.id,
         customerId: appointments.customerId,
         createdByUserId: appointments.createdByUserId,
+        assignedEmployeeId: appointments.assignedEmployeeId,
         appointmentType: appointments.appointmentType,
         serviceType: appointments.serviceType,
         hauswirtschaftDauer: appointments.hauswirtschaftDauer,
@@ -397,7 +398,10 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       .innerJoin(customers, eq(appointments.customerId, customers.id))
       .where(
         and(
-          sqlBuilder`(${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId})`,
+          sqlBuilder`(
+            ${appointments.assignedEmployeeId} = ${userId} 
+            OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId}))
+          )`,
           gte(appointments.date, startDate),
           lte(appointments.date, endDate)
         )

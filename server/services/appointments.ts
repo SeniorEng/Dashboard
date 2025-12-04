@@ -31,6 +31,7 @@ export interface KundenterminInput {
   hauswirtschaftDauer: number | null;
   alltagsbegleitungDauer: number | null;
   notes?: string;
+  assignedEmployeeId?: number | null;
 }
 
 export interface ErstberatungInput {
@@ -39,6 +40,7 @@ export interface ErstberatungInput {
   scheduledStart: string;
   erstberatungDauer: number;
   notes?: string;
+  assignedEmployeeId?: number | null;
 }
 
 export class AppointmentService {
@@ -257,6 +259,7 @@ export class AppointmentService {
       durationPromised: totalDuration,
       notes: input.notes || null,
       status: "scheduled",
+      assignedEmployeeId: input.assignedEmployeeId ?? null,
     };
     
     return { appointmentData, scheduledEnd, totalDuration };
@@ -312,6 +315,7 @@ export class AppointmentService {
       durationPromised: input.erstberatungDauer,
       notes: input.notes || null,
       status: "scheduled",
+      assignedEmployeeId: input.assignedEmployeeId ?? null,
     };
     
     return { customerData, appointmentData, scheduledEnd };
