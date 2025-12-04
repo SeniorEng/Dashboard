@@ -10,7 +10,8 @@ import type {
   TimeEntry, 
   CreateTimeEntryRequest, 
   UpdateTimeEntryRequest,
-  VacationSummary 
+  VacationSummary,
+  TimeOverviewData 
 } from "@/lib/api/types";
 
 export const timeEntryKeys = {
@@ -18,6 +19,7 @@ export const timeEntryKeys = {
   list: (year?: number, month?: number) => [...timeEntryKeys.all, "list", { year, month }] as const,
   detail: (id: number) => [...timeEntryKeys.all, "detail", id] as const,
   vacationSummary: (year: number) => [...timeEntryKeys.all, "vacation-summary", year] as const,
+  overview: (year: number, month: number) => [...timeEntryKeys.all, "overview", { year, month }] as const,
 };
 
 export interface TimeEntryFilters {
@@ -123,5 +125,19 @@ export function useDeleteTimeEntry() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: timeEntryKeys.all });
     },
+  });
+}
+
+/**
+ * Fetch complete time overview for a month (appointments + time entries)
+ */
+export function useTimeOverview(year: number, month: number) {
+  return useQuery({
+    queryKey: timeEntryKeys.overview(year, month),
+    queryFn: async ({ signal }) => {
+      const result = await api.get<TimeOverviewData>(`/time-entries/overview/${year}/${month}`, signal);
+      return unwrapResult(result);
+    },
+    enabled: year >= 2020 && year <= 2100 && month >= 1 && month <= 12,
   });
 }

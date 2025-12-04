@@ -52,6 +52,31 @@ router.get("/vacation-summary/:year", async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /time-entries/overview/:year/:month
+ * Get complete time overview for a month (appointments + time entries)
+ */
+router.get("/overview/:year/:month", async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const year = parseInt(req.params.year);
+    const month = parseInt(req.params.month);
+    
+    if (isNaN(year) || year < 2020 || year > 2100) {
+      return res.status(400).json({ error: "Ungültiges Jahr" });
+    }
+    
+    if (isNaN(month) || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Ungültiger Monat" });
+    }
+    
+    const overview = await timeTrackingStorage.getTimeOverview(userId, { year, month });
+    res.json(overview);
+  } catch (error) {
+    handleRouteError(res, error, "Zeitübersicht konnte nicht geladen werden");
+  }
+});
+
+/**
  * GET /time-entries/:id
  * Get a specific time entry
  */

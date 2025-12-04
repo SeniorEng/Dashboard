@@ -310,3 +310,68 @@ export interface VacationSummary {
   remainingDays: number;
   sickDays: number;
 }
+
+export interface AppointmentWithCustomerName {
+  id: number;
+  customerId: number;
+  createdByUserId: number | null;
+  appointmentType: string;
+  serviceType: string | null;
+  hauswirtschaftDauer: number | null;
+  alltagsbegleitungDauer: number | null;
+  erstberatungDauer: number | null;
+  hauswirtschaftActualDauer: number | null;
+  hauswirtschaftDetails: string | null;
+  alltagsbegleitungActualDauer: number | null;
+  alltagsbegleitungDetails: string | null;
+  erstberatungActualDauer: number | null;
+  erstberatungDetails: string | null;
+  date: string;
+  scheduledStart: string;
+  scheduledEnd: string | null;
+  durationPromised: number;
+  actualStart: string | null;
+  actualEnd: string | null;
+  status: string;
+  notes: string | null;
+  travelOriginType: string | null;
+  travelFromAppointmentId: number | null;
+  travelKilometers: number | null;
+  travelMinutes: number | null;
+  kilometers: string | null;
+  signatureData: string | null;
+  servicesDone: string[] | null;
+  createdAt: string;
+  customerName: string;
+}
+
+export interface ServiceHoursSummary {
+  hauswirtschaftMinutes: number;
+  alltagsbegleitungMinutes: number;
+  erstberatungMinutes: number;
+}
+
+export interface TravelSummary {
+  totalKilometers: number;
+  totalMinutes: number;
+}
+
+export interface TimeEntrySummary {
+  urlaubDays: number;
+  krankheitDays: number;
+  pauseMinutes: number;
+  bueroarbeitMinutes: number;
+  vertriebMinutes: number;
+  schulungMinutes: number;
+  besprechungMinutes: number;
+  sonstigesMinutes: number;
+}
+
+export interface TimeOverviewData {
+  period: { year: number; month: number };
+  serviceHours: ServiceHoursSummary;
+  travel: TravelSummary;
+  timeEntries: TimeEntrySummary;
+  appointments: AppointmentWithCustomerName[];
+  otherEntries: TimeEntry[];
+}

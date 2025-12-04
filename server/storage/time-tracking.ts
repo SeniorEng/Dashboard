@@ -1,14 +1,17 @@
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
-import { eq, and, gte, lte, sql as sqlBuilder } from "drizzle-orm";
+import { eq, and, gte, lte, sql as sqlBuilder, asc } from "drizzle-orm";
 import {
   employeeTimeEntries,
   employeeVacationAllowance,
+  appointments,
+  customers,
   type EmployeeTimeEntry,
   type InsertTimeEntry,
   type UpdateTimeEntry,
   type EmployeeVacationAllowance,
   type InsertVacationAllowance,
+  type Appointment,
 } from "@shared/schema";
 
 const sql = neon(process.env.DATABASE_URL!);
@@ -30,6 +33,46 @@ export interface VacationSummary {
   sickDays: number;
 }
 
+export interface AppointmentWithCustomerName extends Appointment {
+  customerName: string;
+}
+
+export interface TimeOverviewFilters {
+  year: number;
+  month: number;
+}
+
+export interface ServiceHoursSummary {
+  hauswirtschaftMinutes: number;
+  alltagsbegleitungMinutes: number;
+  erstberatungMinutes: number;
+}
+
+export interface TravelSummary {
+  totalKilometers: number;
+  totalMinutes: number;
+}
+
+export interface TimeEntrySummary {
+  urlaubDays: number;
+  krankheitDays: number;
+  pauseMinutes: number;
+  bueroarbeitMinutes: number;
+  vertriebMinutes: number;
+  schulungMinutes: number;
+  besprechungMinutes: number;
+  sonstigesMinutes: number;
+}
+
+export interface TimeOverviewData {
+  period: { year: number; month: number };
+  serviceHours: ServiceHoursSummary;
+  travel: TravelSummary;
+  timeEntries: TimeEntrySummary;
+  appointments: AppointmentWithCustomerName[];
+  otherEntries: EmployeeTimeEntry[];
+}
+
 export interface ITimeTrackingStorage {
   // Time Entries
   getTimeEntries(userId: number, filters?: TimeEntryFilters): Promise<EmployeeTimeEntry[]>;
@@ -45,6 +88,10 @@ export interface ITimeTrackingStorage {
   
   // Admin views
   getAllTimeEntries(filters?: TimeEntryFilters & { userId?: number }): Promise<(EmployeeTimeEntry & { user: { displayName: string } })[]>;
+  
+  // Time Overview (combined appointments + time entries)
+  getTimeOverview(userId: number, filters: TimeOverviewFilters): Promise<TimeOverviewData>;
+  getEmployeeAppointments(userId: number, startDate: string, endDate: string): Promise<AppointmentWithCustomerName[]>;
 }
 
 class TimeTrackingStorage implements ITimeTrackingStorage {
@@ -309,6 +356,146 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       ...r,
       user: { displayName: r.user?.displayName || 'Unbekannt' },
     }));
+  }
+  
+  async getEmployeeAppointments(userId: number, startDate: string, endDate: string): Promise<AppointmentWithCustomerName[]> {
+    const results = await db
+      .select({
+        id: appointments.id,
+        customerId: appointments.customerId,
+        createdByUserId: appointments.createdByUserId,
+        appointmentType: appointments.appointmentType,
+        serviceType: appointments.serviceType,
+        hauswirtschaftDauer: appointments.hauswirtschaftDauer,
+        alltagsbegleitungDauer: appointments.alltagsbegleitungDauer,
+        erstberatungDauer: appointments.erstberatungDauer,
+        hauswirtschaftActualDauer: appointments.hauswirtschaftActualDauer,
+        hauswirtschaftDetails: appointments.hauswirtschaftDetails,
+        alltagsbegleitungActualDauer: appointments.alltagsbegleitungActualDauer,
+        alltagsbegleitungDetails: appointments.alltagsbegleitungDetails,
+        erstberatungActualDauer: appointments.erstberatungActualDauer,
+        erstberatungDetails: appointments.erstberatungDetails,
+        date: appointments.date,
+        scheduledStart: appointments.scheduledStart,
+        scheduledEnd: appointments.scheduledEnd,
+        durationPromised: appointments.durationPromised,
+        actualStart: appointments.actualStart,
+        actualEnd: appointments.actualEnd,
+        status: appointments.status,
+        notes: appointments.notes,
+        travelOriginType: appointments.travelOriginType,
+        travelFromAppointmentId: appointments.travelFromAppointmentId,
+        travelKilometers: appointments.travelKilometers,
+        travelMinutes: appointments.travelMinutes,
+        kilometers: appointments.kilometers,
+        signatureData: appointments.signatureData,
+        servicesDone: appointments.servicesDone,
+        createdAt: appointments.createdAt,
+        customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as('customer_name'),
+      })
+      .from(appointments)
+      .innerJoin(customers, eq(appointments.customerId, customers.id))
+      .where(
+        and(
+          sqlBuilder`(${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId})`,
+          gte(appointments.date, startDate),
+          lte(appointments.date, endDate)
+        )
+      )
+      .orderBy(asc(appointments.date), asc(appointments.scheduledStart));
+    
+    return results.map(r => ({
+      ...r,
+      customerName: String(r.customerName),
+    }));
+  }
+  
+  async getTimeOverview(userId: number, filters: TimeOverviewFilters): Promise<TimeOverviewData> {
+    const { year, month } = filters;
+    const monthStr = month.toString().padStart(2, '0');
+    const startDate = `${year}-${monthStr}-01`;
+    const lastDay = new Date(year, month, 0).getDate();
+    const endDate = `${year}-${monthStr}-${lastDay}`;
+    
+    const [employeeAppointments, timeEntries] = await Promise.all([
+      this.getEmployeeAppointments(userId, startDate, endDate),
+      this.getTimeEntries(userId, { year, month }),
+    ]);
+    
+    const serviceHours: ServiceHoursSummary = {
+      hauswirtschaftMinutes: 0,
+      alltagsbegleitungMinutes: 0,
+      erstberatungMinutes: 0,
+    };
+    
+    const travel: TravelSummary = {
+      totalKilometers: 0,
+      totalMinutes: 0,
+    };
+    
+    for (const appt of employeeAppointments) {
+      if (appt.status === 'completed' || appt.status === 'documenting') {
+        serviceHours.hauswirtschaftMinutes += appt.hauswirtschaftActualDauer || appt.hauswirtschaftDauer || 0;
+        serviceHours.alltagsbegleitungMinutes += appt.alltagsbegleitungActualDauer || appt.alltagsbegleitungDauer || 0;
+        serviceHours.erstberatungMinutes += appt.erstberatungActualDauer || appt.erstberatungDauer || 0;
+      } else {
+        serviceHours.hauswirtschaftMinutes += appt.hauswirtschaftDauer || 0;
+        serviceHours.alltagsbegleitungMinutes += appt.alltagsbegleitungDauer || 0;
+        serviceHours.erstberatungMinutes += appt.erstberatungDauer || 0;
+      }
+      
+      travel.totalKilometers += appt.travelKilometers || 0;
+      travel.totalMinutes += appt.travelMinutes || 0;
+    }
+    
+    const timeEntrySummary: TimeEntrySummary = {
+      urlaubDays: 0,
+      krankheitDays: 0,
+      pauseMinutes: 0,
+      bueroarbeitMinutes: 0,
+      vertriebMinutes: 0,
+      schulungMinutes: 0,
+      besprechungMinutes: 0,
+      sonstigesMinutes: 0,
+    };
+    
+    for (const entry of timeEntries) {
+      switch (entry.entryType) {
+        case 'urlaub':
+          timeEntrySummary.urlaubDays++;
+          break;
+        case 'krankheit':
+          timeEntrySummary.krankheitDays++;
+          break;
+        case 'pause':
+          timeEntrySummary.pauseMinutes += entry.durationMinutes || 0;
+          break;
+        case 'bueroarbeit':
+          timeEntrySummary.bueroarbeitMinutes += entry.durationMinutes || 0;
+          break;
+        case 'vertrieb':
+          timeEntrySummary.vertriebMinutes += entry.durationMinutes || 0;
+          break;
+        case 'schulung':
+          timeEntrySummary.schulungMinutes += entry.durationMinutes || 0;
+          break;
+        case 'besprechung':
+          timeEntrySummary.besprechungMinutes += entry.durationMinutes || 0;
+          break;
+        case 'sonstiges':
+          timeEntrySummary.sonstigesMinutes += entry.durationMinutes || 0;
+          break;
+      }
+    }
+    
+    return {
+      period: { year, month },
+      serviceHours,
+      travel,
+      timeEntries: timeEntrySummary,
+      appointments: employeeAppointments,
+      otherEntries: timeEntries,
+    };
   }
 }
 

@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { useTimeEntries, useVacationSummary, useCreateTimeEntry, useDeleteTimeEntry } from "@/features/time-tracking";
+import { useTimeOverview, useVacationSummary, useCreateTimeEntry, useDeleteTimeEntry } from "@/features/time-tracking";
 import {
   Calendar,
   Plus,
@@ -21,8 +21,11 @@ import {
   Trash2,
   Loader2,
   FileText,
+  Car,
+  Home,
+  Users,
 } from "lucide-react";
-import type { TimeEntryType, CreateTimeEntryRequest } from "@/lib/api/types";
+import type { TimeEntryType, CreateTimeEntryRequest, AppointmentWithCustomerName } from "@/lib/api/types";
 
 const TIME_ENTRY_TYPE_CONFIG: Record<TimeEntryType, { label: string; icon: React.ElementType; color: string; bgColor: string }> = {
   urlaub: { label: "Urlaub", icon: Palmtree, color: "text-green-700", bgColor: "bg-green-100" },
@@ -54,10 +57,21 @@ export default function MyTimes() {
     isFullDay: true,
   });
 
-  const { data: entries, isLoading } = useTimeEntries({ year: selectedYear, month: selectedMonth });
+  const { data: timeOverview, isLoading } = useTimeOverview(selectedYear, selectedMonth);
   const { data: vacationSummary } = useVacationSummary(selectedYear);
   const createMutation = useCreateTimeEntry();
   const deleteMutation = useDeleteTimeEntry();
+
+  const entries = timeOverview?.otherEntries;
+  const appointments = timeOverview?.appointments;
+
+  const formatMinutesToHours = (minutes: number) => {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (hours === 0) return `${mins} min`;
+    if (mins === 0) return `${hours}h`;
+    return `${hours}h ${mins}min`;
+  };
 
   const calendarDays = useMemo(() => {
     const firstDay = new Date(selectedYear, selectedMonth - 1, 1);
@@ -120,6 +134,15 @@ export default function MyTimes() {
     }, {} as Record<string, typeof entries>);
   }, [entries]);
 
+  const appointmentsByDate = useMemo(() => {
+    if (!appointments) return {};
+    return appointments.reduce((acc, appt) => {
+      if (!acc[appt.date]) acc[appt.date] = [];
+      acc[appt.date].push(appt);
+      return acc;
+    }, {} as Record<string, AppointmentWithCustomerName[]>);
+  }, [appointments]);
+
   const handlePrevMonth = () => {
     if (selectedMonth === 1) {
       setSelectedMonth(12);
@@ -172,6 +195,8 @@ export default function MyTimes() {
   };
 
   const selectedDayEntries = selectedDate ? entriesByDate[selectedDate] || [] : [];
+  const selectedDayAppointments = selectedDate ? appointmentsByDate[selectedDate] || [] : [];
+  const hasDayItems = selectedDayEntries.length > 0 || selectedDayAppointments.length > 0;
 
   return (
     <Layout>
@@ -180,7 +205,7 @@ export default function MyTimes() {
           <div className="flex items-center justify-between mb-6">
             <div>
               <h1 className="text-2xl font-bold text-gray-900" data-testid="text-page-title">Meine Zeiten</h1>
-              <p className="text-gray-600">Urlaub, Krankheit und andere Abwesenheiten</p>
+              <p className="text-gray-600">Kundentermine, Urlaub und Abwesenheiten</p>
             </div>
             <Dialog open={showNewEntryDialog} onOpenChange={setShowNewEntryDialog}>
               <DialogTrigger asChild>
@@ -297,42 +322,118 @@ export default function MyTimes() {
             </Dialog>
           </div>
 
-          {/* Vacation Summary Card */}
-          {vacationSummary && (
-            <Card className="mb-6">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-lg">Urlaub und Abwesenheiten {selectedYear}</CardTitle>
+          {/* Time Overview Summary */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            {/* Customer Hours Card */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Kundenstunden {MONTH_NAMES[selectedMonth - 1]}
+                </CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="text-center p-3 rounded-lg bg-teal-50">
-                    <div className="text-2xl font-bold text-teal-700" data-testid="text-remaining-days">
-                      {vacationSummary.remainingDays}
-                    </div>
-                    <div className="text-xs text-gray-500">Verfügbar</div>
+              <CardContent className="pt-0">
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Hauswirtschaft</span>
+                    <span className="font-semibold text-teal-700" data-testid="text-hauswirtschaft-hours">
+                      {formatMinutesToHours(timeOverview?.serviceHours?.hauswirtschaftMinutes || 0)}
+                    </span>
                   </div>
-                  <div className="text-center p-3 rounded-lg bg-green-50">
-                    <div className="text-2xl font-bold text-green-700" data-testid="text-used-days">
-                      {vacationSummary.usedDays}
-                    </div>
-                    <div className="text-xs text-gray-500">Genommen</div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Alltagsbegleitung</span>
+                    <span className="font-semibold text-blue-700" data-testid="text-alltagsbegleitung-hours">
+                      {formatMinutesToHours(timeOverview?.serviceHours?.alltagsbegleitungMinutes || 0)}
+                    </span>
                   </div>
-                  <div className="text-center p-3 rounded-lg bg-blue-50">
-                    <div className="text-2xl font-bold text-blue-700" data-testid="text-planned-days">
-                      {vacationSummary.plannedDays}
-                    </div>
-                    <div className="text-xs text-gray-500">Geplant</div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Erstberatung</span>
+                    <span className="font-semibold text-purple-700" data-testid="text-erstberatung-hours">
+                      {formatMinutesToHours(timeOverview?.serviceHours?.erstberatungMinutes || 0)}
+                    </span>
                   </div>
-                  <div className="text-center p-3 rounded-lg bg-red-50">
-                    <div className="text-2xl font-bold text-red-700" data-testid="text-sick-days">
-                      {vacationSummary.sickDays}
-                    </div>
-                    <div className="text-xs text-gray-500">Krankheit</div>
+                  <div className="border-t pt-2 mt-2 flex justify-between items-center">
+                    <span className="text-sm font-medium text-gray-700">Gesamt</span>
+                    <span className="font-bold text-gray-900" data-testid="text-total-service-hours">
+                      {formatMinutesToHours(
+                        (timeOverview?.serviceHours?.hauswirtschaftMinutes || 0) +
+                        (timeOverview?.serviceHours?.alltagsbegleitungMinutes || 0) +
+                        (timeOverview?.serviceHours?.erstberatungMinutes || 0)
+                      )}
+                    </span>
                   </div>
                 </div>
               </CardContent>
             </Card>
-          )}
+
+            {/* Travel Card */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
+                  <Car className="h-4 w-4" />
+                  Anfahrt {MONTH_NAMES[selectedMonth - 1]}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="space-y-3">
+                  <div className="text-center p-3 rounded-lg bg-amber-50">
+                    <div className="text-2xl font-bold text-amber-700" data-testid="text-total-km">
+                      {timeOverview?.travel?.totalKilometers || 0} km
+                    </div>
+                    <div className="text-xs text-gray-500">Kilometer gesamt</div>
+                  </div>
+                  <div className="text-center p-3 rounded-lg bg-orange-50">
+                    <div className="text-2xl font-bold text-orange-700" data-testid="text-total-travel-time">
+                      {formatMinutesToHours(timeOverview?.travel?.totalMinutes || 0)}
+                    </div>
+                    <div className="text-xs text-gray-500">Fahrzeit gesamt</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Vacation & Absence Card */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
+                  <Palmtree className="h-4 w-4" />
+                  Urlaub {selectedYear}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                {vacationSummary ? (
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-600">Verfügbar</span>
+                      <span className="font-bold text-teal-700" data-testid="text-remaining-days">
+                        {vacationSummary.remainingDays} Tage
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-600">Genommen</span>
+                      <span className="font-semibold text-green-700" data-testid="text-used-days">
+                        {vacationSummary.usedDays} Tage
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-600">Geplant</span>
+                      <span className="font-semibold text-blue-700" data-testid="text-planned-days">
+                        {vacationSummary.plannedDays} Tage
+                      </span>
+                    </div>
+                    <div className="border-t pt-2 mt-2 flex justify-between items-center">
+                      <span className="text-sm text-gray-600">Krankheit</span>
+                      <span className="font-semibold text-red-700" data-testid="text-sick-days">
+                        {vacationSummary.sickDays} Tage
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-4 text-gray-400 text-sm">Laden...</div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Calendar */}
@@ -367,8 +468,10 @@ export default function MyTimes() {
                     <div className="grid grid-cols-7 gap-1">
                       {calendarDays.map(({ date, day, isCurrentMonth, isToday, isWeekend }) => {
                         const dayEntries = entriesByDate[date] || [];
-                        const hasEntries = dayEntries.length > 0;
+                        const dayAppointments = appointmentsByDate[date] || [];
+                        const hasEntries = dayEntries.length > 0 || dayAppointments.length > 0;
                         const isSelected = date === selectedDate;
+                        const totalItems = dayEntries.length + dayAppointments.length;
                         
                         return (
                           <button
@@ -386,7 +489,15 @@ export default function MyTimes() {
                             <span className={`font-medium ${isToday ? "text-teal-700" : ""}`}>{day}</span>
                             {hasEntries && (
                               <div className="mt-1 space-y-0.5">
-                                {dayEntries.slice(0, 2).map((entry) => {
+                                {dayAppointments.slice(0, 1).map((appt) => (
+                                  <div
+                                    key={`appt-${appt.id}`}
+                                    className="text-[10px] px-1 py-0.5 rounded truncate bg-teal-100 text-teal-700"
+                                  >
+                                    {appt.customerName.split(' ')[0]}
+                                  </div>
+                                ))}
+                                {dayEntries.slice(0, dayAppointments.length > 0 ? 1 : 2).map((entry) => {
                                   const config = TIME_ENTRY_TYPE_CONFIG[entry.entryType as TimeEntryType];
                                   return (
                                     <div
@@ -397,9 +508,9 @@ export default function MyTimes() {
                                     </div>
                                   );
                                 })}
-                                {dayEntries.length > 2 && (
+                                {totalItems > 2 && (
                                   <div className="text-[10px] text-gray-500">
-                                    +{dayEntries.length - 2} mehr
+                                    +{totalItems - 2} mehr
                                   </div>
                                 )}
                               </div>
@@ -433,7 +544,7 @@ export default function MyTimes() {
                   <p className="text-gray-500 text-sm text-center py-8">
                     Klicken Sie auf einen Tag im Kalender, um Details anzuzeigen.
                   </p>
-                ) : selectedDayEntries.length === 0 ? (
+                ) : !hasDayItems ? (
                   <div className="text-center py-8">
                     <p className="text-gray-500 text-sm mb-4">Keine Einträge an diesem Tag.</p>
                     <Button
@@ -451,6 +562,60 @@ export default function MyTimes() {
                   </div>
                 ) : (
                   <div className="space-y-3">
+                    {/* Appointments */}
+                    {selectedDayAppointments.map((appt) => {
+                      const getServiceInfo = () => {
+                        const services = [];
+                        if (appt.hauswirtschaftDauer || appt.hauswirtschaftActualDauer) {
+                          services.push({ name: "HW", minutes: appt.hauswirtschaftActualDauer || appt.hauswirtschaftDauer || 0 });
+                        }
+                        if (appt.alltagsbegleitungDauer || appt.alltagsbegleitungActualDauer) {
+                          services.push({ name: "AB", minutes: appt.alltagsbegleitungActualDauer || appt.alltagsbegleitungDauer || 0 });
+                        }
+                        if (appt.erstberatungDauer || appt.erstberatungActualDauer) {
+                          services.push({ name: "EB", minutes: appt.erstberatungActualDauer || appt.erstberatungDauer || 0 });
+                        }
+                        return services;
+                      };
+                      const services = getServiceInfo();
+                      
+                      return (
+                        <div
+                          key={`appt-${appt.id}`}
+                          className="p-3 rounded-lg bg-teal-50 border border-teal-200"
+                          data-testid={`appointment-${appt.id}`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <Users className="h-5 w-5 mt-0.5 text-teal-700" />
+                            <div className="flex-1">
+                              <div className="font-medium text-teal-800">{appt.customerName}</div>
+                              <div className="text-sm text-gray-600">
+                                {appt.scheduledStart.slice(0, 5)} Uhr
+                              </div>
+                              <div className="flex flex-wrap gap-2 mt-1">
+                                {services.map((s, i) => (
+                                  <span key={i} className="text-xs px-2 py-0.5 bg-teal-100 rounded text-teal-700">
+                                    {s.name}: {formatMinutesToHours(s.minutes)}
+                                  </span>
+                                ))}
+                              </div>
+                              {(appt.travelKilometers || appt.travelMinutes) && (
+                                <div className="flex items-center gap-2 mt-1 text-xs text-amber-700">
+                                  <Car className="h-3 w-3" />
+                                  <span>
+                                    {appt.travelKilometers ? `${appt.travelKilometers} km` : ""}
+                                    {appt.travelKilometers && appt.travelMinutes ? " • " : ""}
+                                    {appt.travelMinutes ? `${appt.travelMinutes} min` : ""}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    
+                    {/* Time Entries */}
                     {selectedDayEntries.map((entry) => {
                       const config = TIME_ENTRY_TYPE_CONFIG[entry.entryType as TimeEntryType];
                       const Icon = config.icon;
