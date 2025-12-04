@@ -307,12 +307,12 @@ export default function MyTimes() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                  <div className="text-center p-3 rounded-lg bg-gray-50">
-                    <div className="text-2xl font-bold text-gray-900" data-testid="text-total-days">
-                      {vacationSummary.totalDays + vacationSummary.carryOverDays}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="text-center p-3 rounded-lg bg-teal-50">
+                    <div className="text-2xl font-bold text-teal-700" data-testid="text-remaining-days">
+                      {vacationSummary.remainingDays}
                     </div>
-                    <div className="text-xs text-gray-500">Gesamt</div>
+                    <div className="text-xs text-gray-500">Verfügbar</div>
                   </div>
                   <div className="text-center p-3 rounded-lg bg-green-50">
                     <div className="text-2xl font-bold text-green-700" data-testid="text-used-days">
@@ -325,12 +325,6 @@ export default function MyTimes() {
                       {vacationSummary.plannedDays}
                     </div>
                     <div className="text-xs text-gray-500">Geplant</div>
-                  </div>
-                  <div className="text-center p-3 rounded-lg bg-teal-50">
-                    <div className="text-2xl font-bold text-teal-700" data-testid="text-remaining-days">
-                      {vacationSummary.remainingDays}
-                    </div>
-                    <div className="text-xs text-gray-500">Verfügbar</div>
                   </div>
                   <div className="text-center p-3 rounded-lg bg-red-50">
                     <div className="text-2xl font-bold text-red-700" data-testid="text-sick-days">
