@@ -171,6 +171,7 @@ export default function NewAppointment() {
     const newErrors: Record<string, string> = {};
     if (!ktCustomerId) newErrors.ktCustomerId = "Bitte wählen Sie einen Kunden";
     if (!ktHauswirtschaft && !ktAlltagsbegleitung) newErrors.ktServices = "Bitte wählen Sie mindestens einen Service";
+    if (isAdmin && !ktAssignedEmployeeId) newErrors.ktAssignedEmployeeId = "Bitte wählen Sie einen Mitarbeiter";
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -185,6 +186,7 @@ export default function NewAppointment() {
     if (!ebNr.trim()) newErrors.ebNr = "Hausnummer ist erforderlich";
     if (!/^\d{5}$/.test(ebPlz)) newErrors.ebPlz = "PLZ muss 5 Ziffern haben";
     if (!ebStadt.trim()) newErrors.ebStadt = "Stadt ist erforderlich";
+    if (isAdmin && !ebAssignedEmployeeId) newErrors.ebAssignedEmployeeId = "Bitte wählen Sie einen Mitarbeiter";
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -316,14 +318,14 @@ export default function NewAppointment() {
                 {errors.ktCustomerId && <p className="text-destructive text-sm">{errors.ktCustomerId}</p>}
               </div>
 
-              {/* Employee Assignment (Admin only) */}
+              {/* Employee Assignment (Admin only - required) */}
               {isAdmin && (
                 <div className="space-y-2">
                   <Label>
-                    <Users className={`${iconSize.sm} inline mr-1`} /> Mitarbeiter zuweisen
+                    <Users className={`${iconSize.sm} inline mr-1`} /> Mitarbeiter zuweisen *
                   </Label>
                   <Select value={ktAssignedEmployeeId} onValueChange={setKtAssignedEmployeeId}>
-                    <SelectTrigger data-testid="select-kt-employee">
+                    <SelectTrigger data-testid="select-kt-employee" className={errors.ktAssignedEmployeeId ? "border-destructive" : ""}>
                       <SelectValue placeholder="Mitarbeiter auswählen..." />
                     </SelectTrigger>
                     <SelectContent>
@@ -336,8 +338,9 @@ export default function NewAppointment() {
                         ))}
                     </SelectContent>
                   </Select>
+                  {errors.ktAssignedEmployeeId && <p className="text-destructive text-sm">{errors.ktAssignedEmployeeId}</p>}
                   <p className="text-xs text-muted-foreground">
-                    Wählen Sie den Mitarbeiter, der diesen Termin durchführen soll
+                    Der Mitarbeiter muss dem Kunden zugeordnet sein (Haupt- oder Vertretungsmitarbeiter)
                   </p>
                 </div>
               )}
@@ -627,14 +630,14 @@ export default function NewAppointment() {
                 </Select>
               </div>
 
-              {/* Employee Assignment (Admin only) */}
+              {/* Employee Assignment (Admin only - required) */}
               {isAdmin && (
                 <div className="space-y-2">
                   <Label>
-                    <Users className={`${iconSize.sm} inline mr-1`} /> Mitarbeiter zuweisen
+                    <Users className={`${iconSize.sm} inline mr-1`} /> Mitarbeiter zuweisen *
                   </Label>
                   <Select value={ebAssignedEmployeeId} onValueChange={setEbAssignedEmployeeId}>
-                    <SelectTrigger data-testid="select-eb-employee">
+                    <SelectTrigger data-testid="select-eb-employee" className={errors.ebAssignedEmployeeId ? "border-destructive" : ""}>
                       <SelectValue placeholder="Mitarbeiter auswählen..." />
                     </SelectTrigger>
                     <SelectContent>
@@ -647,8 +650,9 @@ export default function NewAppointment() {
                         ))}
                     </SelectContent>
                   </Select>
+                  {errors.ebAssignedEmployeeId && <p className="text-destructive text-sm">{errors.ebAssignedEmployeeId}</p>}
                   <p className="text-xs text-muted-foreground">
-                    Wählen Sie den Mitarbeiter, der diese Erstberatung durchführen soll
+                    Der ausgewählte Mitarbeiter wird automatisch Hauptmitarbeiter für diesen neuen Kunden
                   </p>
                 </div>
               )}
