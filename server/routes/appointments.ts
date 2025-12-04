@@ -67,6 +67,36 @@ router.post("/kundentermin", async (req, res) => {
     const validatedData = insertKundenterminSchema.parse(req.body);
     const user = req.user!;
     
+    // Determine assigned employee
+    let assignedEmployeeId: number;
+    if (user.isAdmin) {
+      // Admin MUST explicitly select an employee
+      if (!validatedData.assignedEmployeeId) {
+        return sendBadRequest(res, "Bitte wählen Sie einen Mitarbeiter für diesen Termin aus.");
+      }
+      assignedEmployeeId = validatedData.assignedEmployeeId;
+      
+      // Validate that employee is assigned to this customer
+      const customer = await storage.getCustomer(validatedData.customerId);
+      if (!customer) {
+        return sendNotFound(res, "Kunde nicht gefunden.");
+      }
+      
+      const isAssignedEmployee = 
+        customer.primaryEmployeeId === assignedEmployeeId || 
+        customer.backupEmployeeId === assignedEmployeeId;
+      
+      if (!isAssignedEmployee) {
+        return sendBadRequest(
+          res, 
+          "Der ausgewählte Mitarbeiter ist diesem Kunden nicht zugeordnet. Bitte weisen Sie den Mitarbeiter zuerst dem Kunden zu."
+        );
+      }
+    } else {
+      // Regular employee creates appointments for themselves
+      assignedEmployeeId = user.id;
+    }
+    
     const { appointmentData, scheduledEnd } = appointmentService.prepareKundenterminData({
       customerId: validatedData.customerId,
       date: validatedData.date,
@@ -74,7 +104,7 @@ router.post("/kundentermin", async (req, res) => {
       hauswirtschaftDauer: validatedData.hauswirtschaftDauer ?? null,
       alltagsbegleitungDauer: validatedData.alltagsbegleitungDauer ?? null,
       notes: validatedData.notes,
-      assignedEmployeeId: user.isAdmin ? (validatedData.assignedEmployeeId ?? user.id) : user.id,
+      assignedEmployeeId,
     });
     
     const overlapResult = await appointmentService.checkOverlap(
@@ -107,13 +137,28 @@ router.post("/erstberatung", async (req, res) => {
     const validatedData = insertErstberatungSchema.parse(req.body);
     const user = req.user!;
     
+    // Determine assigned employee
+    let assignedEmployeeId: number;
+    if (user.isAdmin) {
+      // Admin MUST explicitly select an employee
+      if (!validatedData.assignedEmployeeId) {
+        return sendBadRequest(res, "Bitte wählen Sie einen Mitarbeiter für diese Erstberatung aus.");
+      }
+      assignedEmployeeId = validatedData.assignedEmployeeId;
+      // Note: For Erstberatung, we're creating a NEW customer, so we can't validate assignment yet.
+      // The selected employee will become the primary employee for this new customer.
+    } else {
+      // Regular employee creates appointments for themselves
+      assignedEmployeeId = user.id;
+    }
+    
     const { customerData, appointmentData, scheduledEnd } = appointmentService.prepareErstberatungData({
       customer: validatedData.customer,
       date: validatedData.date,
       scheduledStart: validatedData.scheduledStart,
       erstberatungDauer: validatedData.erstberatungDauer,
       notes: validatedData.notes,
-      assignedEmployeeId: user.isAdmin ? (validatedData.assignedEmployeeId ?? user.id) : user.id,
+      assignedEmployeeId,
     });
     
     const overlapResult = await appointmentService.checkOverlap(
@@ -134,8 +179,14 @@ router.post("/erstberatung", async (req, res) => {
       return sendConflict(res, "Terminüberschneidung", ErrorMessages.timeOverlap);
     }
     
+    // Set the assigned employee as primary employee for the new customer
+    const customerDataWithEmployee = {
+      ...customerData,
+      primaryEmployeeId: assignedEmployeeId,
+    };
+    
     const { customer, appointment } = await storage.createErstberatungWithCustomer(
-      customerData,
+      customerDataWithEmployee,
       appointmentData
     );
     
