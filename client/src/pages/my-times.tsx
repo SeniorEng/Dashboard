@@ -176,12 +176,18 @@ export default function MyTimes() {
 
   const handleCreateEntry = () => {
     createMutation.mutate(newEntry, {
-      onSuccess: () => {
-        toast({ title: "Eintrag erstellt" });
+      onSuccess: (data: unknown) => {
+        const result = data as { count?: number; message?: string };
+        if (result.count && result.count > 1) {
+          toast({ title: `${result.count} Einträge erstellt` });
+        } else {
+          toast({ title: "Eintrag erstellt" });
+        }
         setShowNewEntryDialog(false);
         setNewEntry({
           entryType: "urlaub",
           entryDate: formatDateString(today),
+          endDate: null,
           isFullDay: true,
         });
       },
@@ -249,16 +255,42 @@ export default function MyTimes() {
                     </Select>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="entryDate">Datum</Label>
-                    <Input
-                      id="entryDate"
-                      type="date"
-                      value={newEntry.entryDate}
-                      onChange={(e) => setNewEntry(prev => ({ ...prev, entryDate: e.target.value }))}
-                      data-testid="input-entry-date"
-                    />
-                  </div>
+                  {(newEntry.entryType === "urlaub" || newEntry.entryType === "krankheit") ? (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="entryDate">Von</Label>
+                        <Input
+                          id="entryDate"
+                          type="date"
+                          value={newEntry.entryDate}
+                          onChange={(e) => setNewEntry(prev => ({ ...prev, entryDate: e.target.value }))}
+                          data-testid="input-entry-date"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="endDate">Bis</Label>
+                        <Input
+                          id="endDate"
+                          type="date"
+                          value={newEntry.endDate || newEntry.entryDate}
+                          min={newEntry.entryDate}
+                          onChange={(e) => setNewEntry(prev => ({ ...prev, endDate: e.target.value }))}
+                          data-testid="input-end-date"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <Label htmlFor="entryDate">Datum</Label>
+                      <Input
+                        id="entryDate"
+                        type="date"
+                        value={newEntry.entryDate}
+                        onChange={(e) => setNewEntry(prev => ({ ...prev, entryDate: e.target.value }))}
+                        data-testid="input-entry-date"
+                      />
+                    </div>
+                  )}
 
                   {(newEntry.entryType === "pause" || newEntry.entryType === "bueroarbeit" || 
                     newEntry.entryType === "besprechung" || newEntry.entryType === "schulung") && (

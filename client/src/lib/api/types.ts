@@ -292,6 +292,7 @@ export interface TimeEntryWithUser extends TimeEntry {
 export interface CreateTimeEntryRequest {
   entryType: TimeEntryType;
   entryDate: string;
+  endDate?: string | null;
   startTime?: string | null;
   endTime?: string | null;
   isFullDay?: boolean;

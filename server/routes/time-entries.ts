@@ -104,13 +104,44 @@ router.get("/:id", async (req: Request, res: Response) => {
 
 /**
  * POST /time-entries
- * Create a new time entry
+ * Create a new time entry (or multiple for date ranges)
  */
 router.post("/", async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
-    const validatedData = insertTimeEntrySchema.parse(req.body);
+    const { endDate, ...entryData } = req.body;
+    const validatedData = insertTimeEntrySchema.parse(entryData);
     
+    // For urlaub and krankheit with date range, create entries for each day
+    if (endDate && (validatedData.entryType === "urlaub" || validatedData.entryType === "krankheit")) {
+      const startDate = new Date(validatedData.entryDate + "T00:00:00");
+      const end = new Date(endDate + "T00:00:00");
+      
+      if (end < startDate) {
+        return res.status(400).json({ error: "Enddatum muss nach Startdatum liegen" });
+      }
+      
+      const entries = [];
+      const currentDate = new Date(startDate);
+      
+      while (currentDate <= end) {
+        const dateStr = currentDate.toISOString().split("T")[0];
+        const entry = await timeTrackingStorage.createTimeEntry(userId, {
+          ...validatedData,
+          entryDate: dateStr,
+        });
+        entries.push(entry);
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+      
+      return res.status(201).json({ 
+        message: `${entries.length} Einträge erstellt`,
+        count: entries.length,
+        entries 
+      });
+    }
+    
+    // Single day entry
     const entry = await timeTrackingStorage.createTimeEntry(userId, validatedData);
     res.status(201).json(entry);
   } catch (error) {
