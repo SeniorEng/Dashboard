@@ -13,6 +13,7 @@ import NewAppointment from "@/pages/new-appointment";
 import EditAppointment from "@/pages/edit-appointment";
 import DocumentAppointment from "@/pages/document-appointment";
 import Customers from "@/pages/customers";
+import MyTimes from "@/pages/my-times";
 import LoginPage from "@/pages/login";
 import AdminDashboard from "@/pages/admin/dashboard";
 import AdminUsers from "@/pages/admin/users";
@@ -20,6 +21,7 @@ import AdminCustomerAssignments from "@/pages/admin/customer-assignments";
 import AdminCustomers from "@/pages/admin/customers";
 import AdminCustomerDetail from "@/pages/admin/customer-detail";
 import AdminCustomerNew from "@/pages/admin/customer-new";
+import AdminTimeEntries from "@/pages/admin/time-entries";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -72,6 +74,9 @@ function Router() {
       <Route path="/customers">
         <ProtectedRoute component={Customers} />
       </Route>
+      <Route path="/my-times">
+        <ProtectedRoute component={MyTimes} />
+      </Route>
       <Route path="/appointment/:id">
         {(params) => <ProtectedRoute component={() => <AppointmentDetail />} />}
       </Route>
@@ -101,6 +106,9 @@ function Router() {
       </Route>
       <Route path="/admin/customers">
         <AdminRoute component={AdminCustomers} />
+      </Route>
+      <Route path="/admin/time-entries">
+        <AdminRoute component={AdminTimeEntries} />
       </Route>
       <Route component={NotFound} />
     </Switch>

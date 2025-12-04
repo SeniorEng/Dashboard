@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { authService } from "../services/auth";
 import { storage } from "../storage";
 import { customerManagementStorage } from "../storage/customer-management";
+import { timeTrackingStorage } from "../storage/time-tracking";
 import { 
   insertUserSchema, 
   EMPLOYEE_ROLES, 
@@ -11,6 +12,7 @@ import {
   insertCustomerContactSchema,
   insertCareLevelHistorySchema,
   insertCustomerBudgetSchema,
+  insertVacationAllowanceSchema,
 } from "@shared/schema";
 import { requireAdmin } from "../middleware/auth";
 import { handleRouteError } from "../lib/errors";
@@ -748,6 +750,58 @@ router.post("/insurance-providers", async (req: Request, res: Response) => {
       return;
     }
     handleRouteError(res, error, "Pflegekasse konnte nicht erstellt werden");
+  }
+});
+
+// ============================================
+// TIME TRACKING (Admin)
+// ============================================
+
+router.get("/time-entries", async (req: Request, res: Response) => {
+  try {
+    const { year, month, userId, entryType } = req.query;
+    
+    const entries = await timeTrackingStorage.getAllTimeEntries({
+      year: year ? parseInt(year as string) : undefined,
+      month: month ? parseInt(month as string) : undefined,
+      userId: userId ? parseInt(userId as string) : undefined,
+      entryType: entryType as string | undefined,
+    });
+    
+    res.json(entries);
+  } catch (error) {
+    handleRouteError(res, error, "Zeiteinträge konnten nicht geladen werden");
+  }
+});
+
+router.get("/time-entries/vacation-summary/:userId/:year", async (req: Request, res: Response) => {
+  try {
+    const userId = parseInt(req.params.userId);
+    const year = parseInt(req.params.year);
+    
+    if (isNaN(userId) || isNaN(year)) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Parameter" });
+      return;
+    }
+    
+    const summary = await timeTrackingStorage.getVacationSummary(userId, year);
+    res.json(summary);
+  } catch (error) {
+    handleRouteError(res, error, "Urlaubsübersicht konnte nicht geladen werden");
+  }
+});
+
+router.put("/time-entries/vacation-allowance", async (req: Request, res: Response) => {
+  try {
+    const validatedData = insertVacationAllowanceSchema.parse(req.body);
+    const allowance = await timeTrackingStorage.setVacationAllowance(validatedData);
+    res.json(allowance);
+  } catch (error: any) {
+    if (error.name === "ZodError") {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: fromError(error).toString() });
+      return;
+    }
+    handleRouteError(res, error, "Urlaubskontingent konnte nicht aktualisiert werden");
   }
 });
 

@@ -34,8 +34,9 @@ CareConnect is a full-stack web application for caregivers managing elderly care
 - **Field Editing Rules**: Specific fields editable only in certain appointment statuses.
 - **Overlap Checking**: Logic for checking appointment overlaps based on `actualEnd` for completed appointments and `scheduledEnd` or calculated duration for scheduled appointments.
 - **Service Model**: "Erstberatung" is integrated as a service type with a unified 2-step documentation flow.
-- **Customer Management**: Multi-step customer creation wizard, detailed customer views, and German-specific validation (IK numbers, Versichertennummer).
+- **Customer Management**: Multi-step customer creation wizard, detailed customer views, and German-specific validation (IK numbers, Versichertennummer). Inline insurance provider creation during customer wizard.
 - **Budgeting & Pricing**: Supports various budget types (e.g., §45b, §39, §36) and customer-specific service rates.
+- **Employee Time Tracking**: Employees can track non-client work including vacation (Urlaub), sick leave (Krankheit), breaks (Pause), office work (Büroarbeit), sales (Vertrieb), training (Schulung), meetings (Besprechung), and other activities. Yearly vacation allowance tracking with used/planned/remaining days summary. Admin view for all employee time entries with vacation allowance management.
 
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)

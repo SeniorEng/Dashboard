@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { Layout } from "@/components/layout";
-import { Users, UserCog, ArrowLeft, LogOut, Contact2 } from "lucide-react";
+import { Users, UserCog, ArrowLeft, LogOut, Contact2, Clock } from "lucide-react";
 
 export default function AdminDashboard() {
   const { user, logout } = useAuth();
@@ -99,6 +99,29 @@ export default function AdminDashboard() {
                 <CardContent>
                   <p className="text-sm text-gray-600">
                     Vollständige Kundendaten inkl. Versicherung, Kontakte, Budgets und Verträge.
+                  </p>
+                </CardContent>
+              </Card>
+            </Link>
+
+            <Link href="/admin/time-entries">
+              <Card className="cursor-pointer hover:shadow-lg transition-shadow" data-testid="card-time-entries">
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-green-100 rounded-lg">
+                      <Clock className="h-6 w-6 text-green-600" />
+                    </div>
+                    <div>
+                      <CardTitle>Zeiterfassung</CardTitle>
+                      <CardDescription>
+                        Urlaub, Krankheit und Arbeitszeiten
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-gray-600">
+                    Übersicht aller Mitarbeiter-Zeiteinträge und Urlaubskontingente verwalten.
                   </p>
                 </CardContent>
               </Card>

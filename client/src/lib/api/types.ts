@@ -254,3 +254,59 @@ export interface InsuranceProviderItem {
   name: string;
   ikNummer: string;
 }
+
+// ============================================
+// TIME TRACKING
+// ============================================
+
+export type TimeEntryType = 
+  | "urlaub"
+  | "krankheit"
+  | "pause"
+  | "bueroarbeit"
+  | "vertrieb"
+  | "schulung"
+  | "besprechung"
+  | "sonstiges";
+
+export interface TimeEntry {
+  id: number;
+  userId: number;
+  entryType: TimeEntryType;
+  entryDate: string;
+  startTime: string | null;
+  endTime: string | null;
+  isFullDay: boolean;
+  durationMinutes: number | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TimeEntryWithUser extends TimeEntry {
+  user: {
+    displayName: string;
+  };
+}
+
+export interface CreateTimeEntryRequest {
+  entryType: TimeEntryType;
+  entryDate: string;
+  startTime?: string | null;
+  endTime?: string | null;
+  isFullDay?: boolean;
+  durationMinutes?: number | null;
+  notes?: string | null;
+}
+
+export interface UpdateTimeEntryRequest extends Partial<CreateTimeEntryRequest> {}
+
+export interface VacationSummary {
+  year: number;
+  totalDays: number;
+  carryOverDays: number;
+  usedDays: number;
+  plannedDays: number;
+  remainingDays: number;
+  sickDays: number;
+}
