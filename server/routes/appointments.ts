@@ -74,7 +74,7 @@ router.post("/kundentermin", async (req, res) => {
       hauswirtschaftDauer: validatedData.hauswirtschaftDauer ?? null,
       alltagsbegleitungDauer: validatedData.alltagsbegleitungDauer ?? null,
       notes: validatedData.notes,
-      assignedEmployeeId: user.isAdmin ? (validatedData.assignedEmployeeId ?? null) : user.id,
+      assignedEmployeeId: user.isAdmin ? (validatedData.assignedEmployeeId ?? user.id) : user.id,
     });
     
     const overlapResult = await appointmentService.checkOverlap(
@@ -113,7 +113,7 @@ router.post("/erstberatung", async (req, res) => {
       scheduledStart: validatedData.scheduledStart,
       erstberatungDauer: validatedData.erstberatungDauer,
       notes: validatedData.notes,
-      assignedEmployeeId: user.isAdmin ? (validatedData.assignedEmployeeId ?? null) : user.id,
+      assignedEmployeeId: user.isAdmin ? (validatedData.assignedEmployeeId ?? user.id) : user.id,
     });
     
     const overlapResult = await appointmentService.checkOverlap(

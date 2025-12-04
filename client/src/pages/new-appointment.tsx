@@ -10,18 +10,22 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ChevronLeft, Loader2, Calendar, Clock, User, Home, Plus } from "lucide-react";
+import { ChevronLeft, Loader2, Calendar, Clock, User, Home, Plus, Users } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS } from "@shared/types";
-import type { Customer } from "@shared/schema";
+import type { Customer, User as UserType } from "@shared/schema";
 import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
 
 export default function NewAppointment() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<string>("kundentermin");
+
+  const isAdmin = user?.isAdmin ?? false;
 
   // Fetch customers for Kundentermin
   const { data: customers = [], isLoading: customersLoading } = useQuery<Customer[]>({
@@ -33,6 +37,17 @@ export default function NewAppointment() {
     },
   });
 
+  // Fetch employees for admin assignment
+  const { data: employees = [] } = useQuery<UserType[]>({
+    queryKey: ["admin", "employees"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/employees", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch employees");
+      return res.json();
+    },
+    enabled: isAdmin,
+  });
+
   // Kundentermin state
   const [ktCustomerId, setKtCustomerId] = useState<string>("");
   const [ktDate, setKtDate] = useState<string>(new Date().toISOString().split("T")[0]);
@@ -42,6 +57,7 @@ export default function NewAppointment() {
   const [ktAlltagsbegleitung, setKtAlltagsbegleitung] = useState<boolean>(false);
   const [ktAlltagsbegleitungDauer, setKtAlltagsbegleitungDauer] = useState<number>(60);
   const [ktNotes, setKtNotes] = useState<string>("");
+  const [ktAssignedEmployeeId, setKtAssignedEmployeeId] = useState<string>("");
 
   // Erstberatung state
   const [ebVorname, setEbVorname] = useState<string>("");
@@ -56,6 +72,7 @@ export default function NewAppointment() {
   const [ebStartTime, setEbStartTime] = useState<string>("09:00");
   const [ebErstberatungDauer, setEbErstberatungDauer] = useState<number>(60);
   const [ebNotes, setEbNotes] = useState<string>("");
+  const [ebAssignedEmployeeId, setEbAssignedEmployeeId] = useState<string>("");
 
   // Validation errors
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -182,6 +199,7 @@ export default function NewAppointment() {
       hauswirtschaftDauer: ktHauswirtschaft ? ktHauswirtschaftDauer : null,
       alltagsbegleitungDauer: ktAlltagsbegleitung ? ktAlltagsbegleitungDauer : null,
       notes: ktNotes || undefined,
+      assignedEmployeeId: isAdmin && ktAssignedEmployeeId ? parseInt(ktAssignedEmployeeId) : undefined,
     });
   };
 
@@ -209,6 +227,7 @@ export default function NewAppointment() {
       scheduledStart: ebStartTime,
       erstberatungDauer: ebErstberatungDauer,
       notes: ebNotes || undefined,
+      assignedEmployeeId: isAdmin && ebAssignedEmployeeId ? parseInt(ebAssignedEmployeeId) : undefined,
     });
   };
   
@@ -296,6 +315,32 @@ export default function NewAppointment() {
                 </Select>
                 {errors.ktCustomerId && <p className="text-destructive text-sm">{errors.ktCustomerId}</p>}
               </div>
+
+              {/* Employee Assignment (Admin only) */}
+              {isAdmin && (
+                <div className="space-y-2">
+                  <Label>
+                    <Users className={`${iconSize.sm} inline mr-1`} /> Mitarbeiter zuweisen
+                  </Label>
+                  <Select value={ktAssignedEmployeeId} onValueChange={setKtAssignedEmployeeId}>
+                    <SelectTrigger data-testid="select-kt-employee">
+                      <SelectValue placeholder="Mitarbeiter auswählen..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {employees
+                        .filter(e => e.isActive)
+                        .map((e) => (
+                          <SelectItem key={e.id} value={e.id.toString()}>
+                            {e.displayName}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Wählen Sie den Mitarbeiter, der diesen Termin durchführen soll
+                  </p>
+                </div>
+              )}
 
               {/* Date & Time */}
               <div className="grid grid-cols-2 gap-4">
@@ -581,6 +626,32 @@ export default function NewAppointment() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* Employee Assignment (Admin only) */}
+              {isAdmin && (
+                <div className="space-y-2">
+                  <Label>
+                    <Users className={`${iconSize.sm} inline mr-1`} /> Mitarbeiter zuweisen
+                  </Label>
+                  <Select value={ebAssignedEmployeeId} onValueChange={setEbAssignedEmployeeId}>
+                    <SelectTrigger data-testid="select-eb-employee">
+                      <SelectValue placeholder="Mitarbeiter auswählen..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {employees
+                        .filter(e => e.isActive)
+                        .map((e) => (
+                          <SelectItem key={e.id} value={e.id.toString()}>
+                            {e.displayName}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Wählen Sie den Mitarbeiter, der diese Erstberatung durchführen soll
+                  </p>
+                </div>
+              )}
 
               {/* Date & Time */}
               <div className="grid grid-cols-2 gap-4">
