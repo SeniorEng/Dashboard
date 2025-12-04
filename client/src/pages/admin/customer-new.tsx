@@ -9,7 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Layout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
-import { useEmployees, useInsuranceProviders, useCreateCustomer } from "@/features/customers";
+import { useEmployees, useInsuranceProviders, useCreateInsuranceProvider, useCreateCustomer } from "@/features/customers";
 import {
   ArrowLeft,
   Loader2,
@@ -23,6 +23,8 @@ import {
   Wallet,
   FileText,
   Check,
+  Plus,
+  X,
 } from "lucide-react";
 
 const STEPS = [
@@ -111,6 +113,80 @@ export default function AdminCustomerNew() {
   const { data: insuranceProviders } = useInsuranceProviders();
   const { data: employees } = useEmployees();
   const createMutation = useCreateCustomer();
+  const createProviderMutation = useCreateInsuranceProvider();
+
+  const [showNewProviderForm, setShowNewProviderForm] = useState(false);
+  const [newProvider, setNewProvider] = useState({
+    name: "",
+    ikNummer: "",
+    strasse: "",
+    hausnummer: "",
+    plz: "",
+    stadt: "",
+    telefon: "",
+    email: "",
+  });
+
+  const handleNewProviderChange = (field: string, value: string) => {
+    setNewProvider((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleCreateProvider = () => {
+    if (!newProvider.name.trim() || !newProvider.ikNummer.trim()) {
+      toast({
+        title: "Pflichtfelder ausfüllen",
+        description: "Name und IK-Nummer sind erforderlich.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!/^\d{9}$/.test(newProvider.ikNummer)) {
+      toast({
+        title: "Ungültige IK-Nummer",
+        description: "Die IK-Nummer muss genau 9 Ziffern enthalten.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    createProviderMutation.mutate(
+      {
+        name: newProvider.name.trim(),
+        ikNummer: newProvider.ikNummer.trim(),
+        strasse: newProvider.strasse.trim() || undefined,
+        hausnummer: newProvider.hausnummer.trim() || undefined,
+        plz: newProvider.plz.trim() || undefined,
+        stadt: newProvider.stadt.trim() || undefined,
+        telefon: newProvider.telefon.trim() || undefined,
+        email: newProvider.email.trim() || undefined,
+      },
+      {
+        onSuccess: (provider) => {
+          toast({ title: "Pflegekasse erfolgreich erstellt" });
+          setFormData((prev) => ({ ...prev, insuranceProviderId: provider.id.toString() }));
+          setShowNewProviderForm(false);
+          setNewProvider({
+            name: "",
+            ikNummer: "",
+            strasse: "",
+            hausnummer: "",
+            plz: "",
+            stadt: "",
+            telefon: "",
+            email: "",
+          });
+        },
+        onError: (error: Error) => {
+          toast({
+            title: "Fehler",
+            description: error.message,
+            variant: "destructive",
+          });
+        },
+      }
+    );
+  };
 
   const handleCreate = () => {
     const today = new Date().toISOString().split("T")[0];
@@ -444,49 +520,210 @@ export default function AdminCustomerNew() {
       case 1:
         return (
           <div className="space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="insuranceProviderId">Pflegekasse</Label>
-              <Select
-                value={formData.insuranceProviderId}
-                onValueChange={(value) => handleChange("insuranceProviderId", value)}
-              >
-                <SelectTrigger data-testid="select-insurance-provider">
-                  <SelectValue placeholder="Pflegekasse auswählen..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {insuranceProviders?.map((provider) => (
-                    <SelectItem key={provider.id} value={provider.id.toString()}>
-                      {provider.name} (IK: {provider.ikNummer})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {!showNewProviderForm ? (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="insuranceProviderId">Pflegekasse</Label>
+                  <div className="flex gap-2">
+                    <Select
+                      value={formData.insuranceProviderId}
+                      onValueChange={(value) => handleChange("insuranceProviderId", value)}
+                    >
+                      <SelectTrigger data-testid="select-insurance-provider" className="flex-1">
+                        <SelectValue placeholder="Pflegekasse auswählen..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {insuranceProviders?.map((provider) => (
+                          <SelectItem key={provider.id} value={provider.id.toString()}>
+                            {provider.name} (IK: {provider.ikNummer})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setShowNewProviderForm(true)}
+                      data-testid="button-add-new-provider"
+                    >
+                      <Plus className="h-4 w-4 mr-1" />
+                      Neu
+                    </Button>
+                  </div>
+                </div>
 
-            {formData.insuranceProviderId && (
-              <div className="space-y-2">
-                <Label htmlFor="versichertennummer">Versichertennummer *</Label>
-                <Input
-                  id="versichertennummer"
-                  value={formData.versichertennummer}
-                  onChange={(e) => handleChange("versichertennummer", e.target.value.toUpperCase())}
-                  placeholder="A123456789"
-                  maxLength={10}
-                  required
-                  data-testid="input-versichertennummer"
-                />
-                <p className="text-xs text-gray-500">
-                  Format: Buchstabe + 9 Ziffern (z.B. A123456789)
-                </p>
-              </div>
-            )}
+                {formData.insuranceProviderId && (
+                  <div className="space-y-2">
+                    <Label htmlFor="versichertennummer">Versichertennummer *</Label>
+                    <Input
+                      id="versichertennummer"
+                      value={formData.versichertennummer}
+                      onChange={(e) => handleChange("versichertennummer", e.target.value.toUpperCase())}
+                      placeholder="A123456789"
+                      maxLength={10}
+                      required
+                      data-testid="input-versichertennummer"
+                    />
+                    <p className="text-xs text-gray-500">
+                      Format: Buchstabe + 9 Ziffern (z.B. A123456789)
+                    </p>
+                  </div>
+                )}
 
-            {!insuranceProviders?.length && (
-              <div className="p-4 rounded-lg bg-amber-50 border border-amber-200">
-                <p className="text-amber-800 text-sm">
-                  Es sind noch keine Pflegekassen im System hinterlegt. 
-                  Sie können diesen Schritt überspringen und die Pflegekasse später hinzufügen.
-                </p>
+                {!insuranceProviders?.length && !showNewProviderForm && (
+                  <div className="p-4 rounded-lg bg-amber-50 border border-amber-200">
+                    <p className="text-amber-800 text-sm">
+                      Es sind noch keine Pflegekassen im System hinterlegt.{" "}
+                      <button
+                        type="button"
+                        onClick={() => setShowNewProviderForm(true)}
+                        className="font-medium underline hover:text-amber-900"
+                        data-testid="link-add-first-provider"
+                      >
+                        Neue Pflegekasse hinzufügen
+                      </button>
+                    </p>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="p-4 rounded-lg border border-teal-200 bg-teal-50">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-medium text-teal-900">Neue Pflegekasse anlegen</h3>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowNewProviderForm(false)}
+                    data-testid="button-cancel-new-provider"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="col-span-2 space-y-2">
+                      <Label htmlFor="newProviderName">Name der Pflegekasse *</Label>
+                      <Input
+                        id="newProviderName"
+                        value={newProvider.name}
+                        onChange={(e) => handleNewProviderChange("name", e.target.value)}
+                        placeholder="z.B. AOK Bayern"
+                        data-testid="input-new-provider-name"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="newProviderIk">IK-Nummer *</Label>
+                      <Input
+                        id="newProviderIk"
+                        value={newProvider.ikNummer}
+                        onChange={(e) => handleNewProviderChange("ikNummer", e.target.value.replace(/\D/g, ""))}
+                        placeholder="123456789"
+                        maxLength={9}
+                        data-testid="input-new-provider-ik"
+                      />
+                      <p className="text-xs text-gray-500">9-stellige Institutionskennzeichen</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="newProviderTelefon">Telefon</Label>
+                      <Input
+                        id="newProviderTelefon"
+                        value={newProvider.telefon}
+                        onChange={(e) => handleNewProviderChange("telefon", e.target.value)}
+                        placeholder="+49 89 1234567"
+                        data-testid="input-new-provider-telefon"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="newProviderEmail">E-Mail</Label>
+                    <Input
+                      id="newProviderEmail"
+                      type="email"
+                      value={newProvider.email}
+                      onChange={(e) => handleNewProviderChange("email", e.target.value)}
+                      placeholder="kontakt@pflegekasse.de"
+                      data-testid="input-new-provider-email"
+                    />
+                  </div>
+
+                  <div className="border-t border-teal-200 pt-4">
+                    <p className="text-xs text-gray-500 mb-2">Adresse (optional)</p>
+                    <div className="grid grid-cols-4 gap-4">
+                      <div className="col-span-3 space-y-2">
+                        <Label htmlFor="newProviderStrasse">Straße</Label>
+                        <Input
+                          id="newProviderStrasse"
+                          value={newProvider.strasse}
+                          onChange={(e) => handleNewProviderChange("strasse", e.target.value)}
+                          data-testid="input-new-provider-strasse"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="newProviderHausnummer">Nr.</Label>
+                        <Input
+                          id="newProviderHausnummer"
+                          value={newProvider.hausnummer}
+                          onChange={(e) => handleNewProviderChange("hausnummer", e.target.value)}
+                          data-testid="input-new-provider-hausnummer"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4 mt-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="newProviderPlz">PLZ</Label>
+                        <Input
+                          id="newProviderPlz"
+                          value={newProvider.plz}
+                          onChange={(e) => handleNewProviderChange("plz", e.target.value)}
+                          maxLength={5}
+                          data-testid="input-new-provider-plz"
+                        />
+                      </div>
+                      <div className="col-span-2 space-y-2">
+                        <Label htmlFor="newProviderStadt">Stadt</Label>
+                        <Input
+                          id="newProviderStadt"
+                          value={newProvider.stadt}
+                          onChange={(e) => handleNewProviderChange("stadt", e.target.value)}
+                          data-testid="input-new-provider-stadt"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setShowNewProviderForm(false)}
+                      data-testid="button-cancel-provider-form"
+                    >
+                      Abbrechen
+                    </Button>
+                    <Button
+                      type="button"
+                      className="bg-teal-600 hover:bg-teal-700"
+                      onClick={handleCreateProvider}
+                      disabled={createProviderMutation.isPending}
+                      data-testid="button-save-new-provider"
+                    >
+                      {createProviderMutation.isPending ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Speichern...
+                        </>
+                      ) : (
+                        <>
+                          <Check className="h-4 w-4 mr-2" />
+                          Pflegekasse speichern
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
               </div>
             )}
           </div>
