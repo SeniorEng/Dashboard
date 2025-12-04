@@ -61,6 +61,7 @@ export default function MyTimes() {
   const [newEntry, setNewEntry] = useState<CreateTimeEntryRequest>({
     entryType: "urlaub",
     entryDate: formatDateString(today),
+    endDate: undefined,
     isFullDay: true,
   });
 
@@ -175,11 +176,19 @@ export default function MyTimes() {
   };
 
   const handleCreateEntry = () => {
+    // Validate dates for urlaub/krankheit
+    if ((newEntry.entryType === "urlaub" || newEntry.entryType === "krankheit") && newEntry.endDate) {
+      if (newEntry.endDate < newEntry.entryDate) {
+        toast({ title: "Fehler", description: "Enddatum muss nach Startdatum liegen", variant: "destructive" });
+        return;
+      }
+    }
+    
     createMutation.mutate(newEntry, {
       onSuccess: (data: unknown) => {
-        const result = data as { count?: number; message?: string };
-        if (result.count && result.count > 1) {
-          toast({ title: `${result.count} Einträge erstellt` });
+        const result = data as { _multiDay?: { count: number; message: string } };
+        if (result._multiDay && result._multiDay.count > 1) {
+          toast({ title: `${result._multiDay.count} Einträge erstellt` });
         } else {
           toast({ title: "Eintrag erstellt" });
         }
@@ -187,7 +196,7 @@ export default function MyTimes() {
         setNewEntry({
           entryType: "urlaub",
           entryDate: formatDateString(today),
-          endDate: null,
+          endDate: undefined,
           isFullDay: true,
         });
       },
@@ -237,7 +246,16 @@ export default function MyTimes() {
                     <Label htmlFor="entryType">Art</Label>
                     <Select
                       value={newEntry.entryType}
-                      onValueChange={(value) => setNewEntry(prev => ({ ...prev, entryType: value as TimeEntryType }))}
+                      onValueChange={(value) => {
+                        const newType = value as TimeEntryType;
+                        const supportsRange = newType === "urlaub" || newType === "krankheit";
+                        setNewEntry(prev => ({ 
+                          ...prev, 
+                          entryType: newType,
+                          endDate: supportsRange ? prev.endDate : undefined,
+                          isFullDay: supportsRange ? true : prev.isFullDay,
+                        }));
+                      }}
                     >
                       <SelectTrigger data-testid="select-entry-type">
                         <SelectValue />
@@ -263,7 +281,11 @@ export default function MyTimes() {
                           id="entryDate"
                           type="date"
                           value={newEntry.entryDate}
-                          onChange={(e) => setNewEntry(prev => ({ ...prev, entryDate: e.target.value }))}
+                          onChange={(e) => setNewEntry(prev => ({ 
+                            ...prev, 
+                            entryDate: e.target.value,
+                            endDate: prev.endDate && prev.endDate < e.target.value ? e.target.value : prev.endDate
+                          }))}
                           data-testid="input-entry-date"
                         />
                       </div>
@@ -274,7 +296,7 @@ export default function MyTimes() {
                           type="date"
                           value={newEntry.endDate || newEntry.entryDate}
                           min={newEntry.entryDate}
-                          onChange={(e) => setNewEntry(prev => ({ ...prev, endDate: e.target.value }))}
+                          onChange={(e) => setNewEntry(prev => ({ ...prev, endDate: e.target.value || undefined }))}
                           data-testid="input-end-date"
                         />
                       </div>

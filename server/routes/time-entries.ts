@@ -103,6 +103,24 @@ router.get("/:id", async (req: Request, res: Response) => {
 });
 
 /**
+ * Helper to format date as YYYY-MM-DD without timezone issues
+ */
+function formatLocalDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Parse date string as local date components
+ */
+function parseLocalDate(dateStr: string): Date {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return new Date(year, month - 1, day, 12, 0, 0);
+}
+
+/**
  * POST /time-entries
  * Create a new time entry (or multiple for date ranges)
  */
@@ -113,9 +131,16 @@ router.post("/", async (req: Request, res: Response) => {
     const validatedData = insertTimeEntrySchema.parse(entryData);
     
     // For urlaub and krankheit with date range, create entries for each day
-    if (endDate && (validatedData.entryType === "urlaub" || validatedData.entryType === "krankheit")) {
-      const startDate = new Date(validatedData.entryDate + "T00:00:00");
-      const end = new Date(endDate + "T00:00:00");
+    if (endDate && typeof endDate === "string" && endDate.trim() && 
+        (validatedData.entryType === "urlaub" || validatedData.entryType === "krankheit")) {
+      
+      // Validate endDate format
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+        return res.status(400).json({ error: "Ungültiges Datumsformat für Enddatum" });
+      }
+      
+      const startDate = parseLocalDate(validatedData.entryDate);
+      const end = parseLocalDate(endDate);
       
       if (end < startDate) {
         return res.status(400).json({ error: "Enddatum muss nach Startdatum liegen" });
@@ -125,7 +150,7 @@ router.post("/", async (req: Request, res: Response) => {
       const currentDate = new Date(startDate);
       
       while (currentDate <= end) {
-        const dateStr = currentDate.toISOString().split("T")[0];
+        const dateStr = formatLocalDate(currentDate);
         const entry = await timeTrackingStorage.createTimeEntry(userId, {
           ...validatedData,
           entryDate: dateStr,
@@ -134,10 +159,11 @@ router.post("/", async (req: Request, res: Response) => {
         currentDate.setDate(currentDate.getDate() + 1);
       }
       
+      // Return first entry for consistency, with count in header
+      res.setHeader("X-Entries-Created", entries.length.toString());
       return res.status(201).json({ 
-        message: `${entries.length} Einträge erstellt`,
-        count: entries.length,
-        entries 
+        ...entries[0],
+        _multiDay: { count: entries.length, message: `${entries.length} Einträge erstellt` }
       });
     }
     
