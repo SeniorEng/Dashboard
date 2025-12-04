@@ -301,10 +301,7 @@ export default function MyTimes() {
           {vacationSummary && (
             <Card className="mb-6">
               <CardHeader className="pb-3">
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Palmtree className="h-5 w-5 text-green-600" />
-                  Urlaub und Abwesenheiten {selectedYear}
-                </CardTitle>
+                <CardTitle className="text-lg">Urlaub und Abwesenheiten {selectedYear}</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
