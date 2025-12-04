@@ -360,6 +360,7 @@ export const appointments = pgTable("appointments", {
   id: serial("id").primaryKey(),
   customerId: integer("customer_id").notNull().references(() => customers.id),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
+  assignedEmployeeId: integer("assigned_employee_id").references(() => users.id), // Employee assigned to this appointment
   appointmentType: text("appointment_type").notNull(), // "Erstberatung" | "Kundentermin"
   // Service durations in minutes (15-min increments) - for Kundentermin
   hauswirtschaftDauer: integer("hauswirtschaft_dauer"), // null if not selected
