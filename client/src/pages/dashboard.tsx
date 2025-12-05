@@ -4,11 +4,11 @@ import { Layout } from "@/components/layout";
 import { useAppointments, useWeekAppointmentCounts, AppointmentList } from "@/features/appointments";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
-import { format, addDays, subDays, startOfWeek, addWeeks, subWeeks, isSameDay } from "date-fns";
+import { format, addDays, subDays, startOfWeek, addWeeks, subWeeks, isSameDay, isSameWeek } from "date-fns";
 import { de } from "date-fns/locale";
 import { Calendar as CalendarIcon, Plus, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 
-const WEEKDAY_NAMES_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+const WEEKDAY_NAMES_SHORT = ["Mo", "Di", "Mi", "Do", "Fr"];
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -16,16 +16,22 @@ export default function Dashboard() {
   const dateString = format(selectedDate, "yyyy-MM-dd");
   
   const { data: appointments, isLoading, error } = useAppointments(dateString);
-  const formattedDate = format(selectedDate, "EEEE, d. MMMM", { locale: de });
+  const formattedDate = format(selectedDate, "EEE, d. MMM", { locale: de });
   
   const today = useMemo(() => new Date(), []);
   const isToday = format(today, "yyyy-MM-dd") === dateString;
 
-  // Get week days (Monday to Sunday) for the week containing selectedDate
+  // Get weekdays only (Monday to Friday) for the week containing selectedDate
   const weekDays = useMemo(() => {
     const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 }); // Monday
-    return Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+    return Array.from({ length: 5 }, (_, i) => addDays(weekStart, i)); // Mo-Fr only
   }, [selectedDate]);
+  
+  // Check if viewing the current week (works even when today is a weekend)
+  const isCurrentWeek = useMemo(() => 
+    isSameWeek(selectedDate, today, { weekStartsOn: 1 }), 
+    [selectedDate, today]
+  );
 
   // Get date strings for the week to fetch appointment counts
   const weekDateStrings = useMemo(() => 
@@ -77,6 +83,17 @@ export default function Dashboard() {
               >
                 <ChevronRight className="w-4 h-4" />
               </Button>
+              {!isCurrentWeek && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs ml-2"
+                  onClick={goToToday}
+                  data-testid="button-go-today"
+                >
+                  Zurück zu Heute
+                </Button>
+              )}
             </div>
           </div>
           <Link href="/new-appointment">
@@ -86,8 +103,8 @@ export default function Dashboard() {
           </Link>
         </div>
 
-        {/* Week Navigation Strip */}
-        <div className="flex items-center gap-1 mt-4 overflow-x-auto pb-1">
+        {/* Week Navigation Strip - Mo-Fr only */}
+        <div className="flex items-center gap-1 mt-4">
           <Button
             variant="ghost"
             size="icon"
@@ -104,7 +121,6 @@ export default function Dashboard() {
               const dayStr = format(day, "yyyy-MM-dd");
               const isSelected = dayStr === dateString;
               const isDayToday = isSameDay(day, today);
-              const isWeekend = index >= 5;
               const appointmentCount = weekAppointmentCounts?.[dayStr] || 0;
               
               return (
@@ -112,14 +128,12 @@ export default function Dashboard() {
                   key={dayStr}
                   onClick={() => setSelectedDate(day)}
                   className={`
-                    relative flex flex-col items-center justify-center min-w-[44px] h-14 px-2 rounded-lg transition-all
+                    relative flex flex-col items-center justify-center flex-1 max-w-[56px] h-12 rounded-lg transition-all
                     ${isSelected 
                       ? "bg-primary text-primary-foreground shadow-md" 
                       : isDayToday 
                         ? "bg-primary/10 text-primary hover:bg-primary/20" 
-                        : isWeekend 
-                          ? "bg-muted/50 text-muted-foreground hover:bg-muted" 
-                          : "bg-background hover:bg-muted"
+                        : "bg-background hover:bg-muted"
                     }
                   `}
                   data-testid={`weekday-${dayStr}`}
@@ -127,7 +141,7 @@ export default function Dashboard() {
                   <span className="text-[10px] font-medium uppercase tracking-wide opacity-70">
                     {WEEKDAY_NAMES_SHORT[index]}
                   </span>
-                  <span className={`text-lg font-semibold ${isDayToday && !isSelected ? "text-primary" : ""}`}>
+                  <span className={`text-base font-semibold ${isDayToday && !isSelected ? "text-primary" : ""}`}>
                     {format(day, "d")}
                   </span>
                   {appointmentCount > 0 && (
@@ -164,22 +178,6 @@ export default function Dashboard() {
             <ChevronsRight className="w-4 h-4" />
           </Button>
         </div>
-
-        {/* Quick "Today" button when not on current week */}
-        {!weekDays.some(d => isSameDay(d, today)) && (
-          <div className="flex justify-center mt-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-xs"
-              onClick={goToToday}
-              data-testid="button-go-today"
-            >
-              <CalendarIcon className="w-3 h-3 mr-1" />
-              Zurück zu Heute
-            </Button>
-          </div>
-        )}
       </div>
 
       <div className="space-y-6">
