@@ -4,9 +4,9 @@ import { Layout } from "@/components/layout";
 import { useAppointments, useWeekAppointmentCounts, AppointmentList } from "@/features/appointments";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
-import { format, addDays, subDays, startOfWeek, addWeeks, subWeeks, isSameDay, isSameWeek } from "date-fns";
+import { format, addDays, startOfWeek, addWeeks, subWeeks, isSameDay } from "date-fns";
 import { de } from "date-fns/locale";
-import { Calendar as CalendarIcon, Plus, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { Plus, ChevronsLeft, ChevronsRight } from "lucide-react";
 
 const WEEKDAY_NAMES_SHORT = ["Mo", "Di", "Mi", "Do", "Fr"];
 
@@ -16,7 +16,6 @@ export default function Dashboard() {
   const dateString = format(selectedDate, "yyyy-MM-dd");
   
   const { data: appointments, isLoading, error } = useAppointments(dateString);
-  const formattedDate = format(selectedDate, "EEE, d. MMM", { locale: de });
   
   const today = useMemo(() => new Date(), []);
   const isToday = format(today, "yyyy-MM-dd") === dateString;
@@ -26,12 +25,6 @@ export default function Dashboard() {
     const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 }); // Monday
     return Array.from({ length: 5 }, (_, i) => addDays(weekStart, i)); // Mo-Fr only
   }, [selectedDate]);
-  
-  // Check if viewing the current week (works even when today is a weekend)
-  const isCurrentWeek = useMemo(() => 
-    isSameWeek(selectedDate, today, { weekStartsOn: 1 }), 
-    [selectedDate, today]
-  );
 
   // Get date strings for the week to fetch appointment counts
   const weekDateStrings = useMemo(() => 
@@ -42,60 +35,16 @@ export default function Dashboard() {
   // Fetch appointment counts for the week
   const { data: weekAppointmentCounts } = useWeekAppointmentCounts(weekDateStrings);
 
-  const goToPreviousDay = () => setSelectedDate(prev => subDays(prev, 1));
-  const goToNextDay = () => setSelectedDate(prev => addDays(prev, 1));
   const goToPreviousWeek = () => setSelectedDate(prev => subWeeks(prev, 1));
   const goToNextWeek = () => setSelectedDate(prev => addWeeks(prev, 1));
-  const goToToday = () => setSelectedDate(new Date());
 
   return (
     <Layout>
       <div className="mb-8 animate-in slide-in-from-top-4 duration-500">
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground tracking-tight mb-1" data-testid="text-greeting">
-              Hallo, {user?.displayName?.split(" ")[0] || "Mitarbeiter"}!
-            </h1>
-            <div className="flex items-center gap-2 mt-2">
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-8 w-8"
-                onClick={goToPreviousDay}
-                data-testid="button-prev-day"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </Button>
-              <div 
-                className="flex items-center text-muted-foreground cursor-pointer hover:text-foreground transition-colors"
-                onClick={goToToday}
-                data-testid="button-today"
-              >
-                <CalendarIcon className="w-4 h-4 mr-2 text-primary" />
-                <span className="capitalize font-medium" data-testid="text-date">{formattedDate}</span>
-              </div>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-8 w-8"
-                onClick={goToNextDay}
-                data-testid="button-next-day"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </Button>
-              {!isCurrentWeek && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-xs ml-2"
-                  onClick={goToToday}
-                  data-testid="button-go-today"
-                >
-                  Zurück zu Heute
-                </Button>
-              )}
-            </div>
-          </div>
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-bold text-foreground tracking-tight" data-testid="text-greeting">
+            Hallo, {user?.displayName?.split(" ")[0] || "Mitarbeiter"}!
+          </h1>
           <Link href="/new-appointment">
             <Button size="sm" className="shadow-lg shadow-primary/20" data-testid="button-new-appointment">
               <Plus className="w-4 h-4 mr-1" /> Neuer Termin
@@ -182,8 +131,10 @@ export default function Dashboard() {
 
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-foreground/90">
-            {isToday ? "Dein Tagesplan" : `Termine am ${format(selectedDate, "d. MMMM", { locale: de })}`}
+          <h2 className="text-lg font-semibold text-foreground/90" data-testid="text-date">
+            {isToday 
+              ? `Heute, ${format(selectedDate, "d. MMMM", { locale: de })}` 
+              : format(selectedDate, "EEEE, d. MMMM", { locale: de })}
           </h2>
           {!isLoading && appointments && (
             <span className="text-xs font-medium px-2.5 py-1 bg-primary/10 text-primary rounded-full" data-testid="text-visit-count">
