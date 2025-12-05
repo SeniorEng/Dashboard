@@ -148,7 +148,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-background font-sans text-foreground pb-20">
       {/* Header */}
-      <header className="sticky top-0 z-50 w-full bg-background/80 backdrop-blur-md border-b border-border/40 shadow-sm">
+      <header className="sticky top-0 z-50 w-full bg-background border-b border-border/40 shadow-sm">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <Link href="/" className="shrink-0 hover:opacity-80 transition-opacity">
             <img src={logo} alt="Logo" className="h-10 w-10 object-cover rounded-lg shadow-sm" />
