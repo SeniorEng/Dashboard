@@ -14,6 +14,7 @@ import EditAppointment from "@/pages/edit-appointment";
 import DocumentAppointment from "@/pages/document-appointment";
 import Customers from "@/pages/customers";
 import MyTimes from "@/pages/my-times";
+import Birthdays from "@/pages/birthdays";
 import LoginPage from "@/pages/login";
 import AdminDashboard from "@/pages/admin/dashboard";
 import AdminUsers from "@/pages/admin/users";
@@ -81,6 +82,9 @@ function Router() {
       </Route>
       <Route path="/my-times">
         <ProtectedRoute component={MyTimes} />
+      </Route>
+      <Route path="/birthdays">
+        <ProtectedRoute component={Birthdays} />
       </Route>
       <Route path="/undocumented">
         <ProtectedRoute component={UndocumentedAppointments} />

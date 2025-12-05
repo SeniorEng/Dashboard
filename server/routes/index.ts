@@ -4,6 +4,7 @@ import customersRouter from "./customers";
 import authRouter from "./auth";
 import adminRouter from "./admin";
 import timeEntriesRouter from "./time-entries";
+import birthdaysRouter from "./birthdays";
 import { searchRouter } from "./search";
 import { csrfProtection, csrfTokenHandler } from "../middleware/csrf";
 
@@ -20,6 +21,7 @@ router.use("/admin", adminRouter);
 router.use("/appointments", appointmentsRouter);
 router.use("/customers", customersRouter);
 router.use("/time-entries", timeEntriesRouter);
+router.use("/birthdays", birthdaysRouter);
 router.use("/search", searchRouter);
 
 export default router;
