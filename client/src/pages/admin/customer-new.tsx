@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Layout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
 import { useEmployees, useInsuranceProviders, useCreateInsuranceProvider, useCreateCustomer } from "@/features/customers";
+import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
 import {
   ArrowLeft,
   Loader2,
@@ -116,6 +117,7 @@ export default function AdminCustomerNew() {
   const createProviderMutation = useCreateInsuranceProvider();
 
   const [showNewProviderForm, setShowNewProviderForm] = useState(false);
+  const [phoneErrors, setPhoneErrors] = useState<Record<string, string | null>>({});
   const [newProvider, setNewProvider] = useState({
     name: "",
     ikNummer: "",
@@ -191,6 +193,30 @@ export default function AdminCustomerNew() {
   const handleCreate = () => {
     const today = new Date().toISOString().split("T")[0];
     
+    // Validate phone numbers before submission
+    const phoneValidationErrors: string[] = [];
+    if (formData.telefon.trim()) {
+      const result = validateGermanPhone(formData.telefon);
+      if (!result.valid) phoneValidationErrors.push(`Mobiltelefon: ${result.error}`);
+    }
+    if (formData.festnetz.trim()) {
+      const result = validateGermanPhone(formData.festnetz);
+      if (!result.valid) phoneValidationErrors.push(`Festnetz: ${result.error}`);
+    }
+    if (formData.contactTelefon.trim()) {
+      const result = validateGermanPhone(formData.contactTelefon);
+      if (!result.valid) phoneValidationErrors.push(`Kontakt-Telefon: ${result.error}`);
+    }
+    
+    if (phoneValidationErrors.length > 0) {
+      toast({
+        title: "Ungültige Telefonnummern",
+        description: phoneValidationErrors.join("; "),
+        variant: "destructive",
+      });
+      return;
+    }
+    
     // Build optional sections
     const insurance = formData.insuranceProviderId && formData.versichertennummer.trim() 
       ? {
@@ -200,13 +226,14 @@ export default function AdminCustomerNew() {
         } 
       : undefined;
 
-    const contacts = formData.contactVorname.trim() && formData.contactNachname.trim() && formData.contactTelefon.trim()
+    const contactPhone = formData.contactTelefon.trim() ? (normalizePhone(formData.contactTelefon) || "") : "";
+    const contacts = formData.contactVorname.trim() && formData.contactNachname.trim() && contactPhone
       ? [{
           contactType: formData.contactType,
           isPrimary: formData.contactIsPrimary,
           vorname: formData.contactVorname.trim(),
           nachname: formData.contactNachname.trim(),
-          telefon: formData.contactTelefon.trim(),
+          telefon: contactPhone,
           email: formData.contactEmail.trim() || undefined,
         }]
       : undefined;
@@ -246,8 +273,8 @@ export default function AdminCustomerNew() {
       pflegegrad: parseInt(formData.pflegegrad),
       pflegegradSeit: formData.pflegegradSeit || today,
       email: formData.email.trim() || undefined,
-      telefon: formData.telefon.trim() || undefined,
-      festnetz: formData.festnetz.trim() || undefined,
+      telefon: formData.telefon.trim() ? (normalizePhone(formData.telefon) || undefined) : undefined,
+      festnetz: formData.festnetz.trim() ? (normalizePhone(formData.festnetz) || undefined) : undefined,
       insurance,
       contacts,
       budgets,
@@ -265,7 +292,21 @@ export default function AdminCustomerNew() {
     });
   };
 
+  const phoneFields = ["telefon", "festnetz", "contactTelefon"] as const;
+  
   const handleChange = (field: string, value: string | boolean) => {
+    if ((phoneFields as readonly string[]).includes(field) && typeof value === "string") {
+      const formatted = formatPhoneAsYouType(value);
+      setFormData((prev) => ({ ...prev, [field]: formatted }));
+      if (value.trim()) {
+        const validation = validateGermanPhone(value);
+        setPhoneErrors((prev) => ({ ...prev, [field]: validation.valid ? null : validation.error || "Ungültige Telefonnummer" }));
+      } else {
+        setPhoneErrors((prev) => ({ ...prev, [field]: null }));
+      }
+      return;
+    }
+    
     setFormData((prev) => {
       const newData = { ...prev, [field]: value };
       if (field === "pflegegrad") {
@@ -370,9 +411,13 @@ export default function AdminCustomerNew() {
                   id="telefon"
                   value={formData.telefon}
                   onChange={(e) => handleChange("telefon", e.target.value)}
-                  placeholder="+49 170 1234567"
+                  placeholder="0170 1234567"
+                  className={phoneErrors.telefon ? "border-red-500" : ""}
                   data-testid="input-telefon"
                 />
+                {phoneErrors.telefon && (
+                  <p className="text-xs text-red-500">{phoneErrors.telefon}</p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="festnetz">Festnetz</Label>
@@ -380,9 +425,13 @@ export default function AdminCustomerNew() {
                   id="festnetz"
                   value={formData.festnetz}
                   onChange={(e) => handleChange("festnetz", e.target.value)}
-                  placeholder="+49 30 1234567"
+                  placeholder="030 1234567"
+                  className={phoneErrors.festnetz ? "border-red-500" : ""}
                   data-testid="input-festnetz"
                 />
+                {phoneErrors.festnetz && (
+                  <p className="text-xs text-red-500">{phoneErrors.festnetz}</p>
+                )}
               </div>
             </div>
 
@@ -783,8 +832,13 @@ export default function AdminCustomerNew() {
                     id="contactTelefon"
                     value={formData.contactTelefon}
                     onChange={(e) => handleChange("contactTelefon", e.target.value)}
+                    placeholder="0170 1234567"
+                    className={phoneErrors.contactTelefon ? "border-red-500" : ""}
                     data-testid="input-contact-telefon"
                   />
+                  {phoneErrors.contactTelefon && (
+                    <p className="text-xs text-red-500">{phoneErrors.contactTelefon}</p>
+                  )}
                 </div>
               </div>
 
