@@ -414,13 +414,20 @@ export default function MyTimes() {
                       {formatMinutesToHours(timeOverview?.serviceHours?.erstberatungMinutes || 0)}
                     </span>
                   </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Anfahrt</span>
+                    <span className="font-semibold text-amber-700" data-testid="text-travel-time-hours">
+                      {formatMinutesToHours(timeOverview?.travel?.totalMinutes || 0)}
+                    </span>
+                  </div>
                   <div className="border-t pt-2 mt-2 flex justify-between items-center">
                     <span className="text-sm font-medium text-gray-700">Gesamt</span>
                     <span className="font-bold text-gray-900" data-testid="text-total-service-hours">
                       {formatMinutesToHours(
                         (timeOverview?.serviceHours?.hauswirtschaftMinutes || 0) +
                         (timeOverview?.serviceHours?.alltagsbegleitungMinutes || 0) +
-                        (timeOverview?.serviceHours?.erstberatungMinutes || 0)
+                        (timeOverview?.serviceHours?.erstberatungMinutes || 0) +
+                        (timeOverview?.travel?.totalMinutes || 0)
                       )}
                     </span>
                   </div>
@@ -428,35 +435,33 @@ export default function MyTimes() {
               </CardContent>
             </Card>
 
-            {/* Travel Card */}
+            {/* Kilometers Card */}
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
                   <Car className="h-4 w-4" />
-                  Fahrten {MONTH_NAMES[selectedMonth - 1]}
+                  Kilometer {MONTH_NAMES[selectedMonth - 1]}
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-0">
-                <div className="space-y-3">
-                  <div className="text-center p-3 rounded-lg bg-amber-50">
-                    <div className="text-2xl font-bold text-amber-700" data-testid="text-total-km">
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Anfahrt</span>
+                    <span className="font-semibold text-amber-700" data-testid="text-anfahrt-km">
                       {timeOverview?.travel?.totalKilometers || 0} km
-                    </div>
-                    <div className="text-xs text-gray-500">Anfahrt</div>
+                    </span>
                   </div>
-                  {(timeOverview?.travel?.customerKilometers || 0) > 0 && (
-                    <div className="text-center p-3 rounded-lg bg-teal-50">
-                      <div className="text-2xl font-bold text-teal-700" data-testid="text-customer-km">
-                        {timeOverview?.travel?.customerKilometers || 0} km
-                      </div>
-                      <div className="text-xs text-gray-500">Km für/mit Kunde</div>
-                    </div>
-                  )}
-                  <div className="text-center p-3 rounded-lg bg-orange-50">
-                    <div className="text-2xl font-bold text-orange-700" data-testid="text-total-travel-time">
-                      {formatMinutesToHours(timeOverview?.travel?.totalMinutes || 0)}
-                    </div>
-                    <div className="text-xs text-gray-500">Fahrzeit gesamt</div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Kundenfahrten</span>
+                    <span className="font-semibold text-teal-700" data-testid="text-customer-km">
+                      {timeOverview?.travel?.customerKilometers || 0} km
+                    </span>
+                  </div>
+                  <div className="border-t pt-2 mt-2 flex justify-between items-center">
+                    <span className="text-sm font-medium text-gray-700">Gesamt</span>
+                    <span className="font-bold text-gray-900" data-testid="text-total-km">
+                      {(timeOverview?.travel?.totalKilometers || 0) + (timeOverview?.travel?.customerKilometers || 0)} km
+                    </span>
                   </div>
                 </div>
               </CardContent>
