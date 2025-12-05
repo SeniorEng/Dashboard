@@ -26,6 +26,7 @@ router.use(requireAuth);
 router.get("/", async (req, res) => {
   try {
     const date = req.query.date as string | undefined;
+    const customerId = req.query.customerId ? parseInt(req.query.customerId as string) : undefined;
     const user = req.user!;
     
     let appointments = await storage.getAppointmentsWithCustomers(date);
@@ -35,6 +36,10 @@ router.get("/", async (req, res) => {
       appointments = appointments.filter(apt => 
         assignedCustomerIds.includes(apt.customerId)
       );
+    }
+    
+    if (customerId) {
+      appointments = appointments.filter(apt => apt.customerId === customerId);
     }
     
     res.json(appointments);

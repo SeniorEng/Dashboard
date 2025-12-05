@@ -23,6 +23,7 @@ import AdminCustomerDetail from "@/pages/admin/customer-detail";
 import AdminCustomerNew from "@/pages/admin/customer-new";
 import AdminTimeEntries from "@/pages/admin/time-entries";
 import UndocumentedAppointments from "@/pages/undocumented-appointments";
+import CustomerDetail from "@/pages/customer-detail";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -74,6 +75,9 @@ function Router() {
       </Route>
       <Route path="/customers">
         <ProtectedRoute component={Customers} />
+      </Route>
+      <Route path="/customer/:id">
+        {() => <ProtectedRoute component={() => <CustomerDetail />} />}
       </Route>
       <Route path="/my-times">
         <ProtectedRoute component={MyTimes} />

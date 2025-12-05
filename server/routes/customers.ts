@@ -27,9 +27,17 @@ router.get("/", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
+    const user = req.user!;
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
       return res.status(400).json({ error: "Invalid customer ID" });
+    }
+    
+    if (!user.isAdmin) {
+      const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
+      if (!assignedCustomerIds.includes(id)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
     }
     
     const customer = await storage.getCustomer(id);

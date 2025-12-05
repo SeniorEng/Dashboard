@@ -1,5 +1,7 @@
 import { Link, useLocation } from "wouter";
-import logo from "@assets/generated_images/friendly_elderly_care_service_logo_with_hands_and_house_icon.png";
+import { useState, useRef, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import logo from "@assets/Logo-04_250x250_1764898165379.jpg";
 import { useAuth } from "@/hooks/use-auth";
 import {
   DropdownMenu,
@@ -8,7 +10,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Shield, LogOut, Settings, User } from "lucide-react";
+import { Shield, LogOut, Search, X, User as UserIcon, Calendar } from "lucide-react";
+
+interface SearchResult {
+  type: "customer" | "appointment";
+  id: number;
+  title: string;
+  subtitle: string;
+  href: string;
+}
 
 function getInitials(name: string): string {
   return name
@@ -17,6 +27,109 @@ function getInitials(name: string): string {
     .join("")
     .toUpperCase()
     .slice(0, 2);
+}
+
+function GlobalSearch() {
+  const [query, setQuery] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
+  const [, navigate] = useLocation();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const { data: results, isLoading } = useQuery<SearchResult[]>({
+    queryKey: ["search", query],
+    queryFn: async () => {
+      if (query.length < 2) return [];
+      const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+      if (!response.ok) throw new Error("Search failed");
+      return response.json();
+    },
+    enabled: query.length >= 2,
+    staleTime: 30000,
+  });
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleSelect = (result: SearchResult) => {
+    navigate(result.href);
+    setQuery("");
+    setIsOpen(false);
+  };
+
+  return (
+    <div ref={containerRef} className="relative flex-1 max-w-md mx-4">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+        <input
+          ref={inputRef}
+          type="text"
+          placeholder="Suchen..."
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setIsOpen(true);
+          }}
+          onFocus={() => setIsOpen(true)}
+          className="w-full h-9 pl-9 pr-8 rounded-lg border border-border bg-muted/50 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+          data-testid="input-global-search"
+        />
+        {query && (
+          <button
+            onClick={() => {
+              setQuery("");
+              inputRef.current?.focus();
+            }}
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-muted"
+          >
+            <X className="w-3.5 h-3.5 text-muted-foreground" />
+          </button>
+        )}
+      </div>
+
+      {isOpen && query.length >= 2 && (
+        <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-border rounded-lg shadow-lg overflow-hidden z-50">
+          {isLoading ? (
+            <div className="px-4 py-3 text-sm text-muted-foreground">Suche...</div>
+          ) : results && results.length > 0 ? (
+            <div className="max-h-64 overflow-y-auto">
+              {results.map((result) => (
+                <button
+                  key={`${result.type}-${result.id}`}
+                  onClick={() => handleSelect(result)}
+                  className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-muted transition-colors text-left"
+                  data-testid={`search-result-${result.type}-${result.id}`}
+                >
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                    result.type === "customer" ? "bg-primary/10 text-primary" : "bg-amber-100 text-amber-600"
+                  }`}>
+                    {result.type === "customer" ? (
+                      <UserIcon className="w-4 h-4" />
+                    ) : (
+                      <Calendar className="w-4 h-4" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium truncate">{result.title}</div>
+                    <div className="text-xs text-muted-foreground truncate">{result.subtitle}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="px-4 py-3 text-sm text-muted-foreground">Keine Ergebnisse gefunden</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -37,10 +150,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
       {/* Header */}
       <header className="sticky top-0 z-50 w-full bg-background/80 backdrop-blur-md border-b border-border/40 shadow-sm">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-            <img src={logo} alt="CareConnect Logo" className="h-10 w-10 object-contain rounded-full bg-white p-1 shadow-sm ring-1 ring-border" />
-            <span className="font-bold text-xl tracking-tight text-primary">CareConnect</span>
+          <Link href="/" className="shrink-0 hover:opacity-80 transition-opacity">
+            <img src={logo} alt="Logo" className="h-10 w-10 object-cover rounded-lg shadow-sm" />
           </Link>
+
+          {isAuthenticated && <GlobalSearch />}
           
           {isAuthenticated && user ? (
             <DropdownMenu>

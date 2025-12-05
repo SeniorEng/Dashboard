@@ -126,10 +126,11 @@ function CustomerCard({ customer }: { customer: Customer }) {
   const pflegegradLabel = getPflegegradLabel(customer.pflegegrad);
 
   return (
-    <Card 
-      className="overflow-hidden hover:shadow-md transition-shadow"
-      data-testid={`card-customer-${customer.id}`}
-    >
+    <Link href={`/customer/${customer.id}`}>
+      <Card 
+        className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer"
+        data-testid={`card-customer-${customer.id}`}
+      >
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
@@ -200,5 +201,6 @@ function CustomerCard({ customer }: { customer: Customer }) {
         </div>
       </CardContent>
     </Card>
+    </Link>
   );
 }
