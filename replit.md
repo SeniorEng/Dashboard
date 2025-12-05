@@ -15,6 +15,15 @@ CareConnect is a full-stack web application for caregivers managing elderly care
 - **State Management**: TanStack Query for data fetching with optimistic updates and caching, React memoization for performance, ErrorBoundary for graceful error handling.
 - **Structure**: Feature-based architecture with clear separation of concerns, utilizing a shared domain logic (`@shared/domain`).
 - **Design System**: Centralized design tokens (`@/design-system`) for colors, typography, spacing, and pre-defined component styles. Semantic color functions for status, service, and Pflegegrad. Layout patterns include `PageHeader`, `SectionCard`, `DataList`, `EmptyState`, and `StatusBadge`.
+- **Date Handling (WICHTIG)**: Datumsstrings im Format "YYYY-MM-DD" niemals direkt mit `new Date(dateString)` parsen! JavaScript interpretiert diese als UTC-Mitternacht, was bei der Konvertierung in die lokale Zeitzone zu Verschiebungen um einen Tag führen kann. Stattdessen immer explizit parsen:
+  ```javascript
+  // FALSCH - führt zu Zeitzonenproblemen:
+  const date = new Date("2025-12-04");
+  
+  // RICHTIG - zeitzonen-sicher:
+  const [year, month, day] = dateString.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  ```
 
 ### Backend Architecture
 - **Framework**: Express.js with TypeScript.
