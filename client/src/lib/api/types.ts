@@ -339,6 +339,7 @@ export interface AppointmentWithCustomerName {
   travelFromAppointmentId: number | null;
   travelKilometers: number | null;
   travelMinutes: number | null;
+  customerKilometers: number | null;
   kilometers: string | null;
   signatureData: string | null;
   servicesDone: string[] | null;
@@ -354,6 +355,7 @@ export interface ServiceHoursSummary {
 
 export interface TravelSummary {
   totalKilometers: number;
+  customerKilometers: number;
   totalMinutes: number;
 }
 

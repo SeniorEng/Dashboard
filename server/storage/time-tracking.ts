@@ -50,6 +50,7 @@ export interface ServiceHoursSummary {
 
 export interface TravelSummary {
   totalKilometers: number;
+  customerKilometers: number;
   totalMinutes: number;
 }
 
@@ -388,6 +389,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
         travelFromAppointmentId: appointments.travelFromAppointmentId,
         travelKilometers: appointments.travelKilometers,
         travelMinutes: appointments.travelMinutes,
+        customerKilometers: appointments.customerKilometers,
         kilometers: appointments.kilometers,
         signatureData: appointments.signatureData,
         servicesDone: appointments.servicesDone,
@@ -434,6 +436,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     
     const travel: TravelSummary = {
       totalKilometers: 0,
+      customerKilometers: 0,
       totalMinutes: 0,
     };
     
@@ -449,6 +452,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       }
       
       travel.totalKilometers += appt.travelKilometers || 0;
+      travel.customerKilometers += appt.customerKilometers || 0;
       travel.totalMinutes += appt.travelMinutes || 0;
     }
     

@@ -433,7 +433,7 @@ export default function MyTimes() {
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
                   <Car className="h-4 w-4" />
-                  Anfahrt {MONTH_NAMES[selectedMonth - 1]}
+                  Fahrten {MONTH_NAMES[selectedMonth - 1]}
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-0">
@@ -442,8 +442,16 @@ export default function MyTimes() {
                     <div className="text-2xl font-bold text-amber-700" data-testid="text-total-km">
                       {timeOverview?.travel?.totalKilometers || 0} km
                     </div>
-                    <div className="text-xs text-gray-500">Kilometer gesamt</div>
+                    <div className="text-xs text-gray-500">Anfahrt</div>
                   </div>
+                  {(timeOverview?.travel?.customerKilometers || 0) > 0 && (
+                    <div className="text-center p-3 rounded-lg bg-teal-50">
+                      <div className="text-2xl font-bold text-teal-700" data-testid="text-customer-km">
+                        {timeOverview?.travel?.customerKilometers || 0} km
+                      </div>
+                      <div className="text-xs text-gray-500">Km für/mit Kunde</div>
+                    </div>
+                  )}
                   <div className="text-center p-3 rounded-lg bg-orange-50">
                     <div className="text-2xl font-bold text-orange-700" data-testid="text-total-travel-time">
                       {formatMinutesToHours(timeOverview?.travel?.totalMinutes || 0)}
@@ -651,10 +659,16 @@ export default function MyTimes() {
                                 <div className="flex items-center gap-2 mt-1 text-xs text-amber-700">
                                   <Car className="h-3 w-3" />
                                   <span>
-                                    {appt.travelKilometers ? `${appt.travelKilometers} km` : ""}
+                                    Anfahrt: {appt.travelKilometers ? `${appt.travelKilometers} km` : ""}
                                     {appt.travelKilometers && appt.travelMinutes ? " • " : ""}
                                     {appt.travelMinutes ? `${appt.travelMinutes} min` : ""}
                                   </span>
+                                </div>
+                              )}
+                              {appt.customerKilometers && appt.customerKilometers > 0 && (
+                                <div className="flex items-center gap-2 mt-1 text-xs text-teal-700">
+                                  <Car className="h-3 w-3" />
+                                  <span>Km für/mit Kunde: {appt.customerKilometers} km</span>
                                 </div>
                               )}
                             </div>
