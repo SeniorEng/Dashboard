@@ -25,10 +25,11 @@ CareConnect is a full-stack web application for caregivers managing elderly care
 
 ### Data Storage
 - **Database**: PostgreSQL via Neon serverless, Drizzle ORM for type-safe queries.
-- **Schema**: Key tables include `customers`, `appointments`, `insurance_providers`, `customer_insurance_history`, `customer_contacts`, `care_level_history`, `customer_budgets`, `customer_contracts`, `customer_contract_rates`, `service_rates`. Historization pattern uses `valid_from`/`valid_to` timestamps for changing data.
+- **Schema**: Key tables include `customers`, `appointments`, `insurance_providers`, `customer_insurance_history`, `customer_contacts`, `care_level_history`, `customer_budgets`, `customer_contracts`, `customer_contract_rates`, `service_rates`, `employee_time_entries`. Historization pattern uses `valid_from`/`valid_to` timestamps for changing data.
 - **Data Types**: Strict SQL types are enforced for dates, times, timestamps, booleans, and numbers to ensure data integrity and enable native database operations.
-- **Indexes**: Composite indexes on frequently queried columns (`date`, `customer_id`, `status`) for performance.
+- **Indexes**: Composite indexes on frequently queried columns (`date`, `customer_id`, `status`, `assigned_employee_id`, `user_id`, `entry_date`) for performance.
 - **Data Layer**: `IStorage` interface abstraction, `DatabaseStorage` with optimized join queries, pagination support, and application-level rollback for atomicity due to Neon HTTP driver limitations.
+- **Caching**: In-memory cache for assigned customer IDs per employee with 10-minute TTL. Cache invalidation on customer creation, deletion, and employee assignment changes.
 
 ### Business Rules & Patterns
 - **Shared Domain Logic**: A single source of truth (`shared/domain/`) for business rules, including appointment status transitions (scheduled → in-progress → documenting → completed, with completed being immutable).
