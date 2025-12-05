@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Cake, User, Users, Loader2, Gift } from "lucide-react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
+import { formatDateForDisplay } from "@shared/utils/date";
 
 interface BirthdayEntry {
   id: number;
@@ -13,15 +14,6 @@ interface BirthdayEntry {
   geburtsdatum: string;
   daysUntil: number;
   age: number;
-}
-
-function formatDate(dateString: string): string {
-  const [year, month, day] = dateString.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
-  return date.toLocaleDateString("de-DE", {
-    day: "numeric",
-    month: "long",
-  });
 }
 
 function getDaysLabel(days: number): string {
@@ -168,7 +160,7 @@ function BirthdayCard({ birthday }: { birthday: BirthdayEntry }) {
             </div>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <span data-testid={`text-birthday-date-${birthday.type}-${birthday.id}`}>
-                {formatDate(birthday.geburtsdatum)}
+                {formatDateForDisplay(birthday.geburtsdatum, { day: "numeric", month: "long" })}
               </span>
               <span className="text-muted-foreground/50">•</span>
               <span>wird {birthday.age}</span>

@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatDateForDisplay } from "@shared/utils/date";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -302,8 +303,6 @@ export default function AdminTimeEntries() {
                           .map((entry) => {
                             const config = TIME_ENTRY_TYPE_CONFIG[entry.entryType as TimeEntryType];
                             const Icon = config.icon;
-                            const [year, month, day] = entry.entryDate.split("-").map(Number);
-                            const date = new Date(year, month - 1, day);
                             return (
                               <div
                                 key={entry.id}
@@ -315,7 +314,7 @@ export default function AdminTimeEntries() {
                                   <div>
                                     <div className={`font-medium ${config.color}`}>{config.label}</div>
                                     <div className="text-sm text-gray-600">
-                                      {date.toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "short" })}
+                                      {formatDateForDisplay(entry.entryDate, { weekday: "short", day: "numeric", month: "short" })}
                                       {entry.startTime && entry.endTime && (
                                         <span className="ml-2">
                                           {entry.startTime.slice(0, 5)} - {entry.endTime.slice(0, 5)}

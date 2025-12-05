@@ -30,6 +30,7 @@ import {
   type AppointmentStatus
 } from "@shared/types";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
+import { formatDateForDisplay } from "@shared/utils/date";
 
 export default function AppointmentDetail() {
   const [, params] = useRoute("/appointment/:id");
@@ -133,15 +134,12 @@ export default function AppointmentDetail() {
           <div className="flex items-center justify-between py-2 border-b border-border/50">
             <span className="text-muted-foreground">Datum</span>
             <span className="font-medium">
-              {(() => {
-                const [year, month, day] = appointment.date.split("-").map(Number);
-                return new Date(year, month - 1, day).toLocaleDateString("de-DE", { 
-                  weekday: "long", 
-                  day: "numeric", 
-                  month: "long", 
-                  year: "numeric" 
-                });
-              })()}
+              {formatDateForDisplay(appointment.date, { 
+                weekday: "long", 
+                day: "numeric", 
+                month: "long", 
+                year: "numeric" 
+              })}
             </span>
           </div>
           

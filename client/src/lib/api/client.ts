@@ -3,7 +3,39 @@
  * 
  * Provides type-safe API calls with consistent error handling and retry logic.
  * All API responses are wrapped in a standard envelope for predictable error handling.
+ * Includes CSRF protection for all state-changing requests.
  */
+
+// CSRF Token handling
+const CSRF_COOKIE_NAME = "careconnect_csrf";
+const CSRF_HEADER_NAME = "x-csrf-token";
+
+function getCsrfToken(): string | null {
+  const cookies = document.cookie.split(";");
+  for (const cookie of cookies) {
+    const [name, value] = cookie.trim().split("=");
+    if (name === CSRF_COOKIE_NAME) {
+      return value;
+    }
+  }
+  return null;
+}
+
+async function ensureCsrfToken(): Promise<string | null> {
+  let token = getCsrfToken();
+  if (!token) {
+    try {
+      const res = await fetch("/api/csrf-token", { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        token = data.csrfToken;
+      }
+    } catch (e) {
+      console.error("Failed to fetch CSRF token:", e);
+    }
+  }
+  return token;
+}
 
 // Standard API error structure
 export interface ApiErrorInfo {
@@ -102,6 +134,21 @@ export async function apiRequest<TResponse, TBody = unknown>(
     retries = DEFAULT_RETRIES 
   } = options;
 
+  // Build headers with CSRF token for state-changing requests
+  const requestHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...headers,
+  };
+
+  // Add CSRF token for non-safe methods
+  const safeMethods = ['GET', 'HEAD', 'OPTIONS'];
+  if (!safeMethods.includes(method)) {
+    const csrfToken = await ensureCsrfToken();
+    if (csrfToken) {
+      requestHeaders[CSRF_HEADER_NAME] = csrfToken;
+    }
+  }
+
   let lastError: ApiErrorInfo | null = null;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -115,10 +162,7 @@ export async function apiRequest<TResponse, TBody = unknown>(
         method,
         credentials: 'include',
         signal,
-        headers: {
-          'Content-Type': 'application/json',
-          ...headers,
-        },
+        headers: requestHeaders,
       };
 
       if (body !== undefined) {

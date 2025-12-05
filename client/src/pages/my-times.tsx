@@ -27,6 +27,7 @@ import {
   Users,
 } from "lucide-react";
 import type { TimeEntryType, CreateTimeEntryRequest, AppointmentWithCustomerName } from "@/lib/api/types";
+import { formatDateForDisplay, formatDateString, isPast } from "@shared/utils/date";
 
 const TIME_ENTRY_TYPE_CONFIG: Record<TimeEntryType, { label: string; icon: React.ElementType; color: string; bgColor: string }> = {
   urlaub: { label: "Urlaub", icon: Palmtree, color: "text-green-700", bgColor: "bg-green-100" },
@@ -39,13 +40,6 @@ const TIME_ENTRY_TYPE_CONFIG: Record<TimeEntryType, { label: string; icon: React
   sonstiges: { label: "Sonstiges", icon: FileText, color: "text-gray-700", bgColor: "bg-gray-100" },
 };
 
-const formatDateString = (date: Date): string => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
-
 const WEEKDAY_NAMES = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 const MONTH_NAMES = [
   "Januar", "Februar", "März", "April", "Mai", "Juni",
@@ -56,13 +50,7 @@ const MONTH_NAMES = [
 function isEntryLocked(entryDate: string, entryType: string): boolean {
   const lockedTypes = ["urlaub", "krankheit"];
   if (!lockedTypes.includes(entryType)) return false;
-  
-  const [year, month, day] = entryDate.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
-  const today = new Date();
-  date.setHours(0, 0, 0, 0);
-  today.setHours(0, 0, 0, 0);
-  return date < today;
+  return isPast(entryDate);
 }
 
 export default function MyTimes() {
@@ -602,15 +590,11 @@ export default function MyTimes() {
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Calendar className="h-5 w-5" />
                   {selectedDate 
-                    ? (() => {
-                        const [year, month, day] = selectedDate.split("-").map(Number);
-                        const date = new Date(year, month - 1, day);
-                        return date.toLocaleDateString("de-DE", { 
-                          weekday: "long", 
-                          day: "numeric", 
-                          month: "long" 
-                        });
-                      })()
+                    ? formatDateForDisplay(selectedDate, { 
+                        weekday: "long", 
+                        day: "numeric", 
+                        month: "long" 
+                      })
                     : "Tag auswählen"
                   }
                 </CardTitle>

@@ -9,6 +9,7 @@
 import { Link, useParams } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { formatDateForDisplay } from "@shared/utils/date";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/patterns/page-header";
@@ -56,12 +57,7 @@ function formatBudget(cents: number): string {
 }
 
 function formatDate(dateStr: string): string {
-  const [year, month, day] = dateStr.split("-").map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString("de-DE", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
+  return formatDateForDisplay(dateStr);
 }
 
 export default function AdminCustomerDetail() {
