@@ -11,6 +11,7 @@ import type { AppointmentWithCustomer } from "@shared/types";
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { eq, count, sql as sqlBuilder, lt, ne, and, or, ilike, inArray } from "drizzle-orm";
+import { customerIdsCache } from "./services/cache";
 
 const sql = neon(process.env.DATABASE_URL!);
 const db = drizzle(sql);
@@ -83,22 +84,35 @@ export class DatabaseStorage implements IStorage {
 
   async createCustomer(customer: InsertCustomer): Promise<Customer> {
     const result = await db.insert(customers).values(customer).returning();
-    return result[0];
+    const created = result[0];
+    customerIdsCache.invalidateForCustomer(created.primaryEmployeeId, created.backupEmployeeId);
+    return created;
   }
 
   async deleteCustomer(id: number): Promise<boolean> {
+    const existing = await this.getCustomer(id);
     const result = await db.delete(customers).where(eq(customers.id, id)).returning();
+    if (result.length > 0 && existing) {
+      customerIdsCache.invalidateForCustomer(existing.primaryEmployeeId, existing.backupEmployeeId);
+    }
     return result.length > 0;
   }
   
   async getAssignedCustomerIds(employeeId: number): Promise<number[]> {
+    const cached = customerIdsCache.get(employeeId);
+    if (cached !== undefined) {
+      return cached;
+    }
+    
     const result = await db
       .select({ id: customers.id })
       .from(customers)
       .where(
         sqlBuilder`${customers.primaryEmployeeId} = ${employeeId} OR ${customers.backupEmployeeId} = ${employeeId}`
       );
-    return result.map(r => r.id);
+    const ids = result.map(r => r.id);
+    customerIdsCache.set(employeeId, ids);
+    return ids;
   }
 
   async getCustomersByIds(ids: number[]): Promise<Customer[]> {

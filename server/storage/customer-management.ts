@@ -35,6 +35,7 @@ import {
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { eq, and, isNull, desc, count, or, ilike, sql as sqlBuilder } from "drizzle-orm";
+import { customerIdsCache } from "../services/cache";
 
 const sql = neon(process.env.DATABASE_URL!);
 const db = drizzle(sql);
@@ -756,28 +757,34 @@ export class CustomerManagementStorage {
   }>): Promise<Customer | undefined> {
     const updateData: any = { ...data, updatedAt: new Date() };
     
+    const existing = await db.select().from(customers).where(eq(customers.id, id));
+    if (existing.length === 0) return undefined;
+    
+    const oldCustomer = existing[0];
+    
     if (data.vorname !== undefined || data.nachname !== undefined) {
-      const existing = await db.select().from(customers).where(eq(customers.id, id));
-      if (existing.length > 0) {
-        const newVorname = data.vorname ?? existing[0].vorname ?? '';
-        const newNachname = data.nachname ?? existing[0].nachname ?? '';
-        updateData.name = `${newNachname}, ${newVorname}`;
-      }
+      const newVorname = data.vorname ?? oldCustomer.vorname ?? '';
+      const newNachname = data.nachname ?? oldCustomer.nachname ?? '';
+      updateData.name = `${newNachname}, ${newVorname}`;
     }
     
     if (data.strasse !== undefined || data.nr !== undefined || data.plz !== undefined || data.stadt !== undefined) {
-      const existing = await db.select().from(customers).where(eq(customers.id, id));
-      if (existing.length > 0) {
-        const newStrasse = data.strasse ?? existing[0].strasse ?? '';
-        const newNr = data.nr ?? existing[0].nr ?? '';
-        const newPlz = data.plz ?? existing[0].plz ?? '';
-        const newStadt = data.stadt ?? existing[0].stadt ?? '';
-        updateData.address = `${newStrasse} ${newNr}, ${newPlz} ${newStadt}`;
-      }
+      const newStrasse = data.strasse ?? oldCustomer.strasse ?? '';
+      const newNr = data.nr ?? oldCustomer.nr ?? '';
+      const newPlz = data.plz ?? oldCustomer.plz ?? '';
+      const newStadt = data.stadt ?? oldCustomer.stadt ?? '';
+      updateData.address = `${newStrasse} ${newNr}, ${newPlz} ${newStadt}`;
     }
     
     const result = await db.update(customers).set(updateData).where(eq(customers.id, id)).returning();
-    return result[0];
+    const updated = result[0];
+    
+    if (data.primaryEmployeeId !== undefined || data.backupEmployeeId !== undefined) {
+      customerIdsCache.invalidateForCustomer(oldCustomer.primaryEmployeeId, oldCustomer.backupEmployeeId);
+      customerIdsCache.invalidateForCustomer(updated.primaryEmployeeId, updated.backupEmployeeId);
+    }
+    
+    return updated;
   }
 }
 

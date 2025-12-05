@@ -415,15 +415,23 @@ async function updateCustomerAssignment(
   const { drizzle } = await import("drizzle-orm/neon-http");
   const { eq } = await import("drizzle-orm");
   const { customers } = await import("@shared/schema");
+  const { customerIdsCache } = await import("../services/cache");
 
   const sql = neon(process.env.DATABASE_URL!);
   const db = drizzle(sql);
 
+  const [existing] = await db.select().from(customers).where(eq(customers.id, customerId));
+  
   const [updated] = await db
     .update(customers)
     .set({ primaryEmployeeId, backupEmployeeId })
     .where(eq(customers.id, customerId))
     .returning();
+
+  if (existing) {
+    customerIdsCache.invalidateForCustomer(existing.primaryEmployeeId, existing.backupEmployeeId);
+  }
+  customerIdsCache.invalidateForCustomer(primaryEmployeeId, backupEmployeeId);
 
   return updated;
 }

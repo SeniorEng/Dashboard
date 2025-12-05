@@ -847,7 +847,11 @@ export const employeeTimeEntries = pgTable("employee_time_entries", {
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  index("time_entries_user_id_idx").on(table.userId),
+  index("time_entries_entry_date_idx").on(table.entryDate),
+  index("time_entries_user_date_idx").on(table.userId, table.entryDate),
+]);
 
 // Employee vacation allowance per year
 export const employeeVacationAllowance = pgTable("employee_vacation_allowance", {
