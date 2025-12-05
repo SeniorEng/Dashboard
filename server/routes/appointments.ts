@@ -73,6 +73,7 @@ router.get("/undocumented", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
+    const user = req.user!;
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
       return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
@@ -82,6 +83,13 @@ router.get("/:id", async (req, res) => {
     
     if (!appointment) {
       return sendNotFound(res, ErrorMessages.appointmentNotFound);
+    }
+    
+    if (!user.isAdmin) {
+      const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
+      if (!assignedCustomerIds.includes(appointment.customerId)) {
+        return sendForbidden(res, "Zugriff verweigert");
+      }
     }
     
     res.json(appointment);
