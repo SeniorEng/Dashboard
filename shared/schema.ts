@@ -390,6 +390,8 @@ export const appointments = pgTable("appointments", {
   travelFromAppointmentId: integer("travel_from_appointment_id"),
   travelKilometers: integer("travel_kilometers"),
   travelMinutes: integer("travel_minutes"),
+  // Customer kilometers (for Alltagsbegleitung - trips with/for customer)
+  customerKilometers: integer("customer_kilometers"),
   // Legacy kilometers field (kept for backwards compatibility)
   kilometers: text("kilometers"),
   notes: text("notes"),

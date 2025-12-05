@@ -42,6 +42,7 @@ interface DocumentationFormData {
   travelFromAppointmentId: number | null;
   travelKilometers: number;
   travelMinutes: number;
+  customerKilometers: number;
   notes: string;
 }
 
@@ -59,6 +60,7 @@ export default function DocumentAppointment() {
     travelFromAppointmentId: null,
     travelKilometers: 0,
     travelMinutes: 0,
+    customerKilometers: 0,
     notes: "",
   });
 
@@ -132,6 +134,9 @@ export default function DocumentAppointment() {
       if (abService) {
         payload.alltagsbegleitungActualDauer = abService.actualDuration;
         payload.alltagsbegleitungDetails = abService.details || null;
+        if (data.customerKilometers > 0) {
+          payload.customerKilometers = data.customerKilometers;
+        }
       }
       if (ebService) {
         payload.erstberatungActualDauer = ebService.actualDuration;
@@ -423,7 +428,7 @@ export default function DocumentAppointment() {
 
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="kilometers">Gefahrene Kilometer</Label>
+                  <Label htmlFor="kilometers">Gefahrene Kilometer (Anfahrt)</Label>
                   <div className="relative">
                     <Input
                       id="kilometers"
@@ -466,6 +471,34 @@ export default function DocumentAppointment() {
                         Min.
                       </span>
                     </div>
+                  </div>
+                )}
+                
+                {formData.services.some(s => s.serviceType === "Alltagsbegleitung") && (
+                  <div className="space-y-2">
+                    <Label htmlFor="customerKilometers">Km für/mit Kunde (optional)</Label>
+                    <div className="relative">
+                      <Input
+                        id="customerKilometers"
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        value={formData.customerKilometers || ""}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          customerKilometers: parseFloat(e.target.value) || 0,
+                        }))}
+                        placeholder="0"
+                        className="pr-12"
+                        data-testid="input-customer-kilometers"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
+                        km
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      z.B. Arztbesuch, Einkauf, Behördengang mit dem Kunden
+                    </p>
                   </div>
                 )}
               </div>
