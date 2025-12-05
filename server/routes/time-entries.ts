@@ -121,6 +121,25 @@ function parseLocalDate(dateStr: string): Date {
 }
 
 /**
+ * Check if a date string is in the past (before today)
+ */
+function isDateInPast(dateStr: string): boolean {
+  const entryDate = parseLocalDate(dateStr);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  entryDate.setHours(0, 0, 0, 0);
+  return entryDate < today;
+}
+
+/**
+ * Check if a time entry is locked (past urlaub/krankheit entries are immutable for non-admins)
+ */
+function isEntryLocked(entry: { entryType: string; entryDate: string }): boolean {
+  const lockedTypes = ["urlaub", "krankheit"];
+  return lockedTypes.includes(entry.entryType) && isDateInPast(entry.entryDate);
+}
+
+/**
  * POST /time-entries
  * Create a new time entry (or multiple for date ranges)
  */
@@ -194,6 +213,13 @@ router.put("/:id", async (req: Request, res: Response) => {
       return res.status(403).json({ error: "Keine Berechtigung" });
     }
     
+    // Past urlaub/krankheit entries are locked for non-admins
+    if (isEntryLocked(existing) && !req.user!.isAdmin) {
+      return res.status(403).json({ 
+        error: "Vergangene Urlaubs- oder Krankheitstage können nicht mehr geändert werden" 
+      });
+    }
+    
     const validatedData = updateTimeEntrySchema.parse(req.body);
     const updated = await timeTrackingStorage.updateTimeEntry(entryId, validatedData);
     
@@ -220,6 +246,13 @@ router.delete("/:id", async (req: Request, res: Response) => {
     // Users can only delete their own entries (unless admin)
     if (existing.userId !== userId && !req.user!.isAdmin) {
       return res.status(403).json({ error: "Keine Berechtigung" });
+    }
+    
+    // Past urlaub/krankheit entries are locked for non-admins
+    if (isEntryLocked(existing) && !req.user!.isAdmin) {
+      return res.status(403).json({ 
+        error: "Vergangene Urlaubs- oder Krankheitstage können nicht mehr gelöscht werden" 
+      });
     }
     
     await timeTrackingStorage.deleteTimeEntry(entryId);

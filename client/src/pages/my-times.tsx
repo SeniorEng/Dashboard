@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { useTimeOverview, useVacationSummary, useCreateTimeEntry, useDeleteTimeEntry } from "@/features/time-tracking";
 import {
   Calendar,
@@ -51,8 +52,22 @@ const MONTH_NAMES = [
   "Juli", "August", "September", "Oktober", "November", "Dezember"
 ];
 
+// Check if entry is locked (past urlaub/krankheit cannot be deleted by non-admins)
+function isEntryLocked(entryDate: string, entryType: string): boolean {
+  const lockedTypes = ["urlaub", "krankheit"];
+  if (!lockedTypes.includes(entryType)) return false;
+  
+  const [year, month, day] = entryDate.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  const today = new Date();
+  date.setHours(0, 0, 0, 0);
+  today.setHours(0, 0, 0, 0);
+  return date < today;
+}
+
 export default function MyTimes() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const today = new Date();
   const [selectedYear, setSelectedYear] = useState(today.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(today.getMonth() + 1);
@@ -709,16 +724,26 @@ export default function MyTimes() {
                               )}
                             </div>
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-gray-400 hover:text-red-600"
-                            onClick={() => handleDeleteEntry(entry.id)}
-                            disabled={deleteMutation.isPending}
-                            data-testid={`button-delete-entry-${entry.id}`}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          {/* Only show delete button if entry is not locked or user is admin */}
+                          {(!isEntryLocked(entry.entryDate, entry.entryType) || user?.isAdmin) ? (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-gray-400 hover:text-red-600"
+                              onClick={() => handleDeleteEntry(entry.id)}
+                              disabled={deleteMutation.isPending}
+                              data-testid={`button-delete-entry-${entry.id}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          ) : (
+                            <div 
+                              className="h-8 w-8 flex items-center justify-center text-gray-300"
+                              title="Vergangene Urlaubs- und Krankheitstage können nicht gelöscht werden"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </div>
+                          )}
                         </div>
                       );
                     })}
