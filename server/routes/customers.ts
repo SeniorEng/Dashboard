@@ -11,12 +11,14 @@ router.use(requireAuth);
 router.get("/", async (req, res) => {
   try {
     const user = req.user!;
-    let customers = await storage.getCustomers();
     
-    if (!user.isAdmin) {
-      const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-      customers = customers.filter(c => assignedCustomerIds.includes(c.id));
+    if (user.isAdmin) {
+      const customers = await storage.getCustomers();
+      return res.json(customers);
     }
+    
+    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
+    const customers = await storage.getCustomersByIds(assignedCustomerIds);
     
     res.json(customers);
   } catch (error) {

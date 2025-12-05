@@ -29,18 +29,24 @@ router.get("/", async (req, res) => {
     const customerId = req.query.customerId ? parseInt(req.query.customerId as string) : undefined;
     const user = req.user!;
     
-    let appointments = await storage.getAppointmentsWithCustomers(date);
+    let customerIds: number[] | undefined;
     
     if (!user.isAdmin) {
-      const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-      appointments = appointments.filter(apt => 
-        assignedCustomerIds.includes(apt.customerId)
-      );
+      customerIds = await storage.getAssignedCustomerIds(user.id);
     }
     
     if (customerId) {
-      appointments = appointments.filter(apt => apt.customerId === customerId);
+      if (customerIds) {
+        if (!customerIds.includes(customerId)) {
+          return res.json([]);
+        }
+        customerIds = [customerId];
+      } else {
+        customerIds = [customerId];
+      }
     }
+    
+    const appointments = await storage.getAppointmentsWithCustomers(date, customerIds);
     
     res.json(appointments);
   } catch (error) {
@@ -54,16 +60,11 @@ router.get("/undocumented", async (req, res) => {
     const user = req.user!;
     const today = new Date().toISOString().split("T")[0];
     
-    // Get all appointments before today that are not completed
-    let appointments = await storage.getUndocumentedAppointments(today);
+    const customerIds = user.isAdmin 
+      ? undefined 
+      : await storage.getAssignedCustomerIds(user.id);
     
-    // Filter by assigned customers for non-admin users
-    if (!user.isAdmin) {
-      const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-      appointments = appointments.filter(apt => 
-        assignedCustomerIds.includes(apt.customerId)
-      );
-    }
+    const appointments = await storage.getUndocumentedAppointments(today, customerIds);
     
     res.json(appointments);
   } catch (error) {
@@ -88,7 +89,7 @@ router.get("/:id", async (req, res) => {
     if (!user.isAdmin) {
       const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
       if (!assignedCustomerIds.includes(appointment.customerId)) {
-        return sendForbidden(res, "Zugriff verweigert");
+        return sendForbidden(res, "Zugriff verweigert", "Access denied");
       }
     }
     

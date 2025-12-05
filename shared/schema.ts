@@ -1,4 +1,4 @@
-import { pgTable, text, integer, timestamp, serial, time, date, boolean, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, timestamp, serial, time, date, boolean, unique, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { isValidPhoneNumber, parsePhoneNumber } from "libphonenumber-js";
@@ -160,7 +160,11 @@ export const customers = pgTable("customers", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
-});
+}, (table) => [
+  index("customers_primary_employee_id_idx").on(table.primaryEmployeeId),
+  index("customers_backup_employee_id_idx").on(table.backupEmployeeId),
+  index("customers_name_idx").on(table.name),
+]);
 
 // ============================================
 // INSURANCE TABLES
@@ -398,7 +402,13 @@ export const appointments = pgTable("appointments", {
   servicesDone: text("services_done").array().default([]),
   signatureData: text("signature_data"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (table) => [
+  index("appointments_customer_id_idx").on(table.customerId),
+  index("appointments_date_idx").on(table.date),
+  index("appointments_assigned_employee_id_idx").on(table.assignedEmployeeId),
+  index("appointments_date_customer_id_idx").on(table.date, table.customerId),
+  index("appointments_status_date_idx").on(table.status, table.date),
+]);
 
 // Base customer schema from Drizzle, with phone validation override
 const baseCustomerSchema = createInsertSchema(customers).omit({

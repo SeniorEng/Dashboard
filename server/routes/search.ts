@@ -26,19 +26,16 @@ searchRouter.get("/", async (req: Request, res: Response) => {
     }
 
     const results: SearchResult[] = [];
+    
+    const assignedCustomerIds = user.isAdmin 
+      ? undefined 
+      : await storage.getAssignedCustomerIds(user.id);
 
-    let customers = await storage.getCustomers();
-    
-    if (!user.isAdmin) {
-      const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-      customers = customers.filter(c => assignedCustomerIds.includes(c.id));
-    }
-    
-    const matchingCustomers = customers.filter(c => 
-      c.name?.toLowerCase().includes(query) ||
-      c.vorname?.toLowerCase().includes(query) ||
-      c.nachname?.toLowerCase().includes(query)
-    ).slice(0, 5);
+    const matchingCustomers = await storage.searchCustomers({
+      query,
+      assignedCustomerIds,
+      limit: 5
+    });
 
     for (const customer of matchingCustomers) {
       results.push({
@@ -50,20 +47,11 @@ searchRouter.get("/", async (req: Request, res: Response) => {
       });
     }
 
-    let allAppointments = await storage.getAppointmentsWithCustomers();
-    
-    if (!user.isAdmin) {
-      const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-      allAppointments = allAppointments.filter(apt => 
-        assignedCustomerIds.includes(apt.customerId)
-      );
-    }
-    
-    const matchingAppointments = allAppointments.filter(a => 
-      a.customer?.name?.toLowerCase().includes(query) ||
-      a.customer?.vorname?.toLowerCase().includes(query) ||
-      a.customer?.nachname?.toLowerCase().includes(query)
-    ).slice(0, 5);
+    const matchingAppointments = await storage.searchAppointmentsWithCustomers({
+      query,
+      assignedCustomerIds,
+      limit: 5
+    });
 
     for (const apt of matchingAppointments) {
       const customerName = apt.customer?.name || `${apt.customer?.vorname} ${apt.customer?.nachname}`;
