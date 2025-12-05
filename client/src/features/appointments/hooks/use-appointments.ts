@@ -51,6 +51,31 @@ export function useAppointments(date?: string) {
   });
 }
 
+// Fetch appointment counts for multiple dates (for week view indicators)
+async function fetchAppointmentCounts(dates: string[]): Promise<Record<string, number>> {
+  const results = await Promise.all(
+    dates.map(async (date) => {
+      const response = await fetch(`/api/appointments?date=${date}`);
+      if (!response.ok) return { date, count: 0 };
+      const appointments = await response.json();
+      return { date, count: appointments.length };
+    })
+  );
+  return results.reduce((acc, { date, count }) => {
+    acc[date] = count;
+    return acc;
+  }, {} as Record<string, number>);
+}
+
+export function useWeekAppointmentCounts(dates: string[]) {
+  return useQuery({
+    queryKey: [QUERY_KEY, "week-counts", dates.join(",")],
+    queryFn: () => fetchAppointmentCounts(dates),
+    staleTime: 30000,
+    enabled: dates.length > 0,
+  });
+}
+
 export function useAppointment(id: number) {
   return useQuery({
     queryKey: [QUERY_KEY, id],

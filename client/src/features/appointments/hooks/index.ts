@@ -1,1 +1,1 @@
-export { useAppointments, useAppointment, useUpdateAppointment, useDeleteAppointment } from "./use-appointments";
+export { useAppointments, useAppointment, useUpdateAppointment, useDeleteAppointment, useWeekAppointmentCounts } from "./use-appointments";
