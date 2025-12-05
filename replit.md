@@ -24,6 +24,23 @@ CareConnect is a full-stack web application for caregivers managing elderly care
   const [year, month, day] = dateString.split("-").map(Number);
   const date = new Date(year, month - 1, day);
   ```
+- **Phone Number Handling**: Telefonnummern werden über `shared/utils/phone.ts` mit der Bibliothek `libphonenumber-js` verarbeitet. Nur deutsche Nummern (+49) sind erlaubt.
+  - **Speicherung**: Immer im E.164-Format (`+491701234567`) in der Datenbank speichern
+  - **Anzeige**: `formatPhoneForDisplay()` für nationale Darstellung (`0170 1234567`)
+  - **Validierung**: `validateGermanPhone()` prüft Gültigkeit und gibt Typ zurück (mobile/landline)
+  - **Live-Formatierung**: `formatPhoneAsYouType()` für Eingabefelder
+  ```javascript
+  import { validateGermanPhone, formatPhoneForDisplay, normalizePhone } from "@shared/utils/phone";
+  
+  // Validieren & Normalisieren vor dem Speichern:
+  const result = validateGermanPhone(userInput);
+  if (result.valid) {
+    await saveToDb(result.normalized); // "+491701234567"
+  }
+  
+  // Anzeige für Benutzer:
+  const display = formatPhoneForDisplay("+491701234567"); // "0170 1234567"
+  ```
 
 ### Backend Architecture
 - **Framework**: Express.js with TypeScript.
