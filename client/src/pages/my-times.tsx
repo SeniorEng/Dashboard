@@ -391,7 +391,7 @@ export default function MyTimes() {
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
                   <Users className="h-4 w-4" />
-                  Kundenstunden {MONTH_NAMES[selectedMonth - 1]}
+                  Stunden {MONTH_NAMES[selectedMonth - 1]}
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-0">
