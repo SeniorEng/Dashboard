@@ -1,4 +1,6 @@
 import { memo, useState, useCallback, useRef, useMemo } from "react";
+import { format, parseISO } from "date-fns";
+import { de } from "date-fns/locale";
 import { Card } from "@/components/ui/card";
 import {
   AlertDialog,
@@ -26,6 +28,7 @@ import {
 
 interface AppointmentCardProps {
   appointment: AppointmentWithCustomer;
+  showDate?: boolean;
 }
 
 function getStatusIcon(status: string) {
@@ -41,7 +44,7 @@ function getStatusIcon(status: string) {
   }
 }
 
-function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
+function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProps) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [swiped, setSwiped] = useState(false);
   const startX = useRef(0);
@@ -191,6 +194,11 @@ function AppointmentCardComponent({ appointment }: AppointmentCardProps) {
             <div className="flex-1 py-3 px-4 min-w-0">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
+                  {showDate && (
+                    <div className="text-xs text-muted-foreground mb-0.5">
+                      {format(parseISO(appointment.date), "EEEE, d. MMM", { locale: de })}
+                    </div>
+                  )}
                   <h3 className="font-semibold text-foreground truncate">
                     {appointment.customer?.name}
                   </h3>

@@ -67,7 +67,7 @@ export default function Dashboard() {
       <div className="mb-6 animate-in slide-in-from-top-4 duration-500">
         {/* Undocumented appointments banner */}
         {undocumentedCount > 0 && (
-          <Link href="/appointments?filter=undocumented">
+          <Link href="/undocumented">
             <div 
               className="flex items-center gap-2 px-3 py-2 mb-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 hover:bg-amber-100 transition-colors cursor-pointer"
               data-testid="banner-undocumented"
