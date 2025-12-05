@@ -21,6 +21,7 @@ CareConnect is a full-stack web application for caregivers managing elderly care
 - **API Design**: RESTful endpoints (`/api/customers`, `/api/appointments`), Zod validation, structured error responses.
 - **Structure**: Modular routes (`server/routes/`), business logic in a dedicated service layer (`server/services/`).
 - **Error Handling**: Centralized error codes (VALIDATION_ERROR, NOT_FOUND, etc.) with German messages, consistent error formatting via `handleRouteError()`.
+- **Security**: Role-based access control with SQL-level data filtering. CSRF protection via Double-Submit Cookie pattern with `X-CSRF-Token` header validation for all state-changing requests. Database indexes on frequently queried columns (`customerId`, `date`, `assignedEmployeeId`) for performance optimization.
 
 ### Data Storage
 - **Database**: PostgreSQL via Neon serverless, Drizzle ORM for type-safe queries.

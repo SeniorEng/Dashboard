@@ -165,13 +165,12 @@ function CustomerCard({ customer }: { customer: Customer }) {
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Phone className="w-4 h-4 flex-shrink-0 text-primary/60" />
                 {phone ? (
-                  <a 
-                    href={`tel:${customer.telefon}`} 
-                    className="text-primary hover:underline"
-                    data-testid={`link-customer-phone-${customer.id}`}
+                  <span 
+                    className="text-primary"
+                    data-testid={`text-customer-phone-${customer.id}`}
                   >
                     {phone}
-                  </a>
+                  </span>
                 ) : (
                   <span className="text-muted-foreground/60" data-testid={`text-customer-phone-${customer.id}`}>
                     Keine Telefonnummer

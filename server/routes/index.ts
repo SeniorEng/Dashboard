@@ -12,9 +12,10 @@ const router = Router();
 router.get("/csrf-token", csrfTokenHandler);
 
 router.use("/auth", authRouter);
-router.use("/admin", adminRouter);
 
 router.use(csrfProtection);
+
+router.use("/admin", adminRouter);
 
 router.use("/appointments", appointmentsRouter);
 router.use("/customers", customersRouter);
