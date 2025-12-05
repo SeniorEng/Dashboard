@@ -133,12 +133,15 @@ export default function AppointmentDetail() {
           <div className="flex items-center justify-between py-2 border-b border-border/50">
             <span className="text-muted-foreground">Datum</span>
             <span className="font-medium">
-              {new Date(appointment.date).toLocaleDateString("de-DE", { 
-                weekday: "long", 
-                day: "numeric", 
-                month: "long", 
-                year: "numeric" 
-              })}
+              {(() => {
+                const [year, month, day] = appointment.date.split("-").map(Number);
+                return new Date(year, month - 1, day).toLocaleDateString("de-DE", { 
+                  weekday: "long", 
+                  day: "numeric", 
+                  month: "long", 
+                  year: "numeric" 
+                });
+              })()}
             </span>
           </div>
           

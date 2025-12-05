@@ -302,7 +302,8 @@ export default function AdminTimeEntries() {
                           .map((entry) => {
                             const config = TIME_ENTRY_TYPE_CONFIG[entry.entryType as TimeEntryType];
                             const Icon = config.icon;
-                            const date = new Date(entry.entryDate);
+                            const [year, month, day] = entry.entryDate.split("-").map(Number);
+                            const date = new Date(year, month - 1, day);
                             return (
                               <div
                                 key={entry.id}
