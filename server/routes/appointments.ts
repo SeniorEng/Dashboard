@@ -43,6 +43,29 @@ router.get("/", async (req, res) => {
   }
 });
 
+// Get undocumented past appointments (needs documentation)
+router.get("/undocumented", async (req, res) => {
+  try {
+    const user = req.user!;
+    const today = new Date().toISOString().split("T")[0];
+    
+    // Get all appointments before today that are not completed
+    let appointments = await storage.getUndocumentedAppointments(today);
+    
+    // Filter by assigned customers for non-admin users
+    if (!user.isAdmin) {
+      const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
+      appointments = appointments.filter(apt => 
+        assignedCustomerIds.includes(apt.customerId)
+      );
+    }
+    
+    res.json(appointments);
+  } catch (error) {
+    handleRouteError(res, error, "Fehler beim Laden der offenen Dokumentationen", "Failed to fetch undocumented appointments");
+  }
+});
+
 router.get("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
