@@ -5,8 +5,9 @@ import { useAppointments, useWeekAppointmentCounts, AppointmentList } from "@/fe
 import { Button } from "@/components/ui/button";
 import { format, addDays, startOfWeek, addWeeks, subWeeks, isSameDay } from "date-fns";
 import { de } from "date-fns/locale";
-import { Plus, ChevronsLeft, ChevronsRight, AlertCircle } from "lucide-react";
+import { Plus, ChevronsLeft, ChevronsRight, AlertCircle, Coffee } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { parseLocalDate, formatDateForDisplay } from "@shared/utils/date";
 
 const WEEKDAY_NAMES_SHORT = ["Mo", "Di", "Mi", "Do", "Fr"];
 
@@ -34,6 +35,28 @@ export default function Dashboard() {
     staleTime: 60000,
   });
   const undocumentedCount = undocumentedAppointments?.length || 0;
+
+  // Fetch open tasks (missing breaks, etc.)
+  const { data: openTasks } = useQuery({
+    queryKey: ["time-entries", "open-tasks"],
+    queryFn: async () => {
+      const response = await fetch(`/api/time-entries/open-tasks`);
+      if (!response.ok) {
+        throw new Error("Failed to fetch open tasks");
+      }
+      return response.json() as Promise<{
+        daysWithMissingBreaks: Array<{
+          date: string;
+          totalWorkMinutes: number;
+          requiredBreakMinutes: number;
+          documentedBreakMinutes: number;
+        }>;
+      }>;
+    },
+    staleTime: 60000,
+  });
+  const missingBreaksCount = openTasks?.daysWithMissingBreaks?.length || 0;
+  const totalOpenTasks = undocumentedCount + missingBreaksCount;
 
   // Get weekdays only (Monday to Friday) for the week(s) containing selectedDate
   const weekDays = useMemo(() => {
@@ -65,19 +88,39 @@ export default function Dashboard() {
   return (
     <Layout>
       <div className="mb-6 animate-in slide-in-from-top-4 duration-500">
-        {/* Undocumented appointments banner */}
-        {undocumentedCount > 0 && (
-          <Link href="/undocumented">
-            <div 
-              className="flex items-center gap-2 px-3 py-2 mb-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 hover:bg-amber-100 transition-colors cursor-pointer"
-              data-testid="banner-undocumented"
-            >
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span className="text-sm font-medium">
-                {undocumentedCount} {undocumentedCount === 1 ? "offene Dokumentation" : "offene Dokumentationen"}
-              </span>
-            </div>
-          </Link>
+        {/* Open Tasks Banner */}
+        {totalOpenTasks > 0 && (
+          <div className="mb-3 space-y-2" data-testid="open-tasks-section">
+            {/* Undocumented appointments */}
+            {undocumentedCount > 0 && (
+              <Link href="/undocumented">
+                <div 
+                  className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 hover:bg-amber-100 transition-colors cursor-pointer"
+                  data-testid="banner-undocumented"
+                >
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span className="text-sm font-medium">
+                    {undocumentedCount} {undocumentedCount === 1 ? "offene Dokumentation" : "offene Dokumentationen"}
+                  </span>
+                </div>
+              </Link>
+            )}
+            
+            {/* Missing breaks */}
+            {missingBreaksCount > 0 && (
+              <Link href="/my-times">
+                <div 
+                  className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 hover:bg-blue-100 transition-colors cursor-pointer"
+                  data-testid="banner-missing-breaks"
+                >
+                  <Coffee className="w-4 h-4 shrink-0" />
+                  <span className="text-sm font-medium">
+                    {missingBreaksCount} {missingBreaksCount === 1 ? "Tag" : "Tage"} mit fehlender Pausendokumentation
+                  </span>
+                </div>
+              </Link>
+            )}
+          </div>
         )}
 
         {/* Header with week toggle and new appointment button */}

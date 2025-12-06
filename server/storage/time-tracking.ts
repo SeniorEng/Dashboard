@@ -74,6 +74,17 @@ export interface TimeOverviewData {
   otherEntries: EmployeeTimeEntry[];
 }
 
+export interface MissingBreakDay {
+  date: string;
+  totalWorkMinutes: number;
+  requiredBreakMinutes: number;
+  documentedBreakMinutes: number;
+}
+
+export interface OpenTasksSummary {
+  daysWithMissingBreaks: MissingBreakDay[];
+}
+
 export interface ITimeTrackingStorage {
   // Time Entries
   getTimeEntries(userId: number, filters?: TimeEntryFilters): Promise<EmployeeTimeEntry[]>;
@@ -93,6 +104,9 @@ export interface ITimeTrackingStorage {
   // Time Overview (combined appointments + time entries)
   getTimeOverview(userId: number, filters: TimeOverviewFilters): Promise<TimeOverviewData>;
   getEmployeeAppointments(userId: number, startDate: string, endDate: string): Promise<AppointmentWithCustomerName[]>;
+  
+  // Open Tasks
+  getOpenTasks(userId: number): Promise<OpenTasksSummary>;
 }
 
 class TimeTrackingStorage implements ITimeTrackingStorage {
@@ -503,6 +517,96 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       timeEntries: timeEntrySummary,
       appointments: employeeAppointments,
       otherEntries: timeEntries,
+    };
+  }
+  
+  async getOpenTasks(userId: number): Promise<OpenTasksSummary> {
+    // Look at the last 30 days (excluding today, since the day isn't finished)
+    const today = new Date();
+    const endDate = new Date(today);
+    endDate.setDate(endDate.getDate() - 1); // Yesterday
+    const startDate = new Date(today);
+    startDate.setDate(startDate.getDate() - 30);
+    
+    const formatDate = (d: Date) => d.toISOString().split('T')[0];
+    const startDateStr = formatDate(startDate);
+    const endDateStr = formatDate(endDate);
+    
+    // Get appointments and time entries for this period
+    const [employeeAppointments, timeEntries] = await Promise.all([
+      this.getEmployeeAppointments(userId, startDateStr, endDateStr),
+      db.select()
+        .from(employeeTimeEntries)
+        .where(
+          and(
+            eq(employeeTimeEntries.userId, userId),
+            gte(employeeTimeEntries.entryDate, startDateStr),
+            lte(employeeTimeEntries.entryDate, endDateStr)
+          )
+        ),
+    ]);
+    
+    // Group work time by date
+    const workByDate: Record<string, { workMinutes: number; breakMinutes: number }> = {};
+    
+    // Add appointment durations (only completed/documenting)
+    // Note: Only count actual service time, not travel time, for break requirements
+    // Travel time is generally not counted as "Arbeitszeit" for break calculation purposes
+    for (const appt of employeeAppointments) {
+      if (appt.status === 'completed' || appt.status === 'documenting') {
+        const date = appt.date;
+        if (!workByDate[date]) {
+          workByDate[date] = { workMinutes: 0, breakMinutes: 0 };
+        }
+        // Sum up service durations (actual work time)
+        workByDate[date].workMinutes += (appt.hauswirtschaftActualDauer || appt.hauswirtschaftDauer || 0);
+        workByDate[date].workMinutes += (appt.alltagsbegleitungActualDauer || appt.alltagsbegleitungDauer || 0);
+        workByDate[date].workMinutes += (appt.erstberatungActualDauer || appt.erstberatungDauer || 0);
+        // Travel time is excluded from break calculation as it's not continuous work
+      }
+    }
+    
+    // Add time entries (work types add to work, pause adds to breaks)
+    for (const entry of timeEntries) {
+      const date = entry.entryDate;
+      if (!workByDate[date]) {
+        workByDate[date] = { workMinutes: 0, breakMinutes: 0 };
+      }
+      
+      if (entry.entryType === 'pause') {
+        workByDate[date].breakMinutes += entry.durationMinutes || 0;
+      } else if (['bueroarbeit', 'vertrieb', 'schulung', 'besprechung', 'sonstiges'].includes(entry.entryType)) {
+        workByDate[date].workMinutes += entry.durationMinutes || 0;
+      }
+      // urlaub and krankheit are full days off, don't count as work
+    }
+    
+    // Find days with missing breaks (>6h work needs 30min, >9h needs 45min)
+    const daysWithMissingBreaks: MissingBreakDay[] = [];
+    
+    for (const [date, data] of Object.entries(workByDate)) {
+      let requiredBreak = 0;
+      if (data.workMinutes > 540) { // > 9 hours
+        requiredBreak = 45;
+      } else if (data.workMinutes > 360) { // > 6 hours
+        requiredBreak = 30;
+      }
+      
+      if (requiredBreak > 0 && data.breakMinutes < requiredBreak) {
+        daysWithMissingBreaks.push({
+          date,
+          totalWorkMinutes: data.workMinutes,
+          requiredBreakMinutes: requiredBreak,
+          documentedBreakMinutes: data.breakMinutes,
+        });
+      }
+    }
+    
+    // Sort by date descending (most recent first)
+    daysWithMissingBreaks.sort((a, b) => b.date.localeCompare(a.date));
+    
+    return {
+      daysWithMissingBreaks,
     };
   }
 }

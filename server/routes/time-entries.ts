@@ -77,6 +77,20 @@ router.get("/overview/:year/:month", async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /time-entries/open-tasks
+ * Get open tasks (missing breaks, etc.)
+ */
+router.get("/open-tasks", async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const openTasks = await timeTrackingStorage.getOpenTasks(userId);
+    res.json(openTasks);
+  } catch (error) {
+    handleRouteError(res, error, "Offene Aufgaben konnten nicht geladen werden");
+  }
+});
+
+/**
  * GET /time-entries/:id
  * Get a specific time entry
  */

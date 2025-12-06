@@ -434,6 +434,14 @@ export default function MyTimes() {
                       )}
                     </span>
                   </div>
+                  {(timeOverview?.timeEntries?.pauseMinutes || 0) > 0 && (
+                    <div className="flex justify-between items-center pt-1 text-gray-500">
+                      <span className="text-xs">davon Pause (unbezahlt)</span>
+                      <span className="text-xs font-medium" data-testid="text-pause-hours">
+                        {formatMinutesToHours(timeOverview?.timeEntries?.pauseMinutes || 0)}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
