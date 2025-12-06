@@ -16,6 +16,8 @@ import Customers from "@/pages/customers";
 import MyTimes from "@/pages/my-times";
 import Birthdays from "@/pages/birthdays";
 import LoginPage from "@/pages/login";
+import ForgotPasswordPage from "@/pages/forgot-password";
+import ResetPasswordPage from "@/pages/reset-password";
 import AdminDashboard from "@/pages/admin/dashboard";
 import AdminUsers from "@/pages/admin/users";
 import AdminCustomerAssignments from "@/pages/admin/customer-assignments";
@@ -71,6 +73,8 @@ function Router() {
   return (
     <Switch>
       <Route path="/login" component={LoginPage} />
+      <Route path="/forgot-password" component={ForgotPasswordPage} />
+      <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/">
         <ProtectedRoute component={Dashboard} />
       </Route>
