@@ -114,9 +114,16 @@ export default function Dashboard() {
                   data-testid="banner-missing-breaks"
                 >
                   <Coffee className="w-4 h-4 shrink-0" />
-                  <span className="text-sm font-medium">
-                    {missingBreaksCount} {missingBreaksCount === 1 ? "Tag" : "Tage"} mit fehlender Pausendokumentation
-                  </span>
+                  <div className="text-sm">
+                    <span className="font-medium">Fehlende Pausendokumentation: </span>
+                    <span>
+                      {openTasks?.daysWithMissingBreaks
+                        ?.slice(0, 5)
+                        .map(d => formatDateForDisplay(d.date, { day: "numeric", month: "numeric" }))
+                        .join(", ")}
+                      {missingBreaksCount > 5 && ` (+${missingBreaksCount - 5} weitere)`}
+                    </span>
+                  </div>
                 </div>
               </Link>
             )}

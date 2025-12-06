@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { useQuery } from "@tanstack/react-query";
 import { useTimeOverview, useVacationSummary, useCreateTimeEntry, useDeleteTimeEntry } from "@/features/time-tracking";
 import {
   Calendar,
@@ -25,6 +26,7 @@ import {
   Car,
   Home,
   Users,
+  AlertCircle,
 } from "lucide-react";
 import type { TimeEntryType, CreateTimeEntryRequest, AppointmentWithCustomerName } from "@/lib/api/types";
 import { formatDateForDisplay, formatDateString, isPast } from "@shared/utils/date";
@@ -72,6 +74,28 @@ export default function MyTimes() {
   const { data: vacationSummary } = useVacationSummary(selectedYear);
   const createMutation = useCreateTimeEntry();
   const deleteMutation = useDeleteTimeEntry();
+  
+  // Fetch open tasks (missing breaks)
+  const { data: openTasks } = useQuery({
+    queryKey: ["time-entries", "open-tasks"],
+    queryFn: async () => {
+      const response = await fetch(`/api/time-entries/open-tasks`);
+      if (!response.ok) {
+        throw new Error("Failed to fetch open tasks");
+      }
+      return response.json() as Promise<{
+        daysWithMissingBreaks: Array<{
+          date: string;
+          totalWorkMinutes: number;
+          requiredBreakMinutes: number;
+          documentedBreakMinutes: number;
+        }>;
+      }>;
+    },
+    staleTime: 60000,
+  });
+  const daysWithMissingBreaks = openTasks?.daysWithMissingBreaks || [];
+  const missingBreakDates = useMemo(() => new Set(daysWithMissingBreaks.map(d => d.date)), [daysWithMissingBreaks]);
 
   const entries = timeOverview?.otherEntries;
   const appointments = timeOverview?.appointments;
@@ -228,6 +252,50 @@ export default function MyTimes() {
     <Layout>
       <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
         <div className="container mx-auto px-4 py-6 max-w-6xl">
+          {/* Missing Breaks Banner */}
+          {daysWithMissingBreaks.length > 0 && (
+            <div 
+              className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg"
+              data-testid="banner-missing-breaks-detail"
+            >
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-blue-800 mb-1">
+                    Fehlende Pausendokumentation
+                  </p>
+                  <p className="text-xs text-blue-700 mb-2">
+                    Nach deutschem Arbeitsrecht (§4 ArbZG) muss bei mehr als 6 Stunden Arbeit eine Pause von mindestens 30 Minuten dokumentiert werden.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {daysWithMissingBreaks.map(day => {
+                      const requiredMinutes = day.requiredBreakMinutes;
+                      const missingMinutes = requiredMinutes - day.documentedBreakMinutes;
+                      return (
+                        <button
+                          key={day.date}
+                          onClick={() => {
+                            const [year, month] = day.date.split("-").map(Number);
+                            setSelectedYear(year);
+                            setSelectedMonth(month);
+                            setSelectedDate(day.date);
+                          }}
+                          className="px-2 py-1 bg-blue-100 hover:bg-blue-200 rounded text-xs font-medium text-blue-800 transition-colors"
+                          data-testid={`missing-break-day-${day.date}`}
+                        >
+                          {formatDateForDisplay(day.date, { day: "numeric", month: "short" })} 
+                          <span className="text-blue-600 ml-1">
+                            (noch {missingMinutes} min)
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          
           <div className="flex items-center justify-between mb-6">
             <div>
               <h1 className="text-2xl font-bold text-gray-900" data-testid="text-page-title">Meine Zeiten</h1>
@@ -558,6 +626,7 @@ export default function MyTimes() {
                         const hasAppointments = dayAppointments.length > 0;
                         const hasOtherEntries = dayEntries.length > 0;
                         const isSelected = date === selectedDate;
+                        const hasMissingBreak = missingBreakDates.has(date);
                         
                         return (
                           <button
@@ -569,10 +638,17 @@ export default function MyTimes() {
                               ${isWeekend && isCurrentMonth ? "bg-gray-100" : ""}
                               ${isToday ? "ring-2 ring-teal-500" : ""}
                               ${isSelected ? "ring-2 ring-teal-600" : "hover:bg-gray-100"}
+                              ${hasMissingBreak ? "bg-blue-50 border-2 border-blue-300" : ""}
                             `}
                             data-testid={`calendar-day-${date}`}
+                            title={hasMissingBreak ? "Fehlende Pausendokumentation" : undefined}
                           >
-                            <span className={`font-medium ${isToday ? "text-teal-700" : ""}`}>{day}</span>
+                            <span className={`font-medium ${isToday ? "text-teal-700" : ""} ${hasMissingBreak ? "text-blue-800" : ""}`}>{day}</span>
+                            {hasMissingBreak && (
+                              <div className="absolute top-1 right-1">
+                                <Coffee className="w-3 h-3 text-blue-500" />
+                              </div>
+                            )}
                             {(hasAppointments || hasOtherEntries) && (
                               <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 flex gap-0.5">
                                 {hasAppointments && (
