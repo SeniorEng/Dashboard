@@ -920,6 +920,23 @@ export default function MyTimes() {
                       };
                       const services = getServiceInfo();
                       
+                      // Calculate end time from start + total service duration
+                      const getEndTime = () => {
+                        if (appt.scheduledEnd) {
+                          return appt.scheduledEnd.slice(0, 5);
+                        }
+                        const totalMinutes = services.reduce((sum, s) => sum + s.minutes, 0);
+                        if (totalMinutes > 0 && appt.scheduledStart) {
+                          const [hours, mins] = appt.scheduledStart.split(":").map(Number);
+                          const endMinutes = hours * 60 + mins + totalMinutes;
+                          const endHours = Math.floor(endMinutes / 60) % 24;
+                          const endMins = endMinutes % 60;
+                          return `${String(endHours).padStart(2, "0")}:${String(endMins).padStart(2, "0")}`;
+                        }
+                        return null;
+                      };
+                      const endTime = getEndTime();
+                      
                       return (
                         <div
                           key={`appt-${appt.id}`}
@@ -931,7 +948,7 @@ export default function MyTimes() {
                             <div className="flex-1">
                               <div className="font-medium text-teal-800">{appt.customerName}</div>
                               <div className="text-sm text-gray-600">
-                                {appt.scheduledStart.slice(0, 5)} Uhr
+                                {appt.scheduledStart.slice(0, 5)}{endTime ? ` - ${endTime}` : ""} Uhr
                               </div>
                               <div className="flex flex-wrap gap-2 mt-1">
                                 {services.map((s, i) => (
