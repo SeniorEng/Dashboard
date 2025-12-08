@@ -10,7 +10,7 @@ import {
 import type { AppointmentWithCustomer } from "@shared/types";
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
-import { eq, count, sql as sqlBuilder, lt, ne, and, or, ilike, inArray } from "drizzle-orm";
+import { eq, count, sql as sqlBuilder, lt, ne, and, or, ilike, inArray, isNull } from "drizzle-orm";
 import { customerIdsCache } from "./services/cache";
 
 const sql = neon(process.env.DATABASE_URL!);
@@ -823,12 +823,18 @@ export class DatabaseStorage implements IStorage {
       }
     };
     
+    // Get appointments where the employee is assigned OR created the appointment OR appointment is unassigned
+    // This ensures overlap checking catches all relevant appointments for a user
     const rows = await db.select(selectFields)
       .from(appointments)
       .leftJoin(customers, eq(appointments.customerId, customers.id))
       .where(and(
-        eq(appointments.assignedEmployeeId, employeeId),
-        eq(appointments.date, date)
+        eq(appointments.date, date),
+        or(
+          eq(appointments.assignedEmployeeId, employeeId),
+          eq(appointments.createdByUserId, employeeId),
+          isNull(appointments.assignedEmployeeId)
+        )
       ))
       .orderBy(appointments.scheduledStart);
     
