@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { 
   MapPin, Clock, Calendar, FileText, ChevronLeft, Loader2, 
-  Pencil, Trash2, CheckCircle2, AlertTriangle, Phone
+  Pencil, Trash2, CheckCircle2, AlertTriangle, Phone, Car, Home, ArrowRight
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { formatTimeSlot, getEndTime } from "@/features/appointments/utils";
@@ -86,6 +86,12 @@ export default function AppointmentDetail() {
   const hasHauswirtschaft = !!appointment.hauswirtschaftDauer;
   const hasAlltagsbegleitung = !!appointment.alltagsbegleitungDauer;
   const hasErstberatung = !!appointment.erstberatungDauer;
+
+  const hasDocumentedHauswirtschaft = !!appointment.hauswirtschaftActualDauer;
+  const hasDocumentedAlltagsbegleitung = !!appointment.alltagsbegleitungActualDauer;
+  const hasDocumentedErstberatung = !!appointment.erstberatungActualDauer;
+  const hasAnyDocumentedService = hasDocumentedHauswirtschaft || hasDocumentedAlltagsbegleitung || hasDocumentedErstberatung;
+  const isCompleted = appointment.status === "completed";
 
   return (
     <Layout>
@@ -166,7 +172,91 @@ export default function AppointmentDetail() {
         </div>
       </SectionCard>
 
-      {(hasHauswirtschaft || hasAlltagsbegleitung || hasErstberatung) && (
+      {isCompleted && hasAnyDocumentedService ? (
+        <SectionCard
+          title="Dokumentierte Leistungen"
+          icon={<CheckCircle2 className={iconSize.sm} />}
+          className="mb-4"
+        >
+          <div className="space-y-4">
+            {hasDocumentedHauswirtschaft && (
+              <div className="py-2 border-b border-border/50 last:border-0">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${getServiceColors('hauswirtschaft').bg}`} />
+                    <span className="font-medium">Hauswirtschaft</span>
+                  </div>
+                  <span className="font-medium text-primary">
+                    {formatDuration(appointment.hauswirtschaftActualDauer!)}
+                  </span>
+                </div>
+                {hasHauswirtschaft && appointment.hauswirtschaftDauer !== appointment.hauswirtschaftActualDauer && (
+                  <p className="text-xs text-muted-foreground ml-4">
+                    Geplant: {formatDuration(appointment.hauswirtschaftDauer!)}
+                  </p>
+                )}
+                {!hasHauswirtschaft && (
+                  <p className="text-xs text-primary/70 ml-4">Hinzugefügt bei Dokumentation</p>
+                )}
+                {appointment.hauswirtschaftDetails && (
+                  <p className="text-sm text-muted-foreground mt-1 ml-4">
+                    {appointment.hauswirtschaftDetails}
+                  </p>
+                )}
+              </div>
+            )}
+            {hasDocumentedAlltagsbegleitung && (
+              <div className="py-2 border-b border-border/50 last:border-0">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${getServiceColors('alltagsbegleitung').bg}`} />
+                    <span className="font-medium">Alltagsbegleitung</span>
+                  </div>
+                  <span className="font-medium text-primary">
+                    {formatDuration(appointment.alltagsbegleitungActualDauer!)}
+                  </span>
+                </div>
+                {hasAlltagsbegleitung && appointment.alltagsbegleitungDauer !== appointment.alltagsbegleitungActualDauer && (
+                  <p className="text-xs text-muted-foreground ml-4">
+                    Geplant: {formatDuration(appointment.alltagsbegleitungDauer!)}
+                  </p>
+                )}
+                {!hasAlltagsbegleitung && (
+                  <p className="text-xs text-primary/70 ml-4">Hinzugefügt bei Dokumentation</p>
+                )}
+                {appointment.alltagsbegleitungDetails && (
+                  <p className="text-sm text-muted-foreground mt-1 ml-4">
+                    {appointment.alltagsbegleitungDetails}
+                  </p>
+                )}
+              </div>
+            )}
+            {hasDocumentedErstberatung && (
+              <div className="py-2 border-b border-border/50 last:border-0">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${getServiceColors('erstberatung').bg}`} />
+                    <span className="font-medium">Erstberatung</span>
+                  </div>
+                  <span className="font-medium text-primary">
+                    {formatDuration(appointment.erstberatungActualDauer!)}
+                  </span>
+                </div>
+                {hasErstberatung && appointment.erstberatungDauer !== appointment.erstberatungActualDauer && (
+                  <p className="text-xs text-muted-foreground ml-4">
+                    Geplant: {formatDuration(appointment.erstberatungDauer!)}
+                  </p>
+                )}
+                {appointment.erstberatungDetails && (
+                  <p className="text-sm text-muted-foreground mt-1 ml-4">
+                    {appointment.erstberatungDetails}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </SectionCard>
+      ) : (hasHauswirtschaft || hasAlltagsbegleitung || hasErstberatung) && (
         <SectionCard
           title="Geplante Leistungen"
           icon={<FileText className={iconSize.sm} />}
@@ -231,20 +321,54 @@ export default function AppointmentDetail() {
         </SectionCard>
       )}
 
-      {appointment.status === "completed" && (
-        <Card className="mb-4 border-green-200 bg-green-50/50">
-          <CardContent className="py-4">
-            <div className="flex items-center gap-3 text-green-800">
-              <CheckCircle2 className={iconSize.md} />
-              <div>
-                <p className="font-medium">Termin abgeschlossen</p>
-                {appointment.travelKilometers && (
-                  <p className="text-sm text-green-700">Gefahrene Kilometer: {appointment.travelKilometers} km</p>
+      {isCompleted && (
+        <SectionCard
+          title="Anfahrt & Kilometer"
+          icon={<Car className={iconSize.sm} />}
+          className="mb-4"
+        >
+          <div className="space-y-3">
+            <div className="flex items-center justify-between py-2 border-b border-border/50">
+              <div className="flex items-center gap-2">
+                {appointment.travelOriginType === "home" ? (
+                  <Home className={`${iconSize.sm} text-muted-foreground`} />
+                ) : (
+                  <ArrowRight className={`${iconSize.sm} text-muted-foreground`} />
                 )}
+                <span className="text-muted-foreground">Herkunft</span>
               </div>
+              <span className="font-medium">
+                {appointment.travelOriginType === "home" ? "Von zu Hause" : "Vom vorherigen Kunden"}
+              </span>
             </div>
-          </CardContent>
-        </Card>
+
+            {appointment.travelOriginType === "appointment" && appointment.travelMinutes && (
+              <div className="flex items-center justify-between py-2 border-b border-border/50">
+                <span className="text-muted-foreground">Fahrzeit</span>
+                <span className="font-medium">{appointment.travelMinutes} Min.</span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between py-2 border-b border-border/50">
+              <span className="text-muted-foreground">Anfahrt</span>
+              <span className="font-medium">{appointment.travelKilometers || 0} km</span>
+            </div>
+
+            {appointment.customerKilometers && appointment.customerKilometers > 0 && (
+              <div className="flex items-center justify-between py-2 border-b border-border/50">
+                <span className="text-muted-foreground">Km für/mit Kunde</span>
+                <span className="font-medium">{appointment.customerKilometers} km</span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between py-2 pt-2 border-t border-border">
+              <span className="font-medium">Gesamt</span>
+              <span className="font-medium text-primary">
+                {(appointment.travelKilometers || 0) + (appointment.customerKilometers || 0)} km
+              </span>
+            </div>
+          </div>
+        </SectionCard>
       )}
 
       {appointment.status !== "completed" && (
