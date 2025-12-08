@@ -110,6 +110,7 @@ CareConnect is a full-stack web application for caregivers managing elderly care
   - Ohne diesen Header werden alle POST/PATCH/DELETE-Anfragen mit 403 abgelehnt
 
 - **Phone Number Handling**: Telefonnummern werden über `shared/utils/phone.ts` mit der Bibliothek `libphonenumber-js` verarbeitet. Nur deutsche Nummern (+49) sind erlaubt.
+
   - **Speicherung**: Immer im E.164-Format (`+491701234567`) in der Datenbank speichern
   - **Anzeige**: `formatPhoneForDisplay()` für nationale Darstellung (`0170 1234567`)
   - **Validierung**: `validateGermanPhone()` prüft Gültigkeit und gibt Typ zurück (mobile/landline)
@@ -126,6 +127,19 @@ CareConnect is a full-stack web application for caregivers managing elderly care
   // Anzeige für Benutzer:
   const display = formatPhoneForDisplay("+491701234567"); // "0170 1234567"
   ```
+
+- **Typ-Organisation (Code-Architektur)**:
+  Das Projekt verwendet eine hierarchische Typ-Organisation:
+  - `@shared/schema.ts`: Datenbank-Schemas (Drizzle), Zod-Validierung, Insert/Update-Typen
+  - `@shared/domain/*`: Business-Logik und Domain-Typen (z.B. Status-Konstanten, Service-Typen)
+  - `@shared/utils/*`: Utility-Funktionen (datetime, phone, etc.)
+  - `@shared/types.ts`: Re-Exports und API-Response-Typen (Haupt-Import-Punkt für Frontend)
+  - `client/src/lib/api/types.ts`: Frontend-spezifische API-Typen mit Re-Export aus @shared
+  
+  **Import-Regeln:**
+  - Frontend-Komponenten importieren aus `@shared/types` für Domain-Typen
+  - Backend-Code importiert direkt aus `@shared/schema` und `@shared/domain`
+  - Zeit-Utilities immer aus `@shared/utils/datetime` (nicht aus domain/appointments)
 
 ### Backend Architecture
 - **Framework**: Express.js with TypeScript.
