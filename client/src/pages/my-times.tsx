@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { useQuery } from "@tanstack/react-query";
-import { useTimeOverview, useVacationSummary, useCreateTimeEntry, useDeleteTimeEntry } from "@/features/time-tracking";
+import { useTimeOverview, useVacationSummary, useCreateTimeEntry, useDeleteTimeEntry, useUpdateTimeEntry } from "@/features/time-tracking";
 import {
   Calendar,
   Plus,
@@ -27,6 +27,7 @@ import {
   Home,
   Users,
   AlertCircle,
+  Pencil,
 } from "lucide-react";
 import type { TimeEntryType, CreateTimeEntryRequest, AppointmentWithCustomerName } from "@/lib/api/types";
 import { formatDateForDisplay, formatDateString, isPast } from "@shared/utils/date";
@@ -74,6 +75,19 @@ export default function MyTimes() {
   const { data: vacationSummary } = useVacationSummary(selectedYear);
   const createMutation = useCreateTimeEntry();
   const deleteMutation = useDeleteTimeEntry();
+  const updateMutation = useUpdateTimeEntry();
+  
+  // Edit dialog state
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<{
+    id: number;
+    entryType: TimeEntryType;
+    entryDate: string;
+    startTime?: string | null;
+    endTime?: string | null;
+    isFullDay: boolean;
+    notes?: string | null;
+  } | null>(null);
   
   // Fetch open tasks (missing breaks)
   const { data: openTasks } = useQuery({
@@ -237,6 +251,45 @@ export default function MyTimes() {
     deleteMutation.mutate(id, {
       onSuccess: () => {
         toast({ title: "Eintrag gelöscht" });
+      },
+      onError: (error: Error) => {
+        toast({ title: "Fehler", description: error.message, variant: "destructive" });
+      },
+    });
+  };
+
+  const handleEditEntry = (entry: typeof editingEntry) => {
+    if (!entry) return;
+    setEditingEntry({
+      id: entry.id,
+      entryType: entry.entryType,
+      entryDate: entry.entryDate,
+      startTime: entry.startTime?.slice(0, 5) || null,
+      endTime: entry.endTime?.slice(0, 5) || null,
+      isFullDay: entry.isFullDay,
+      notes: entry.notes,
+    });
+    setShowEditDialog(true);
+  };
+
+  const handleUpdateEntry = () => {
+    if (!editingEntry) return;
+    
+    updateMutation.mutate({
+      id: editingEntry.id,
+      data: {
+        entryType: editingEntry.entryType,
+        entryDate: editingEntry.entryDate,
+        startTime: editingEntry.isFullDay ? null : editingEntry.startTime,
+        endTime: editingEntry.isFullDay ? null : editingEntry.endTime,
+        isFullDay: editingEntry.isFullDay,
+        notes: editingEntry.notes || null,
+      },
+    }, {
+      onSuccess: () => {
+        toast({ title: "Eintrag aktualisiert" });
+        setShowEditDialog(false);
+        setEditingEntry(null);
       },
       onError: (error: Error) => {
         toast({ title: "Fehler", description: error.message, variant: "destructive" });
@@ -451,6 +504,150 @@ export default function MyTimes() {
                     </Button>
                   </div>
                 </div>
+              </DialogContent>
+            </Dialog>
+
+            {/* Edit Entry Dialog */}
+            <Dialog open={showEditDialog} onOpenChange={(open) => {
+              setShowEditDialog(open);
+              if (!open) setEditingEntry(null);
+            }}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Zeiteintrag bearbeiten</DialogTitle>
+                </DialogHeader>
+                {editingEntry && (
+                  <div className="space-y-4 pt-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-entryType">Art</Label>
+                      <Select
+                        value={editingEntry.entryType}
+                        onValueChange={(value) => {
+                          const newType = value as TimeEntryType;
+                          const isFullDayType = newType === "urlaub" || newType === "krankheit";
+                          setEditingEntry(prev => prev ? { 
+                            ...prev, 
+                            entryType: newType,
+                            isFullDay: isFullDayType ? true : prev.isFullDay,
+                          } : null);
+                        }}
+                      >
+                        <SelectTrigger data-testid="edit-select-entry-type">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(TIME_ENTRY_TYPE_CONFIG).map(([type, config]) => (
+                            <SelectItem key={type} value={type}>
+                              <div className="flex items-center gap-2">
+                                <config.icon className={`h-4 w-4 ${config.color}`} />
+                                {config.label}
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-entryDate">Datum</Label>
+                      <Input
+                        id="edit-entryDate"
+                        type="date"
+                        value={editingEntry.entryDate}
+                        onChange={(e) => setEditingEntry(prev => prev ? { ...prev, entryDate: e.target.value } : null)}
+                        data-testid="edit-input-entry-date"
+                      />
+                    </div>
+
+                    {!(editingEntry.entryType === "urlaub" || editingEntry.entryType === "krankheit") && (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            id="edit-isFullDay"
+                            checked={editingEntry.isFullDay}
+                            onChange={(e) => setEditingEntry(prev => prev ? { 
+                              ...prev, 
+                              isFullDay: e.target.checked,
+                              startTime: e.target.checked ? null : prev.startTime,
+                              endTime: e.target.checked ? null : prev.endTime,
+                            } : null)}
+                            className="h-4 w-4"
+                            data-testid="edit-checkbox-full-day"
+                          />
+                          <Label htmlFor="edit-isFullDay">Ganztägig</Label>
+                        </div>
+
+                        {!editingEntry.isFullDay && (
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label htmlFor="edit-startTime">Startzeit</Label>
+                              <Input
+                                id="edit-startTime"
+                                type="time"
+                                value={editingEntry.startTime || ""}
+                                onChange={(e) => setEditingEntry(prev => prev ? { 
+                                  ...prev, 
+                                  startTime: e.target.value,
+                                } : null)}
+                                data-testid="edit-input-start-time"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="edit-endTime">Endzeit</Label>
+                              <Input
+                                id="edit-endTime"
+                                type="time"
+                                value={editingEntry.endTime || ""}
+                                onChange={(e) => setEditingEntry(prev => prev ? { ...prev, endTime: e.target.value } : null)}
+                                data-testid="edit-input-end-time"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-notes">Notizen (optional)</Label>
+                      <Textarea
+                        id="edit-notes"
+                        value={editingEntry.notes || ""}
+                        onChange={(e) => setEditingEntry(prev => prev ? { ...prev, notes: e.target.value } : null)}
+                        placeholder="Optionale Bemerkungen..."
+                        data-testid="edit-input-notes"
+                      />
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-4">
+                      <Button 
+                        variant="outline" 
+                        onClick={() => {
+                          setShowEditDialog(false);
+                          setEditingEntry(null);
+                        }}
+                        data-testid="edit-button-cancel"
+                      >
+                        Abbrechen
+                      </Button>
+                      <Button
+                        className="bg-teal-600 hover:bg-teal-700"
+                        onClick={handleUpdateEntry}
+                        disabled={updateMutation.isPending}
+                        data-testid="edit-button-save"
+                      >
+                        {updateMutation.isPending ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Speichern...
+                          </>
+                        ) : (
+                          "Speichern"
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </DialogContent>
             </Dialog>
           </div>
@@ -792,26 +989,47 @@ export default function MyTimes() {
                               )}
                             </div>
                           </div>
-                          {/* Only show delete button if entry is not locked or user is admin */}
-                          {(!isEntryLocked(entry.entryDate, entry.entryType) || user?.isAdmin) ? (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-gray-400 hover:text-red-600"
-                              onClick={() => handleDeleteEntry(entry.id)}
-                              disabled={deleteMutation.isPending}
-                              data-testid={`button-delete-entry-${entry.id}`}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          ) : (
-                            <div 
-                              className="h-8 w-8 flex items-center justify-center text-gray-300"
-                              title="Vergangene Urlaubs- und Krankheitstage können nicht gelöscht werden"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </div>
-                          )}
+                          {/* Edit and delete buttons - only show if entry is not locked or user is admin */}
+                          <div className="flex items-center gap-1">
+                            {(!isEntryLocked(entry.entryDate, entry.entryType) || user?.isAdmin) ? (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-gray-400 hover:text-teal-600"
+                                  onClick={() => handleEditEntry({
+                                    id: entry.id,
+                                    entryType: entry.entryType as TimeEntryType,
+                                    entryDate: entry.entryDate,
+                                    startTime: entry.startTime,
+                                    endTime: entry.endTime,
+                                    isFullDay: entry.isFullDay,
+                                    notes: entry.notes,
+                                  })}
+                                  data-testid={`button-edit-entry-${entry.id}`}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-gray-400 hover:text-red-600"
+                                  onClick={() => handleDeleteEntry(entry.id)}
+                                  disabled={deleteMutation.isPending}
+                                  data-testid={`button-delete-entry-${entry.id}`}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </>
+                            ) : (
+                              <div 
+                                className="h-8 w-8 flex items-center justify-center text-gray-300"
+                                title="Vergangene Urlaubs- und Krankheitstage können nicht geändert werden"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </div>
+                            )}
+                          </div>
                         </div>
                       );
                     })}
