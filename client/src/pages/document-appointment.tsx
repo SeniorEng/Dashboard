@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRoute, useLocation } from "wouter";
 import { Layout } from "@/components/layout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -197,12 +197,12 @@ export default function DocumentAppointment() {
     }));
   }, []);
 
-  const availableServicesToAdd = (() => {
+  const availableServicesToAdd = useMemo(() => {
     if (appointment?.appointmentType !== "Kundentermin") return [];
     const existingTypes = formData.services.map(s => s.serviceType);
     const possibleServices: ServiceType[] = ["Hauswirtschaft", "Alltagsbegleitung"];
     return possibleServices.filter(s => !existingTypes.includes(s));
-  })();
+  }, [appointment?.appointmentType, formData.services]);
 
   const handleNext = useCallback(() => {
     if (formData.services.length === 0) {

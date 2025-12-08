@@ -3,6 +3,7 @@ import { storage } from "../storage";
 import { insertCustomerSchema } from "@shared/schema";
 import { fromError } from "zod-validation-error";
 import { requireAuth } from "../middleware/auth";
+import { birthdaysCache } from "../services/cache";
 
 const router = Router();
 
@@ -57,6 +58,10 @@ router.post("/", async (req, res) => {
   try {
     const validatedData = insertCustomerSchema.parse(req.body);
     const customer = await storage.createCustomer(validatedData);
+    
+    // Invalidate birthday cache (new customer may have birthday)
+    birthdaysCache.invalidateAll();
+    
     res.status(201).json(customer);
   } catch (error: any) {
     if (error.name === "ZodError") {

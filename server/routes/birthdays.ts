@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { requireAuth } from "../middleware/auth";
 import { handleRouteError } from "../lib/errors";
 import { storage } from "../storage";
+import { birthdaysCache } from "../services/cache";
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { users, customers } from "@shared/schema";
@@ -57,6 +58,12 @@ router.get("/", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
     const horizonDays = parseInt(req.query.days as string) || 30;
+    
+    // Check cache first
+    const cached = birthdaysCache.get(user.id, user.isAdmin, horizonDays);
+    if (cached) {
+      return res.json(cached);
+    }
     
     const dbConnection = neon(process.env.DATABASE_URL!);
     const db = drizzle(dbConnection);
@@ -156,6 +163,9 @@ router.get("/", async (req: Request, res: Response) => {
     }
     
     birthdays.sort((a, b) => a.daysUntil - b.daysUntil);
+    
+    // Store in cache (1 hour TTL)
+    birthdaysCache.set(user.id, user.isAdmin, horizonDays, birthdays);
     
     res.json(birthdays);
   } catch (error) {

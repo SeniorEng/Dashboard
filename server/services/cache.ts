@@ -87,3 +87,87 @@ class CustomerIdsCacheService {
 }
 
 export const customerIdsCache = new CustomerIdsCacheService();
+
+// Cache for user/employee lists (5 minute TTL)
+const USERS_CACHE_TTL = 5 * 60 * 1000;
+
+interface SafeUser {
+  id: number;
+  email: string;
+  displayName: string;
+  vorname: string | null;
+  nachname: string | null;
+  strasse: string | null;
+  hausnummer: string | null;
+  plz: string | null;
+  stadt: string | null;
+  geburtsdatum: string | null;
+  isActive: boolean;
+  isAdmin: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  roles: string[];
+  vacationDaysPerYear?: number | null;
+}
+
+class UsersCacheService {
+  private allUsersCache = new SimpleCache<SafeUser[]>(USERS_CACHE_TTL);
+  private activeEmployeesCache = new SimpleCache<SafeUser[]>(USERS_CACHE_TTL);
+
+  getAllUsers(): SafeUser[] | undefined {
+    return this.allUsersCache.get("all");
+  }
+
+  setAllUsers(users: SafeUser[]): void {
+    this.allUsersCache.set("all", users);
+  }
+
+  getActiveEmployees(): SafeUser[] | undefined {
+    return this.activeEmployeesCache.get("active");
+  }
+
+  setActiveEmployees(employees: SafeUser[]): void {
+    this.activeEmployeesCache.set("active", employees);
+  }
+
+  invalidateAll(): void {
+    this.allUsersCache.clear();
+    this.activeEmployeesCache.clear();
+  }
+}
+
+export const usersCache = new UsersCacheService();
+
+// Cache for birthdays (1 hour TTL)
+const BIRTHDAYS_CACHE_TTL = 60 * 60 * 1000;
+
+interface BirthdayEntry {
+  id: number;
+  type: "employee" | "customer";
+  name: string;
+  geburtsdatum: string;
+  daysUntil: number;
+  age: number;
+}
+
+class BirthdaysCacheService {
+  private cache = new SimpleCache<BirthdayEntry[]>(BIRTHDAYS_CACHE_TTL);
+
+  private getKey(userId: number, isAdmin: boolean, horizonDays: number): string {
+    return `birthdays:${isAdmin ? 'admin' : userId}:${horizonDays}`;
+  }
+
+  get(userId: number, isAdmin: boolean, horizonDays: number): BirthdayEntry[] | undefined {
+    return this.cache.get(this.getKey(userId, isAdmin, horizonDays));
+  }
+
+  set(userId: number, isAdmin: boolean, horizonDays: number, birthdays: BirthdayEntry[]): void {
+    this.cache.set(this.getKey(userId, isAdmin, horizonDays), birthdays);
+  }
+
+  invalidateAll(): void {
+    this.cache.clear();
+  }
+}
+
+export const birthdaysCache = new BirthdaysCacheService();

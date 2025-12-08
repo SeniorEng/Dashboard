@@ -3,6 +3,7 @@ import { authService } from "../services/auth";
 import { storage } from "../storage";
 import { customerManagementStorage } from "../storage/customer-management";
 import { timeTrackingStorage } from "../storage/time-tracking";
+import { usersCache, birthdaysCache } from "../services/cache";
 import { 
   insertUserSchema, 
   EMPLOYEE_ROLES, 
@@ -25,8 +26,18 @@ router.use(requireAdmin);
 
 router.get("/users", async (_req: Request, res: Response) => {
   try {
+    // Check cache first
+    const cached = usersCache.getAllUsers();
+    if (cached) {
+      return res.json(cached);
+    }
+
     const users = await authService.getAllUsers();
     const safeUsers = users.map(({ passwordHash, ...user }) => user);
+    
+    // Store in cache
+    usersCache.setAllUsers(safeUsers);
+    
     res.json(safeUsers);
   } catch (error) {
     handleRouteError(res, error, "Benutzer konnten nicht geladen werden");
@@ -85,6 +96,10 @@ router.post("/users", async (req: Request, res: Response) => {
       isAdmin: result.data.isAdmin,
       roles: result.data.roles,
     });
+
+    // Invalidate caches after creating user (affects users list and birthdays)
+    usersCache.invalidateAll();
+    birthdaysCache.invalidateAll();
 
     const { passwordHash, ...safeUser } = user;
     res.status(201).json(safeUser);
@@ -165,6 +180,10 @@ router.patch("/users/:id", async (req: Request, res: Response) => {
     if (roles !== undefined) {
       await authService.setUserRoles(id, roles);
     }
+
+    // Invalidate caches after updating user (affects users list and birthdays)
+    usersCache.invalidateAll();
+    birthdaysCache.invalidateAll();
 
     const finalUser = await authService.getUser(id);
     const { passwordHash, ...safeUser } = finalUser!;
@@ -247,6 +266,10 @@ router.post("/users/:id/deactivate", async (req: Request, res: Response) => {
       return;
     }
 
+    // Invalidate caches after deactivating user (affects users list and birthdays)
+    usersCache.invalidateAll();
+    birthdaysCache.invalidateAll();
+
     res.json({
       success: true,
       message: "Benutzer wurde deaktiviert",
@@ -275,6 +298,10 @@ router.post("/users/:id/activate", async (req: Request, res: Response) => {
       });
       return;
     }
+
+    // Invalidate caches after activating user (affects users list and birthdays)
+    usersCache.invalidateAll();
+    birthdaysCache.invalidateAll();
 
     res.json({
       success: true,
@@ -313,6 +340,10 @@ router.delete("/users/:id", async (req: Request, res: Response) => {
       return;
     }
 
+    // Invalidate caches after deleting user (affects users list and birthdays)
+    usersCache.invalidateAll();
+    birthdaysCache.invalidateAll();
+
     res.json({
       success: true,
       message: "Benutzer wurde gelöscht",
@@ -324,8 +355,18 @@ router.delete("/users/:id", async (req: Request, res: Response) => {
 
 router.get("/employees", async (_req: Request, res: Response) => {
   try {
+    // Check cache first
+    const cached = usersCache.getActiveEmployees();
+    if (cached) {
+      return res.json(cached);
+    }
+
     const employees = await authService.getActiveEmployees();
     const safeEmployees = employees.map(({ passwordHash, ...employee }) => employee);
+    
+    // Store in cache
+    usersCache.setActiveEmployees(safeEmployees);
+    
     res.json(safeEmployees);
   } catch (error) {
     handleRouteError(res, error, "Mitarbeiter konnten nicht geladen werden");
@@ -400,6 +441,10 @@ router.patch("/customers/:id/assign", async (req: Request, res: Response) => {
     }
 
     const updatedCustomer = await updateCustomerAssignment(id, primaryEmployeeId, backupEmployeeId);
+    
+    // Invalidate birthday cache (employee assignments affect which customers appear for each user)
+    birthdaysCache.invalidateAll();
+    
     res.json(updatedCustomer);
   } catch (error) {
     handleRouteError(res, error, "Zuordnung konnte nicht aktualisiert werden");
@@ -492,6 +537,10 @@ router.post("/customers", async (req: Request, res: Response) => {
   try {
     const validatedData = createFullCustomerSchema.parse(req.body);
     const customer = await customerManagementStorage.createFullCustomer(validatedData, req.user!.id);
+    
+    // Invalidate birthday cache (new customer may have birthday)
+    birthdaysCache.invalidateAll();
+    
     res.status(201).json(customer);
   } catch (error: any) {
     if (error.name === "ZodError") {
@@ -531,6 +580,9 @@ router.patch("/customers/:id", async (req: Request, res: Response) => {
       res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
       return;
     }
+    
+    // Invalidate birthday cache (customer data may have changed)
+    birthdaysCache.invalidateAll();
     
     res.json(customer);
   } catch (error: any) {
