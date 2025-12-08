@@ -7,7 +7,6 @@
 
 import type { 
   Customer, 
-  Appointment, 
   User,
   InsuranceProvider,
   CustomerContact,
@@ -186,9 +185,8 @@ export interface CreateCustomerRequest {
 // APPOINTMENTS
 // ============================================
 
-export interface AppointmentWithCustomer extends Appointment {
-  customer: Customer | null;
-}
+// Re-export from shared for consistency
+export type { AppointmentWithCustomer } from "@shared/types";
 
 export interface CreateAppointmentRequest {
   customerId: number;
