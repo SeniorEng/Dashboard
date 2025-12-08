@@ -56,8 +56,9 @@ export interface AppointmentWithCustomer extends Appointment {
 
 export interface UpdateAppointmentPayload {
   status?: "scheduled" | "in-progress" | "documenting" | "completed";
-  actualStart?: Date;
-  actualEnd?: Date;
+  // actualStart and actualEnd are now time strings (HH:MM:SS) - harmonized system
+  actualStart?: string;
+  actualEnd?: string;
   kilometers?: string;
   notes?: string;
   servicesDone?: string[];

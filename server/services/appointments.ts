@@ -44,8 +44,13 @@ export interface ErstberatungInput {
 }
 
 export class AppointmentService {
-  private formatTimeFromTimestamp(timestamp: Date): string {
-    return timestamp.toTimeString().slice(0, 5);
+  /**
+   * Format time string to HH:MM format for display
+   * Note: With harmonized time system, actualStart/actualEnd are now stored as time strings
+   */
+  private formatTimeForDisplay(timeStr: string): string {
+    // Time is now stored as "HH:MM:SS" - extract "HH:MM"
+    return timeStr.slice(0, 5);
   }
 
   async checkOverlap(
@@ -61,10 +66,11 @@ export class AppointmentService {
       
       if (apt.status === "completed") {
         if (apt.actualEnd) {
+          // actualStart and actualEnd are now time strings (HH:MM:SS)
           const actualStart = apt.actualStart 
-            ? this.formatTimeFromTimestamp(apt.actualStart) 
+            ? this.formatTimeForDisplay(apt.actualStart) 
             : apt.scheduledStart;
-          const actualEnd = this.formatTimeFromTimestamp(apt.actualEnd);
+          const actualEnd = this.formatTimeForDisplay(apt.actualEnd);
           
           if (doTimesOverlap(startTime, endTime, actualStart, actualEnd)) {
             return { hasOverlap: true, hasUnreliableData: false };

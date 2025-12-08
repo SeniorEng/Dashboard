@@ -15,14 +15,42 @@ CareConnect is a full-stack web application for caregivers managing elderly care
 - **State Management**: TanStack Query for data fetching with optimistic updates and caching, React memoization for performance, ErrorBoundary for graceful error handling.
 - **Structure**: Feature-based architecture with clear separation of concerns, utilizing a shared domain logic (`@shared/domain`).
 - **Design System**: Centralized design tokens (`@/design-system`) for colors, typography, spacing, and pre-defined component styles. Semantic color functions for status, service, and Pflegegrad. Layout patterns include `PageHeader`, `SectionCard`, `DataList`, `EmptyState`, and `StatusBadge`.
-- **Date Handling (WICHTIG)**: Datumsstrings im Format "YYYY-MM-DD" niemals direkt mit `new Date(dateString)` parsen! JavaScript interpretiert diese als UTC-Mitternacht, was bei der Konvertierung in die lokale Zeitzone zu Verschiebungen um einen Tag führen kann. Stattdessen immer explizit parsen:
-  ```javascript
+- **Date/Time Handling (KRITISCH - Harmonisiertes System)**:
+  Das System verwendet **Variante C: Lokale Zeiten ohne Zeitzone** für alle Termin- und Zeitdaten. Alle Zeiten werden als "deutsche Ortszeit" behandelt - keine UTC-Konvertierung nötig.
+  
+  **Datenbankformate:**
+  - `date` Spalten: String "YYYY-MM-DD" (z.B. "2025-12-04")
+  - `time` Spalten: String "HH:MM:SS" (z.B. "16:30:00")
+  - Keine `timestamptz` für Terminzeiten! (Nur für Audit-Felder wie `createdAt`)
+  
+  **Zentrale Utilities** (`shared/utils/datetime.ts`):
+  ```typescript
+  import { 
+    parseLocalDate,      // "2025-12-04" → Date (lokale Mitternacht)
+    parseLocalTime,      // "16:30:00" → { hours: 16, minutes: 30, seconds: 0 }
+    formatDateISO,       // Date → "2025-12-04"
+    formatTimeHHMM,      // "16:30:00" → "16:30"
+    formatTimeHHMMSS,    // Date/time → "16:30:00"
+    combineDateAndTime,  // ("2025-12-04", "16:30:00") → Date
+    timeToMinutes,       // "16:30:00" | Date → 990
+    minutesToTime,       // 990 → "16:30:00"
+  } from "@shared/utils/datetime";
+  ```
+  
+  **Lerneffekte & Regeln:**
+  1. **NIEMALS** `new Date("2025-12-04")` verwenden! JavaScript interpretiert das als UTC-Mitternacht → Verschiebung um einen Tag möglich
+  2. **IMMER** die zentralen Utilities verwenden für konsistentes Parsing
+  3. Drizzle gibt `date`/`time` als Strings zurück, `timestamp` als Date-Objekte → daher alle Terminzeiten als `time` speichern
+  4. Das System ist nur für Deutschland ausgelegt - 16:00 Uhr ist immer 16:00 Uhr deutscher Zeit
+  
+  **Beispiel korrektes Parsen:**
+  ```typescript
   // FALSCH - führt zu Zeitzonenproblemen:
   const date = new Date("2025-12-04");
   
-  // RICHTIG - zeitzonen-sicher:
-  const [year, month, day] = dateString.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
+  // RICHTIG - zeitzonen-sicher mit Utility:
+  import { parseLocalDate } from "@shared/utils/datetime";
+  const date = parseLocalDate("2025-12-04");
   ```
 - **Phone Number Handling**: Telefonnummern werden über `shared/utils/phone.ts` mit der Bibliothek `libphonenumber-js` verarbeitet. Nur deutsche Nummern (+49) sind erlaubt.
   - **Speicherung**: Immer im E.164-Format (`+491701234567`) in der Datenbank speichern

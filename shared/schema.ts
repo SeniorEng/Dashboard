@@ -386,9 +386,9 @@ export const appointments = pgTable("appointments", {
   scheduledEnd: time("scheduled_end"),
   durationPromised: integer("duration_promised").notNull(),
   status: text("status").notNull().default("scheduled"),
-  // Actual visit times (recorded during visit)
-  actualStart: timestamp("actual_start"),
-  actualEnd: timestamp("actual_end"),
+  // Actual visit times (recorded during visit) - stored as time strings "HH:MM:SS"
+  actualStart: time("actual_start"),
+  actualEnd: time("actual_end"),
   // Travel documentation
   travelOriginType: text("travel_origin_type"), // "home" | "appointment"
   travelFromAppointmentId: integer("travel_from_appointment_id"),

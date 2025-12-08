@@ -8,6 +8,7 @@ import {
 } from "@shared/schema";
 import { appointmentService } from "../services/appointments";
 import { suggestTravelOrigin, validateServiceDocumentation } from "@shared/domain/appointments";
+import { formatTimeHHMMSS } from "@shared/utils/datetime";
 import { 
   ErrorMessages, 
   handleRouteError, 
@@ -280,9 +281,10 @@ router.post("/:id/start", async (req, res) => {
       return sendForbidden(res, "INVALID_STATUS", "Nur geplante Termine können gestartet werden");
     }
     
+    // Store actualStart as time string (HH:MM:SS) - harmonized time system
     const updatedAppointment = await storage.updateAppointment(id, {
       status: "in-progress",
-      actualStart: new Date(),
+      actualStart: formatTimeHHMMSS(new Date()),
     });
     
     res.json(updatedAppointment);
@@ -307,9 +309,10 @@ router.post("/:id/end", async (req, res) => {
       return sendForbidden(res, "INVALID_STATUS", "Nur laufende Termine können beendet werden");
     }
     
+    // Store actualEnd as time string (HH:MM:SS) - harmonized time system
     const updatedAppointment = await storage.updateAppointment(id, {
       status: "documenting",
-      actualEnd: new Date(),
+      actualEnd: formatTimeHHMMSS(new Date()),
     });
     
     res.json(updatedAppointment);

@@ -4,37 +4,7 @@ import { handleRouteError } from "../lib/errors";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { insertTimeEntrySchema, updateTimeEntrySchema } from "@shared/schema";
 import { storage } from "../storage";
-
-/**
- * Convert time string (HH:MM, HH:MM:SS) or ISO timestamp to minutes since midnight
- * Handles both "16:30:00" and "2025-12-02T16:30:00.000Z" formats
- */
-function timeToMinutes(time: string): number {
-  if (!time || typeof time !== 'string') {
-    return -1;
-  }
-  
-  // Check if it's an ISO timestamp (contains 'T')
-  if (time.includes('T')) {
-    const date = new Date(time);
-    if (isNaN(date.getTime())) {
-      return -1;
-    }
-    return date.getHours() * 60 + date.getMinutes();
-  }
-  
-  // Regular time string (HH:MM or HH:MM:SS)
-  const parts = time.split(":");
-  if (parts.length < 2) {
-    return -1;
-  }
-  const hours = parseInt(parts[0], 10);
-  const minutes = parseInt(parts[1], 10);
-  if (isNaN(hours) || isNaN(minutes)) {
-    return -1;
-  }
-  return hours * 60 + minutes;
-}
+import { timeToMinutes } from "@shared/utils/datetime";
 
 /**
  * Check if two time ranges overlap
@@ -49,11 +19,12 @@ function timeRangesOverlap(
 /**
  * Calculate appointment end time in minutes from midnight
  * Uses actualEnd > scheduledEnd > calculated duration (based on services + travel)
+ * Note: actualEnd is now stored as time string "HH:MM:SS" (harmonized system)
  */
 function getAppointmentEndMinutes(appt: {
   scheduledStart: string;
   scheduledEnd: string | null;
-  actualEnd: Date | string | null;
+  actualEnd: string | null;
   hauswirtschaftActualDauer: number | null;
   hauswirtschaftDauer: number | null;
   alltagsbegleitungActualDauer: number | null;
@@ -66,10 +37,6 @@ function getAppointmentEndMinutes(appt: {
   
   // Prefer actualEnd if available (completed appointments)
   if (appt.actualEnd) {
-    // Handle both Date objects and string timestamps
-    if (appt.actualEnd instanceof Date) {
-      return appt.actualEnd.getHours() * 60 + appt.actualEnd.getMinutes();
-    }
     return timeToMinutes(appt.actualEnd);
   }
   
