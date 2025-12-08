@@ -365,7 +365,7 @@ export function getServicesToDocument(appointment: Appointment): ServiceDocument
 }
 
 export function validateServiceDocumentation(
-  appointment: Appointment,
+  _appointment: Appointment,
   hauswirtschaftActualDauer: number | null | undefined,
   hauswirtschaftDetails: string | null | undefined,
   alltagsbegleitungActualDauer: number | null | undefined,
@@ -375,28 +375,28 @@ export function validateServiceDocumentation(
 ): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
   
-  if (appointment.hauswirtschaftDauer) {
-    if (!hauswirtschaftActualDauer || hauswirtschaftActualDauer < 1) {
-      errors.push("Bitte geben Sie die tatsächliche Dauer für Hauswirtschaft an");
-    }
+  const hasHauswirtschaft = hauswirtschaftActualDauer && hauswirtschaftActualDauer > 0;
+  const hasAlltagsbegleitung = alltagsbegleitungActualDauer && alltagsbegleitungActualDauer > 0;
+  const hasErstberatung = erstberatungActualDauer && erstberatungActualDauer > 0;
+  
+  if (!hasHauswirtschaft && !hasAlltagsbegleitung && !hasErstberatung) {
+    errors.push("Mindestens ein Service muss dokumentiert werden");
+    return { valid: false, errors };
+  }
+  
+  if (hasHauswirtschaft) {
     if (hauswirtschaftDetails && hauswirtschaftDetails.length > 55) {
       errors.push("Hauswirtschaft Details dürfen maximal 55 Zeichen haben");
     }
   }
   
-  if (appointment.alltagsbegleitungDauer) {
-    if (!alltagsbegleitungActualDauer || alltagsbegleitungActualDauer < 1) {
-      errors.push("Bitte geben Sie die tatsächliche Dauer für Alltagsbegleitung an");
-    }
+  if (hasAlltagsbegleitung) {
     if (alltagsbegleitungDetails && alltagsbegleitungDetails.length > 55) {
       errors.push("Alltagsbegleitung Details dürfen maximal 55 Zeichen haben");
     }
   }
   
-  if (appointment.erstberatungDauer) {
-    if (!erstberatungActualDauer || erstberatungActualDauer < 1) {
-      errors.push("Bitte geben Sie die tatsächliche Dauer für Erstberatung an");
-    }
+  if (hasErstberatung) {
     if (erstberatungDetails && erstberatungDetails.length > 55) {
       errors.push("Erstberatung Details dürfen maximal 55 Zeichen haben");
     }
