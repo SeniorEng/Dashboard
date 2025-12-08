@@ -11,7 +11,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Slider } from "@/components/ui/slider";
 import { 
   ChevronLeft, ChevronRight, Loader2, Clock, 
-  Home, MapPin, Car, Check, AlertCircle
+  Home, MapPin, Car, Check, AlertCircle, X, Plus
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, componentStyles } from "@/design-system";
@@ -174,7 +174,46 @@ export default function DocumentAppointment() {
     }));
   }, []);
 
+  const removeService = useCallback((index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      services: prev.services.filter((_, i) => i !== index),
+    }));
+  }, []);
+
+  const addService = useCallback((serviceType: ServiceType) => {
+    const defaultDuration = 60;
+    setFormData(prev => ({
+      ...prev,
+      services: [
+        ...prev.services,
+        {
+          serviceType,
+          plannedDuration: 0,
+          actualDuration: defaultDuration,
+          details: "",
+        },
+      ],
+    }));
+  }, []);
+
+  const availableServicesToAdd = (() => {
+    if (appointment?.appointmentType !== "Kundentermin") return [];
+    const existingTypes = formData.services.map(s => s.serviceType);
+    const possibleServices: ServiceType[] = ["Hauswirtschaft", "Alltagsbegleitung"];
+    return possibleServices.filter(s => !existingTypes.includes(s));
+  })();
+
   const handleNext = useCallback(() => {
+    if (formData.services.length === 0) {
+      toast({
+        title: "Kein Service vorhanden",
+        description: "Mindestens ein Service muss dokumentiert werden.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     const isStep1Valid = formData.services.every(s => s.actualDuration > 0);
     if (!isStep1Valid) {
       toast({
@@ -303,56 +342,113 @@ export default function DocumentAppointment() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {formData.services.map((service, index) => (
-                <div key={service.serviceType} className="space-y-4 pb-4 border-b last:border-b-0 last:pb-0">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-medium text-foreground">{service.serviceType}</h3>
-                    <span className="text-sm text-muted-foreground">
-                      Geplant: {formatDuration(service.plannedDuration)}
-                    </span>
-                  </div>
-                  
-                  <div className="space-y-2">
+              {formData.services.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <p className="mb-2">Keine Services vorhanden</p>
+                  <p className="text-sm">Fügen Sie mindestens einen Service hinzu</p>
+                </div>
+              ) : (
+                formData.services.map((service, index) => (
+                  <div key={service.serviceType} className="space-y-4 pb-4 border-b last:border-b-0 last:pb-0">
                     <div className="flex items-center justify-between">
-                      <Label>Tatsächliche Dauer</Label>
-                      <span className="text-sm font-medium text-primary">
-                        {formatDuration(service.actualDuration)}
-                      </span>
+                      <h3 className="font-medium text-foreground">{service.serviceType}</h3>
+                      <div className="flex items-center gap-3">
+                        {service.plannedDuration > 0 && (
+                          <span className="text-sm text-muted-foreground">
+                            Geplant: {formatDuration(service.plannedDuration)}
+                          </span>
+                        )}
+                        {service.plannedDuration === 0 && (
+                          <span className="text-xs text-primary bg-primary/10 px-2 py-0.5 rounded">
+                            Hinzugefügt
+                          </span>
+                        )}
+                        {appointment?.appointmentType === "Kundentermin" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => {
+                              const hasData = service.details.trim().length > 0;
+                              if (hasData) {
+                                if (window.confirm(`"${service.serviceType}" hat bereits eingetragene Details. Wirklich entfernen?`)) {
+                                  removeService(index);
+                                }
+                              } else {
+                                removeService(index);
+                              }
+                            }}
+                            data-testid={`button-remove-${service.serviceType.toLowerCase()}`}
+                          >
+                            <X className={iconSize.sm} />
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                    <Slider
-                      value={[service.actualDuration]}
-                      onValueChange={([value]) => updateService(index, "actualDuration", value)}
-                      min={15}
-                      max={240}
-                      step={15}
-                      className="w-full"
-                      data-testid={`slider-duration-${service.serviceType.toLowerCase()}`}
-                    />
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>15 Min.</span>
-                      <span>4 Std.</span>
+                    
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label>Tatsächliche Dauer</Label>
+                        <span className="text-sm font-medium text-primary">
+                          {formatDuration(service.actualDuration)}
+                        </span>
+                      </div>
+                      <Slider
+                        value={[service.actualDuration]}
+                        onValueChange={([value]) => updateService(index, "actualDuration", value)}
+                        min={15}
+                        max={240}
+                        step={15}
+                        className="w-full"
+                        data-testid={`slider-duration-${service.serviceType.toLowerCase()}`}
+                      />
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>15 Min.</span>
+                        <span>4 Std.</span>
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor={`details-${index}`}>Servicedetails *</Label>
+                        <span className={`text-xs ${service.details.length > 55 ? "text-destructive" : "text-muted-foreground"}`}>
+                          {service.details.length}/55
+                        </span>
+                      </div>
+                      <Input
+                        id={`details-${index}`}
+                        value={service.details}
+                        onChange={(e) => updateService(index, "details", e.target.value.slice(0, 55))}
+                        placeholder="z.B. Wäsche gewaschen, Boden gewischt"
+                        maxLength={55}
+                        className={!service.details.trim() ? "border-amber-300" : ""}
+                        data-testid={`input-details-${service.serviceType.toLowerCase()}`}
+                      />
                     </div>
                   </div>
-                  
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor={`details-${index}`}>Servicedetails *</Label>
-                      <span className={`text-xs ${service.details.length > 55 ? "text-destructive" : "text-muted-foreground"}`}>
-                        {service.details.length}/55
-                      </span>
-                    </div>
-                    <Input
-                      id={`details-${index}`}
-                      value={service.details}
-                      onChange={(e) => updateService(index, "details", e.target.value.slice(0, 55))}
-                      placeholder="z.B. Wäsche gewaschen, Boden gewischt"
-                      maxLength={55}
-                      className={!service.details.trim() ? "border-amber-300" : ""}
-                      data-testid={`input-details-${service.serviceType.toLowerCase()}`}
-                    />
+                ))
+              )}
+              
+              {availableServicesToAdd.length > 0 && (
+                <div className="pt-4 border-t">
+                  <p className="text-sm text-muted-foreground mb-3">Service hinzufügen:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {availableServicesToAdd.map(serviceType => (
+                      <Button
+                        key={serviceType}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => addService(serviceType)}
+                        className="gap-1"
+                        data-testid={`button-add-${serviceType.toLowerCase()}`}
+                      >
+                        <Plus className={iconSize.xs} />
+                        {serviceType}
+                      </Button>
+                    ))}
                   </div>
                 </div>
-              ))}
+              )}
             </CardContent>
           </Card>
           
