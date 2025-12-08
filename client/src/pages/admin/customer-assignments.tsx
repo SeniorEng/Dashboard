@@ -14,6 +14,7 @@ import {
 import { Layout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Loader2, User, Users, Save } from "lucide-react";
+import { api, unwrapResult } from "@/lib/api/client";
 
 interface Customer {
   id: number;
@@ -69,17 +70,8 @@ export default function AdminCustomerAssignments() {
       primaryEmployeeId: number | null;
       backupEmployeeId: number | null;
     }) => {
-      const res = await fetch(`/api/admin/customers/${customerId}/assign`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ primaryEmployeeId, backupEmployeeId }),
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || "Zuordnung konnte nicht gespeichert werden");
-      }
-      return res.json();
+      const result = await api.patch(`/admin/customers/${customerId}/assign`, { primaryEmployeeId, backupEmployeeId });
+      return unwrapResult(result);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["customers"] });

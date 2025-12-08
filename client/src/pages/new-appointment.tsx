@@ -14,6 +14,7 @@ import { ChevronLeft, Loader2, Calendar, Clock, User, Home, Plus, Users } from "
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
+import { api, unwrapResult } from "@/lib/api/client";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS } from "@shared/types";
 import type { Customer, User as UserType } from "@shared/schema";
 import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
@@ -121,16 +122,8 @@ export default function NewAppointment() {
   // Create Kundentermin mutation
   const createKundentermin = useMutation({
     mutationFn: async (data: any) => {
-      const res = await fetch("/api/appointments/kundentermin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || error.error || "Kundentermin konnte nicht erstellt werden");
-      }
-      return res.json();
+      const result = await api.post("/appointments/kundentermin", data);
+      return unwrapResult(result);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
@@ -145,16 +138,8 @@ export default function NewAppointment() {
   // Create Erstberatung mutation
   const createErstberatung = useMutation({
     mutationFn: async (data: any) => {
-      const res = await fetch("/api/appointments/erstberatung", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || error.error || "Erstberatung konnte nicht erstellt werden");
-      }
-      return res.json();
+      const result = await api.post("/appointments/erstberatung", data);
+      return unwrapResult(result);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["appointments"] });

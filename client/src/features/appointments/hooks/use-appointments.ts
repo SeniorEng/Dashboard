@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { AppointmentWithCustomer, UpdateAppointmentPayload } from "@shared/types";
 import type { Appointment } from "@shared/schema";
+import { api, unwrapResult } from "@/lib/api/client";
 
 const QUERY_KEY = "appointments";
 
@@ -22,25 +23,13 @@ async function fetchAppointment(id: number): Promise<AppointmentWithCustomer> {
 }
 
 async function updateAppointment(id: number, data: UpdateAppointmentPayload): Promise<Appointment> {
-  const response = await fetch(`/api/appointments/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-  if (!response.ok) {
-    throw new Error("Failed to update appointment");
-  }
-  return response.json();
+  const result = await api.patch<Appointment>(`/appointments/${id}`, data);
+  return unwrapResult(result);
 }
 
 async function deleteAppointment(id: number): Promise<void> {
-  const response = await fetch(`/api/appointments/${id}`, {
-    method: "DELETE",
-  });
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.message || "Termin konnte nicht gelöscht werden");
-  }
+  const result = await api.delete(`/appointments/${id}`);
+  unwrapResult(result);
 }
 
 export function useAppointments(date?: string) {

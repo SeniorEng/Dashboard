@@ -7,6 +7,7 @@ import {
   ReactNode,
 } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { api, unwrapResult } from "@/lib/api/client";
 
 export interface User {
   id: number;
@@ -66,14 +67,8 @@ async function loginRequest(email: string, password: string): Promise<{ user: Us
 }
 
 async function logoutRequest(): Promise<void> {
-  const res = await fetch("/api/auth/logout", {
-    method: "POST",
-    credentials: "include",
-  });
-
-  if (!res.ok) {
-    throw new Error("Abmeldung fehlgeschlagen");
-  }
+  const result = await api.post("/auth/logout", {});
+  unwrapResult(result);
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {

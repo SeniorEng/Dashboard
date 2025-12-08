@@ -44,9 +44,6 @@ export function csrfProtection(
   }
 
   if (!headerToken || headerToken !== cookieToken) {
-    console.log("[CSRF Debug] Cookie token:", cookieToken?.substring(0, 10) + "...");
-    console.log("[CSRF Debug] Header token:", headerToken?.substring(0, 10) + "...");
-    console.log("[CSRF Debug] Match:", headerToken === cookieToken);
     res.status(403).json({
       error: "CSRF_TOKEN_INVALID",
       message: "CSRF-Token ungültig. Bitte laden Sie die Seite neu.",

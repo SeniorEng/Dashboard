@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2, AlertCircle, Heart } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { api, unwrapResult } from "@/lib/api/client";
 
 export default function LoginPage() {
   const [, navigate] = useLocation();
@@ -160,19 +161,8 @@ function SetupPage() {
         throw new Error("Passwörter stimmen nicht überein");
       }
 
-      const res = await fetch("/api/auth/setup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, vorname, nachname }),
-        credentials: "include",
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.message || "Setup fehlgeschlagen");
-      }
-
-      return res.json();
+      const result = await api.post("/auth/setup", { email, password, vorname, nachname });
+      return unwrapResult(result);
     },
     onSuccess: () => {
       window.location.href = "/";

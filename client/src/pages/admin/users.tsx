@@ -41,6 +41,7 @@ import {
   Shield,
   User,
 } from "lucide-react";
+import { api, unwrapResult } from "@/lib/api/client";
 
 interface UserData {
   id: number;
@@ -107,17 +108,8 @@ export default function AdminUsers() {
 
   const createMutation = useMutation({
     mutationFn: async (data: UserFormData & { password: string }) => {
-      const res = await fetch("/api/admin/users", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || "Benutzer konnte nicht erstellt werden");
-      }
-      return res.json();
+      const result = await api.post("/admin/users", data);
+      return unwrapResult(result);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
@@ -131,17 +123,8 @@ export default function AdminUsers() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, ...data }: { id: number } & Partial<UserFormData>) => {
-      const res = await fetch(`/api/admin/users/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || "Benutzer konnte nicht aktualisiert werden");
-      }
-      return res.json();
+      const result = await api.patch(`/admin/users/${id}`, data);
+      return unwrapResult(result);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
@@ -156,15 +139,8 @@ export default function AdminUsers() {
   const toggleActiveMutation = useMutation({
     mutationFn: async ({ id, activate }: { id: number; activate: boolean }) => {
       const endpoint = activate ? "activate" : "deactivate";
-      const res = await fetch(`/api/admin/users/${id}/${endpoint}`, {
-        method: "POST",
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || "Status konnte nicht geändert werden");
-      }
-      return res.json();
+      const result = await api.post(`/admin/users/${id}/${endpoint}`, {});
+      return unwrapResult(result);
     },
     onSuccess: (_, { activate }) => {
       queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
@@ -177,17 +153,8 @@ export default function AdminUsers() {
 
   const resetPasswordMutation = useMutation({
     mutationFn: async ({ id, newPassword }: { id: number; newPassword: string }) => {
-      const res = await fetch(`/api/admin/users/${id}/reset-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ newPassword }),
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || "Passwort konnte nicht zurückgesetzt werden");
-      }
-      return res.json();
+      const result = await api.post(`/admin/users/${id}/reset-password`, { newPassword });
+      return unwrapResult(result);
     },
     onSuccess: () => {
       setResetPasswordUser(null);
@@ -200,15 +167,8 @@ export default function AdminUsers() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
-      const res = await fetch(`/api/admin/users/${id}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || "Benutzer konnte nicht gelöscht werden");
-      }
-      return res.json();
+      const result = await api.delete(`/admin/users/${id}`);
+      return unwrapResult(result);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "users"] });

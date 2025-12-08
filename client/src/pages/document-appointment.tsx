@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, componentStyles } from "@/design-system";
+import { api, unwrapResult } from "@/lib/api/client";
 import { 
   formatDuration, 
   getServicesToDocument,
@@ -143,18 +144,8 @@ export default function DocumentAppointment() {
         payload.erstberatungDetails = ebService.details || null;
       }
 
-      const res = await fetch(`/api/appointments/${id}/document`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || "Dokumentation fehlgeschlagen");
-      }
-
-      return res.json();
+      const result = await api.post(`/appointments/${id}/document`, payload);
+      return unwrapResult(result);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["appointments"] });

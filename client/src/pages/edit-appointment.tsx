@@ -12,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ChevronLeft, Loader2, Calendar, Clock, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, componentStyles } from "@/design-system";
+import { api, unwrapResult } from "@/lib/api/client";
 import { useAppointment } from "@/features/appointments";
 import { DURATION_OPTIONS } from "@shared/types";
 import type { Customer } from "@shared/schema";
@@ -111,16 +112,8 @@ export default function EditAppointment() {
 
   const updateMutation = useMutation({
     mutationFn: async (data: any) => {
-      const res = await fetch(`/api/appointments/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || "Termin konnte nicht aktualisiert werden");
-      }
-      return res.json();
+      const result = await api.patch(`/appointments/${id}`, data);
+      return unwrapResult(result);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
