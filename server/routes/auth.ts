@@ -16,6 +16,7 @@ import {
   getAvailableServiceTypes,
 } from "../middleware/auth";
 import { handleRouteError } from "../lib/errors";
+import { generateCsrfToken, setCsrfCookie } from "../middleware/csrf";
 
 const router = Router();
 
@@ -43,6 +44,7 @@ router.post("/login", async (req: Request, res: Response) => {
     }
 
     setSessionCookie(res, loginResult.token);
+    setCsrfCookie(res, generateCsrfToken());
 
     const { passwordHash, ...userWithoutPassword } = loginResult.user;
     res.json({
@@ -78,6 +80,11 @@ router.get("/me", async (req: Request, res: Response) => {
         message: "Nicht angemeldet",
       });
       return;
+    }
+
+    const existingCsrf = req.cookies?.careconnect_csrf;
+    if (!existingCsrf) {
+      setCsrfCookie(res, generateCsrfToken());
     }
 
     const { passwordHash, ...userWithoutPassword } = req.user;
