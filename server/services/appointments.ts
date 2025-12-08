@@ -1,13 +1,12 @@
 import { storage } from "../storage";
 import type { Appointment, InsertAppointment, UpdateAppointment, InsertErstberatungCustomer } from "@shared/schema";
+import { timeToMinutes, addMinutesToTime } from "@shared/utils/datetime";
 import { 
   doTimesOverlap, 
-  addMinutesToTime, 
   calculateTotalDuration,
   isValidStatusTransition,
   canModifyAppointment,
   canEditNotes,
-  timeToMinutes,
   getServiceTypeFromDurations,
   type AppointmentStatus
 } from "@shared/types";
