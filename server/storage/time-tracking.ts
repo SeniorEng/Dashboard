@@ -467,11 +467,19 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     };
     
     for (const appt of employeeAppointments) {
-      if (appt.status === 'completed' || appt.status === 'documenting') {
-        serviceHours.hauswirtschaftMinutes += appt.hauswirtschaftActualDauer || appt.hauswirtschaftDauer || 0;
-        serviceHours.alltagsbegleitungMinutes += appt.alltagsbegleitungActualDauer || appt.alltagsbegleitungDauer || 0;
-        serviceHours.erstberatungMinutes += appt.erstberatungActualDauer || appt.erstberatungDauer || 0;
+      if (appt.status === 'completed') {
+        // For completed appointments: ONLY count documented (actual) durations
+        // If a service was removed during documentation, ActualDauer is NULL → counts as 0
+        serviceHours.hauswirtschaftMinutes += appt.hauswirtschaftActualDauer || 0;
+        serviceHours.alltagsbegleitungMinutes += appt.alltagsbegleitungActualDauer || 0;
+        serviceHours.erstberatungMinutes += appt.erstberatungActualDauer || 0;
+      } else if (appt.status === 'documenting') {
+        // For documenting appointments: use actual if available, otherwise planned
+        serviceHours.hauswirtschaftMinutes += appt.hauswirtschaftActualDauer ?? appt.hauswirtschaftDauer ?? 0;
+        serviceHours.alltagsbegleitungMinutes += appt.alltagsbegleitungActualDauer ?? appt.alltagsbegleitungDauer ?? 0;
+        serviceHours.erstberatungMinutes += appt.erstberatungActualDauer ?? appt.erstberatungDauer ?? 0;
       } else {
+        // For scheduled/in-progress: use planned durations
         serviceHours.hauswirtschaftMinutes += appt.hauswirtschaftDauer || 0;
         serviceHours.alltagsbegleitungMinutes += appt.alltagsbegleitungDauer || 0;
         serviceHours.erstberatungMinutes += appt.erstberatungDauer || 0;
