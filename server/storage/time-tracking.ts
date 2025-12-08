@@ -151,6 +151,18 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       .where(eq(employeeTimeEntries.id, id));
     return results[0];
   }
+
+  async getTimeEntriesForDate(userId: number, date: string): Promise<EmployeeTimeEntry[]> {
+    const results = await db
+      .select()
+      .from(employeeTimeEntries)
+      .where(and(
+        eq(employeeTimeEntries.userId, userId),
+        eq(employeeTimeEntries.entryDate, date)
+      ))
+      .orderBy(employeeTimeEntries.startTime);
+    return results;
+  }
   
   async createTimeEntry(userId: number, data: InsertTimeEntry): Promise<EmployeeTimeEntry> {
     const results = await db

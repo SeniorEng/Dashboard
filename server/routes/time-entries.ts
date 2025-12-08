@@ -3,6 +3,160 @@ import { requireAuth } from "../middleware/auth";
 import { handleRouteError } from "../lib/errors";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { insertTimeEntrySchema, updateTimeEntrySchema } from "@shared/schema";
+import { storage } from "../storage";
+
+/**
+ * Convert time string (HH:MM or HH:MM:SS) to minutes since midnight
+ */
+function timeToMinutes(time: string): number {
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+/**
+ * Check if two time ranges overlap
+ */
+function timeRangesOverlap(
+  start1: number, end1: number,
+  start2: number, end2: number
+): boolean {
+  return start1 < end2 && start2 < end1;
+}
+
+/**
+ * Calculate appointment end time in minutes from midnight
+ * Uses actualEnd > scheduledEnd > calculated duration (based on services + travel)
+ */
+function getAppointmentEndMinutes(appt: {
+  scheduledStart: string;
+  scheduledEnd: string | null;
+  actualEnd: string | null;
+  hauswirtschaftActualDauer: number | null;
+  hauswirtschaftDauer: number | null;
+  alltagsbegleitungActualDauer: number | null;
+  alltagsbegleitungDauer: number | null;
+  erstberatungActualDauer: number | null;
+  erstberatungDauer: number | null;
+  travelMinutes: number | null;
+}): number {
+  const apptStart = timeToMinutes(appt.scheduledStart);
+  
+  // Prefer actualEnd if available (completed appointments)
+  if (appt.actualEnd) {
+    return timeToMinutes(appt.actualEnd);
+  }
+  
+  // Then try scheduledEnd
+  if (appt.scheduledEnd) {
+    return timeToMinutes(appt.scheduledEnd);
+  }
+  
+  // Calculate from service durations
+  let duration = 0;
+  if (appt.hauswirtschaftActualDauer) duration += appt.hauswirtschaftActualDauer;
+  else if (appt.hauswirtschaftDauer) duration += appt.hauswirtschaftDauer;
+  if (appt.alltagsbegleitungActualDauer) duration += appt.alltagsbegleitungActualDauer;
+  else if (appt.alltagsbegleitungDauer) duration += appt.alltagsbegleitungDauer;
+  if (appt.erstberatungActualDauer) duration += appt.erstberatungActualDauer;
+  else if (appt.erstberatungDauer) duration += appt.erstberatungDauer;
+  duration += appt.travelMinutes || 0;
+  
+  // Only use calculated duration if we have any service data
+  if (duration > 0) {
+    return apptStart + duration;
+  }
+  
+  // No duration data at all - cannot determine end time, skip this appointment
+  return -1;
+}
+
+/**
+ * Check for time conflicts with existing appointments and time entries
+ * Returns error message if conflict found, null otherwise
+ */
+async function checkTimeConflicts(
+  userId: number,
+  date: string,
+  startTime: string | null | undefined,
+  endTime: string | null | undefined,
+  isFullDay: boolean,
+  excludeEntryId?: number
+): Promise<string | null> {
+  // Get appointments for this date
+  const appointments = await storage.getAppointmentsForDay(userId, date);
+  
+  // Filter out cancelled appointments
+  const activeAppointments = appointments.filter(a => a.status !== 'cancelled');
+  
+  // Get time entries for this date
+  const timeEntries = await timeTrackingStorage.getTimeEntriesForDate(userId, date);
+  
+  // Filter out the entry we're updating (if any)
+  const otherEntries = excludeEntryId 
+    ? timeEntries.filter(e => e.id !== excludeEntryId)
+    : timeEntries;
+  
+  // For full-day entries, check if there are any other active appointments or entries
+  if (isFullDay) {
+    if (activeAppointments.length > 0) {
+      const apptTimes = activeAppointments
+        .map(a => a.scheduledStart)
+        .slice(0, 3)
+        .join(", ");
+      return `An diesem Tag gibt es bereits Termine (${apptTimes})`;
+    }
+    if (otherEntries.length > 0) {
+      const entryTypes = otherEntries.map(e => e.entryType).slice(0, 3).join(", ");
+      return `An diesem Tag gibt es bereits Zeiteinträge (${entryTypes})`;
+    }
+    return null;
+  }
+  
+  // For time-based entries, require both start and end times
+  if (!startTime || !endTime) {
+    // Allow entries without times to pass - they don't have a specific time range
+    // and thus cannot overlap with timed entries
+    return null;
+  }
+  
+  const newStart = timeToMinutes(startTime);
+  const newEnd = timeToMinutes(endTime);
+  
+  if (newEnd <= newStart) {
+    return "Die Endzeit muss nach der Startzeit liegen";
+  }
+  
+  // Check against active appointments
+  for (const appt of activeAppointments) {
+    const apptStart = timeToMinutes(appt.scheduledStart);
+    const apptEnd = getAppointmentEndMinutes(appt);
+    
+    // Skip appointments with no determinable end time
+    if (apptEnd === -1) continue;
+    
+    if (timeRangesOverlap(newStart, newEnd, apptStart, apptEnd)) {
+      return `Überlappung mit Termin um ${appt.scheduledStart} Uhr bei ${appt.customerFirstName} ${appt.customerLastName}`;
+    }
+  }
+  
+  // Check against other time entries
+  for (const entry of otherEntries) {
+    if (entry.isFullDay) {
+      return `An diesem Tag ist bereits ein ganztägiger Eintrag (${entry.entryType}) vorhanden`;
+    }
+    
+    if (entry.startTime && entry.endTime) {
+      const entryStart = timeToMinutes(entry.startTime);
+      const entryEnd = timeToMinutes(entry.endTime);
+      
+      if (timeRangesOverlap(newStart, newEnd, entryStart, entryEnd)) {
+        return `Überlappung mit bestehendem Eintrag (${entry.entryType}) von ${entry.startTime} bis ${entry.endTime}`;
+      }
+    }
+  }
+  
+  return null;
+}
 
 const router = Router();
 
@@ -179,17 +333,36 @@ router.post("/", async (req: Request, res: Response) => {
         return res.status(400).json({ error: "Enddatum muss nach Startdatum liegen" });
       }
       
-      const entries = [];
+      // Check conflicts for all days first
       const currentDate = new Date(startDate);
-      
       while (currentDate <= end) {
         const dateStr = formatLocalDate(currentDate);
+        const conflict = await checkTimeConflicts(
+          userId,
+          dateStr,
+          validatedData.startTime,
+          validatedData.endTime,
+          validatedData.isFullDay ?? true
+        );
+        if (conflict) {
+          return res.status(400).json({ 
+            error: `Konflikt am ${dateStr.split('-').reverse().join('.')}: ${conflict}` 
+          });
+        }
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+      
+      const entries = [];
+      const currentDate2 = new Date(startDate);
+      
+      while (currentDate2 <= end) {
+        const dateStr = formatLocalDate(currentDate2);
         const entry = await timeTrackingStorage.createTimeEntry(userId, {
           ...validatedData,
           entryDate: dateStr,
         });
         entries.push(entry);
-        currentDate.setDate(currentDate.getDate() + 1);
+        currentDate2.setDate(currentDate2.getDate() + 1);
       }
       
       // Return first entry for consistency, with count in header
@@ -200,7 +373,18 @@ router.post("/", async (req: Request, res: Response) => {
       });
     }
     
-    // Single day entry
+    // Single day entry - check for conflicts
+    const conflict = await checkTimeConflicts(
+      userId,
+      validatedData.entryDate,
+      validatedData.startTime,
+      validatedData.endTime,
+      validatedData.isFullDay ?? false
+    );
+    if (conflict) {
+      return res.status(400).json({ error: conflict });
+    }
+    
     const entry = await timeTrackingStorage.createTimeEntry(userId, validatedData);
     res.status(201).json(entry);
   } catch (error) {
@@ -235,6 +419,25 @@ router.put("/:id", async (req: Request, res: Response) => {
     }
     
     const validatedData = updateTimeEntrySchema.parse(req.body);
+    
+    // Check for time conflicts with updated values
+    const newDate = validatedData.entryDate ?? existing.entryDate;
+    const newStartTime = validatedData.startTime !== undefined ? validatedData.startTime : existing.startTime;
+    const newEndTime = validatedData.endTime !== undefined ? validatedData.endTime : existing.endTime;
+    const newIsFullDay = validatedData.isFullDay !== undefined ? validatedData.isFullDay : existing.isFullDay;
+    
+    const conflict = await checkTimeConflicts(
+      existing.userId,
+      newDate,
+      newStartTime,
+      newEndTime,
+      newIsFullDay,
+      entryId // Exclude the entry being updated
+    );
+    if (conflict) {
+      return res.status(400).json({ error: conflict });
+    }
+    
     const updated = await timeTrackingStorage.updateTimeEntry(entryId, validatedData);
     
     res.json(updated);

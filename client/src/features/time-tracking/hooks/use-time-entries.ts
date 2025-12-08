@@ -20,6 +20,7 @@ export const timeEntryKeys = {
   detail: (id: number) => [...timeEntryKeys.all, "detail", id] as const,
   vacationSummary: (year: number) => [...timeEntryKeys.all, "vacation-summary", year] as const,
   overview: (year: number, month: number) => [...timeEntryKeys.all, "overview", { year, month }] as const,
+  openTasks: [...["time-entries"], "open-tasks"] as const,
 };
 
 export interface TimeEntryFilters {
@@ -90,6 +91,7 @@ export function useCreateTimeEntry() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: timeEntryKeys.all });
+      queryClient.invalidateQueries({ queryKey: timeEntryKeys.openTasks, refetchType: "all" });
     },
   });
 }
@@ -124,6 +126,7 @@ export function useDeleteTimeEntry() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: timeEntryKeys.all });
+      queryClient.invalidateQueries({ queryKey: timeEntryKeys.openTasks, refetchType: "all" });
     },
   });
 }

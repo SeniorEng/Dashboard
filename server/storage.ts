@@ -69,6 +69,9 @@ export interface IStorage {
     customer: InsertCustomer,
     appointment: Omit<InsertAppointment, 'customerId'>
   ): Promise<{ customer: Customer; appointment: Appointment }>;
+  
+  // Get appointments for a specific employee on a specific day
+  getAppointmentsForDay(employeeId: number, date: string): Promise<AppointmentWithCustomer[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -759,6 +762,113 @@ export class DatabaseStorage implements IStorage {
       }
       throw error;
     }
+  }
+
+  async getAppointmentsForDay(employeeId: number, date: string): Promise<AppointmentWithCustomer[]> {
+    const selectFields = {
+      id: appointments.id,
+      customerId: appointments.customerId,
+      createdByUserId: appointments.createdByUserId,
+      assignedEmployeeId: appointments.assignedEmployeeId,
+      appointmentType: appointments.appointmentType,
+      serviceType: appointments.serviceType,
+      hauswirtschaftDauer: appointments.hauswirtschaftDauer,
+      alltagsbegleitungDauer: appointments.alltagsbegleitungDauer,
+      erstberatungDauer: appointments.erstberatungDauer,
+      hauswirtschaftActualDauer: appointments.hauswirtschaftActualDauer,
+      hauswirtschaftDetails: appointments.hauswirtschaftDetails,
+      alltagsbegleitungActualDauer: appointments.alltagsbegleitungActualDauer,
+      alltagsbegleitungDetails: appointments.alltagsbegleitungDetails,
+      erstberatungActualDauer: appointments.erstberatungActualDauer,
+      erstberatungDetails: appointments.erstberatungDetails,
+      date: appointments.date,
+      scheduledStart: appointments.scheduledStart,
+      scheduledEnd: appointments.scheduledEnd,
+      durationPromised: appointments.durationPromised,
+      status: appointments.status,
+      actualStart: appointments.actualStart,
+      actualEnd: appointments.actualEnd,
+      travelOriginType: appointments.travelOriginType,
+      travelFromAppointmentId: appointments.travelFromAppointmentId,
+      travelKilometers: appointments.travelKilometers,
+      travelMinutes: appointments.travelMinutes,
+      customerKilometers: appointments.customerKilometers,
+      kilometers: appointments.kilometers,
+      notes: appointments.notes,
+      servicesDone: appointments.servicesDone,
+      signatureData: appointments.signatureData,
+      createdAt: appointments.createdAt,
+      customer: {
+        id: customers.id,
+        name: customers.name,
+        vorname: customers.vorname,
+        nachname: customers.nachname,
+        email: customers.email,
+        festnetz: customers.festnetz,
+        telefon: customers.telefon,
+        geburtsdatum: customers.geburtsdatum,
+        address: customers.address,
+        strasse: customers.strasse,
+        nr: customers.nr,
+        plz: customers.plz,
+        stadt: customers.stadt,
+        pflegegrad: customers.pflegegrad,
+        primaryEmployeeId: customers.primaryEmployeeId,
+        backupEmployeeId: customers.backupEmployeeId,
+        avatar: customers.avatar,
+        needs: customers.needs,
+        createdAt: customers.createdAt,
+        updatedAt: customers.updatedAt,
+        createdByUserId: customers.createdByUserId,
+      }
+    };
+    
+    const rows = await db.select(selectFields)
+      .from(appointments)
+      .leftJoin(customers, eq(appointments.customerId, customers.id))
+      .where(and(
+        eq(appointments.assignedEmployeeId, employeeId),
+        eq(appointments.date, date)
+      ))
+      .orderBy(appointments.scheduledStart);
+    
+    return rows.map(row => ({
+      id: row.id,
+      customerId: row.customerId,
+      createdByUserId: row.createdByUserId,
+      assignedEmployeeId: row.assignedEmployeeId,
+      appointmentType: row.appointmentType,
+      serviceType: row.serviceType,
+      hauswirtschaftDauer: row.hauswirtschaftDauer,
+      alltagsbegleitungDauer: row.alltagsbegleitungDauer,
+      erstberatungDauer: row.erstberatungDauer,
+      hauswirtschaftActualDauer: row.hauswirtschaftActualDauer,
+      hauswirtschaftDetails: row.hauswirtschaftDetails,
+      alltagsbegleitungActualDauer: row.alltagsbegleitungActualDauer,
+      alltagsbegleitungDetails: row.alltagsbegleitungDetails,
+      erstberatungActualDauer: row.erstberatungActualDauer,
+      erstberatungDetails: row.erstberatungDetails,
+      date: row.date,
+      scheduledStart: row.scheduledStart,
+      scheduledEnd: row.scheduledEnd,
+      durationPromised: row.durationPromised,
+      status: row.status,
+      actualStart: row.actualStart,
+      actualEnd: row.actualEnd,
+      travelOriginType: row.travelOriginType,
+      travelFromAppointmentId: row.travelFromAppointmentId,
+      travelKilometers: row.travelKilometers,
+      travelMinutes: row.travelMinutes,
+      customerKilometers: row.customerKilometers,
+      kilometers: row.kilometers,
+      notes: row.notes,
+      servicesDone: row.servicesDone,
+      signatureData: row.signatureData,
+      createdAt: row.createdAt,
+      customer: row.customer?.id ? row.customer : null,
+      customerFirstName: row.customer?.vorname || null,
+      customerLastName: row.customer?.nachname || null,
+    }));
   }
 }
 
