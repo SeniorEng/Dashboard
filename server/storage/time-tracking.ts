@@ -493,7 +493,23 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       sonstigesMinutes: 0,
     };
     
+    // Helper to calculate duration from startTime/endTime if durationMinutes is not set
+    const getEntryDuration = (entry: { durationMinutes: number | null; startTime: string | null; endTime: string | null }): number => {
+      if (entry.durationMinutes && entry.durationMinutes > 0) {
+        return entry.durationMinutes;
+      }
+      if (entry.startTime && entry.endTime) {
+        const [startH, startM] = entry.startTime.split(':').map(Number);
+        const [endH, endM] = entry.endTime.split(':').map(Number);
+        const startMinutes = startH * 60 + startM;
+        const endMinutes = endH * 60 + endM;
+        return Math.max(0, endMinutes - startMinutes);
+      }
+      return 0;
+    };
+    
     for (const entry of timeEntries) {
+      const duration = getEntryDuration(entry);
       switch (entry.entryType) {
         case 'urlaub':
           timeEntrySummary.urlaubDays++;
@@ -502,22 +518,22 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
           timeEntrySummary.krankheitDays++;
           break;
         case 'pause':
-          timeEntrySummary.pauseMinutes += entry.durationMinutes || 0;
+          timeEntrySummary.pauseMinutes += duration;
           break;
         case 'bueroarbeit':
-          timeEntrySummary.bueroarbeitMinutes += entry.durationMinutes || 0;
+          timeEntrySummary.bueroarbeitMinutes += duration;
           break;
         case 'vertrieb':
-          timeEntrySummary.vertriebMinutes += entry.durationMinutes || 0;
+          timeEntrySummary.vertriebMinutes += duration;
           break;
         case 'schulung':
-          timeEntrySummary.schulungMinutes += entry.durationMinutes || 0;
+          timeEntrySummary.schulungMinutes += duration;
           break;
         case 'besprechung':
-          timeEntrySummary.besprechungMinutes += entry.durationMinutes || 0;
+          timeEntrySummary.besprechungMinutes += duration;
           break;
         case 'sonstiges':
-          timeEntrySummary.sonstigesMinutes += entry.durationMinutes || 0;
+          timeEntrySummary.sonstigesMinutes += duration;
           break;
       }
     }
@@ -578,6 +594,21 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       }
     }
     
+    // Helper to calculate duration from startTime and endTime if durationMinutes is not set
+    const getEntryDuration = (entry: { durationMinutes: number | null; startTime: string | null; endTime: string | null }): number => {
+      if (entry.durationMinutes && entry.durationMinutes > 0) {
+        return entry.durationMinutes;
+      }
+      if (entry.startTime && entry.endTime) {
+        const [startH, startM] = entry.startTime.split(':').map(Number);
+        const [endH, endM] = entry.endTime.split(':').map(Number);
+        const startMinutes = startH * 60 + startM;
+        const endMinutes = endH * 60 + endM;
+        return Math.max(0, endMinutes - startMinutes);
+      }
+      return 0;
+    };
+    
     // Add time entries (work types add to work, pause adds to breaks)
     for (const entry of timeEntries) {
       const date = entry.entryDate;
@@ -585,10 +616,12 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
         workByDate[date] = { workMinutes: 0, breakMinutes: 0 };
       }
       
+      const duration = getEntryDuration(entry);
+      
       if (entry.entryType === 'pause') {
-        workByDate[date].breakMinutes += entry.durationMinutes || 0;
+        workByDate[date].breakMinutes += duration;
       } else if (['bueroarbeit', 'vertrieb', 'schulung', 'besprechung', 'sonstiges'].includes(entry.entryType)) {
-        workByDate[date].workMinutes += entry.durationMinutes || 0;
+        workByDate[date].workMinutes += duration;
       }
       // urlaub and krankheit are full days off, don't count as work
     }

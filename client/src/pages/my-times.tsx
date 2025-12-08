@@ -265,7 +265,7 @@ export default function MyTimes() {
                     Fehlende Pausendokumentation
                   </p>
                   <p className="text-xs text-blue-700 mb-2">
-                    Nach deutschem Arbeitsrecht (§4 ArbZG) muss bei mehr als 6 Stunden Arbeit eine Pause von mindestens 30 Minuten dokumentiert werden.
+                    Nach deutschem Arbeitsrecht (§4 ArbZG) muss bei mehr als 6h Arbeit mind. 30 min Pause, bei mehr als 9h Arbeit mind. 45 min Pause dokumentiert werden.
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {daysWithMissingBreaks.map(day => {
