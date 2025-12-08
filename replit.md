@@ -145,7 +145,8 @@ CareConnect is a full-stack web application for caregivers managing elderly care
 - **Framework**: Express.js with TypeScript.
 - **API Design**: RESTful endpoints (`/api/customers`, `/api/appointments`), Zod validation, structured error responses.
 - **Structure**: Modular routes (`server/routes/`), business logic in a dedicated service layer (`server/services/`).
-- **Error Handling**: Centralized error codes (VALIDATION_ERROR, NOT_FOUND, etc.) with German messages, consistent error formatting via `handleRouteError()`.
+- **Dependency Injection**: Services support constructor injection for testability. Example: `AppointmentService` accepts an `IAppointmentStorage` interface, defaulting to the global storage singleton for backward compatibility but allowing mock injection in tests.
+- **Error Handling**: Centralized error codes (VALIDATION_ERROR, NOT_FOUND, etc.) with German messages, consistent error formatting via `handleRouteError()`. All routes must use `handleRouteError()` in catch blocks - no direct `res.status(500).json()` calls.
 - **Security**: Role-based access control with SQL-level data filtering. CSRF protection via Double-Submit Cookie pattern with `X-CSRF-Token` header validation for all state-changing requests. Database indexes on frequently queried columns (`customerId`, `date`, `assignedEmployeeId`) for performance optimization.
 
 ### Data Storage

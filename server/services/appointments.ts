@@ -1,4 +1,4 @@
-import { storage } from "../storage";
+import { storage, type IStorage } from "../storage";
 import type { Appointment, InsertAppointment, UpdateAppointment, InsertErstberatungCustomer } from "@shared/schema";
 import { timeToMinutes, addMinutesToTime } from "@shared/utils/datetime";
 import { 
@@ -10,6 +10,14 @@ import {
   getServiceTypeFromDurations,
   type AppointmentStatus
 } from "@shared/types";
+
+/**
+ * Minimal storage interface for AppointmentService
+ * This allows for easier testing by injecting mock implementations
+ */
+export interface IAppointmentStorage {
+  getAppointmentsByDate(date: string): Promise<Appointment[]>;
+}
 
 export interface OverlapCheckResult {
   hasOverlap: boolean;
@@ -43,6 +51,16 @@ export interface ErstberatungInput {
 }
 
 export class AppointmentService {
+  private storage: IAppointmentStorage;
+
+  /**
+   * Create an AppointmentService instance
+   * @param storageImpl - Storage implementation (defaults to global storage singleton for backward compatibility)
+   */
+  constructor(storageImpl: IAppointmentStorage = storage) {
+    this.storage = storageImpl;
+  }
+
   /**
    * Format time string to HH:MM format for display
    * Note: With harmonized time system, actualStart/actualEnd are now stored as time strings
@@ -58,7 +76,7 @@ export class AppointmentService {
     endTime: string, 
     excludeId?: number
   ): Promise<OverlapCheckResult> {
-    const existingAppointments = await storage.getAppointmentsByDate(date);
+    const existingAppointments = await this.storage.getAppointmentsByDate(date);
     
     for (const apt of existingAppointments) {
       if (excludeId && apt.id === excludeId) continue;

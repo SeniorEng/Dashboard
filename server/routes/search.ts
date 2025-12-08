@@ -3,6 +3,7 @@ import { storage } from "../storage";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
 import { requireAuth } from "../middleware/auth";
+import { handleRouteError } from "../lib/errors";
 
 interface SearchResult {
   type: "customer" | "appointment";
@@ -68,7 +69,6 @@ searchRouter.get("/", async (req: Request, res: Response) => {
 
     res.json(results);
   } catch (error) {
-    console.error("Search error:", error);
-    res.status(500).json({ error: "Search failed" });
+    handleRouteError(res, error, "Suche fehlgeschlagen", "Search error");
   }
 });

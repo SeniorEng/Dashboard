@@ -16,6 +16,7 @@ import { api, unwrapResult } from "@/lib/api/client";
 import { useAppointment } from "@/features/appointments";
 import { DURATION_OPTIONS } from "@shared/types";
 import type { Customer } from "@shared/schema";
+import { timeToMinutes, minutesToTimeDisplay, formatDurationDisplay } from "@shared/utils/datetime";
 
 export default function EditAppointment() {
   const [, params] = useRoute("/edit-appointment/:id");
@@ -83,27 +84,17 @@ export default function EditAppointment() {
     
     const totalMinutes = services.reduce((sum, s) => sum + s.duration, 0);
     
+    // Calculate end time using central utilities
     let calculatedEndTime = "";
     if (time && totalMinutes > 0) {
-      const [hours, mins] = time.split(":").map(Number);
-      const totalMins = hours * 60 + mins + totalMinutes;
-      const endHours = Math.floor(totalMins / 60) % 24;
-      const endMins = totalMins % 60;
-      calculatedEndTime = `${endHours.toString().padStart(2, "0")}:${endMins.toString().padStart(2, "0")}`;
+      const startMinutes = timeToMinutes(time);
+      calculatedEndTime = minutesToTimeDisplay((startMinutes + totalMinutes) % (24 * 60));
     }
-    
-    const formatDuration = (mins: number) => {
-      const h = Math.floor(mins / 60);
-      const m = mins % 60;
-      if (h === 0) return `${m} Min.`;
-      if (m === 0) return `${h} Std.`;
-      return `${h} Std. ${m} Min.`;
-    };
     
     return {
       services,
       totalMinutes,
-      totalFormatted: formatDuration(totalMinutes),
+      totalFormatted: formatDurationDisplay(totalMinutes, "verbose"),
       startTime: time,
       endTime: calculatedEndTime,
       hasServices: services.length > 0

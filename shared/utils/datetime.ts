@@ -193,11 +193,26 @@ export function isTimeBetween(
 }
 
 /**
- * Formatiert Minuten als Stunden:Minuten String für Anzeige (z.B. "2:30 Std")
+ * Formatiert Minuten als Stunden:Minuten String für Anzeige
+ * @param totalMinutes - Gesamtminuten
+ * @param style - "compact" für "2:30 Std", "verbose" für "2 Std. 30 Min."
+ * 
+ * Beispiele:
+ * - formatDurationDisplay(90, "compact") → "1:30 Std"
+ * - formatDurationDisplay(90, "verbose") → "1 Std. 30 Min."
+ * - formatDurationDisplay(30, "verbose") → "30 Min."
  */
-export function formatDurationDisplay(totalMinutes: number): string {
+export function formatDurationDisplay(totalMinutes: number, style: "compact" | "verbose" = "compact"): string {
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
+  
+  if (style === "verbose") {
+    if (hours === 0) return `${minutes} Min.`;
+    if (minutes === 0) return `${hours} Std.`;
+    return `${hours} Std. ${minutes} Min.`;
+  }
+  
+  // compact style (default)
   if (hours === 0) {
     return `${minutes} Min`;
   }

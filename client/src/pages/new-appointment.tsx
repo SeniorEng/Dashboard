@@ -18,6 +18,7 @@ import { api, unwrapResult } from "@/lib/api/client";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS } from "@shared/types";
 import type { Customer, User as UserType } from "@shared/schema";
 import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
+import { timeToMinutes, minutesToTimeDisplay, formatDurationDisplay } from "@shared/utils/datetime";
 
 export default function NewAppointment() {
   const [, setLocation] = useLocation();
@@ -90,29 +91,17 @@ export default function NewAppointment() {
     
     const totalMinutes = services.reduce((sum, s) => sum + s.duration, 0);
     
-    // Calculate end time
+    // Calculate end time using central utilities
     let endTime = "";
     if (ktTime && totalMinutes > 0) {
-      const [hours, mins] = ktTime.split(":").map(Number);
-      const totalMins = hours * 60 + mins + totalMinutes;
-      const endHours = Math.floor(totalMins / 60) % 24;
-      const endMins = totalMins % 60;
-      endTime = `${endHours.toString().padStart(2, "0")}:${endMins.toString().padStart(2, "0")}`;
+      const startMinutes = timeToMinutes(ktTime);
+      endTime = minutesToTimeDisplay((startMinutes + totalMinutes) % (24 * 60));
     }
-    
-    // Format duration as hours and minutes
-    const formatDuration = (mins: number) => {
-      const h = Math.floor(mins / 60);
-      const m = mins % 60;
-      if (h === 0) return `${m} Min.`;
-      if (m === 0) return `${h} Std.`;
-      return `${h} Std. ${m} Min.`;
-    };
     
     return {
       services,
       totalMinutes,
-      totalFormatted: formatDuration(totalMinutes),
+      totalFormatted: formatDurationDisplay(totalMinutes, "verbose"),
       startTime: ktTime,
       endTime,
       hasServices: services.length > 0
@@ -220,28 +209,16 @@ export default function NewAppointment() {
   
   // Computed summary for Erstberatung
   const ebSummary = useMemo(() => {
-    // Calculate end time
+    // Calculate end time using central utilities
     let endTime = "";
     if (ebStartTime && ebErstberatungDauer > 0) {
-      const [hours, mins] = ebStartTime.split(":").map(Number);
-      const totalMins = hours * 60 + mins + ebErstberatungDauer;
-      const endHours = Math.floor(totalMins / 60) % 24;
-      const endMins = totalMins % 60;
-      endTime = `${endHours.toString().padStart(2, "0")}:${endMins.toString().padStart(2, "0")}`;
+      const startMinutes = timeToMinutes(ebStartTime);
+      endTime = minutesToTimeDisplay((startMinutes + ebErstberatungDauer) % (24 * 60));
     }
-    
-    // Format duration as hours and minutes
-    const formatDuration = (mins: number) => {
-      const h = Math.floor(mins / 60);
-      const m = mins % 60;
-      if (h === 0) return `${m} Min.`;
-      if (m === 0) return `${h} Std.`;
-      return `${h} Std. ${m} Min.`;
-    };
     
     return {
       totalMinutes: ebErstberatungDauer,
-      totalFormatted: formatDuration(ebErstberatungDauer),
+      totalFormatted: formatDurationDisplay(ebErstberatungDauer, "verbose"),
       startTime: ebStartTime,
       endTime,
     };
