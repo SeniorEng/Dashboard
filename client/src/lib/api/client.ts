@@ -13,9 +13,13 @@ const CSRF_HEADER_NAME = "x-csrf-token";
 function getCsrfToken(): string | null {
   const cookies = document.cookie.split(";");
   for (const cookie of cookies) {
-    const [name, value] = cookie.trim().split("=");
-    if (name === CSRF_COOKIE_NAME) {
-      return value;
+    const trimmed = cookie.trim();
+    const eqIndex = trimmed.indexOf("=");
+    if (eqIndex === -1) continue;
+    const name = trimmed.substring(0, eqIndex);
+    const value = trimmed.substring(eqIndex + 1);
+    if (name === CSRF_COOKIE_NAME && value) {
+      return decodeURIComponent(value);
     }
   }
   return null;
