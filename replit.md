@@ -52,6 +52,63 @@ CareConnect is a full-stack web application for caregivers managing elderly care
   import { parseLocalDate } from "@shared/utils/datetime";
   const date = parseLocalDate("2025-12-04");
   ```
+- **API-Aufrufe (KRITISCH - CSRF-Schutz)**:
+  Das System verwendet CSRF-Schutz (Double-Submit Cookie Pattern) für alle zustandsändernden Anfragen. 
+  
+  **Lerneffekte & Regeln:**
+  1. **NIEMALS** direkte `fetch()` Aufrufe für POST/PATCH/DELETE verwenden!
+  2. **IMMER** den zentralen API-Client verwenden für alle mutierenden Anfragen
+  3. GET-Anfragen können weiterhin direkt mit `fetch()` gemacht werden (kein CSRF nötig)
+  4. Login ist absichtlich von CSRF ausgenommen (Token wird erst nach Login gesetzt)
+  
+  **Zentraler API-Client** (`client/src/lib/api/client.ts`):
+  ```typescript
+  import { api, unwrapResult } from "@/lib/api/client";
+  
+  // POST-Anfrage:
+  const result = await api.post("/appointments/kundentermin", data);
+  return unwrapResult(result);
+  
+  // PATCH-Anfrage:
+  const result = await api.patch(`/appointments/${id}`, data);
+  return unwrapResult(result);
+  
+  // DELETE-Anfrage:
+  const result = await api.delete(`/appointments/${id}`);
+  unwrapResult(result);
+  ```
+  
+  **Beispiel mit useMutation:**
+  ```typescript
+  // FALSCH - führt zu 403 CSRF-Fehler:
+  const mutation = useMutation({
+    mutationFn: async (data) => {
+      const res = await fetch("/api/appointments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      return res.json();
+    },
+  });
+  
+  // RICHTIG - mit API-Client und CSRF-Token:
+  import { api, unwrapResult } from "@/lib/api/client";
+  
+  const mutation = useMutation({
+    mutationFn: async (data) => {
+      const result = await api.post("/appointments", data);
+      return unwrapResult(result);
+    },
+  });
+  ```
+  
+  **Warum?**
+  - Der API-Client fügt automatisch den `X-CSRF-Token` Header hinzu
+  - Das Token wird aus dem Cookie `careconnect_csrf` gelesen
+  - Der Server validiert, dass Header-Token und Cookie-Token übereinstimmen
+  - Ohne diesen Header werden alle POST/PATCH/DELETE-Anfragen mit 403 abgelehnt
+
 - **Phone Number Handling**: Telefonnummern werden über `shared/utils/phone.ts` mit der Bibliothek `libphonenumber-js` verarbeitet. Nur deutsche Nummern (+49) sind erlaubt.
   - **Speicherung**: Immer im E.164-Format (`+491701234567`) in der Datenbank speichern
   - **Anzeige**: `formatPhoneForDisplay()` für nationale Darstellung (`0170 1234567`)
