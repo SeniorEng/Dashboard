@@ -6,10 +6,33 @@ import { insertTimeEntrySchema, updateTimeEntrySchema } from "@shared/schema";
 import { storage } from "../storage";
 
 /**
- * Convert time string (HH:MM or HH:MM:SS) to minutes since midnight
+ * Convert time string (HH:MM, HH:MM:SS) or ISO timestamp to minutes since midnight
+ * Handles both "16:30:00" and "2025-12-02T16:30:00.000Z" formats
  */
 function timeToMinutes(time: string): number {
-  const [hours, minutes] = time.split(":").map(Number);
+  if (!time || typeof time !== 'string') {
+    return -1;
+  }
+  
+  // Check if it's an ISO timestamp (contains 'T')
+  if (time.includes('T')) {
+    const date = new Date(time);
+    if (isNaN(date.getTime())) {
+      return -1;
+    }
+    return date.getHours() * 60 + date.getMinutes();
+  }
+  
+  // Regular time string (HH:MM or HH:MM:SS)
+  const parts = time.split(":");
+  if (parts.length < 2) {
+    return -1;
+  }
+  const hours = parseInt(parts[0], 10);
+  const minutes = parseInt(parts[1], 10);
+  if (isNaN(hours) || isNaN(minutes)) {
+    return -1;
+  }
   return hours * 60 + minutes;
 }
 
@@ -30,7 +53,7 @@ function timeRangesOverlap(
 function getAppointmentEndMinutes(appt: {
   scheduledStart: string;
   scheduledEnd: string | null;
-  actualEnd: string | null;
+  actualEnd: Date | string | null;
   hauswirtschaftActualDauer: number | null;
   hauswirtschaftDauer: number | null;
   alltagsbegleitungActualDauer: number | null;
@@ -43,6 +66,10 @@ function getAppointmentEndMinutes(appt: {
   
   // Prefer actualEnd if available (completed appointments)
   if (appt.actualEnd) {
+    // Handle both Date objects and string timestamps
+    if (appt.actualEnd instanceof Date) {
+      return appt.actualEnd.getHours() * 60 + appt.actualEnd.getMinutes();
+    }
     return timeToMinutes(appt.actualEnd);
   }
   
@@ -135,7 +162,8 @@ async function checkTimeConflicts(
     if (apptEnd === -1) continue;
     
     if (timeRangesOverlap(newStart, newEnd, apptStart, apptEnd)) {
-      return `Überlappung mit Termin um ${appt.scheduledStart} Uhr bei ${appt.customerFirstName} ${appt.customerLastName}`;
+      const customerName = appt.customer?.name || `${appt.customer?.vorname || ''} ${appt.customer?.nachname || ''}`.trim() || 'Unbekannt';
+      return `Überlappung mit Termin um ${appt.scheduledStart.slice(0, 5)} Uhr bei ${customerName}`;
     }
   }
   
