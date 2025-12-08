@@ -45,10 +45,7 @@ export {
   APPOINTMENT_TYPE_COLORS,
   SERVICE_TYPE_COLORS,
   SERVICE_BORDER_COLORS,
-  // Time utilities (deprecated - prefer @shared/utils/datetime)
-  timeToMinutes,
-  minutesToTime,
-  addMinutesToTime,
+  // Time formatting utilities
   formatTimeSlot,
   formatDuration,
   // Time comparison

@@ -50,11 +50,12 @@ export default function AppointmentDetail() {
         description: "Der Termin wurde erfolgreich gelöscht.",
       });
       setLocation("/");
-    } catch (error: any) {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Der Termin konnte nicht gelöscht werden.";
       toast({
         variant: "destructive",
         title: "Fehler",
-        description: error.message || "Der Termin konnte nicht gelöscht werden.",
+        description: message,
       });
     }
     setShowDeleteDialog(false);

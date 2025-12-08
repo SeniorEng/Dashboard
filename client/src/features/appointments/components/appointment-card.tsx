@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { MapPin, CheckCircle2, Clock, FileText, Pencil, Trash2, MoreVertical } from "lucide-react";
 import { useLocation } from "wouter";
-import type { AppointmentWithCustomer } from "@shared/types";
+import type { AppointmentWithCustomer, AppointmentStatus } from "@shared/types";
 import { getCardServiceInfo, canModifyAppointment } from "@shared/types";
 import { formatTimeSlot, getEndTime } from "../utils";
 import { useDeleteAppointment } from "../hooks";
@@ -52,7 +52,7 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
   const { toast } = useToast();
   const [, navigate] = useLocation();
   
-  const canModify = canModifyAppointment(appointment.status as any);
+  const canModify = canModifyAppointment(appointment.status as AppointmentStatus);
   const serviceInfo = useMemo(() => 
     getCardServiceInfo(
       appointment.appointmentType,
@@ -114,11 +114,12 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
         title: "Termin gelöscht",
         description: "Der Termin wurde erfolgreich gelöscht.",
       });
-    } catch (error: any) {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Der Termin konnte nicht gelöscht werden.";
       toast({
         variant: "destructive",
         title: "Fehler",
-        description: error.message || "Der Termin konnte nicht gelöscht werden.",
+        description: message,
       });
     }
     setShowDeleteDialog(false);

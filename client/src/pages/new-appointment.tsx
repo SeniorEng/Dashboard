@@ -121,7 +121,7 @@ export default function NewAppointment() {
 
   // Create Kundentermin mutation
   const createKundentermin = useMutation({
-    mutationFn: async (data: any) => {
+    mutationFn: async (data: Record<string, unknown>) => {
       const result = await api.post("/appointments/kundentermin", data);
       return unwrapResult(result);
     },
@@ -137,7 +137,7 @@ export default function NewAppointment() {
 
   // Create Erstberatung mutation
   const createErstberatung = useMutation({
-    mutationFn: async (data: any) => {
+    mutationFn: async (data: Record<string, unknown>) => {
       const result = await api.post("/appointments/erstberatung", data);
       return unwrapResult(result);
     },

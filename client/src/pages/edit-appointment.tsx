@@ -111,7 +111,7 @@ export default function EditAppointment() {
   }, [appointment, time, endTime, hauswirtschaft, hauswirtschaftDauer, alltagsbegleitung, alltagsbegleitungDauer]);
 
   const updateMutation = useMutation({
-    mutationFn: async (data: any) => {
+    mutationFn: async (data: Record<string, unknown>) => {
       const result = await api.patch(`/appointments/${id}`, data);
       return unwrapResult(result);
     },

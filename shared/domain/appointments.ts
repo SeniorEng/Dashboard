@@ -1,8 +1,5 @@
 import type { Appointment } from "../schema";
-import {
-  timeToMinutes as datetimeToMinutes,
-  minutesToTimeDisplay,
-} from "../utils/datetime";
+import { timeToMinutes, addMinutesToTime } from "../utils/datetime";
 
 // ============================================
 // TYPES
@@ -55,36 +52,8 @@ export const SERVICE_OPTIONS = [
 export type ServiceOption = typeof SERVICE_OPTIONS[number];
 
 // ============================================
-// TIME UTILITIES (delegating to datetime.ts)
+// TIME FORMATTING UTILITIES
 // ============================================
-
-/**
- * Konvertiert Zeit-String zu Minuten seit Mitternacht
- * @deprecated Bevorzuge direkt @shared/utils/datetime für neue Nutzungen
- */
-export function timeToMinutes(time: string): number {
-  return datetimeToMinutes(time);
-}
-
-/**
- * Konvertiert Minuten zu Zeit-String "HH:MM"
- * @deprecated Bevorzuge direkt @shared/utils/datetime für neue Nutzungen
- */
-export function minutesToTime(minutes: number): string {
-  const normalizedMinutes = ((minutes % 1440) + 1440) % 1440;
-  return minutesToTimeDisplay(normalizedMinutes);
-}
-
-/**
- * Addiert Minuten zu einer Zeit (mit Normalisierung für 24h-Überlauf)
- * @deprecated Bevorzuge direkt @shared/utils/datetime für neue Nutzungen
- */
-export function addMinutesToTime(time: string, minutesToAdd: number): string {
-  const totalMinutes = datetimeToMinutes(time) + minutesToAdd;
-  // Normalize to 0-1439 (24h in minutes) to handle overflow/underflow
-  const normalizedMinutes = ((totalMinutes % 1440) + 1440) % 1440;
-  return minutesToTimeDisplay(normalizedMinutes);
-}
 
 export function formatTimeSlot(time: string | null): string {
   if (!time) return "--:--";
