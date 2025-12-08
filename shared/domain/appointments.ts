@@ -1,9 +1,21 @@
 import type { Appointment } from "../schema";
+import {
+  timeToMinutes as datetimeToMinutes,
+  minutesToTimeDisplay,
+} from "../utils/datetime";
+
+// ============================================
+// TYPES
+// ============================================
 
 export type AppointmentStatus = "scheduled" | "in-progress" | "documenting" | "completed";
 export type AppointmentType = "Erstberatung" | "Kundentermin";
 export type ServiceType = "Hauswirtschaft" | "Alltagsbegleitung" | "Erstberatung";
 export type TravelOriginType = "home" | "appointment";
+
+// ============================================
+// CONSTANTS
+// ============================================
 
 export const APPOINTMENT_STATUSES: AppointmentStatus[] = ["scheduled", "in-progress", "documenting", "completed"];
 export const APPOINTMENT_TYPES: AppointmentType[] = ["Erstberatung", "Kundentermin"];
@@ -42,21 +54,36 @@ export const SERVICE_OPTIONS = [
 ] as const;
 export type ServiceOption = typeof SERVICE_OPTIONS[number];
 
+// ============================================
+// TIME UTILITIES (delegating to datetime.ts)
+// ============================================
+
+/**
+ * Konvertiert Zeit-String zu Minuten seit Mitternacht
+ * @deprecated Bevorzuge direkt @shared/utils/datetime für neue Nutzungen
+ */
 export function timeToMinutes(time: string): number {
-  const [hours, minutes] = time.split(":").map(Number);
-  return hours * 60 + minutes;
+  return datetimeToMinutes(time);
 }
 
+/**
+ * Konvertiert Minuten zu Zeit-String "HH:MM"
+ * @deprecated Bevorzuge direkt @shared/utils/datetime für neue Nutzungen
+ */
 export function minutesToTime(minutes: number): string {
   const normalizedMinutes = ((minutes % 1440) + 1440) % 1440;
-  const hours = Math.floor(normalizedMinutes / 60);
-  const mins = normalizedMinutes % 60;
-  return `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}`;
+  return minutesToTimeDisplay(normalizedMinutes);
 }
 
+/**
+ * Addiert Minuten zu einer Zeit (mit Normalisierung für 24h-Überlauf)
+ * @deprecated Bevorzuge direkt @shared/utils/datetime für neue Nutzungen
+ */
 export function addMinutesToTime(time: string, minutesToAdd: number): string {
-  const totalMinutes = timeToMinutes(time) + minutesToAdd;
-  return minutesToTime(totalMinutes);
+  const totalMinutes = datetimeToMinutes(time) + minutesToAdd;
+  // Normalize to 0-1439 (24h in minutes) to handle overflow/underflow
+  const normalizedMinutes = ((totalMinutes % 1440) + 1440) % 1440;
+  return minutesToTimeDisplay(normalizedMinutes);
 }
 
 export function formatTimeSlot(time: string | null): string {

@@ -1,5 +1,24 @@
+/**
+ * Zentrale Typen-Exports für CareConnect
+ * 
+ * Diese Datei dient als Haupt-Import-Punkt für Frontend-Komponenten.
+ * Sie re-exportiert Typen und Funktionen aus spezialisierten Modulen.
+ * 
+ * Struktur:
+ * - @shared/schema.ts      → Datenbank-Schemas, Drizzle-Typen, Zod-Validierung
+ * - @shared/domain/*       → Business-Logik und Domain-Typen
+ * - @shared/utils/*        → Utility-Funktionen (datetime, phone, etc.)
+ * - @shared/types.ts       → API-Response-Typen und Re-Exports (diese Datei)
+ */
+
 import type { Appointment, Customer } from "./schema";
+
+// ============================================
+// RE-EXPORTS FROM DOMAIN/APPOINTMENTS
+// ============================================
+
 export {
+  // Types
   type AppointmentStatus,
   type AppointmentType,
   type ServiceType,
@@ -11,6 +30,7 @@ export {
   type CardServiceInfo,
   type TravelOriginSuggestion,
   type ServiceDocumentation,
+  // Constants
   APPOINTMENT_TYPES,
   APPOINTMENT_STATUSES,
   SERVICE_TYPES,
@@ -25,16 +45,22 @@ export {
   APPOINTMENT_TYPE_COLORS,
   SERVICE_TYPE_COLORS,
   SERVICE_BORDER_COLORS,
+  // Time utilities (deprecated - prefer @shared/utils/datetime)
   timeToMinutes,
   minutesToTime,
   addMinutesToTime,
   formatTimeSlot,
   formatDuration,
+  // Time comparison
   doTimesOverlap,
   calculateTotalDuration,
   getEndTime,
+  // Service helpers
   getServiceInfo,
   getCardServiceInfo,
+  getServicesToDocument,
+  validateServiceDocumentation,
+  // Status helpers
   isValidStatusTransition,
   canModifyAppointment,
   canEditSchedulingFields,
@@ -45,18 +71,27 @@ export {
   getAppointmentTypeColor,
   getServiceColor,
   getServiceBorderColor,
+  // Travel helpers
   suggestTravelOrigin,
-  getServicesToDocument,
-  validateServiceDocumentation,
 } from "./domain/appointments";
 
+// ============================================
+// API RESPONSE TYPES
+// ============================================
+
+/**
+ * Termin mit verknüpftem Kunden (für Listen-Anzeige)
+ */
 export interface AppointmentWithCustomer extends Appointment {
   customer: Customer | null;
 }
 
+/**
+ * Payload für Termin-Updates
+ * @deprecated Verwende stattdessen die Zod-Schemas aus schema.ts
+ */
 export interface UpdateAppointmentPayload {
   status?: "scheduled" | "in-progress" | "documenting" | "completed";
-  // actualStart and actualEnd are now time strings (HH:MM:SS) - harmonized system
   actualStart?: string;
   actualEnd?: string;
   kilometers?: string;
@@ -65,6 +100,13 @@ export interface UpdateAppointmentPayload {
   signatureData?: string;
 }
 
+// ============================================
+// UTILITY FUNCTIONS
+// ============================================
+
+/**
+ * Ermittelt den primären Service-Typ basierend auf den geplanten Dauern
+ */
 export function getServiceTypeFromDurations(
   hauswirtschaftDauer: number | null | undefined,
   alltagsbegleitungDauer: number | null | undefined
