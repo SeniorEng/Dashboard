@@ -322,7 +322,9 @@ export const customerContracts = pgTable("customer_contracts", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
-});
+}, (table) => [
+  index("customer_contracts_customer_status_idx").on(table.customerId, table.status),
+]);
 
 // Service categories for pricing
 export const SERVICE_CATEGORIES = [

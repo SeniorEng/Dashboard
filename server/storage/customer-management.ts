@@ -34,7 +34,7 @@ import {
 } from "@shared/schema";
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
-import { eq, and, isNull, desc, count, or, ilike, sql as sqlBuilder } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, desc, count, or, ilike, sql as sqlBuilder } from "drizzle-orm";
 import { customerIdsCache } from "../services/cache";
 
 const sql = neon(process.env.DATABASE_URL!);
@@ -468,11 +468,12 @@ export class CustomerManagementStorage {
     const limit = options?.limit ?? 20;
     const offset = options?.offset ?? 0;
 
-    let whereConditions: any[] = [];
+    // Base where conditions (without hasActiveContract filter)
+    let baseConditions: any[] = [];
     
     if (filters?.search) {
       const searchTerm = `%${filters.search}%`;
-      whereConditions.push(
+      baseConditions.push(
         or(
           ilike(customers.name, searchTerm),
           ilike(customers.vorname, searchTerm),
@@ -486,20 +487,41 @@ export class CustomerManagementStorage {
     }
     
     if (filters?.pflegegrad) {
-      whereConditions.push(eq(customers.pflegegrad, filters.pflegegrad));
+      baseConditions.push(eq(customers.pflegegrad, filters.pflegegrad));
     }
     
     if (filters?.primaryEmployeeId) {
-      whereConditions.push(eq(customers.primaryEmployeeId, filters.primaryEmployeeId));
+      baseConditions.push(eq(customers.primaryEmployeeId, filters.primaryEmployeeId));
     }
 
-    const whereClause = whereConditions.length > 0 ? and(...whereConditions) : undefined;
+    // Subquery to check for active contracts - avoids N+1 queries
+    const activeContractSubquery = db
+      .select({ 
+        customerId: customerContracts.customerId,
+        hasContract: sqlBuilder<boolean>`true`.as('has_contract')
+      })
+      .from(customerContracts)
+      .where(eq(customerContracts.status, "active"))
+      .groupBy(customerContracts.customerId)
+      .as('active_contracts');
 
-    const countResult = await db
+    // Build full where clause including hasActiveContract filter (applied after join)
+    let fullConditions = [...baseConditions];
+    if (filters?.hasActiveContract === true) {
+      fullConditions.push(isNotNull(activeContractSubquery.customerId));
+    } else if (filters?.hasActiveContract === false) {
+      fullConditions.push(isNull(activeContractSubquery.customerId));
+    }
+    const fullWhereClause = fullConditions.length > 0 ? and(...fullConditions) : undefined;
+
+    // Count query needs to join with subquery for accurate hasActiveContract filtering
+    const countQuery = db
       .select({ count: count() })
       .from(customers)
-      .where(whereClause);
+      .leftJoin(activeContractSubquery, eq(customers.id, activeContractSubquery.customerId))
+      .where(fullWhereClause);
     
+    const countResult = await countQuery;
     const total = Number(countResult[0]?.count ?? 0);
 
     const result = await db
@@ -516,40 +538,31 @@ export class CustomerManagementStorage {
         createdAt: customers.createdAt,
         primaryEmployeeId: customers.primaryEmployeeId,
         primaryEmployeeName: users.displayName,
+        hasActiveContract: activeContractSubquery.hasContract,
       })
       .from(customers)
       .leftJoin(users, eq(customers.primaryEmployeeId, users.id))
-      .where(whereClause)
+      .leftJoin(activeContractSubquery, eq(customers.id, activeContractSubquery.customerId))
+      .where(fullWhereClause)
       .orderBy(desc(customers.createdAt))
       .limit(limit)
       .offset(offset);
 
-    const data: CustomerListItem[] = await Promise.all(result.map(async (r) => {
-      const contract = await db
-        .select({ id: customerContracts.id })
-        .from(customerContracts)
-        .where(and(
-          eq(customerContracts.customerId, r.id),
-          eq(customerContracts.status, "active")
-        ))
-        .limit(1);
-
-      return {
-        id: r.id,
-        name: r.name,
-        vorname: r.vorname,
-        nachname: r.nachname,
-        email: r.email,
-        telefon: r.telefon,
-        pflegegrad: r.pflegegrad,
-        address: r.address,
-        stadt: r.stadt,
-        primaryEmployee: r.primaryEmployeeId && r.primaryEmployeeName 
-          ? { id: r.primaryEmployeeId, displayName: r.primaryEmployeeName }
-          : null,
-        hasActiveContract: contract.length > 0,
-        createdAt: r.createdAt,
-      };
+    const data: CustomerListItem[] = result.map((r) => ({
+      id: r.id,
+      name: r.name,
+      vorname: r.vorname,
+      nachname: r.nachname,
+      email: r.email,
+      telefon: r.telefon,
+      pflegegrad: r.pflegegrad,
+      address: r.address,
+      stadt: r.stadt,
+      primaryEmployee: r.primaryEmployeeId && r.primaryEmployeeName 
+        ? { id: r.primaryEmployeeId, displayName: r.primaryEmployeeName }
+        : null,
+      hasActiveContract: r.hasActiveContract === true,
+      createdAt: r.createdAt,
     }));
 
     return { data, total, limit, offset };
