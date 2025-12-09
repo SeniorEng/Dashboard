@@ -74,6 +74,7 @@ interface UserFormData {
   password?: string;
   vorname: string;
   nachname: string;
+  telefon?: string;
   strasse?: string;
   hausnummer?: string;
   plz?: string;
@@ -115,6 +116,41 @@ function formatPhoneDisplay(phone: string): string {
     return '0' + phone.slice(3).replace(/(\d{3})(\d+)/, '$1 $2');
   }
   return phone;
+}
+
+// Validate German phone number
+function validateGermanPhoneNumber(input: string): 
+  | { valid: true; normalized: string; formatted: string }
+  | { valid: false; error: string } {
+  if (!input || input.trim() === "") {
+    return { valid: false, error: "Telefonnummer ist erforderlich" };
+  }
+  
+  const cleaned = input.trim().replace(/\s+/g, '');
+  
+  // Basic German phone pattern check
+  const germanPattern = /^(\+49|0049|0)[1-9]\d{6,13}$/;
+  if (!germanPattern.test(cleaned)) {
+    return { valid: false, error: "Ungültige deutsche Telefonnummer" };
+  }
+  
+  // Normalize to E.164
+  let normalized: string;
+  if (cleaned.startsWith('+49')) {
+    normalized = cleaned;
+  } else if (cleaned.startsWith('0049')) {
+    normalized = '+49' + cleaned.slice(4);
+  } else if (cleaned.startsWith('0')) {
+    normalized = '+49' + cleaned.slice(1);
+  } else {
+    normalized = '+49' + cleaned;
+  }
+  
+  // Format for display
+  const nationalNumber = normalized.slice(3);
+  const formatted = '0' + nationalNumber.slice(0, 3) + ' ' + nationalNumber.slice(3);
+  
+  return { valid: true, normalized, formatted };
 }
 
 export default function AdminUsers() {
@@ -422,6 +458,8 @@ function UserForm({
   const [password, setPassword] = useState("");
   const [vorname, setVorname] = useState(user?.vorname ?? "");
   const [nachname, setNachname] = useState(user?.nachname ?? "");
+  const [telefon, setTelefon] = useState(user?.telefon ? formatPhoneDisplay(user.telefon) : "");
+  const [telefonError, setTelefonError] = useState("");
   const [strasse, setStrasse] = useState(user?.strasse ?? "");
   const [hausnummer, setHausnummer] = useState(user?.hausnummer ?? "");
   const [plz, setPlz] = useState(user?.plz ?? "");
@@ -444,12 +482,40 @@ function UserForm({
     hourlyRateAlltagsbegleitung || 
     travelCostType;
 
+  // Validate and normalize phone on blur
+  const handleTelefonBlur = () => {
+    if (!telefon.trim()) {
+      setTelefonError("");
+      return;
+    }
+    const result = validateGermanPhoneNumber(telefon);
+    if (result.valid) {
+      setTelefon(result.formatted);
+      setTelefonError("");
+    } else {
+      setTelefonError(result.error);
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validate phone before submit
+    let normalizedTelefon: string | undefined = undefined;
+    if (telefon.trim()) {
+      const result = validateGermanPhoneNumber(telefon);
+      if (!result.valid) {
+        setTelefonError(result.error);
+        return;
+      }
+      normalizedTelefon = result.normalized;
+    }
+    
     const data: UserFormData & { password?: string } = {
       email,
       vorname,
       nachname,
+      telefon: normalizedTelefon,
       strasse: strasse || undefined,
       hausnummer: hausnummer || undefined,
       plz: plz || undefined,
@@ -519,15 +585,33 @@ function UserForm({
             </div>
           </div>
           
-          <div className="space-y-2">
-            <Label htmlFor="geburtsdatum">Geburtsdatum</Label>
-            <Input
-              id="geburtsdatum"
-              type="date"
-              value={geburtsdatum}
-              onChange={(e) => setGeburtsdatum(e.target.value)}
-              data-testid="input-user-geburtsdatum"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="geburtsdatum">Geburtsdatum</Label>
+              <Input
+                id="geburtsdatum"
+                type="date"
+                value={geburtsdatum}
+                onChange={(e) => setGeburtsdatum(e.target.value)}
+                data-testid="input-user-geburtsdatum"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="telefon">Telefon</Label>
+              <Input
+                id="telefon"
+                type="tel"
+                value={telefon}
+                onChange={(e) => setTelefon(e.target.value)}
+                onBlur={handleTelefonBlur}
+                placeholder="0170 1234567"
+                className={telefonError ? "border-red-500" : ""}
+                data-testid="input-user-telefon"
+              />
+              {telefonError && (
+                <p className="text-xs text-red-500">{telefonError}</p>
+              )}
+            </div>
           </div>
         </div>
 

@@ -52,6 +52,7 @@ export interface CreateUserData {
   password: string;
   vorname: string;
   nachname: string;
+  telefon?: string;
   strasse?: string;
   hausnummer?: string;
   plz?: string;
@@ -83,6 +84,7 @@ export class AuthService {
         displayName,
         vorname: data.vorname,
         nachname: data.nachname,
+        telefon: data.telefon || null,
         strasse: data.strasse || null,
         hausnummer: data.hausnummer || null,
         plz: data.plz || null,

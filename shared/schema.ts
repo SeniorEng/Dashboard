@@ -93,6 +93,7 @@ export const insertUserSchema = z.object({
   password: z.string().min(8, "Passwort muss mindestens 8 Zeichen haben"),
   vorname: z.string().min(1, "Vorname ist erforderlich"),
   nachname: z.string().min(1, "Nachname ist erforderlich"),
+  telefon: z.string().optional(),
   strasse: z.string().optional(),
   hausnummer: z.string().optional(),
   plz: z.string().optional(),
