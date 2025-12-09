@@ -29,13 +29,14 @@ export function PageHeader({
   className,
 }: PageHeaderProps) {
   return (
-    <div className={cn("flex items-center justify-between mb-6", className)}>
-      <div className="flex items-center gap-4">
+    <div className={cn("flex items-center justify-between gap-3 mb-6", className)}>
+      <div className="flex items-center gap-3 min-w-0 flex-1">
         {backHref && (
           <Link href={backHref}>
             <Button 
               variant="ghost" 
               size="icon" 
+              className="shrink-0"
               data-testid="button-back"
               aria-label={backLabel || "Zurück"}
             >
@@ -43,10 +44,10 @@ export function PageHeader({
             </Button>
           </Link>
         )}
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">{title}</h1>
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold text-gray-900 truncate">{title}</h1>
           {subtitle && (
-            <p className="text-sm text-gray-600 mt-0.5">{subtitle}</p>
+            <p className="text-sm text-gray-600 mt-0.5 truncate">{subtitle}</p>
           )}
           {badge && (
             <div className="flex items-center gap-2 mt-1">{badge}</div>
@@ -54,7 +55,7 @@ export function PageHeader({
         </div>
       </div>
       {actions && (
-        <div className="flex items-center gap-2">{actions}</div>
+        <div className="flex items-center gap-2 shrink-0">{actions}</div>
       )}
     </div>
   );
