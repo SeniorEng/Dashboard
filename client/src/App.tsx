@@ -24,6 +24,7 @@ import AdminCustomerAssignments from "@/pages/admin/customer-assignments";
 import AdminCustomers from "@/pages/admin/customers";
 import AdminCustomerDetail from "@/pages/admin/customer-detail";
 import AdminCustomerNew from "@/pages/admin/customer-new";
+import AdminCustomerEdit from "@/pages/admin/customer-edit";
 import AdminTimeEntries from "@/pages/admin/time-entries";
 import UndocumentedAppointments from "@/pages/undocumented-appointments";
 import CustomerDetail from "@/pages/customer-detail";
@@ -116,6 +117,9 @@ function Router() {
       </Route>
       <Route path="/admin/customers/new">
         <AdminRoute component={AdminCustomerNew} />
+      </Route>
+      <Route path="/admin/customers/:id/edit">
+        {() => <AdminRoute component={() => <AdminCustomerEdit />} />}
       </Route>
       <Route path="/admin/customers/:id">
         {() => <AdminRoute component={() => <AdminCustomerDetail />} />}
