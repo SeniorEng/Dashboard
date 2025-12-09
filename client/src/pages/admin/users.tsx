@@ -291,53 +291,55 @@ export default function AdminUsers() {
             <div className="space-y-4">
               {users?.map((user) => (
                 <Card key={user.id} data-testid={`card-user-${user.id}`}>
-                  <CardContent className="p-4">
-                    {/* Header row: Name, Phone, Role (right-aligned) */}
-                    <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-gray-100">
-                      <div className="min-w-0 flex-1">
-                        <span className="font-semibold text-gray-900">{user.displayName}</span>
-                        <p className="text-sm text-gray-500">
-                          {user.telefon ? formatPhoneDisplay(user.telefon) : '–'}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        {!user.isActive && (
-                          <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600">
-                            Inaktiv
-                          </span>
-                        )}
-                        <span className={`text-xs px-2 py-0.5 rounded ${user.isAdmin ? 'bg-teal-100 text-teal-700' : 'bg-gray-100 text-gray-600'}`}>
-                          {user.isAdmin ? 'Admin' : 'Mitarbeiter'}
-                        </span>
-                      </div>
-                    </div>
-                    
-                    {/* Content: Left column (skills) + divider + Right column (buttons) */}
+                  <CardContent className="p-0">
                     <div className="flex">
-                      {/* Left column - 80% - Skills */}
-                      <div className="flex-1 pr-4">
-                        <div className="text-xs text-gray-500 mb-1">Tätigkeitsbereiche</div>
-                        <div className="flex flex-wrap gap-x-3 gap-y-1">
-                          {user.roles.map((role) => (
-                            <span key={role} className="text-sm text-gray-700">
-                              {ROLE_LABELS[role] || role}
+                      {/* Left column - 80% */}
+                      <div className="flex-1 p-4">
+                        {/* Top: Name, Phone, Badges */}
+                        <div className="flex items-center gap-3 mb-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-semibold text-gray-900">{user.displayName}</span>
+                              <span className="text-gray-400">·</span>
+                              <span className="text-sm text-gray-500">
+                                {user.telefon ? formatPhoneDisplay(user.telefon) : '–'}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {!user.isActive && (
+                              <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600">
+                                Inaktiv
+                              </span>
+                            )}
+                            <span className={`text-xs px-2 py-0.5 rounded ${user.isAdmin ? 'bg-teal-100 text-teal-700' : 'bg-gray-100 text-gray-600'}`}>
+                              {user.isAdmin ? 'Admin' : 'Mitarbeiter'}
                             </span>
-                          ))}
-                          {user.roles.length === 0 && (
-                            <span className="text-sm text-gray-400 italic">Keine zugewiesen</span>
-                          )}
+                          </div>
+                        </div>
+                        
+                        {/* Bottom: Skills */}
+                        <div>
+                          <div className="text-xs text-gray-500 mb-1">Tätigkeitsbereiche</div>
+                          <div className="flex flex-wrap gap-x-3 gap-y-1">
+                            {user.roles.map((role) => (
+                              <span key={role} className="text-sm text-gray-700">
+                                {ROLE_LABELS[role] || role}
+                              </span>
+                            ))}
+                            {user.roles.length === 0 && (
+                              <span className="text-sm text-gray-400 italic">Keine zugewiesen</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                       
-                      {/* Vertical divider */}
-                      <div className="w-px bg-gray-200 mx-2"></div>
-                      
-                      {/* Right column - Buttons stacked vertically */}
-                      <div className="flex flex-col gap-1 pl-2">
+                      {/* Right column - Buttons spanning full height */}
+                      <div className="flex flex-col justify-center gap-1 px-3 bg-gray-50 border-l border-gray-100">
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-7 w-7 p-0"
+                          className="h-8 w-8 p-0"
                           onClick={() => setEditingUser(user)}
                           data-testid={`button-edit-user-${user.id}`}
                         >
@@ -346,7 +348,7 @@ export default function AdminUsers() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-7 w-7 p-0"
+                          className="h-8 w-8 p-0"
                           onClick={() => setResetPasswordUser(user)}
                           data-testid={`button-reset-password-${user.id}`}
                         >
@@ -355,7 +357,7 @@ export default function AdminUsers() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-7 w-7 p-0"
+                          className="h-8 w-8 p-0"
                           onClick={() =>
                             toggleActiveMutation.mutate({
                               id: user.id,
@@ -375,7 +377,7 @@ export default function AdminUsers() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-7 w-7 p-0"
+                              className="h-8 w-8 p-0"
                               data-testid={`button-delete-user-${user.id}`}
                             >
                               <Trash2 className="h-4 w-4 text-red-500" />
