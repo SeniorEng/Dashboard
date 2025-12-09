@@ -2,11 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Cake, User, Users, Loader2, Gift } from "lucide-react";
+import { Cake, Loader2, Gift } from "lucide-react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { formatDateForDisplay } from "@shared/utils/date";
-import { iconSize, componentStyles } from "@/design-system";
+import { iconSize } from "@/design-system";
 import { EmptyState } from "@/components/patterns/empty-state";
 
 interface BirthdayEntry {
@@ -138,19 +138,7 @@ function BirthdayCard({ birthday }: { birthday: BirthdayEntry }) {
       data-testid={`card-birthday-${birthday.type}-${birthday.id}`}
     >
       <CardContent className="p-4">
-        <div className="flex items-center gap-4">
-          <div className={`${componentStyles.avatarContainerLg} flex-shrink-0 ${
-            birthday.type === "employee" 
-              ? "bg-blue-100 text-blue-600" 
-              : "bg-primary/10 text-primary"
-          }`}>
-            {birthday.type === "employee" ? (
-              <User className={iconSize.lg} />
-            ) : (
-              <Users className={iconSize.lg} />
-            )}
-          </div>
-          
+        <div className="flex items-center justify-between gap-3">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-0.5">
               <h3 className="font-semibold text-foreground truncate" data-testid={`text-birthday-name-${birthday.type}-${birthday.id}`}>
@@ -161,6 +149,13 @@ function BirthdayCard({ birthday }: { birthday: BirthdayEntry }) {
               )}
             </div>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Badge 
+                variant="outline" 
+                className={`text-xs ${birthday.type === "employee" ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-primary/10 text-primary border-primary/20"}`}
+              >
+                {birthday.type === "employee" ? "Mitarbeiter" : "Kunde"}
+              </Badge>
+              <span className="text-muted-foreground/50">•</span>
               <span data-testid={`text-birthday-date-${birthday.type}-${birthday.id}`}>
                 {formatDateForDisplay(birthday.geburtsdatum, { day: "numeric", month: "long" })}
               </span>
@@ -169,18 +164,13 @@ function BirthdayCard({ birthday }: { birthday: BirthdayEntry }) {
             </div>
           </div>
           
-          <div className="text-right flex-shrink-0">
-            <Badge 
-              variant={isToday ? "default" : isSoon ? "secondary" : "outline"}
-              className={isToday ? "bg-green-600" : ""}
-              data-testid={`badge-birthday-days-${birthday.type}-${birthday.id}`}
-            >
-              {getDaysLabel(birthday.daysUntil)}
-            </Badge>
-            <div className="text-xs text-muted-foreground mt-1">
-              {birthday.type === "employee" ? "Mitarbeiter" : "Kunde"}
-            </div>
-          </div>
+          <Badge 
+            variant={isToday ? "default" : isSoon ? "secondary" : "outline"}
+            className={`shrink-0 ${isToday ? "bg-green-600" : ""}`}
+            data-testid={`badge-birthday-days-${birthday.type}-${birthday.id}`}
+          >
+            {getDaysLabel(birthday.daysUntil)}
+          </Badge>
         </div>
       </CardContent>
     </Card>

@@ -263,7 +263,9 @@ export const componentStyles = {
   listContainer: 'space-y-3',
   listItem: 'flex items-center justify-between p-4 rounded-xl bg-white shadow-sm',
   
-  // Avatar/Icon containers
+  // Avatar/Icon containers (DEPRECATED - nicht für Kunden/Mitarbeiter verwenden!)
+  // Diese App verwendet keine Fotos für Kunden oder Mitarbeiter.
+  // Verwende stattdessen Text-Badges oder direkte Informationsdarstellung.
   avatarContainer: 'h-10 w-10 rounded-full flex items-center justify-center',
   avatarContainerSm: 'h-8 w-8 rounded-full flex items-center justify-center',
   avatarContainerLg: 'h-12 w-12 rounded-full flex items-center justify-center',

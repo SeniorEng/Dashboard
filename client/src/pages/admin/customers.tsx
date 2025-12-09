@@ -260,14 +260,10 @@ export default function AdminCustomers() {
                   data-testid={`card-customer-${customer.id}`}
                 >
                   <div className="flex items-start justify-between">
-                    <div className="flex items-start gap-3">
-                      <div className={`${componentStyles.avatarContainer} bg-teal-100`}>
-                        <User2 className={`${iconSize.md} text-teal-600`} />
-                      </div>
-                      <div>
-                        <h3 className="font-medium text-gray-900">
-                          {customer.name}
-                        </h3>
+                    <div>
+                      <h3 className="font-medium text-gray-900">
+                        {customer.name}
+                      </h3>
                         {customer.address && (
                           <div className="flex items-center gap-1 text-sm text-gray-600 mt-1">
                             <MapPin className={iconSize.xs} />
@@ -280,7 +276,6 @@ export default function AdminCustomers() {
                             <span>{customer.telefon}</span>
                           </div>
                         )}
-                      </div>
                     </div>
                     <div className="flex flex-col items-end gap-2">
                       {customer.pflegegrad !== null && customer.pflegegrad > 0 && (

@@ -5,7 +5,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 
 ## User Preferences
 - Preferred communication style: Simple, everyday language
-- No profile pictures for customers (use icons instead)
+- **Keine Avatare/Profilbilder**: Für Kunden und Mitarbeiter werden keine Fotos oder Avatar-Platzhalter verwendet. Stattdessen werden Namen direkt mit Badges (z.B. Pflegegrad) dargestellt. Dies spart Platz und hält die Oberfläche aufgeräumt.
 
 ## System Architecture
 
