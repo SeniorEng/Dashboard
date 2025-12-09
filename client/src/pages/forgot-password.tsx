@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2, AlertCircle, Heart, CheckCircle, ArrowLeft } from "lucide-react";
+import { iconSize } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 
 export default function ForgotPasswordPage() {
@@ -37,7 +38,7 @@ export default function ForgotPasswordPage() {
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-green-100">
-              <CheckCircle className="h-6 w-6 text-green-600" />
+              <CheckCircle className={`${iconSize.lg} text-green-600`} />
             </div>
             <CardTitle className="text-2xl font-bold text-gray-900">E-Mail gesendet</CardTitle>
             <CardDescription>
@@ -54,7 +55,7 @@ export default function ForgotPasswordPage() {
                 className="w-full"
                 data-testid="button-back-to-login"
               >
-                <ArrowLeft className="mr-2 h-4 w-4" />
+                <ArrowLeft className={`mr-2 ${iconSize.sm}`} />
                 Zurück zur Anmeldung
               </Button>
             </Link>
@@ -69,7 +70,7 @@ export default function ForgotPasswordPage() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-teal-100">
-            <Heart className="h-6 w-6 text-teal-600" />
+            <Heart className={`${iconSize.lg} text-teal-600`} />
           </div>
           <CardTitle className="text-2xl font-bold text-gray-900">Passwort vergessen</CardTitle>
           <CardDescription>
@@ -80,7 +81,7 @@ export default function ForgotPasswordPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             {requestResetMutation.isError && (
               <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
+                <AlertCircle className={iconSize.sm} />
                 <AlertDescription>
                   {(requestResetMutation.error as Error)?.message || "Ein Fehler ist aufgetreten"}
                 </AlertDescription>
@@ -108,7 +109,7 @@ export default function ForgotPasswordPage() {
             >
               {requestResetMutation.isPending ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className={`mr-2 ${iconSize.sm} animate-spin`} />
                   Senden...
                 </>
               ) : (

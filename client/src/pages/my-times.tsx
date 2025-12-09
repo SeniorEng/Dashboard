@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import type { TimeEntryType, CreateTimeEntryRequest, AppointmentWithCustomerName } from "@/lib/api/types";
 import { formatDateForDisplay, formatDateString, isPast } from "@shared/utils/date";
+import { iconSize } from "@/design-system";
 
 const TIME_ENTRY_TYPE_CONFIG: Record<TimeEntryType, { label: string; icon: React.ElementType; color: string; bgColor: string }> = {
   urlaub: { label: "Urlaub", icon: Palmtree, color: "text-green-700", bgColor: "bg-green-100" },
@@ -312,7 +313,7 @@ export default function MyTimes() {
               data-testid="banner-missing-breaks-detail"
             >
               <div className="flex items-start gap-2">
-                <AlertCircle className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                <AlertCircle className={`${iconSize.md} text-blue-600 shrink-0 mt-0.5`} />
                 <div>
                   <p className="text-sm font-medium text-blue-800 mb-1">
                     Fehlende Pausendokumentation
@@ -357,7 +358,7 @@ export default function MyTimes() {
             <Dialog open={showNewEntryDialog} onOpenChange={setShowNewEntryDialog}>
               <DialogTrigger asChild>
                 <Button className="bg-teal-600 hover:bg-teal-700" data-testid="button-new-entry">
-                  <Plus className="h-4 w-4 mr-2" />
+                  <Plus className={`${iconSize.sm} mr-2`} />
                   Neuer Eintrag
                 </Button>
               </DialogTrigger>
@@ -388,7 +389,7 @@ export default function MyTimes() {
                         {Object.entries(TIME_ENTRY_TYPE_CONFIG).map(([type, config]) => (
                           <SelectItem key={type} value={type}>
                             <div className="flex items-center gap-2">
-                              <config.icon className={`h-4 w-4 ${config.color}`} />
+                              <config.icon className={`${iconSize.sm} ${config.color}`} />
                               {config.label}
                             </div>
                           </SelectItem>
@@ -495,7 +496,7 @@ export default function MyTimes() {
                     >
                       {createMutation.isPending ? (
                         <>
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
                           Speichern...
                         </>
                       ) : (
@@ -539,7 +540,7 @@ export default function MyTimes() {
                           {Object.entries(TIME_ENTRY_TYPE_CONFIG).map(([type, config]) => (
                             <SelectItem key={type} value={type}>
                               <div className="flex items-center gap-2">
-                                <config.icon className={`h-4 w-4 ${config.color}`} />
+                                <config.icon className={`${iconSize.sm} ${config.color}`} />
                                 {config.label}
                               </div>
                             </SelectItem>
@@ -638,7 +639,7 @@ export default function MyTimes() {
                       >
                         {updateMutation.isPending ? (
                           <>
-                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
                             Speichern...
                           </>
                         ) : (
@@ -658,7 +659,7 @@ export default function MyTimes() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
-                  <Users className="h-4 w-4" />
+                  <Users className={iconSize.sm} />
                   Stunden {MONTH_NAMES[selectedMonth - 1]}
                 </CardTitle>
               </CardHeader>
@@ -715,7 +716,7 @@ export default function MyTimes() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
-                  <Car className="h-4 w-4" />
+                  <Car className={iconSize.sm} />
                   Kilometer {MONTH_NAMES[selectedMonth - 1]}
                 </CardTitle>
               </CardHeader>
@@ -747,7 +748,7 @@ export default function MyTimes() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
-                  <Palmtree className="h-4 w-4" />
+                  <Palmtree className={iconSize.sm} />
                   Urlaub {selectedYear}
                 </CardTitle>
               </CardHeader>
@@ -792,20 +793,20 @@ export default function MyTimes() {
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <Button variant="ghost" size="icon" onClick={handlePrevMonth} data-testid="button-prev-month">
-                    <ChevronLeft className="h-5 w-5" />
+                    <ChevronLeft className={iconSize.md} />
                   </Button>
                   <CardTitle className="text-lg">
                     {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
                   </CardTitle>
                   <Button variant="ghost" size="icon" onClick={handleNextMonth} data-testid="button-next-month">
-                    <ChevronRight className="h-5 w-5" />
+                    <ChevronRight className={iconSize.md} />
                   </Button>
                 </div>
               </CardHeader>
               <CardContent>
                 {isLoading ? (
                   <div className="flex items-center justify-center py-12">
-                    <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+                    <Loader2 className={`${iconSize.xl} animate-spin text-teal-600`} />
                   </div>
                 ) : (
                   <>
@@ -843,7 +844,7 @@ export default function MyTimes() {
                             <span className={`font-medium ${isToday ? "text-teal-700" : ""} ${hasMissingBreak ? "text-blue-800" : ""}`}>{day}</span>
                             {hasMissingBreak && (
                               <div className="absolute top-1 right-1">
-                                <Coffee className="w-3 h-3 text-blue-500" />
+                                <Coffee className={`${iconSize.xs} text-blue-500`} />
                               </div>
                             )}
                             {(hasAppointments || hasOtherEntries) && (
@@ -869,7 +870,7 @@ export default function MyTimes() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <Calendar className="h-5 w-5" />
+                  <Calendar className={iconSize.md} />
                   {selectedDate 
                     ? formatDateForDisplay(selectedDate, { 
                         weekday: "long", 
@@ -897,7 +898,7 @@ export default function MyTimes() {
                       }}
                       data-testid="button-add-entry-for-day"
                     >
-                      <Plus className="h-4 w-4 mr-2" />
+                      <Plus className={`${iconSize.sm} mr-2`} />
                       Eintrag hinzufügen
                     </Button>
                   </div>
@@ -944,7 +945,7 @@ export default function MyTimes() {
                           data-testid={`appointment-${appt.id}`}
                         >
                           <div className="flex items-start gap-3">
-                            <Users className="h-5 w-5 mt-0.5 text-teal-700" />
+                            <Users className={`${iconSize.md} mt-0.5 text-teal-700`} />
                             <div className="flex-1">
                               <div className="font-medium text-teal-800">{appt.customerName}</div>
                               <div className="text-sm text-gray-600">
@@ -959,7 +960,7 @@ export default function MyTimes() {
                               </div>
                               {(appt.travelKilometers || appt.travelMinutes) && (
                                 <div className="flex items-center gap-2 mt-1 text-xs text-amber-700">
-                                  <Car className="h-3 w-3" />
+                                  <Car className={iconSize.xs} />
                                   <span>
                                     Anfahrt: {appt.travelKilometers ? `${appt.travelKilometers} km` : ""}
                                     {appt.travelKilometers && appt.travelMinutes ? " • " : ""}
@@ -969,7 +970,7 @@ export default function MyTimes() {
                               )}
                               {appt.customerKilometers && appt.customerKilometers > 0 && (
                                 <div className="flex items-center gap-2 mt-1 text-xs text-teal-700">
-                                  <Car className="h-3 w-3" />
+                                  <Car className={iconSize.xs} />
                                   <span>Km für/mit Kunde: {appt.customerKilometers} km</span>
                                 </div>
                               )}
@@ -990,7 +991,7 @@ export default function MyTimes() {
                           data-testid={`time-entry-${entry.id}`}
                         >
                           <div className="flex items-start gap-3">
-                            <Icon className={`h-5 w-5 mt-0.5 ${config.color}`} />
+                            <Icon className={`${iconSize.md} mt-0.5 ${config.color}`} />
                             <div>
                               <div className={`font-medium ${config.color}`}>{config.label}</div>
                               {entry.startTime && entry.endTime && (
@@ -1025,7 +1026,7 @@ export default function MyTimes() {
                                   })}
                                   data-testid={`button-edit-entry-${entry.id}`}
                                 >
-                                  <Pencil className="h-4 w-4" />
+                                  <Pencil className={iconSize.sm} />
                                 </Button>
                                 <Button
                                   variant="ghost"
@@ -1035,7 +1036,7 @@ export default function MyTimes() {
                                   disabled={deleteMutation.isPending}
                                   data-testid={`button-delete-entry-${entry.id}`}
                                 >
-                                  <Trash2 className="h-4 w-4" />
+                                  <Trash2 className={iconSize.sm} />
                                 </Button>
                               </>
                             ) : (
@@ -1043,7 +1044,7 @@ export default function MyTimes() {
                                 className="h-8 w-8 flex items-center justify-center text-gray-300"
                                 title="Vergangene Urlaubs- und Krankheitstage können nicht geändert werden"
                               >
-                                <Pencil className="h-4 w-4" />
+                                <Pencil className={iconSize.sm} />
                               </div>
                             )}
                           </div>
@@ -1060,7 +1061,7 @@ export default function MyTimes() {
                       }}
                       data-testid="button-add-another-entry"
                     >
-                      <Plus className="h-4 w-4 mr-2" />
+                      <Plus className={`${iconSize.sm} mr-2`} />
                       Weiteren Eintrag hinzufügen
                     </Button>
                   </div>

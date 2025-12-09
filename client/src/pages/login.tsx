@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2, AlertCircle } from "lucide-react";
+import { iconSize } from "@/design-system";
 import { useAuth } from "@/hooks/use-auth";
 import logoImage from "@/assets/logo-seniorenengel.png";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -47,7 +48,7 @@ export default function LoginPage() {
   if (authLoading || setupLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
-        <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+        <Loader2 className={`${iconSize.xl} animate-spin text-teal-600`} />
       </div>
     );
   }
@@ -55,7 +56,7 @@ export default function LoginPage() {
   if (isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
-        <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+        <Loader2 className={`${iconSize.xl} animate-spin text-teal-600`} />
       </div>
     );
   }
@@ -84,7 +85,7 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
               <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
+                <AlertCircle className={iconSize.sm} />
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
@@ -123,7 +124,7 @@ export default function LoginPage() {
             >
               {loginMutation.isPending ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className={`mr-2 ${iconSize.sm} animate-spin`} />
                   Anmelden...
                 </>
               ) : (
@@ -197,7 +198,7 @@ function SetupPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
               <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
+                <AlertCircle className={iconSize.sm} />
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
@@ -277,7 +278,7 @@ function SetupPage() {
             >
               {setupMutation.isPending ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className={`mr-2 ${iconSize.sm} animate-spin`} />
                   Einrichten...
                 </>
               ) : (
