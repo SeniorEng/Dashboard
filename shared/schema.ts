@@ -584,6 +584,8 @@ export const documentAppointmentSchema = z.object({
   travelFromAppointmentId: z.number().nullable().optional(),
   travelKilometers: z.number().min(0, "Kilometer müssen positiv sein"),
   travelMinutes: z.number().min(0).nullable().optional(), // Only required if origin is appointment
+  // Customer kilometers (for Alltagsbegleitung - trips with/for customer)
+  customerKilometers: z.number().min(0).nullable().optional(),
   // Optional notes
   notes: z.string().max(255).nullable().optional(),
 }).refine(

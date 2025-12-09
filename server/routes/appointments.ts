@@ -395,6 +395,7 @@ router.post("/:id/document", async (req, res) => {
       travelFromAppointmentId: validatedData.travelFromAppointmentId ?? null,
       travelKilometers: validatedData.travelKilometers,
       travelMinutes: validatedData.travelMinutes ?? null,
+      customerKilometers: validatedData.customerKilometers ?? null,
       notes: validatedData.notes ?? appointment.notes,
       status: "completed" as const,
     };
