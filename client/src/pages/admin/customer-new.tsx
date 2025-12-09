@@ -27,6 +27,7 @@ import {
   Plus,
   X,
 } from "lucide-react";
+import { iconSize, getPflegegradColors, componentStyles } from "@/design-system";
 
 const STEPS = [
   { id: "personal", title: "Persönliche Daten", icon: User2 },
@@ -437,7 +438,7 @@ export default function AdminCustomerNew() {
 
             <div className="border-t pt-4">
               <h3 className="font-medium mb-4 flex items-center gap-2">
-                <MapPin className="h-4 w-4" />
+                <MapPin className={iconSize.sm} />
                 Adresse
               </h3>
               <div className="space-y-4">
@@ -595,7 +596,7 @@ export default function AdminCustomerNew() {
                       onClick={() => setShowNewProviderForm(true)}
                       data-testid="button-add-new-provider"
                     >
-                      <Plus className="h-4 w-4 mr-1" />
+                      <Plus className={`${iconSize.sm} mr-1`} />
                       Neu
                     </Button>
                   </div>
@@ -646,7 +647,7 @@ export default function AdminCustomerNew() {
                     onClick={() => setShowNewProviderForm(false)}
                     data-testid="button-cancel-new-provider"
                   >
-                    <X className="h-4 w-4" />
+                    <X className={iconSize.sm} />
                   </Button>
                 </div>
 
@@ -761,12 +762,12 @@ export default function AdminCustomerNew() {
                     >
                       {createProviderMutation.isPending ? (
                         <>
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
                           Speichern...
                         </>
                       ) : (
                         <>
-                          <Check className="h-4 w-4 mr-2" />
+                          <Check className={`${iconSize.sm} mr-2`} />
                           Pflegekasse speichern
                         </>
                       )}
@@ -1022,7 +1023,7 @@ export default function AdminCustomerNew() {
           <div className="flex items-center gap-4 mb-6">
             <Link href="/admin/customers">
               <Button variant="ghost" size="icon" data-testid="button-back">
-                <ArrowLeft className="h-5 w-5" />
+                <ArrowLeft className={iconSize.md} />
               </Button>
             </Link>
             <h1 className="text-2xl font-bold text-gray-900">Neuen Kunden anlegen</h1>
@@ -1045,9 +1046,9 @@ export default function AdminCustomerNew() {
                     }`}
                   >
                     {index < currentStep ? (
-                      <Check className="h-5 w-5" />
+                      <Check className={iconSize.md} />
                     ) : (
-                      <step.icon className="h-5 w-5" />
+                      <step.icon className={iconSize.md} />
                     )}
                   </div>
                   {index < STEPS.length - 1 && (
@@ -1086,7 +1087,7 @@ export default function AdminCustomerNew() {
                   disabled={currentStep === 0}
                   data-testid="button-step-back"
                 >
-                  <ChevronLeft className="h-4 w-4 mr-2" />
+                  <ChevronLeft className={`${iconSize.sm} mr-2`} />
                   Zurück
                 </Button>
 
@@ -1099,13 +1100,13 @@ export default function AdminCustomerNew() {
                   >
                     {createMutation.isPending ? (
                       <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
                         Erstellen...
                       </>
                     ) : (
                       <>
                         Kunde erstellen
-                        <Check className="h-4 w-4 ml-2" />
+                        <Check className={`${iconSize.sm} ml-2`} />
                       </>
                     )}
                   </Button>
@@ -1116,7 +1117,7 @@ export default function AdminCustomerNew() {
                     data-testid="button-step-next"
                   >
                     Weiter
-                    <ChevronRight className="h-4 w-4 ml-2" />
+                    <ChevronRight className={`${iconSize.sm} ml-2`} />
                   </Button>
                 )}
               </div>

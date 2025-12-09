@@ -17,7 +17,7 @@ import { SectionCard } from "@/components/patterns/section-card";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { useCustomer } from "@/features/customers";
-import { iconSize, componentStyles } from "@/design-system";
+import { iconSize, getPflegegradColors, componentStyles } from "@/design-system";
 import {
   Loader2,
   User2,

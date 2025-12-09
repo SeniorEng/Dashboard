@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { iconSize } from "@/design-system";
 import {
   Dialog,
   DialogContent,
@@ -260,7 +261,7 @@ export default function AdminUsers() {
             <div className="flex items-center gap-2 sm:gap-4 min-w-0">
               <Link href="/admin">
                 <Button variant="ghost" size="icon" data-testid="button-back" className="shrink-0">
-                  <ArrowLeft className="h-5 w-5" />
+                  <ArrowLeft className={iconSize.md} />
                 </Button>
               </Link>
               <h1 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">Benutzerverwaltung</h1>
@@ -268,7 +269,7 @@ export default function AdminUsers() {
             <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
               <DialogTrigger asChild>
                 <Button className="bg-teal-600 hover:bg-teal-700 shrink-0" data-testid="button-create-user">
-                  <Plus className="h-4 w-4 sm:mr-2" />
+                  <Plus className={`${iconSize.sm} sm:mr-2`} />
                   <span className="hidden sm:inline">Neuer Benutzer</span>
                   <span className="sm:hidden">Neu</span>
                 </Button>
@@ -285,7 +286,7 @@ export default function AdminUsers() {
 
           {isLoading ? (
             <div className="flex justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+              <Loader2 className={`${iconSize.xl} animate-spin text-teal-600`} />
             </div>
           ) : (
             <div className="space-y-4">
@@ -343,7 +344,7 @@ export default function AdminUsers() {
                           onClick={() => setEditingUser(user)}
                           data-testid={`button-edit-user-${user.id}`}
                         >
-                          <Pencil className="h-4 w-4 text-gray-600" />
+                          <Pencil className={`${iconSize.sm} text-gray-600`} />
                         </Button>
                         <Button
                           variant="ghost"
@@ -352,7 +353,7 @@ export default function AdminUsers() {
                           onClick={() => setResetPasswordUser(user)}
                           data-testid={`button-reset-password-${user.id}`}
                         >
-                          <Key className="h-4 w-4 text-gray-600" />
+                          <Key className={`${iconSize.sm} text-gray-600`} />
                         </Button>
                         <Button
                           variant="ghost"
@@ -367,9 +368,9 @@ export default function AdminUsers() {
                           data-testid={`button-toggle-active-${user.id}`}
                         >
                           {user.isActive ? (
-                            <UserX className="h-4 w-4 text-red-500" />
+                            <UserX className={`${iconSize.sm} text-red-500`} />
                           ) : (
-                            <UserCheck className="h-4 w-4 text-green-500" />
+                            <UserCheck className={`${iconSize.sm} text-green-500`} />
                           )}
                         </Button>
                         <AlertDialog>
@@ -380,7 +381,7 @@ export default function AdminUsers() {
                               className="h-8 w-8 p-0"
                               data-testid={`button-delete-user-${user.id}`}
                             >
-                              <Trash2 className="h-4 w-4 text-red-500" />
+                              <Trash2 className={`${iconSize.sm} text-red-500`} />
                             </Button>
                           </AlertDialogTrigger>
                           <AlertDialogContent>
@@ -735,7 +736,7 @@ function UserForm({
         {isCreate && (
           <div className="space-y-4">
             <h3 className="text-sm font-semibold text-gray-700 border-b pb-2 flex items-center gap-2">
-              <Euro className="h-4 w-4" />
+              <Euro className={iconSize.sm} />
               Vergütung (optional)
             </h3>
             
@@ -859,7 +860,7 @@ function UserForm({
         <Button type="submit" disabled={isLoading} data-testid="button-submit-user">
           {isLoading ? (
             <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              <Loader2 className={`mr-2 ${iconSize.sm} animate-spin`} />
               {isCreate ? "Erstellen..." : "Speichern..."}
             </>
           ) : (
@@ -960,7 +961,7 @@ function CompensationSection({ userId, userName }: { userId: number; userName: s
     <div className="mt-6 pt-6 border-t">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-          <Euro className="h-4 w-4" />
+          <Euro className={iconSize.sm} />
           Vergütung
         </h3>
         <Button 
@@ -969,7 +970,7 @@ function CompensationSection({ userId, userName }: { userId: number; userName: s
           onClick={() => setIsAddOpen(!isAddOpen)}
           data-testid="button-add-compensation"
         >
-          <Plus className="h-4 w-4 mr-1" />
+          <Plus className={`${iconSize.sm} mr-1`} />
           Neue Vergütung
         </Button>
       </div>
@@ -1097,7 +1098,7 @@ function CompensationSection({ userId, userName }: { userId: number; userName: s
               data-testid="button-submit-compensation"
             >
               {addCompensationMutation.isPending ? (
-                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Speichern...</>
+                <><Loader2 className={`mr-2 ${iconSize.sm} animate-spin`} />Speichern...</>
               ) : "Speichern"}
             </Button>
             <Button type="button" variant="outline" onClick={() => setIsAddOpen(false)}>
@@ -1109,7 +1110,7 @@ function CompensationSection({ userId, userName }: { userId: number; userName: s
 
       {isLoading ? (
         <div className="flex justify-center py-4">
-          <Loader2 className="h-5 w-5 animate-spin text-teal-600" />
+          <Loader2 className={`${iconSize.md} animate-spin text-teal-600`} />
         </div>
       ) : compensationHistory && compensationHistory.length > 0 ? (
         <div className="space-y-3">
@@ -1236,7 +1237,7 @@ function ResetPasswordForm({
         <Button type="submit" disabled={isLoading} data-testid="button-submit-reset-password">
           {isLoading ? (
             <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              <Loader2 className={`mr-2 ${iconSize.sm} animate-spin`} />
               Zurücksetzen...
             </>
           ) : (

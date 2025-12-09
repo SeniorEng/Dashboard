@@ -9,6 +9,7 @@ import {
   ArrowLeft, MapPin, Phone, Mail, User, Heart, 
   Calendar, Loader2, AlertCircle
 } from "lucide-react";
+import { iconSize } from "@/design-system";
 import type { Customer } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
@@ -72,7 +73,7 @@ export default function CustomerDetailPage() {
     return (
       <Layout>
         <div className="flex items-center justify-center min-h-[50vh]">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <Loader2 className={`${iconSize.xl} animate-spin text-primary`} />
         </div>
       </Layout>
     );
@@ -82,7 +83,7 @@ export default function CustomerDetailPage() {
     return (
       <Layout>
         <div className="text-center py-12">
-          <AlertCircle className="w-12 h-12 text-destructive mx-auto mb-4" />
+          <AlertCircle className={`${iconSize["2xl"]} text-destructive mx-auto mb-4`} />
           <p className="text-destructive font-medium">Kunde nicht gefunden</p>
           <Link href="/customers">
             <Button variant="outline" className="mt-4">
@@ -104,7 +105,7 @@ export default function CustomerDetailPage() {
         <div className="flex items-center gap-3 mb-4">
           <Link href="/customers">
             <Button variant="ghost" size="icon" className="shrink-0" data-testid="button-back">
-              <ArrowLeft className="w-5 h-5" />
+              <ArrowLeft className={iconSize.md} />
             </Button>
           </Link>
           <h1 className="text-xl font-semibold text-foreground" data-testid="text-customer-name">
@@ -116,7 +117,7 @@ export default function CustomerDetailPage() {
           <CardContent className="p-4">
             <div className="flex items-start gap-4">
               <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                <User className="w-7 h-7 text-primary" />
+                <User className={`${iconSize.lg} text-primary`} />
               </div>
               <div className="flex-1 min-w-0 space-y-3">
                 {pflegegradLabel && (
@@ -130,13 +131,13 @@ export default function CustomerDetailPage() {
 
                 {address && (
                   <div className="flex items-start gap-2 text-sm">
-                    <MapPin className="w-4 h-4 mt-0.5 flex-shrink-0 text-primary/60" />
+                    <MapPin className={`${iconSize.sm} mt-0.5 flex-shrink-0 text-primary/60`} />
                     <span className="text-muted-foreground">{address}</span>
                   </div>
                 )}
 
                 <div className="flex items-center gap-2 text-sm">
-                  <Phone className="w-4 h-4 flex-shrink-0 text-primary/60" />
+                  <Phone className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
                   {phone ? (
                     <a href={`tel:${customer.telefon}`} className="text-primary hover:underline">
                       {phone}
@@ -148,7 +149,7 @@ export default function CustomerDetailPage() {
 
                 {customer.email && (
                   <div className="flex items-center gap-2 text-sm">
-                    <Mail className="w-4 h-4 flex-shrink-0 text-primary/60" />
+                    <Mail className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
                     <a href={`mailto:${customer.email}`} className="text-primary hover:underline">
                       {customer.email}
                     </a>
@@ -157,7 +158,7 @@ export default function CustomerDetailPage() {
 
                 {customer.needs && customer.needs.length > 0 && (
                   <div className="flex items-start gap-2 pt-1">
-                    <Heart className="w-4 h-4 mt-0.5 flex-shrink-0 text-rose-400" />
+                    <Heart className={`${iconSize.sm} mt-0.5 flex-shrink-0 text-rose-400`} />
                     <div className="flex flex-wrap gap-1">
                       {customer.needs.map((need, index) => (
                         <Badge 
@@ -179,7 +180,7 @@ export default function CustomerDetailPage() {
         {upcomingAppointments.length > 0 && (
           <div className="mb-6">
             <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-primary" />
+              <Calendar className={`${iconSize.md} text-primary`} />
               Anstehende Termine
             </h2>
             <div className="space-y-3">
@@ -206,7 +207,7 @@ export default function CustomerDetailPage() {
         {upcomingAppointments.length === 0 && pastAppointments.length === 0 && !appointmentsLoading && (
           <Card className="border-dashed">
             <CardContent className="flex flex-col items-center justify-center py-8 text-center">
-              <Calendar className="w-10 h-10 text-muted-foreground/40 mb-3" />
+              <Calendar className={`${iconSize.xl} text-muted-foreground/40 mb-3`} />
               <p className="text-muted-foreground">Keine Termine vorhanden</p>
             </CardContent>
           </Card>

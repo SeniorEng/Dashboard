@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
 import { useEmployees } from "@/features/customers";
+import { iconSize } from "@/design-system";
 import {
   ArrowLeft,
   Calendar,
@@ -174,7 +175,7 @@ export default function AdminTimeEntries() {
           <div className="flex items-center gap-4 mb-6">
             <Link href="/admin">
               <Button variant="ghost" size="icon" data-testid="button-back">
-                <ArrowLeft className="h-5 w-5" />
+                <ArrowLeft className={iconSize.md} />
               </Button>
             </Link>
             <div>
@@ -219,13 +220,13 @@ export default function AdminTimeEntries() {
               <div className="flex flex-wrap items-center gap-4">
                 <div className="flex items-center gap-2">
                   <Button variant="ghost" size="icon" onClick={handlePrevMonth} data-testid="button-prev-month">
-                    <ChevronLeft className="h-5 w-5" />
+                    <ChevronLeft className={iconSize.md} />
                   </Button>
                   <span className="font-medium min-w-[150px] text-center">
                     {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
                   </span>
                   <Button variant="ghost" size="icon" onClick={handleNextMonth} data-testid="button-next-month">
-                    <ChevronRight className="h-5 w-5" />
+                    <ChevronRight className={iconSize.md} />
                   </Button>
                 </div>
 
@@ -269,7 +270,7 @@ export default function AdminTimeEntries() {
           {/* Entries List */}
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+              <Loader2 className={`${iconSize.xl} animate-spin text-teal-600`} />
             </div>
           ) : entries && entries.length > 0 ? (
             <div className="space-y-4">
@@ -280,7 +281,7 @@ export default function AdminTimeEntries() {
                     <CardHeader className="pb-2">
                       <div className="flex items-center justify-between">
                         <CardTitle className="text-lg flex items-center gap-2">
-                          <Users className="h-5 w-5" />
+                          <Users className={iconSize.md} />
                           {employeeName}
                         </CardTitle>
                         {employee && (
@@ -290,7 +291,7 @@ export default function AdminTimeEntries() {
                             onClick={() => handleEditVacation(employee.id, employee.displayName)}
                             data-testid={`button-edit-vacation-${employee.id}`}
                           >
-                            <Settings className="h-4 w-4 mr-1" />
+                            <Settings className={`${iconSize.sm} mr-1`} />
                             Urlaubskontingent
                           </Button>
                         )}
@@ -310,7 +311,7 @@ export default function AdminTimeEntries() {
                                 data-testid={`time-entry-${entry.id}`}
                               >
                                 <div className="flex items-center gap-3">
-                                  <Icon className={`h-5 w-5 ${config.color}`} />
+                                  <Icon className={`${iconSize.md} ${config.color}`} />
                                   <div>
                                     <div className={`font-medium ${config.color}`}>{config.label}</div>
                                     <div className="text-sm text-gray-600">
@@ -341,7 +342,7 @@ export default function AdminTimeEntries() {
           ) : (
             <Card>
               <CardContent className="p-12 text-center">
-                <Calendar className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                <Calendar className={`${iconSize["2xl"]} mx-auto mb-4 text-gray-300`} />
                 <p className="text-gray-500">Keine Zeiteinträge für diesen Zeitraum.</p>
               </CardContent>
             </Card>
@@ -357,7 +358,7 @@ export default function AdminTimeEntries() {
               </DialogHeader>
               {vacationLoading ? (
                 <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin" />
+                  <Loader2 className={`${iconSize.lg} animate-spin`} />
                 </div>
               ) : (
                 <div className="space-y-4 pt-4">
@@ -427,7 +428,7 @@ export default function AdminTimeEntries() {
                     >
                       {updateVacationMutation.isPending ? (
                         <>
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
                           Speichern...
                         </>
                       ) : (

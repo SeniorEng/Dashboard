@@ -15,6 +15,7 @@ import { Layout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Loader2, User, Users, Save } from "lucide-react";
 import { api, unwrapResult } from "@/lib/api/client";
+import { iconSize, getPflegegradColors, componentStyles } from "@/design-system";
 
 interface Customer {
   id: number;
@@ -119,7 +120,7 @@ export default function AdminCustomerAssignments() {
           <div className="flex items-center gap-4 mb-6">
             <Link href="/admin">
               <Button variant="ghost" size="icon" data-testid="button-back">
-                <ArrowLeft className="h-5 w-5" />
+                <ArrowLeft className={iconSize.md} />
               </Button>
             </Link>
             <div>
@@ -132,7 +133,7 @@ export default function AdminCustomerAssignments() {
 
           {isLoading ? (
             <div className="flex justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+              <Loader2 className={`${iconSize.xl} animate-spin text-teal-600`} />
             </div>
           ) : (
             <div className="space-y-4">
@@ -176,10 +177,10 @@ export default function AdminCustomerAssignments() {
                             data-testid={`button-save-assignment-${customer.id}`}
                           >
                             {assignMutation.isPending ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <Loader2 className={`${iconSize.sm} animate-spin`} />
                             ) : (
                               <>
-                                <Save className="h-4 w-4 mr-2" />
+                                <Save className={`${iconSize.sm} mr-2`} />
                                 Speichern
                               </>
                             )}
@@ -190,7 +191,7 @@ export default function AdminCustomerAssignments() {
                       <div className="grid gap-4 md:grid-cols-2">
                         <div>
                           <div className="flex items-center gap-2 mb-2">
-                            <User className="h-4 w-4 text-teal-600" />
+                            <User className={`${iconSize.sm} text-teal-600`} />
                             <span className="text-sm font-medium">Hauptansprechpartner</span>
                           </div>
                           {isEditing ? (
@@ -233,7 +234,7 @@ export default function AdminCustomerAssignments() {
 
                         <div>
                           <div className="flex items-center gap-2 mb-2">
-                            <Users className="h-4 w-4 text-orange-600" />
+                            <Users className={`${iconSize.sm} text-orange-600`} />
                             <span className="text-sm font-medium">Vertretung</span>
                           </div>
                           {isEditing ? (

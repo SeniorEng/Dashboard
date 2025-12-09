@@ -20,7 +20,7 @@ import { DataList, DataListItem } from "@/components/patterns/data-list";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { useCustomers, useEmployees } from "@/features/customers";
-import { iconSize, componentStyles } from "@/design-system";
+import { iconSize, getPflegegradColors, componentStyles } from "@/design-system";
 import {
   Plus,
   Loader2,

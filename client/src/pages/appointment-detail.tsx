@@ -250,7 +250,7 @@ export default function AppointmentDetail() {
                     <span className="font-medium">Hauswirtschaft</span>
                     {!hasHauswirtschaft && (
                       <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded flex items-center gap-0.5">
-                        <Plus className="w-3 h-3" /> Neu
+                        <Plus className={iconSize.xs} /> Neu
                       </span>
                     )}
                     {hasHauswirtschaft && appointment.hauswirtschaftDauer !== appointment.hauswirtschaftActualDauer && (
@@ -283,7 +283,7 @@ export default function AppointmentDetail() {
                     <span className="font-medium">Alltagsbegleitung</span>
                     {!hasAlltagsbegleitung && (
                       <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded flex items-center gap-0.5">
-                        <Plus className="w-3 h-3" /> Neu
+                        <Plus className={iconSize.xs} /> Neu
                       </span>
                     )}
                     {hasAlltagsbegleitung && appointment.alltagsbegleitungDauer !== appointment.alltagsbegleitungActualDauer && (

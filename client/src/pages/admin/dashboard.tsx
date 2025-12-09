@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { Layout } from "@/components/layout";
 import { Users, UserCog, ArrowLeft, Contact2, Clock } from "lucide-react";
+import { iconSize } from "@/design-system";
 
 export default function AdminDashboard() {
   const { user } = useAuth();
@@ -15,7 +16,7 @@ export default function AdminDashboard() {
           <div className="flex items-center gap-4 mb-6">
             <Link href="/">
               <Button variant="ghost" size="icon" data-testid="button-back">
-                <ArrowLeft className="h-5 w-5" />
+                <ArrowLeft className={iconSize.md} />
               </Button>
             </Link>
             <div>
@@ -30,7 +31,7 @@ export default function AdminDashboard() {
                 <CardHeader>
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-teal-100 rounded-lg">
-                      <Users className="h-6 w-6 text-teal-600" />
+                      <Users className={`${iconSize.lg} text-teal-600`} />
                     </div>
                     <div>
                       <CardTitle>Benutzerverwaltung</CardTitle>
@@ -48,7 +49,7 @@ export default function AdminDashboard() {
                 <CardHeader>
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-orange-100 rounded-lg">
-                      <UserCog className="h-6 w-6 text-orange-600" />
+                      <UserCog className={`${iconSize.lg} text-orange-600`} />
                     </div>
                     <div>
                       <CardTitle>Kundenzuordnung</CardTitle>
@@ -66,7 +67,7 @@ export default function AdminDashboard() {
                 <CardHeader>
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-blue-100 rounded-lg">
-                      <Contact2 className="h-6 w-6 text-blue-600" />
+                      <Contact2 className={`${iconSize.lg} text-blue-600`} />
                     </div>
                     <div>
                       <CardTitle>Kundenverwaltung</CardTitle>
@@ -84,7 +85,7 @@ export default function AdminDashboard() {
                 <CardHeader>
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-green-100 rounded-lg">
-                      <Clock className="h-6 w-6 text-green-600" />
+                      <Clock className={`${iconSize.lg} text-green-600`} />
                     </div>
                     <div>
                       <CardTitle>Zeiterfassung</CardTitle>

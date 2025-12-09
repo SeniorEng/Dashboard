@@ -4,6 +4,7 @@ import { Layout } from "@/components/layout";
 import { AppointmentCard } from "@/features/appointments/components/appointment-card";
 import { ArrowLeft, Loader2, FileCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { iconSize } from "@/design-system";
 import type { AppointmentWithCustomer } from "@shared/types";
 
 export default function UndocumentedAppointments() {
@@ -29,7 +30,7 @@ export default function UndocumentedAppointments() {
         <div className="flex items-center gap-3 mb-4">
           <Link href="/">
             <Button variant="ghost" size="icon" className="shrink-0" data-testid="button-back">
-              <ArrowLeft className="w-5 h-5" />
+              <ArrowLeft className={iconSize.md} />
             </Button>
           </Link>
           <h1 className="text-xl font-semibold text-foreground">Offene Dokumentationen</h1>
@@ -37,7 +38,7 @@ export default function UndocumentedAppointments() {
 
         {isLoading && (
           <div className="flex items-center justify-center py-12" data-testid="loading-undocumented">
-            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            <Loader2 className={`${iconSize.xl} animate-spin text-primary`} />
           </div>
         )}
 
@@ -50,7 +51,7 @@ export default function UndocumentedAppointments() {
         {!isLoading && !error && sortedAppointments.length === 0 && (
           <div className="text-center py-12" data-testid="empty-undocumented">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 mb-4">
-              <FileCheck className="w-8 h-8 text-green-600" />
+              <FileCheck className={`${iconSize.xl} text-green-600`} />
             </div>
             <p className="text-muted-foreground">Alle Termine sind dokumentiert!</p>
           </div>
