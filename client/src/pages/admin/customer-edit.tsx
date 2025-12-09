@@ -122,18 +122,30 @@ export default function AdminCustomerEdit() {
       return;
     }
 
+    const primaryId = formData.primaryEmployeeId ? parseInt(formData.primaryEmployeeId) : null;
+    const backupId = formData.backupEmployeeId ? parseInt(formData.backupEmployeeId) : null;
+
+    if (primaryId && backupId && primaryId === backupId) {
+      toast({
+        title: "Ungültige Auswahl",
+        description: "Haupt- und Vertretungsmitarbeiter dürfen nicht identisch sein.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const data: Record<string, unknown> = {
       vorname: formData.vorname.trim(),
       nachname: formData.nachname.trim(),
       email: formData.email.trim() || null,
-      telefon: formData.telefon ? normalizePhone(formData.telefon) : null,
-      festnetz: formData.festnetz ? normalizePhone(formData.festnetz) : null,
+      telefon: formData.telefon.trim() ? normalizePhone(formData.telefon) : null,
+      festnetz: formData.festnetz.trim() ? normalizePhone(formData.festnetz) : null,
       strasse: formData.strasse.trim() || null,
       nr: formData.nr.trim() || null,
       plz: formData.plz.trim() || null,
       stadt: formData.stadt.trim() || null,
-      primaryEmployeeId: formData.primaryEmployeeId ? parseInt(formData.primaryEmployeeId) : null,
-      backupEmployeeId: formData.backupEmployeeId ? parseInt(formData.backupEmployeeId) : null,
+      primaryEmployeeId: primaryId,
+      backupEmployeeId: backupId,
     };
 
     updateMutation.mutate(
