@@ -6,6 +6,25 @@ import { insertTimeEntrySchema, updateTimeEntrySchema } from "@shared/schema";
 import { storage } from "../storage";
 import { timeToMinutes } from "@shared/utils/datetime";
 
+const entryTypeLabels: Record<string, string> = {
+  urlaub: "Urlaub",
+  krankheit: "Krankheit",
+  pause: "Pause",
+  bueroarbeit: "Büroarbeit",
+  vertrieb: "Vertrieb",
+  schulung: "Schulung",
+  besprechung: "Besprechung",
+  sonstiges: "Sonstiges",
+};
+
+function getEntryTypeLabel(entryType: string): string {
+  return entryTypeLabels[entryType] || entryType;
+}
+
+function formatTimeShort(time: string): string {
+  return time.slice(0, 5);
+}
+
 /**
  * Check if two time ranges overlap
  */
@@ -100,7 +119,7 @@ async function checkTimeConflicts(
       return `An diesem Tag gibt es bereits Termine (${apptTimes})`;
     }
     if (otherEntries.length > 0) {
-      const entryTypes = otherEntries.map(e => e.entryType).slice(0, 3).join(", ");
+      const entryTypes = otherEntries.map(e => getEntryTypeLabel(e.entryType)).slice(0, 3).join(", ");
       return `An diesem Tag gibt es bereits Zeiteinträge (${entryTypes})`;
     }
     return null;
@@ -137,7 +156,7 @@ async function checkTimeConflicts(
   // Check against other time entries
   for (const entry of otherEntries) {
     if (entry.isFullDay) {
-      return `An diesem Tag ist bereits ein ganztägiger Eintrag (${entry.entryType}) vorhanden`;
+      return `An diesem Tag ist bereits ein ganztägiger Eintrag (${getEntryTypeLabel(entry.entryType)}) vorhanden`;
     }
     
     if (entry.startTime && entry.endTime) {
@@ -145,7 +164,7 @@ async function checkTimeConflicts(
       const entryEnd = timeToMinutes(entry.endTime);
       
       if (timeRangesOverlap(newStart, newEnd, entryStart, entryEnd)) {
-        return `Überlappung mit bestehendem Eintrag (${entry.entryType}) von ${entry.startTime} bis ${entry.endTime}`;
+        return `Überlappung mit bestehendem Eintrag (${getEntryTypeLabel(entry.entryType)}) von ${formatTimeShort(entry.startTime)} bis ${formatTimeShort(entry.endTime)} Uhr`;
       }
     }
   }
