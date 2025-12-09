@@ -128,7 +128,7 @@ function CustomerCard({ customer }: { customer: Customer }) {
   return (
     <Link href={`/customer/${customer.id}`}>
       <Card 
-        className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer"
+        className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer mb-4"
         data-testid={`card-customer-${customer.id}`}
       >
       <CardContent className="p-4">
