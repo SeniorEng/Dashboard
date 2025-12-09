@@ -164,14 +164,18 @@ function CustomerCard({ customer }: { customer: Customer }) {
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Phone className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
                 {phone && customer.telefon ? (
-                  <a 
-                    href={`tel:${customer.telefon}`}
-                    className="text-primary hover:underline"
-                    onClick={(e) => e.stopPropagation()}
-                    data-testid={`link-customer-phone-${customer.id}`}
+                  <button 
+                    type="button"
+                    className="text-primary hover:underline text-left"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      window.location.href = `tel:${customer.telefon}`;
+                    }}
+                    data-testid={`button-customer-phone-${customer.id}`}
                   >
                     {phone}
-                  </a>
+                  </button>
                 ) : (
                   <span className="text-muted-foreground/60" data-testid={`text-customer-phone-${customer.id}`}>
                     Keine Telefonnummer
