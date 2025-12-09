@@ -150,6 +150,7 @@ export default function DocumentAppointment() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
       queryClient.invalidateQueries({ queryKey: ["appointment", id] });
+      queryClient.invalidateQueries({ queryKey: ["time-entries"] });
       toast({
         title: "Dokumentation abgeschlossen",
         description: "Der Termin wurde erfolgreich dokumentiert.",
