@@ -557,10 +557,11 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
   }
   
   async getOpenTasks(userId: number): Promise<OpenTasksSummary> {
-    // Look at the last 30 days including today
-    // Today is included because users expect immediate feedback when they enter 6+ hours of work
+    // Look at the last 30 days plus 7 days in the future
+    // Future dates are included so users get immediate feedback when planning work
     const today = new Date();
-    const endDate = new Date(today); // Include today
+    const endDate = new Date(today);
+    endDate.setDate(endDate.getDate() + 7); // Include 7 days ahead
     const startDate = new Date(today);
     startDate.setDate(startDate.getDate() - 30);
     
