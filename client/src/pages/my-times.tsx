@@ -439,8 +439,7 @@ export default function MyTimes() {
                     </div>
                   )}
 
-                  {(newEntry.entryType === "pause" || newEntry.entryType === "bueroarbeit" || 
-                    newEntry.entryType === "besprechung" || newEntry.entryType === "schulung") && (
+                  {(newEntry.entryType !== "urlaub" && newEntry.entryType !== "krankheit") && (
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="startTime">Startzeit</Label>
