@@ -141,13 +141,15 @@ export default function AdminCustomerDetail() {
           />
 
           <Tabs defaultValue="overview" className="space-y-4">
-            <TabsList className="bg-white">
-              <TabsTrigger value="overview" data-testid="tab-overview">Übersicht</TabsTrigger>
-              <TabsTrigger value="contacts" data-testid="tab-contacts">Kontakte</TabsTrigger>
-              <TabsTrigger value="insurance" data-testid="tab-insurance">Versicherung</TabsTrigger>
-              <TabsTrigger value="budgets" data-testid="tab-budgets">Budgets</TabsTrigger>
-              <TabsTrigger value="history" data-testid="tab-history">Historie</TabsTrigger>
-            </TabsList>
+            <div className="overflow-x-auto -mx-4 px-4">
+              <TabsList className="bg-white w-max">
+                <TabsTrigger value="overview" data-testid="tab-overview">Übersicht</TabsTrigger>
+                <TabsTrigger value="contacts" data-testid="tab-contacts">Kontakte</TabsTrigger>
+                <TabsTrigger value="insurance" data-testid="tab-insurance">Versicherung</TabsTrigger>
+                <TabsTrigger value="budgets" data-testid="tab-budgets">Budgets</TabsTrigger>
+                <TabsTrigger value="history" data-testid="tab-history">Historie</TabsTrigger>
+              </TabsList>
+            </div>
 
             <TabsContent value="overview" className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
