@@ -244,10 +244,10 @@ export default function AdminUsers() {
             <div className="space-y-4">
               {users?.map((user) => (
                 <Card key={user.id} data-testid={`card-user-${user.id}`}>
-                  <CardContent className="flex items-center justify-between p-4">
-                    <div className="flex items-center gap-4">
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-3">
                       <div
-                        className={`p-2 rounded-full ${
+                        className={`p-2 rounded-full shrink-0 ${
                           user.isActive ? "bg-teal-100" : "bg-gray-100"
                         }`}
                       >
@@ -265,8 +265,8 @@ export default function AdminUsers() {
                           />
                         )}
                       </div>
-                      <div>
-                        <div className="flex items-center gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <p className="font-medium text-gray-900">
                             {user.displayName}
                           </p>
@@ -279,7 +279,7 @@ export default function AdminUsers() {
                             </Badge>
                           )}
                         </div>
-                        <p className="text-sm text-gray-500">{user.email}</p>
+                        <p className="text-sm text-gray-500 truncate">{user.email}</p>
                         <div className="flex flex-wrap gap-1 mt-1">
                           {user.roles.map((role) => (
                             <Badge key={role} variant="outline" className="text-xs">
@@ -288,70 +288,74 @@ export default function AdminUsers() {
                           ))}
                         </div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setEditingUser(user)}
-                        data-testid={`button-edit-user-${user.id}`}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setResetPasswordUser(user)}
-                        data-testid={`button-reset-password-${user.id}`}
-                      >
-                        <Key className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() =>
-                          toggleActiveMutation.mutate({
-                            id: user.id,
-                            activate: !user.isActive,
-                          })
-                        }
-                        data-testid={`button-toggle-active-${user.id}`}
-                      >
-                        {user.isActive ? (
-                          <UserX className="h-4 w-4 text-red-600" />
-                        ) : (
-                          <UserCheck className="h-4 w-4 text-green-600" />
-                        )}
-                      </Button>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            data-testid={`button-delete-user-${user.id}`}
-                          >
-                            <Trash2 className="h-4 w-4 text-red-600" />
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Benutzer löschen?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              Möchten Sie den Benutzer "{user.displayName}" wirklich löschen?
-                              Diese Aktion kann nicht rückgängig gemacht werden.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Abbrechen</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={() => deleteMutation.mutate(user.id)}
-                              className="bg-red-600 hover:bg-red-700"
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8 border-gray-300"
+                          onClick={() => setEditingUser(user)}
+                          data-testid={`button-edit-user-${user.id}`}
+                        >
+                          <Pencil className="h-3.5 w-3.5 text-gray-600" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8 border-gray-300"
+                          onClick={() => setResetPasswordUser(user)}
+                          data-testid={`button-reset-password-${user.id}`}
+                        >
+                          <Key className="h-3.5 w-3.5 text-gray-600" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8 border-gray-300"
+                          onClick={() =>
+                            toggleActiveMutation.mutate({
+                              id: user.id,
+                              activate: !user.isActive,
+                            })
+                          }
+                          data-testid={`button-toggle-active-${user.id}`}
+                        >
+                          {user.isActive ? (
+                            <UserX className="h-3.5 w-3.5 text-red-600" />
+                          ) : (
+                            <UserCheck className="h-3.5 w-3.5 text-green-600" />
+                          )}
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8 border-red-200 hover:bg-red-50"
+                              data-testid={`button-delete-user-${user.id}`}
                             >
-                              Löschen
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
+                              <Trash2 className="h-3.5 w-3.5 text-red-600" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Benutzer löschen?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Möchten Sie den Benutzer "{user.displayName}" wirklich löschen?
+                                Diese Aktion kann nicht rückgängig gemacht werden.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Abbrechen</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() => deleteMutation.mutate(user.id)}
+                                className="bg-red-600 hover:bg-red-700"
+                              >
+                                Löschen
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
