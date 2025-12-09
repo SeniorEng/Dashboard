@@ -3,35 +3,25 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { Layout } from "@/components/layout";
-import { Users, UserCog, ArrowLeft, LogOut, Contact2, Clock } from "lucide-react";
+import { Users, UserCog, ArrowLeft, Contact2, Clock } from "lucide-react";
 
 export default function AdminDashboard() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
 
   return (
     <Layout>
       <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
         <div className="container mx-auto px-4 py-6 max-w-4xl">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-4">
-              <Link href="/">
-                <Button variant="ghost" size="icon" data-testid="button-back">
-                  <ArrowLeft className="h-5 w-5" />
-                </Button>
-              </Link>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">Administration</h1>
-                <p className="text-gray-600">Willkommen, {user?.displayName}</p>
-              </div>
+          <div className="flex items-center gap-4 mb-6">
+            <Link href="/">
+              <Button variant="ghost" size="icon" data-testid="button-back">
+                <ArrowLeft className="h-5 w-5" />
+              </Button>
+            </Link>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Administration</h1>
+              <p className="text-gray-600">Willkommen, {user?.displayName}</p>
             </div>
-            <Button
-              variant="outline"
-              onClick={logout}
-              data-testid="button-logout"
-            >
-              <LogOut className="h-4 w-4 mr-2" />
-              Abmelden
-            </Button>
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">

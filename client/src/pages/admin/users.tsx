@@ -209,20 +209,21 @@ export default function AdminUsers() {
     <Layout>
       <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
         <div className="container mx-auto px-4 py-6 max-w-4xl">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-4">
+          <div className="flex items-center justify-between gap-2 mb-6">
+            <div className="flex items-center gap-2 sm:gap-4 min-w-0">
               <Link href="/admin">
-                <Button variant="ghost" size="icon" data-testid="button-back">
+                <Button variant="ghost" size="icon" data-testid="button-back" className="shrink-0">
                   <ArrowLeft className="h-5 w-5" />
                 </Button>
               </Link>
-              <h1 className="text-2xl font-bold text-gray-900">Benutzerverwaltung</h1>
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">Benutzerverwaltung</h1>
             </div>
             <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
               <DialogTrigger asChild>
-                <Button className="bg-teal-600 hover:bg-teal-700" data-testid="button-create-user">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Neuer Benutzer
+                <Button className="bg-teal-600 hover:bg-teal-700 shrink-0" data-testid="button-create-user">
+                  <Plus className="h-4 w-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Neuer Benutzer</span>
+                  <span className="sm:hidden">Neu</span>
                 </Button>
               </DialogTrigger>
               <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
