@@ -245,72 +245,68 @@ export default function AdminUsers() {
               {users?.map((user) => (
                 <Card key={user.id} data-testid={`card-user-${user.id}`}>
                   <CardContent className="p-4">
-                    <div className="flex items-start gap-3">
-                      <div
-                        className={`p-2 rounded-full shrink-0 ${
-                          user.isActive ? "bg-teal-100" : "bg-gray-100"
-                        }`}
-                      >
-                        {user.isAdmin ? (
-                          <Shield
-                            className={`h-5 w-5 ${
-                              user.isActive ? "text-teal-600" : "text-gray-400"
-                            }`}
-                          />
-                        ) : (
-                          <User
-                            className={`h-5 w-5 ${
-                              user.isActive ? "text-teal-600" : "text-gray-400"
-                            }`}
-                          />
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
+                    {/* Header row: Name, Email, Role */}
+                    <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-gray-100">
+                      <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <p className="font-medium text-gray-900">
-                            {user.displayName}
-                          </p>
-                          {user.isAdmin && (
-                            <Badge variant="secondary">Admin</Badge>
-                          )}
+                          <span className="font-semibold text-gray-900">{user.displayName}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded ${user.isAdmin ? 'bg-teal-100 text-teal-700' : 'bg-gray-100 text-gray-600'}`}>
+                            {user.isAdmin ? 'Admin' : 'Mitarbeiter'}
+                          </span>
                           {!user.isActive && (
-                            <Badge variant="outline" className="text-red-600">
+                            <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600">
                               Deaktiviert
-                            </Badge>
+                            </span>
                           )}
                         </div>
                         <p className="text-sm text-gray-500 truncate">{user.email}</p>
-                        <div className="flex flex-wrap gap-1 mt-1">
+                      </div>
+                    </div>
+                    
+                    {/* Content: Left column (skills) + divider + Right column (buttons) */}
+                    <div className="flex">
+                      {/* Left column - 80% - Skills */}
+                      <div className="flex-1 pr-4">
+                        <div className="text-xs text-gray-500 mb-1">Tätigkeitsbereiche</div>
+                        <div className="flex flex-wrap gap-x-3 gap-y-1">
                           {user.roles.map((role) => (
-                            <Badge key={role} variant="outline" className="text-xs">
+                            <span key={role} className="text-sm text-gray-700">
                               {ROLE_LABELS[role] || role}
-                            </Badge>
+                            </span>
                           ))}
+                          {user.roles.length === 0 && (
+                            <span className="text-sm text-gray-400 italic">Keine zugewiesen</span>
+                          )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-0.5 shrink-0">
+                      
+                      {/* Vertical divider */}
+                      <div className="w-px bg-gray-200 mx-2"></div>
+                      
+                      {/* Right column - Buttons stacked vertically */}
+                      <div className="flex flex-col gap-1 pl-2">
                         <Button
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8 border-gray-300"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0"
                           onClick={() => setEditingUser(user)}
                           data-testid={`button-edit-user-${user.id}`}
                         >
-                          <Pencil className="h-3.5 w-3.5 text-gray-600" />
+                          <Pencil className="h-4 w-4 text-gray-600" />
                         </Button>
                         <Button
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8 border-gray-300"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0"
                           onClick={() => setResetPasswordUser(user)}
                           data-testid={`button-reset-password-${user.id}`}
                         >
-                          <Key className="h-3.5 w-3.5 text-gray-600" />
+                          <Key className="h-4 w-4 text-gray-600" />
                         </Button>
                         <Button
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8 border-gray-300"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0"
                           onClick={() =>
                             toggleActiveMutation.mutate({
                               id: user.id,
@@ -320,20 +316,20 @@ export default function AdminUsers() {
                           data-testid={`button-toggle-active-${user.id}`}
                         >
                           {user.isActive ? (
-                            <UserX className="h-3.5 w-3.5 text-red-600" />
+                            <UserX className="h-4 w-4 text-red-500" />
                           ) : (
-                            <UserCheck className="h-3.5 w-3.5 text-green-600" />
+                            <UserCheck className="h-4 w-4 text-green-500" />
                           )}
                         </Button>
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
                             <Button
-                              variant="outline"
-                              size="icon"
-                              className="h-8 w-8 border-red-200 hover:bg-red-50"
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0"
                               data-testid={`button-delete-user-${user.id}`}
                             >
-                              <Trash2 className="h-3.5 w-3.5 text-red-600" />
+                              <Trash2 className="h-4 w-4 text-red-500" />
                             </Button>
                           </AlertDialogTrigger>
                           <AlertDialogContent>
