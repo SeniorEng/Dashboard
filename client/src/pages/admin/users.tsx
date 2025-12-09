@@ -747,8 +747,10 @@ function UserForm({
                 type="date"
                 value={compensationValidFrom}
                 onChange={(e) => setCompensationValidFrom(e.target.value)}
+                min={new Date().toISOString().split("T")[0]}
                 data-testid="input-compensation-valid-from"
               />
+              <p className="text-xs text-gray-500">Nur ab heute oder in der Zukunft möglich</p>
             </div>
           </div>
         )}
@@ -792,7 +794,8 @@ function CompensationSection({ userId, userName }: { userId: number; userName: s
   const [newTravelCostType, setNewTravelCostType] = useState<"kilometergeld" | "pauschale" | "">("");
   const [newKilometerRate, setNewKilometerRate] = useState("");
   const [newMonthlyTravelAllowance, setNewMonthlyTravelAllowance] = useState("");
-  const [newValidFrom, setNewValidFrom] = useState(new Date().toISOString().split("T")[0]);
+  const todayDate = new Date().toISOString().split("T")[0];
+  const [newValidFrom, setNewValidFrom] = useState(todayDate);
 
   const { data: compensationHistory, isLoading } = useQuery<CompensationData[]>({
     queryKey: ["admin", "users", userId, "compensation"],
@@ -981,9 +984,11 @@ function CompensationSection({ userId, userName }: { userId: number; userName: s
               type="date"
               value={newValidFrom}
               onChange={(e) => setNewValidFrom(e.target.value)}
+              min={todayDate}
               required
               data-testid="input-new-valid-from"
             />
+            <p className="text-xs text-gray-500">Nur ab heute oder in der Zukunft möglich</p>
           </div>
 
           <div className="flex gap-2">
@@ -1011,28 +1016,28 @@ function CompensationSection({ userId, userName }: { userId: number; userName: s
         <div className="space-y-3">
           {currentCompensation && (
             <div className="p-3 bg-teal-50 border border-teal-200 rounded-lg">
-              <div className="flex items-center gap-2 mb-2">
+              <div className="flex items-center gap-2 mb-3">
                 <Badge variant="secondary" className="bg-teal-100 text-teal-800">Aktuell</Badge>
                 <span className="text-sm text-gray-500">seit {formatDate(currentCompensation.validFrom)}</span>
               </div>
-              <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="grid grid-cols-3 gap-3 text-sm">
                 <div>
-                  <span className="text-gray-500">Hauswirtschaft:</span>{" "}
-                  <span className="font-medium">{formatCurrency(currentCompensation.hourlyRateHauswirtschaft)}/h</span>
+                  <div className="text-gray-500 text-xs">Hauswirtschaft</div>
+                  <div className="font-medium">{formatCurrency(currentCompensation.hourlyRateHauswirtschaft)} €/h</div>
                 </div>
                 <div>
-                  <span className="text-gray-500">Alltagsbegleitung:</span>{" "}
-                  <span className="font-medium">{formatCurrency(currentCompensation.hourlyRateAlltagsbegleitung)}/h</span>
+                  <div className="text-gray-500 text-xs">Alltagsbegleitung</div>
+                  <div className="font-medium">{formatCurrency(currentCompensation.hourlyRateAlltagsbegleitung)} €/h</div>
                 </div>
-                <div className="col-span-2">
-                  <span className="text-gray-500">Fahrtkosten:</span>{" "}
-                  <span className="font-medium">
+                <div>
+                  <div className="text-gray-500 text-xs">Fahrtkosten</div>
+                  <div className="font-medium">
                     {currentCompensation.travelCostType === "kilometergeld" 
-                      ? `${formatCurrency(currentCompensation.kilometerRate)}/km`
+                      ? `${formatCurrency(currentCompensation.kilometerRate)} €/km`
                       : currentCompensation.travelCostType === "pauschale"
-                      ? `${formatCurrency(currentCompensation.monthlyTravelAllowance)}/Monat`
+                      ? `${formatCurrency(currentCompensation.monthlyTravelAllowance)} €/Mo`
                       : "-"}
-                  </span>
+                  </div>
                 </div>
               </div>
             </div>

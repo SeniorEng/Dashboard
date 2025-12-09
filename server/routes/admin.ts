@@ -104,7 +104,11 @@ router.post("/users", async (req: Request, res: Response) => {
       const compensationData = { ...req.body.compensation, userId: user.id };
       const validatedCompensation = insertEmployeeCompensationSchema.safeParse(compensationData);
       if (validatedCompensation.success) {
-        await compensationStorage.addCompensation(validatedCompensation.data, req.user!.id);
+        // Prevent backdated compensation entries
+        const today = new Date().toISOString().split("T")[0];
+        if (validatedCompensation.data.validFrom >= today) {
+          await compensationStorage.addCompensation(validatedCompensation.data, req.user!.id);
+        }
       }
     }
 
@@ -920,6 +924,17 @@ router.post("/users/:userId/compensation", async (req: Request, res: Response) =
 
     const data = { ...req.body, userId };
     const validatedData = insertEmployeeCompensationSchema.parse(data);
+    
+    // Prevent backdated compensation entries - only today or future allowed
+    const today = new Date().toISOString().split("T")[0];
+    if (validatedData.validFrom < today) {
+      res.status(400).json({ 
+        error: "VALIDATION_ERROR", 
+        message: "Vergütung kann nicht rückwirkend angelegt werden. Bitte wählen Sie ein Datum ab heute." 
+      });
+      return;
+    }
+    
     const compensation = await compensationStorage.addCompensation(validatedData, req.user!.id);
     res.status(201).json(compensation);
   } catch (error: any) {
