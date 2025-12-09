@@ -266,6 +266,7 @@ export class AuthService {
       email?: string;
       vorname?: string;
       nachname?: string;
+      telefon?: string;
       strasse?: string;
       hausnummer?: string;
       plz?: string;
@@ -290,6 +291,7 @@ export class AuthService {
     if (updates.email !== undefined) dbUpdates.email = updates.email;
     if (updates.vorname !== undefined) dbUpdates.vorname = updates.vorname;
     if (updates.nachname !== undefined) dbUpdates.nachname = updates.nachname;
+    if (updates.telefon !== undefined) dbUpdates.telefon = updates.telefon || null;
     if (updates.strasse !== undefined) dbUpdates.strasse = updates.strasse || null;
     if (updates.hausnummer !== undefined) dbUpdates.hausnummer = updates.hausnummer || null;
     if (updates.plz !== undefined) dbUpdates.plz = updates.plz || null;
