@@ -57,6 +57,7 @@ export class CustomerPricingStorage implements ICustomerPricingStorage {
     dayBeforeNew.setDate(dayBeforeNew.getDate() - 1);
     const validToForOld = dayBeforeNew.toISOString().split('T')[0];
     
+    // Close any currently active record that overlaps with new entry
     const currentRecord = await db
       .select()
       .from(customerPricingHistory)
@@ -80,12 +81,33 @@ export class CustomerPricingStorage implements ICustomerPricingStorage {
         .where(eq(customerPricingHistory.id, currentRecord[0].id));
     }
     
+    // Find if there are any future records and get the first one to determine validTo
+    const futureRecords = await db
+      .select()
+      .from(customerPricingHistory)
+      .where(
+        and(
+          eq(customerPricingHistory.customerId, customerId),
+          gte(customerPricingHistory.validFrom, newValidFrom)
+        )
+      )
+      .orderBy(customerPricingHistory.validFrom)
+      .limit(1);
+    
+    // If there's a future record, set validTo to day before it starts
+    let newValidTo: string | null = null;
+    if (futureRecords.length > 0) {
+      const futureStart = new Date(futureRecords[0].validFrom);
+      futureStart.setDate(futureStart.getDate() - 1);
+      newValidTo = futureStart.toISOString().split('T')[0];
+    }
+    
     const [newRecord] = await db
       .insert(customerPricingHistory)
       .values({
         customerId,
         validFrom: newValidFrom,
-        validTo: null,
+        validTo: newValidTo,
         hauswirtschaftRateCents: rest.hauswirtschaftRateCents ?? null,
         alltagsbegleitungRateCents: rest.alltagsbegleitungRateCents ?? null,
         kilometerRateCents: rest.kilometerRateCents ?? null,
