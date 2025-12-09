@@ -137,20 +137,18 @@ function CustomerCard({ customer }: { customer: Customer }) {
               <div className={`${componentStyles.avatarContainer} bg-primary/10`}>
                 <User className={`${iconSize.md} text-primary`} />
               </div>
-              <div className="min-w-0">
-                <h3 className="font-semibold text-foreground truncate" data-testid={`text-customer-name-${customer.id}`}>
-                  {customer.name}
-                </h3>
-                {pflegegradLabel && pflegegradColors && (
-                  <Badge 
-                    variant="secondary" 
-                    className={`text-xs mt-0.5 ${pflegegradColors.bg} ${pflegegradColors.text} ${pflegegradColors.border}`}
-                    data-testid={`badge-customer-pflegegrad-${customer.id}`}
-                  >
-                    {pflegegradLabel}
-                  </Badge>
-                )}
-              </div>
+              <h3 className="font-semibold text-foreground truncate flex-1" data-testid={`text-customer-name-${customer.id}`}>
+                {customer.name}
+              </h3>
+              {pflegegradLabel && pflegegradColors && (
+                <Badge 
+                  variant="secondary" 
+                  className={`text-xs shrink-0 ${pflegegradColors.bg} ${pflegegradColors.text} ${pflegegradColors.border}`}
+                  data-testid={`badge-customer-pflegegrad-${customer.id}`}
+                >
+                  {pflegegradLabel}
+                </Badge>
+              )}
             </div>
 
             <div className="space-y-1.5 text-sm">
