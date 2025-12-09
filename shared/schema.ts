@@ -367,6 +367,10 @@ export const customerContracts = pgTable("customer_contracts", {
   // Service scope
   hoursPerPeriod: integer("hours_per_period").notNull(), // Total hours
   periodType: text("period_type").notNull(), // "week" | "month" | "year"
+  // Pricing (in cents) - required for all contracts
+  hauswirtschaftRateCents: integer("hauswirtschaft_rate_cents").notNull().default(0), // €/Stunde in Cent
+  alltagsbegleitungRateCents: integer("alltagsbegleitung_rate_cents").notNull().default(0), // €/Stunde in Cent
+  kilometerRateCents: integer("kilometer_rate_cents").notNull().default(0), // €/km in Cent
   // Status
   status: text("status").notNull().default("active"), // "active" | "paused" | "terminated"
   notes: text("notes"),
@@ -744,6 +748,10 @@ export const insertCustomerContractSchema = z.object({
   contractEnd: z.string().optional().nullable(),
   hoursPerPeriod: z.number().min(1),
   periodType: z.enum(CONTRACT_PERIOD_TYPES),
+  // Pricing (in cents) - required for all contracts
+  hauswirtschaftRateCents: z.number().min(0, "Hauswirtschaft-Preis ist erforderlich"),
+  alltagsbegleitungRateCents: z.number().min(0, "Alltagsbegleitung-Preis ist erforderlich"),
+  kilometerRateCents: z.number().min(0, "Kilometer-Preis ist erforderlich"),
   status: z.enum(CONTRACT_STATUS).optional().default("active"),
   notes: z.string().max(500).optional().nullable(),
 });
@@ -853,9 +861,10 @@ export const createFullCustomerSchema = z.object({
   contractPeriod: z.enum(CONTRACT_PERIOD_TYPES),
   contractStart: z.string().optional().nullable(),
   
-  // Prices (in euros, will convert to cents)
-  hauswirtschaftRate: z.number().min(0).optional(),
-  alltagsbegleitungRate: z.number().min(0).optional(),
+  // Prices (in euros, will convert to cents) - all required
+  hauswirtschaftRate: z.number().min(0, "Hauswirtschaft-Preis ist erforderlich"),
+  alltagsbegleitungRate: z.number().min(0, "Alltagsbegleitung-Preis ist erforderlich"),
+  kilometerRate: z.number().min(0, "Kilometer-Preis ist erforderlich"),
 });
 
 export type CreateFullCustomer = z.infer<typeof createFullCustomerSchema>;

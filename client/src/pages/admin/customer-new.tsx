@@ -109,7 +109,7 @@ export default function AdminCustomerNew() {
     contractPeriod: "weekly" as "weekly" | "monthly",
     hauswirtschaftRate: "38",
     alltagsbegleitungRate: "42",
-    erstberatungRate: "0",
+    kilometerRate: "0.35",
   });
 
   const { data: insuranceProviders } = useInsuranceProviders();
