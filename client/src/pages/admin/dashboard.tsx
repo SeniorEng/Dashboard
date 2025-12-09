@@ -1,5 +1,5 @@
 import { Link } from "wouter";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { Layout } from "@/components/layout";
@@ -24,9 +24,9 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <Link href="/admin/users">
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow" data-testid="card-users">
+          <div className="grid gap-4 md:grid-cols-2 auto-rows-fr">
+            <Link href="/admin/users" className="block h-full">
+              <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid="card-users">
                 <CardHeader>
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-teal-100 rounded-lg">
@@ -40,16 +40,11 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-gray-600">
-                    Verwalten Sie alle Benutzerkonten und deren Berechtigungen.
-                  </p>
-                </CardContent>
               </Card>
             </Link>
 
-            <Link href="/admin/customer-assignments">
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow" data-testid="card-assignments">
+            <Link href="/admin/customer-assignments" className="block h-full">
+              <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid="card-assignments">
                 <CardHeader>
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-orange-100 rounded-lg">
@@ -63,16 +58,11 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-gray-600">
-                    Legen Sie fest, welcher Mitarbeiter für welchen Kunden zuständig ist.
-                  </p>
-                </CardContent>
               </Card>
             </Link>
 
-            <Link href="/admin/customers">
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow" data-testid="card-customers">
+            <Link href="/admin/customers" className="block h-full">
+              <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid="card-customers">
                 <CardHeader>
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-blue-100 rounded-lg">
@@ -86,16 +76,11 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-gray-600">
-                    Vollständige Kundendaten inkl. Versicherung, Kontakte, Budgets und Verträge.
-                  </p>
-                </CardContent>
               </Card>
             </Link>
 
-            <Link href="/admin/time-entries">
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow" data-testid="card-time-entries">
+            <Link href="/admin/time-entries" className="block h-full">
+              <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid="card-time-entries">
                 <CardHeader>
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-green-100 rounded-lg">
@@ -109,11 +94,6 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-gray-600">
-                    Übersicht aller Mitarbeiter-Zeiteinträge und Urlaubskontingente verwalten.
-                  </p>
-                </CardContent>
               </Card>
             </Link>
           </div>
