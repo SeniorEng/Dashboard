@@ -111,6 +111,48 @@ export interface CustomerDetail extends Customer {
   careLevelHistory: CustomerCareLevelHistoryItem[];
   currentBudgets: CustomerBudgetsInfo | null;
   activeContractCount: number;
+  needsAssessment: CustomerNeedsAssessmentInfo | null;
+  currentContract: CustomerContractInfo | null;
+  primaryEmployee: { id: number; displayName: string } | null;
+  backupEmployee: { id: number; displayName: string } | null;
+}
+
+export interface CustomerNeedsAssessmentInfo {
+  id: number;
+  assessmentDate: string;
+  householdSize: number;
+  pflegedienstBeauftragt: boolean;
+  anamnese: string | null;
+  serviceHaushaltHilfe: boolean;
+  serviceMahlzeiten: boolean;
+  serviceReinigung: boolean;
+  serviceWaeschePflege: boolean;
+  serviceEinkauf: boolean;
+  serviceTagesablauf: boolean;
+  serviceAlltagsverrichtungen: boolean;
+  serviceTerminbegleitung: boolean;
+  serviceBotengaenge: boolean;
+  serviceGrundpflege: boolean;
+  serviceFreizeitbegleitung: boolean;
+  serviceDemenzbetreuung: boolean;
+  serviceGesellschaft: boolean;
+  serviceSozialeKontakte: boolean;
+  serviceFreizeitgestaltung: boolean;
+  serviceKreativ: boolean;
+  sonstigeLeistungen: string | null;
+}
+
+export interface CustomerContractInfo {
+  id: number;
+  contractStart: string;
+  contractEnd: string | null;
+  hoursPerPeriod: number;
+  periodType: string;
+  status: string;
+  hauswirtschaftRateCents: number;
+  alltagsbegleitungRateCents: number;
+  kilometerRateCents: number;
+  notes: string | null;
 }
 
 export interface CustomerContactItem {

@@ -716,31 +716,16 @@ export class CustomerManagementStorage {
         validFrom: new Date().toISOString().split('T')[0],
       }, userId);
 
-      const contract = await this.createCustomerContract({
+      await this.createCustomerContract({
         customerId: customer.id,
         contractStart: data.contractStart || new Date().toISOString().split('T')[0],
         hoursPerPeriod: data.contractHours,
         periodType: data.contractPeriod,
+        hauswirtschaftRateCents: Math.round((data.hauswirtschaftRate ?? 0) * 100),
+        alltagsbegleitungRateCents: Math.round((data.alltagsbegleitungRate ?? 0) * 100),
+        kilometerRateCents: Math.round((data.kilometerRate ?? 0) * 100),
         status: "active",
       }, userId);
-
-      if (data.hauswirtschaftRate !== undefined) {
-        await this.addContractRate({
-          contractId: contract.id,
-          serviceCategory: "hauswirtschaft",
-          hourlyRateCents: Math.round(data.hauswirtschaftRate * 100),
-          validFrom: data.contractStart || new Date().toISOString().split('T')[0],
-        }, userId);
-      }
-
-      if (data.alltagsbegleitungRate !== undefined) {
-        await this.addContractRate({
-          contractId: contract.id,
-          serviceCategory: "alltagsbegleitung",
-          hourlyRateCents: Math.round(data.alltagsbegleitungRate * 100),
-          validFrom: data.contractStart || new Date().toISOString().split('T')[0],
-        }, userId);
-      }
 
       return customer;
     } catch (error) {

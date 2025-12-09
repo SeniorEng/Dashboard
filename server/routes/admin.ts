@@ -544,7 +544,36 @@ router.get("/customers/:id/details", async (req: Request, res: Response) => {
       return;
     }
     
-    res.json(customer);
+    const response = {
+      ...customer,
+      currentInsurance: customer.insurance ? {
+        id: customer.insurance.id,
+        providerName: customer.insurance.provider?.name || "Unbekannt",
+        versichertennummer: customer.insurance.versichertennummer,
+        validFrom: customer.insurance.validFrom,
+      } : null,
+      currentBudgets: customer.budget ? {
+        entlastungsbetrag45b: customer.budget.entlastungsbetrag45b,
+        verhinderungspflege39: customer.budget.verhinderungspflege39,
+        pflegesachleistungen36: customer.budget.pflegesachleistungen36,
+      } : null,
+      needsAssessment: customer.needsAssessment || null,
+      currentContract: customer.contract ? {
+        id: customer.contract.id,
+        contractStart: customer.contract.contractStart,
+        contractEnd: customer.contract.contractEnd,
+        hoursPerPeriod: customer.contract.hoursPerPeriod,
+        periodType: customer.contract.periodType,
+        status: customer.contract.status,
+        hauswirtschaftRateCents: customer.contract.hauswirtschaftRateCents ?? 0,
+        alltagsbegleitungRateCents: customer.contract.alltagsbegleitungRateCents ?? 0,
+        kilometerRateCents: customer.contract.kilometerRateCents ?? 0,
+        notes: customer.contract.notes,
+      } : null,
+      activeContractCount: customer.contract ? 1 : 0,
+    };
+    
+    res.json(response);
   } catch (error) {
     handleRouteError(res, error, "Kunde konnte nicht geladen werden");
   }
