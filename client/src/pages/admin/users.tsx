@@ -1120,19 +1120,19 @@ function CompensationSection({ userId, userName }: { userId: number; userName: s
               <div className="grid grid-cols-3 gap-3 text-sm">
                 <div>
                   <div className="text-gray-500 text-xs">Hauswirtschaft</div>
-                  <div className="font-medium">{formatCurrency(currentCompensation.hourlyRateHauswirtschaft)} €/h</div>
+                  <div className="font-medium">{formatCurrency(currentCompensation.hourlyRateHauswirtschaft)}/h</div>
                 </div>
                 <div>
                   <div className="text-gray-500 text-xs">Alltagsbegleitung</div>
-                  <div className="font-medium">{formatCurrency(currentCompensation.hourlyRateAlltagsbegleitung)} €/h</div>
+                  <div className="font-medium">{formatCurrency(currentCompensation.hourlyRateAlltagsbegleitung)}/h</div>
                 </div>
                 <div>
                   <div className="text-gray-500 text-xs">Fahrtkosten</div>
                   <div className="font-medium">
                     {currentCompensation.travelCostType === "kilometergeld" 
-                      ? `${formatCurrency(currentCompensation.kilometerRate)} €/km`
+                      ? `${formatCurrency(currentCompensation.kilometerRate)}/km`
                       : currentCompensation.travelCostType === "pauschale"
-                      ? `${formatCurrency(currentCompensation.monthlyTravelAllowance)} €/Mo`
+                      ? `${formatCurrency(currentCompensation.monthlyTravelAllowance)}/Mo`
                       : "-"}
                   </div>
                 </div>
