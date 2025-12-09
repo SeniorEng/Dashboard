@@ -1,7 +1,7 @@
 # CareConnect - Elderly Care Service Management System
 
 ## Overview
-CareConnect is a full-stack web application for caregivers managing elderly care services. It provides a mobile-first interface for scheduling, tracking, and documenting appointments, including digital signatures. The system aims to streamline operations for care professionals with real-time data management. The project vision includes comprehensive customer management, unified service models, and robust data historization for auditing and compliance.
+CareConnect is a full-stack, mobile-first web application designed to streamline operations for caregivers managing elderly care services. It provides functionalities for scheduling, tracking, and documenting appointments, including digital signatures and real-time data management. The system aims to enhance efficiency for care professionals with features like comprehensive customer management, unified service models, robust data historization for compliance, and adherence to German labor laws. The business vision includes expanding customer management capabilities, unifying service models, and ensuring data integrity for auditing.
 
 ## User Preferences
 - Preferred communication style: Simple, everyday language
@@ -9,167 +9,44 @@ CareConnect is a full-stack web application for caregivers managing elderly care
 
 ## System Architecture
 
-### Frontend Architecture
+### Frontend
 - **Frameworks**: React 18 with TypeScript, Vite, Wouter for routing.
-- **UI/UX**: `shadcn/ui` components on Radix UI primitives, Tailwind CSS v4 with a "Care & Clarity" theme (teal and warm beige), mobile-first responsive design.
-- **State Management**: TanStack Query for data fetching with optimistic updates and caching, React memoization for performance, ErrorBoundary for graceful error handling.
-- **Structure**: Feature-based architecture with clear separation of concerns, utilizing a shared domain logic (`@shared/domain`).
-- **Design System**: Centralized design tokens (`@/design-system`) for colors, typography, spacing, and pre-defined component styles. Semantic color functions for status, service, and Pflegegrad. Layout patterns include `PageHeader`, `SectionCard`, `DataList`, `EmptyState`, and `StatusBadge`.
-- **Date/Time Handling (KRITISCH - Harmonisiertes System)**:
-  Das System verwendet **Variante C: Lokale Zeiten ohne Zeitzone** für alle Termin- und Zeitdaten. Alle Zeiten werden als "deutsche Ortszeit" behandelt - keine UTC-Konvertierung nötig.
-  
-  **Datenbankformate:**
-  - `date` Spalten: String "YYYY-MM-DD" (z.B. "2025-12-04")
-  - `time` Spalten: String "HH:MM:SS" (z.B. "16:30:00")
-  - Keine `timestamptz` für Terminzeiten! (Nur für Audit-Felder wie `createdAt`)
-  
-  **Zentrale Utilities** (`shared/utils/datetime.ts`):
-  ```typescript
-  import { 
-    parseLocalDate,      // "2025-12-04" → Date (lokale Mitternacht)
-    parseLocalTime,      // "16:30:00" → { hours: 16, minutes: 30, seconds: 0 }
-    formatDateISO,       // Date → "2025-12-04"
-    formatTimeHHMM,      // "16:30:00" → "16:30"
-    formatTimeHHMMSS,    // Date/time → "16:30:00"
-    combineDateAndTime,  // ("2025-12-04", "16:30:00") → Date
-    timeToMinutes,       // "16:30:00" | Date → 990
-    minutesToTime,       // 990 → "16:30:00"
-  } from "@shared/utils/datetime";
-  ```
-  
-  **Lerneffekte & Regeln:**
-  1. **NIEMALS** `new Date("2025-12-04")` verwenden! JavaScript interpretiert das als UTC-Mitternacht → Verschiebung um einen Tag möglich
-  2. **IMMER** die zentralen Utilities verwenden für konsistentes Parsing
-  3. Drizzle gibt `date`/`time` als Strings zurück, `timestamp` als Date-Objekte → daher alle Terminzeiten als `time` speichern
-  4. Das System ist nur für Deutschland ausgelegt - 16:00 Uhr ist immer 16:00 Uhr deutscher Zeit
-  
-  **Beispiel korrektes Parsen:**
-  ```typescript
-  // FALSCH - führt zu Zeitzonenproblemen:
-  const date = new Date("2025-12-04");
-  
-  // RICHTIG - zeitzonen-sicher mit Utility:
-  import { parseLocalDate } from "@shared/utils/datetime";
-  const date = parseLocalDate("2025-12-04");
-  ```
-- **API-Aufrufe (KRITISCH - CSRF-Schutz)**:
-  Das System verwendet CSRF-Schutz (Double-Submit Cookie Pattern) für alle zustandsändernden Anfragen. 
-  
-  **Lerneffekte & Regeln:**
-  1. **NIEMALS** direkte `fetch()` Aufrufe für POST/PATCH/DELETE verwenden!
-  2. **IMMER** den zentralen API-Client verwenden für alle mutierenden Anfragen
-  3. GET-Anfragen können weiterhin direkt mit `fetch()` gemacht werden (kein CSRF nötig)
-  4. Login ist absichtlich von CSRF ausgenommen (Token wird erst nach Login gesetzt)
-  
-  **Zentraler API-Client** (`client/src/lib/api/client.ts`):
-  ```typescript
-  import { api, unwrapResult } from "@/lib/api/client";
-  
-  // POST-Anfrage:
-  const result = await api.post("/appointments/kundentermin", data);
-  return unwrapResult(result);
-  
-  // PATCH-Anfrage:
-  const result = await api.patch(`/appointments/${id}`, data);
-  return unwrapResult(result);
-  
-  // DELETE-Anfrage:
-  const result = await api.delete(`/appointments/${id}`);
-  unwrapResult(result);
-  ```
-  
-  **Beispiel mit useMutation:**
-  ```typescript
-  // FALSCH - führt zu 403 CSRF-Fehler:
-  const mutation = useMutation({
-    mutationFn: async (data) => {
-      const res = await fetch("/api/appointments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      return res.json();
-    },
-  });
-  
-  // RICHTIG - mit API-Client und CSRF-Token:
-  import { api, unwrapResult } from "@/lib/api/client";
-  
-  const mutation = useMutation({
-    mutationFn: async (data) => {
-      const result = await api.post("/appointments", data);
-      return unwrapResult(result);
-    },
-  });
-  ```
-  
-  **Warum?**
-  - Der API-Client fügt automatisch den `X-CSRF-Token` Header hinzu
-  - Das Token wird aus dem Cookie `careconnect_csrf` gelesen
-  - Der Server validiert, dass Header-Token und Cookie-Token übereinstimmen
-  - Ohne diesen Header werden alle POST/PATCH/DELETE-Anfragen mit 403 abgelehnt
+- **UI/UX**: Mobile-first responsive design using `shadcn/ui` components on Radix UI primitives, styled with Tailwind CSS v4 and a "Care & Clarity" theme (teal and warm beige).
+- **State Management**: TanStack Query for data fetching (optimistic updates, caching), React memoization, ErrorBoundary for error handling.
+- **Design System**: Centralized `@/design-system` for consistent styling, enforcing the use of tokens for icons, component styles, semantic spacing, and semantic colors (status, service, care level).
+- **Date/Time Handling**: Uses local times without time zone conversion, treating all date/time data as "German local time". `date` columns are "YYYY-MM-DD" strings, `time` columns are "HH:MM:SS" strings. Centralized utilities (`@shared/utils/datetime`) must be used for parsing and formatting.
+- **API Calls**: All state-changing API requests (POST, PATCH, DELETE) must use the central API client (`client/src/lib/api/client.ts`) for CSRF protection (Double-Submit Cookie Pattern). Direct `fetch()` calls for mutations will result in 403 errors.
+- **Phone Number Handling**: Uses `libphonenumber-js` via `@shared/utils/phone.ts` for validating, formatting, and storing German phone numbers in E.164 format (`+49...`).
+- **Type Organization**: Hierarchical type structure with `@shared/schema.ts` (Drizzle, Zod), `@shared/domain/*` (business logic, domain types), `@shared/utils/*` (utilities), and `@shared/types.ts` (re-exports for frontend).
 
-- **Phone Number Handling**: Telefonnummern werden über `shared/utils/phone.ts` mit der Bibliothek `libphonenumber-js` verarbeitet. Nur deutsche Nummern (+49) sind erlaubt.
-
-  - **Speicherung**: Immer im E.164-Format (`+491701234567`) in der Datenbank speichern
-  - **Anzeige**: `formatPhoneForDisplay()` für nationale Darstellung (`0170 1234567`)
-  - **Validierung**: `validateGermanPhone()` prüft Gültigkeit und gibt Typ zurück (mobile/landline)
-  - **Live-Formatierung**: `formatPhoneAsYouType()` für Eingabefelder
-  ```javascript
-  import { validateGermanPhone, formatPhoneForDisplay, normalizePhone } from "@shared/utils/phone";
-  
-  // Validieren & Normalisieren vor dem Speichern:
-  const result = validateGermanPhone(userInput);
-  if (result.valid) {
-    await saveToDb(result.normalized); // "+491701234567"
-  }
-  
-  // Anzeige für Benutzer:
-  const display = formatPhoneForDisplay("+491701234567"); // "0170 1234567"
-  ```
-
-- **Typ-Organisation (Code-Architektur)**:
-  Das Projekt verwendet eine hierarchische Typ-Organisation:
-  - `@shared/schema.ts`: Datenbank-Schemas (Drizzle), Zod-Validierung, Insert/Update-Typen
-  - `@shared/domain/*`: Business-Logik und Domain-Typen (z.B. Status-Konstanten, Service-Typen)
-  - `@shared/utils/*`: Utility-Funktionen (datetime, phone, etc.)
-  - `@shared/types.ts`: Re-Exports und API-Response-Typen (Haupt-Import-Punkt für Frontend)
-  - `client/src/lib/api/types.ts`: Frontend-spezifische API-Typen mit Re-Export aus @shared
-  
-  **Import-Regeln:**
-  - Frontend-Komponenten importieren aus `@shared/types` für Domain-Typen
-  - Backend-Code importiert direkt aus `@shared/schema` und `@shared/domain`
-  - Zeit-Utilities immer aus `@shared/utils/datetime` (nicht aus domain/appointments)
-
-### Backend Architecture
+### Backend
 - **Framework**: Express.js with TypeScript.
-- **API Design**: RESTful endpoints (`/api/customers`, `/api/appointments`), Zod validation, structured error responses.
-- **Structure**: Modular routes (`server/routes/`), business logic in a dedicated service layer (`server/services/`).
-- **Dependency Injection**: Services support constructor injection for testability. Example: `AppointmentService` accepts an `IAppointmentStorage` interface, defaulting to the global storage singleton for backward compatibility but allowing mock injection in tests.
-- **Error Handling**: Centralized error codes (VALIDATION_ERROR, NOT_FOUND, etc.) with German messages, consistent error formatting via `handleRouteError()`. All routes must use `handleRouteError()` in catch blocks - no direct `res.status(500).json()` calls.
-- **Security**: Role-based access control with SQL-level data filtering. CSRF protection via Double-Submit Cookie pattern with `X-CSRF-Token` header validation for all state-changing requests. Database indexes on frequently queried columns (`customerId`, `date`, `assignedEmployeeId`) for performance optimization.
+- **API Design**: RESTful endpoints, Zod validation, structured error responses, and modular routing.
+- **Business Logic**: Separated into a dedicated service layer with dependency injection for testability.
+- **Error Handling**: Centralized error codes and German messages, consistent error formatting via `handleRouteError()`.
+- **Security**: Role-based access control with SQL-level data filtering, CSRF protection for all state-changing requests, and database indexing for performance.
 
 ### Data Storage
-- **Database**: PostgreSQL via Neon serverless, Drizzle ORM for type-safe queries.
-- **Schema**: Key tables include `customers`, `appointments`, `insurance_providers`, `customer_insurance_history`, `customer_contacts`, `care_level_history`, `customer_budgets`, `customer_contracts`, `customer_contract_rates`, `service_rates`, `employee_time_entries`. Historization pattern uses `valid_from`/`valid_to` timestamps for changing data.
-- **Data Types**: Strict SQL types are enforced for dates, times, timestamps, booleans, and numbers to ensure data integrity and enable native database operations.
-- **Indexes**: Composite indexes on frequently queried columns (`date`, `customer_id`, `status`, `assigned_employee_id`, `user_id`, `entry_date`) for performance.
-- **Data Layer**: `IStorage` interface abstraction, `DatabaseStorage` with optimized join queries, pagination support, and application-level rollback for atomicity due to Neon HTTP driver limitations.
-- **Caching**: In-memory cache for assigned customer IDs per employee with 10-minute TTL. Cache invalidation on customer creation, deletion, and employee assignment changes.
+- **Database**: PostgreSQL via Neon serverless, managed with Drizzle ORM.
+- **Schema**: Includes tables for `customers`, `appointments`, `insurance_providers`, `employee_time_entries`, and others, utilizing a historization pattern (`valid_from`/`valid_to`) for changing data.
+- **Data Types**: Strict SQL types for data integrity.
+- **Indexes**: Composite indexes on frequently queried columns.
+- **Data Layer**: `IStorage` interface abstraction with `DatabaseStorage` providing optimized queries, pagination, and application-level rollback.
+- **Caching**: In-memory cache for assigned customer IDs with TTL and invalidation.
 
 ### Business Rules & Patterns
-- **Shared Domain Logic**: A single source of truth (`shared/domain/`) for business rules, including appointment status transitions (scheduled → in-progress → documenting → completed, with completed being immutable).
-- **Field Editing Rules**: Specific fields editable only in certain appointment statuses.
-- **Overlap Checking**: Logic for checking appointment overlaps based on `actualEnd` for completed appointments and `scheduledEnd` or calculated duration for scheduled appointments.
-- **Service Model**: "Erstberatung" is integrated as a service type with a unified 2-step documentation flow.
-- **Customer Management**: Multi-step customer creation wizard, detailed customer views, and German-specific validation (IK numbers, Versichertennummer). Inline insurance provider creation during customer wizard.
-- **Budgeting & Pricing**: Supports various budget types (e.g., §45b, §39, §36) and customer-specific service rates.
-- **Employee Time Tracking**: Employees can track non-client work including vacation (Urlaub), sick leave (Krankheit), breaks (Pause), office work (Büroarbeit), sales (Vertrieb), training (Schulung), meetings (Besprechung), and other activities. Yearly vacation allowance tracking with used/planned/remaining days summary. Admin view for all employee time entries with vacation allowance management. Multi-day date range support for Urlaub and Krankheit. Past vacation/sick leave entries are locked for non-admin users to prevent manipulation.
-- **German Labor Law Compliance (§4 ArbZG)**: Automatic detection of missing break documentation based on work hours. When an employee works more than 6 hours, they must document at least 30 minutes of break. When working more than 9 hours, they must document at least 45 minutes. The calculation only counts actual service time (Hauswirtschaft, Alltagsbegleitung, Erstberatung) plus administrative entries - travel time (Anfahrt) is excluded as it's not continuous work.
-- **Open Tasks System**: Dashboard displays banners for pending tasks including undocumented appointments (amber) and missing break documentation (blue). This helps employees stay compliant with documentation requirements.
-- **Customer Kilometers**: During Alltagsbegleitung documentation, employees can record additional "Km für/mit Kunde" (kilometers driven with/for the customer) separate from travel kilometers (Anfahrt). This captures trips like doctor visits, shopping, or errands done with the customer. These are displayed separately in the time overview.
+- **Shared Domain Logic**: Single source of truth for business rules (e.g., appointment status transitions).
+- **Field Editing**: Rules govern which fields are editable based on appointment status.
+- **Overlap Checking**: Logic for preventing appointment overlaps.
+- **Service Model**: "Erstberatung" (initial consultation) is a core service type.
+- **Customer Management**: Multi-step customer creation, detailed views, and German-specific validation (IK numbers, insurance numbers).
+- **Budgeting & Pricing**: Supports various budget types and customer-specific service rates.
+- **Employee Time Tracking**: Comprehensive tracking for client and non-client work (vacation, sick leave, breaks, office work, etc.), including yearly vacation allowance and multi-day entries. Past entries are locked for non-admin users.
+- **German Labor Law Compliance**: Automatic detection of missing break documentation based on work hours (`§4 ArbZG`).
+- **Open Tasks System**: Dashboard banners alert employees to pending tasks like undocumented appointments or missing break documentation.
+- **Customer Kilometers**: Tracking of kilometers driven with/for the customer ("Km für/mit Kunde") separate from travel kilometers.
 
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)
-- **Frontend Libraries**: React, TypeScript, Vite, Wouter, shadcn/ui, Radix UI, Tailwind CSS v4, TanStack Query, Zod.
+- **Frontend Libraries**: React, TypeScript, Vite, Wouter, `shadcn/ui`, Radix UI, Tailwind CSS v4, TanStack Query, Zod.
 - **Backend Libraries**: Express.js, TypeScript, Zod, Drizzle ORM.
