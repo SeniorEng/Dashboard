@@ -14,6 +14,7 @@ export const users = pgTable("users", {
   displayName: text("display_name").notNull(),
   vorname: text("vorname"),
   nachname: text("nachname"),
+  telefon: text("telefon"), // Phone number in E.164 format
   strasse: text("strasse"),
   hausnummer: text("hausnummer"),
   plz: text("plz"),

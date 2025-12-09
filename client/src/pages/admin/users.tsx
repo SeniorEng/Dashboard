@@ -57,6 +57,7 @@ interface UserData {
   displayName: string;
   vorname: string | null;
   nachname: string | null;
+  telefon: string | null;
   strasse: string | null;
   hausnummer: string | null;
   plz: string | null;
@@ -105,6 +106,16 @@ const AVAILABLE_ROLES = [
   "personenbefoerderung",
   "kinderbetreuung",
 ];
+
+// Format phone number for display (E.164 to national format)
+function formatPhoneDisplay(phone: string): string {
+  if (!phone) return '';
+  // Convert +49... to 0... format for display
+  if (phone.startsWith('+49')) {
+    return '0' + phone.slice(3).replace(/(\d{3})(\d+)/, '$1 $2');
+  }
+  return phone;
+}
 
 export default function AdminUsers() {
   const queryClient = useQueryClient();
@@ -245,21 +256,23 @@ export default function AdminUsers() {
               {users?.map((user) => (
                 <Card key={user.id} data-testid={`card-user-${user.id}`}>
                   <CardContent className="p-4">
-                    {/* Header row: Name, Email, Role */}
+                    {/* Header row: Name, Phone, Role (right-aligned) */}
                     <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-gray-100">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold text-gray-900">{user.displayName}</span>
-                          <span className={`text-xs px-2 py-0.5 rounded ${user.isAdmin ? 'bg-teal-100 text-teal-700' : 'bg-gray-100 text-gray-600'}`}>
-                            {user.isAdmin ? 'Admin' : 'Mitarbeiter'}
+                      <div className="min-w-0 flex-1">
+                        <span className="font-semibold text-gray-900">{user.displayName}</span>
+                        <p className="text-sm text-gray-500">
+                          {user.telefon ? formatPhoneDisplay(user.telefon) : '–'}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {!user.isActive && (
+                          <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600">
+                            Inaktiv
                           </span>
-                          {!user.isActive && (
-                            <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600">
-                              Deaktiviert
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-sm text-gray-500 truncate">{user.email}</p>
+                        )}
+                        <span className={`text-xs px-2 py-0.5 rounded ${user.isAdmin ? 'bg-teal-100 text-teal-700' : 'bg-gray-100 text-gray-600'}`}>
+                          {user.isAdmin ? 'Admin' : 'Mitarbeiter'}
+                        </span>
                       </div>
                     </div>
                     
