@@ -1,13 +1,15 @@
 /**
  * PageHeader Component
  * 
- * Consistent page header with optional back button, title, subtitle, and actions.
+ * Responsive page header with optional back button, title, subtitle, badges and actions.
+ * Stacks vertically on mobile with full-width buttons, horizontal layout on larger screens.
  */
 
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { componentStyles } from "@/design-system";
 
 interface PageHeaderProps {
   title: string;
@@ -29,8 +31,9 @@ export function PageHeader({
   className,
 }: PageHeaderProps) {
   return (
-    <div className={cn("flex items-center justify-between gap-3 mb-6", className)}>
-      <div className="flex items-center gap-3 min-w-0 flex-1">
+    <div className={cn(componentStyles.pageHeader, className)}>
+      {/* Top row: Back button + Title (always horizontal) */}
+      <div className={componentStyles.pageHeaderTop}>
         {backHref && (
           <Link href={backHref}>
             <Button 
@@ -44,18 +47,20 @@ export function PageHeader({
             </Button>
           </Link>
         )}
-        <div className="min-w-0">
-          <h1 className="text-2xl font-bold text-gray-900 truncate">{title}</h1>
+        <div className={componentStyles.pageHeaderTitleWrap}>
+          <h1 className={componentStyles.pageTitle}>{title}</h1>
           {subtitle && (
-            <p className="text-sm text-gray-600 mt-0.5 truncate">{subtitle}</p>
+            <p className={componentStyles.pageSubtitle}>{subtitle}</p>
           )}
           {badge && (
-            <div className="flex items-center gap-2 mt-1">{badge}</div>
+            <div className={componentStyles.pageHeaderBadges}>{badge}</div>
           )}
         </div>
       </div>
+      
+      {/* Actions: Full-width on mobile, inline on desktop */}
       {actions && (
-        <div className="flex items-center gap-2 shrink-0">{actions}</div>
+        <div className={componentStyles.pageHeaderActions}>{actions}</div>
       )}
     </div>
   );

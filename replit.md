@@ -14,6 +14,8 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **UI/UX**: Mobile-first responsive design using `shadcn/ui` components on Radix UI primitives, styled with Tailwind CSS v4 and a "Care & Clarity" theme (teal and warm beige).
 - **State Management**: TanStack Query for data fetching (optimistic updates, caching), React memoization, ErrorBoundary for error handling.
 - **Design System**: Centralized `@/design-system` for consistent styling, enforcing the use of tokens for icons, component styles, semantic spacing, and semantic colors (status, service, care level).
+  - **PageHeader**: Responsive stacked layout - title wraps naturally on mobile, action buttons go full-width below. Uses `componentStyles.pageHeader*` tokens.
+  - **ResponsiveTabs**: Priority+ pattern - shows first N tabs inline, rest collapse into "Mehr" dropdown on mobile. Component at `@/components/patterns/responsive-tabs.tsx`.
 - **Date/Time Handling**: Uses local times without time zone conversion, treating all date/time data as "German local time". `date` columns are "YYYY-MM-DD" strings, `time` columns are "HH:MM:SS" strings. Centralized utilities (`@shared/utils/datetime`) must be used for parsing and formatting.
 - **API Calls**: All state-changing API requests (POST, PATCH, DELETE) must use the central API client (`client/src/lib/api/client.ts`) for CSRF protection (Double-Submit Cookie Pattern). Direct `fetch()` calls for mutations will result in 403 errors.
 - **Phone Number Handling**: Uses `libphonenumber-js` via `@shared/utils/phone.ts` for validating, formatting, and storing German phone numbers in E.164 format (`+49...`).

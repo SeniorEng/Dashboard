@@ -249,10 +249,18 @@ export const componentStyles = {
   // Page container
   pageContainer: 'container mx-auto px-4 py-6',
   
-  // Page header with back button
-  pageHeader: 'flex items-center justify-between mb-6',
-  pageTitle: 'text-2xl font-bold text-gray-900',
-  pageSubtitle: 'text-sm text-gray-600',
+  // Page header - responsive stacked layout on mobile
+  pageHeader: 'flex flex-col gap-3 mb-6 sm:flex-row sm:items-center sm:justify-between',
+  pageHeaderTop: 'flex items-center gap-3',
+  pageHeaderTitleWrap: 'flex-1 min-w-0',
+  pageTitle: 'text-xl sm:text-2xl font-bold text-gray-900',
+  pageSubtitle: 'text-sm text-gray-600 mt-0.5',
+  pageHeaderBadges: 'flex flex-wrap items-center gap-2 mt-1',
+  pageHeaderActions: 'flex flex-col gap-2 w-full sm:flex-row sm:w-auto sm:items-center',
+  pageHeaderActionBtn: 'w-full sm:w-auto', // Full-width on mobile, auto on desktop
+  
+  // Legacy (deprecated) - für Rückwärtskompatibilität
+  pageHeaderLegacy: 'flex items-center justify-between mb-6',
   
   // Cards
   card: 'bg-white rounded-xl shadow-sm border border-gray-100',
@@ -275,6 +283,13 @@ export const componentStyles = {
   btnSecondary: 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-200',
   btnDanger: 'bg-red-600 hover:bg-red-700 text-white',
   btnGhost: 'hover:bg-gray-100 text-gray-700',
+  
+  // Responsive tabs (priority+ pattern)
+  tabsList: 'bg-white h-auto p-1 flex-wrap gap-1',
+  tabsTrigger: 'text-sm',
+  tabsOverflowBtn: 'h-8 px-3 text-sm font-medium',
+  tabsOverflowActive: 'bg-teal-100 text-teal-700',
+  tabsOverflowInactive: 'text-gray-600 hover:text-gray-900 hover:bg-gray-100',
   
   // Form sections
   formSection: 'space-y-4 border-t pt-4',

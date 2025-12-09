@@ -118,8 +118,8 @@ export default function AdminCustomers() {
             subtitle={`${total} ${total === 1 ? "Kunde" : "Kunden"} gefunden`}
             backHref="/admin"
             actions={
-              <Link href="/admin/customers/new">
-                <Button className={componentStyles.btnPrimary} data-testid="button-new-customer">
+              <Link href="/admin/customers/new" className={componentStyles.pageHeaderActionBtn}>
+                <Button className={`${componentStyles.btnPrimary} w-full sm:w-auto`} data-testid="button-new-customer">
                   <Plus className={iconSize.sm + " mr-2"} />
                   Neuer Kunde
                 </Button>

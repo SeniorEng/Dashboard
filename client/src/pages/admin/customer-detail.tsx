@@ -10,12 +10,12 @@ import { Link, useParams } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { formatDateForDisplay } from "@shared/utils/date";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SectionCard } from "@/components/patterns/section-card";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { StatusBadge } from "@/components/patterns/status-badge";
+import { ResponsiveTabs, TabsContent, TabItem } from "@/components/patterns/responsive-tabs";
 import { useCustomer } from "@/features/customers";
 import { iconSize, getPflegegradColors, componentStyles } from "@/design-system";
 import {
@@ -133,23 +133,24 @@ export default function AdminCustomerDetail() {
               </>
             }
             actions={
-              <Button variant="outline" className="bg-white" data-testid="button-edit-customer">
+              <Button variant="outline" className={`bg-white ${componentStyles.pageHeaderActionBtn}`} data-testid="button-edit-customer">
                 <Edit className={`${iconSize.sm} mr-2`} />
                 Bearbeiten
               </Button>
             }
           />
 
-          <Tabs defaultValue="overview" className="space-y-4">
-            <div className="overflow-x-auto -mx-4 px-4">
-              <TabsList className="bg-white w-max">
-                <TabsTrigger value="overview" data-testid="tab-overview">Übersicht</TabsTrigger>
-                <TabsTrigger value="contacts" data-testid="tab-contacts">Kontakte</TabsTrigger>
-                <TabsTrigger value="insurance" data-testid="tab-insurance">Versicherung</TabsTrigger>
-                <TabsTrigger value="budgets" data-testid="tab-budgets">Budgets</TabsTrigger>
-                <TabsTrigger value="history" data-testid="tab-history">Historie</TabsTrigger>
-              </TabsList>
-            </div>
+          <ResponsiveTabs
+            tabs={[
+              { value: "overview", label: "Übersicht", testId: "tab-overview" },
+              { value: "contacts", label: "Kontakte", testId: "tab-contacts" },
+              { value: "insurance", label: "Versicherung", testId: "tab-insurance" },
+              { value: "budgets", label: "Budgets", testId: "tab-budgets" },
+              { value: "history", label: "Historie", testId: "tab-history" },
+            ]}
+            defaultValue="overview"
+            mobileVisibleCount={3}
+          >
 
             <TabsContent value="overview" className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
@@ -391,7 +392,7 @@ export default function AdminCustomerDetail() {
                 )}
               </SectionCard>
             </TabsContent>
-          </Tabs>
+          </ResponsiveTabs>
         </div>
       </div>
     </Layout>
