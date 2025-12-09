@@ -8,6 +8,7 @@ import { de } from "date-fns/locale";
 import { Plus, ChevronsLeft, ChevronsRight, AlertCircle, Coffee } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { parseLocalDate, formatDateForDisplay } from "@shared/utils/date";
+import { iconSize } from "@/design-system";
 
 const WEEKDAY_NAMES_SHORT = ["Mo", "Di", "Mi", "Do", "Fr"];
 
@@ -98,7 +99,7 @@ export default function Dashboard() {
                   className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 hover:bg-amber-100 transition-colors cursor-pointer"
                   data-testid="banner-undocumented"
                 >
-                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <AlertCircle className={`${iconSize.sm} shrink-0`} />
                   <span className="text-sm font-medium">
                     {undocumentedCount} {undocumentedCount === 1 ? "offene Dokumentation" : "offene Dokumentationen"}
                   </span>
@@ -113,7 +114,7 @@ export default function Dashboard() {
                   className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 hover:bg-blue-100 transition-colors cursor-pointer"
                   data-testid="banner-missing-breaks"
                 >
-                  <Coffee className="w-4 h-4 shrink-0" />
+                  <Coffee className={`${iconSize.sm} shrink-0`} />
                   <div className="text-sm">
                     <span className="font-medium">Fehlende Pausendokumentation: </span>
                     <span>
@@ -154,7 +155,7 @@ export default function Dashboard() {
           </div>
           <Link href="/new-appointment">
             <Button size="sm" className="shadow-lg shadow-primary/20" data-testid="button-new-appointment">
-              <Plus className="w-4 h-4 mr-1" /> Neuer Termin
+              <Plus className={`${iconSize.sm} mr-1`} /> Neuer Termin
             </Button>
           </Link>
         </div>
@@ -169,7 +170,7 @@ export default function Dashboard() {
             data-testid="button-prev-week"
             title="Vorherige Woche"
           >
-            <ChevronsLeft className="w-4 h-4" />
+            <ChevronsLeft className={iconSize.sm} />
           </Button>
           
           <div className="flex-1 space-y-1">
@@ -288,7 +289,7 @@ export default function Dashboard() {
             data-testid="button-next-week"
             title="Nächste Woche"
           >
-            <ChevronsRight className="w-4 h-4" />
+            <ChevronsRight className={iconSize.sm} />
           </Button>
         </div>
       </div>

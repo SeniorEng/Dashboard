@@ -6,6 +6,8 @@ import { Cake, User, Users, Loader2, Gift } from "lucide-react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { formatDateForDisplay } from "@shared/utils/date";
+import { iconSize, componentStyles } from "@/design-system";
+import { EmptyState } from "@/components/patterns/empty-state";
 
 interface BirthdayEntry {
   id: number;
@@ -59,7 +61,7 @@ export default function BirthdaysPage() {
     return (
       <Layout>
         <div className="flex items-center justify-center min-h-[50vh]">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <Loader2 className={`${iconSize.xl} animate-spin text-primary`} />
         </div>
       </Layout>
     );
@@ -69,7 +71,7 @@ export default function BirthdaysPage() {
     <Layout>
       <div className="mb-6 animate-in slide-in-from-top-4 duration-500">
         <div className="flex items-center gap-3 mb-1">
-          <Cake className="w-7 h-7 text-primary" />
+          <Cake className={`${iconSize.lg} text-primary`} />
           <h1 className="text-2xl font-bold text-foreground tracking-tight" data-testid="text-birthdays-title">
             Geburtstage
           </h1>
@@ -84,11 +86,11 @@ export default function BirthdaysPage() {
 
       {!hasAnyBirthdays ? (
         <Card className="border-dashed">
-          <CardContent className="flex flex-col items-center justify-center py-10 text-center">
-            <Gift className="w-12 h-12 text-muted-foreground/40 mb-3" />
-            <p className="text-muted-foreground font-medium">
-              Keine Geburtstage in den nächsten 30 Tagen
-            </p>
+          <CardContent className="py-10">
+            <EmptyState
+              icon={<Gift className={`${iconSize["2xl"]} text-muted-foreground/40`} />}
+              title="Keine Geburtstage in den nächsten 30 Tagen"
+            />
           </CardContent>
         </Card>
       ) : (
@@ -137,15 +139,15 @@ function BirthdayCard({ birthday }: { birthday: BirthdayEntry }) {
     >
       <CardContent className="p-4">
         <div className="flex items-center gap-4">
-          <div className={`h-12 w-12 rounded-full flex items-center justify-center flex-shrink-0 ${
+          <div className={`${componentStyles.avatarContainerLg} flex-shrink-0 ${
             birthday.type === "employee" 
               ? "bg-blue-100 text-blue-600" 
               : "bg-primary/10 text-primary"
           }`}>
             {birthday.type === "employee" ? (
-              <User className="w-6 h-6" />
+              <User className={iconSize.lg} />
             ) : (
-              <Users className="w-6 h-6" />
+              <Users className={iconSize.lg} />
             )}
           </div>
           
