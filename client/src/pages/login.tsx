@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, AlertCircle, Heart } from "lucide-react";
+import { Loader2, AlertCircle } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import logoImage from "@/assets/logo-seniorenengel.png";
 import { api, unwrapResult } from "@/lib/api/client";
 
 export default function LoginPage() {
@@ -72,12 +73,12 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4] p-4">
       <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-teal-100">
-            <Heart className="h-6 w-6 text-teal-600" />
-          </div>
-          <CardTitle className="text-2xl font-bold text-gray-900">CareConnect</CardTitle>
-          <CardDescription>Melden Sie sich an, um fortzufahren</CardDescription>
+        <CardHeader className="text-center pb-2">
+          <img 
+            src={logoImage} 
+            alt="SeniorenEngel" 
+            className="h-16 mx-auto mb-2"
+          />
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -181,11 +182,13 @@ function SetupPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4] p-4">
       <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-teal-100">
-            <Heart className="h-6 w-6 text-teal-600" />
-          </div>
-          <CardTitle className="text-2xl font-bold text-gray-900">CareConnect einrichten</CardTitle>
+        <CardHeader className="text-center pb-2">
+          <img 
+            src={logoImage} 
+            alt="SeniorenEngel" 
+            className="h-16 mx-auto mb-2"
+          />
+          <CardTitle className="text-xl font-bold text-gray-900">Ersteinrichtung</CardTitle>
           <CardDescription>
             Erstellen Sie das erste Administrator-Konto
           </CardDescription>
