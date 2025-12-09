@@ -54,6 +54,27 @@ export const passwordResetTokens = pgTable("password_reset_tokens", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Employee compensation history (historized)
+export const TRAVEL_COST_TYPES = ["kilometergeld", "pauschale"] as const;
+export type TravelCostType = typeof TRAVEL_COST_TYPES[number];
+
+export const employeeCompensationHistory = pgTable("employee_compensation_history", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  hourlyRateHauswirtschaft: text("hourly_rate_hauswirtschaft"), // €/Stunde as string for decimal precision
+  hourlyRateAlltagsbegleitung: text("hourly_rate_alltagsbegleitung"), // €/Stunde as string for decimal precision
+  travelCostType: text("travel_cost_type"), // "kilometergeld" | "pauschale"
+  kilometerRate: text("kilometer_rate"), // €/km if travelCostType is "kilometergeld"
+  monthlyTravelAllowance: text("monthly_travel_allowance"), // €/Monat if travelCostType is "pauschale"
+  validFrom: date("valid_from").notNull(),
+  validTo: date("valid_to"), // null = currently valid
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdByUserId: integer("created_by_user_id").references(() => users.id),
+}, (table) => [
+  index("employee_compensation_user_idx").on(table.userId),
+  index("employee_compensation_valid_idx").on(table.userId, table.validFrom, table.validTo),
+]);
+
 // Employee role types
 export const EMPLOYEE_ROLES = [
   "hauswirtschaft",
@@ -100,8 +121,37 @@ export type UserRole = typeof userRoles.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 
+// Employee compensation schemas
+export const insertEmployeeCompensationSchema = z.object({
+  userId: z.number(),
+  hourlyRateHauswirtschaft: z.string().nullable().optional(),
+  hourlyRateAlltagsbegleitung: z.string().nullable().optional(),
+  travelCostType: z.enum(TRAVEL_COST_TYPES).nullable().optional(),
+  kilometerRate: z.string().nullable().optional(),
+  monthlyTravelAllowance: z.string().nullable().optional(),
+  validFrom: z.string(), // ISO date string
+}).refine((data) => {
+  if (data.travelCostType === "kilometergeld") {
+    return data.kilometerRate && !data.monthlyTravelAllowance;
+  }
+  if (data.travelCostType === "pauschale") {
+    return data.monthlyTravelAllowance && !data.kilometerRate;
+  }
+  return true;
+}, {
+  message: "Bei Kilometergeld muss der Km-Satz angegeben werden, bei Pauschale die monatliche Pauschale",
+});
+
+export type EmployeeCompensation = typeof employeeCompensationHistory.$inferSelect;
+export type InsertEmployeeCompensation = z.infer<typeof insertEmployeeCompensationSchema>;
+
 // User with roles (for API responses)
 export type UserWithRoles = User & { roles: EmployeeRole[] };
+
+// User with roles and current compensation (for admin views)
+export type UserWithRolesAndCompensation = UserWithRoles & { 
+  currentCompensation: EmployeeCompensation | null;
+};
 
 // German phone validation using libphonenumber-js
 export const germanPhoneSchema = z.string().refine(

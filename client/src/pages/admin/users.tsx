@@ -30,6 +30,13 @@ import {
 import { Layout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   ArrowLeft,
   Plus,
   Loader2,
@@ -40,6 +47,7 @@ import {
   Trash2,
   Shield,
   User,
+  Euro,
 } from "lucide-react";
 import { api, unwrapResult } from "@/lib/api/client";
 
@@ -72,6 +80,14 @@ interface UserFormData {
   geburtsdatum?: string;
   isAdmin: boolean;
   roles: string[];
+  compensation?: {
+    hourlyRateHauswirtschaft?: string;
+    hourlyRateAlltagsbegleitung?: string;
+    travelCostType?: "kilometergeld" | "pauschale";
+    kilometerRate?: string;
+    monthlyTravelAllowance?: string;
+    validFrom: string;
+  };
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -179,8 +195,9 @@ export default function AdminUsers() {
     },
   });
 
-  const handleCreateSubmit = (data: UserFormData & { password: string }) => {
-    createMutation.mutate(data);
+  const handleCreateSubmit = (data: UserFormData & { password?: string }) => {
+    if (!data.password) return;
+    createMutation.mutate(data as UserFormData & { password: string });
   };
 
   const handleEditSubmit = (data: UserFormData) => {
@@ -344,14 +361,17 @@ export default function AdminUsers() {
       </div>
 
       <Dialog open={!!editingUser} onOpenChange={() => setEditingUser(null)}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           {editingUser && (
-            <UserForm
-              mode="edit"
-              user={editingUser}
-              onSubmit={handleEditSubmit}
-              isLoading={updateMutation.isPending}
-            />
+            <>
+              <UserForm
+                mode="edit"
+                user={editingUser}
+                onSubmit={handleEditSubmit}
+                isLoading={updateMutation.isPending}
+              />
+              <CompensationSection userId={editingUser.id} userName={editingUser.displayName} />
+            </>
           )}
         </DialogContent>
       </Dialog>
@@ -395,6 +415,20 @@ function UserForm({
   const [geburtsdatum, setGeburtsdatum] = useState(user?.geburtsdatum ?? "");
   const [isAdmin, setIsAdmin] = useState(user?.isAdmin ?? false);
   const [roles, setRoles] = useState<string[]>(user?.roles ?? []);
+  
+  const [hourlyRateHauswirtschaft, setHourlyRateHauswirtschaft] = useState("");
+  const [hourlyRateAlltagsbegleitung, setHourlyRateAlltagsbegleitung] = useState("");
+  const [travelCostType, setTravelCostType] = useState<"kilometergeld" | "pauschale" | "">("");
+  const [kilometerRate, setKilometerRate] = useState("");
+  const [monthlyTravelAllowance, setMonthlyTravelAllowance] = useState("");
+  const [compensationValidFrom, setCompensationValidFrom] = useState(
+    new Date().toISOString().split("T")[0]
+  );
+
+  const hasCompensationData = 
+    hourlyRateHauswirtschaft || 
+    hourlyRateAlltagsbegleitung || 
+    travelCostType;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -413,6 +447,17 @@ function UserForm({
     
     if (mode === "create") {
       data.password = password;
+    }
+    
+    if (mode === "create" && hasCompensationData) {
+      data.compensation = {
+        hourlyRateHauswirtschaft: hourlyRateHauswirtschaft || undefined,
+        hourlyRateAlltagsbegleitung: hourlyRateAlltagsbegleitung || undefined,
+        travelCostType: travelCostType || undefined,
+        kilometerRate: travelCostType === "kilometergeld" ? kilometerRate : undefined,
+        monthlyTravelAllowance: travelCostType === "pauschale" ? monthlyTravelAllowance : undefined,
+        validFrom: compensationValidFrom,
+      };
     }
     
     onSubmit(data);
@@ -586,6 +631,126 @@ function UserForm({
             </div>
           </div>
         </div>
+
+        {isCreate && (
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold text-gray-700 border-b pb-2 flex items-center gap-2">
+              <Euro className="h-4 w-4" />
+              Vergütung (optional)
+            </h3>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="hourlyRateHauswirtschaft">Stundenlohn Hauswirtschaft</Label>
+                <div className="relative">
+                  <Input
+                    id="hourlyRateHauswirtschaft"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={hourlyRateHauswirtschaft}
+                    onChange={(e) => setHourlyRateHauswirtschaft(e.target.value)}
+                    placeholder="z.B. 15.50"
+                    className="pr-8"
+                    data-testid="input-hourly-rate-hauswirtschaft"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€/h</span>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="hourlyRateAlltagsbegleitung">Stundenlohn Alltagsbegleitung</Label>
+                <div className="relative">
+                  <Input
+                    id="hourlyRateAlltagsbegleitung"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={hourlyRateAlltagsbegleitung}
+                    onChange={(e) => setHourlyRateAlltagsbegleitung(e.target.value)}
+                    placeholder="z.B. 16.00"
+                    className="pr-8"
+                    data-testid="input-hourly-rate-alltagsbegleitung"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€/h</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="travelCostType">Fahrtkostenmodell</Label>
+              <Select
+                value={travelCostType}
+                onValueChange={(value: "kilometergeld" | "pauschale" | "") => {
+                  setTravelCostType(value);
+                  if (value === "kilometergeld") {
+                    setMonthlyTravelAllowance("");
+                  } else if (value === "pauschale") {
+                    setKilometerRate("");
+                  }
+                }}
+              >
+                <SelectTrigger data-testid="select-travel-cost-type">
+                  <SelectValue placeholder="Bitte wählen..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="kilometergeld">Kilometergeld</SelectItem>
+                  <SelectItem value="pauschale">Monatliche Pauschale</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {travelCostType === "kilometergeld" && (
+              <div className="space-y-2">
+                <Label htmlFor="kilometerRate">Kilometergeld</Label>
+                <div className="relative">
+                  <Input
+                    id="kilometerRate"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={kilometerRate}
+                    onChange={(e) => setKilometerRate(e.target.value)}
+                    placeholder="z.B. 0.30"
+                    className="pr-12"
+                    data-testid="input-kilometer-rate"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€/km</span>
+                </div>
+              </div>
+            )}
+
+            {travelCostType === "pauschale" && (
+              <div className="space-y-2">
+                <Label htmlFor="monthlyTravelAllowance">Monatliche Pauschale</Label>
+                <div className="relative">
+                  <Input
+                    id="monthlyTravelAllowance"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={monthlyTravelAllowance}
+                    onChange={(e) => setMonthlyTravelAllowance(e.target.value)}
+                    placeholder="z.B. 150.00"
+                    className="pr-14"
+                    data-testid="input-monthly-travel-allowance"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€/Monat</span>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="compensationValidFrom">Gültig ab</Label>
+              <Input
+                id="compensationValidFrom"
+                type="date"
+                value={compensationValidFrom}
+                onChange={(e) => setCompensationValidFrom(e.target.value)}
+                data-testid="input-compensation-valid-from"
+              />
+            </div>
+          </div>
+        )}
       </div>
       
       <DialogFooter>
@@ -601,6 +766,307 @@ function UserForm({
         </Button>
       </DialogFooter>
     </form>
+  );
+}
+
+interface CompensationData {
+  id: number;
+  userId: number;
+  hourlyRateHauswirtschaft: string | null;
+  hourlyRateAlltagsbegleitung: string | null;
+  travelCostType: string | null;
+  kilometerRate: string | null;
+  monthlyTravelAllowance: string | null;
+  validFrom: string;
+  validTo: string | null;
+  createdAt: string;
+}
+
+function CompensationSection({ userId, userName }: { userId: number; userName: string }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [newHourlyRateHauswirtschaft, setNewHourlyRateHauswirtschaft] = useState("");
+  const [newHourlyRateAlltagsbegleitung, setNewHourlyRateAlltagsbegleitung] = useState("");
+  const [newTravelCostType, setNewTravelCostType] = useState<"kilometergeld" | "pauschale" | "">("");
+  const [newKilometerRate, setNewKilometerRate] = useState("");
+  const [newMonthlyTravelAllowance, setNewMonthlyTravelAllowance] = useState("");
+  const [newValidFrom, setNewValidFrom] = useState(new Date().toISOString().split("T")[0]);
+
+  const { data: compensationHistory, isLoading } = useQuery<CompensationData[]>({
+    queryKey: ["admin", "users", userId, "compensation"],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/users/${userId}/compensation`, { credentials: "include" });
+      if (!res.ok) throw new Error("Vergütungshistorie konnte nicht geladen werden");
+      return res.json();
+    },
+  });
+
+  const addCompensationMutation = useMutation({
+    mutationFn: async (data: {
+      hourlyRateHauswirtschaft?: string;
+      hourlyRateAlltagsbegleitung?: string;
+      travelCostType?: string;
+      kilometerRate?: string;
+      monthlyTravelAllowance?: string;
+      validFrom: string;
+    }) => {
+      const result = await api.post(`/admin/users/${userId}/compensation`, data);
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "users", userId, "compensation"] });
+      setIsAddOpen(false);
+      setNewHourlyRateHauswirtschaft("");
+      setNewHourlyRateAlltagsbegleitung("");
+      setNewTravelCostType("");
+      setNewKilometerRate("");
+      setNewMonthlyTravelAllowance("");
+      setNewValidFrom(new Date().toISOString().split("T")[0]);
+      toast({ title: "Vergütung hinzugefügt" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleAddSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    addCompensationMutation.mutate({
+      hourlyRateHauswirtschaft: newHourlyRateHauswirtschaft || undefined,
+      hourlyRateAlltagsbegleitung: newHourlyRateAlltagsbegleitung || undefined,
+      travelCostType: newTravelCostType || undefined,
+      kilometerRate: newTravelCostType === "kilometergeld" ? newKilometerRate : undefined,
+      monthlyTravelAllowance: newTravelCostType === "pauschale" ? newMonthlyTravelAllowance : undefined,
+      validFrom: newValidFrom,
+    });
+  };
+
+  const formatCurrency = (value: string | null) => {
+    if (!value) return "-";
+    return `${parseFloat(value).toFixed(2)} €`;
+  };
+
+  const formatDate = (dateStr: string) => {
+    return new Date(dateStr + "T00:00:00").toLocaleDateString("de-DE");
+  };
+
+  const currentCompensation = compensationHistory?.find(c => !c.validTo);
+
+  return (
+    <div className="mt-6 pt-6 border-t">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+          <Euro className="h-4 w-4" />
+          Vergütung
+        </h3>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={() => setIsAddOpen(!isAddOpen)}
+          data-testid="button-add-compensation"
+        >
+          <Plus className="h-4 w-4 mr-1" />
+          Neue Vergütung
+        </Button>
+      </div>
+
+      {isAddOpen && (
+        <form onSubmit={handleAddSubmit} className="mb-4 p-4 bg-gray-50 rounded-lg space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="new-hourly-rate-hauswirtschaft">Stundenlohn Hauswirtschaft</Label>
+              <div className="relative">
+                <Input
+                  id="new-hourly-rate-hauswirtschaft"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={newHourlyRateHauswirtschaft}
+                  onChange={(e) => setNewHourlyRateHauswirtschaft(e.target.value)}
+                  placeholder="z.B. 15.50"
+                  className="pr-8"
+                  data-testid="input-new-hourly-rate-hauswirtschaft"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€/h</span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-hourly-rate-alltagsbegleitung">Stundenlohn Alltagsbegleitung</Label>
+              <div className="relative">
+                <Input
+                  id="new-hourly-rate-alltagsbegleitung"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={newHourlyRateAlltagsbegleitung}
+                  onChange={(e) => setNewHourlyRateAlltagsbegleitung(e.target.value)}
+                  placeholder="z.B. 16.00"
+                  className="pr-8"
+                  data-testid="input-new-hourly-rate-alltagsbegleitung"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€/h</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="new-travel-cost-type">Fahrtkostenmodell</Label>
+            <Select
+              value={newTravelCostType}
+              onValueChange={(value: "kilometergeld" | "pauschale" | "") => {
+                setNewTravelCostType(value);
+                if (value === "kilometergeld") {
+                  setNewMonthlyTravelAllowance("");
+                } else if (value === "pauschale") {
+                  setNewKilometerRate("");
+                }
+              }}
+            >
+              <SelectTrigger data-testid="select-new-travel-cost-type">
+                <SelectValue placeholder="Bitte wählen..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="kilometergeld">Kilometergeld</SelectItem>
+                <SelectItem value="pauschale">Monatliche Pauschale</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {newTravelCostType === "kilometergeld" && (
+            <div className="space-y-2">
+              <Label htmlFor="new-kilometer-rate">Kilometergeld</Label>
+              <div className="relative">
+                <Input
+                  id="new-kilometer-rate"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={newKilometerRate}
+                  onChange={(e) => setNewKilometerRate(e.target.value)}
+                  placeholder="z.B. 0.30"
+                  className="pr-12"
+                  data-testid="input-new-kilometer-rate"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€/km</span>
+              </div>
+            </div>
+          )}
+
+          {newTravelCostType === "pauschale" && (
+            <div className="space-y-2">
+              <Label htmlFor="new-monthly-travel-allowance">Monatliche Pauschale</Label>
+              <div className="relative">
+                <Input
+                  id="new-monthly-travel-allowance"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={newMonthlyTravelAllowance}
+                  onChange={(e) => setNewMonthlyTravelAllowance(e.target.value)}
+                  placeholder="z.B. 150.00"
+                  className="pr-14"
+                  data-testid="input-new-monthly-travel-allowance"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€/Monat</span>
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <Label htmlFor="new-valid-from">Gültig ab *</Label>
+            <Input
+              id="new-valid-from"
+              type="date"
+              value={newValidFrom}
+              onChange={(e) => setNewValidFrom(e.target.value)}
+              required
+              data-testid="input-new-valid-from"
+            />
+          </div>
+
+          <div className="flex gap-2">
+            <Button 
+              type="submit" 
+              disabled={addCompensationMutation.isPending}
+              data-testid="button-submit-compensation"
+            >
+              {addCompensationMutation.isPending ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Speichern...</>
+              ) : "Speichern"}
+            </Button>
+            <Button type="button" variant="outline" onClick={() => setIsAddOpen(false)}>
+              Abbrechen
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {isLoading ? (
+        <div className="flex justify-center py-4">
+          <Loader2 className="h-5 w-5 animate-spin text-teal-600" />
+        </div>
+      ) : compensationHistory && compensationHistory.length > 0 ? (
+        <div className="space-y-3">
+          {currentCompensation && (
+            <div className="p-3 bg-teal-50 border border-teal-200 rounded-lg">
+              <div className="flex items-center gap-2 mb-2">
+                <Badge variant="secondary" className="bg-teal-100 text-teal-800">Aktuell</Badge>
+                <span className="text-sm text-gray-500">seit {formatDate(currentCompensation.validFrom)}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div>
+                  <span className="text-gray-500">Hauswirtschaft:</span>{" "}
+                  <span className="font-medium">{formatCurrency(currentCompensation.hourlyRateHauswirtschaft)}/h</span>
+                </div>
+                <div>
+                  <span className="text-gray-500">Alltagsbegleitung:</span>{" "}
+                  <span className="font-medium">{formatCurrency(currentCompensation.hourlyRateAlltagsbegleitung)}/h</span>
+                </div>
+                <div className="col-span-2">
+                  <span className="text-gray-500">Fahrtkosten:</span>{" "}
+                  <span className="font-medium">
+                    {currentCompensation.travelCostType === "kilometergeld" 
+                      ? `${formatCurrency(currentCompensation.kilometerRate)}/km`
+                      : currentCompensation.travelCostType === "pauschale"
+                      ? `${formatCurrency(currentCompensation.monthlyTravelAllowance)}/Monat`
+                      : "-"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {compensationHistory.filter(c => c.validTo).length > 0 && (
+            <div className="mt-4">
+              <h4 className="text-xs font-medium text-gray-500 mb-2">Vergangene Vergütungen</h4>
+              <div className="space-y-2">
+                {compensationHistory.filter(c => c.validTo).map((comp) => (
+                  <div key={comp.id} className="p-2 bg-gray-50 rounded text-sm">
+                    <div className="text-gray-500 text-xs mb-1">
+                      {formatDate(comp.validFrom)} - {formatDate(comp.validTo!)}
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 text-xs">
+                      <span>HW: {formatCurrency(comp.hourlyRateHauswirtschaft)}/h</span>
+                      <span>AB: {formatCurrency(comp.hourlyRateAlltagsbegleitung)}/h</span>
+                      <span>
+                        {comp.travelCostType === "kilometergeld" 
+                          ? `${formatCurrency(comp.kilometerRate)}/km`
+                          : comp.travelCostType === "pauschale"
+                          ? `${formatCurrency(comp.monthlyTravelAllowance)}/Mo`
+                          : "-"}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <p className="text-sm text-gray-500 py-4 text-center">Noch keine Vergütung hinterlegt</p>
+      )}
+    </div>
   );
 }
 

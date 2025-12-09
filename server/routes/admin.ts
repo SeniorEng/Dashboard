@@ -3,6 +3,7 @@ import { authService } from "../services/auth";
 import { storage } from "../storage";
 import { customerManagementStorage } from "../storage/customer-management";
 import { timeTrackingStorage } from "../storage/time-tracking";
+import { compensationStorage } from "../storage/compensation";
 import { usersCache, birthdaysCache } from "../services/cache";
 import { 
   insertUserSchema, 
@@ -14,6 +15,7 @@ import {
   insertCareLevelHistorySchema,
   insertCustomerBudgetSchema,
   insertVacationAllowanceSchema,
+  insertEmployeeCompensationSchema,
 } from "@shared/schema";
 import { requireAdmin } from "../middleware/auth";
 import { handleRouteError } from "../lib/errors";
@@ -96,6 +98,15 @@ router.post("/users", async (req: Request, res: Response) => {
       isAdmin: result.data.isAdmin,
       roles: result.data.roles,
     });
+
+    // Create initial compensation record if provided
+    if (req.body.compensation) {
+      const compensationData = { ...req.body.compensation, userId: user.id };
+      const validatedCompensation = insertEmployeeCompensationSchema.safeParse(compensationData);
+      if (validatedCompensation.success) {
+        await compensationStorage.addCompensation(validatedCompensation.data, req.user!.id);
+      }
+    }
 
     // Invalidate caches after creating user (affects users list and birthdays)
     usersCache.invalidateAll();
@@ -862,6 +873,61 @@ router.put("/time-entries/vacation-allowance", async (req: Request, res: Respons
       return;
     }
     handleRouteError(res, error, "Urlaubskontingent konnte nicht aktualisiert werden");
+  }
+});
+
+// ============================================
+// EMPLOYEE COMPENSATION
+// ============================================
+
+router.get("/users/:userId/compensation", async (req: Request, res: Response) => {
+  try {
+    const userId = parseInt(req.params.userId);
+    if (isNaN(userId)) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Benutzer-ID" });
+      return;
+    }
+
+    const history = await compensationStorage.getCompensationHistory(userId);
+    res.json(history);
+  } catch (error) {
+    handleRouteError(res, error, "Vergütungshistorie konnte nicht geladen werden");
+  }
+});
+
+router.get("/users/:userId/compensation/current", async (req: Request, res: Response) => {
+  try {
+    const userId = parseInt(req.params.userId);
+    if (isNaN(userId)) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Benutzer-ID" });
+      return;
+    }
+
+    const current = await compensationStorage.getCurrentCompensation(userId);
+    res.json(current);
+  } catch (error) {
+    handleRouteError(res, error, "Aktuelle Vergütung konnte nicht geladen werden");
+  }
+});
+
+router.post("/users/:userId/compensation", async (req: Request, res: Response) => {
+  try {
+    const userId = parseInt(req.params.userId);
+    if (isNaN(userId)) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Benutzer-ID" });
+      return;
+    }
+
+    const data = { ...req.body, userId };
+    const validatedData = insertEmployeeCompensationSchema.parse(data);
+    const compensation = await compensationStorage.addCompensation(validatedData, req.user!.id);
+    res.status(201).json(compensation);
+  } catch (error: any) {
+    if (error.name === "ZodError") {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: fromError(error).toString() });
+      return;
+    }
+    handleRouteError(res, error, "Vergütung konnte nicht hinzugefügt werden");
   }
 });
 
