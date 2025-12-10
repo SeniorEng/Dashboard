@@ -284,6 +284,12 @@ router.post("/:id/start", async (req, res) => {
       return sendNotFound(res, ErrorMessages.appointmentNotFound);
     }
     
+    // Check if appointment is locked by a signed service record
+    const isLocked = await storage.isAppointmentLocked(id);
+    if (isLocked) {
+      return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
+    }
+    
     if (appointment.status !== "scheduled") {
       return sendForbidden(res, "INVALID_STATUS", "Nur geplante Termine können gestartet werden");
     }
@@ -310,6 +316,12 @@ router.post("/:id/end", async (req, res) => {
     const appointment = await storage.getAppointment(id);
     if (!appointment) {
       return sendNotFound(res, ErrorMessages.appointmentNotFound);
+    }
+    
+    // Check if appointment is locked by a signed service record
+    const isLocked = await storage.isAppointmentLocked(id);
+    if (isLocked) {
+      return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
     }
     
     if (appointment.status !== "in-progress") {
@@ -369,6 +381,12 @@ router.post("/:id/document", async (req, res) => {
     const appointment = await storage.getAppointment(id);
     if (!appointment) {
       return sendNotFound(res, ErrorMessages.appointmentNotFound);
+    }
+    
+    // Check if appointment is locked by a signed service record
+    const isLocked = await storage.isAppointmentLocked(id);
+    if (isLocked) {
+      return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
     }
     
     if (appointment.status === "completed") {

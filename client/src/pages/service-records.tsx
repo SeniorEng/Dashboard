@@ -70,6 +70,11 @@ export default function ServiceRecordsPage() {
 
   const { data: pendingRecords } = useQuery<MonthlyServiceRecord[]>({
     queryKey: ["/api/service-records/pending"],
+    queryFn: async () => {
+      const response = await fetch(`/api/service-records/pending`);
+      if (!response.ok) throw new Error("Ausstehende Leistungsnachweise konnten nicht geladen werden");
+      return response.json();
+    },
   });
 
   const years = useMemo(() => {
