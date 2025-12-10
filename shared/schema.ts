@@ -356,7 +356,7 @@ export const customerPricingHistory = pgTable("customer_pricing_history", {
 ]);
 
 // ============================================
-// BUDGETS (historized)
+// BUDGETS (historized) - Legacy table, kept for migration
 // ============================================
 
 export const customerBudgets = pgTable("customer_budgets", {
@@ -372,6 +372,91 @@ export const customerBudgets = pgTable("customer_budgets", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
 });
+
+// ============================================
+// BUDGET LEDGER SYSTEM (§45b Entlastungsbetrag)
+// ============================================
+
+// Budget allocation sources
+export const BUDGET_ALLOCATION_SOURCES = [
+  "monthly",           // Regular monthly allocation (131€)
+  "carryover",         // Carryover from previous year (expires June 30)
+  "initial_balance",   // Initial balance when customer joins
+  "manual_adjustment", // Manual correction/adjustment
+] as const;
+
+export type BudgetAllocationSource = typeof BUDGET_ALLOCATION_SOURCES[number];
+
+// Budget allocations - credits to the customer's account
+export const budgetAllocations = pgTable("budget_allocations", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  budgetType: text("budget_type").notNull().default("entlastungsbetrag_45b"), // For future: other budget types
+  year: integer("year").notNull(),
+  month: integer("month"), // null for carryover/initial entries
+  amountCents: integer("amount_cents").notNull(), // Amount in cents (e.g., 13100 = 131€)
+  source: text("source").notNull(), // monthly, carryover, initial_balance, manual_adjustment
+  validFrom: date("valid_from").notNull(), // When this allocation becomes available
+  expiresAt: date("expires_at"), // null = never expires, set for carryover (June 30)
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdByUserId: integer("created_by_user_id").references(() => users.id),
+}, (table) => [
+  index("budget_allocations_customer_idx").on(table.customerId),
+  index("budget_allocations_customer_year_idx").on(table.customerId, table.year),
+  index("budget_allocations_expires_idx").on(table.expiresAt),
+]);
+
+// Budget transaction types
+export const BUDGET_TRANSACTION_TYPES = [
+  "consumption",       // Service consumption (appointment)
+  "expiration",        // Carryover expiration after June 30
+  "reversal",          // Reversal of a consumption (e.g., cancelled appointment)
+  "manual_adjustment", // Manual correction
+] as const;
+
+export type BudgetTransactionType = typeof BUDGET_TRANSACTION_TYPES[number];
+
+// Budget transactions - debits from the customer's account
+export const budgetTransactions = pgTable("budget_transactions", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  budgetType: text("budget_type").notNull().default("entlastungsbetrag_45b"),
+  transactionDate: date("transaction_date").notNull(),
+  transactionType: text("transaction_type").notNull(), // consumption, expiration, reversal, manual_adjustment
+  amountCents: integer("amount_cents").notNull(), // Negative for consumption, positive for reversals
+  // Breakdown for consumption transactions
+  hauswirtschaftMinutes: integer("hauswirtschaft_minutes"),
+  hauswirtschaftCents: integer("hauswirtschaft_cents"),
+  alltagsbegleitungMinutes: integer("alltagsbegleitung_minutes"),
+  alltagsbegleitungCents: integer("alltagsbegleitung_cents"),
+  travelKilometers: integer("travel_kilometers"),
+  travelCents: integer("travel_cents"),
+  customerKilometers: integer("customer_kilometers"),
+  customerKilometersCents: integer("customer_kilometers_cents"),
+  // Reference to source
+  appointmentId: integer("appointment_id").references(() => appointments.id),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdByUserId: integer("created_by_user_id").references(() => users.id),
+}, (table) => [
+  index("budget_transactions_customer_idx").on(table.customerId),
+  index("budget_transactions_customer_date_idx").on(table.customerId, table.transactionDate),
+  index("budget_transactions_appointment_idx").on(table.appointmentId),
+]);
+
+// Customer budget preferences (monthly limit, etc.)
+export const customerBudgetPreferences = pgTable("customer_budget_preferences", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }).unique(),
+  monthlyLimitCents: integer("monthly_limit_cents"), // Desired monthly usage limit (null = no limit, use full 131€)
+  budgetStartDate: date("budget_start_date"), // When customer started using budget (for pro-rata calculation)
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  index("customer_budget_preferences_customer_idx").on(table.customerId),
+]);
 
 // ============================================
 // CONTRACTS & PRICING
@@ -768,6 +853,57 @@ export const insertCustomerBudgetSchema = z.object({
 
 export type CustomerBudget = typeof customerBudgets.$inferSelect;
 export type InsertCustomerBudget = z.infer<typeof insertCustomerBudgetSchema>;
+
+// Budget Allocation schemas (Ledger system)
+export const insertBudgetAllocationSchema = z.object({
+  customerId: z.number(),
+  budgetType: z.string().default("entlastungsbetrag_45b"),
+  year: z.number().min(2020).max(2100),
+  month: z.number().min(1).max(12).nullable().optional(),
+  amountCents: z.number().min(0),
+  source: z.enum(BUDGET_ALLOCATION_SOURCES),
+  validFrom: z.string(),
+  expiresAt: z.string().nullable().optional(),
+  notes: z.string().max(500).nullable().optional(),
+});
+
+export type BudgetAllocation = typeof budgetAllocations.$inferSelect;
+export type InsertBudgetAllocation = z.infer<typeof insertBudgetAllocationSchema>;
+
+// Budget Transaction schemas (Ledger system)
+export const insertBudgetTransactionSchema = z.object({
+  customerId: z.number(),
+  budgetType: z.string().default("entlastungsbetrag_45b"),
+  transactionDate: z.string(),
+  transactionType: z.enum(BUDGET_TRANSACTION_TYPES),
+  amountCents: z.number(), // Negative for consumption, positive for reversals
+  hauswirtschaftMinutes: z.number().nullable().optional(),
+  hauswirtschaftCents: z.number().nullable().optional(),
+  alltagsbegleitungMinutes: z.number().nullable().optional(),
+  alltagsbegleitungCents: z.number().nullable().optional(),
+  travelKilometers: z.number().nullable().optional(),
+  travelCents: z.number().nullable().optional(),
+  customerKilometers: z.number().nullable().optional(),
+  customerKilometersCents: z.number().nullable().optional(),
+  appointmentId: z.number().nullable().optional(),
+  notes: z.string().max(500).nullable().optional(),
+});
+
+export type BudgetTransaction = typeof budgetTransactions.$inferSelect;
+export type InsertBudgetTransaction = z.infer<typeof insertBudgetTransactionSchema>;
+
+// Customer Budget Preferences schemas
+export const insertBudgetPreferencesSchema = z.object({
+  customerId: z.number(),
+  monthlyLimitCents: z.number().min(0).nullable().optional(),
+  budgetStartDate: z.string().nullable().optional(),
+  notes: z.string().max(500).nullable().optional(),
+});
+
+export const updateBudgetPreferencesSchema = insertBudgetPreferencesSchema.partial().omit({ customerId: true });
+
+export type CustomerBudgetPreferences = typeof customerBudgetPreferences.$inferSelect;
+export type InsertBudgetPreferences = z.infer<typeof insertBudgetPreferencesSchema>;
 
 // Contract schemas
 export const CONTRACT_PERIOD_TYPES = ["week", "month", "year"] as const;
