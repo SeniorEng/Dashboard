@@ -28,6 +28,7 @@ import AdminCustomerEdit from "@/pages/admin/customer-edit";
 import AdminTimeEntries from "@/pages/admin/time-entries";
 import UndocumentedAppointments from "@/pages/undocumented-appointments";
 import CustomerDetail from "@/pages/customer-detail";
+import TasksPage from "@/pages/tasks";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -93,6 +94,9 @@ function Router() {
       </Route>
       <Route path="/undocumented">
         <ProtectedRoute component={UndocumentedAppointments} />
+      </Route>
+      <Route path="/tasks">
+        <ProtectedRoute component={TasksPage} />
       </Route>
       <Route path="/appointment/:id">
         {(params) => <ProtectedRoute component={() => <AppointmentDetail />} />}

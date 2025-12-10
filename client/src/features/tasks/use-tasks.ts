@@ -99,6 +99,21 @@ export function useDeleteTask() {
   });
 }
 
+export function useToggleTaskStatus() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, currentStatus }: { id: number; currentStatus: string }) => {
+      const newStatus = currentStatus === "completed" ? "open" : "completed";
+      const result = await api.patch<Task>(`/tasks/${id}`, { status: newStatus });
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    },
+  });
+}
+
 export function useCompleteTask() {
   const queryClient = useQueryClient();
 

@@ -1,2 +1,1 @@
-// Re-export from components
-export { TaskCard, TaskListSection } from "./components";
+export { TaskCard, TaskListSection, TaskDetailSheet } from "./components";
