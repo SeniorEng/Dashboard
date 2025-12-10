@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { formatDateForDisplay } from "@shared/utils/date";
 import { iconSize } from "@/design-system";
 import { EmptyState } from "@/components/patterns/empty-state";
+import { ErrorState } from "@/components/patterns/error-state";
 
 interface BirthdayEntry {
   id: number;
@@ -50,7 +51,7 @@ function groupBirthdays(birthdays: BirthdayEntry[]): Record<string, BirthdayEntr
 export default function BirthdaysPage() {
   const { user } = useAuth();
   
-  const { data: birthdays = [], isLoading } = useQuery<BirthdayEntry[]>({
+  const { data: birthdays = [], isLoading, error, refetch } = useQuery<BirthdayEntry[]>({
     queryKey: ["/api/birthdays"],
   });
 
@@ -62,6 +63,20 @@ export default function BirthdaysPage() {
       <Layout>
         <div className="flex items-center justify-center min-h-[50vh]">
           <Loader2 className={`${iconSize.xl} animate-spin text-primary`} />
+        </div>
+      </Layout>
+    );
+  }
+
+  if (error) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center min-h-[50vh]">
+          <ErrorState
+            title="Geburtstage konnten nicht geladen werden"
+            description={error instanceof Error ? error.message : "Bitte versuchen Sie es erneut."}
+            onRetry={() => refetch()}
+          />
         </div>
       </Layout>
     );

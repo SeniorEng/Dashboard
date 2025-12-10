@@ -3,14 +3,16 @@ import { Loader2 } from "lucide-react";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { AppointmentCard } from "./appointment-card";
 import { sortAppointmentsByPriority } from "../utils";
+import { ErrorState } from "@/components/patterns/error-state";
 
 interface AppointmentListProps {
   appointments: AppointmentWithCustomer[] | undefined;
   isLoading: boolean;
   error: Error | null;
+  onRetry?: () => void;
 }
 
-function AppointmentListComponent({ appointments, isLoading, error }: AppointmentListProps) {
+function AppointmentListComponent({ appointments, isLoading, error, onRetry }: AppointmentListProps) {
   const sortedAppointments = useMemo(() => {
     if (!appointments) return [];
     return sortAppointmentsByPriority(appointments);
@@ -26,8 +28,12 @@ function AppointmentListComponent({ appointments, isLoading, error }: Appointmen
 
   if (error) {
     return (
-      <div className="text-center py-12 text-destructive" data-testid="error-appointments">
-        <p>Termine konnten nicht geladen werden. Bitte versuchen Sie es erneut.</p>
+      <div data-testid="error-appointments">
+        <ErrorState
+          title="Termine konnten nicht geladen werden"
+          description={error.message || "Bitte versuchen Sie es erneut."}
+          onRetry={onRetry}
+        />
       </div>
     );
   }

@@ -12,6 +12,7 @@ import {
 import type { Customer } from "@shared/schema";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { EmptyState } from "@/components/patterns/empty-state";
+import { ErrorState } from "@/components/patterns/error-state";
 import { 
   iconSize, 
   getPflegegradColors,
@@ -34,7 +35,7 @@ function getPflegegradLabel(pflegegrad: number | null): string | null {
 export default function CustomersPage() {
   const [searchQuery, setSearchQuery] = useState("");
 
-  const { data: customers = [], isLoading } = useQuery<Customer[]>({
+  const { data: customers = [], isLoading, error, refetch } = useQuery<Customer[]>({
     queryKey: ["customers"],
     queryFn: async () => {
       const res = await fetch("/api/customers");
@@ -63,6 +64,20 @@ export default function CustomersPage() {
       <Layout>
         <div className="flex items-center justify-center min-h-[50vh]">
           <Loader2 className={`${iconSize.xl} animate-spin text-primary`} />
+        </div>
+      </Layout>
+    );
+  }
+
+  if (error) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center min-h-[50vh]">
+          <ErrorState
+            title="Kunden konnten nicht geladen werden"
+            description={error instanceof Error ? error.message : "Ein unbekannter Fehler ist aufgetreten."}
+            onRetry={() => refetch()}
+          />
         </div>
       </Layout>
     );

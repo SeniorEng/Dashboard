@@ -6,10 +6,11 @@ import { TaskListSection } from "@/features/tasks";
 import { Button } from "@/components/ui/button";
 import { format, addDays, startOfWeek, addWeeks, subWeeks, isSameDay } from "date-fns";
 import { de } from "date-fns/locale";
-import { Plus, ChevronsLeft, ChevronsRight, AlertCircle, Coffee } from "lucide-react";
+import { Plus, ChevronsLeft, ChevronsRight, AlertCircle, Coffee, Loader2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { parseLocalDate, formatDateForDisplay } from "@shared/utils/date";
 import { iconSize } from "@/design-system";
+import { ErrorState } from "@/components/patterns/error-state";
 
 const WEEKDAY_NAMES_SHORT = ["Mo", "Di", "Mi", "Do", "Fr"];
 
@@ -18,7 +19,7 @@ export default function Dashboard() {
   const [showTwoWeeks, setShowTwoWeeks] = useState(false);
   const dateString = format(selectedDate, "yyyy-MM-dd");
   
-  const { data: appointments, isLoading, error } = useAppointments(dateString);
+  const { data: appointments, isLoading, error, refetch } = useAppointments(dateString);
   
   const today = useMemo(() => new Date(), []);
   const todayString = format(today, "yyyy-MM-dd");
@@ -312,7 +313,8 @@ export default function Dashboard() {
         <AppointmentList 
           appointments={appointments} 
           isLoading={isLoading} 
-          error={error} 
+          error={error}
+          onRetry={() => refetch()}
         />
 
         <TaskListSection />

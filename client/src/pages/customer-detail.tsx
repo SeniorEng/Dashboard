@@ -10,6 +10,7 @@ import {
   Calendar, Loader2, AlertCircle
 } from "lucide-react";
 import { iconSize } from "@/design-system";
+import { ErrorState } from "@/components/patterns/error-state";
 import type { Customer } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
@@ -39,7 +40,7 @@ export default function CustomerDetailPage() {
   const [, params] = useRoute("/customer/:id");
   const customerId = params?.id ? parseInt(params.id, 10) : null;
 
-  const { data: customer, isLoading: customerLoading, error: customerError } = useQuery<Customer>({
+  const { data: customer, isLoading: customerLoading, error: customerError, refetch: refetchCustomer } = useQuery<Customer>({
     queryKey: ["customer", customerId],
     queryFn: async () => {
       const res = await fetch(`/api/customers/${customerId}`);
@@ -82,14 +83,12 @@ export default function CustomerDetailPage() {
   if (customerError || !customer) {
     return (
       <Layout>
-        <div className="text-center py-12">
-          <AlertCircle className={`${iconSize["2xl"]} text-destructive mx-auto mb-4`} />
-          <p className="text-destructive font-medium">Kunde nicht gefunden</p>
-          <Link href="/customers">
-            <Button variant="outline" className="mt-4">
-              Zurück zur Kundenliste
-            </Button>
-          </Link>
+        <div className="flex items-center justify-center min-h-[50vh]">
+          <ErrorState
+            title="Kunde konnte nicht geladen werden"
+            description={customerError instanceof Error ? customerError.message : "Der Kunde wurde nicht gefunden oder es ist ein Fehler aufgetreten."}
+            onRetry={() => refetchCustomer()}
+          />
         </div>
       </Layout>
     );

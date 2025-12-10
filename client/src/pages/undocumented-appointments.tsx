@@ -5,10 +5,11 @@ import { AppointmentCard } from "@/features/appointments/components/appointment-
 import { ArrowLeft, Loader2, FileCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { iconSize } from "@/design-system";
+import { ErrorState } from "@/components/patterns/error-state";
 import type { AppointmentWithCustomer } from "@shared/types";
 
 export default function UndocumentedAppointments() {
-  const { data: appointments, isLoading, error } = useQuery<AppointmentWithCustomer[]>({
+  const { data: appointments, isLoading, error, refetch } = useQuery<AppointmentWithCustomer[]>({
     queryKey: ["appointments", "undocumented"],
     queryFn: async () => {
       const response = await fetch(`/api/appointments/undocumented`);
@@ -43,8 +44,12 @@ export default function UndocumentedAppointments() {
         )}
 
         {error && (
-          <div className="text-center py-12 text-destructive" data-testid="error-undocumented">
-            <p>Termine konnten nicht geladen werden. Bitte versuchen Sie es erneut.</p>
+          <div data-testid="error-undocumented">
+            <ErrorState
+              title="Offene Dokumentationen konnten nicht geladen werden"
+              description={error instanceof Error ? error.message : "Bitte versuchen Sie es erneut."}
+              onRetry={() => refetch()}
+            />
           </div>
         )}
 
