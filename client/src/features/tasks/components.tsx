@@ -490,7 +490,7 @@ export function TaskListSection() {
           task={selectedTask}
           open={!!selectedTask}
           onOpenChange={(open) => !open && setSelectedTask(null)}
-          onComplete={handleCompleteTask}
+          onToggleStatus={handleToggleStatus}
         />
       )}
     </>
