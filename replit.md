@@ -17,9 +17,22 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
   - **PageHeader**: Responsive stacked layout - title wraps naturally on mobile, action buttons go full-width below. Uses `componentStyles.pageHeader*` tokens.
   - **ResponsiveTabs**: Priority+ pattern - shows first N tabs inline, rest collapse into "Mehr" dropdown on mobile. Component at `@/components/patterns/responsive-tabs.tsx`.
 - **Date/Time Handling**: Uses local times without time zone conversion, treating all date/time data as "German local time". `date` columns are "YYYY-MM-DD" strings, `time` columns are "HH:MM:SS" strings. Centralized utilities (`@shared/utils/datetime`) must be used for parsing and formatting.
+- **DatePicker-Komponente**: Alle Datumsfelder verwenden die zentrale `DatePicker`-Komponente (`@/components/ui/date-picker.tsx`). Diese bietet:
+  - Deutsche Lokalisierung (Montag als Wochenbeginn, deutsche Monatsnamen)
+  - Touch-optimierte 44px Mindestgröße für Mobile-Kompatibilität (iOS Safari, Android Chrome)
+  - Popover-basiertes Kalender-Widget statt nativem `type="date"` Input
+  - ISO-String API (`value: string | null`, `onChange: (date: string | null) => void`)
+  - Optional: `clearable`, `minDate`, `maxDate` Props
+- **Mobile-Kompatibilität**: Die App verwendet touch-optimierte UI-Komponenten mit mindestens 44x44px Touch-Bereichen gemäß WCAG-Richtlinien. Radix UI Popovers verwenden `modal={true}` für korrektes Scroll-Locking auf Mobile.
 - **API Calls**: All state-changing API requests (POST, PATCH, DELETE) must use the central API client (`client/src/lib/api/client.ts`) for CSRF protection (Double-Submit Cookie Pattern). Direct `fetch()` calls for mutations will result in 403 errors.
 - **Phone Number Handling**: Uses `libphonenumber-js` via `@shared/utils/phone.ts` for validating, formatting, and storing German phone numbers in E.164 format (`+49...`).
 - **Type Organization**: Hierarchical type structure with `@shared/schema.ts` (Drizzle, Zod), `@shared/domain/*` (business logic, domain types), `@shared/utils/*` (utilities), and `@shared/types.ts` (re-exports for frontend).
+- **Date-Validierung**: Zentraler Date-Validator in `@shared/utils/date-validation.ts` bietet:
+  - `isValidISODate(dateString)` - Prüft ISO-Format "YYYY-MM-DD"
+  - `parseISODate(dateString)` - Parst zu Date-Objekt
+  - `formatToISODate(date)` - Formatiert Date zu ISO-String
+  - `isoDateSchema` / `isoDateOptionalSchema` - Zod-Schemas für API-Validierung
+  - `isDateInPast()`, `isDateToday()`, `isDateInFuture()` - Datum-Vergleiche
 
 ### Backend
 - **Framework**: Express.js with TypeScript.

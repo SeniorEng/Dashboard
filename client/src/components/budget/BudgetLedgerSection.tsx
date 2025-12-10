@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Plus, Wallet, History, AlertTriangle, Calendar, Settings, Euro } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system/tokens";
 import { toast } from "sonner";
@@ -405,13 +406,10 @@ function InitialBudgetForm({ customerId, onSuccess }: { customerId: number; onSu
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <Label htmlFor="budgetStartDate">Startdatum</Label>
-        <Input
-          id="budgetStartDate"
-          type="date"
-          value={budgetStartDate}
-          onChange={(e) => setBudgetStartDate(e.target.value)}
-          required
+        <Label>Startdatum</Label>
+        <DatePicker
+          value={budgetStartDate || null}
+          onChange={(val) => setBudgetStartDate(val || "")}
           data-testid="input-budget-start-date"
         />
         <p className="text-xs text-gray-500 mt-1">

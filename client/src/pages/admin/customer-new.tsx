@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Layout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
 import { useEmployees, useInsuranceProviders, useCreateInsuranceProvider, useCreateCustomer } from "@/features/customers";
@@ -511,12 +512,10 @@ export default function AdminCustomerNew() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="pflegegradSeit">Pflegegrad seit</Label>
-                  <Input
-                    id="pflegegradSeit"
-                    type="date"
-                    value={formData.pflegegradSeit}
-                    onChange={(e) => handleChange("pflegegradSeit", e.target.value)}
+                  <Label>Pflegegrad seit</Label>
+                  <DatePicker
+                    value={formData.pflegegradSeit || null}
+                    onChange={(val) => handleChange("pflegegradSeit", val || "")}
                     data-testid="input-pflegegrad-seit"
                   />
                 </div>

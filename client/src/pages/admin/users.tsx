@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DatePicker } from "@/components/ui/date-picker";
 import { iconSize } from "@/design-system";
 import {
   Dialog,
@@ -590,12 +591,10 @@ function UserForm({
           
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="geburtsdatum">Geburtsdatum</Label>
-              <Input
-                id="geburtsdatum"
-                type="date"
-                value={geburtsdatum}
-                onChange={(e) => setGeburtsdatum(e.target.value)}
+              <Label>Geburtsdatum</Label>
+              <DatePicker
+                value={geburtsdatum || null}
+                onChange={(val) => setGeburtsdatum(val || "")}
                 data-testid="input-user-geburtsdatum"
               />
             </div>
@@ -841,13 +840,11 @@ function UserForm({
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="compensationValidFrom">Gültig ab</Label>
-              <Input
-                id="compensationValidFrom"
-                type="date"
-                value={compensationValidFrom}
-                onChange={(e) => setCompensationValidFrom(e.target.value)}
-                min={new Date().toISOString().split("T")[0]}
+              <Label>Gültig ab</Label>
+              <DatePicker
+                value={compensationValidFrom || null}
+                onChange={(val) => setCompensationValidFrom(val || "")}
+                minDate={new Date()}
                 data-testid="input-compensation-valid-from"
               />
               <p className="text-xs text-gray-500">Nur ab heute oder in der Zukunft möglich</p>
@@ -1078,14 +1075,11 @@ function CompensationSection({ userId, userName }: { userId: number; userName: s
           )}
 
           <div className="space-y-2">
-            <Label htmlFor="new-valid-from">Gültig ab *</Label>
-            <Input
-              id="new-valid-from"
-              type="date"
-              value={newValidFrom}
-              onChange={(e) => setNewValidFrom(e.target.value)}
-              min={todayDate}
-              required
+            <Label>Gültig ab *</Label>
+            <DatePicker
+              value={newValidFrom || null}
+              onChange={(val) => setNewValidFrom(val || "")}
+              minDate={new Date(todayDate)}
               data-testid="input-new-valid-from"
             />
             <p className="text-xs text-gray-500">Nur ab heute oder in der Zukunft möglich</p>

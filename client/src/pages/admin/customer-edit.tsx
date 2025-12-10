@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/patterns/page-header";
 import { useToast } from "@/hooks/use-toast";
@@ -230,12 +231,10 @@ export default function AdminCustomerEdit() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="geburtsdatum">Geburtsdatum</Label>
-                  <Input
-                    id="geburtsdatum"
-                    type="date"
-                    value={formData.geburtsdatum}
-                    onChange={(e) => handleChange("geburtsdatum", e.target.value)}
+                  <Label>Geburtsdatum</Label>
+                  <DatePicker
+                    value={formData.geburtsdatum || null}
+                    onChange={(val) => handleChange("geburtsdatum", val || "")}
                     data-testid="input-geburtsdatum"
                   />
                 </div>

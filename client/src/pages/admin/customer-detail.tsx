@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/ui/date-picker";
 import { formatDateForDisplay } from "@shared/utils/date";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/patterns/page-header";
@@ -225,14 +226,11 @@ function PricingSection({ customerId, customerName, pricingHistory, currentPrici
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="new-pricing-valid-from">Gültig ab *</Label>
-            <Input
-              id="new-pricing-valid-from"
-              type="date"
-              value={newValidFrom}
-              onChange={(e) => setNewValidFrom(e.target.value)}
-              min={todayDate}
-              required
+            <Label>Gültig ab *</Label>
+            <DatePicker
+              value={newValidFrom || null}
+              onChange={(val) => setNewValidFrom(val || "")}
+              minDate={new Date(todayDate)}
               data-testid="input-new-pricing-valid-from"
             />
             <p className="text-xs text-gray-500">Nur ab heute oder in der Zukunft möglich</p>

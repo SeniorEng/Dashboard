@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DatePicker } from "@/components/ui/date-picker";
 import { ChevronLeft, Loader2, Calendar, Clock, User, Home, Plus, Users } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
@@ -310,14 +311,12 @@ export default function NewAppointment() {
               {/* Date & Time */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="kt-date">
+                  <Label>
                     <Calendar className={`${iconSize.sm} inline mr-1`} /> Datum
                   </Label>
-                  <Input
-                    id="kt-date"
-                    type="date"
-                    value={ktDate}
-                    onChange={(e) => setKtDate(e.target.value)}
+                  <DatePicker
+                    value={ktDate || null}
+                    onChange={(val) => setKtDate(val || "")}
                     data-testid="input-kt-date"
                   />
                 </div>
@@ -622,14 +621,12 @@ export default function NewAppointment() {
               {/* Date & Time */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="eb-date">
+                  <Label>
                     <Calendar className={`${iconSize.sm} inline mr-1`} /> Datum *
                   </Label>
-                  <Input
-                    id="eb-date"
-                    type="date"
-                    value={ebDate}
-                    onChange={(e) => setEbDate(e.target.value)}
+                  <DatePicker
+                    value={ebDate || null}
+                    onChange={(val) => setEbDate(val || "")}
                     data-testid="input-eb-date"
                   />
                 </div>

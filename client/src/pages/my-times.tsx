@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { DatePicker } from "@/components/ui/date-picker";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { useQuery } from "@tanstack/react-query";
@@ -401,39 +402,33 @@ export default function MyTimes() {
                   {(newEntry.entryType === "urlaub" || newEntry.entryType === "krankheit") ? (
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="entryDate">Von</Label>
-                        <Input
-                          id="entryDate"
-                          type="date"
-                          value={newEntry.entryDate}
-                          onChange={(e) => setNewEntry(prev => ({ 
+                        <Label>Von</Label>
+                        <DatePicker
+                          value={newEntry.entryDate || null}
+                          onChange={(val) => setNewEntry(prev => ({ 
                             ...prev, 
-                            entryDate: e.target.value,
-                            endDate: prev.endDate && prev.endDate < e.target.value ? e.target.value : prev.endDate
+                            entryDate: val || "",
+                            endDate: prev.endDate && prev.endDate < (val || "") ? val || "" : prev.endDate
                           }))}
                           data-testid="input-entry-date"
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="endDate">Bis</Label>
-                        <Input
-                          id="endDate"
-                          type="date"
-                          value={newEntry.endDate || newEntry.entryDate}
-                          min={newEntry.entryDate}
-                          onChange={(e) => setNewEntry(prev => ({ ...prev, endDate: e.target.value || undefined }))}
+                        <Label>Bis</Label>
+                        <DatePicker
+                          value={newEntry.endDate || newEntry.entryDate || null}
+                          minDate={newEntry.entryDate ? new Date(newEntry.entryDate) : undefined}
+                          onChange={(val) => setNewEntry(prev => ({ ...prev, endDate: val || undefined }))}
                           data-testid="input-end-date"
                         />
                       </div>
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      <Label htmlFor="entryDate">Datum</Label>
-                      <Input
-                        id="entryDate"
-                        type="date"
-                        value={newEntry.entryDate}
-                        onChange={(e) => setNewEntry(prev => ({ ...prev, entryDate: e.target.value }))}
+                      <Label>Datum</Label>
+                      <DatePicker
+                        value={newEntry.entryDate || null}
+                        onChange={(val) => setNewEntry(prev => ({ ...prev, entryDate: val || "" }))}
                         data-testid="input-entry-date"
                       />
                     </div>
@@ -549,12 +544,10 @@ export default function MyTimes() {
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="edit-entryDate">Datum</Label>
-                      <Input
-                        id="edit-entryDate"
-                        type="date"
-                        value={editingEntry.entryDate}
-                        onChange={(e) => setEditingEntry(prev => prev ? { ...prev, entryDate: e.target.value } : null)}
+                      <Label>Datum</Label>
+                      <DatePicker
+                        value={editingEntry.entryDate || null}
+                        onChange={(val) => setEditingEntry(prev => prev ? { ...prev, entryDate: val || "" } : null)}
                         data-testid="edit-input-entry-date"
                       />
                     </div>
