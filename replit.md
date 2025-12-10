@@ -43,6 +43,11 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Service Model**: "Erstberatung" (initial consultation) is a core service type.
 - **Customer Management**: Multi-step customer creation, detailed views, and German-specific validation (IK numbers, insurance numbers).
 - **Budgeting & Pricing**: Supports various budget types and customer-specific service rates.
+  - **§45b Budget Ledger System**: Ledger-based tracking for Entlastungsbetrag with allocations (monthly, carryover, initial, manual) and transactions (consumption at appointment completion, reversals).
+  - **Automatic Budget Booking**: At appointment documentation, the system calculates costs based on: (Hauswirtschaft minutes × rate/h) + (Alltagsbegleitung minutes × rate/h) + (travel km × km rate) + (customer km × km rate).
+  - **Carryover Rules**: §45b budget from previous year expires on June 30 of the following year. System warns about expiring carryover.
+  - **Monthly Limits**: Optional customer preference for monthly usage limits with progress indicators and warnings.
+  - **Pricing Requirement**: Appointment documentation requires a valid pricing agreement for the customer. Missing pricing blocks completion with an actionable error message.
 - **Employee Time Tracking**: Comprehensive tracking for client and non-client work (vacation, sick leave, breaks, office work, etc.), including yearly vacation allowance and multi-day entries. Past entries are locked for non-admin users.
 - **German Labor Law Compliance**: Automatic detection of missing break documentation based on work hours (`§4 ArbZG`).
 - **Open Tasks System**: Dashboard banners alert employees to pending tasks like undocumented appointments or missing break documentation.
