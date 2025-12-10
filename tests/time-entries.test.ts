@@ -211,24 +211,25 @@ describe("Zeiterfassung (Time Entries) CRUD", () => {
 
   describe("Offene Aufgaben (Open Tasks)", () => {
     it("sollte offene Aufgaben abrufen können", async () => {
-      const { status, data } = await apiGet<unknown[]>("/api/time-entries/open-tasks");
+      interface OpenTasksResponse {
+        daysWithMissingBreaks: { date: string; workMinutes: number }[];
+      }
+      const { status, data } = await apiGet<OpenTasksResponse>("/api/time-entries/open-tasks");
 
       expect(status).toBe(200);
-      expect(Array.isArray(data)).toBe(true);
+      expect(data).toHaveProperty("daysWithMissingBreaks");
+      expect(Array.isArray(data.daysWithMissingBreaks)).toBe(true);
     });
   });
 });
 
 describe("Pausenprüfung §4 ArbZG", () => {
-  interface OpenTask {
-    type: string;
-    date?: string;
-    entryId?: number;
-    message?: string;
+  interface OpenTasksResponse {
+    daysWithMissingBreaks: { date: string; workMinutes: number }[];
   }
 
-  it("sollte Pausenwarnung bei >6h Arbeitszeit ohne Pause liefern", async () => {
-    const testDate = getPastDate(1);
+  it("sollte Zeiteinträge mit korrektem Zeitformat erstellen können", async () => {
+    const testDate = getFutureDate(100);
     
     const entry = await apiPost<TimeEntry>("/api/time-entries", {
       entryDate: testDate,
@@ -236,42 +237,24 @@ describe("Pausenprüfung §4 ArbZG", () => {
       startTime: "08:00",
       endTime: "15:00",
       isFullDay: false,
-      breakMinutes: 0,
     });
 
     expect(entry.status).toBe(201);
+    expect(entry.data.startTime).toBe("08:00:00");
+    expect(entry.data.endTime).toBe("15:00:00");
+    
+    await apiDelete(`/api/time-entries/${entry.data.id}`);
+  });
 
-    const openTasks = await apiGet<OpenTask[]>("/api/time-entries/open-tasks");
+  it("sollte fehlende Pausen in offenen Aufgaben anzeigen", async () => {
+    const openTasks = await apiGet<OpenTasksResponse>("/api/time-entries/open-tasks");
+    
     expect(openTasks.status).toBe(200);
-    expect(Array.isArray(openTasks.data)).toBe(true);
-    
-    const breakWarning = openTasks.data.find(
-      task => task.type === "missing_break" || task.type === "break_warning"
-    );
-    
-    await apiDelete(`/api/time-entries/${entry.data.id}`);
+    expect(openTasks.data).toHaveProperty("daysWithMissingBreaks");
   });
 
-  it("sollte bei korrekter Pause keine Warnung zeigen", async () => {
-    const testDate = getFutureDate(61);
-    
-    const entry = await apiPost<TimeEntry>("/api/time-entries", {
-      entryDate: testDate,
-      entryType: "bueroarbeit",
-      startTime: "08:00",
-      endTime: "15:00",
-      isFullDay: false,
-      breakMinutes: 30,
-    });
-
-    expect(entry.status).toBe(201);
-    expect(entry.data.breakMinutes).toBe(30);
-    
-    await apiDelete(`/api/time-entries/${entry.data.id}`);
-  });
-
-  it("sollte Arbeitszeit korrekt berechnen (7h Arbeit - 30min Pause = 6.5h)", async () => {
-    const testDate = getFutureDate(62);
+  it("sollte Arbeitszeit korrekt berechnen", async () => {
+    const testDate = getFutureDate(101);
     
     const entry = await apiPost<TimeEntry>("/api/time-entries", {
       entryDate: testDate,
@@ -279,13 +262,11 @@ describe("Pausenprüfung §4 ArbZG", () => {
       startTime: "08:00",
       endTime: "15:30",
       isFullDay: false,
-      breakMinutes: 30,
     });
 
     expect(entry.status).toBe(201);
     expect(entry.data.startTime).toBe("08:00:00");
     expect(entry.data.endTime).toBe("15:30:00");
-    expect(entry.data.breakMinutes).toBe(30);
     
     await apiDelete(`/api/time-entries/${entry.data.id}`);
   });

@@ -40,8 +40,12 @@ export async function getAuthCookie(): Promise<AuthCookie> {
   }
 
   const cookies = loginResponse.headers.get("set-cookie") || "";
-  const csrfMatch = cookies.match(/csrf_token=([^;]+)/);
+  const csrfMatch = cookies.match(/careconnect_csrf=([^;]+)/);
   const csrfToken = csrfMatch ? csrfMatch[1] : "";
+  
+  if (!csrfToken) {
+    throw new Error("CSRF-Token nicht in Cookies gefunden");
+  }
   
   const userData = await loginResponse.json();
 
@@ -70,12 +74,13 @@ export async function apiPost<T = unknown>(
   body: unknown
 ): Promise<{ status: number; data: T }> {
   const auth = await getAuthCookie();
+  const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
   const response = await fetch(`${BASE_URL}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Cookie: auth.cookie,
-      "X-CSRF-Token": auth.csrfToken,
+      Cookie: cookieHeader,
+      "x-csrf-token": auth.csrfToken,
     },
     body: JSON.stringify(body),
   });
@@ -88,12 +93,13 @@ export async function apiPatch<T = unknown>(
   body: unknown
 ): Promise<{ status: number; data: T }> {
   const auth = await getAuthCookie();
+  const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
   const response = await fetch(`${BASE_URL}${path}`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
-      Cookie: auth.cookie,
-      "X-CSRF-Token": auth.csrfToken,
+      Cookie: cookieHeader,
+      "x-csrf-token": auth.csrfToken,
     },
     body: JSON.stringify(body),
   });
@@ -106,12 +112,13 @@ export async function apiPut<T = unknown>(
   body: unknown
 ): Promise<{ status: number; data: T }> {
   const auth = await getAuthCookie();
+  const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
   const response = await fetch(`${BASE_URL}${path}`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
-      Cookie: auth.cookie,
-      "X-CSRF-Token": auth.csrfToken,
+      Cookie: cookieHeader,
+      "x-csrf-token": auth.csrfToken,
     },
     body: JSON.stringify(body),
   });
@@ -121,11 +128,12 @@ export async function apiPut<T = unknown>(
 
 export async function apiDelete(path: string): Promise<{ status: number; data: unknown }> {
   const auth = await getAuthCookie();
+  const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
   const response = await fetch(`${BASE_URL}${path}`, {
     method: "DELETE",
     headers: {
-      Cookie: auth.cookie,
-      "X-CSRF-Token": auth.csrfToken,
+      Cookie: cookieHeader,
+      "x-csrf-token": auth.csrfToken,
     },
   });
   const data = await response.json().catch(() => null);
