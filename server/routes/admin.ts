@@ -573,6 +573,9 @@ router.get("/customers/:id/details", async (req: Request, res: Response) => {
         notes: customer.contract.notes,
       } : null,
       activeContractCount: customer.contract ? 1 : 0,
+      pricingHistory: customer.pricingHistory || [],
+      currentPricing: customer.currentPricing || null,
+      budgetSummary: customer.budgetSummary || null,
     };
     
     res.json(response);

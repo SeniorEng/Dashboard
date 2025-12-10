@@ -36,6 +36,8 @@ import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { eq, and, isNull, isNotNull, desc, count, or, ilike, sql as sqlBuilder } from "drizzle-orm";
 import { customerIdsCache } from "../services/cache";
+import { customerPricingStorage } from "./customer-pricing";
+import { budgetLedgerStorage } from "./budget-ledger";
 
 const sql = neon(process.env.DATABASE_URL!);
 const db = drizzle(sql);
@@ -587,6 +589,9 @@ export class CustomerManagementStorage {
       contract,
       primaryEmployee,
       backupEmployee,
+      pricingHistory,
+      currentPricing,
+      budgetSummary,
     ] = await Promise.all([
       this.getCustomerCurrentInsurance(customerId),
       this.getCustomerContacts(customerId),
@@ -600,6 +605,9 @@ export class CustomerManagementStorage {
       customer.backupEmployeeId
         ? db.select({ id: users.id, displayName: users.displayName }).from(users).where(eq(users.id, customer.backupEmployeeId)).then(r => r[0])
         : Promise.resolve(undefined),
+      customerPricingStorage.getPricingHistory(customerId),
+      customerPricingStorage.getCurrentPricing(customerId),
+      budgetLedgerStorage.getBudgetSummary(customerId),
     ]);
 
     return {
@@ -612,6 +620,9 @@ export class CustomerManagementStorage {
       contract: contract ?? undefined,
       primaryEmployee,
       backupEmployee,
+      pricingHistory,
+      currentPricing: currentPricing ?? undefined,
+      budgetSummary,
     };
   }
 

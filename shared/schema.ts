@@ -1036,6 +1036,19 @@ export const createFullCustomerSchema = z.object({
 
 export type CreateFullCustomer = z.infer<typeof createFullCustomerSchema>;
 
+// Budget summary for customer detail view
+export interface BudgetSummary {
+  customerId: number;
+  totalAllocatedCents: number;
+  totalUsedCents: number;
+  availableCents: number;
+  carryoverCents: number;
+  carryoverExpiresAt: string | null;
+  currentYearAllocatedCents: number;
+  monthlyLimitCents: number | null;
+  currentMonthUsedCents: number;
+}
+
 // Customer with all related data for detail view
 export type CustomerWithDetails = Customer & {
   insurance?: CustomerInsuranceHistory & { provider: InsuranceProvider };
@@ -1046,6 +1059,9 @@ export type CustomerWithDetails = Customer & {
   contract?: CustomerContract & { rates: CustomerContractRate[] };
   primaryEmployee?: { id: number; displayName: string };
   backupEmployee?: { id: number; displayName: string };
+  pricingHistory?: CustomerPricing[];
+  currentPricing?: CustomerPricing;
+  budgetSummary?: BudgetSummary;
 };
 
 // ============================================

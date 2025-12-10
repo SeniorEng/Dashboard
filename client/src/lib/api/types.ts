@@ -100,6 +100,29 @@ export interface CustomerListParams extends PaginationParams {
   primaryEmployeeId?: string;
 }
 
+export interface CustomerPricingInfo {
+  id: number;
+  customerId: number;
+  hauswirtschaftRateCents: number | null;
+  alltagsbegleitungRateCents: number | null;
+  kilometerRateCents: number | null;
+  validFrom: string;
+  validTo: string | null;
+  createdAt: string;
+}
+
+export interface BudgetSummaryInfo {
+  customerId: number;
+  totalAllocatedCents: number;
+  totalUsedCents: number;
+  availableCents: number;
+  carryoverCents: number;
+  carryoverExpiresAt: string | null;
+  currentYearAllocatedCents: number;
+  monthlyLimitCents: number | null;
+  currentMonthUsedCents: number;
+}
+
 export interface CustomerDetail extends Customer {
   currentInsurance: {
     id: number;
@@ -115,6 +138,9 @@ export interface CustomerDetail extends Customer {
   currentContract: CustomerContractInfo | null;
   primaryEmployee: { id: number; displayName: string } | null;
   backupEmployee: { id: number; displayName: string } | null;
+  pricingHistory: CustomerPricingInfo[];
+  currentPricing: CustomerPricingInfo | null;
+  budgetSummary: BudgetSummaryInfo | null;
 }
 
 export interface CustomerNeedsAssessmentInfo {

@@ -89,16 +89,7 @@ function formatPeriodType(type: string): string {
   }
 }
 
-interface PricingData {
-  id: number;
-  customerId: number;
-  hauswirtschaftRateCents: number | null;
-  alltagsbegleitungRateCents: number | null;
-  kilometerRateCents: number | null;
-  validFrom: string;
-  validTo: string | null;
-  createdAt: string;
-}
+import type { CustomerPricingInfo } from "@/lib/api/types";
 
 function formatCentsToEuro(cents: number | null): string {
   if (cents === null) return "-";
@@ -108,24 +99,22 @@ function formatCentsToEuro(cents: number | null): string {
   }).format(cents / 100);
 }
 
-function PricingSection({ customerId, customerName }: { customerId: number; customerName: string }) {
+interface PricingSectionProps {
+  customerId: number;
+  customerName: string;
+  pricingHistory: CustomerPricingInfo[];
+  currentPricing: CustomerPricingInfo | null;
+  onRefresh: () => void;
+}
+
+function PricingSection({ customerId, customerName, pricingHistory, currentPricing, onRefresh }: PricingSectionProps) {
   const { toast } = useToast();
-  const queryClient = useQueryClient();
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [newHauswirtschaftRate, setNewHauswirtschaftRate] = useState("");
   const [newAlltagsbegleitungRate, setNewAlltagsbegleitungRate] = useState("");
   const [newKilometerRate, setNewKilometerRate] = useState("");
   const todayDate = new Date().toISOString().split("T")[0];
   const [newValidFrom, setNewValidFrom] = useState(todayDate);
-
-  const { data: pricingHistory, isLoading } = useQuery<PricingData[]>({
-    queryKey: ["admin", "customers", customerId, "pricing"],
-    queryFn: async () => {
-      const res = await fetch(`/api/admin/customers/${customerId}/pricing`, { credentials: "include" });
-      if (!res.ok) throw new Error("Preishistorie konnte nicht geladen werden");
-      return res.json();
-    },
-  });
 
   const addPricingMutation = useMutation({
     mutationFn: async (data: {
@@ -138,7 +127,7 @@ function PricingSection({ customerId, customerName }: { customerId: number; cust
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "customers", customerId, "pricing"] });
+      onRefresh();
       setIsAddOpen(false);
       setNewHauswirtschaftRate("");
       setNewAlltagsbegleitungRate("");
@@ -160,11 +149,6 @@ function PricingSection({ customerId, customerName }: { customerId: number; cust
       validFrom: newValidFrom,
     });
   };
-
-  const today = new Date().toISOString().split("T")[0];
-  const currentPricing = pricingHistory?.find(p => 
-    p.validFrom <= today && (!p.validTo || p.validTo >= today)
-  );
 
   return (
     <div className="mt-6 pt-6 border-t">
@@ -271,11 +255,7 @@ function PricingSection({ customerId, customerName }: { customerId: number; cust
         </form>
       )}
 
-      {isLoading ? (
-        <div className="flex justify-center py-4">
-          <Loader2 className={`${iconSize.md} animate-spin text-teal-600`} />
-        </div>
-      ) : pricingHistory && pricingHistory.length > 0 ? (
+      {pricingHistory && pricingHistory.length > 0 ? (
         <div className="space-y-3">
           {currentPricing && (
             <div className="p-3 bg-teal-50 border border-teal-200 rounded-lg">
@@ -701,6 +681,9 @@ export default function AdminCustomerDetail() {
                 <PricingSection 
                   customerId={customerId} 
                   customerName={customer.vorname && customer.nachname ? `${customer.vorname} ${customer.nachname}` : customer.name}
+                  pricingHistory={customer.pricingHistory || []}
+                  currentPricing={customer.currentPricing || null}
+                  onRefresh={refetch}
                 />
               </SectionCard>
             </TabsContent>
