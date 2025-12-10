@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/layout";
 import { useAppointments, useWeekAppointmentCounts, AppointmentList } from "@/features/appointments";
+import { TaskListSection } from "@/features/tasks";
 import { Button } from "@/components/ui/button";
 import { format, addDays, startOfWeek, addWeeks, subWeeks, isSameDay } from "date-fns";
 import { de } from "date-fns/locale";
@@ -313,6 +314,8 @@ export default function Dashboard() {
           isLoading={isLoading} 
           error={error} 
         />
+
+        <TaskListSection />
       </div>
     </Layout>
   );
