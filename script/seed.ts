@@ -50,6 +50,7 @@ async function seed() {
       serviceType: "Alltagsbegleitung",
       date: today,
       time: "09:00",
+      scheduledStart: "09:00",
       durationPromised: 45,
       status: "completed"
     },
@@ -60,6 +61,7 @@ async function seed() {
       serviceType: "Hauswirtschaft",
       date: today,
       time: "10:30",
+      scheduledStart: "10:30",
       durationPromised: 60,
       status: "scheduled"
     },
@@ -70,6 +72,7 @@ async function seed() {
       serviceType: null,
       date: today,
       time: "13:00",
+      scheduledStart: "13:00",
       durationPromised: 60,
       status: "scheduled"
     },
@@ -80,6 +83,7 @@ async function seed() {
       serviceType: "Alltagsbegleitung",
       date: today,
       time: "15:00",
+      scheduledStart: "15:00",
       durationPromised: 45,
       status: "scheduled"
     },
@@ -90,6 +94,7 @@ async function seed() {
       serviceType: null,
       date: today,
       time: "16:30",
+      scheduledStart: "16:30",
       durationPromised: 60,
       status: "completed"
     }
