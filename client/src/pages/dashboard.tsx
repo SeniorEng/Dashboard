@@ -6,7 +6,7 @@ import { TaskListSection } from "@/features/tasks";
 import { Button } from "@/components/ui/button";
 import { format, addDays, startOfWeek, addWeeks, subWeeks, isSameDay } from "date-fns";
 import { de } from "date-fns/locale";
-import { Plus, ChevronsLeft, ChevronsRight, AlertCircle, Coffee, Loader2 } from "lucide-react";
+import { Plus, ChevronsLeft, ChevronsRight, AlertCircle, Coffee, Loader2, FileSignature } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { parseLocalDate, formatDateForDisplay } from "@shared/utils/date";
 import { iconSize } from "@/design-system";
@@ -59,7 +59,22 @@ export default function Dashboard() {
     staleTime: 60000,
   });
   const missingBreaksCount = openTasks?.daysWithMissingBreaks?.length || 0;
-  const totalOpenTasks = undocumentedCount + missingBreaksCount;
+
+  // Fetch pending service records
+  const { data: pendingServiceRecords } = useQuery({
+    queryKey: ["/api/service-records/pending"],
+    queryFn: async () => {
+      const response = await fetch(`/api/service-records/pending`);
+      if (!response.ok) {
+        throw new Error("Failed to fetch pending service records");
+      }
+      return response.json();
+    },
+    staleTime: 60000,
+  });
+  const pendingServiceRecordsCount = pendingServiceRecords?.length || 0;
+
+  const totalOpenTasks = undocumentedCount + missingBreaksCount + pendingServiceRecordsCount;
 
   // Get weekdays only (Monday to Friday) for the week(s) containing selectedDate
   const weekDays = useMemo(() => {
@@ -127,6 +142,21 @@ export default function Dashboard() {
                       {missingBreaksCount > 5 && ` (+${missingBreaksCount - 5} weitere)`}
                     </span>
                   </div>
+                </div>
+              </Link>
+            )}
+
+            {/* Pending service records */}
+            {pendingServiceRecordsCount > 0 && (
+              <Link href="/service-records">
+                <div 
+                  className="flex items-center gap-2 px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg text-purple-800 hover:bg-purple-100 transition-colors cursor-pointer"
+                  data-testid="banner-pending-service-records"
+                >
+                  <FileSignature className={`${iconSize.sm} shrink-0`} />
+                  <span className="text-sm font-medium">
+                    {pendingServiceRecordsCount} {pendingServiceRecordsCount === 1 ? "Leistungsnachweis" : "Leistungsnachweise"} zum Unterschreiben
+                  </span>
                 </div>
               </Link>
             )}

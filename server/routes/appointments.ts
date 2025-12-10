@@ -247,6 +247,12 @@ router.patch("/:id", async (req, res) => {
       return sendNotFound(res, ErrorMessages.appointmentNotFound);
     }
     
+    // Check if appointment is locked by a signed service record
+    const isLocked = await storage.isAppointmentLocked(id);
+    if (isLocked) {
+      return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
+    }
+    
     const validatedData = updateAppointmentSchema.parse(req.body);
     
     const validation = appointmentService.validateAllUpdateRules(existingAppointment, validatedData);
@@ -460,6 +466,12 @@ router.delete("/:id", async (req, res) => {
     const appointment = await storage.getAppointment(id);
     if (!appointment) {
       return sendNotFound(res, ErrorMessages.appointmentNotFound);
+    }
+    
+    // Check if appointment is locked by a signed service record
+    const isLocked = await storage.isAppointmentLocked(id);
+    if (isLocked) {
+      return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht gelöscht werden.");
     }
     
     const canDelete = appointmentService.canDeleteAppointment(appointment);

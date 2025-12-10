@@ -90,6 +90,7 @@ export interface IStorage {
   getDocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<AppointmentWithCustomer[]>;
   getUndocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<AppointmentWithCustomer[]>;
   getPendingServiceRecords(employeeId: number): Promise<MonthlyServiceRecord[]>;
+  isAppointmentLocked(appointmentId: number): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1292,6 +1293,25 @@ export class DatabaseStorage implements IStorage {
         ne(monthlyServiceRecords.status, 'completed')
       ))
       .orderBy(monthlyServiceRecords.year, monthlyServiceRecords.month);
+  }
+
+  async isAppointmentLocked(appointmentId: number): Promise<boolean> {
+    const result = await db.select({ 
+      serviceRecordId: serviceRecordAppointments.serviceRecordId,
+      status: monthlyServiceRecords.status,
+    })
+      .from(serviceRecordAppointments)
+      .innerJoin(monthlyServiceRecords, eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id))
+      .where(and(
+        eq(serviceRecordAppointments.appointmentId, appointmentId),
+        or(
+          eq(monthlyServiceRecords.status, 'employee_signed'),
+          eq(monthlyServiceRecords.status, 'completed')
+        )
+      ))
+      .limit(1);
+    
+    return result.length > 0;
   }
 }
 
