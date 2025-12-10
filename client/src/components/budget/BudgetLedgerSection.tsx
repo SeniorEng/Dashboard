@@ -361,7 +361,7 @@ function InitialBudgetForm({ customerId, onSuccess }: { customerId: number; onSu
 
   const mutation = useMutation({
     mutationFn: async (data: { currentYearAmountCents: number; carryoverAmountCents: number; budgetStartDate: string }) => {
-      return await api.post(`/api/budget/${customerId}/initial-budget`, data);
+      return await api.post(`/budget/${customerId}/initial-budget`, data);
     },
     onSuccess: () => {
       toast.success("Startbudget erfolgreich erfasst");
@@ -446,7 +446,7 @@ function ManualAdjustmentForm({ customerId, onSuccess }: { customerId: number; o
 
   const mutation = useMutation({
     mutationFn: async (data: { amountCents: number; notes: string }) => {
-      return await api.post(`/api/budget/${customerId}/manual-adjustment`, data);
+      return await api.post(`/budget/${customerId}/manual-adjustment`, data);
     },
     onSuccess: () => {
       toast.success("Korrektur erfolgreich gespeichert");
@@ -529,7 +529,7 @@ function PreferencesForm({ customerId, currentLimit, onSuccess }: { customerId: 
 
   const mutation = useMutation({
     mutationFn: async (data: { monthlyLimitCents: number | null }) => {
-      return await api.put(`/api/budget/${customerId}/preferences`, data);
+      return await api.put(`/budget/${customerId}/preferences`, data);
     },
     onSuccess: () => {
       toast.success("Einstellungen gespeichert");
