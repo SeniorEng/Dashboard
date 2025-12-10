@@ -283,16 +283,16 @@ function PricingSection({ customerId, customerName }: { customerId: number; cust
                 <Badge variant="secondary" className="bg-teal-100 text-teal-800">Aktuell</Badge>
                 <span className="text-sm text-gray-500">seit {formatDate(currentPricing.validFrom)}</span>
               </div>
-              <div className="grid grid-cols-3 gap-3 text-sm">
-                <div>
+              <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+                <div className="min-w-[100px]">
                   <div className="text-gray-500 text-xs">Hauswirtschaft</div>
                   <div className="font-medium">{formatCentsToEuro(currentPricing.hauswirtschaftRateCents)}/h</div>
                 </div>
-                <div>
+                <div className="min-w-[100px]">
                   <div className="text-gray-500 text-xs">Alltagsbegleitung</div>
                   <div className="font-medium">{formatCentsToEuro(currentPricing.alltagsbegleitungRateCents)}/h</div>
                 </div>
-                <div>
+                <div className="min-w-[80px]">
                   <div className="text-gray-500 text-xs">Kilometer</div>
                   <div className="font-medium">{formatCentsToEuro(currentPricing.kilometerRateCents)}/km</div>
                 </div>
@@ -309,7 +309,7 @@ function PricingSection({ customerId, customerName }: { customerId: number; cust
                     <div className="text-gray-500 text-xs mb-1">
                       {formatDate(pricing.validFrom)} - {formatDate(pricing.validTo!)}
                     </div>
-                    <div className="grid grid-cols-3 gap-1 text-xs">
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
                       <span>HW: {formatCentsToEuro(pricing.hauswirtschaftRateCents)}/h</span>
                       <span>AB: {formatCentsToEuro(pricing.alltagsbegleitungRateCents)}/h</span>
                       <span>Km: {formatCentsToEuro(pricing.kilometerRateCents)}/km</span>
