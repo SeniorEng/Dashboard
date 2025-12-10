@@ -1,0 +1,213 @@
+import { useState, useMemo } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Layout } from "@/components/layout";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SignaturePad, SignatureDisplay } from "@/components/ui/signature-pad";
+import { EmptyState } from "@/components/patterns/empty-state";
+import { ErrorState } from "@/components/patterns/error-state";
+import { 
+  FileSignature, Loader2, Calendar, User, Clock, MapPin, 
+  ChevronRight, Check, AlertCircle, FileText
+} from "lucide-react";
+import { iconSize } from "@/design-system";
+import { formatDateForDisplay } from "@shared/utils/date";
+import { Link, useLocation } from "wouter";
+import { toast } from "sonner";
+import { apiRequest } from "@/lib/api/client";
+import type { MonthlyServiceRecord, Customer } from "@shared/schema";
+import type { AppointmentWithCustomer } from "@shared/types";
+
+const MONTH_NAMES = [
+  "Januar", "Februar", "März", "April", "Mai", "Juni",
+  "Juli", "August", "September", "Oktober", "November", "Dezember"
+];
+
+function getStatusBadge(status: string) {
+  switch (status) {
+    case "pending":
+      return <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">Warte auf Unterschrift</Badge>;
+    case "employee_signed":
+      return <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Warte auf Kundenunterschrift</Badge>;
+    case "completed":
+      return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">Abgeschlossen</Badge>;
+    default:
+      return <Badge variant="outline">{status}</Badge>;
+  }
+}
+
+export default function ServiceRecordsPage() {
+  const currentDate = new Date();
+  const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
+  const queryClient = useQueryClient();
+
+  const { data: records, isLoading, error, refetch } = useQuery<MonthlyServiceRecord[]>({
+    queryKey: ["/api/service-records", selectedYear, selectedMonth],
+    queryFn: async () => {
+      const response = await fetch(`/api/service-records?year=${selectedYear}&month=${selectedMonth}`);
+      if (!response.ok) throw new Error("Leistungsnachweise konnten nicht geladen werden");
+      return response.json();
+    },
+  });
+
+  const { data: pendingRecords } = useQuery<MonthlyServiceRecord[]>({
+    queryKey: ["/api/service-records/pending"],
+  });
+
+  const years = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    return [currentYear - 1, currentYear, currentYear + 1];
+  }, []);
+
+  if (isLoading) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center min-h-[50vh]">
+          <Loader2 className={`${iconSize.xl} animate-spin text-primary`} />
+        </div>
+      </Layout>
+    );
+  }
+
+  if (error) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center min-h-[50vh]">
+          <ErrorState
+            title="Leistungsnachweise konnten nicht geladen werden"
+            description={error instanceof Error ? error.message : "Bitte versuchen Sie es erneut."}
+            onRetry={() => refetch()}
+          />
+        </div>
+      </Layout>
+    );
+  }
+
+  const pendingCount = pendingRecords?.length || 0;
+
+  return (
+    <Layout>
+      <div className="mb-6 animate-in slide-in-from-top-4 duration-500">
+        <div className="flex items-center gap-3 mb-1">
+          <FileSignature className={`${iconSize.lg} text-primary`} />
+          <h1 className="text-2xl font-bold text-foreground tracking-tight" data-testid="text-title">
+            Leistungsnachweise
+          </h1>
+        </div>
+        <p className="text-muted-foreground text-sm ml-10">
+          Monatliche Unterschriften für dokumentierte Termine
+        </p>
+      </div>
+
+      {pendingCount > 0 && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg" data-testid="banner-pending">
+          <div className="flex items-center gap-2 text-amber-800">
+            <AlertCircle className={iconSize.sm} />
+            <span className="text-sm font-medium">
+              {pendingCount} {pendingCount === 1 ? "Leistungsnachweis benötigt" : "Leistungsnachweise benötigen"} noch Unterschriften
+            </span>
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-3 mb-6">
+        <Select
+          value={selectedYear.toString()}
+          onValueChange={(val) => setSelectedYear(parseInt(val))}
+        >
+          <SelectTrigger className="w-32" data-testid="select-year">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {years.map((year) => (
+              <SelectItem key={year} value={year.toString()}>
+                {year}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select
+          value={selectedMonth.toString()}
+          onValueChange={(val) => setSelectedMonth(parseInt(val))}
+        >
+          <SelectTrigger className="w-40" data-testid="select-month">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {MONTH_NAMES.map((name, index) => (
+              <SelectItem key={index + 1} value={(index + 1).toString()}>
+                {name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {!records || records.length === 0 ? (
+        <Card className="border-dashed">
+          <CardContent className="py-10">
+            <EmptyState
+              icon={<FileText className={`${iconSize["2xl"]} text-muted-foreground/40`} />}
+              title={`Keine Leistungsnachweise für ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`}
+              description="Leistungsnachweise werden erstellt, wenn alle Termine eines Monats dokumentiert sind."
+            />
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {records.map((record) => (
+            <ServiceRecordCard key={record.id} record={record} />
+          ))}
+        </div>
+      )}
+    </Layout>
+  );
+}
+
+interface ServiceRecordCardProps {
+  record: MonthlyServiceRecord;
+}
+
+function ServiceRecordCard({ record }: ServiceRecordCardProps) {
+  const [, navigate] = useLocation();
+
+  const { data: customer } = useQuery<Customer>({
+    queryKey: ["customer", record.customerId],
+    queryFn: async () => {
+      const response = await fetch(`/api/customers/${record.customerId}`);
+      if (!response.ok) throw new Error("Kunde konnte nicht geladen werden");
+      return response.json();
+    },
+  });
+
+  return (
+    <Link href={`/service-records/${record.id}`}>
+      <Card className="hover:bg-muted/50 transition-colors cursor-pointer" data-testid={`card-record-${record.id}`}>
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <User className={`${iconSize.sm} text-muted-foreground`} />
+                <span className="font-medium" data-testid={`text-customer-${record.id}`}>
+                  {customer ? `${customer.vorname} ${customer.nachname}` : "Kunde laden..."}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Calendar className={iconSize.xs} />
+                <span>{MONTH_NAMES[record.month - 1]} {record.year}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              {getStatusBadge(record.status)}
+              <ChevronRight className={`${iconSize.sm} text-muted-foreground`} />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}

@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Shield, LogOut, Search, X, User as UserIcon, Calendar, Cake } from "lucide-react";
+import { Shield, LogOut, Search, X, User as UserIcon, Calendar, Cake, FileSignature } from "lucide-react";
 
 interface SearchResult {
   type: "customer" | "appointment";
@@ -217,6 +217,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Link href="/birthdays" className={`p-2 rounded-xl flex flex-col items-center gap-1 transition-colors ${location === '/birthdays' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground'}`}>
           <Cake className="w-6 h-6" />
           <span className="text-[10px] font-medium">Geburtstage</span>
+        </Link>
+        <Link href="/service-records" className={`p-2 rounded-xl flex flex-col items-center gap-1 transition-colors ${location.startsWith('/service-records') ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground'}`}>
+          <FileSignature className="w-6 h-6" />
+          <span className="text-[10px] font-medium">Nachweise</span>
         </Link>
         <Link href="/my-times" className={`p-2 rounded-xl flex flex-col items-center gap-1 transition-colors ${location === '/my-times' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground'}`}>
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
