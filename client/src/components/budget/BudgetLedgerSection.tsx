@@ -72,15 +72,19 @@ function getTransactionTypeLabel(type: string): string {
 interface BudgetLedgerSectionProps {
   customerId: number;
   customerName: string;
+  initialSummary?: BudgetSummary | null;
+  onRefresh?: () => void;
 }
 
-export function BudgetLedgerSection({ customerId, customerName }: BudgetLedgerSectionProps) {
+export function BudgetLedgerSection({ customerId, customerName, initialSummary, onRefresh }: BudgetLedgerSectionProps) {
   const queryClient = useQueryClient();
   const [showInitialBudgetDialog, setShowInitialBudgetDialog] = useState(false);
   const [showAdjustmentDialog, setShowAdjustmentDialog] = useState(false);
   const [showPreferencesDialog, setShowPreferencesDialog] = useState(false);
 
-  const { data: summary, isLoading: summaryLoading } = useQuery<BudgetSummary>({
+  const hasInitialSummary = initialSummary !== undefined;
+  
+  const { data: fetchedSummary, isLoading: summaryLoading } = useQuery<BudgetSummary>({
     queryKey: ["budget-summary", customerId],
     queryFn: async () => {
       const response = await fetch(`/api/budget/${customerId}/summary`, {
@@ -89,7 +93,11 @@ export function BudgetLedgerSection({ customerId, customerName }: BudgetLedgerSe
       if (!response.ok) throw new Error("Failed to fetch budget summary");
       return response.json();
     },
+    enabled: !hasInitialSummary,
+    staleTime: 30000,
   });
+
+  const summary = hasInitialSummary ? initialSummary : fetchedSummary;
 
   const { data: transactions } = useQuery<BudgetTransaction[]>({
     queryKey: ["budget-transactions", customerId],
@@ -100,7 +108,14 @@ export function BudgetLedgerSection({ customerId, customerName }: BudgetLedgerSe
       if (!response.ok) throw new Error("Failed to fetch transactions");
       return response.json();
     },
+    staleTime: 30000,
   });
+
+  const handleRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["budget-summary", customerId] });
+    queryClient.invalidateQueries({ queryKey: ["budget-transactions", customerId] });
+    onRefresh?.();
+  };
 
   const usagePercent = summary && summary.totalAllocatedCents > 0
     ? Math.min(100, (summary.totalUsedCents / summary.totalAllocatedCents) * 100)
@@ -110,7 +125,7 @@ export function BudgetLedgerSection({ customerId, customerName }: BudgetLedgerSe
     ? Math.min(100, (summary.currentMonthUsedCents / summary.monthlyLimitCents) * 100)
     : 0;
 
-  if (summaryLoading) {
+  if (!hasInitialSummary && summaryLoading) {
     return (
       <div className="animate-pulse space-y-4">
         <div className="h-32 bg-gray-100 rounded-lg" />
@@ -146,7 +161,7 @@ export function BudgetLedgerSection({ customerId, customerName }: BudgetLedgerSe
                   customerId={customerId}
                   onSuccess={() => {
                     setShowInitialBudgetDialog(false);
-                    queryClient.invalidateQueries({ queryKey: ["budget-summary", customerId] });
+                    handleRefresh();
                   }}
                 />
               </DialogContent>
@@ -239,7 +254,7 @@ export function BudgetLedgerSection({ customerId, customerName }: BudgetLedgerSe
                             currentLimit={summary!.monthlyLimitCents}
                             onSuccess={() => {
                               setShowPreferencesDialog(false);
-                              queryClient.invalidateQueries({ queryKey: ["budget-summary", customerId] });
+                              handleRefresh();
                             }}
                           />
                         </DialogContent>
@@ -271,7 +286,7 @@ export function BudgetLedgerSection({ customerId, customerName }: BudgetLedgerSe
                         currentLimit={null}
                         onSuccess={() => {
                           setShowPreferencesDialog(false);
-                          queryClient.invalidateQueries({ queryKey: ["budget-summary", customerId] });
+                          handleRefresh();
                         }}
                       />
                     </DialogContent>
@@ -303,8 +318,7 @@ export function BudgetLedgerSection({ customerId, customerName }: BudgetLedgerSe
                       customerId={customerId}
                       onSuccess={() => {
                         setShowAdjustmentDialog(false);
-                        queryClient.invalidateQueries({ queryKey: ["budget-summary", customerId] });
-                        queryClient.invalidateQueries({ queryKey: ["budget-transactions", customerId] });
+                        handleRefresh();
                       }}
                     />
                   </DialogContent>

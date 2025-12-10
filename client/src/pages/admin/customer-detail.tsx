@@ -671,6 +671,8 @@ export default function AdminCustomerDetail() {
                 <BudgetLedgerSection 
                   customerId={customerId} 
                   customerName={customer.vorname && customer.nachname ? `${customer.vorname} ${customer.nachname}` : customer.name}
+                  initialSummary={customer.budgetSummary}
+                  onRefresh={refetch}
                 />
               </SectionCard>
 
