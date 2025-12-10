@@ -30,6 +30,32 @@ router.get("/pending", requireAuth, async (req, res) => {
   }
 });
 
+router.get("/check-period", requireAuth, async (req, res) => {
+  try {
+    const userId = req.user!.id;
+    const customerId = parseInt(req.query.customerId as string);
+    const year = parseInt(req.query.year as string);
+    const month = parseInt(req.query.month as string);
+    
+    if (isNaN(customerId) || isNaN(year) || isNaN(month)) {
+      return res.status(400).json({ message: "Ungültige Parameter" });
+    }
+    
+    const existingRecord = await storage.getServiceRecordByPeriod(customerId, userId, year, month);
+    const documentedAppointments = await storage.getDocumentedAppointmentsForPeriod(customerId, userId, year, month);
+    const undocumentedAppointments = await storage.getUndocumentedAppointmentsForPeriod(customerId, userId, year, month);
+    
+    res.json({
+      existingRecord,
+      documentedAppointments,
+      undocumentedAppointments,
+      canCreateRecord: undocumentedAppointments.length === 0 && documentedAppointments.length > 0,
+    });
+  } catch (error) {
+    handleRouteError(res, error, "Periodendaten konnten nicht geladen werden");
+  }
+});
+
 router.get("/customer/:customerId", requireAuth, async (req, res) => {
   try {
     const customerId = parseInt(req.params.customerId);
@@ -73,32 +99,6 @@ router.get("/:id/appointments", requireAuth, async (req, res) => {
     res.json(appointments);
   } catch (error) {
     handleRouteError(res, error, "Termine konnten nicht geladen werden");
-  }
-});
-
-router.get("/check-period", requireAuth, async (req, res) => {
-  try {
-    const userId = req.user!.id;
-    const customerId = parseInt(req.query.customerId as string);
-    const year = parseInt(req.query.year as string);
-    const month = parseInt(req.query.month as string);
-    
-    if (isNaN(customerId) || isNaN(year) || isNaN(month)) {
-      return res.status(400).json({ message: "Ungültige Parameter" });
-    }
-    
-    const existingRecord = await storage.getServiceRecordByPeriod(customerId, userId, year, month);
-    const documentedAppointments = await storage.getDocumentedAppointmentsForPeriod(customerId, userId, year, month);
-    const undocumentedAppointments = await storage.getUndocumentedAppointmentsForPeriod(customerId, userId, year, month);
-    
-    res.json({
-      existingRecord,
-      documentedAppointments,
-      undocumentedAppointments,
-      canCreateRecord: undocumentedAppointments.length === 0 && documentedAppointments.length > 0,
-    });
-  } catch (error) {
-    handleRouteError(res, error, "Periodendaten konnten nicht geladen werden");
   }
 });
 
