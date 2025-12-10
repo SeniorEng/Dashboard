@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { storage } from "../storage";
+import { budgetLedgerStorage } from "../storage/budget-ledger";
 import { 
   updateAppointmentSchema, 
   insertKundenterminSchema,
@@ -400,13 +401,50 @@ router.post("/:id/document", async (req, res) => {
       status: "completed" as const,
     };
     
+    const hauswirtschaftMinutes = validatedData.hauswirtschaftActualDauer || 0;
+    const alltagsbegleitungMinutes = validatedData.alltagsbegleitungActualDauer || 0;
+    const travelKilometers = validatedData.travelKilometers || 0;
+    const customerKilometers = validatedData.customerKilometers || 0;
+    
+    const hasUsage = hauswirtschaftMinutes > 0 || alltagsbegleitungMinutes > 0 || 
+                     travelKilometers > 0 || customerKilometers > 0;
+    
+    let budgetTransaction = null;
+    let budgetWarning: string | null = null;
+    
+    if (hasUsage) {
+      try {
+        budgetTransaction = await budgetLedgerStorage.createConsumptionTransaction({
+          customerId: appointment.customerId,
+          appointmentId: id,
+          transactionDate: appointment.date,
+          hauswirtschaftMinutes,
+          alltagsbegleitungMinutes,
+          travelKilometers,
+          customerKilometers,
+          userId: req.user?.id,
+        });
+      } catch (budgetError: any) {
+        const errorMessage = budgetError?.message || "Budget-Abbuchung fehlgeschlagen";
+        if (errorMessage.includes("Preisvereinbarung")) {
+          return sendBadRequest(res, `${errorMessage}. Bitte hinterlegen Sie zuerst eine Preisvereinbarung für diesen Kunden.`);
+        }
+        budgetWarning = errorMessage;
+        console.warn("Budget booking warning:", budgetError);
+      }
+    }
+    
     const updatedAppointment = await storage.updateAppointment(id, updateData);
     
     if (!updatedAppointment) {
       return sendServerError(res, "Fehler beim Speichern der Dokumentation");
     }
     
-    res.json(updatedAppointment);
+    res.json({
+      ...updatedAppointment,
+      budgetTransaction,
+      budgetWarning,
+    });
   } catch (error) {
     handleRouteError(res, error, "Fehler beim Speichern der Dokumentation", "Failed to document appointment");
   }

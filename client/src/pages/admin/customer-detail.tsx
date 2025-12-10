@@ -44,6 +44,7 @@ import {
   Car,
   Plus,
 } from "lucide-react";
+import { BudgetLedgerSection } from "@/components/budget/BudgetLedgerSection";
 
 function formatAddress(customer: {
   strasse: string | null;
@@ -684,52 +685,19 @@ export default function AdminCustomerDetail() {
 
             <TabsContent value="budgets" className="space-y-4">
               <SectionCard
-                title="Budgets & Leistungsansprüche"
+                title="§45b Entlastungsbetrag"
                 icon={<Wallet className={iconSize.sm} />}
-                actions={
-                  <Button size="sm" variant="outline" data-testid="button-update-budgets">
-                    Aktualisieren
-                  </Button>
-                }
               >
-                {customer.currentBudgets ? (
-                  <div className="grid gap-4 md:grid-cols-3">
-                    <div className="p-4 rounded-lg bg-green-50 border border-green-100">
-                      <p className="text-sm text-gray-600">§45b Entlastungsbetrag</p>
-                      <p className="text-xl font-semibold text-gray-900 mt-1">
-                        {formatBudget(customer.currentBudgets.entlastungsbetrag45b)}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-1">pro Monat</p>
-                    </div>
-                    <div className="p-4 rounded-lg bg-blue-50 border border-blue-100">
-                      <p className="text-sm text-gray-600">§39 Verhinderungspflege</p>
-                      <p className="text-xl font-semibold text-gray-900 mt-1">
-                        {formatBudget(customer.currentBudgets.verhinderungspflege39)}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-1">pro Jahr</p>
-                    </div>
-                    <div className="p-4 rounded-lg bg-purple-50 border border-purple-100">
-                      <p className="text-sm text-gray-600">§36 Pflegesachleistungen</p>
-                      <p className="text-xl font-semibold text-gray-900 mt-1">
-                        {formatBudget(customer.currentBudgets.pflegesachleistungen36)}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-1">pro Monat</p>
-                    </div>
-                  </div>
-                ) : (
-                  <EmptyState
-                    icon={<Wallet className={iconSize.xl} />}
-                    title="Keine Budgets"
-                    description="Keine Budgets hinterlegt"
-                    action={
-                      <Button size="sm" className={componentStyles.btnPrimary}>
-                        Budgets erfassen
-                      </Button>
-                    }
-                    className="py-6"
-                  />
-                )}
+                <BudgetLedgerSection 
+                  customerId={customerId} 
+                  customerName={customer.vorname && customer.nachname ? `${customer.vorname} ${customer.nachname}` : customer.name}
+                />
+              </SectionCard>
 
+              <SectionCard
+                title="Preisvereinbarung"
+                icon={<Euro className={iconSize.sm} />}
+              >
                 <PricingSection 
                   customerId={customerId} 
                   customerName={customer.vorname && customer.nachname ? `${customer.vorname} ${customer.nachname}` : customer.name}
