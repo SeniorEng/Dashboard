@@ -13,6 +13,7 @@ import { CheckSquare, Plus, Loader2, ArrowLeft } from "lucide-react";
 import { Link } from "wouter";
 import { iconSize, componentStyles } from "@/design-system";
 import { useTasks, useCreateTask, useToggleTaskStatus, type TaskWithRelations, TaskCard, TaskDetailSheet } from "@/features/tasks";
+import { DatePicker } from "@/components/ui/date-picker";
 
 type TaskFilter = "open" | "completed" | "all";
 
@@ -111,12 +112,11 @@ export default function TasksPage() {
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <Label htmlFor="new-task-due-date">Fällig am</Label>
-                      <Input
-                        id="new-task-due-date"
-                        type="date"
-                        value={newTask.dueDate}
-                        onChange={(e) => setNewTask({ ...newTask, dueDate: e.target.value })}
+                      <Label>Fällig am</Label>
+                      <DatePicker
+                        value={newTask.dueDate || null}
+                        onChange={(date) => setNewTask({ ...newTask, dueDate: date || "" })}
+                        placeholder="Datum wählen"
                         data-testid="input-new-task-due-date"
                       />
                     </div>

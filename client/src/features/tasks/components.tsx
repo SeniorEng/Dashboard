@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DatePicker } from "@/components/ui/date-picker";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { CheckSquare, Plus, Calendar, Flag, Loader2, Trash2, Pencil } from "lucide-react";
 import { format, parseISO, isToday, isTomorrow, isPast, isValid } from "date-fns";
@@ -98,12 +99,11 @@ function TaskForm({
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <Label htmlFor="task-form-due-date">Fällig am</Label>
-          <Input
-            id="task-form-due-date"
-            type="date"
-            value={data.dueDate}
-            onChange={(e) => onChange({ ...data, dueDate: e.target.value })}
+          <Label>Fällig am</Label>
+          <DatePicker
+            value={data.dueDate || null}
+            onChange={(date) => onChange({ ...data, dueDate: date || "" })}
+            placeholder="Datum wählen"
             data-testid="input-task-due-date"
           />
         </div>

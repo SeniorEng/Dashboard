@@ -242,6 +242,20 @@ export const containerWidth = {
 } as const;
 
 // ============================================
+// DATE PICKER TOKENS
+// ============================================
+
+export const datePicker = {
+  trigger: 'min-h-[44px] px-3 w-full justify-start text-left font-normal',
+  triggerPlaceholder: 'text-muted-foreground',
+  calendar: {
+    day: 'min-w-[44px] min-h-[44px] text-base',
+    weekday: 'text-sm font-medium text-muted-foreground',
+  },
+  clearButton: 'ml-2 p-1 rounded-full hover:bg-muted transition-colors shrink-0 min-w-[24px] min-h-[24px] flex items-center justify-center',
+} as const;
+
+// ============================================
 // COMPONENT STYLE PRESETS
 // ============================================
 
