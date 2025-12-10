@@ -4,8 +4,13 @@ import {
   type Appointment, 
   type InsertAppointment,
   type UpdateAppointment,
+  type MonthlyServiceRecord,
+  type InsertServiceRecord,
+  type ServiceRecordStatus,
   customers, 
-  appointments 
+  appointments,
+  monthlyServiceRecords,
+  serviceRecordAppointments,
 } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { neon } from "@neondatabase/serverless";
@@ -72,6 +77,19 @@ export interface IStorage {
   
   // Get appointments for a specific employee on a specific day
   getAppointmentsForDay(employeeId: number, date: string): Promise<AppointmentWithCustomer[]>;
+  
+  // Monthly Service Records (Leistungsnachweise)
+  getServiceRecordsForEmployee(employeeId: number, year?: number, month?: number): Promise<MonthlyServiceRecord[]>;
+  getServiceRecordsForCustomer(customerId: number): Promise<MonthlyServiceRecord[]>;
+  getServiceRecord(id: number): Promise<MonthlyServiceRecord | undefined>;
+  getServiceRecordByPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<MonthlyServiceRecord | undefined>;
+  createServiceRecord(record: InsertServiceRecord): Promise<MonthlyServiceRecord>;
+  signServiceRecord(id: number, signatureData: string, signerType: 'employee' | 'customer'): Promise<MonthlyServiceRecord | undefined>;
+  getAppointmentsForServiceRecord(serviceRecordId: number): Promise<AppointmentWithCustomer[]>;
+  addAppointmentsToServiceRecord(serviceRecordId: number, appointmentIds: number[]): Promise<void>;
+  getDocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<AppointmentWithCustomer[]>;
+  getUndocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<AppointmentWithCustomer[]>;
+  getPendingServiceRecords(employeeId: number): Promise<MonthlyServiceRecord[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -875,6 +893,402 @@ export class DatabaseStorage implements IStorage {
       customerFirstName: row.customer?.vorname || null,
       customerLastName: row.customer?.nachname || null,
     }));
+  }
+
+  // Monthly Service Records (Leistungsnachweise)
+  async getServiceRecordsForEmployee(employeeId: number, year?: number, month?: number): Promise<MonthlyServiceRecord[]> {
+    let conditions = [eq(monthlyServiceRecords.employeeId, employeeId)];
+    if (year !== undefined) {
+      conditions.push(eq(monthlyServiceRecords.year, year));
+    }
+    if (month !== undefined) {
+      conditions.push(eq(monthlyServiceRecords.month, month));
+    }
+    return await db.select()
+      .from(monthlyServiceRecords)
+      .where(and(...conditions))
+      .orderBy(monthlyServiceRecords.year, monthlyServiceRecords.month);
+  }
+
+  async getServiceRecordsForCustomer(customerId: number): Promise<MonthlyServiceRecord[]> {
+    return await db.select()
+      .from(monthlyServiceRecords)
+      .where(eq(monthlyServiceRecords.customerId, customerId))
+      .orderBy(monthlyServiceRecords.year, monthlyServiceRecords.month);
+  }
+
+  async getServiceRecord(id: number): Promise<MonthlyServiceRecord | undefined> {
+    const result = await db.select()
+      .from(monthlyServiceRecords)
+      .where(eq(monthlyServiceRecords.id, id));
+    return result[0];
+  }
+
+  async getServiceRecordByPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<MonthlyServiceRecord | undefined> {
+    const result = await db.select()
+      .from(monthlyServiceRecords)
+      .where(and(
+        eq(monthlyServiceRecords.customerId, customerId),
+        eq(monthlyServiceRecords.employeeId, employeeId),
+        eq(monthlyServiceRecords.year, year),
+        eq(monthlyServiceRecords.month, month)
+      ));
+    return result[0];
+  }
+
+  async createServiceRecord(record: InsertServiceRecord): Promise<MonthlyServiceRecord> {
+    const result = await db.insert(monthlyServiceRecords)
+      .values({
+        customerId: record.customerId,
+        employeeId: record.employeeId,
+        year: record.year,
+        month: record.month,
+        status: "pending",
+      })
+      .returning();
+    return result[0];
+  }
+
+  async signServiceRecord(id: number, signatureData: string, signerType: 'employee' | 'customer'): Promise<MonthlyServiceRecord | undefined> {
+    const existing = await this.getServiceRecord(id);
+    if (!existing) return undefined;
+
+    const now = new Date();
+    let updateData: Partial<MonthlyServiceRecord> = { updatedAt: now };
+
+    if (signerType === 'employee') {
+      if (existing.status !== 'pending') {
+        throw new Error('Mitarbeiter kann nur bei Status "pending" unterschreiben');
+      }
+      updateData = {
+        ...updateData,
+        employeeSignatureData: signatureData,
+        employeeSignedAt: now,
+        status: 'employee_signed' as ServiceRecordStatus,
+      };
+    } else if (signerType === 'customer') {
+      if (existing.status !== 'employee_signed') {
+        throw new Error('Kunde kann nur nach Mitarbeiter-Unterschrift unterschreiben');
+      }
+      updateData = {
+        ...updateData,
+        customerSignatureData: signatureData,
+        customerSignedAt: now,
+        status: 'completed' as ServiceRecordStatus,
+      };
+    }
+
+    const result = await db.update(monthlyServiceRecords)
+      .set(updateData)
+      .where(eq(monthlyServiceRecords.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async getAppointmentsForServiceRecord(serviceRecordId: number): Promise<AppointmentWithCustomer[]> {
+    const linkedAppointments = await db.select({ appointmentId: serviceRecordAppointments.appointmentId })
+      .from(serviceRecordAppointments)
+      .where(eq(serviceRecordAppointments.serviceRecordId, serviceRecordId));
+    
+    if (linkedAppointments.length === 0) return [];
+    
+    const appointmentIds = linkedAppointments.map(la => la.appointmentId);
+    
+    const selectFields = {
+      id: appointments.id,
+      customerId: appointments.customerId,
+      createdByUserId: appointments.createdByUserId,
+      assignedEmployeeId: appointments.assignedEmployeeId,
+      appointmentType: appointments.appointmentType,
+      serviceType: appointments.serviceType,
+      hauswirtschaftDauer: appointments.hauswirtschaftDauer,
+      alltagsbegleitungDauer: appointments.alltagsbegleitungDauer,
+      erstberatungDauer: appointments.erstberatungDauer,
+      hauswirtschaftActualDauer: appointments.hauswirtschaftActualDauer,
+      hauswirtschaftDetails: appointments.hauswirtschaftDetails,
+      alltagsbegleitungActualDauer: appointments.alltagsbegleitungActualDauer,
+      alltagsbegleitungDetails: appointments.alltagsbegleitungDetails,
+      erstberatungActualDauer: appointments.erstberatungActualDauer,
+      erstberatungDetails: appointments.erstberatungDetails,
+      date: appointments.date,
+      scheduledStart: appointments.scheduledStart,
+      scheduledEnd: appointments.scheduledEnd,
+      durationPromised: appointments.durationPromised,
+      status: appointments.status,
+      actualStart: appointments.actualStart,
+      actualEnd: appointments.actualEnd,
+      travelOriginType: appointments.travelOriginType,
+      travelFromAppointmentId: appointments.travelFromAppointmentId,
+      travelKilometers: appointments.travelKilometers,
+      travelMinutes: appointments.travelMinutes,
+      customerKilometers: appointments.customerKilometers,
+      kilometers: appointments.kilometers,
+      notes: appointments.notes,
+      servicesDone: appointments.servicesDone,
+      signatureData: appointments.signatureData,
+      createdAt: appointments.createdAt,
+      customer: customers,
+    };
+
+    const rows = await db.select(selectFields)
+      .from(appointments)
+      .leftJoin(customers, eq(appointments.customerId, customers.id))
+      .where(inArray(appointments.id, appointmentIds))
+      .orderBy(appointments.date, appointments.scheduledStart);
+    
+    return rows.map(row => ({
+      id: row.id,
+      customerId: row.customerId,
+      createdByUserId: row.createdByUserId,
+      assignedEmployeeId: row.assignedEmployeeId,
+      appointmentType: row.appointmentType,
+      serviceType: row.serviceType,
+      hauswirtschaftDauer: row.hauswirtschaftDauer,
+      alltagsbegleitungDauer: row.alltagsbegleitungDauer,
+      erstberatungDauer: row.erstberatungDauer,
+      hauswirtschaftActualDauer: row.hauswirtschaftActualDauer,
+      hauswirtschaftDetails: row.hauswirtschaftDetails,
+      alltagsbegleitungActualDauer: row.alltagsbegleitungActualDauer,
+      alltagsbegleitungDetails: row.alltagsbegleitungDetails,
+      erstberatungActualDauer: row.erstberatungActualDauer,
+      erstberatungDetails: row.erstberatungDetails,
+      date: row.date,
+      scheduledStart: row.scheduledStart,
+      scheduledEnd: row.scheduledEnd,
+      durationPromised: row.durationPromised,
+      status: row.status,
+      actualStart: row.actualStart,
+      actualEnd: row.actualEnd,
+      travelOriginType: row.travelOriginType,
+      travelFromAppointmentId: row.travelFromAppointmentId,
+      travelKilometers: row.travelKilometers,
+      travelMinutes: row.travelMinutes,
+      customerKilometers: row.customerKilometers,
+      kilometers: row.kilometers,
+      notes: row.notes,
+      servicesDone: row.servicesDone,
+      signatureData: row.signatureData,
+      createdAt: row.createdAt,
+      customer: row.customer?.id ? row.customer : null,
+      customerFirstName: row.customer?.vorname || null,
+      customerLastName: row.customer?.nachname || null,
+    }));
+  }
+
+  async addAppointmentsToServiceRecord(serviceRecordId: number, appointmentIds: number[]): Promise<void> {
+    if (appointmentIds.length === 0) return;
+    
+    const values = appointmentIds.map(appointmentId => ({
+      serviceRecordId,
+      appointmentId,
+    }));
+    
+    await db.insert(serviceRecordAppointments)
+      .values(values)
+      .onConflictDoNothing();
+  }
+
+  async getDocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<AppointmentWithCustomer[]> {
+    const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+    const endMonth = month === 12 ? 1 : month + 1;
+    const endYear = month === 12 ? year + 1 : year;
+    const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
+    
+    const selectFields = {
+      id: appointments.id,
+      customerId: appointments.customerId,
+      createdByUserId: appointments.createdByUserId,
+      assignedEmployeeId: appointments.assignedEmployeeId,
+      appointmentType: appointments.appointmentType,
+      serviceType: appointments.serviceType,
+      hauswirtschaftDauer: appointments.hauswirtschaftDauer,
+      alltagsbegleitungDauer: appointments.alltagsbegleitungDauer,
+      erstberatungDauer: appointments.erstberatungDauer,
+      hauswirtschaftActualDauer: appointments.hauswirtschaftActualDauer,
+      hauswirtschaftDetails: appointments.hauswirtschaftDetails,
+      alltagsbegleitungActualDauer: appointments.alltagsbegleitungActualDauer,
+      alltagsbegleitungDetails: appointments.alltagsbegleitungDetails,
+      erstberatungActualDauer: appointments.erstberatungActualDauer,
+      erstberatungDetails: appointments.erstberatungDetails,
+      date: appointments.date,
+      scheduledStart: appointments.scheduledStart,
+      scheduledEnd: appointments.scheduledEnd,
+      durationPromised: appointments.durationPromised,
+      status: appointments.status,
+      actualStart: appointments.actualStart,
+      actualEnd: appointments.actualEnd,
+      travelOriginType: appointments.travelOriginType,
+      travelFromAppointmentId: appointments.travelFromAppointmentId,
+      travelKilometers: appointments.travelKilometers,
+      travelMinutes: appointments.travelMinutes,
+      customerKilometers: appointments.customerKilometers,
+      kilometers: appointments.kilometers,
+      notes: appointments.notes,
+      servicesDone: appointments.servicesDone,
+      signatureData: appointments.signatureData,
+      createdAt: appointments.createdAt,
+      customer: customers,
+    };
+
+    const rows = await db.select(selectFields)
+      .from(appointments)
+      .leftJoin(customers, eq(appointments.customerId, customers.id))
+      .where(and(
+        eq(appointments.customerId, customerId),
+        or(
+          eq(appointments.assignedEmployeeId, employeeId),
+          eq(appointments.createdByUserId, employeeId)
+        ),
+        eq(appointments.status, 'documented'),
+        sqlBuilder`${appointments.date} >= ${startDate}`,
+        sqlBuilder`${appointments.date} < ${endDate}`
+      ))
+      .orderBy(appointments.date, appointments.scheduledStart);
+    
+    return rows.map(row => ({
+      id: row.id,
+      customerId: row.customerId,
+      createdByUserId: row.createdByUserId,
+      assignedEmployeeId: row.assignedEmployeeId,
+      appointmentType: row.appointmentType,
+      serviceType: row.serviceType,
+      hauswirtschaftDauer: row.hauswirtschaftDauer,
+      alltagsbegleitungDauer: row.alltagsbegleitungDauer,
+      erstberatungDauer: row.erstberatungDauer,
+      hauswirtschaftActualDauer: row.hauswirtschaftActualDauer,
+      hauswirtschaftDetails: row.hauswirtschaftDetails,
+      alltagsbegleitungActualDauer: row.alltagsbegleitungActualDauer,
+      alltagsbegleitungDetails: row.alltagsbegleitungDetails,
+      erstberatungActualDauer: row.erstberatungActualDauer,
+      erstberatungDetails: row.erstberatungDetails,
+      date: row.date,
+      scheduledStart: row.scheduledStart,
+      scheduledEnd: row.scheduledEnd,
+      durationPromised: row.durationPromised,
+      status: row.status,
+      actualStart: row.actualStart,
+      actualEnd: row.actualEnd,
+      travelOriginType: row.travelOriginType,
+      travelFromAppointmentId: row.travelFromAppointmentId,
+      travelKilometers: row.travelKilometers,
+      travelMinutes: row.travelMinutes,
+      customerKilometers: row.customerKilometers,
+      kilometers: row.kilometers,
+      notes: row.notes,
+      servicesDone: row.servicesDone,
+      signatureData: row.signatureData,
+      createdAt: row.createdAt,
+      customer: row.customer?.id ? row.customer : null,
+      customerFirstName: row.customer?.vorname || null,
+      customerLastName: row.customer?.nachname || null,
+    }));
+  }
+
+  async getUndocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<AppointmentWithCustomer[]> {
+    const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+    const endMonth = month === 12 ? 1 : month + 1;
+    const endYear = month === 12 ? year + 1 : year;
+    const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
+    
+    const selectFields = {
+      id: appointments.id,
+      customerId: appointments.customerId,
+      createdByUserId: appointments.createdByUserId,
+      assignedEmployeeId: appointments.assignedEmployeeId,
+      appointmentType: appointments.appointmentType,
+      serviceType: appointments.serviceType,
+      hauswirtschaftDauer: appointments.hauswirtschaftDauer,
+      alltagsbegleitungDauer: appointments.alltagsbegleitungDauer,
+      erstberatungDauer: appointments.erstberatungDauer,
+      hauswirtschaftActualDauer: appointments.hauswirtschaftActualDauer,
+      hauswirtschaftDetails: appointments.hauswirtschaftDetails,
+      alltagsbegleitungActualDauer: appointments.alltagsbegleitungActualDauer,
+      alltagsbegleitungDetails: appointments.alltagsbegleitungDetails,
+      erstberatungActualDauer: appointments.erstberatungActualDauer,
+      erstberatungDetails: appointments.erstberatungDetails,
+      date: appointments.date,
+      scheduledStart: appointments.scheduledStart,
+      scheduledEnd: appointments.scheduledEnd,
+      durationPromised: appointments.durationPromised,
+      status: appointments.status,
+      actualStart: appointments.actualStart,
+      actualEnd: appointments.actualEnd,
+      travelOriginType: appointments.travelOriginType,
+      travelFromAppointmentId: appointments.travelFromAppointmentId,
+      travelKilometers: appointments.travelKilometers,
+      travelMinutes: appointments.travelMinutes,
+      customerKilometers: appointments.customerKilometers,
+      kilometers: appointments.kilometers,
+      notes: appointments.notes,
+      servicesDone: appointments.servicesDone,
+      signatureData: appointments.signatureData,
+      createdAt: appointments.createdAt,
+      customer: customers,
+    };
+
+    const rows = await db.select(selectFields)
+      .from(appointments)
+      .leftJoin(customers, eq(appointments.customerId, customers.id))
+      .where(and(
+        eq(appointments.customerId, customerId),
+        or(
+          eq(appointments.assignedEmployeeId, employeeId),
+          eq(appointments.createdByUserId, employeeId)
+        ),
+        ne(appointments.status, 'documented'),
+        ne(appointments.status, 'cancelled'),
+        sqlBuilder`${appointments.date} >= ${startDate}`,
+        sqlBuilder`${appointments.date} < ${endDate}`
+      ))
+      .orderBy(appointments.date, appointments.scheduledStart);
+    
+    return rows.map(row => ({
+      id: row.id,
+      customerId: row.customerId,
+      createdByUserId: row.createdByUserId,
+      assignedEmployeeId: row.assignedEmployeeId,
+      appointmentType: row.appointmentType,
+      serviceType: row.serviceType,
+      hauswirtschaftDauer: row.hauswirtschaftDauer,
+      alltagsbegleitungDauer: row.alltagsbegleitungDauer,
+      erstberatungDauer: row.erstberatungDauer,
+      hauswirtschaftActualDauer: row.hauswirtschaftActualDauer,
+      hauswirtschaftDetails: row.hauswirtschaftDetails,
+      alltagsbegleitungActualDauer: row.alltagsbegleitungActualDauer,
+      alltagsbegleitungDetails: row.alltagsbegleitungDetails,
+      erstberatungActualDauer: row.erstberatungActualDauer,
+      erstberatungDetails: row.erstberatungDetails,
+      date: row.date,
+      scheduledStart: row.scheduledStart,
+      scheduledEnd: row.scheduledEnd,
+      durationPromised: row.durationPromised,
+      status: row.status,
+      actualStart: row.actualStart,
+      actualEnd: row.actualEnd,
+      travelOriginType: row.travelOriginType,
+      travelFromAppointmentId: row.travelFromAppointmentId,
+      travelKilometers: row.travelKilometers,
+      travelMinutes: row.travelMinutes,
+      customerKilometers: row.customerKilometers,
+      kilometers: row.kilometers,
+      notes: row.notes,
+      servicesDone: row.servicesDone,
+      signatureData: row.signatureData,
+      createdAt: row.createdAt,
+      customer: row.customer?.id ? row.customer : null,
+      customerFirstName: row.customer?.vorname || null,
+      customerLastName: row.customer?.nachname || null,
+    }));
+  }
+
+  async getPendingServiceRecords(employeeId: number): Promise<MonthlyServiceRecord[]> {
+    return await db.select()
+      .from(monthlyServiceRecords)
+      .where(and(
+        eq(monthlyServiceRecords.employeeId, employeeId),
+        ne(monthlyServiceRecords.status, 'completed')
+      ))
+      .orderBy(monthlyServiceRecords.year, monthlyServiceRecords.month);
   }
 }
 

@@ -7,6 +7,7 @@ import timeEntriesRouter from "./time-entries";
 import birthdaysRouter from "./birthdays";
 import budgetRouter from "./budget";
 import tasksRouter from "./tasks";
+import serviceRecordsRouter from "./service-records";
 import { searchRouter } from "./search";
 import { csrfProtection, csrfTokenHandler } from "../middleware/csrf";
 
@@ -26,6 +27,7 @@ router.use("/time-entries", timeEntriesRouter);
 router.use("/birthdays", birthdaysRouter);
 router.use("/budget", budgetRouter);
 router.use("/tasks", tasksRouter);
+router.use("/service-records", serviceRecordsRouter);
 router.use("/search", searchRouter);
 
 export default router;
