@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { AppointmentCard } from "@/features/appointments/components/appointment-card";
 import { 
   ArrowLeft, MapPin, Phone, Mail, User, Heart, 
-  Calendar, Loader2, AlertCircle
+  Calendar, Loader2, AlertCircle, FileSignature, ChevronRight
 } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { ErrorState } from "@/components/patterns/error-state";
@@ -211,6 +211,26 @@ export default function CustomerDetailPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* Leistungsnachweise Link */}
+        <div className="mt-6">
+          <Link href={`/service-records?customerId=${customerId}`}>
+            <Card className="hover:bg-muted/50 transition-colors cursor-pointer">
+              <CardContent className="p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                    <FileSignature className={`${iconSize.md} text-primary`} />
+                  </div>
+                  <div>
+                    <h3 className="font-medium">Leistungsnachweise</h3>
+                    <p className="text-sm text-muted-foreground">Monatliche Unterschriften und Dokumentation</p>
+                  </div>
+                </div>
+                <ChevronRight className={`${iconSize.md} text-muted-foreground`} />
+              </CardContent>
+            </Card>
+          </Link>
+        </div>
       </div>
     </Layout>
   );

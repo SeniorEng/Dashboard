@@ -11,8 +11,9 @@ router.get("/", requireAuth, async (req, res) => {
     const userId = req.user!.id;
     const year = req.query.year ? parseInt(req.query.year as string) : undefined;
     const month = req.query.month ? parseInt(req.query.month as string) : undefined;
+    const customerId = req.query.customerId ? parseInt(req.query.customerId as string) : undefined;
     
-    const records = await storage.getServiceRecordsForEmployee(userId, year, month);
+    const records = await storage.getServiceRecordsForEmployee(userId, year, month, customerId);
     res.json(records);
   } catch (error) {
     handleRouteError(res, error, "Leistungsnachweise konnten nicht geladen werden");

@@ -79,7 +79,7 @@ export interface IStorage {
   getAppointmentsForDay(employeeId: number, date: string): Promise<AppointmentWithCustomer[]>;
   
   // Monthly Service Records (Leistungsnachweise)
-  getServiceRecordsForEmployee(employeeId: number, year?: number, month?: number): Promise<MonthlyServiceRecord[]>;
+  getServiceRecordsForEmployee(employeeId: number, year?: number, month?: number, customerId?: number): Promise<MonthlyServiceRecord[]>;
   getServiceRecordsForCustomer(customerId: number): Promise<MonthlyServiceRecord[]>;
   getServiceRecord(id: number): Promise<MonthlyServiceRecord | undefined>;
   getServiceRecordByPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<MonthlyServiceRecord | undefined>;
@@ -896,13 +896,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Monthly Service Records (Leistungsnachweise)
-  async getServiceRecordsForEmployee(employeeId: number, year?: number, month?: number): Promise<MonthlyServiceRecord[]> {
+  async getServiceRecordsForEmployee(employeeId: number, year?: number, month?: number, customerId?: number): Promise<MonthlyServiceRecord[]> {
     let conditions = [eq(monthlyServiceRecords.employeeId, employeeId)];
     if (year !== undefined) {
       conditions.push(eq(monthlyServiceRecords.year, year));
     }
     if (month !== undefined) {
       conditions.push(eq(monthlyServiceRecords.month, month));
+    }
+    if (customerId !== undefined) {
+      conditions.push(eq(monthlyServiceRecords.customerId, customerId));
     }
     return await db.select()
       .from(monthlyServiceRecords)

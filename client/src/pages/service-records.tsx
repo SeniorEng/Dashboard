@@ -10,11 +10,11 @@ import { EmptyState } from "@/components/patterns/empty-state";
 import { ErrorState } from "@/components/patterns/error-state";
 import { 
   FileSignature, Loader2, Calendar, User, Clock, MapPin, 
-  ChevronRight, Check, AlertCircle, FileText
+  ChevronRight, Check, AlertCircle, FileText, ArrowLeft
 } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { formatDateForDisplay } from "@shared/utils/date";
-import { Link, useLocation } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import { toast } from "sonner";
 import { apiRequest } from "@/lib/api/client";
 import type { MonthlyServiceRecord, Customer } from "@shared/schema";
@@ -43,11 +43,26 @@ export default function ServiceRecordsPage() {
   const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
   const queryClient = useQueryClient();
+  const searchString = useSearch();
+  const searchParams = new URLSearchParams(searchString);
+  const customerId = searchParams.get("customerId") ? parseInt(searchParams.get("customerId")!) : null;
+
+  const { data: selectedCustomer } = useQuery<Customer>({
+    queryKey: ["customer", customerId],
+    queryFn: async () => {
+      const response = await fetch(`/api/customers/${customerId}`);
+      if (!response.ok) throw new Error("Kunde konnte nicht geladen werden");
+      return response.json();
+    },
+    enabled: !!customerId,
+  });
 
   const { data: records, isLoading, error, refetch } = useQuery<MonthlyServiceRecord[]>({
-    queryKey: ["/api/service-records", selectedYear, selectedMonth],
+    queryKey: ["/api/service-records", selectedYear, selectedMonth, customerId],
     queryFn: async () => {
-      const response = await fetch(`/api/service-records?year=${selectedYear}&month=${selectedMonth}`);
+      let url = `/api/service-records?year=${selectedYear}&month=${selectedMonth}`;
+      if (customerId) url += `&customerId=${customerId}`;
+      const response = await fetch(url);
       if (!response.ok) throw new Error("Leistungsnachweise konnten nicht geladen werden");
       return response.json();
     },
@@ -92,9 +107,19 @@ export default function ServiceRecordsPage() {
     <Layout>
       <div className="mb-6 animate-in slide-in-from-top-4 duration-500">
         <div className="flex items-center gap-3 mb-1">
-          <FileSignature className={`${iconSize.lg} text-primary`} />
+          {customerId && (
+            <Link href={`/customer/${customerId}`}>
+              <Button variant="ghost" size="icon" className="shrink-0" data-testid="button-back">
+                <ArrowLeft className={iconSize.md} />
+              </Button>
+            </Link>
+          )}
+          {!customerId && <FileSignature className={`${iconSize.lg} text-primary`} />}
           <h1 className="text-2xl font-bold text-foreground tracking-tight" data-testid="text-title">
-            Leistungsnachweise
+            {customerId && selectedCustomer 
+              ? `Leistungsnachweise: ${selectedCustomer.vorname} ${selectedCustomer.nachname}`
+              : "Leistungsnachweise"
+            }
           </h1>
         </div>
         <p className="text-muted-foreground text-sm ml-10">
