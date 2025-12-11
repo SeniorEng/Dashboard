@@ -249,51 +249,6 @@ export default function ServiceRecordsPage() {
         </Select>
       </div>
 
-      {/* Show period status when viewing a specific customer */}
-      {customerId && periodCheck && !periodCheck.existingRecord && (
-        <Card className="mb-4">
-          <CardContent className="py-4">
-            {periodCheck.canCreateRecord ? (
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div>
-                  <p className="font-medium text-green-700">
-                    Alle {periodCheck.documentedAppointments.length} Termine dokumentiert
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    Sie können jetzt einen Leistungsnachweis für {MONTH_NAMES[selectedMonth - 1]} {selectedYear} erstellen.
-                  </p>
-                </div>
-                <Button
-                  onClick={() => createRecordMutation.mutate()}
-                  disabled={createRecordMutation.isPending}
-                  data-testid="button-create-record"
-                >
-                  {createRecordMutation.isPending ? (
-                    <Loader2 className={`${iconSize.sm} animate-spin mr-2`} />
-                  ) : (
-                    <Plus className={`${iconSize.sm} mr-2`} />
-                  )}
-                  Leistungsnachweis erstellen
-                </Button>
-              </div>
-            ) : periodCheck.undocumentedAppointments.length > 0 ? (
-              <div className="text-amber-700">
-                <p className="font-medium">
-                  {periodCheck.undocumentedAppointments.length} {periodCheck.undocumentedAppointments.length === 1 ? "Termin" : "Termine"} noch nicht dokumentiert
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Bitte dokumentieren Sie alle Termine, bevor Sie einen Leistungsnachweis erstellen.
-                </p>
-              </div>
-            ) : (
-              <div className="text-muted-foreground">
-                <p>Keine Termine in diesem Zeitraum vorhanden.</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
       {/* Show overview when no customer is selected */}
       {!customerId && (
         <>
@@ -321,25 +276,88 @@ export default function ServiceRecordsPage() {
         </>
       )}
 
-      {/* Show records when a customer is selected */}
-      {customerId && (
+      {/* Customer detail view - simplified: ONE state per month */}
+      {customerId && periodCheck && (
         <>
-          {!records || records.length === 0 ? (
+          {/* Case 1: Record already exists - show it (check both sources for robustness) */}
+          {(records && records.length > 0) || periodCheck.existingRecord ? (
+            <div className="space-y-4">
+              {records && records.length > 0 ? (
+                records.map((record) => (
+                  <ServiceRecordCard key={record.id} record={record} />
+                ))
+              ) : periodCheck.existingRecord ? (
+                <ServiceRecordCard key={periodCheck.existingRecord.id} record={periodCheck.existingRecord} />
+              ) : null}
+            </div>
+          ) : periodCheck.canCreateRecord ? (
+            /* Case 2: Ready to create - show create button */
+            <Card>
+              <CardContent className="py-6">
+                <div className="text-center space-y-4">
+                  <div className="mx-auto w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
+                    <Check className={`${iconSize.lg} text-green-600`} />
+                  </div>
+                  <div>
+                    <p className="font-medium text-green-700">
+                      Alle {periodCheck.documentedAppointments.length} Termine dokumentiert
+                    </p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Sie können jetzt den Leistungsnachweis für {MONTH_NAMES[selectedMonth - 1]} {selectedYear} erstellen.
+                    </p>
+                  </div>
+                  <Button
+                    onClick={() => createRecordMutation.mutate()}
+                    disabled={createRecordMutation.isPending}
+                    size="lg"
+                    className="w-full sm:w-auto"
+                    data-testid="button-create-record"
+                  >
+                    {createRecordMutation.isPending ? (
+                      <Loader2 className={`${iconSize.sm} animate-spin mr-2`} />
+                    ) : (
+                      <Plus className={`${iconSize.sm} mr-2`} />
+                    )}
+                    Leistungsnachweis erstellen
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : periodCheck.undocumentedAppointments.length > 0 ? (
+            /* Case 3: Appointments still open - show warning */
+            <Card className="border-amber-200 bg-amber-50/50">
+              <CardContent className="py-6">
+                <div className="text-center space-y-4">
+                  <div className="mx-auto w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center">
+                    <AlertCircle className={`${iconSize.lg} text-amber-600`} />
+                  </div>
+                  <div>
+                    <p className="font-medium text-amber-700">
+                      {periodCheck.undocumentedAppointments.length} {periodCheck.undocumentedAppointments.length === 1 ? "Termin" : "Termine"} noch offen
+                    </p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Dokumentieren Sie alle Termine, um den Leistungsnachweis zu erstellen.
+                    </p>
+                  </div>
+                  <Link href="/">
+                    <Button variant="outline" className="w-full sm:w-auto">
+                      Zu den Terminen
+                    </Button>
+                  </Link>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            /* Case 4: No appointments at all */
             <Card className="border-dashed">
               <CardContent className="py-10">
                 <EmptyState
                   icon={<FileText className={`${iconSize["2xl"]} text-muted-foreground/40`} />}
-                  title={`Keine Leistungsnachweise für ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`}
-                  description="Erstellen Sie einen neuen Leistungsnachweis, wenn alle Termine dokumentiert sind."
+                  title={`Keine Termine für ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`}
+                  description="Es wurden keine Termine für diesen Kunden in diesem Monat geplant."
                 />
               </CardContent>
             </Card>
-          ) : (
-            <div className="space-y-4">
-              {records.map((record) => (
-                <ServiceRecordCard key={record.id} record={record} />
-              ))}
-            </div>
           )}
         </>
       )}
