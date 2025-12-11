@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
-import { requireAuth, requireAdmin } from "../middleware/auth";
+import { requireAuth, requireAdmin, requireCustomerAccess } from "../middleware/auth";
+import { storage } from "../storage";
 import { handleRouteError } from "../lib/errors";
 import { 
   insertBudgetAllocationSchema, 
@@ -12,17 +13,14 @@ const router = Router();
 
 router.use(requireAuth);
 
-router.get("/:customerId/summary", async (req: Request, res: Response) => {
+// Middleware für Kundenzugriffsprüfung
+const checkCustomerAccess = requireCustomerAccess(
+  (employeeId) => storage.getAssignedCustomerIds(employeeId)
+);
+
+router.get("/:customerId/summary", checkCustomerAccess, async (req: Request, res: Response) => {
   try {
     const customerId = parseInt(req.params.customerId);
-    if (isNaN(customerId)) {
-      res.status(400).json({
-        error: "VALIDATION_ERROR",
-        message: "Ungültige Kunden-ID",
-      });
-      return;
-    }
-
     const summary = await budgetLedgerStorage.getBudgetSummary(customerId);
     res.json(summary);
   } catch (error) {
@@ -30,18 +28,10 @@ router.get("/:customerId/summary", async (req: Request, res: Response) => {
   }
 });
 
-router.get("/:customerId/allocations", async (req: Request, res: Response) => {
+router.get("/:customerId/allocations", checkCustomerAccess, async (req: Request, res: Response) => {
   try {
     const customerId = parseInt(req.params.customerId);
     const year = req.query.year ? parseInt(req.query.year as string) : undefined;
-    
-    if (isNaN(customerId)) {
-      res.status(400).json({
-        error: "VALIDATION_ERROR",
-        message: "Ungültige Kunden-ID",
-      });
-      return;
-    }
 
     const allocations = await budgetLedgerStorage.getBudgetAllocations(customerId, year);
     res.json(allocations);
@@ -50,19 +40,11 @@ router.get("/:customerId/allocations", async (req: Request, res: Response) => {
   }
 });
 
-router.get("/:customerId/transactions", async (req: Request, res: Response) => {
+router.get("/:customerId/transactions", checkCustomerAccess, async (req: Request, res: Response) => {
   try {
     const customerId = parseInt(req.params.customerId);
     const year = req.query.year ? parseInt(req.query.year as string) : undefined;
     const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
-    
-    if (isNaN(customerId)) {
-      res.status(400).json({
-        error: "VALIDATION_ERROR",
-        message: "Ungültige Kunden-ID",
-      });
-      return;
-    }
 
     const transactions = await budgetLedgerStorage.getBudgetTransactions(customerId, { year, limit });
     res.json(transactions);
@@ -71,16 +53,9 @@ router.get("/:customerId/transactions", async (req: Request, res: Response) => {
   }
 });
 
-router.get("/:customerId/preferences", async (req: Request, res: Response) => {
+router.get("/:customerId/preferences", checkCustomerAccess, async (req: Request, res: Response) => {
   try {
     const customerId = parseInt(req.params.customerId);
-    if (isNaN(customerId)) {
-      res.status(400).json({
-        error: "VALIDATION_ERROR",
-        message: "Ungültige Kunden-ID",
-      });
-      return;
-    }
 
     const preferences = await budgetLedgerStorage.getBudgetPreferences(customerId);
     res.json(preferences || { customerId, monthlyLimitCents: null, budgetStartDate: null, notes: null });

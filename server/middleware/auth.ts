@@ -203,3 +203,63 @@ export function canCreateAppointmentType(
     userRoles.includes("alltagsbegleitung")
   );
 }
+
+/**
+ * Prüft ob ein Benutzer Zugriff auf einen bestimmten Kunden hat.
+ * Admins haben Zugriff auf alle Kunden.
+ * Nicht-Admins haben nur Zugriff auf ihnen zugewiesene Kunden.
+ */
+export async function canAccessCustomer(
+  userId: number,
+  isAdmin: boolean,
+  customerId: number,
+  getAssignedCustomerIds: (employeeId: number) => Promise<number[]>
+): Promise<boolean> {
+  if (isAdmin) return true;
+  
+  const assignedCustomerIds = await getAssignedCustomerIds(userId);
+  return assignedCustomerIds.includes(customerId);
+}
+
+/**
+ * Middleware-Funktion die prüft ob der Benutzer auf den Kunden in req.params.customerId zugreifen darf.
+ */
+export function requireCustomerAccess(
+  getAssignedCustomerIds: (employeeId: number) => Promise<number[]>
+) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.user) {
+      res.status(401).json({
+        error: "UNAUTHORIZED",
+        message: "Bitte melden Sie sich an",
+      });
+      return;
+    }
+
+    const customerId = parseInt(req.params.customerId);
+    if (isNaN(customerId)) {
+      res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "Ungültige Kunden-ID",
+      });
+      return;
+    }
+
+    const hasAccess = await canAccessCustomer(
+      req.user.id,
+      req.user.isAdmin,
+      customerId,
+      getAssignedCustomerIds
+    );
+
+    if (!hasAccess) {
+      res.status(403).json({
+        error: "FORBIDDEN",
+        message: "Sie haben keinen Zugriff auf diesen Kunden",
+      });
+      return;
+    }
+
+    next();
+  };
+}

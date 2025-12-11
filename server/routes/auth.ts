@@ -116,7 +116,9 @@ router.post(
       const token = await authService.createPasswordResetToken(result.data.email);
       
       if (token) {
-        console.log(`Password reset token for ${result.data.email}: ${token}`);
+        // SECURITY: Token wird NICHT geloggt um Account-Übernahme zu verhindern
+        // In Produktion würde hier eine E-Mail gesendet werden
+        console.log(`Password reset requested for: ${result.data.email}`);
       }
 
       res.json({

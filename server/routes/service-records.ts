@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { storage } from "../storage";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, canAccessCustomer } from "../middleware/auth";
 import { insertServiceRecordSchema, signServiceRecordSchema } from "@shared/schema";
 import { handleRouteError } from "../lib/errors";
 
@@ -41,6 +41,20 @@ router.get("/check-period", requireAuth, async (req, res) => {
       return res.status(400).json({ message: "Ungültige Parameter" });
     }
     
+    // Autorisierungsprüfung: Nur zugewiesene Kunden oder Admin
+    const hasAccess = await canAccessCustomer(
+      userId,
+      req.user!.isAdmin,
+      customerId,
+      (employeeId) => storage.getAssignedCustomerIds(employeeId)
+    );
+    if (!hasAccess) {
+      return res.status(403).json({ 
+        error: "FORBIDDEN",
+        message: "Sie haben keinen Zugriff auf diesen Kunden" 
+      });
+    }
+    
     const existingRecord = await storage.getServiceRecordByPeriod(customerId, userId, year, month);
     const documentedAppointments = await storage.getDocumentedAppointmentsForPeriod(customerId, userId, year, month);
     const undocumentedAppointments = await storage.getUndocumentedAppointmentsForPeriod(customerId, userId, year, month);
@@ -63,6 +77,20 @@ router.get("/customer/:customerId", requireAuth, async (req, res) => {
       return res.status(400).json({ message: "Ungültige Kunden-ID" });
     }
     
+    // Autorisierungsprüfung: Nur zugewiesene Kunden oder Admin
+    const hasAccess = await canAccessCustomer(
+      req.user!.id,
+      req.user!.isAdmin,
+      customerId,
+      (employeeId) => storage.getAssignedCustomerIds(employeeId)
+    );
+    if (!hasAccess) {
+      return res.status(403).json({ 
+        error: "FORBIDDEN",
+        message: "Sie haben keinen Zugriff auf diesen Kunden" 
+      });
+    }
+    
     const records = await storage.getServiceRecordsForCustomer(customerId);
     res.json(records);
   } catch (error) {
@@ -82,6 +110,20 @@ router.get("/:id", requireAuth, async (req, res) => {
       return res.status(404).json({ message: "Leistungsnachweis nicht gefunden" });
     }
     
+    // Autorisierungsprüfung: Nur zugewiesene Kunden oder Admin
+    const hasAccess = await canAccessCustomer(
+      req.user!.id,
+      req.user!.isAdmin,
+      record.customerId,
+      (employeeId) => storage.getAssignedCustomerIds(employeeId)
+    );
+    if (!hasAccess) {
+      return res.status(403).json({ 
+        error: "FORBIDDEN",
+        message: "Sie haben keinen Zugriff auf diesen Leistungsnachweis" 
+      });
+    }
+    
     res.json(record);
   } catch (error) {
     handleRouteError(res, error, "Leistungsnachweis konnte nicht geladen werden");
@@ -93,6 +135,26 @@ router.get("/:id/appointments", requireAuth, async (req, res) => {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
       return res.status(400).json({ message: "Ungültige ID" });
+    }
+    
+    // Erst den Service Record laden um die customerId zu prüfen
+    const record = await storage.getServiceRecord(id);
+    if (!record) {
+      return res.status(404).json({ message: "Leistungsnachweis nicht gefunden" });
+    }
+    
+    // Autorisierungsprüfung: Nur zugewiesene Kunden oder Admin
+    const hasAccess = await canAccessCustomer(
+      req.user!.id,
+      req.user!.isAdmin,
+      record.customerId,
+      (employeeId) => storage.getAssignedCustomerIds(employeeId)
+    );
+    if (!hasAccess) {
+      return res.status(403).json({ 
+        error: "FORBIDDEN",
+        message: "Sie haben keinen Zugriff auf diese Termine" 
+      });
     }
     
     const appointments = await storage.getAppointmentsForServiceRecord(id);
@@ -115,6 +177,20 @@ router.post("/", requireAuth, async (req, res) => {
     }
     
     const { customerId, year, month } = parsed.data;
+    
+    // Autorisierungsprüfung: Nur zugewiesene Kunden oder Admin
+    const hasAccess = await canAccessCustomer(
+      userId,
+      req.user!.isAdmin,
+      customerId,
+      (employeeId) => storage.getAssignedCustomerIds(employeeId)
+    );
+    if (!hasAccess) {
+      return res.status(403).json({ 
+        error: "FORBIDDEN",
+        message: "Sie haben keinen Zugriff auf diesen Kunden" 
+      });
+    }
     
     const existingRecord = await storage.getServiceRecordByPeriod(customerId, userId, year, month);
     if (existingRecord) {
@@ -159,6 +235,26 @@ router.post("/:id/sign", requireAuth, async (req, res) => {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
       return res.status(400).json({ message: "Ungültige ID" });
+    }
+    
+    // Erst den Service Record laden um die customerId zu prüfen
+    const existingRecord = await storage.getServiceRecord(id);
+    if (!existingRecord) {
+      return res.status(404).json({ message: "Leistungsnachweis nicht gefunden" });
+    }
+    
+    // Autorisierungsprüfung: Nur zugewiesene Kunden oder Admin
+    const hasAccess = await canAccessCustomer(
+      req.user!.id,
+      req.user!.isAdmin,
+      existingRecord.customerId,
+      (employeeId) => storage.getAssignedCustomerIds(employeeId)
+    );
+    if (!hasAccess) {
+      return res.status(403).json({ 
+        error: "FORBIDDEN",
+        message: "Sie haben keinen Zugriff auf diesen Leistungsnachweis" 
+      });
     }
     
     const parsed = signServiceRecordSchema.safeParse(req.body);
