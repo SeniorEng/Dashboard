@@ -50,7 +50,19 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Caching**: In-memory cache for assigned customer IDs with TTL and invalidation.
 
 ### Business Rules & Patterns
-- **Shared Domain Logic**: Single source of truth for business rules (e.g., appointment status transitions).
+- **Shared Domain Logic**: Single source of truth for business rules in `@shared/domain/*` (e.g., appointment status transitions).
+- **Termin-Status-Definitionen** (zentral in `@shared/domain/appointments.ts`):
+  - `scheduled` - Geplant (noch nicht durchgeführt)
+  - `in-progress` - Läuft gerade
+  - `documenting` - Dokumentation wird ausgefüllt
+  - `completed` - Abgeschlossen und dokumentiert
+  - **Für Leistungsnachweise gilt**: Nur `completed` Termine gelten als "dokumentiert". Alle anderen Status blockieren die Erstellung eines Leistungsnachweises.
+- **Leistungsnachweis-Workflow**:
+  1. Termine durchführen und dokumentieren (Status → `completed`)
+  2. Leistungsnachweis erstellen (wenn ALLE Termine des Monats `completed` sind)
+  3. Mitarbeiter unterschreibt
+  4. Kunde unterschreibt
+  5. Status wechselt zu `completed`
 - **Field Editing**: Rules govern which fields are editable based on appointment status.
 - **Overlap Checking**: Logic for preventing appointment overlaps.
 - **Service Model**: "Erstberatung" (initial consultation) is a core service type.

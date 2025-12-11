@@ -1143,7 +1143,7 @@ export class DatabaseStorage implements IStorage {
           eq(appointments.assignedEmployeeId, employeeId),
           eq(appointments.createdByUserId, employeeId)
         ),
-        eq(appointments.status, 'documented'),
+        eq(appointments.status, 'completed'),
         sqlBuilder`${appointments.date} >= ${startDate}`,
         sqlBuilder`${appointments.date} < ${endDate}`
       ))
@@ -1239,7 +1239,7 @@ export class DatabaseStorage implements IStorage {
           eq(appointments.assignedEmployeeId, employeeId),
           eq(appointments.createdByUserId, employeeId)
         ),
-        ne(appointments.status, 'documented'),
+        ne(appointments.status, 'completed'),
         ne(appointments.status, 'cancelled'),
         sqlBuilder`${appointments.date} >= ${startDate}`,
         sqlBuilder`${appointments.date} < ${endDate}`

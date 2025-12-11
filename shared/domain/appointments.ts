@@ -35,6 +35,55 @@ export const STATUS_LABELS: Record<AppointmentStatus, string> = {
   "completed": "Abgeschlossen",
 };
 
+// ============================================
+// STATUS DEFINITIONS FOR SERVICE RECORDS
+// ============================================
+// 
+// Diese Definitionen legen fest, welche Termin-Status für
+// Leistungsnachweise als "dokumentiert" gelten.
+//
+// Workflow für Leistungsnachweise:
+// 1. Termin durchführen → Status wechselt zu "documenting"
+// 2. Dokumentation ausfüllen (Dauer, Notizen, etc.)
+// 3. Termin abschließen → Status wechselt zu "completed"
+// 4. Leistungsnachweis erstellen (wenn ALLE Termine des Monats "completed" sind)
+// 5. Unterschriften einholen (Mitarbeiter, dann Kunde)
+//
+// Ein Termin gilt als "dokumentiert" für Leistungsnachweise, wenn:
+// - Status = "completed" (Termin wurde durchgeführt und dokumentiert)
+//
+// Ein Termin gilt als "undokumentiert" (blockiert Leistungsnachweis), wenn:
+// - Status = "scheduled" (noch nicht durchgeführt)
+// - Status = "in-progress" (läuft gerade)
+// - Status = "documenting" (Dokumentation noch nicht abgeschlossen)
+// ============================================
+
+/**
+ * Status, die als "dokumentiert" für Leistungsnachweise gelten.
+ * Nur Termine mit diesen Status werden in einen Leistungsnachweis aufgenommen.
+ */
+export const DOCUMENTED_STATUSES: AppointmentStatus[] = ["completed"];
+
+/**
+ * Status, die einen Leistungsnachweis blockieren.
+ * Solange Termine mit diesen Status existieren, kann kein Leistungsnachweis erstellt werden.
+ */
+export const UNDOCUMENTED_STATUSES: AppointmentStatus[] = ["scheduled", "in-progress", "documenting"];
+
+/**
+ * Prüft, ob ein Termin als dokumentiert für Leistungsnachweise gilt.
+ */
+export function isAppointmentDocumented(status: AppointmentStatus): boolean {
+  return DOCUMENTED_STATUSES.includes(status);
+}
+
+/**
+ * Prüft, ob ein Termin einen Leistungsnachweis blockiert.
+ */
+export function isAppointmentBlockingServiceRecord(status: AppointmentStatus): boolean {
+  return UNDOCUMENTED_STATUSES.includes(status);
+}
+
 export const PFLEGEGRAD_OPTIONS = [1, 2, 3, 4, 5] as const;
 export type Pflegegrad = typeof PFLEGEGRAD_OPTIONS[number];
 
