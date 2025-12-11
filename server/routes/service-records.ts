@@ -30,6 +30,73 @@ router.get("/pending", requireAuth, async (req, res) => {
   }
 });
 
+// Overview of all assigned customers with their service record status for a period
+router.get("/overview", requireAuth, async (req, res) => {
+  try {
+    const userId = req.user!.id;
+    const year = parseInt(req.query.year as string);
+    const month = parseInt(req.query.month as string);
+    
+    if (isNaN(year) || isNaN(month)) {
+      return res.status(400).json({ message: "Jahr und Monat sind erforderlich" });
+    }
+    
+    // Get all assigned customer IDs for this employee
+    const assignedCustomerIds = await storage.getAssignedCustomerIds(userId);
+    
+    // Get overview data for each customer
+    const overview = await Promise.all(
+      assignedCustomerIds.map(async (customerId) => {
+        const customer = await storage.getCustomer(customerId);
+        if (!customer) return null;
+        
+        const existingRecord = await storage.getServiceRecordByPeriod(customerId, userId, year, month);
+        const documentedAppointments = await storage.getDocumentedAppointmentsForPeriod(customerId, userId, year, month);
+        const undocumentedAppointments = await storage.getUndocumentedAppointmentsForPeriod(customerId, userId, year, month);
+        
+        const totalAppointments = documentedAppointments.length + undocumentedAppointments.length;
+        
+        // Skip customers with no appointments and no existing record in this period
+        // (they don't require any action for this month)
+        if (totalAppointments === 0 && !existingRecord) {
+          return null;
+        }
+        
+        let status: "undocumented" | "ready" | "pending" | "employee_signed" | "completed";
+        
+        if (existingRecord) {
+          status = existingRecord.status as "pending" | "employee_signed" | "completed";
+        } else if (undocumentedAppointments.length > 0) {
+          status = "undocumented";
+        } else {
+          status = "ready";
+        }
+        
+        return {
+          customerId,
+          customerName: `${customer.vorname} ${customer.nachname}`,
+          existingRecord,
+          documentedCount: documentedAppointments.length,
+          undocumentedCount: undocumentedAppointments.length,
+          totalAppointments,
+          status,
+          canCreateRecord: !existingRecord && undocumentedAppointments.length === 0 && documentedAppointments.length > 0,
+        };
+      })
+    );
+    
+    // Filter out null values and sort by status priority
+    const statusOrder = ["undocumented", "ready", "pending", "employee_signed", "completed"];
+    const filteredOverview = overview
+      .filter((item): item is NonNullable<typeof item> => item !== null)
+      .sort((a, b) => statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status));
+    
+    res.json(filteredOverview);
+  } catch (error) {
+    handleRouteError(res, error, "Übersicht konnte nicht geladen werden");
+  }
+});
+
 router.get("/check-period", requireAuth, async (req, res) => {
   try {
     const userId = req.user!.id;

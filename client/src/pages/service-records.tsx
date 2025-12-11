@@ -27,6 +27,17 @@ interface PeriodCheckResponse {
   canCreateRecord: boolean;
 }
 
+interface CustomerOverviewItem {
+  customerId: number;
+  customerName: string;
+  existingRecord: MonthlyServiceRecord | null;
+  documentedCount: number;
+  undocumentedCount: number;
+  totalAppointments: number;
+  status: "undocumented" | "ready" | "pending" | "employee_signed" | "completed";
+  canCreateRecord: boolean;
+}
+
 const MONTH_NAMES = [
   "Januar", "Februar", "März", "April", "Mai", "Juni",
   "Juli", "August", "September", "Oktober", "November", "Dezember"
@@ -83,6 +94,19 @@ export default function ServiceRecordsPage() {
       if (!response.ok) throw new Error("Ausstehende Leistungsnachweise konnten nicht geladen werden");
       return response.json();
     },
+  });
+
+  // Overview of all customers with their service record status
+  const { data: overview, isLoading: isOverviewLoading } = useQuery<CustomerOverviewItem[]>({
+    queryKey: ["/api/service-records/overview", selectedYear, selectedMonth],
+    queryFn: async () => {
+      const response = await fetch(
+        `/api/service-records/overview?year=${selectedYear}&month=${selectedMonth}`
+      );
+      if (!response.ok) throw new Error("Übersicht konnte nicht geladen werden");
+      return response.json();
+    },
+    enabled: !customerId,
   });
 
   // Check if we can create a service record for the selected period
@@ -270,25 +294,54 @@ export default function ServiceRecordsPage() {
         </Card>
       )}
 
-      {!records || records.length === 0 ? (
-        <Card className="border-dashed">
-          <CardContent className="py-10">
-            <EmptyState
-              icon={<FileText className={`${iconSize["2xl"]} text-muted-foreground/40`} />}
-              title={`Keine Leistungsnachweise für ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`}
-              description={customerId 
-                ? "Erstellen Sie einen neuen Leistungsnachweis, wenn alle Termine dokumentiert sind."
-                : "Leistungsnachweise werden erstellt, wenn alle Termine eines Monats dokumentiert sind."
-              }
-            />
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-4">
-          {records.map((record) => (
-            <ServiceRecordCard key={record.id} record={record} />
-          ))}
-        </div>
+      {/* Show overview when no customer is selected */}
+      {!customerId && (
+        <>
+          {isOverviewLoading ? (
+            <div className="flex items-center justify-center py-10">
+              <Loader2 className={`${iconSize.lg} animate-spin text-primary`} />
+            </div>
+          ) : !overview || overview.length === 0 ? (
+            <Card className="border-dashed">
+              <CardContent className="py-10">
+                <EmptyState
+                  icon={<FileText className={`${iconSize["2xl"]} text-muted-foreground/40`} />}
+                  title={`Keine Termine für ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`}
+                  description="In diesem Zeitraum wurden keine Termine für Ihre Kunden geplant."
+                />
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-3">
+              {overview.map((item) => (
+                <CustomerOverviewCard key={item.customerId} item={item} selectedYear={selectedYear} selectedMonth={selectedMonth} />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Show records when a customer is selected */}
+      {customerId && (
+        <>
+          {!records || records.length === 0 ? (
+            <Card className="border-dashed">
+              <CardContent className="py-10">
+                <EmptyState
+                  icon={<FileText className={`${iconSize["2xl"]} text-muted-foreground/40`} />}
+                  title={`Keine Leistungsnachweise für ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`}
+                  description="Erstellen Sie einen neuen Leistungsnachweis, wenn alle Termine dokumentiert sind."
+                />
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-4">
+              {records.map((record) => (
+                <ServiceRecordCard key={record.id} record={record} />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </Layout>
   );
@@ -329,6 +382,67 @@ function ServiceRecordCard({ record }: ServiceRecordCardProps) {
             </div>
             <div className="flex items-center gap-3">
               {getStatusBadge(record.status)}
+              <ChevronRight className={`${iconSize.sm} text-muted-foreground`} />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
+interface CustomerOverviewCardProps {
+  item: CustomerOverviewItem;
+  selectedYear: number;
+  selectedMonth: number;
+}
+
+function getOverviewStatusBadge(status: CustomerOverviewItem["status"]) {
+  switch (status) {
+    case "undocumented":
+      return <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">Termine offen</Badge>;
+    case "ready":
+      return <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">Bereit</Badge>;
+    case "pending":
+      return <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">Warte auf Unterschrift</Badge>;
+    case "employee_signed":
+      return <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Warte auf Kunde</Badge>;
+    case "completed":
+      return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">Abgeschlossen</Badge>;
+    default:
+      return <Badge variant="outline">{status}</Badge>;
+  }
+}
+
+function CustomerOverviewCard({ item, selectedYear, selectedMonth }: CustomerOverviewCardProps) {
+  const href = item.existingRecord 
+    ? `/service-records/${item.existingRecord.id}`
+    : `/service-records?customerId=${item.customerId}`;
+  
+  return (
+    <Link href={href}>
+      <Card className="hover:bg-muted/50 transition-colors cursor-pointer" data-testid={`card-overview-${item.customerId}`}>
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <User className={`${iconSize.sm} text-muted-foreground`} />
+                <span className="font-medium" data-testid={`text-customer-${item.customerId}`}>
+                  {item.customerName}
+                </span>
+              </div>
+              <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                <span>{item.totalAppointments} {item.totalAppointments === 1 ? "Termin" : "Termine"}</span>
+                {item.undocumentedCount > 0 && (
+                  <span className="text-red-600">{item.undocumentedCount} offen</span>
+                )}
+                {item.documentedCount > 0 && item.undocumentedCount === 0 && !item.existingRecord && (
+                  <span className="text-emerald-600">{item.documentedCount} dokumentiert</span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              {getOverviewStatusBadge(item.status)}
               <ChevronRight className={`${iconSize.sm} text-muted-foreground`} />
             </div>
           </div>
