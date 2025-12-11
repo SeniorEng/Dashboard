@@ -10,15 +10,22 @@ import { EmptyState } from "@/components/patterns/empty-state";
 import { ErrorState } from "@/components/patterns/error-state";
 import { 
   FileSignature, Loader2, Calendar, User, Clock, MapPin, 
-  ChevronRight, Check, AlertCircle, FileText, ArrowLeft
+  ChevronRight, Check, AlertCircle, FileText, ArrowLeft, Plus
 } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { formatDateForDisplay } from "@shared/utils/date";
 import { Link, useLocation, useSearch } from "wouter";
 import { toast } from "sonner";
 import { apiRequest } from "@/lib/api/client";
-import type { MonthlyServiceRecord, Customer } from "@shared/schema";
+import type { MonthlyServiceRecord, Customer, Appointment } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
+
+interface PeriodCheckResponse {
+  existingRecord: MonthlyServiceRecord | null;
+  documentedAppointments: Appointment[];
+  undocumentedAppointments: Appointment[];
+  canCreateRecord: boolean;
+}
 
 const MONTH_NAMES = [
   "Januar", "Februar", "März", "April", "Mai", "Juni",
@@ -43,6 +50,7 @@ export default function ServiceRecordsPage() {
   const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
   const queryClient = useQueryClient();
+  const [, navigate] = useLocation();
   const searchString = useSearch();
   const searchParams = new URLSearchParams(searchString);
   const customerId = searchParams.get("customerId") ? parseInt(searchParams.get("customerId")!) : null;
@@ -74,6 +82,46 @@ export default function ServiceRecordsPage() {
       const response = await fetch(`/api/service-records/pending`);
       if (!response.ok) throw new Error("Ausstehende Leistungsnachweise konnten nicht geladen werden");
       return response.json();
+    },
+  });
+
+  // Check if we can create a service record for the selected period
+  const { data: periodCheck, isLoading: isPeriodCheckLoading } = useQuery<PeriodCheckResponse>({
+    queryKey: ["/api/service-records/check-period", customerId, selectedYear, selectedMonth],
+    queryFn: async () => {
+      const response = await fetch(
+        `/api/service-records/check-period?customerId=${customerId}&year=${selectedYear}&month=${selectedMonth}`
+      );
+      if (!response.ok) throw new Error("Periodenprüfung fehlgeschlagen");
+      return response.json();
+    },
+    enabled: !!customerId,
+  });
+
+  // Mutation to create a new service record
+  const createRecordMutation = useMutation({
+    mutationFn: async () => {
+      const result = await apiRequest<MonthlyServiceRecord>("/api/service-records", {
+        method: "POST",
+        body: JSON.stringify({
+          customerId,
+          year: selectedYear,
+          month: selectedMonth,
+        }),
+      });
+      if (!result.success) {
+        throw new Error(result.error.message || "Fehler beim Erstellen");
+      }
+      return result.data;
+    },
+    onSuccess: (newRecord) => {
+      toast.success("Leistungsnachweis erstellt");
+      queryClient.invalidateQueries({ queryKey: ["/api/service-records"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/service-records/check-period"] });
+      navigate(`/service-records/${newRecord.id}`);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "Fehler beim Erstellen des Leistungsnachweises");
     },
   });
 
@@ -177,13 +225,61 @@ export default function ServiceRecordsPage() {
         </Select>
       </div>
 
+      {/* Show period status when viewing a specific customer */}
+      {customerId && periodCheck && !periodCheck.existingRecord && (
+        <Card className="mb-4">
+          <CardContent className="py-4">
+            {periodCheck.canCreateRecord ? (
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <p className="font-medium text-green-700">
+                    Alle {periodCheck.documentedAppointments.length} Termine dokumentiert
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Sie können jetzt einen Leistungsnachweis für {MONTH_NAMES[selectedMonth - 1]} {selectedYear} erstellen.
+                  </p>
+                </div>
+                <Button
+                  onClick={() => createRecordMutation.mutate()}
+                  disabled={createRecordMutation.isPending}
+                  data-testid="button-create-record"
+                >
+                  {createRecordMutation.isPending ? (
+                    <Loader2 className={`${iconSize.sm} animate-spin mr-2`} />
+                  ) : (
+                    <Plus className={`${iconSize.sm} mr-2`} />
+                  )}
+                  Leistungsnachweis erstellen
+                </Button>
+              </div>
+            ) : periodCheck.undocumentedAppointments.length > 0 ? (
+              <div className="text-amber-700">
+                <p className="font-medium">
+                  {periodCheck.undocumentedAppointments.length} {periodCheck.undocumentedAppointments.length === 1 ? "Termin" : "Termine"} noch nicht dokumentiert
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Bitte dokumentieren Sie alle Termine, bevor Sie einen Leistungsnachweis erstellen.
+                </p>
+              </div>
+            ) : (
+              <div className="text-muted-foreground">
+                <p>Keine Termine in diesem Zeitraum vorhanden.</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {!records || records.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="py-10">
             <EmptyState
               icon={<FileText className={`${iconSize["2xl"]} text-muted-foreground/40`} />}
               title={`Keine Leistungsnachweise für ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`}
-              description="Leistungsnachweise werden erstellt, wenn alle Termine eines Monats dokumentiert sind."
+              description={customerId 
+                ? "Erstellen Sie einen neuen Leistungsnachweis, wenn alle Termine dokumentiert sind."
+                : "Leistungsnachweise werden erstellt, wenn alle Termine eines Monats dokumentiert sind."
+              }
             />
           </CardContent>
         </Card>
