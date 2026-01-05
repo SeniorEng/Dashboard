@@ -13,6 +13,7 @@ import { Plus, Wallet, History, AlertTriangle, Calendar, Settings, Euro } from "
 import { iconSize, componentStyles } from "@/design-system/tokens";
 import { toast } from "sonner";
 import { api } from "@/lib/api/client";
+import { formatCurrency, formatDateDisplay } from "@shared/utils/format";
 
 interface BudgetSummary {
   customerId: number;
@@ -43,21 +44,6 @@ interface BudgetTransaction {
   appointmentId: number | null;
   notes: string | null;
   createdAt: string;
-}
-
-function formatCurrency(cents: number): string {
-  return (cents / 100).toLocaleString("de-DE", {
-    style: "currency",
-    currency: "EUR",
-  });
-}
-
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString("de-DE", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
 }
 
 function getTransactionTypeLabel(type: string): string {
@@ -222,7 +208,7 @@ export function BudgetLedgerSection({ customerId, customerName, initialSummary, 
                   {summary!.carryoverExpiresAt && (
                     <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
                       <Calendar className="w-3 h-3" />
-                      Verfällt am {formatDate(summary!.carryoverExpiresAt)}
+                      Verfällt am {formatDateDisplay(summary!.carryoverExpiresAt!)}
                     </p>
                   )}
                 </CardContent>
@@ -340,7 +326,7 @@ export function BudgetLedgerSection({ customerId, customerName, initialSummary, 
                           <Badge variant={tx.amountCents < 0 ? "destructive" : "secondary"}>
                             {getTransactionTypeLabel(tx.transactionType)}
                           </Badge>
-                          <span className="text-sm text-gray-500">{formatDate(tx.transactionDate)}</span>
+                          <span className="text-sm text-gray-500">{formatDateDisplay(tx.transactionDate)}</span>
                         </div>
                         {tx.notes && (
                           <p className="text-xs text-gray-500 mt-1">{tx.notes}</p>

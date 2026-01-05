@@ -23,6 +23,40 @@ export interface TimeEntryFilters {
   entryType?: string;
 }
 
+/**
+ * Builds date range conditions for time entry queries.
+ * Centralized helper to avoid duplicating filter logic.
+ */
+function buildTimeEntryFilterConditions(filters?: TimeEntryFilters & { userId?: number }) {
+  const conditions = [];
+  
+  if (filters?.userId) {
+    conditions.push(eq(employeeTimeEntries.userId, filters.userId));
+  }
+  
+  if (filters?.year && filters?.month) {
+    // Month filter (more specific, so check first)
+    const monthStr = filters.month.toString().padStart(2, '0');
+    const startDate = `${filters.year}-${monthStr}-01`;
+    const lastDay = new Date(filters.year, filters.month, 0).getDate();
+    const endDate = `${filters.year}-${monthStr}-${lastDay}`;
+    conditions.push(gte(employeeTimeEntries.entryDate, startDate));
+    conditions.push(lte(employeeTimeEntries.entryDate, endDate));
+  } else if (filters?.year) {
+    // Year-only filter
+    const startDate = `${filters.year}-01-01`;
+    const endDate = `${filters.year}-12-31`;
+    conditions.push(gte(employeeTimeEntries.entryDate, startDate));
+    conditions.push(lte(employeeTimeEntries.entryDate, endDate));
+  }
+  
+  if (filters?.entryType) {
+    conditions.push(eq(employeeTimeEntries.entryType, filters.entryType));
+  }
+  
+  return conditions;
+}
+
 export interface VacationSummary {
   year: number;
   totalDays: number;
@@ -111,34 +145,12 @@ export interface ITimeTrackingStorage {
 
 class TimeTrackingStorage implements ITimeTrackingStorage {
   async getTimeEntries(userId: number, filters?: TimeEntryFilters): Promise<EmployeeTimeEntry[]> {
-    let query = db.select().from(employeeTimeEntries).where(eq(employeeTimeEntries.userId, userId));
-    
-    const conditions = [eq(employeeTimeEntries.userId, userId)];
-    
-    if (filters?.year) {
-      const startDate = `${filters.year}-01-01`;
-      const endDate = `${filters.year}-12-31`;
-      conditions.push(gte(employeeTimeEntries.entryDate, startDate));
-      conditions.push(lte(employeeTimeEntries.entryDate, endDate));
-    }
-    
-    if (filters?.month && filters?.year) {
-      const monthStr = filters.month.toString().padStart(2, '0');
-      const startDate = `${filters.year}-${monthStr}-01`;
-      const lastDay = new Date(filters.year, filters.month, 0).getDate();
-      const endDate = `${filters.year}-${monthStr}-${lastDay}`;
-      conditions.push(gte(employeeTimeEntries.entryDate, startDate));
-      conditions.push(lte(employeeTimeEntries.entryDate, endDate));
-    }
-    
-    if (filters?.entryType) {
-      conditions.push(eq(employeeTimeEntries.entryType, filters.entryType));
-    }
+    const conditions = buildTimeEntryFilterConditions({ ...filters, userId });
     
     const results = await db
       .select()
       .from(employeeTimeEntries)
-      .where(and(...conditions))
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(employeeTimeEntries.entryDate);
     
     return results;
@@ -328,31 +340,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
   }
   
   async getAllTimeEntries(filters?: TimeEntryFilters & { userId?: number }): Promise<(EmployeeTimeEntry & { user: { displayName: string } })[]> {
-    const conditions = [];
-    
-    if (filters?.userId) {
-      conditions.push(eq(employeeTimeEntries.userId, filters.userId));
-    }
-    
-    if (filters?.year) {
-      const startDate = `${filters.year}-01-01`;
-      const endDate = `${filters.year}-12-31`;
-      conditions.push(gte(employeeTimeEntries.entryDate, startDate));
-      conditions.push(lte(employeeTimeEntries.entryDate, endDate));
-    }
-    
-    if (filters?.month && filters?.year) {
-      const monthStr = filters.month.toString().padStart(2, '0');
-      const startDate = `${filters.year}-${monthStr}-01`;
-      const lastDay = new Date(filters.year, filters.month, 0).getDate();
-      const endDate = `${filters.year}-${monthStr}-${lastDay}`;
-      conditions.push(gte(employeeTimeEntries.entryDate, startDate));
-      conditions.push(lte(employeeTimeEntries.entryDate, endDate));
-    }
-    
-    if (filters?.entryType) {
-      conditions.push(eq(employeeTimeEntries.entryType, filters.entryType));
-    }
+    const conditions = buildTimeEntryFilterConditions(filters);
     
     // Import users table for join
     const { users } = await import("@shared/schema");

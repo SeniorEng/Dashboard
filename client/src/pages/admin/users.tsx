@@ -52,6 +52,7 @@ import {
   Euro,
 } from "lucide-react";
 import { api, unwrapResult } from "@/lib/api/client";
+import { formatDateDisplay } from "@shared/utils/format";
 
 interface UserData {
   id: number;
@@ -943,13 +944,9 @@ function CompensationSection({ userId, userName }: { userId: number; userName: s
     });
   };
 
-  const formatCurrency = (value: string | null) => {
+  const formatCompensationValue = (value: string | null) => {
     if (!value) return "-";
     return `${parseFloat(value).toFixed(2)} €`;
-  };
-
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr + "T00:00:00").toLocaleDateString("de-DE");
   };
 
   const currentCompensation = compensationHistory?.find(c => !c.validTo);
@@ -1112,24 +1109,24 @@ function CompensationSection({ userId, userName }: { userId: number; userName: s
             <div className="p-3 bg-teal-50 border border-teal-200 rounded-lg">
               <div className="flex items-center gap-2 mb-3">
                 <Badge variant="secondary" className="bg-teal-100 text-teal-800">Aktuell</Badge>
-                <span className="text-sm text-gray-500">seit {formatDate(currentCompensation.validFrom)}</span>
+                <span className="text-sm text-gray-500">seit {formatDateDisplay(currentCompensation.validFrom)}</span>
               </div>
               <div className="grid grid-cols-3 gap-3 text-sm">
                 <div>
                   <div className="text-gray-500 text-xs">Hauswirtschaft</div>
-                  <div className="font-medium">{formatCurrency(currentCompensation.hourlyRateHauswirtschaft)}/h</div>
+                  <div className="font-medium">{formatCompensationValue(currentCompensation.hourlyRateHauswirtschaft)}/h</div>
                 </div>
                 <div>
                   <div className="text-gray-500 text-xs">Alltagsbegleitung</div>
-                  <div className="font-medium">{formatCurrency(currentCompensation.hourlyRateAlltagsbegleitung)}/h</div>
+                  <div className="font-medium">{formatCompensationValue(currentCompensation.hourlyRateAlltagsbegleitung)}/h</div>
                 </div>
                 <div>
                   <div className="text-gray-500 text-xs">Fahrtkosten</div>
                   <div className="font-medium">
                     {currentCompensation.travelCostType === "kilometergeld" 
-                      ? `${formatCurrency(currentCompensation.kilometerRate)}/km`
+                      ? `${formatCompensationValue(currentCompensation.kilometerRate)}/km`
                       : currentCompensation.travelCostType === "pauschale"
-                      ? `${formatCurrency(currentCompensation.monthlyTravelAllowance)}/Mo`
+                      ? `${formatCompensationValue(currentCompensation.monthlyTravelAllowance)}/Mo`
                       : "-"}
                   </div>
                 </div>
@@ -1144,16 +1141,16 @@ function CompensationSection({ userId, userName }: { userId: number; userName: s
                 {compensationHistory.filter(c => c.validTo).map((comp) => (
                   <div key={comp.id} className="p-2 bg-gray-50 rounded text-sm">
                     <div className="text-gray-500 text-xs mb-1">
-                      {formatDate(comp.validFrom)} - {formatDate(comp.validTo!)}
+                      {formatDateDisplay(comp.validFrom)} - {formatDateDisplay(comp.validTo!)}
                     </div>
                     <div className="grid grid-cols-3 gap-1 text-xs">
-                      <span>HW: {formatCurrency(comp.hourlyRateHauswirtschaft)}/h</span>
-                      <span>AB: {formatCurrency(comp.hourlyRateAlltagsbegleitung)}/h</span>
+                      <span>HW: {formatCompensationValue(comp.hourlyRateHauswirtschaft)}/h</span>
+                      <span>AB: {formatCompensationValue(comp.hourlyRateAlltagsbegleitung)}/h</span>
                       <span>
                         {comp.travelCostType === "kilometergeld" 
-                          ? `${formatCurrency(comp.kilometerRate)}/km`
+                          ? `${formatCompensationValue(comp.kilometerRate)}/km`
                           : comp.travelCostType === "pauschale"
-                          ? `${formatCurrency(comp.monthlyTravelAllowance)}/Mo`
+                          ? `${formatCompensationValue(comp.monthlyTravelAllowance)}/Mo`
                           : "-"}
                       </span>
                     </div>

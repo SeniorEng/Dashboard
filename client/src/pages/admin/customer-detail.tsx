@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DatePicker } from "@/components/ui/date-picker";
 import { formatDateForDisplay } from "@shared/utils/date";
+import { formatCurrency } from "@shared/utils/format";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SectionCard } from "@/components/patterns/section-card";
@@ -63,23 +64,6 @@ function formatAddress(customer: {
   return parts.join(", ") || "Keine Adresse hinterlegt";
 }
 
-function formatBudget(cents: number): string {
-  return new Intl.NumberFormat("de-DE", {
-    style: "currency",
-    currency: "EUR",
-  }).format(cents / 100);
-}
-
-function formatRate(cents: number): string {
-  return new Intl.NumberFormat("de-DE", {
-    style: "currency",
-    currency: "EUR",
-  }).format(cents / 100);
-}
-
-function formatDate(dateStr: string): string {
-  return formatDateForDisplay(dateStr);
-}
 
 function formatPeriodType(type: string): string {
   switch (type) {
@@ -92,12 +76,9 @@ function formatPeriodType(type: string): string {
 
 import type { CustomerPricingInfo } from "@/lib/api/types";
 
-function formatCentsToEuro(cents: number | null): string {
+function formatCentsOrDash(cents: number | null): string {
   if (cents === null) return "-";
-  return new Intl.NumberFormat("de-DE", {
-    style: "currency",
-    currency: "EUR",
-  }).format(cents / 100);
+  return formatCurrency(cents);
 }
 
 interface PricingSectionProps {
@@ -259,20 +240,20 @@ function PricingSection({ customerId, customerName, pricingHistory, currentPrici
             <div className="p-3 bg-teal-50 border border-teal-200 rounded-lg">
               <div className="flex items-center gap-2 mb-3">
                 <Badge variant="secondary" className="bg-teal-100 text-teal-800">Aktuell</Badge>
-                <span className="text-sm text-gray-500">seit {formatDate(currentPricing.validFrom)}</span>
+                <span className="text-sm text-gray-500">seit {formatDateForDisplay(currentPricing.validFrom)}</span>
               </div>
               <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
                 <div className="min-w-[100px]">
                   <div className="text-gray-500 text-xs">Hauswirtschaft</div>
-                  <div className="font-medium">{formatCentsToEuro(currentPricing.hauswirtschaftRateCents)}/h</div>
+                  <div className="font-medium">{formatCentsOrDash(currentPricing.hauswirtschaftRateCents)}/h</div>
                 </div>
                 <div className="min-w-[100px]">
                   <div className="text-gray-500 text-xs">Alltagsbegleitung</div>
-                  <div className="font-medium">{formatCentsToEuro(currentPricing.alltagsbegleitungRateCents)}/h</div>
+                  <div className="font-medium">{formatCentsOrDash(currentPricing.alltagsbegleitungRateCents)}/h</div>
                 </div>
                 <div className="min-w-[80px]">
                   <div className="text-gray-500 text-xs">Kilometer</div>
-                  <div className="font-medium">{formatCentsToEuro(currentPricing.kilometerRateCents)}/km</div>
+                  <div className="font-medium">{formatCentsOrDash(currentPricing.kilometerRateCents)}/km</div>
                 </div>
               </div>
             </div>
@@ -285,12 +266,12 @@ function PricingSection({ customerId, customerName, pricingHistory, currentPrici
                 {pricingHistory.filter(p => p.validTo).map((pricing) => (
                   <div key={pricing.id} className="p-2 bg-gray-50 rounded text-sm">
                     <div className="text-gray-500 text-xs mb-1">
-                      {formatDate(pricing.validFrom)} - {formatDate(pricing.validTo!)}
+                      {formatDateForDisplay(pricing.validFrom)} - {formatDateForDisplay(pricing.validTo!)}
                     </div>
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
-                      <span>HW: {formatCentsToEuro(pricing.hauswirtschaftRateCents)}/h</span>
-                      <span>AB: {formatCentsToEuro(pricing.alltagsbegleitungRateCents)}/h</span>
-                      <span>Km: {formatCentsToEuro(pricing.kilometerRateCents)}/km</span>
+                      <span>HW: {formatCentsOrDash(pricing.hauswirtschaftRateCents)}/h</span>
+                      <span>AB: {formatCentsOrDash(pricing.alltagsbegleitungRateCents)}/h</span>
+                      <span>Km: {formatCentsOrDash(pricing.kilometerRateCents)}/km</span>
                     </div>
                   </div>
                 ))}
@@ -430,7 +411,7 @@ export default function AdminCustomerDetail() {
                     {customer.geburtsdatum && (
                       <div className="flex items-center gap-2 text-gray-700">
                         <Calendar className={`${iconSize.sm} text-gray-400`} />
-                        Geb.: {formatDate(customer.geburtsdatum)}
+                        Geb.: {formatDateForDisplay(customer.geburtsdatum)}
                       </div>
                     )}
                     <div className="flex items-center gap-2 text-gray-700">
@@ -486,7 +467,7 @@ export default function AdminCustomerDetail() {
                       Vers.-Nr.: {customer.currentInsurance.versichertennummer}
                     </p>
                     <p className="text-xs text-gray-500">
-                      Seit {formatDate(customer.currentInsurance.validFrom)}
+                      Seit {formatDateForDisplay(customer.currentInsurance.validFrom)}
                     </p>
                   </div>
                 ) : (
@@ -523,7 +504,7 @@ export default function AdminCustomerDetail() {
                       <div>
                         <p className="text-sm text-gray-500">Vertragsbeginn</p>
                         <p className="font-medium">
-                          {formatDate(customer.currentContract.contractStart)}
+                          {formatDateForDisplay(customer.currentContract.contractStart)}
                         </p>
                       </div>
                     </div>
@@ -534,13 +515,13 @@ export default function AdminCustomerDetail() {
                         <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-100">
                           <p className="text-sm text-gray-600">Hauswirtschaft</p>
                           <p className="text-xl font-semibold text-gray-900">
-                            {formatRate(customer.currentContract.hauswirtschaftRateCents)}/Std.
+                            {formatCurrency(customer.currentContract.hauswirtschaftRateCents)}/Std.
                           </p>
                         </div>
                         <div className="p-3 rounded-lg bg-sky-50 border border-sky-100">
                           <p className="text-sm text-gray-600">Alltagsbegleitung</p>
                           <p className="text-xl font-semibold text-gray-900">
-                            {formatRate(customer.currentContract.alltagsbegleitungRateCents)}/Std.
+                            {formatCurrency(customer.currentContract.alltagsbegleitungRateCents)}/Std.
                           </p>
                         </div>
                         <div className="p-3 rounded-lg bg-amber-50 border border-amber-100">
@@ -549,7 +530,7 @@ export default function AdminCustomerDetail() {
                             <p className="text-sm text-gray-600">Kilometer</p>
                           </div>
                           <p className="text-xl font-semibold text-gray-900">
-                            {formatRate(customer.currentContract.kilometerRateCents)}/km
+                            {formatCurrency(customer.currentContract.kilometerRateCents)}/km
                           </p>
                         </div>
                       </div>
@@ -707,7 +688,7 @@ export default function AdminCustomerDetail() {
                       Versichertennummer: {customer.currentInsurance.versichertennummer}
                     </p>
                     <p className="text-xs text-gray-500 mt-2">
-                      Gültig seit {formatDate(customer.currentInsurance.validFrom)}
+                      Gültig seit {formatDateForDisplay(customer.currentInsurance.validFrom)}
                     </p>
                   </div>
                 ) : (
@@ -746,8 +727,8 @@ export default function AdminCustomerDetail() {
                             <div className="flex items-center justify-between">
                               <StatusBadge type="pflegegrad" value={entry.pflegegrad} />
                               <span className="text-xs text-gray-500">
-                                {formatDate(entry.validFrom)}
-                                {entry.validTo && ` - ${formatDate(entry.validTo)}`}
+                                {formatDateForDisplay(entry.validFrom)}
+                                {entry.validTo && ` - ${formatDateForDisplay(entry.validTo)}`}
                               </span>
                             </div>
                             {entry.notes && (
