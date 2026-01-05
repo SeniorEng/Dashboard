@@ -17,6 +17,7 @@ import { formatDateForDisplay } from "@shared/utils/date";
 import { Link, useLocation, useSearch } from "wouter";
 import { toast } from "sonner";
 import { apiRequest } from "@/lib/api/client";
+import { useAuth } from "@/hooks/use-auth";
 import type { MonthlyServiceRecord, Customer, Appointment } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 
@@ -65,6 +66,7 @@ export default function ServiceRecordsPage() {
   const searchString = useSearch();
   const searchParams = new URLSearchParams(searchString);
   const customerId = searchParams.get("customerId") ? parseInt(searchParams.get("customerId")!) : null;
+  const { user } = useAuth();
 
   const { data: selectedCustomer } = useQuery<Customer>({
     queryKey: ["customer", customerId],
@@ -125,10 +127,14 @@ export default function ServiceRecordsPage() {
   // Mutation to create a new service record
   const createRecordMutation = useMutation({
     mutationFn: async () => {
+      if (!user?.id) {
+        throw new Error("Nicht angemeldet");
+      }
       const result = await apiRequest<MonthlyServiceRecord>("/service-records", {
         method: "POST",
         body: {
           customerId,
+          employeeId: user.id,
           year: selectedYear,
           month: selectedMonth,
         },
