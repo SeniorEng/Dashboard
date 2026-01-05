@@ -66,7 +66,7 @@ export function formatHourlyRate(centsPerHour: number): string {
 /**
  * Formatiert einen Datumsstring für die deutsche Anzeige.
  * 
- * @param dateStr - Datumsstring im Format "YYYY-MM-DD"
+ * @param dateStr - Datumsstring im Format "YYYY-MM-DD" oder ISO-Timestamp "YYYY-MM-DDTHH:mm:ss"
  * @param style - Anzeigeformat
  *   - "short": "04.12.2025"
  *   - "medium": "4. Dez. 2025"
@@ -76,6 +76,7 @@ export function formatHourlyRate(centsPerHour: number): string {
  * 
  * @example
  * formatDateDisplay("2025-12-04") → "04.12.2025"
+ * formatDateDisplay("2025-12-04T14:30:00.000Z") → "04.12.2025"
  * formatDateDisplay("2025-12-04", "long") → "4. Dezember 2025"
  */
 export function formatDateDisplay(
@@ -84,7 +85,9 @@ export function formatDateDisplay(
 ): string {
   if (!dateStr) return "";
   
-  const date = parseLocalDate(dateStr);
+  // Handle ISO timestamps by extracting just the date part
+  const dateOnly = dateStr.includes("T") ? dateStr.split("T")[0] : dateStr;
+  const date = parseLocalDate(dateOnly);
   
   if (style === "relative") {
     const today = new Date();
