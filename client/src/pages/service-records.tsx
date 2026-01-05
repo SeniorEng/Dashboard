@@ -125,13 +125,13 @@ export default function ServiceRecordsPage() {
   // Mutation to create a new service record
   const createRecordMutation = useMutation({
     mutationFn: async () => {
-      const result = await apiRequest<MonthlyServiceRecord>("/api/service-records", {
+      const result = await apiRequest<MonthlyServiceRecord>("/service-records", {
         method: "POST",
-        body: JSON.stringify({
+        body: {
           customerId,
           year: selectedYear,
           month: selectedMonth,
-        }),
+        },
       });
       if (!result.success) {
         throw new Error(result.error.message || "Fehler beim Erstellen");
