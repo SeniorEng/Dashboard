@@ -100,7 +100,7 @@ export function SignaturePad({
           )}
         </div>
 
-        <div className="flex gap-2 justify-end">
+        <div className="flex flex-wrap gap-2 justify-between">
           <Button
             type="button"
             variant="outline"
@@ -112,29 +112,31 @@ export function SignaturePad({
             <Eraser className={iconSize.sm} />
             <span className="ml-1">Löschen</span>
           </Button>
-          {onCancel && (
+          <div className="flex gap-2">
+            {onCancel && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={onCancel}
+                disabled={disabled}
+                data-testid="button-cancel-signature"
+              >
+                <X className={iconSize.sm} />
+                <span className="ml-1 hidden sm:inline">Abbrechen</span>
+              </Button>
+            )}
             <Button
               type="button"
-              variant="ghost"
               size="sm"
-              onClick={onCancel}
-              disabled={disabled}
-              data-testid="button-cancel-signature"
+              onClick={handleSave}
+              disabled={disabled || isEmpty}
+              data-testid="button-save-signature"
             >
-              <X className={iconSize.sm} />
-              <span className="ml-1">Abbrechen</span>
+              <Check className={iconSize.sm} />
+              <span className="ml-1">Bestätigen</span>
             </Button>
-          )}
-          <Button
-            type="button"
-            size="sm"
-            onClick={handleSave}
-            disabled={disabled || isEmpty}
-            data-testid="button-save-signature"
-          >
-            <Check className={iconSize.sm} />
-            <span className="ml-1">Bestätigen</span>
-          </Button>
+          </div>
         </div>
       </CardContent>
     </Card>
