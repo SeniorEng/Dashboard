@@ -1,5 +1,6 @@
 import express, { type Request, Response, NextFunction } from "express";
 import cookieParser from "cookie-parser";
+import compression from "compression";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
@@ -13,6 +14,8 @@ declare module "http" {
     rawBody: unknown;
   }
 }
+
+app.use(compression());
 
 app.use(
   express.json({
