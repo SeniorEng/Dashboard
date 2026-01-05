@@ -91,6 +91,22 @@ export interface IStorage {
   getUndocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<AppointmentWithCustomer[]>;
   getPendingServiceRecords(employeeId: number): Promise<MonthlyServiceRecord[]>;
   isAppointmentLocked(appointmentId: number): Promise<boolean>;
+  
+  // Optimized overview query
+  getServiceRecordsOverview(employeeId: number, year: number, month: number): Promise<ServiceRecordOverviewItem[]>;
+  
+  // Optimized period check - counts only
+  getAppointmentCountsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<{ documentedCount: number; undocumentedCount: number }>;
+}
+
+export interface ServiceRecordOverviewItem {
+  customerId: number;
+  customerName: string;
+  existingRecordId: number | null;
+  existingRecordStatus: string | null;
+  documentedCount: number;
+  undocumentedCount: number;
+  totalAppointments: number;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1312,6 +1328,98 @@ export class DatabaseStorage implements IStorage {
       .limit(1);
     
     return result.length > 0;
+  }
+
+  async getServiceRecordsOverview(employeeId: number, year: number, month: number): Promise<ServiceRecordOverviewItem[]> {
+    const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+    const endMonth = month === 12 ? 1 : month + 1;
+    const endYear = month === 12 ? year + 1 : year;
+    const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
+
+    const assignedCustomerIds = await this.getAssignedCustomerIds(employeeId);
+    if (assignedCustomerIds.length === 0) {
+      return [];
+    }
+
+    const overviewData = await db.select({
+      customerId: customers.id,
+      vorname: customers.vorname,
+      nachname: customers.nachname,
+      documentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} = 'completed' THEN 1 ELSE 0 END), 0)::int`,
+      undocumentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} IN ('scheduled', 'in-progress', 'documenting') THEN 1 ELSE 0 END), 0)::int`,
+      totalAppointments: sqlBuilder<number>`COUNT(${appointments.id})::int`,
+    })
+      .from(customers)
+      .leftJoin(appointments, and(
+        eq(appointments.customerId, customers.id),
+        or(
+          eq(appointments.assignedEmployeeId, employeeId),
+          eq(appointments.createdByUserId, employeeId)
+        ),
+        sqlBuilder`${appointments.date} >= ${startDate}`,
+        sqlBuilder`${appointments.date} < ${endDate}`,
+        ne(appointments.status, 'cancelled')
+      ))
+      .where(inArray(customers.id, assignedCustomerIds))
+      .groupBy(customers.id, customers.vorname, customers.nachname);
+
+    const existingRecords = await db.select({
+      customerId: monthlyServiceRecords.customerId,
+      id: monthlyServiceRecords.id,
+      status: monthlyServiceRecords.status,
+    })
+      .from(monthlyServiceRecords)
+      .where(and(
+        eq(monthlyServiceRecords.employeeId, employeeId),
+        eq(monthlyServiceRecords.year, year),
+        eq(monthlyServiceRecords.month, month),
+        inArray(monthlyServiceRecords.customerId, assignedCustomerIds)
+      ));
+
+    const recordMap = new Map(existingRecords.map(r => [r.customerId, { id: r.id, status: r.status }]));
+
+    return overviewData
+      .filter(item => item.totalAppointments > 0 || recordMap.has(item.customerId))
+      .map(item => {
+        const record = recordMap.get(item.customerId);
+        return {
+          customerId: item.customerId,
+          customerName: `${item.vorname} ${item.nachname}`,
+          existingRecordId: record?.id ?? null,
+          existingRecordStatus: record?.status ?? null,
+          documentedCount: item.documentedCount,
+          undocumentedCount: item.undocumentedCount,
+          totalAppointments: item.totalAppointments,
+        };
+      });
+  }
+
+  async getAppointmentCountsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<{ documentedCount: number; undocumentedCount: number }> {
+    const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+    const endMonth = month === 12 ? 1 : month + 1;
+    const endYear = month === 12 ? year + 1 : year;
+    const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
+
+    const result = await db.select({
+      documentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} = 'completed' THEN 1 ELSE 0 END), 0)::int`,
+      undocumentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} IN ('scheduled', 'in-progress', 'documenting') THEN 1 ELSE 0 END), 0)::int`,
+    })
+      .from(appointments)
+      .where(and(
+        eq(appointments.customerId, customerId),
+        or(
+          eq(appointments.assignedEmployeeId, employeeId),
+          eq(appointments.createdByUserId, employeeId)
+        ),
+        ne(appointments.status, 'cancelled'),
+        sqlBuilder`${appointments.date} >= ${startDate}`,
+        sqlBuilder`${appointments.date} < ${endDate}`
+      ));
+
+    return {
+      documentedCount: result[0]?.documentedCount ?? 0,
+      undocumentedCount: result[0]?.undocumentedCount ?? 0,
+    };
   }
 }
 

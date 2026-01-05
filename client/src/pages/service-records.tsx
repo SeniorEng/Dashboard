@@ -23,15 +23,15 @@ import type { AppointmentWithCustomer } from "@shared/types";
 
 interface PeriodCheckResponse {
   existingRecord: MonthlyServiceRecord | null;
-  documentedAppointments: Appointment[];
-  undocumentedAppointments: Appointment[];
+  documentedCount: number;
+  undocumentedCount: number;
   canCreateRecord: boolean;
 }
 
 interface CustomerOverviewItem {
   customerId: number;
   customerName: string;
-  existingRecord: MonthlyServiceRecord | null;
+  existingRecord: { id: number; status: string } | null;
   documentedCount: number;
   undocumentedCount: number;
   totalAppointments: number;
@@ -96,6 +96,7 @@ export default function ServiceRecordsPage() {
       if (!response.ok) throw new Error("Ausstehende Leistungsnachweise konnten nicht geladen werden");
       return response.json();
     },
+    enabled: !customerId,
   });
 
   // Overview of all customers with their service record status
@@ -306,7 +307,7 @@ export default function ServiceRecordsPage() {
                   </div>
                   <div>
                     <p className="font-medium text-green-700">
-                      Alle {periodCheck.documentedAppointments.length} Termine dokumentiert
+                      Alle {periodCheck.documentedCount} Termine dokumentiert
                     </p>
                     <p className="text-sm text-muted-foreground mt-1">
                       Sie können jetzt den Leistungsnachweis für {MONTH_NAMES[selectedMonth - 1]} {selectedYear} erstellen.
@@ -329,7 +330,7 @@ export default function ServiceRecordsPage() {
                 </div>
               </CardContent>
             </Card>
-          ) : periodCheck.undocumentedAppointments.length > 0 ? (
+          ) : periodCheck.undocumentedCount > 0 ? (
             /* Case 3: Appointments still open - show warning */
             <Card className="border-amber-200 bg-amber-50/50">
               <CardContent className="py-6">
@@ -339,7 +340,7 @@ export default function ServiceRecordsPage() {
                   </div>
                   <div>
                     <p className="font-medium text-amber-700">
-                      {periodCheck.undocumentedAppointments.length} {periodCheck.undocumentedAppointments.length === 1 ? "Termin" : "Termine"} noch offen
+                      {periodCheck.undocumentedCount} {periodCheck.undocumentedCount === 1 ? "Termin" : "Termine"} noch offen
                     </p>
                     <p className="text-sm text-muted-foreground mt-1">
                       Dokumentieren Sie alle Termine, um den Leistungsnachweis zu erstellen.

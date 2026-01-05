@@ -41,57 +41,35 @@ router.get("/overview", requireAuth, async (req, res) => {
       return res.status(400).json({ message: "Jahr und Monat sind erforderlich" });
     }
     
-    // Get all assigned customer IDs for this employee
-    const assignedCustomerIds = await storage.getAssignedCustomerIds(userId);
+    const overviewData = await storage.getServiceRecordsOverview(userId, year, month);
     
-    // Get overview data for each customer
-    const overview = await Promise.all(
-      assignedCustomerIds.map(async (customerId) => {
-        const customer = await storage.getCustomer(customerId);
-        if (!customer) return null;
-        
-        const existingRecord = await storage.getServiceRecordByPeriod(customerId, userId, year, month);
-        const documentedAppointments = await storage.getDocumentedAppointmentsForPeriod(customerId, userId, year, month);
-        const undocumentedAppointments = await storage.getUndocumentedAppointmentsForPeriod(customerId, userId, year, month);
-        
-        const totalAppointments = documentedAppointments.length + undocumentedAppointments.length;
-        
-        // Skip customers with no appointments and no existing record in this period
-        // (they don't require any action for this month)
-        if (totalAppointments === 0 && !existingRecord) {
-          return null;
-        }
-        
-        let status: "undocumented" | "ready" | "pending" | "employee_signed" | "completed";
-        
-        if (existingRecord) {
-          status = existingRecord.status as "pending" | "employee_signed" | "completed";
-        } else if (undocumentedAppointments.length > 0) {
-          status = "undocumented";
-        } else {
-          status = "ready";
-        }
-        
-        return {
-          customerId,
-          customerName: `${customer.vorname} ${customer.nachname}`,
-          existingRecord,
-          documentedCount: documentedAppointments.length,
-          undocumentedCount: undocumentedAppointments.length,
-          totalAppointments,
-          status,
-          canCreateRecord: !existingRecord && undocumentedAppointments.length === 0 && documentedAppointments.length > 0,
-        };
-      })
-    );
+    const overview = overviewData.map(item => {
+      let status: "undocumented" | "ready" | "pending" | "employee_signed" | "completed";
+      
+      if (item.existingRecordId) {
+        status = item.existingRecordStatus as "pending" | "employee_signed" | "completed";
+      } else if (item.undocumentedCount > 0) {
+        status = "undocumented";
+      } else {
+        status = "ready";
+      }
+      
+      return {
+        customerId: item.customerId,
+        customerName: item.customerName,
+        existingRecord: item.existingRecordId ? { id: item.existingRecordId, status: item.existingRecordStatus } : null,
+        documentedCount: item.documentedCount,
+        undocumentedCount: item.undocumentedCount,
+        totalAppointments: item.totalAppointments,
+        status,
+        canCreateRecord: !item.existingRecordId && item.undocumentedCount === 0 && item.documentedCount > 0,
+      };
+    });
     
-    // Filter out null values and sort by status priority
     const statusOrder = ["undocumented", "ready", "pending", "employee_signed", "completed"];
-    const filteredOverview = overview
-      .filter((item): item is NonNullable<typeof item> => item !== null)
-      .sort((a, b) => statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status));
+    overview.sort((a, b) => statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status));
     
-    res.json(filteredOverview);
+    res.json(overview);
   } catch (error) {
     handleRouteError(res, error, "Übersicht konnte nicht geladen werden");
   }
@@ -108,7 +86,6 @@ router.get("/check-period", requireAuth, async (req, res) => {
       return res.status(400).json({ message: "Ungültige Parameter" });
     }
     
-    // Autorisierungsprüfung: Nur zugewiesene Kunden oder Admin
     const hasAccess = await canAccessCustomer(
       userId,
       req.user!.isAdmin,
@@ -122,15 +99,16 @@ router.get("/check-period", requireAuth, async (req, res) => {
       });
     }
     
-    const existingRecord = await storage.getServiceRecordByPeriod(customerId, userId, year, month);
-    const documentedAppointments = await storage.getDocumentedAppointmentsForPeriod(customerId, userId, year, month);
-    const undocumentedAppointments = await storage.getUndocumentedAppointmentsForPeriod(customerId, userId, year, month);
+    const [existingRecord, counts] = await Promise.all([
+      storage.getServiceRecordByPeriod(customerId, userId, year, month),
+      storage.getAppointmentCountsForPeriod(customerId, userId, year, month),
+    ]);
     
     res.json({
       existingRecord,
-      documentedAppointments,
-      undocumentedAppointments,
-      canCreateRecord: undocumentedAppointments.length === 0 && documentedAppointments.length > 0,
+      documentedCount: counts.documentedCount,
+      undocumentedCount: counts.undocumentedCount,
+      canCreateRecord: counts.undocumentedCount === 0 && counts.documentedCount > 0,
     });
   } catch (error) {
     handleRouteError(res, error, "Periodendaten konnten nicht geladen werden");
