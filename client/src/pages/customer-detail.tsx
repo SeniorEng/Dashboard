@@ -1,4 +1,4 @@
-import { useRoute, Link } from "wouter";
+import { useRoute, Link, useSearch } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { AppointmentCard } from "@/features/appointments/components/appointment-card";
 import { 
   ArrowLeft, MapPin, Phone, Mail, User, Heart, 
-  Calendar, Loader2, AlertCircle, FileSignature, ChevronRight
+  Calendar, Loader2, AlertCircle, FileSignature, ChevronRight, X
 } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { ErrorState } from "@/components/patterns/error-state";
@@ -16,6 +16,7 @@ import type { AppointmentWithCustomer } from "@shared/types";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { format, parseISO, isAfter, isBefore, startOfToday } from "date-fns";
 import { de } from "date-fns/locale";
+import { UNDOCUMENTED_STATUSES } from "@shared/domain/appointments";
 
 function formatAddress(customer: Customer): string {
   if (customer.strasse && customer.nr && customer.plz && customer.stadt) {
@@ -39,6 +40,9 @@ function getPflegegradColor(pflegegrad: number | null): string {
 export default function CustomerDetailPage() {
   const [, params] = useRoute("/customer/:id");
   const customerId = params?.id ? parseInt(params.id, 10) : null;
+  const searchString = useSearch();
+  const searchParams = new URLSearchParams(searchString);
+  const filterUndocumented = searchParams.get("filter") === "undocumented";
 
   const { data: customer, isLoading: customerLoading, error: customerError, refetch: refetchCustomer } = useQuery<Customer>({
     queryKey: ["customer", customerId],
@@ -61,14 +65,21 @@ export default function CustomerDetailPage() {
   });
 
   const today = startOfToday();
-  const upcomingAppointments = appointments
+  
+  const undocumentedAppointments = appointments.filter(apt => 
+    UNDOCUMENTED_STATUSES.includes(apt.status as typeof UNDOCUMENTED_STATUSES[number])
+  );
+  
+  const displayAppointments = filterUndocumented ? undocumentedAppointments : appointments;
+  
+  const upcomingAppointments = displayAppointments
     .filter(apt => isAfter(parseISO(apt.date), today) || apt.date === format(today, "yyyy-MM-dd"))
     .sort((a, b) => a.date.localeCompare(b.date));
   
-  const pastAppointments = appointments
+  const pastAppointments = displayAppointments
     .filter(apt => isBefore(parseISO(apt.date), today) && apt.date !== format(today, "yyyy-MM-dd"))
     .sort((a, b) => b.date.localeCompare(a.date))
-    .slice(0, 5);
+    .slice(0, filterUndocumented ? 50 : 5);
 
   if (customerLoading) {
     return (
@@ -111,6 +122,27 @@ export default function CustomerDetailPage() {
             {customer.name}
           </h1>
         </div>
+
+        {filterUndocumented && (
+          <Card className="mb-4 border-amber-200 bg-amber-50/50">
+            <CardContent className="py-3 px-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className={`${iconSize.sm} text-amber-600`} />
+                  <span className="text-sm font-medium text-amber-700">
+                    {undocumentedAppointments.length} {undocumentedAppointments.length === 1 ? "offener Termin" : "offene Termine"}
+                  </span>
+                </div>
+                <Link href={`/customer/${customerId}`}>
+                  <Button variant="ghost" size="sm" className="h-7 px-2 text-amber-700 hover:text-amber-900">
+                    <X className={iconSize.sm} />
+                    <span className="sr-only">Filter entfernen</span>
+                  </Button>
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Card className="mb-6">
           <CardContent className="p-4">
