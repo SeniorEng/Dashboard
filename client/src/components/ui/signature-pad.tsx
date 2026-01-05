@@ -48,7 +48,8 @@ export function SignaturePad({
 
   const handleSave = () => {
     if (signatureRef.current && !isEmpty) {
-      const dataUrl = signatureRef.current.getTrimmedCanvas().toDataURL("image/png");
+      const canvas = signatureRef.current.getCanvas();
+      const dataUrl = canvas.toDataURL("image/png");
       onSave(dataUrl);
     }
   };
