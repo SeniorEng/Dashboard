@@ -533,12 +533,7 @@ export default function DocumentAppointment() {
                   <RadioGroupItem value="home" id="origin-home" data-testid="radio-origin-home" />
                   <Label htmlFor="origin-home" className="flex items-center gap-2 cursor-pointer flex-1">
                     <Home className={`${iconSize.sm} text-muted-foreground`} />
-                    <div>
-                      <span className="font-medium">Von zu Hause</span>
-                      {travelSuggestion?.suggestedOrigin === "home" && (
-                        <p className="text-xs text-muted-foreground">Erster Termin des Tages</p>
-                      )}
-                    </div>
+                    <span className="font-medium">Von zu Hause</span>
                   </Label>
                 </div>
                 
