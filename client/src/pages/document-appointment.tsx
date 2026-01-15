@@ -420,7 +420,13 @@ export default function DocumentAppointment() {
                         id={`details-${index}`}
                         value={service.details}
                         onChange={(e) => updateService(index, "details", e.target.value.slice(0, 55))}
-                        placeholder="z.B. Wäsche gewaschen, Boden gewischt"
+                        placeholder={
+                          service.serviceType === "Hauswirtschaft" 
+                            ? "z.B. Wäsche gewaschen, Boden gewischt" 
+                            : service.serviceType === "Alltagsbegleitung"
+                            ? "z.B. Begleitung zum Arzt, Spaziergang"
+                            : "z.B. Beratung durchgeführt"
+                        }
                         maxLength={55}
                         className={!service.details.trim() ? "border-amber-300" : ""}
                         data-testid={`input-details-${service.serviceType.toLowerCase()}`}
