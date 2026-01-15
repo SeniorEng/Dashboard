@@ -133,13 +133,7 @@ export default function MyTimes() {
     
     const isFullDayType = newEntry.entryType === "urlaub" || newEntry.entryType === "krankheit";
     
-    // For time-based entries, wait until we have both times
-    if (!isFullDayType && (!newEntry.startTime || !newEntry.endTime)) {
-      setNewEntryConflict(null);
-      return;
-    }
-    
-    const timer = setTimeout(async () => {
+    const checkConflict = async () => {
       if (!newEntry.entryDate) return;
       
       setIsCheckingConflict(true);
@@ -160,7 +154,11 @@ export default function MyTimes() {
       } finally {
         setIsCheckingConflict(false);
       }
-    }, 300);
+    };
+    
+    // Immediate check when dialog opens or date changes, debounce for time changes
+    const delay = newEntry.startTime && newEntry.endTime ? 150 : 0;
+    const timer = setTimeout(checkConflict, delay);
     
     return () => clearTimeout(timer);
   }, [showNewEntryDialog, newEntry.entryDate, newEntry.startTime, newEntry.endTime, newEntry.entryType, newEntryTimeError]);
@@ -180,13 +178,7 @@ export default function MyTimes() {
     
     const isFullDayType = editingEntry.entryType === "urlaub" || editingEntry.entryType === "krankheit";
     
-    // For time-based entries, wait until we have both times (unless full day)
-    if (!isFullDayType && !editingEntry.isFullDay && (!editingEntry.startTime || !editingEntry.endTime)) {
-      setEditEntryConflict(null);
-      return;
-    }
-    
-    const timer = setTimeout(async () => {
+    const checkConflict = async () => {
       if (!editingEntry.entryDate) return;
       
       setIsCheckingConflict(true);
@@ -208,7 +200,11 @@ export default function MyTimes() {
       } finally {
         setIsCheckingConflict(false);
       }
-    }, 300);
+    };
+    
+    // Immediate check when dialog opens or date changes, debounce for time changes
+    const delay = editingEntry.startTime && editingEntry.endTime ? 150 : 0;
+    const timer = setTimeout(checkConflict, delay);
     
     return () => clearTimeout(timer);
   }, [showEditDialog, editingEntry, editEntryTimeError]);

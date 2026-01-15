@@ -125,10 +125,16 @@ async function checkTimeConflicts(
     return null;
   }
   
-  // For time-based entries, require both start and end times
+  // Even without times, check if there's a full-day entry blocking this date
+  for (const entry of otherEntries) {
+    if (entry.isFullDay) {
+      return `An diesem Tag ist bereits ein ganztägiger Eintrag (${getEntryTypeLabel(entry.entryType)}) vorhanden`;
+    }
+  }
+  
+  // For time-based entries, require both start and end times for overlap checks
   if (!startTime || !endTime) {
-    // Allow entries without times to pass - they don't have a specific time range
-    // and thus cannot overlap with timed entries
+    // Can't check time overlaps without specific times
     return null;
   }
   
