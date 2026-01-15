@@ -458,15 +458,15 @@ export default function DocumentAppointment() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Car className={`${iconSize.md} text-primary`} />
-                  Begleitfahrt mit Kunde
+                  Fahrten für/mit Kunde
                 </CardTitle>
                 <CardDescription>
-                  Falls Sie den Kunden gefahren haben (Arzt, Einkauf, Behörde)
+                  z.B. Arztbesuch, Einkauf, Behördengang
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  <Label htmlFor="customerKilometers">Gefahrene Kilometer mit Kunde</Label>
+                  <Label htmlFor="customerKilometers">Gefahrene Kilometer</Label>
                   <div className="relative">
                     <Input
                       id="customerKilometers"
@@ -486,9 +486,6 @@ export default function DocumentAppointment() {
                       km
                     </span>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    z.B. Arztbesuch, Einkauf, Behördengang mit dem Kunden
-                  </p>
                 </div>
               </CardContent>
             </Card>
