@@ -459,7 +459,7 @@ export default function DocumentAppointment() {
             </CardContent>
           </Card>
 
-          {formData.services.length > 0 && (
+          {formData.services.some(s => s.serviceType === "Hauswirtschaft" || s.serviceType === "Alltagsbegleitung") && (
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg flex items-center gap-2">
