@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Layout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -77,17 +77,38 @@ function formatMinutesToHours(minutes: number): string {
 export default function MyTimes() {
   const { toast } = useToast();
   const { user } = useAuth();
-  const today = new Date();
+  // Stable reference for today's date string (doesn't change during session)
+  const todayStr = useMemo(() => formatDateString(new Date()), []);
+  const today = useMemo(() => new Date(), []);
   const [selectedYear, setSelectedYear] = useState(today.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(today.getMonth() + 1);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [showNewEntryDialog, setShowNewEntryDialog] = useState(false);
+  
   const [newEntry, setNewEntry] = useState<CreateTimeEntryRequest>({
     entryType: "urlaub",
-    entryDate: formatDateString(today),
+    entryDate: todayStr,
     endDate: undefined,
     isFullDay: true,
+    startTime: undefined,
+    endTime: undefined,
+    notes: undefined,
   });
+  
+  // Reset new entry form when dialog opens
+  useEffect(() => {
+    if (showNewEntryDialog) {
+      setNewEntry({
+        entryType: "urlaub",
+        entryDate: selectedDate || todayStr,
+        endDate: undefined,
+        isFullDay: true,
+        startTime: undefined,
+        endTime: undefined,
+        notes: undefined,
+      });
+    }
+  }, [showNewEntryDialog, selectedDate, todayStr]);
 
   const { data: timeOverview, isLoading } = useTimeOverview(selectedYear, selectedMonth);
   const { data: vacationSummary } = useVacationSummary(selectedYear);
@@ -161,9 +182,7 @@ export default function MyTimes() {
       });
     }
     
-    const todayStr = formatDateString(today);
-    
-    // Add days from current month
+    // Add days from current month (use outer todayStr for stable reference)
     for (let day = 1; day <= daysInMonth; day++) {
       const date = new Date(selectedYear, selectedMonth - 1, day);
       const dateStr = formatDateString(date);
@@ -190,7 +209,7 @@ export default function MyTimes() {
     }
     
     return days;
-  }, [selectedYear, selectedMonth]);
+  }, [selectedYear, selectedMonth, todayStr]);
 
   const entriesByDate = useMemo(() => {
     if (!entries) return {};
@@ -389,12 +408,14 @@ export default function MyTimes() {
                       value={newEntry.entryType}
                       onValueChange={(value) => {
                         const newType = value as TimeEntryType;
-                        const supportsRange = newType === "urlaub" || newType === "krankheit";
+                        const isFullDayType = newType === "urlaub" || newType === "krankheit";
                         setNewEntry(prev => ({ 
                           ...prev, 
                           entryType: newType,
-                          endDate: supportsRange ? prev.endDate : undefined,
-                          isFullDay: supportsRange ? true : prev.isFullDay,
+                          endDate: isFullDayType ? prev.endDate : undefined,
+                          isFullDay: isFullDayType,
+                          startTime: isFullDayType ? undefined : prev.startTime,
+                          endTime: isFullDayType ? undefined : prev.endTime,
                         }));
                       }}
                     >
@@ -548,7 +569,9 @@ export default function MyTimes() {
                           setEditingEntry(prev => prev ? { 
                             ...prev, 
                             entryType: newType,
-                            isFullDay: isFullDayType ? true : prev.isFullDay,
+                            isFullDay: isFullDayType,
+                            startTime: isFullDayType ? null : prev.startTime,
+                            endTime: isFullDayType ? null : prev.endTime,
                           } : null);
                         }}
                       >
