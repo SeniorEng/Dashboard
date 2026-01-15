@@ -452,6 +452,47 @@ export default function DocumentAppointment() {
               )}
             </CardContent>
           </Card>
+
+          {formData.services.some(s => s.serviceType === "Alltagsbegleitung") && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Car className={`${iconSize.md} text-primary`} />
+                  Begleitfahrt mit Kunde
+                </CardTitle>
+                <CardDescription>
+                  Falls Sie den Kunden gefahren haben (Arzt, Einkauf, Behörde)
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  <Label htmlFor="customerKilometers">Gefahrene Kilometer mit Kunde</Label>
+                  <div className="relative">
+                    <Input
+                      id="customerKilometers"
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={formData.customerKilometers || ""}
+                      onChange={(e) => setFormData(prev => ({
+                        ...prev,
+                        customerKilometers: parseFloat(e.target.value) || 0,
+                      }))}
+                      placeholder="0"
+                      className="pr-12"
+                      data-testid="input-customer-kilometers"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
+                      km
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    z.B. Arztbesuch, Einkauf, Behördengang mit dem Kunden
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
           
           <Button 
             className={`w-full ${componentStyles.btnPrimary}`}
@@ -559,34 +600,6 @@ export default function DocumentAppointment() {
                         Min.
                       </span>
                     </div>
-                  </div>
-                )}
-                
-                {formData.services.some(s => s.serviceType === "Alltagsbegleitung") && (
-                  <div className="space-y-2">
-                    <Label htmlFor="customerKilometers">Km für/mit Kunde (optional)</Label>
-                    <div className="relative">
-                      <Input
-                        id="customerKilometers"
-                        type="number"
-                        min="0"
-                        step="0.1"
-                        value={formData.customerKilometers || ""}
-                        onChange={(e) => setFormData(prev => ({
-                          ...prev,
-                          customerKilometers: parseFloat(e.target.value) || 0,
-                        }))}
-                        placeholder="0"
-                        className="pr-12"
-                        data-testid="input-customer-kilometers"
-                      />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
-                        km
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      z.B. Arztbesuch, Einkauf, Behördengang mit dem Kunden
-                    </p>
                   </div>
                 )}
               </div>
