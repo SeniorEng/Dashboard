@@ -138,7 +138,7 @@ export default function MyTimes() {
       
       setIsCheckingConflict(true);
       try {
-        const result = await api.post<{ conflict: string | null }>("time-entries/check-conflicts", {
+        const result = await api.post<{ conflict: string | null }>("/time-entries/check-conflicts", {
           date: newEntry.entryDate,
           startTime: newEntry.startTime || null,
           endTime: newEntry.endTime || null,
@@ -183,7 +183,7 @@ export default function MyTimes() {
       
       setIsCheckingConflict(true);
       try {
-        const result = await api.post<{ conflict: string | null }>("time-entries/check-conflicts", {
+        const result = await api.post<{ conflict: string | null }>("/time-entries/check-conflicts", {
           date: editingEntry.entryDate,
           startTime: editingEntry.startTime || null,
           endTime: editingEntry.endTime || null,
