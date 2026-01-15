@@ -135,13 +135,13 @@ export default function DocumentAppointment() {
       if (abService) {
         payload.alltagsbegleitungActualDauer = abService.actualDuration;
         payload.alltagsbegleitungDetails = abService.details || null;
-        if (data.customerKilometers > 0) {
-          payload.customerKilometers = data.customerKilometers;
-        }
       }
       if (ebService) {
         payload.erstberatungActualDauer = ebService.actualDuration;
         payload.erstberatungDetails = ebService.details || null;
+      }
+      if (data.customerKilometers > 0) {
+        payload.customerKilometers = data.customerKilometers;
       }
 
       const result = await api.post(`/appointments/${id}/document`, payload);
@@ -459,7 +459,7 @@ export default function DocumentAppointment() {
             </CardContent>
           </Card>
 
-          {formData.services.some(s => s.serviceType === "Alltagsbegleitung") && (
+          {formData.services.length > 0 && (
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg flex items-center gap-2">
