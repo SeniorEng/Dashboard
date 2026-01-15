@@ -259,6 +259,34 @@ router.get("/open-tasks", async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /time-entries/check-conflicts
+ * Real-time check for time conflicts (for validation while typing)
+ */
+router.post("/check-conflicts", async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const { date, startTime, endTime, isFullDay, excludeEntryId } = req.body;
+    
+    if (!date || typeof date !== "string") {
+      return res.status(400).json({ error: "Datum erforderlich" });
+    }
+    
+    const conflict = await checkTimeConflicts(
+      userId,
+      date,
+      startTime || null,
+      endTime || null,
+      isFullDay ?? false,
+      excludeEntryId
+    );
+    
+    res.json({ conflict });
+  } catch (error) {
+    handleRouteError(res, error, "Konfliktprüfung fehlgeschlagen");
+  }
+});
+
+/**
  * GET /time-entries/:id
  * Get a specific time entry
  */

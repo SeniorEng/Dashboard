@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { Layout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { useQuery } from "@tanstack/react-query";
 import { useTimeOverview, useVacationSummary, useCreateTimeEntry, useDeleteTimeEntry, useUpdateTimeEntry } from "@/features/time-tracking";
+import { api } from "@/lib/api/client";
 import {
   Calendar,
   Plus,
@@ -90,6 +91,127 @@ export default function MyTimes() {
     isFullDay: boolean;
     notes?: string | null;
   } | null>(null);
+  
+  // Real-time validation state
+  const [newEntryConflict, setNewEntryConflict] = useState<string | null>(null);
+  const [editEntryConflict, setEditEntryConflict] = useState<string | null>(null);
+  const [isCheckingConflict, setIsCheckingConflict] = useState(false);
+  
+  // Client-side time validation (instant feedback)
+  const newEntryTimeError = useMemo(() => {
+    if (newEntry.entryType === "urlaub" || newEntry.entryType === "krankheit") return null;
+    if (!newEntry.startTime || !newEntry.endTime) return null;
+    if (newEntry.endTime <= newEntry.startTime) {
+      return "Die Endzeit muss nach der Startzeit liegen";
+    }
+    return null;
+  }, [newEntry.startTime, newEntry.endTime, newEntry.entryType]);
+  
+  const editEntryTimeError = useMemo(() => {
+    if (!editingEntry) return null;
+    if (editingEntry.entryType === "urlaub" || editingEntry.entryType === "krankheit") return null;
+    if (editingEntry.isFullDay) return null;
+    if (!editingEntry.startTime || !editingEntry.endTime) return null;
+    if (editingEntry.endTime <= editingEntry.startTime) {
+      return "Die Endzeit muss nach der Startzeit liegen";
+    }
+    return null;
+  }, [editingEntry]);
+  
+  // Debounced conflict check for new entry
+  useEffect(() => {
+    if (!showNewEntryDialog) {
+      setNewEntryConflict(null);
+      return;
+    }
+    
+    // Skip if there's already a time error
+    if (newEntryTimeError) {
+      setNewEntryConflict(null);
+      return;
+    }
+    
+    const isFullDayType = newEntry.entryType === "urlaub" || newEntry.entryType === "krankheit";
+    
+    // For time-based entries, wait until we have both times
+    if (!isFullDayType && (!newEntry.startTime || !newEntry.endTime)) {
+      setNewEntryConflict(null);
+      return;
+    }
+    
+    const timer = setTimeout(async () => {
+      if (!newEntry.entryDate) return;
+      
+      setIsCheckingConflict(true);
+      try {
+        const result = await api.post<{ conflict: string | null }>("time-entries/check-conflicts", {
+          date: newEntry.entryDate,
+          startTime: newEntry.startTime || null,
+          endTime: newEntry.endTime || null,
+          isFullDay: isFullDayType,
+        });
+        if (result.success) {
+          setNewEntryConflict(result.data.conflict);
+        } else {
+          setNewEntryConflict(null);
+        }
+      } catch {
+        setNewEntryConflict(null);
+      } finally {
+        setIsCheckingConflict(false);
+      }
+    }, 300);
+    
+    return () => clearTimeout(timer);
+  }, [showNewEntryDialog, newEntry.entryDate, newEntry.startTime, newEntry.endTime, newEntry.entryType, newEntryTimeError]);
+  
+  // Debounced conflict check for edit entry
+  useEffect(() => {
+    if (!showEditDialog || !editingEntry) {
+      setEditEntryConflict(null);
+      return;
+    }
+    
+    // Skip if there's already a time error
+    if (editEntryTimeError) {
+      setEditEntryConflict(null);
+      return;
+    }
+    
+    const isFullDayType = editingEntry.entryType === "urlaub" || editingEntry.entryType === "krankheit";
+    
+    // For time-based entries, wait until we have both times (unless full day)
+    if (!isFullDayType && !editingEntry.isFullDay && (!editingEntry.startTime || !editingEntry.endTime)) {
+      setEditEntryConflict(null);
+      return;
+    }
+    
+    const timer = setTimeout(async () => {
+      if (!editingEntry.entryDate) return;
+      
+      setIsCheckingConflict(true);
+      try {
+        const result = await api.post<{ conflict: string | null }>("time-entries/check-conflicts", {
+          date: editingEntry.entryDate,
+          startTime: editingEntry.startTime || null,
+          endTime: editingEntry.endTime || null,
+          isFullDay: isFullDayType || editingEntry.isFullDay,
+          excludeEntryId: editingEntry.id,
+        });
+        if (result.success) {
+          setEditEntryConflict(result.data.conflict);
+        } else {
+          setEditEntryConflict(null);
+        }
+      } catch {
+        setEditEntryConflict(null);
+      } finally {
+        setIsCheckingConflict(false);
+      }
+    }, 300);
+    
+    return () => clearTimeout(timer);
+  }, [showEditDialog, editingEntry, editEntryTimeError]);
   
   // Fetch open tasks (missing breaks)
   const { data: openTasks } = useQuery({
@@ -447,6 +569,7 @@ export default function MyTimes() {
                             startTime: e.target.value,
                             isFullDay: false,
                           }))}
+                          className={newEntryTimeError ? "border-red-500" : ""}
                           data-testid="input-start-time"
                         />
                       </div>
@@ -457,9 +580,18 @@ export default function MyTimes() {
                           type="time"
                           value={newEntry.endTime || ""}
                           onChange={(e) => setNewEntry(prev => ({ ...prev, endTime: e.target.value }))}
+                          className={newEntryTimeError ? "border-red-500" : ""}
                           data-testid="input-end-time"
                         />
                       </div>
+                    </div>
+                  )}
+
+                  {/* Real-time validation warnings */}
+                  {(newEntryTimeError || newEntryConflict) && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2" data-testid="validation-warning-new">
+                      <AlertCircle className={`${iconSize.md} text-red-600 shrink-0 mt-0.5`} />
+                      <p className="text-sm text-red-700">{newEntryTimeError || newEntryConflict}</p>
                     </div>
                   )}
 
@@ -485,7 +617,7 @@ export default function MyTimes() {
                     <Button
                       className="bg-teal-600 hover:bg-teal-700"
                       onClick={handleCreateEntry}
-                      disabled={createMutation.isPending}
+                      disabled={createMutation.isPending || !!newEntryTimeError || !!newEntryConflict}
                       data-testid="button-save-entry"
                     >
                       {createMutation.isPending ? (
@@ -583,6 +715,7 @@ export default function MyTimes() {
                                   ...prev, 
                                   startTime: e.target.value,
                                 } : null)}
+                                className={editEntryTimeError ? "border-red-500" : ""}
                                 data-testid="edit-input-start-time"
                               />
                             </div>
@@ -593,12 +726,21 @@ export default function MyTimes() {
                                 type="time"
                                 value={editingEntry.endTime || ""}
                                 onChange={(e) => setEditingEntry(prev => prev ? { ...prev, endTime: e.target.value } : null)}
+                                className={editEntryTimeError ? "border-red-500" : ""}
                                 data-testid="edit-input-end-time"
                               />
                             </div>
                           </div>
                         )}
                       </>
+                    )}
+
+                    {/* Real-time validation warnings */}
+                    {(editEntryTimeError || editEntryConflict) && (
+                      <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2" data-testid="validation-warning-edit">
+                        <AlertCircle className={`${iconSize.md} text-red-600 shrink-0 mt-0.5`} />
+                        <p className="text-sm text-red-700">{editEntryTimeError || editEntryConflict}</p>
+                      </div>
                     )}
 
                     <div className="space-y-2">
@@ -626,7 +768,7 @@ export default function MyTimes() {
                       <Button
                         className="bg-teal-600 hover:bg-teal-700"
                         onClick={handleUpdateEntry}
-                        disabled={updateMutation.isPending}
+                        disabled={updateMutation.isPending || !!editEntryTimeError || !!editEntryConflict}
                         data-testid="edit-button-save"
                       >
                         {updateMutation.isPending ? (
