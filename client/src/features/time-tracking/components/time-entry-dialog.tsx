@@ -121,8 +121,8 @@ export function TimeEntryDialog({
           )}
 
           {!isFullDayType && (
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="space-y-2 flex-1">
+            <>
+              <div className="space-y-2">
                 <Label>Startzeit</Label>
                 <Input
                   type="time"
@@ -132,7 +132,7 @@ export function TimeEntryDialog({
                   data-testid={`${prefix}input-start-time`}
                 />
               </div>
-              <div className="space-y-2 flex-1">
+              <div className="space-y-2">
                 <Label>Endzeit</Label>
                 <Input
                   type="time"
@@ -142,7 +142,7 @@ export function TimeEntryDialog({
                   data-testid={`${prefix}input-end-time`}
                 />
               </div>
-            </div>
+            </>
           )}
 
           {(validation.timeError || validation.conflict) && (

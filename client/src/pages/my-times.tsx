@@ -480,8 +480,8 @@ export default function MyTimes() {
                   )}
 
                   {(newEntry.entryType !== "urlaub" && newEntry.entryType !== "krankheit") && (
-                    <div className="flex flex-col sm:flex-row gap-3">
-                      <div className="space-y-2 flex-1">
+                    <>
+                      <div className="space-y-2">
                         <Label htmlFor="startTime">Startzeit</Label>
                         <Input
                           id="startTime"
@@ -496,7 +496,7 @@ export default function MyTimes() {
                           data-testid="input-start-time"
                         />
                       </div>
-                      <div className="space-y-2 flex-1">
+                      <div className="space-y-2">
                         <Label htmlFor="endTime">Endzeit</Label>
                         <Input
                           id="endTime"
@@ -507,7 +507,7 @@ export default function MyTimes() {
                           data-testid="input-end-time"
                         />
                       </div>
-                    </div>
+                    </>
                   )}
 
                   {/* Real-time validation warnings */}
@@ -629,8 +629,8 @@ export default function MyTimes() {
                         </div>
 
                         {!editingEntry.isFullDay && (
-                          <div className="flex flex-col sm:flex-row gap-3">
-                            <div className="space-y-2 flex-1">
+                          <>
+                            <div className="space-y-2">
                               <Label htmlFor="edit-startTime">Startzeit</Label>
                               <Input
                                 id="edit-startTime"
@@ -644,7 +644,7 @@ export default function MyTimes() {
                                 data-testid="edit-input-start-time"
                               />
                             </div>
-                            <div className="space-y-2 flex-1">
+                            <div className="space-y-2">
                               <Label htmlFor="edit-endTime">Endzeit</Label>
                               <Input
                                 id="edit-endTime"
@@ -655,7 +655,7 @@ export default function MyTimes() {
                                 data-testid="edit-input-end-time"
                               />
                             </div>
-                          </div>
+                          </>
                         )}
                       </>
                     )}
