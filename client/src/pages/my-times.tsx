@@ -40,6 +40,7 @@ import {
 import type { TimeEntryType, CreateTimeEntryRequest, AppointmentWithCustomerName } from "@/lib/api/types";
 import { formatDateForDisplay, formatDateString, isPast } from "@shared/utils/date";
 import { iconSize } from "@/design-system";
+import { cn } from "@/lib/utils";
 
 const TIME_ENTRY_TYPE_CONFIG: Record<TimeEntryType, { label: string; icon: React.ElementType; color: string; bgColor: string }> = {
   urlaub: { label: "Urlaub", icon: Palmtree, color: "text-green-700", bgColor: "bg-green-100" },
@@ -409,13 +410,17 @@ export default function MyTimes() {
                       onValueChange={(value) => {
                         const newType = value as TimeEntryType;
                         const isFullDayType = newType === "urlaub" || newType === "krankheit";
+                        const now = new Date();
+                        const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+                        const endHour = Math.min(now.getHours() + 1, 23);
+                        const defaultEndTime = `${String(endHour).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
                         setNewEntry(prev => ({ 
                           ...prev, 
                           entryType: newType,
                           endDate: isFullDayType ? prev.endDate : undefined,
                           isFullDay: isFullDayType,
-                          startTime: isFullDayType ? undefined : prev.startTime,
-                          endTime: isFullDayType ? undefined : prev.endTime,
+                          startTime: isFullDayType ? undefined : (prev.startTime || currentTime),
+                          endTime: isFullDayType ? undefined : (prev.endTime || defaultEndTime),
                         }));
                       }}
                     >
@@ -471,7 +476,7 @@ export default function MyTimes() {
                   )}
 
                   {(newEntry.entryType !== "urlaub" && newEntry.entryType !== "krankheit") && (
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-2">
                         <Label htmlFor="startTime">Startzeit</Label>
                         <Input
@@ -483,7 +488,7 @@ export default function MyTimes() {
                             startTime: e.target.value,
                             isFullDay: false,
                           }))}
-                          className={newEntryValidation.timeError ? "border-red-500" : ""}
+                          className={cn("text-base", newEntryValidation.timeError ? "border-red-500" : "")}
                           data-testid="input-start-time"
                         />
                       </div>
@@ -494,7 +499,7 @@ export default function MyTimes() {
                           type="time"
                           value={newEntry.endTime || ""}
                           onChange={(e) => setNewEntry(prev => ({ ...prev, endTime: e.target.value }))}
-                          className={newEntryValidation.timeError ? "border-red-500" : ""}
+                          className={cn("text-base", newEntryValidation.timeError ? "border-red-500" : "")}
                           data-testid="input-end-time"
                         />
                       </div>
@@ -620,7 +625,7 @@ export default function MyTimes() {
                         </div>
 
                         {!editingEntry.isFullDay && (
-                          <div className="grid grid-cols-2 gap-4">
+                          <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-2">
                               <Label htmlFor="edit-startTime">Startzeit</Label>
                               <Input
@@ -631,7 +636,7 @@ export default function MyTimes() {
                                   ...prev, 
                                   startTime: e.target.value,
                                 } : null)}
-                                className={editEntryValidation.timeError ? "border-red-500" : ""}
+                                className={cn("text-base", editEntryValidation.timeError ? "border-red-500" : "")}
                                 data-testid="edit-input-start-time"
                               />
                             </div>
@@ -642,7 +647,7 @@ export default function MyTimes() {
                                 type="time"
                                 value={editingEntry.endTime || ""}
                                 onChange={(e) => setEditingEntry(prev => prev ? { ...prev, endTime: e.target.value } : null)}
-                                className={editEntryValidation.timeError ? "border-red-500" : ""}
+                                className={cn("text-base", editEntryValidation.timeError ? "border-red-500" : "")}
                                 data-testid="edit-input-end-time"
                               />
                             </div>
