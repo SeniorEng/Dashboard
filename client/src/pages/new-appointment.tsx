@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DatePicker } from "@/components/ui/date-picker";
 import { ChevronLeft, Loader2, Calendar, Clock, User, Home, Plus, Users } from "lucide-react";
@@ -225,6 +226,25 @@ export default function NewAppointment() {
     };
   }, [ebStartTime, ebErstberatungDauer]);
 
+  const customerOptions = useMemo(() =>
+    customers.map((c) => ({
+      value: c.id.toString(),
+      label: c.name,
+      sublabel: c.address,
+    })),
+    [customers]
+  );
+
+  const employeeOptions = useMemo(() =>
+    employees
+      .filter(e => e.isActive)
+      .map((e) => ({
+        value: e.id.toString(),
+        label: e.displayName,
+      })),
+    [employees]
+  );
+
   const isPending = createKundentermin.isPending || createErstberatung.isPending;
 
   return (
@@ -262,22 +282,16 @@ export default function NewAppointment() {
               {/* Customer Selection */}
               <div className="space-y-2">
                 <Label>Kunde auswählen</Label>
-                <Select value={ktCustomerId} onValueChange={setKtCustomerId}>
-                  <SelectTrigger data-testid="select-customer">
-                    <SelectValue placeholder="Kunde auswählen..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {customersLoading ? (
-                      <div className="p-2 text-center text-muted-foreground">Laden...</div>
-                    ) : (
-                      customers.map((c) => (
-                        <SelectItem key={c.id} value={c.id.toString()}>
-                          {c.name} - {c.address}
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={customerOptions}
+                  value={ktCustomerId}
+                  onValueChange={setKtCustomerId}
+                  placeholder="Kunde auswählen..."
+                  searchPlaceholder="Kunde suchen..."
+                  emptyText="Kein Kunde gefunden."
+                  isLoading={customersLoading}
+                  data-testid="select-customer"
+                />
                 {errors.ktCustomerId && <p className="text-destructive text-sm">{errors.ktCustomerId}</p>}
               </div>
 
@@ -287,20 +301,16 @@ export default function NewAppointment() {
                   <Label>
                     <Users className={`${iconSize.sm} inline mr-1`} /> Mitarbeiter zuweisen *
                   </Label>
-                  <Select value={ktAssignedEmployeeId} onValueChange={setKtAssignedEmployeeId}>
-                    <SelectTrigger data-testid="select-kt-employee" className={errors.ktAssignedEmployeeId ? "border-destructive" : ""}>
-                      <SelectValue placeholder="Mitarbeiter auswählen..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {employees
-                        .filter(e => e.isActive)
-                        .map((e) => (
-                          <SelectItem key={e.id} value={e.id.toString()}>
-                            {e.displayName}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchableSelect
+                    options={employeeOptions}
+                    value={ktAssignedEmployeeId}
+                    onValueChange={setKtAssignedEmployeeId}
+                    placeholder="Mitarbeiter auswählen..."
+                    searchPlaceholder="Mitarbeiter suchen..."
+                    emptyText="Kein Mitarbeiter gefunden."
+                    className={errors.ktAssignedEmployeeId ? "border-destructive" : ""}
+                    data-testid="select-kt-employee"
+                  />
                   {errors.ktAssignedEmployeeId && <p className="text-destructive text-sm">{errors.ktAssignedEmployeeId}</p>}
                   <p className="text-xs text-muted-foreground">
                     Der Mitarbeiter muss dem Kunden zugeordnet sein (Haupt- oder Vertretungsmitarbeiter)
@@ -599,20 +609,16 @@ export default function NewAppointment() {
                   <Label>
                     <Users className={`${iconSize.sm} inline mr-1`} /> Mitarbeiter zuweisen *
                   </Label>
-                  <Select value={ebAssignedEmployeeId} onValueChange={setEbAssignedEmployeeId}>
-                    <SelectTrigger data-testid="select-eb-employee" className={errors.ebAssignedEmployeeId ? "border-destructive" : ""}>
-                      <SelectValue placeholder="Mitarbeiter auswählen..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {employees
-                        .filter(e => e.isActive)
-                        .map((e) => (
-                          <SelectItem key={e.id} value={e.id.toString()}>
-                            {e.displayName}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchableSelect
+                    options={employeeOptions}
+                    value={ebAssignedEmployeeId}
+                    onValueChange={setEbAssignedEmployeeId}
+                    placeholder="Mitarbeiter auswählen..."
+                    searchPlaceholder="Mitarbeiter suchen..."
+                    emptyText="Kein Mitarbeiter gefunden."
+                    className={errors.ebAssignedEmployeeId ? "border-destructive" : ""}
+                    data-testid="select-eb-employee"
+                  />
                   {errors.ebAssignedEmployeeId && <p className="text-destructive text-sm">{errors.ebAssignedEmployeeId}</p>}
                   <p className="text-xs text-muted-foreground">
                     Der ausgewählte Mitarbeiter wird automatisch Hauptmitarbeiter für diesen neuen Kunden

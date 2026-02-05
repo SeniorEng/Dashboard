@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/patterns/page-header";
@@ -61,6 +62,14 @@ export default function AdminCustomers() {
   }, [searchQuery]);
 
   const { data: employees } = useEmployees();
+
+  const employeeFilterOptions = useMemo(() => [
+    { value: "all", label: "Alle Mitarbeiter" },
+    ...(employees?.map((emp) => ({
+      value: emp.id.toString(),
+      label: emp.displayName,
+    })) || []),
+  ], [employees]);
 
   const queryParams = useMemo(() => ({
     search: debouncedSearch || undefined,
@@ -177,22 +186,15 @@ export default function AdminCustomers() {
 
                   <div className="space-y-2">
                     <Label>Zuständiger Mitarbeiter</Label>
-                    <Select
+                    <SearchableSelect
+                      options={employeeFilterOptions}
                       value={employeeFilter || "all"}
                       onValueChange={(value) => handleFilterChange("employee", value)}
-                    >
-                      <SelectTrigger data-testid="select-employee">
-                        <SelectValue placeholder="Alle Mitarbeiter" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Alle Mitarbeiter</SelectItem>
-                        {employees?.map((emp) => (
-                          <SelectItem key={emp.id} value={emp.id.toString()}>
-                            {emp.displayName}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      placeholder="Alle Mitarbeiter"
+                      searchPlaceholder="Mitarbeiter suchen..."
+                      emptyText="Kein Mitarbeiter gefunden."
+                      data-testid="select-employee"
+                    />
                   </div>
 
                   <Button

@@ -28,6 +28,12 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
   - **iOS Safari Zoom-Prävention**: Inputs verwenden `text-base` (16px) auf Mobile, um automatisches Zoomen bei Fokus zu verhindern.
   - **Dialog Mobile-Pattern**: Dialoge auf Mobile erscheinen als Bottom-Sheet (slide-up), auf Desktop als zentriertes Modal. Dies verbessert die Bedienung bei virtueller Tastatur.
   - **Viewport**: `maximum-scale=1` verhindert ungewolltes Pinch-Zooming.
+  - **SearchableSelect**: Für lange Auswahllisten (Kunden, Mitarbeiter, Pflegekassen) wird `SearchableSelect` (`@/components/ui/searchable-select.tsx`) statt `Select` verwendet. Diese Komponente bietet:
+    - Integrierte Suchfunktion (cmdk-basiert) zum Filtern langer Listen
+    - Mobile: Drawer (Bottom-Sheet) mit scrollbarer, durchsuchbarer Liste
+    - Desktop: Popover mit scrollbarer, durchsuchbarer Liste
+    - Touch-optimierte 44px Mindestgröße, sublabel-Support für Zusatzinfos (z.B. Adresse, IK-Nummer)
+    - Kurze/statische Listen (Pflegegrad, Dauer, Status, Monat) verwenden weiterhin die normale `Select`-Komponente
 - **API Calls**: All state-changing API requests (POST, PATCH, DELETE) must use the central API client (`client/src/lib/api/client.ts`) for CSRF protection (Double-Submit Cookie Pattern). Direct `fetch()` calls for mutations will result in 403 errors.
 - **Phone Number Handling**: Uses `libphonenumber-js` via `@shared/utils/phone.ts` for validating, formatting, and storing German phone numbers in E.164 format (`+49...`).
 - **Type Organization**: Hierarchical type structure with `@shared/schema.ts` (Drizzle, Zod), `@shared/domain/*` (business logic, domain types), `@shared/utils/*` (utilities), and `@shared/types.ts` (re-exports for frontend).

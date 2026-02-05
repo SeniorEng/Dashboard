@@ -1,16 +1,10 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Layout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Loader2, User, Users, Save } from "lucide-react";
@@ -85,6 +79,14 @@ export default function AdminCustomerAssignments() {
   });
 
   const isLoading = customersLoading || employeesLoading;
+
+  const employeeOptions = useMemo(() => [
+    { value: "none", label: "Nicht zugewiesen" },
+    ...(employees?.map((emp) => ({
+      value: emp.id.toString(),
+      label: emp.displayName,
+    })) || []),
+  ], [employees]);
 
   const getEmployeeName = (id: number | null) => {
     if (!id) return null;
@@ -195,7 +197,8 @@ export default function AdminCustomerAssignments() {
                             <span className="text-sm font-medium">Hauptansprechpartner</span>
                           </div>
                           {isEditing ? (
-                            <Select
+                            <SearchableSelect
+                              options={employeeOptions}
                               value={assignment.primary?.toString() || "none"}
                               onValueChange={(value) =>
                                 setAssignments({
@@ -206,23 +209,11 @@ export default function AdminCustomerAssignments() {
                                   },
                                 })
                               }
-                            >
-                              <SelectTrigger data-testid={`select-primary-${customer.id}`}>
-                                <SelectValue placeholder="Mitarbeiter wählen" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">Nicht zugewiesen</SelectItem>
-                                {employees?.map((employee) => (
-                                  <SelectItem
-                                    key={employee.id}
-                                    value={employee.id.toString()}
-                                    disabled={assignment.backup === employee.id}
-                                  >
-                                    {employee.displayName}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              placeholder="Mitarbeiter wählen"
+                              searchPlaceholder="Mitarbeiter suchen..."
+                              emptyText="Kein Mitarbeiter gefunden."
+                              data-testid={`select-primary-${customer.id}`}
+                            />
                           ) : (
                             <p className="text-gray-700">
                               {getEmployeeName(customer.primaryEmployeeId) || (
@@ -238,7 +229,8 @@ export default function AdminCustomerAssignments() {
                             <span className="text-sm font-medium">Vertretung</span>
                           </div>
                           {isEditing ? (
-                            <Select
+                            <SearchableSelect
+                              options={employeeOptions}
                               value={assignment.backup?.toString() || "none"}
                               onValueChange={(value) =>
                                 setAssignments({
@@ -249,23 +241,11 @@ export default function AdminCustomerAssignments() {
                                   },
                                 })
                               }
-                            >
-                              <SelectTrigger data-testid={`select-backup-${customer.id}`}>
-                                <SelectValue placeholder="Vertretung wählen" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">Nicht zugewiesen</SelectItem>
-                                {employees?.map((employee) => (
-                                  <SelectItem
-                                    key={employee.id}
-                                    value={employee.id.toString()}
-                                    disabled={assignment.primary === employee.id}
-                                  >
-                                    {employee.displayName}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              placeholder="Vertretung wählen"
+                              searchPlaceholder="Mitarbeiter suchen..."
+                              emptyText="Kein Mitarbeiter gefunden."
+                              data-testid={`select-backup-${customer.id}`}
+                            />
                           ) : (
                             <p className="text-gray-700">
                               {getEmployeeName(customer.backupEmployeeId) || (

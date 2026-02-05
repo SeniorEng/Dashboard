@@ -5,13 +5,13 @@
  * contact details, and employee assignments.
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams, useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/patterns/page-header";
@@ -46,6 +46,14 @@ export default function AdminCustomerEdit() {
   const { data: customer, isLoading } = useCustomer(customerId);
   const { data: employees } = useEmployees();
   const updateMutation = useUpdateCustomer();
+
+  const employeeOptions = useMemo(() => [
+    { value: "", label: "Nicht zugewiesen" },
+    ...(employees?.map((emp) => ({
+      value: emp.id.toString(),
+      label: emp.displayName,
+    })) || []),
+  ], [employees]);
 
   const [formData, setFormData] = useState({
     vorname: "",
@@ -360,42 +368,28 @@ export default function AdminCustomerEdit() {
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label>Hauptzuständig</Label>
-                  <Select
+                  <SearchableSelect
+                    options={employeeOptions}
                     value={formData.primaryEmployeeId}
                     onValueChange={(value) => handleChange("primaryEmployeeId", value)}
-                  >
-                    <SelectTrigger data-testid="select-primary-employee">
-                      <SelectValue placeholder="Mitarbeiter auswählen" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">Nicht zugewiesen</SelectItem>
-                      {employees?.map((emp) => (
-                        <SelectItem key={emp.id} value={emp.id.toString()}>
-                          {emp.displayName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Mitarbeiter auswählen"
+                    searchPlaceholder="Mitarbeiter suchen..."
+                    emptyText="Kein Mitarbeiter gefunden."
+                    data-testid="select-primary-employee"
+                  />
                 </div>
 
                 <div className="space-y-2">
                   <Label>Vertretung</Label>
-                  <Select
+                  <SearchableSelect
+                    options={employeeOptions}
                     value={formData.backupEmployeeId}
                     onValueChange={(value) => handleChange("backupEmployeeId", value)}
-                  >
-                    <SelectTrigger data-testid="select-backup-employee">
-                      <SelectValue placeholder="Mitarbeiter auswählen" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">Nicht zugewiesen</SelectItem>
-                      {employees?.map((emp) => (
-                        <SelectItem key={emp.id} value={emp.id.toString()}>
-                          {emp.displayName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Mitarbeiter auswählen"
+                    searchPlaceholder="Mitarbeiter suchen..."
+                    emptyText="Kein Mitarbeiter gefunden."
+                    data-testid="select-backup-employee"
+                  />
                 </div>
               </CardContent>
             </Card>

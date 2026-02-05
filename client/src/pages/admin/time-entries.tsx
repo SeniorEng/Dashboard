@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -59,6 +60,14 @@ export default function AdminTimeEntries() {
   const [carryOverDays, setCarryOverDays] = useState("0");
 
   const { data: employees } = useEmployees();
+
+  const employeeFilterOptions = useMemo(() => [
+    { value: "all", label: "Alle Mitarbeiter" },
+    ...(employees?.map((emp) => ({
+      value: emp.id.toString(),
+      label: emp.displayName,
+    })) || []),
+  ], [employees]);
 
   const { data: entries, isLoading } = useQuery({
     queryKey: ["admin-time-entries", selectedYear, selectedMonth, selectedUserId, selectedEntryType],
@@ -232,19 +241,16 @@ export default function AdminTimeEntries() {
 
                 <div className="flex items-center gap-2">
                   <Label className="text-sm text-gray-500">Mitarbeiter:</Label>
-                  <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                    <SelectTrigger className="w-[180px]" data-testid="select-employee">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Alle Mitarbeiter</SelectItem>
-                      {employees?.map((emp) => (
-                        <SelectItem key={emp.id} value={emp.id.toString()}>
-                          {emp.displayName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchableSelect
+                    options={employeeFilterOptions}
+                    value={selectedUserId}
+                    onValueChange={setSelectedUserId}
+                    placeholder="Alle Mitarbeiter"
+                    searchPlaceholder="Mitarbeiter suchen..."
+                    emptyText="Kein Mitarbeiter gefunden."
+                    className="w-[180px]"
+                    data-testid="select-employee"
+                  />
                 </div>
 
                 <div className="flex items-center gap-2">

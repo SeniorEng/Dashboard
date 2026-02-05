@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -117,6 +118,23 @@ export default function AdminCustomerNew() {
   const { data: employees } = useEmployees();
   const createMutation = useCreateCustomer();
   const createProviderMutation = useCreateInsuranceProvider();
+
+  const employeeOptions = useMemo(() =>
+    employees?.map((emp) => ({
+      value: emp.id.toString(),
+      label: emp.displayName,
+    })) || [],
+    [employees]
+  );
+
+  const insuranceOptions = useMemo(() =>
+    insuranceProviders?.map((p) => ({
+      value: p.id.toString(),
+      label: p.name,
+      sublabel: `IK: ${p.ikNummer}`,
+    })) || [],
+    [insuranceProviders]
+  );
 
   const [showNewProviderForm, setShowNewProviderForm] = useState(false);
   const [phoneErrors, setPhoneErrors] = useState<Record<string, string | null>>({});
@@ -527,39 +545,27 @@ export default function AdminCustomerNew() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="primaryEmployeeId">Hauptansprechpartner</Label>
-                  <Select
+                  <SearchableSelect
+                    options={employeeOptions}
                     value={formData.primaryEmployeeId}
                     onValueChange={(value) => handleChange("primaryEmployeeId", value)}
-                  >
-                    <SelectTrigger data-testid="select-primary-employee">
-                      <SelectValue placeholder="Auswählen..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {employees?.map((emp) => (
-                        <SelectItem key={emp.id} value={emp.id.toString()}>
-                          {emp.displayName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Auswählen..."
+                    searchPlaceholder="Mitarbeiter suchen..."
+                    emptyText="Kein Mitarbeiter gefunden."
+                    data-testid="select-primary-employee"
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="backupEmployeeId">Vertretung</Label>
-                  <Select
+                  <SearchableSelect
+                    options={employeeOptions}
                     value={formData.backupEmployeeId}
                     onValueChange={(value) => handleChange("backupEmployeeId", value)}
-                  >
-                    <SelectTrigger data-testid="select-backup-employee">
-                      <SelectValue placeholder="Auswählen..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {employees?.map((emp) => (
-                        <SelectItem key={emp.id} value={emp.id.toString()}>
-                          {emp.displayName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Auswählen..."
+                    searchPlaceholder="Mitarbeiter suchen..."
+                    emptyText="Kein Mitarbeiter gefunden."
+                    data-testid="select-backup-employee"
+                  />
                 </div>
               </div>
             </div>
@@ -574,21 +580,16 @@ export default function AdminCustomerNew() {
                 <div className="space-y-2">
                   <Label htmlFor="insuranceProviderId">Pflegekasse</Label>
                   <div className="flex gap-2">
-                    <Select
+                    <SearchableSelect
+                      options={insuranceOptions}
                       value={formData.insuranceProviderId}
                       onValueChange={(value) => handleChange("insuranceProviderId", value)}
-                    >
-                      <SelectTrigger data-testid="select-insurance-provider" className="flex-1">
-                        <SelectValue placeholder="Pflegekasse auswählen..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {insuranceProviders?.map((provider) => (
-                          <SelectItem key={provider.id} value={provider.id.toString()}>
-                            {provider.name} (IK: {provider.ikNummer})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      placeholder="Pflegekasse auswählen..."
+                      searchPlaceholder="Pflegekasse suchen..."
+                      emptyText="Keine Pflegekasse gefunden."
+                      className="flex-1"
+                      data-testid="select-insurance-provider"
+                    />
                     <Button
                       type="button"
                       variant="outline"
