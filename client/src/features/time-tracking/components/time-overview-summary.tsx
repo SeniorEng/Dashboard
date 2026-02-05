@@ -16,6 +16,11 @@ interface TimeOverview {
   };
   timeEntries?: {
     pauseMinutes?: number;
+    bueroarbeitMinutes?: number;
+    vertriebMinutes?: number;
+    schulungMinutes?: number;
+    besprechungMinutes?: number;
+    sonstigesMinutes?: number;
   };
 }
 
@@ -38,7 +43,13 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
   const ab = timeOverview?.serviceHours?.alltagsbegleitungMinutes || 0;
   const eb = timeOverview?.serviceHours?.erstberatungMinutes || 0;
   const travel = timeOverview?.travel?.totalMinutes || 0;
-  const totalServiceMinutes = hw + ab + eb + travel;
+  const sonstigesMinutes =
+    (timeOverview?.timeEntries?.bueroarbeitMinutes || 0) +
+    (timeOverview?.timeEntries?.vertriebMinutes || 0) +
+    (timeOverview?.timeEntries?.schulungMinutes || 0) +
+    (timeOverview?.timeEntries?.besprechungMinutes || 0) +
+    (timeOverview?.timeEntries?.sonstigesMinutes || 0);
+  const totalServiceMinutes = hw + ab + eb + travel + sonstigesMinutes;
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
@@ -55,6 +66,7 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
             <SummaryRow label="Alltagsbegleitung" value={formatMinutesToHours(ab)} color="text-blue-700" testId="text-alltagsbegleitung-hours" />
             <SummaryRow label="Erstberatung" value={formatMinutesToHours(eb)} color="text-purple-700" testId="text-erstberatung-hours" />
             <SummaryRow label="Anfahrt" value={formatMinutesToHours(travel)} color="text-amber-700" testId="text-travel-time-hours" />
+            <SummaryRow label="Sonstiges" value={formatMinutesToHours(sonstigesMinutes)} color="text-gray-700" testId="text-sonstiges-hours" />
             <div className="border-t pt-2 mt-2 flex justify-between items-center">
               <span className="text-sm font-medium text-gray-700">Gesamt</span>
               <span className="font-bold text-gray-900" data-testid="text-total-service-hours">
