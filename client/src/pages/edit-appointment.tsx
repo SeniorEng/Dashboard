@@ -247,6 +247,7 @@ export default function EditAppointment() {
               <DatePicker
                 value={date || null}
                 onChange={(val) => setDate(val || "")}
+                disableWeekends
                 data-testid="input-date"
               />
             </div>

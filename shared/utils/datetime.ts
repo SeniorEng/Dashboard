@@ -263,6 +263,14 @@ export function getWeekdayName(date: Date | string, style: "short" | "long" = "s
 }
 
 /**
+ * Prüft ob ein Datum auf ein Wochenende (Samstag oder Sonntag) fällt
+ */
+export function isWeekend(date: Date | string): boolean {
+  const index = getWeekdayIndex(date);
+  return index >= 5;
+}
+
+/**
  * Prüft ob zwei Datums-Strings den gleichen Tag repräsentieren
  */
 export function isSameDay(date1: string | Date, date2: string | Date): boolean {

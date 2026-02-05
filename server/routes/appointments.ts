@@ -9,7 +9,7 @@ import {
 } from "@shared/schema";
 import { appointmentService } from "../services/appointments";
 import { suggestTravelOrigin, validateServiceDocumentation } from "@shared/domain/appointments";
-import { formatTimeHHMMSS } from "@shared/utils/datetime";
+import { formatTimeHHMMSS, isWeekend } from "@shared/utils/datetime";
 import { 
   ErrorMessages, 
   handleRouteError, 
@@ -106,6 +106,10 @@ router.post("/kundentermin", async (req, res) => {
     const validatedData = insertKundenterminSchema.parse(req.body);
     const user = req.user!;
     
+    if (isWeekend(validatedData.date)) {
+      return sendBadRequest(res, "Termine können nicht an Samstagen oder Sonntagen erstellt werden.");
+    }
+    
     // Determine assigned employee
     let assignedEmployeeId: number;
     if (user.isAdmin) {
@@ -175,6 +179,10 @@ router.post("/erstberatung", async (req, res) => {
   try {
     const validatedData = insertErstberatungSchema.parse(req.body);
     const user = req.user!;
+    
+    if (isWeekend(validatedData.date)) {
+      return sendBadRequest(res, "Termine können nicht an Samstagen oder Sonntagen erstellt werden.");
+    }
     
     // Determine assigned employee
     let assignedEmployeeId: number;
@@ -254,6 +262,10 @@ router.patch("/:id", async (req, res) => {
     }
     
     const validatedData = updateAppointmentSchema.parse(req.body);
+    
+    if (validatedData.date && isWeekend(validatedData.date)) {
+      return sendBadRequest(res, "Termine können nicht auf Samstage oder Sonntage verschoben werden.");
+    }
     
     const validation = appointmentService.validateAllUpdateRules(existingAppointment, validatedData);
     if (!validation.valid) {

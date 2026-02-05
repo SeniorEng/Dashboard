@@ -22,6 +22,7 @@ export interface DatePickerProps {
   clearable?: boolean
   minDate?: Date
   maxDate?: Date
+  disableWeekends?: boolean
   className?: string
   "data-testid"?: string
 }
@@ -34,6 +35,7 @@ export function DatePicker({
   clearable = true,
   minDate,
   maxDate,
+  disableWeekends = false,
   className,
   "data-testid": testId,
 }: DatePickerProps) {
@@ -113,6 +115,10 @@ export function DatePicker({
           disabled={(date) => {
             if (minDate && date < minDate) return true
             if (maxDate && date > maxDate) return true
+            if (disableWeekends) {
+              const day = date.getDay()
+              if (day === 0 || day === 6) return true
+            }
             return false
           }}
           locale={de}

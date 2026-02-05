@@ -317,6 +317,7 @@ export default function NewAppointment() {
                   <DatePicker
                     value={ktDate || null}
                     onChange={(val) => setKtDate(val || "")}
+                    disableWeekends
                     data-testid="input-kt-date"
                   />
                 </div>
@@ -628,6 +629,7 @@ export default function NewAppointment() {
                   <DatePicker
                     value={ebDate || null}
                     onChange={(val) => setEbDate(val || "")}
+                    disableWeekends
                     data-testid="input-eb-date"
                   />
                 </div>

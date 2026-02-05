@@ -86,6 +86,7 @@ export function TimeEntryDialog({
                 <DatePicker
                   value={formState.entryDate || null}
                   onChange={(val) => onFieldChange("entryDate", val || "")}
+                  disableWeekends
                   data-testid={`${prefix}input-entry-date`}
                 />
               </div>
@@ -95,6 +96,7 @@ export function TimeEntryDialog({
                   value={formState.endDate || formState.entryDate || null}
                   minDate={formState.entryDate ? new Date(formState.entryDate) : undefined}
                   onChange={(val) => onFieldChange("endDate", val || undefined)}
+                  disableWeekends
                   data-testid={`${prefix}input-end-date`}
                 />
               </div>
@@ -105,6 +107,7 @@ export function TimeEntryDialog({
               <DatePicker
                 value={formState.entryDate || null}
                 onChange={(val) => onFieldChange("entryDate", val || "")}
+                disableWeekends
                 data-testid={`${prefix}input-entry-date`}
               />
             </div>

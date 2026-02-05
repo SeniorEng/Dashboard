@@ -4,7 +4,7 @@ import { handleRouteError } from "../lib/errors";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { insertTimeEntrySchema, updateTimeEntrySchema } from "@shared/schema";
 import { storage } from "../storage";
-import { timeToMinutes } from "@shared/utils/datetime";
+import { timeToMinutes, isWeekend } from "@shared/utils/datetime";
 
 const entryTypeLabels: Record<string, string> = {
   urlaub: "Urlaub",
@@ -381,10 +381,23 @@ router.post("/", async (req: Request, res: Response) => {
         return res.status(400).json({ error: "Enddatum muss nach Startdatum liegen" });
       }
       
-      // Check conflicts for all days first
-      const currentDate = new Date(startDate);
-      while (currentDate <= end) {
-        const dateStr = formatLocalDate(currentDate);
+      // Collect weekday dates (skip weekends)
+      const weekdayDates: string[] = [];
+      const collectDate = new Date(startDate);
+      while (collectDate <= end) {
+        const dateStr = formatLocalDate(collectDate);
+        if (!isWeekend(dateStr)) {
+          weekdayDates.push(dateStr);
+        }
+        collectDate.setDate(collectDate.getDate() + 1);
+      }
+      
+      if (weekdayDates.length === 0) {
+        return res.status(400).json({ error: "Der gewählte Zeitraum enthält nur Wochenendtage. Bitte wählen Sie einen Zeitraum mit Werktagen." });
+      }
+      
+      // Check conflicts for all weekdays first
+      for (const dateStr of weekdayDates) {
         const conflict = await checkTimeConflicts(
           userId,
           dateStr,
@@ -397,20 +410,15 @@ router.post("/", async (req: Request, res: Response) => {
             error: `Konflikt am ${dateStr.split('-').reverse().join('.')}: ${conflict}` 
           });
         }
-        currentDate.setDate(currentDate.getDate() + 1);
       }
       
       const entries = [];
-      const currentDate2 = new Date(startDate);
-      
-      while (currentDate2 <= end) {
-        const dateStr = formatLocalDate(currentDate2);
+      for (const dateStr of weekdayDates) {
         const entry = await timeTrackingStorage.createTimeEntry(userId, {
           ...validatedData,
           entryDate: dateStr,
         });
         entries.push(entry);
-        currentDate2.setDate(currentDate2.getDate() + 1);
       }
       
       // Return first entry for consistency, with count in header
@@ -419,6 +427,11 @@ router.post("/", async (req: Request, res: Response) => {
         ...entries[0],
         _multiDay: { count: entries.length, message: `${entries.length} Einträge erstellt` }
       });
+    }
+    
+    // Single day entry - block weekends
+    if (isWeekend(validatedData.entryDate)) {
+      return res.status(400).json({ error: "Zeiteinträge können nicht an Samstagen oder Sonntagen erstellt werden." });
     }
     
     // Single day entry - check for conflicts
@@ -467,6 +480,12 @@ router.put("/:id", async (req: Request, res: Response) => {
     }
     
     const validatedData = updateTimeEntrySchema.parse(req.body);
+    
+    // Block weekend dates on update
+    const dateToCheck = validatedData.entryDate ?? existing.entryDate;
+    if (isWeekend(dateToCheck)) {
+      return res.status(400).json({ error: "Zeiteinträge können nicht auf Samstage oder Sonntage gelegt werden." });
+    }
     
     // Check for time conflicts with updated values
     const newDate = validatedData.entryDate ?? existing.entryDate;
