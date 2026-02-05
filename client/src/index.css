@@ -147,4 +147,29 @@
   body {
     @apply font-sans antialiased bg-background text-foreground;
   }
+
+  input[type="time"],
+  input[type="date"],
+  input[type="datetime-local"] {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  ::-webkit-datetime-edit,
+  ::-webkit-datetime-edit-fields-wrapper {
+    padding: 0;
+    width: 100%;
+  }
+
+  ::-webkit-datetime-edit-text,
+  ::-webkit-datetime-edit-minute-field,
+  ::-webkit-datetime-edit-hour-field,
+  ::-webkit-datetime-edit-ampm-field,
+  ::-webkit-datetime-edit-meridiem-field {
+    padding: 0;
+  }
 }
