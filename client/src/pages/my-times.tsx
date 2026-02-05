@@ -411,9 +411,13 @@ export default function MyTimes() {
                         const newType = value as TimeEntryType;
                         const isFullDayType = newType === "urlaub" || newType === "krankheit";
                         const now = new Date();
-                        const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-                        const endHour = Math.min(now.getHours() + 1, 23);
-                        const defaultEndTime = `${String(endHour).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+                        const h = now.getHours();
+                        const m = now.getMinutes();
+                        const currentTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                        const endDate = new Date(now.getTime() + 60 * 60 * 1000);
+                        const defaultEndTime = endDate.getDate() !== now.getDate()
+                          ? "23:59"
+                          : `${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}`;
                         setNewEntry(prev => ({ 
                           ...prev, 
                           entryType: newType,
