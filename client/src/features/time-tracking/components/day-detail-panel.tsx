@@ -1,0 +1,226 @@
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Calendar, Plus, Car, Users, Pencil, Trash2 } from "lucide-react";
+import { iconSize } from "@/design-system";
+import { formatDateForDisplay } from "@shared/utils/date";
+import { TIME_ENTRY_TYPE_CONFIG, formatMinutesToHours, isEntryLocked } from "../constants";
+import type { TimeEntryType, AppointmentWithCustomerName } from "@/lib/api/types";
+
+export interface DayTimeEntry {
+  id: number;
+  entryType: string;
+  entryDate: string;
+  startTime: string | null;
+  endTime: string | null;
+  isFullDay: boolean;
+  notes: string | null;
+}
+
+interface DayDetailPanelProps {
+  selectedDate: string | null;
+  entries: DayTimeEntry[];
+  appointments: AppointmentWithCustomerName[];
+  onEditEntry: (entry: DayTimeEntry) => void;
+  onDeleteEntry: (id: number) => void;
+  onAddEntry: () => void;
+  isAdmin: boolean;
+  isDeleting: boolean;
+}
+
+function getAppointmentServices(appt: AppointmentWithCustomerName) {
+  const services: { name: string; minutes: number }[] = [];
+  if (appt.hauswirtschaftDauer || appt.hauswirtschaftActualDauer) {
+    services.push({ name: "HW", minutes: appt.hauswirtschaftActualDauer || appt.hauswirtschaftDauer || 0 });
+  }
+  if (appt.alltagsbegleitungDauer || appt.alltagsbegleitungActualDauer) {
+    services.push({ name: "AB", minutes: appt.alltagsbegleitungActualDauer || appt.alltagsbegleitungDauer || 0 });
+  }
+  if (appt.erstberatungDauer || appt.erstberatungActualDauer) {
+    services.push({ name: "EB", minutes: appt.erstberatungActualDauer || appt.erstberatungDauer || 0 });
+  }
+  return services;
+}
+
+function getAppointmentEndTime(appt: AppointmentWithCustomerName, services: { minutes: number }[]) {
+  if (appt.scheduledEnd) return appt.scheduledEnd.slice(0, 5);
+  const totalMinutes = services.reduce((sum, s) => sum + s.minutes, 0);
+  if (totalMinutes > 0 && appt.scheduledStart) {
+    const [hours, mins] = appt.scheduledStart.split(":").map(Number);
+    const endMinutes = hours * 60 + mins + totalMinutes;
+    const endHours = Math.floor(endMinutes / 60) % 24;
+    const endMins = endMinutes % 60;
+    return `${String(endHours).padStart(2, "0")}:${String(endMins).padStart(2, "0")}`;
+  }
+  return null;
+}
+
+export function DayDetailPanel({
+  selectedDate,
+  entries,
+  appointments,
+  onEditEntry,
+  onDeleteEntry,
+  onAddEntry,
+  isAdmin,
+  isDeleting,
+}: DayDetailPanelProps) {
+  const hasDayItems = entries.length > 0 || appointments.length > 0;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <Calendar className={iconSize.md} />
+          {selectedDate
+            ? formatDateForDisplay(selectedDate, {
+                weekday: "long",
+                day: "numeric",
+                month: "long",
+              })
+            : "Tag auswählen"
+          }
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {!selectedDate ? (
+          <p className="text-gray-500 text-sm text-center py-8">
+            Klicken Sie auf einen Tag im Kalender, um Details anzuzeigen.
+          </p>
+        ) : !hasDayItems ? (
+          <div className="text-center py-8">
+            <p className="text-gray-500 text-sm mb-4">Keine Einträge an diesem Tag.</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onAddEntry}
+              data-testid="button-add-entry-for-day"
+            >
+              <Plus className={`${iconSize.sm} mr-2`} />
+              Eintrag hinzufügen
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {appointments.map((appt) => {
+              const services = getAppointmentServices(appt);
+              const endTime = getAppointmentEndTime(appt, services);
+              return (
+                <div
+                  key={`appt-${appt.id}`}
+                  className="p-3 rounded-lg bg-teal-50 border border-teal-200"
+                  data-testid={`appointment-${appt.id}`}
+                >
+                  <div className="flex items-start gap-3">
+                    <Users className={`${iconSize.md} mt-0.5 text-teal-700`} />
+                    <div className="flex-1">
+                      <div className="font-medium text-teal-800">{appt.customerName}</div>
+                      <div className="text-sm text-gray-600">
+                        {appt.scheduledStart.slice(0, 5)}{endTime ? ` - ${endTime}` : ""} Uhr
+                      </div>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        {services.map((s, i) => (
+                          <span key={i} className="text-xs px-2 py-0.5 bg-teal-100 rounded text-teal-700">
+                            {s.name}: {formatMinutesToHours(s.minutes)}
+                          </span>
+                        ))}
+                      </div>
+                      {(appt.travelKilometers || appt.travelMinutes) && (
+                        <div className="flex items-center gap-2 mt-1 text-xs text-amber-700">
+                          <Car className={iconSize.xs} />
+                          <span>
+                            Anfahrt: {appt.travelKilometers ? `${appt.travelKilometers} km` : ""}
+                            {appt.travelKilometers && appt.travelMinutes ? " • " : ""}
+                            {appt.travelMinutes ? `${appt.travelMinutes} min` : ""}
+                          </span>
+                        </div>
+                      )}
+                      {appt.customerKilometers && appt.customerKilometers > 0 && (
+                        <div className="flex items-center gap-2 mt-1 text-xs text-teal-700">
+                          <Car className={iconSize.xs} />
+                          <span>Km für/mit Kunde: {appt.customerKilometers} km</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            {entries.map((entry) => {
+              const config = TIME_ENTRY_TYPE_CONFIG[entry.entryType as TimeEntryType];
+              const Icon = config.icon;
+              const locked = isEntryLocked(entry.entryDate, entry.entryType);
+              return (
+                <div
+                  key={entry.id}
+                  className={`p-3 rounded-lg ${config.bgColor} flex items-start justify-between`}
+                  data-testid={`time-entry-${entry.id}`}
+                >
+                  <div className="flex items-start gap-3">
+                    <Icon className={`${iconSize.md} mt-0.5 ${config.color}`} />
+                    <div>
+                      <div className={`font-medium ${config.color}`}>{config.label}</div>
+                      {entry.startTime && entry.endTime && (
+                        <div className="text-sm text-gray-600">
+                          {entry.startTime.slice(0, 5)} - {entry.endTime.slice(0, 5)}
+                        </div>
+                      )}
+                      {entry.isFullDay && (
+                        <div className="text-sm text-gray-600">Ganztägig</div>
+                      )}
+                      {entry.notes && (
+                        <div className="text-sm text-gray-600 mt-1">{entry.notes}</div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {(!locked || isAdmin) ? (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-gray-400 hover:text-teal-600"
+                          onClick={() => onEditEntry(entry)}
+                          data-testid={`button-edit-entry-${entry.id}`}
+                        >
+                          <Pencil className={iconSize.sm} />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-gray-400 hover:text-red-600"
+                          onClick={() => onDeleteEntry(entry.id)}
+                          disabled={isDeleting}
+                          data-testid={`button-delete-entry-${entry.id}`}
+                        >
+                          <Trash2 className={iconSize.sm} />
+                        </Button>
+                      </>
+                    ) : (
+                      <div
+                        className="h-8 w-8 flex items-center justify-center text-gray-300"
+                        title="Vergangene Urlaubs- und Krankheitstage können nicht geändert werden"
+                      >
+                        <Pencil className={iconSize.sm} />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full mt-2"
+              onClick={onAddEntry}
+              data-testid="button-add-another-entry"
+            >
+              <Plus className={`${iconSize.sm} mr-2`} />
+              Weiteren Eintrag hinzufügen
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

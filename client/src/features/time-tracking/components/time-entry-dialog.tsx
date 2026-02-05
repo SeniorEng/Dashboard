@@ -12,22 +12,12 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { DatePicker } from "@/components/ui/date-picker";
-import { Loader2, AlertCircle, Palmtree, Thermometer, Coffee, Briefcase, FileText } from "lucide-react";
+import { Loader2, AlertCircle } from "lucide-react";
 import { iconSize } from "@/design-system";
 import type { TimeEntryType } from "@/lib/api/types";
 import type { TimeEntryFormState } from "../hooks/use-time-entry-form";
 import type { UseTimeEntryConflictResult } from "../hooks/use-time-entry-conflict";
-
-const TIME_ENTRY_TYPE_CONFIG: Record<TimeEntryType, { label: string; icon: React.ElementType; color: string }> = {
-  urlaub: { label: "Urlaub", icon: Palmtree, color: "text-green-700" },
-  krankheit: { label: "Krankheit", icon: Thermometer, color: "text-red-700" },
-  pause: { label: "Pause", icon: Coffee, color: "text-amber-700" },
-  bueroarbeit: { label: "Büroarbeit", icon: Briefcase, color: "text-blue-700" },
-  vertrieb: { label: "Vertrieb", icon: Briefcase, color: "text-purple-700" },
-  schulung: { label: "Schulung", icon: FileText, color: "text-indigo-700" },
-  besprechung: { label: "Besprechung", icon: FileText, color: "text-teal-700" },
-  sonstiges: { label: "Sonstiges", icon: FileText, color: "text-gray-700" },
-};
+import { TIME_ENTRY_TYPE_CONFIG } from "../constants";
 
 export interface TimeEntryDialogProps {
   open: boolean;
