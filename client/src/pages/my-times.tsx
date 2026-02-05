@@ -480,8 +480,8 @@ export default function MyTimes() {
                   )}
 
                   {(newEntry.entryType !== "urlaub" && newEntry.entryType !== "krankheit") && (
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-2">
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <div className="space-y-2 flex-1">
                         <Label htmlFor="startTime">Startzeit</Label>
                         <Input
                           id="startTime"
@@ -496,7 +496,7 @@ export default function MyTimes() {
                           data-testid="input-start-time"
                         />
                       </div>
-                      <div className="space-y-2">
+                      <div className="space-y-2 flex-1">
                         <Label htmlFor="endTime">Endzeit</Label>
                         <Input
                           id="endTime"
@@ -629,8 +629,8 @@ export default function MyTimes() {
                         </div>
 
                         {!editingEntry.isFullDay && (
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="space-y-2">
+                          <div className="flex flex-col sm:flex-row gap-3">
+                            <div className="space-y-2 flex-1">
                               <Label htmlFor="edit-startTime">Startzeit</Label>
                               <Input
                                 id="edit-startTime"
@@ -644,7 +644,7 @@ export default function MyTimes() {
                                 data-testid="edit-input-start-time"
                               />
                             </div>
-                            <div className="space-y-2">
+                            <div className="space-y-2 flex-1">
                               <Label htmlFor="edit-endTime">Endzeit</Label>
                               <Input
                                 id="edit-endTime"
