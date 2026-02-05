@@ -445,7 +445,7 @@ export default function MyTimes() {
                   </div>
 
                   {(newEntry.entryType === "urlaub" || newEntry.entryType === "krankheit") ? (
-                    <div className="grid grid-cols-2 gap-4">
+                    <>
                       <div className="space-y-2">
                         <Label>Von</Label>
                         <DatePicker
@@ -467,7 +467,7 @@ export default function MyTimes() {
                           data-testid="input-end-date"
                         />
                       </div>
-                    </div>
+                    </>
                   ) : (
                     <div className="space-y-2">
                       <Label>Datum</Label>

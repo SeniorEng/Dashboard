@@ -309,7 +309,7 @@ export default function NewAppointment() {
               )}
 
               {/* Date & Time */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>
                     <Calendar className={`${iconSize.sm} inline mr-1`} /> Datum
@@ -620,7 +620,7 @@ export default function NewAppointment() {
               )}
 
               {/* Date & Time */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>
                     <Calendar className={`${iconSize.sm} inline mr-1`} /> Datum *

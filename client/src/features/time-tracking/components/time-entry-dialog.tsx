@@ -90,7 +90,7 @@ export function TimeEntryDialog({
           </div>
 
           {supportsDateRange ? (
-            <div className="grid grid-cols-2 gap-4">
+            <>
               <div className="space-y-2">
                 <Label>Von</Label>
                 <DatePicker
@@ -108,7 +108,7 @@ export function TimeEntryDialog({
                   data-testid={`${prefix}input-end-date`}
                 />
               </div>
-            </div>
+            </>
           ) : (
             <div className="space-y-2">
               <Label>Datum</Label>
