@@ -329,6 +329,7 @@ export default function NewAppointment() {
                     type="time"
                     value={ktTime}
                     onChange={(e) => setKtTime(e.target.value)}
+                    className="text-base"
                     data-testid="input-kt-time"
                   />
                 </div>
@@ -639,6 +640,7 @@ export default function NewAppointment() {
                     type="time"
                     value={ebStartTime}
                     onChange={(e) => setEbStartTime(e.target.value)}
+                    className="text-base"
                     data-testid="input-eb-start"
                   />
                 </div>

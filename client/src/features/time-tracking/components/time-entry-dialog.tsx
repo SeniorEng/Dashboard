@@ -121,14 +121,14 @@ export function TimeEntryDialog({
           )}
 
           {!isFullDayType && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Startzeit</Label>
                 <Input
                   type="time"
                   value={formState.startTime || ""}
                   onChange={(e) => onFieldChange("startTime", e.target.value)}
-                  className={validation.timeError ? "border-red-500" : ""}
+                  className={`text-base ${validation.timeError ? "border-red-500" : ""}`}
                   data-testid={`${prefix}input-start-time`}
                 />
               </div>
@@ -138,7 +138,7 @@ export function TimeEntryDialog({
                   type="time"
                   value={formState.endTime || ""}
                   onChange={(e) => onFieldChange("endTime", e.target.value)}
-                  className={validation.timeError ? "border-red-500" : ""}
+                  className={`text-base ${validation.timeError ? "border-red-500" : ""}`}
                   data-testid={`${prefix}input-end-time`}
                 />
               </div>

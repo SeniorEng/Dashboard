@@ -259,6 +259,7 @@ export default function EditAppointment() {
                 type="time"
                 value={time}
                 onChange={(e) => setTime(e.target.value)}
+                className="text-base"
                 data-testid="input-time"
               />
             </div>
@@ -381,6 +382,7 @@ export default function EditAppointment() {
                 type="time"
                 value={endTime}
                 onChange={(e) => setEndTime(e.target.value)}
+                className="text-base"
                 data-testid="input-endtime"
               />
               {errors.time && <p className="text-destructive text-sm">{errors.time}</p>}
