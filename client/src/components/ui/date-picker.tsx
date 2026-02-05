@@ -61,8 +61,9 @@ export function DatePicker({
     setOpen(false)
   }
 
-  const handleClear = (e: React.MouseEvent) => {
+  const handleClear = (e: React.SyntheticEvent) => {
     e.stopPropagation()
+    e.preventDefault()
     onChange?.(null)
   }
 
@@ -71,36 +72,41 @@ export function DatePicker({
     return format(dateValue, "d. MMMM yyyy", { locale: de })
   }, [dateValue])
 
+  const showClear = clearable && value && !disabled
+
   return (
     <Popover open={open} onOpenChange={setOpen} modal={true}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          disabled={disabled}
-          className={cn(
-            "w-full justify-start text-left font-normal min-h-[44px] px-3",
-            !value && "text-muted-foreground",
-            className
-          )}
-          data-testid={testId}
-        >
-          <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
-          <span className="flex-1 truncate">
-            {displayValue || placeholder}
-          </span>
-          {clearable && value && (
-            <button
-              type="button"
-              onClick={handleClear}
-              className="ml-2 p-1 rounded-full hover:bg-muted transition-colors shrink-0 min-w-[24px] min-h-[24px] flex items-center justify-center"
-              aria-label="Datum löschen"
-              data-testid={testId ? `${testId}-clear` : undefined}
-            >
-              <X className="h-3 w-3" />
-            </button>
-          )}
-        </Button>
-      </PopoverTrigger>
+      <div className="relative flex items-center">
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            disabled={disabled}
+            className={cn(
+              "w-full justify-start text-left font-normal min-h-[44px] px-3",
+              showClear && "pr-9",
+              !value && "text-muted-foreground",
+              className
+            )}
+            data-testid={testId}
+          >
+            <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
+            <span className="flex-1 truncate">
+              {displayValue || placeholder}
+            </span>
+          </Button>
+        </PopoverTrigger>
+        {showClear && (
+          <button
+            type="button"
+            onClick={handleClear}
+            className="absolute right-2 p-1 rounded-full hover:bg-muted transition-colors min-w-[24px] min-h-[24px] flex items-center justify-center"
+            aria-label="Datum löschen"
+            data-testid={testId ? `${testId}-clear` : undefined}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </div>
       <PopoverContent 
         className="w-auto p-0" 
         align="start"

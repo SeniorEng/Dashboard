@@ -111,6 +111,7 @@ export default function AdminCustomerNew() {
     contractPeriod: "weekly" as "weekly" | "monthly",
     hauswirtschaftRate: "38",
     alltagsbegleitungRate: "42",
+    erstberatungRate: "",
     kilometerRate: "0.35",
   });
 
