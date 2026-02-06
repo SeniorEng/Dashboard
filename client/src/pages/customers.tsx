@@ -123,7 +123,7 @@ export default function CustomersPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {sortedCustomers.map((customer) => (
             <CustomerCard key={customer.id} customer={customer} />
           ))}
