@@ -142,7 +142,7 @@ function CustomerCard({ customer }: { customer: Customer }) {
   return (
     <Link href={`/customer/${customer.id}`}>
       <Card 
-        className={componentStyles.cardHover}
+        className="hover:shadow-md transition-shadow cursor-pointer"
         data-testid={`card-customer-${customer.id}`}
       >
       <CardContent className="p-4">
