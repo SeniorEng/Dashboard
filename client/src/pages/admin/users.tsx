@@ -291,7 +291,7 @@ export default function AdminUsers() {
               <Loader2 className={`${iconSize.xl} animate-spin text-teal-600`} />
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="flex flex-col gap-3">
               {users?.map((user) => (
                 <Card key={user.id} data-testid={`card-user-${user.id}`}>
                   <CardContent className="p-0">

@@ -74,9 +74,9 @@ export const semanticSpacing = {
   cardPaddingLarge: 'p-6',     // Large card padding
   cardGap: 'space-y-4',        // Gap between card content
   
-  // List items
-  listGap: 'space-y-3',        // Gap between list items
-  listItemPadding: 'p-4',      // Padding inside list items
+  // List items (flex gap statt space-y, damit Links korrekt dargestellt werden)
+  listGap: 'flex flex-col gap-3',  // Gap between list items (Link-safe)
+  listItemPadding: 'p-4',         // Padding inside list items
   
   // Form elements
   formGap: 'space-y-4',        // Gap between form fields
@@ -276,13 +276,13 @@ export const componentStyles = {
   // Legacy (deprecated) - für Rückwärtskompatibilität
   pageHeaderLegacy: 'flex items-center justify-between mb-6',
   
-  // Cards
-  card: 'bg-white rounded-xl shadow-sm border border-gray-100',
-  cardHover: 'bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow cursor-pointer',
+  // Cards (verwende Standard-Card-Komponente, keine custom bg/border)
+  card: '',
+  cardHover: 'cursor-pointer',
   cardMuted: 'bg-white/80 backdrop-blur-sm rounded-xl shadow-sm',
   
-  // Lists
-  listContainer: 'space-y-3',
+  // Lists (flex gap statt space-y, damit Links korrekt dargestellt werden)
+  listContainer: 'flex flex-col gap-3',
   listItem: 'flex items-center justify-between p-4 rounded-xl bg-white shadow-sm',
   
   // Avatar/Icon containers (DEPRECATED - nicht für Kunden/Mitarbeiter verwenden!)

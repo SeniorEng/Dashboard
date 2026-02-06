@@ -123,7 +123,7 @@ export default function CustomersPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-3">
+        <div className="flex flex-col gap-3">
           {sortedCustomers.map((customer) => (
             <CustomerCard key={customer.id} customer={customer} />
           ))}
@@ -142,7 +142,6 @@ function CustomerCard({ customer }: { customer: Customer }) {
   return (
     <Link href={`/customer/${customer.id}`}>
       <Card 
-        className="hover:shadow-md transition-shadow cursor-pointer"
         data-testid={`card-customer-${customer.id}`}
       >
       <CardContent className="p-4">

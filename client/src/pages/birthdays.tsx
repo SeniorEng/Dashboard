@@ -123,7 +123,7 @@ export default function BirthdaysPage() {
                   </Badge>
                 </h2>
                 
-                <div className="space-y-2">
+                <div className="flex flex-col gap-3">
                   {groupBirthdays.map((birthday) => (
                     <BirthdayCard key={`${birthday.type}-${birthday.id}`} birthday={birthday} />
                   ))}
@@ -143,12 +143,12 @@ function BirthdayCard({ birthday }: { birthday: BirthdayEntry }) {
   
   const content = (
     <Card 
-      className={`overflow-hidden transition-all ${
+      className={`overflow-hidden ${
         isToday 
           ? "border-green-300 bg-green-50/50 shadow-md" 
           : isSoon 
             ? "border-amber-200 bg-amber-50/30" 
-            : "hover:shadow-sm"
+            : ""
       }`}
       data-testid={`card-birthday-${birthday.type}-${birthday.id}`}
     >

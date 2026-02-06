@@ -138,7 +138,7 @@ export default function AdminCustomerAssignments() {
               <Loader2 className={`${iconSize.xl} animate-spin text-teal-600`} />
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="flex flex-col gap-3">
               {customers?.map((customer) => {
                 const isEditing = editingCustomer === customer.id;
                 const assignment = assignments[customer.id] || {

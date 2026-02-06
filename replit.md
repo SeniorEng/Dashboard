@@ -34,6 +34,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
     - Desktop: Popover mit scrollbarer, durchsuchbarer Liste
     - Touch-optimierte 44px Mindestgröße, sublabel-Support für Zusatzinfos (z.B. Adresse, IK-Nummer)
     - Kurze/statische Listen (Pflegegrad, Dauer, Status, Monat) verwenden weiterhin die normale `Select`-Komponente
+- **Kartenlisten-Pattern**: Für Listen von Karten (Kunden, Geburtstage, Termine, Leistungsnachweise) wird einheitlich `flex flex-col gap-3` statt `space-y-*` verwendet. Grund: `space-y` nutzt `margin-top`, das bei inline-Elementen (z.B. `<a>` von Link-Wrappern) nicht wirkt. `flex gap` funktioniert unabhängig vom Display-Typ der Kinder. Keine Hover-Effekte auf Karten (mobile-first App).
 - **API Calls**: All state-changing API requests (POST, PATCH, DELETE) must use the central API client (`client/src/lib/api/client.ts`) for CSRF protection (Double-Submit Cookie Pattern). Direct `fetch()` calls for mutations will result in 403 errors.
 - **Phone Number Handling**: Uses `libphonenumber-js` via `@shared/utils/phone.ts` for validating, formatting, and storing German phone numbers in E.164 format (`+49...`).
 - **Type Organization**: Hierarchical type structure with `@shared/schema.ts` (Drizzle, Zod), `@shared/domain/*` (business logic, domain types), `@shared/utils/*` (utilities), and `@shared/types.ts` (re-exports for frontend).

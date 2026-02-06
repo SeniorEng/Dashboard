@@ -274,7 +274,7 @@ export default function ServiceRecordsPage() {
               </CardContent>
             </Card>
           ) : (
-            <div className="space-y-3">
+            <div className="flex flex-col gap-3">
               {overview.map((item) => (
                 <CustomerOverviewCard key={item.customerId} item={item} selectedYear={selectedYear} selectedMonth={selectedMonth} />
               ))}
@@ -288,7 +288,7 @@ export default function ServiceRecordsPage() {
         <>
           {/* Case 1: Record already exists - show it (check both sources for robustness) */}
           {(records && records.length > 0) || periodCheck.existingRecord ? (
-            <div className="space-y-4">
+            <div className="flex flex-col gap-3">
               {records && records.length > 0 ? (
                 records.map((record) => (
                   <ServiceRecordCard key={record.id} record={record} />
@@ -390,7 +390,7 @@ function ServiceRecordCard({ record }: ServiceRecordCardProps) {
 
   return (
     <Link href={`/service-records/${record.id}`}>
-      <Card className="hover:bg-muted/50 transition-colors cursor-pointer" data-testid={`card-record-${record.id}`}>
+      <Card data-testid={`card-record-${record.id}`}>
         <CardContent className="p-4">
           <div className="flex items-center justify-between">
             <div className="space-y-1">
@@ -446,7 +446,7 @@ function CustomerOverviewCard({ item, selectedYear, selectedMonth }: CustomerOve
   
   return (
     <Link href={href}>
-      <Card className="hover:bg-muted/50 transition-colors cursor-pointer" data-testid={`card-overview-${item.customerId}`}>
+      <Card data-testid={`card-overview-${item.customerId}`}>
         <CardContent className="p-4">
           <div className="flex items-center justify-between">
             <div className="space-y-1">

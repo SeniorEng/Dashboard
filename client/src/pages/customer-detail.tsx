@@ -214,7 +214,7 @@ export default function CustomerDetailPage() {
               <Calendar className={`${iconSize.md} text-primary`} />
               Anstehende Termine
             </h2>
-            <div className="space-y-3">
+            <div className="flex flex-col gap-3">
               {upcomingAppointments.map((apt) => (
                 <AppointmentCard key={apt.id} appointment={apt} showDate />
               ))}
@@ -227,7 +227,7 @@ export default function CustomerDetailPage() {
             <h2 className="text-lg font-semibold mb-3 text-muted-foreground">
               Letzte Termine
             </h2>
-            <div className="space-y-3 opacity-75">
+            <div className="flex flex-col gap-3 opacity-75">
               {pastAppointments.map((apt) => (
                 <AppointmentCard key={apt.id} appointment={apt} showDate />
               ))}
@@ -247,7 +247,7 @@ export default function CustomerDetailPage() {
         {/* Leistungsnachweise Link */}
         <div className="mt-6">
           <Link href={`/service-records?customerId=${customerId}`}>
-            <Card className="hover:bg-muted/50 transition-colors cursor-pointer">
+            <Card>
               <CardContent className="p-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
