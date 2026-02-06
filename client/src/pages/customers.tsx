@@ -123,7 +123,7 @@ export default function CustomersPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className={semanticSpacing.listGap}>
+        <div className="space-y-2">
           {sortedCustomers.map((customer) => (
             <CustomerCard key={customer.id} customer={customer} />
           ))}
