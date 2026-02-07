@@ -33,7 +33,7 @@ router.get("/", async (req, res) => {
     res.json(customersWithAccess);
   } catch (error) {
     console.error("Failed to fetch customers:", error);
-    res.status(500).json({ error: "Failed to fetch customers" });
+    res.status(500).json({ error: "Kunden konnten nicht geladen werden" });
   }
 });
 
@@ -42,24 +42,24 @@ router.get("/:id", async (req, res) => {
     const user = req.user!;
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
-      return res.status(400).json({ error: "Invalid customer ID" });
+      return res.status(400).json({ error: "Ungültige Kunden-ID" });
     }
     
     if (!user.isAdmin) {
       const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
       if (!assignedCustomerIds.includes(id)) {
-        return res.status(403).json({ error: "Access denied" });
+        return res.status(403).json({ error: "Zugriff verweigert" });
       }
     }
     
     const customer = await storage.getCustomer(id);
     if (!customer) {
-      return res.status(404).json({ error: "Customer not found" });
+      return res.status(404).json({ error: "Kunde nicht gefunden" });
     }
     res.json(customer);
   } catch (error) {
     console.error("Failed to fetch customer:", error);
-    res.status(500).json({ error: "Failed to fetch customer" });
+    res.status(500).json({ error: "Kunde konnte nicht geladen werden" });
   }
 });
 
@@ -77,7 +77,7 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ error: fromError(error).toString() });
     }
     console.error("Failed to create customer:", error);
-    res.status(500).json({ error: "Failed to create customer" });
+    res.status(500).json({ error: "Kunde konnte nicht erstellt werden" });
   }
 });
 

@@ -9,7 +9,6 @@ import {
   MapPin, Phone, User, Search, 
   Heart, Loader2, Users
 } from "lucide-react";
-import type { Customer } from "@shared/schema";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { ErrorState } from "@/components/patterns/error-state";
@@ -20,10 +19,8 @@ import {
   semanticSpacing 
 } from "@/design-system";
 import { useAuth } from "@/hooks/use-auth";
-
 import { formatAddress } from "@shared/utils/format";
-
-type CustomerWithAccess = Customer & { isCurrentlyAssigned?: boolean };
+import type { CustomerWithAccess } from "@/features/appointments";
 
 function getPflegegradLabel(pflegegrad: number | null): string | null {
   if (!pflegegrad) return null;
@@ -36,6 +33,7 @@ export default function CustomersPage() {
 
   const { data: customers = [], isLoading, error, refetch } = useQuery<CustomerWithAccess[]>({
     queryKey: ["customers"],
+    staleTime: 30000,
     queryFn: async () => {
       const res = await fetch("/api/customers");
       if (!res.ok) throw new Error("Kunden konnten nicht geladen werden");

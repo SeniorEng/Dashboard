@@ -21,8 +21,19 @@ import {
   sendServerError
 } from "../lib/errors";
 import { requireAuth } from "../middleware/auth";
+import type { Response } from "express";
 
 const router = Router();
+
+async function checkCustomerAccess(user: Express.User, customerId: number, res: Response): Promise<boolean> {
+  if (user.isAdmin) return true;
+  const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
+  if (!assignedCustomerIds.includes(customerId)) {
+    sendForbidden(res, "ACCESS_DENIED", "Sie haben keinen Zugriff auf diesen Termin.");
+    return false;
+  }
+  return true;
+}
 
 router.use(requireAuth);
 
@@ -296,6 +307,8 @@ router.patch("/:id", async (req, res) => {
       return sendNotFound(res, ErrorMessages.appointmentNotFound);
     }
     
+    if (!await checkCustomerAccess(req.user!, existingAppointment.customerId, res)) return;
+    
     // Check if appointment is locked by a signed service record
     const isLocked = await storage.isAppointmentLocked(id);
     if (isLocked) {
@@ -337,6 +350,8 @@ router.post("/:id/start", async (req, res) => {
       return sendNotFound(res, ErrorMessages.appointmentNotFound);
     }
     
+    if (!await checkCustomerAccess(req.user!, appointment.customerId, res)) return;
+    
     // Check if appointment is locked by a signed service record
     const isLocked = await storage.isAppointmentLocked(id);
     if (isLocked) {
@@ -370,6 +385,8 @@ router.post("/:id/end", async (req, res) => {
     if (!appointment) {
       return sendNotFound(res, ErrorMessages.appointmentNotFound);
     }
+    
+    if (!await checkCustomerAccess(req.user!, appointment.customerId, res)) return;
     
     // Check if appointment is locked by a signed service record
     const isLocked = await storage.isAppointmentLocked(id);
@@ -435,6 +452,8 @@ router.post("/:id/document", async (req, res) => {
     if (!appointment) {
       return sendNotFound(res, ErrorMessages.appointmentNotFound);
     }
+    
+    if (!await checkCustomerAccess(req.user!, appointment.customerId, res)) return;
     
     // Check if appointment is locked by a signed service record
     const isLocked = await storage.isAppointmentLocked(id);
@@ -507,6 +526,8 @@ router.delete("/:id", async (req, res) => {
     if (!appointment) {
       return sendNotFound(res, ErrorMessages.appointmentNotFound);
     }
+    
+    if (!await checkCustomerAccess(req.user!, appointment.customerId, res)) return;
     
     // Check if appointment is locked by a signed service record
     const isLocked = await storage.isAppointmentLocked(id);
