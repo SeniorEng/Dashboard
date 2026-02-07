@@ -190,14 +190,16 @@ export default function NewAppointment() {
     };
   }, [ebStartTime, ebErstberatungDauer]);
 
-  const customerOptions = useMemo(() =>
-    customers.map((c) => ({
+  const customerOptions = useMemo(() => {
+    const eligible = isAdmin
+      ? customers
+      : customers.filter((c) => c.isCurrentlyAssigned !== false);
+    return eligible.map((c) => ({
       value: c.id.toString(),
       label: c.name,
       sublabel: c.address,
-    })),
-    [customers]
-  );
+    }));
+  }, [customers, isAdmin]);
 
   const employeeOptions = useMemo(() =>
     employees

@@ -1,8 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import type { Customer } from "@shared/schema";
 
+export type CustomerWithAccess = Customer & {
+  isCurrentlyAssigned?: boolean;
+};
+
 export function useCustomerList() {
-  return useQuery<Customer[]>({
+  return useQuery<CustomerWithAccess[]>({
     queryKey: ["customers"],
     queryFn: async () => {
       const res = await fetch("/api/customers");

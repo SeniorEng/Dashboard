@@ -173,8 +173,12 @@ router.post("/kundentermin", async (req, res) => {
         );
       }
     } else {
-      // Regular employee creates appointments for themselves
       assignedEmployeeId = user.id;
+      
+      const currentCustomerIds = await storage.getCurrentlyAssignedCustomerIds(user.id);
+      if (!currentCustomerIds.includes(validatedData.customerId)) {
+        return sendForbidden(res, "NOT_ASSIGNED", "Sie sind diesem Kunden nicht mehr zugeordnet und können keine neuen Termine erstellen.");
+      }
     }
     
     const { appointmentData, scheduledEnd } = appointmentService.prepareKundenterminData({

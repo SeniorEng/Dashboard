@@ -48,6 +48,7 @@ export interface IStorage {
   createCustomer(customer: InsertCustomer): Promise<Customer>;
   deleteCustomer(id: number): Promise<boolean>;
   getAssignedCustomerIds(employeeId: number): Promise<number[]>;
+  getCurrentlyAssignedCustomerIds(employeeId: number): Promise<number[]>;
 
   // Birthday queries
   getActiveEmployeesWithBirthday(): Promise<{ id: number; displayName: string; geburtsdatum: string | null }[]>;
@@ -144,19 +145,45 @@ export class DatabaseStorage implements IStorage {
     return result.length > 0;
   }
   
-  async getAssignedCustomerIds(employeeId: number): Promise<number[]> {
-    const cached = customerIdsCache.get(employeeId);
-    if (cached !== undefined) {
-      return cached;
-    }
-    
+  async getCurrentlyAssignedCustomerIds(employeeId: number): Promise<number[]> {
     const result = await db
       .select({ id: customers.id })
       .from(customers)
       .where(
         sqlBuilder`${customers.primaryEmployeeId} = ${employeeId} OR ${customers.backupEmployeeId} = ${employeeId}`
       );
-    const ids = result.map(r => r.id);
+    return result.map(r => r.id);
+  }
+
+  async getAssignedCustomerIds(employeeId: number): Promise<number[]> {
+    const cached = customerIdsCache.get(employeeId);
+    if (cached !== undefined) {
+      return cached;
+    }
+    
+    const currentlyAssigned = await db
+      .select({ id: customers.id })
+      .from(customers)
+      .where(
+        sqlBuilder`${customers.primaryEmployeeId} = ${employeeId} OR ${customers.backupEmployeeId} = ${employeeId}`
+      );
+    
+    const fromAppointments = await db
+      .select({ customerId: appointments.customerId })
+      .from(appointments)
+      .where(
+        or(
+          eq(appointments.assignedEmployeeId, employeeId),
+          eq(appointments.performedByEmployeeId, employeeId)
+        )
+      )
+      .groupBy(appointments.customerId);
+    
+    const idSet = new Set<number>();
+    for (const r of currentlyAssigned) idSet.add(r.id);
+    for (const r of fromAppointments) idSet.add(r.customerId);
+    
+    const ids = Array.from(idSet);
     customerIdsCache.set(employeeId, ids);
     return ids;
   }

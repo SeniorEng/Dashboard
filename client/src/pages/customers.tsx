@@ -19,8 +19,11 @@ import {
   componentStyles,
   semanticSpacing 
 } from "@/design-system";
+import { useAuth } from "@/hooks/use-auth";
 
 import { formatAddress } from "@shared/utils/format";
+
+type CustomerWithAccess = Customer & { isCurrentlyAssigned?: boolean };
 
 function getPflegegradLabel(pflegegrad: number | null): string | null {
   if (!pflegegrad) return null;
@@ -29,8 +32,9 @@ function getPflegegradLabel(pflegegrad: number | null): string | null {
 
 export default function CustomersPage() {
   const [searchQuery, setSearchQuery] = useState("");
+  const { user } = useAuth();
 
-  const { data: customers = [], isLoading, error, refetch } = useQuery<Customer[]>({
+  const { data: customers = [], isLoading, error, refetch } = useQuery<CustomerWithAccess[]>({
     queryKey: ["customers"],
     queryFn: async () => {
       const res = await fetch("/api/customers");
@@ -51,7 +55,12 @@ export default function CustomersPage() {
   }, [customers, searchQuery]);
 
   const sortedCustomers = useMemo(() => {
-    return [...filteredCustomers].sort((a, b) => a.name.localeCompare(b.name, "de"));
+    return [...filteredCustomers].sort((a, b) => {
+      const aLegacy = a.isCurrentlyAssigned === false ? 1 : 0;
+      const bLegacy = b.isCurrentlyAssigned === false ? 1 : 0;
+      if (aLegacy !== bLegacy) return aLegacy - bLegacy;
+      return a.name.localeCompare(b.name, "de");
+    });
   }, [filteredCustomers]);
 
   if (isLoading) {
@@ -128,33 +137,46 @@ export default function CustomersPage() {
   );
 }
 
-function CustomerCard({ customer }: { customer: Customer }) {
+function CustomerCard({ customer }: { customer: CustomerWithAccess }) {
   const address = formatAddress(customer);
   const phone = customer.telefon ? formatPhoneForDisplay(customer.telefon) : null;
   const pflegegradLabel = getPflegegradLabel(customer.pflegegrad);
   const pflegegradColors = customer.pflegegrad ? getPflegegradColors(customer.pflegegrad) : null;
+  const isLegacy = customer.isCurrentlyAssigned === false;
 
   return (
     <Link href={`/customer/${customer.id}`}>
       <Card 
         data-testid={`card-customer-${customer.id}`}
+        className={isLegacy ? "opacity-75 border-dashed" : ""}
       >
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2 mb-2">
-              <h3 className="font-semibold text-foreground truncate" data-testid={`text-customer-name-${customer.id}`}>
+              <h3 className={`font-semibold truncate ${isLegacy ? "text-muted-foreground" : "text-foreground"}`} data-testid={`text-customer-name-${customer.id}`}>
                 {customer.name}
               </h3>
-              {pflegegradLabel && pflegegradColors && (
-                <Badge 
-                  variant="secondary" 
-                  className={`text-xs shrink-0 ${pflegegradColors.bg} ${pflegegradColors.text} ${pflegegradColors.border}`}
-                  data-testid={`badge-customer-pflegegrad-${customer.id}`}
-                >
-                  {pflegegradLabel}
-                </Badge>
-              )}
+              <div className="flex items-center gap-1.5 shrink-0">
+                {isLegacy && (
+                  <Badge 
+                    variant="outline" 
+                    className="text-xs bg-amber-50 text-amber-700 border-amber-200"
+                    data-testid={`badge-customer-legacy-${customer.id}`}
+                  >
+                    Frühere Zuordnung
+                  </Badge>
+                )}
+                {pflegegradLabel && pflegegradColors && (
+                  <Badge 
+                    variant="secondary" 
+                    className={`text-xs ${pflegegradColors.bg} ${pflegegradColors.text} ${pflegegradColors.border}`}
+                    data-testid={`badge-customer-pflegegrad-${customer.id}`}
+                  >
+                    {pflegegradLabel}
+                  </Badge>
+                )}
+              </div>
             </div>
 
             <div className="space-y-1.5 text-sm">

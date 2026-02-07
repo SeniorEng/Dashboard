@@ -18,10 +18,19 @@ router.get("/", async (req, res) => {
       return res.json(customers);
     }
     
-    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-    const customers = await storage.getCustomersByIds(assignedCustomerIds);
+    const [allCustomerIds, currentIds] = await Promise.all([
+      storage.getAssignedCustomerIds(user.id),
+      storage.getCurrentlyAssignedCustomerIds(user.id),
+    ]);
+    const customers = await storage.getCustomersByIds(allCustomerIds);
+    const currentIdSet = new Set(currentIds);
     
-    res.json(customers);
+    const customersWithAccess = customers.map(c => ({
+      ...c,
+      isCurrentlyAssigned: currentIdSet.has(c.id),
+    }));
+    
+    res.json(customersWithAccess);
   } catch (error) {
     console.error("Failed to fetch customers:", error);
     res.status(500).json({ error: "Failed to fetch customers" });
