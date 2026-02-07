@@ -244,7 +244,7 @@ export default function DocumentAppointment() {
           title: "Dokumentation abgeschlossen",
           description: "Der Termin wurde erfolgreich dokumentiert.",
         });
-        setLocation("/");
+        setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");
       },
       onError: (error: Error) => {
         toast({

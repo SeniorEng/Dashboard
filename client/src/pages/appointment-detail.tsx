@@ -48,7 +48,7 @@ export default function AppointmentDetail() {
         title: "Termin gelöscht",
         description: "Der Termin wurde erfolgreich gelöscht.",
       });
-      setLocation("/");
+      setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Der Termin konnte nicht gelöscht werden.";
       toast({
@@ -100,7 +100,7 @@ export default function AppointmentDetail() {
           variant="ghost" 
           size="sm" 
           className="pl-0 text-muted-foreground hover:text-foreground mb-4" 
-          onClick={() => setLocation("/")}
+          onClick={() => setLocation(appointment?.date ? `/?date=${appointment.date}` : "/")}
           data-testid="button-back"
         >
           <ChevronLeft className={`${iconSize.sm} mr-1`} /> Zurück
@@ -405,7 +405,7 @@ export default function AppointmentDetail() {
           <Button 
             variant="outline" 
             className="w-full"
-            onClick={() => setLocation("/")}
+            onClick={() => setLocation(appointment?.date ? `/?date=${appointment.date}` : "/")}
             data-testid="button-back-dashboard"
           >
             Zurück zur Übersicht

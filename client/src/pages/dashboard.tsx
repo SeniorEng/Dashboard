@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Link } from "wouter";
+import { Link, useSearch } from "wouter";
 import { Layout } from "@/components/layout";
 import { useAppointments, useWeekAppointmentCounts, AppointmentList } from "@/features/appointments";
 import { TaskListSection } from "@/features/tasks";
@@ -60,7 +60,16 @@ function DayButton({ dayStr, day, index, isSelected, isDayToday, appointmentCoun
 }
 
 export default function Dashboard() {
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const searchString = useSearch();
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const params = new URLSearchParams(searchString);
+    const dateParam = params.get("date");
+    if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+      const parsed = parseLocalDate(dateParam);
+      if (!isNaN(parsed.getTime())) return parsed;
+    }
+    return new Date();
+  });
   const [showTwoWeeks, setShowTwoWeeks] = useState(false);
   const dateString = format(selectedDate, "yyyy-MM-dd");
   

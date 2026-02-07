@@ -129,7 +129,7 @@ export default function NewAppointment() {
     }, {
       onSuccess: () => {
         toast({ title: "Termin erstellt", description: "Der Kundentermin wurde erfolgreich angelegt." });
-        setLocation("/");
+        setLocation(ktDate ? `/?date=${ktDate}` : "/");
       },
       onError: (error: Error) => {
         toast({ variant: "destructive", title: "Fehler", description: error.message });
@@ -165,7 +165,7 @@ export default function NewAppointment() {
     }, {
       onSuccess: () => {
         toast({ title: "Erstberatung erstellt", description: "Die Erstberatung und der neue Kunde wurden erfolgreich angelegt." });
-        setLocation("/");
+        setLocation(ebDate ? `/?date=${ebDate}` : "/");
       },
       onError: (error: Error) => {
         toast({ variant: "destructive", title: "Fehler", description: error.message });
