@@ -14,6 +14,7 @@ import {
   Home, MapPin, Car, Check, AlertCircle, X, Plus, User
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -80,6 +81,7 @@ export default function DocumentAppointment() {
   const [, params] = useRoute("/document-appointment/:id");
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const id = params?.id ? parseInt(params.id) : 0;
 
@@ -364,23 +366,25 @@ export default function DocumentAppointment() {
 
       {step === 1 ? (
         <div className="space-y-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <User className={`${iconSize.md} text-primary`} />
-                Durchgeführt von
-              </CardTitle>
-              <CardDescription>
-                Wer hat diesen Termin durchgeführt?
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <PerformedBySelector
-                value={formData.performedByEmployeeId}
-                onChange={(val) => setFormData(prev => ({ ...prev, performedByEmployeeId: val }))}
-              />
-            </CardContent>
-          </Card>
+          {isAdmin && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <User className={`${iconSize.md} text-primary`} />
+                  Durchgeführt von
+                </CardTitle>
+                <CardDescription>
+                  Wer hat diesen Termin durchgeführt?
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <PerformedBySelector
+                  value={formData.performedByEmployeeId}
+                  onChange={(val) => setFormData(prev => ({ ...prev, performedByEmployeeId: val }))}
+                />
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader className="pb-3">
