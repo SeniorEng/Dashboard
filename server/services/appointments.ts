@@ -1,6 +1,6 @@
 import { storage, type IStorage } from "../storage";
 import type { Appointment, InsertAppointment, UpdateAppointment, InsertErstberatungCustomer } from "@shared/schema";
-import { timeToMinutes, addMinutesToTime } from "@shared/utils/datetime";
+import { timeToMinutes, addMinutesToTime, addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
 import { 
   doTimesOverlap, 
   calculateTotalDuration,
@@ -262,7 +262,7 @@ export class AppointmentService {
       input.alltagsbegleitungDauer
     );
     
-    const scheduledEnd = addMinutesToTime(input.scheduledStart, totalDuration);
+    const scheduledEnd = addMinutesToTimeHHMMSS(input.scheduledStart, totalDuration);
     
     const serviceType = getServiceTypeFromDurations(
       input.hauswirtschaftDauer,
@@ -307,7 +307,7 @@ export class AppointmentService {
     const fullName = `${input.customer.vorname} ${input.customer.nachname}`;
     const fullAddress = `${input.customer.strasse} ${input.customer.nr}, ${input.customer.plz} ${input.customer.stadt}`;
     
-    const scheduledEnd = addMinutesToTime(input.scheduledStart, input.erstberatungDauer);
+    const scheduledEnd = addMinutesToTimeHHMMSS(input.scheduledStart, input.erstberatungDauer);
     
     const customerData = {
       name: fullName,

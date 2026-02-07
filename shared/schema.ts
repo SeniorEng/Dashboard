@@ -682,6 +682,8 @@ export const updateAppointmentSchema = baseAppointmentSchema.partial();
 export const documentAppointmentSchema = z.object({
   // Employee who actually performed this appointment (defaults to assignedEmployeeId if not provided)
   performedByEmployeeId: z.number().nullable().optional(),
+  // Actual start time (confirmed or adjusted by user during documentation)
+  actualStart: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Ungültiges Zeitformat (HH:MM erwartet)"),
   // Service documentation (at least one required based on what was scheduled)
   hauswirtschaftActualDauer: z.number().min(1).nullable().optional(),
   hauswirtschaftDetails: z.string().max(55, "Maximal 55 Zeichen").nullable().optional(),

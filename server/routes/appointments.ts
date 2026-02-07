@@ -10,7 +10,7 @@ import {
 import { appointmentService } from "../services/appointments";
 import { authService } from "../services/auth";
 import { suggestTravelOrigin, validateServiceDocumentation } from "@shared/domain/appointments";
-import { formatTimeHHMMSS, isWeekend } from "@shared/utils/datetime";
+import { formatTimeHHMMSS, addMinutesToTimeHHMMSS, isWeekend } from "@shared/utils/datetime";
 import { 
   ErrorMessages, 
   handleRouteError, 
@@ -437,9 +437,16 @@ router.post("/:id/document", async (req, res) => {
     
     const performedBy = validatedData.performedByEmployeeId ?? appointment.assignedEmployeeId ?? req.user?.id ?? null;
 
-    const now = formatTimeHHMMSS(new Date());
+    const actualStartTime = formatTimeHHMMSS(validatedData.actualStart);
+    const totalDurationMinutes = (validatedData.hauswirtschaftActualDauer ?? 0)
+      + (validatedData.alltagsbegleitungActualDauer ?? 0)
+      + (validatedData.erstberatungActualDauer ?? 0);
+    const actualEndTime = addMinutesToTimeHHMMSS(actualStartTime, totalDurationMinutes);
+
     const updateData: Record<string, unknown> = {
       performedByEmployeeId: performedBy,
+      actualStart: actualStartTime,
+      actualEnd: actualEndTime,
       hauswirtschaftActualDauer: validatedData.hauswirtschaftActualDauer ?? null,
       hauswirtschaftDetails: validatedData.hauswirtschaftDetails ?? null,
       alltagsbegleitungActualDauer: validatedData.alltagsbegleitungActualDauer ?? null,
@@ -454,13 +461,6 @@ router.post("/:id/document", async (req, res) => {
       notes: validatedData.notes ?? appointment.notes,
       status: "completed" as const,
     };
-
-    if (!appointment.actualStart) {
-      updateData.actualStart = appointment.scheduledStart;
-    }
-    if (!appointment.actualEnd) {
-      updateData.actualEnd = now;
-    }
     
     const hauswirtschaftMinutes = validatedData.hauswirtschaftActualDauer || 0;
     const alltagsbegleitungMinutes = validatedData.alltagsbegleitungActualDauer || 0;

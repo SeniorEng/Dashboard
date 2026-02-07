@@ -102,6 +102,25 @@ export function formatTimeHHMMSS(time: string | Date): string {
 }
 
 /**
+ * Addiert Minuten zu einer Zeit und gibt das Ergebnis als "HH:MM" zurück.
+ * Akzeptiert: "HH:MM:SS", "HH:MM"
+ */
+export function addMinutesToTime(time: string, minutes: number): string {
+  const parsed = parseLocalTime(time);
+  const totalMinutes = parsed.hours * 60 + parsed.minutes + minutes;
+  const hours = Math.floor(totalMinutes / 60) % 24;
+  const mins = totalMinutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
+}
+
+/**
+ * Addiert Minuten zu einer Zeit und gibt das Ergebnis als "HH:MM:SS" zurück.
+ */
+export function addMinutesToTimeHHMMSS(time: string, minutes: number): string {
+  return addMinutesToTime(time, minutes) + ":00";
+}
+
+/**
  * Kombiniert Datum und Zeit zu einem Date-Objekt (lokale Zeit)
  */
 export function combineDateAndTime(dateString: string, timeString: string): Date {
@@ -168,14 +187,6 @@ export function minutesToTimeDisplay(totalMinutes: number): string {
  */
 export function timeDifferenceMinutes(startTime: string | Date, endTime: string | Date): number {
   return timeToMinutes(endTime) - timeToMinutes(startTime);
-}
-
-/**
- * Addiert Minuten zu einer Zeit und gibt das Ergebnis als "HH:MM:SS" zurück
- */
-export function addMinutesToTime(timeString: string, minutesToAdd: number): string {
-  const currentMinutes = timeToMinutes(timeString);
-  return minutesToTime(currentMinutes + minutesToAdd);
 }
 
 /**

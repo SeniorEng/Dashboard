@@ -25,6 +25,7 @@ import {
   type ServiceType
 } from "@shared/types";
 import type { AppointmentWithCustomer } from "@shared/types";
+import { formatTimeHHMM, addMinutesToTime } from "@shared/utils/datetime";
 
 interface TravelSuggestion {
   suggestedOrigin: TravelOriginType;
@@ -41,6 +42,7 @@ interface ServiceFormData {
 
 interface DocumentationFormData {
   performedByEmployeeId: number | null;
+  actualStart: string;
   services: ServiceFormData[];
   travelOriginType: TravelOriginType;
   travelFromAppointmentId: number | null;
@@ -88,6 +90,7 @@ export default function DocumentAppointment() {
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState<DocumentationFormData>({
     performedByEmployeeId: null,
+    actualStart: "",
     services: [],
     travelOriginType: "home",
     travelFromAppointmentId: null,
@@ -120,9 +123,15 @@ export default function DocumentAppointment() {
   useEffect(() => {
     if (appointment) {
       const services = getServicesToDocument(appointment);
+      const prefillStart = appointment.actualStart
+        ? formatTimeHHMM(appointment.actualStart)
+        : appointment.scheduledStart
+          ? formatTimeHHMM(appointment.scheduledStart)
+          : "";
       setFormData(prev => ({
         ...prev,
         performedByEmployeeId: appointment.assignedEmployeeId ?? null,
+        actualStart: prefillStart,
         services: services.map(s => ({
           serviceType: s.serviceType,
           plannedDuration: s.plannedDuration,
@@ -148,6 +157,7 @@ export default function DocumentAppointment() {
     mutationFn: async (data: DocumentationFormData) => {
       const payload: Record<string, unknown> = {
         performedByEmployeeId: data.performedByEmployeeId,
+        actualStart: data.actualStart,
         travelOriginType: data.travelOriginType,
         travelKilometers: data.travelKilometers,
         notes: data.notes || null,
@@ -232,6 +242,13 @@ export default function DocumentAppointment() {
     }));
   }, []);
 
+  const calculatedEnd = useMemo(() => {
+    if (!formData.actualStart) return null;
+    const totalMinutes = formData.services.reduce((sum, s) => sum + (s.actualDuration || 0), 0);
+    if (totalMinutes === 0) return null;
+    return addMinutesToTime(formData.actualStart, totalMinutes);
+  }, [formData.actualStart, formData.services]);
+
   const availableServicesToAdd = useMemo(() => {
     if (appointment?.appointmentType !== "Kundentermin") return [];
     const existingTypes = formData.services.map(s => s.serviceType);
@@ -240,6 +257,15 @@ export default function DocumentAppointment() {
   }, [appointment?.appointmentType, formData.services]);
 
   const handleNext = useCallback(() => {
+    if (!formData.actualStart || !/^\d{2}:\d{2}$/.test(formData.actualStart)) {
+      toast({
+        title: "Startzeit fehlt",
+        description: "Bitte geben Sie die tatsächliche Startzeit an.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (formData.services.length === 0) {
       toast({
         title: "Kein Service vorhanden",
@@ -385,6 +411,41 @@ export default function DocumentAppointment() {
               </CardContent>
             </Card>
           )}
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Clock className={`${iconSize.md} text-primary`} />
+                Tatsächliche Startzeit
+              </CardTitle>
+              <CardDescription>
+                Wann hat der Termin tatsächlich begonnen?
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-4">
+                <div className="flex-1">
+                  <Label htmlFor="actualStart">Startzeit</Label>
+                  <Input
+                    id="actualStart"
+                    type="time"
+                    className="min-h-[44px] text-base"
+                    value={formData.actualStart}
+                    onChange={(e) => setFormData(prev => ({ ...prev, actualStart: e.target.value }))}
+                    data-testid="input-actual-start"
+                  />
+                </div>
+                {calculatedEnd && (
+                  <div className="flex-1">
+                    <Label>Berechnetes Ende</Label>
+                    <div className="min-h-[44px] flex items-center text-base text-muted-foreground bg-muted/50 rounded-md px-3">
+                      {calculatedEnd} Uhr
+                    </div>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader className="pb-3">
