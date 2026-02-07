@@ -11,10 +11,11 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Slider } from "@/components/ui/slider";
 import { 
   ChevronLeft, ChevronRight, Loader2, Clock, 
-  Home, MapPin, Car, Check, AlertCircle, X, Plus
+  Home, MapPin, Car, Check, AlertCircle, X, Plus, User
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, componentStyles } from "@/design-system";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { api, unwrapResult } from "@/lib/api/client";
 import { 
   formatDuration, 
@@ -38,6 +39,7 @@ interface ServiceFormData {
 }
 
 interface DocumentationFormData {
+  performedByEmployeeId: number | null;
   services: ServiceFormData[];
   travelOriginType: TravelOriginType;
   travelFromAppointmentId: number | null;
@@ -45,6 +47,33 @@ interface DocumentationFormData {
   travelMinutes: number;
   customerKilometers: number;
   notes: string;
+}
+
+function PerformedBySelector({ value, onChange }: { value: number | null; onChange: (val: number | null) => void }) {
+  const { data: employees = [] } = useQuery<{ id: number; displayName: string }[]>({
+    queryKey: ["active-employees"],
+    queryFn: async () => {
+      const res = await fetch("/api/appointments/active-employees", { credentials: "include" });
+      if (!res.ok) throw new Error("Fehler");
+      return res.json();
+    },
+  });
+
+  const options = employees.map(e => ({
+    value: String(e.id),
+    label: e.displayName,
+  }));
+
+  return (
+    <SearchableSelect
+      options={options}
+      value={value ? String(value) : ""}
+      onValueChange={(val) => onChange(val ? parseInt(val) : null)}
+      placeholder="Mitarbeiter auswählen"
+      searchPlaceholder="Mitarbeiter suchen..."
+      data-testid="select-performed-by"
+    />
+  );
 }
 
 export default function DocumentAppointment() {
@@ -56,6 +85,7 @@ export default function DocumentAppointment() {
 
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState<DocumentationFormData>({
+    performedByEmployeeId: null,
     services: [],
     travelOriginType: "home",
     travelFromAppointmentId: null,
@@ -90,6 +120,7 @@ export default function DocumentAppointment() {
       const services = getServicesToDocument(appointment);
       setFormData(prev => ({
         ...prev,
+        performedByEmployeeId: appointment.assignedEmployeeId ?? null,
         services: services.map(s => ({
           serviceType: s.serviceType,
           plannedDuration: s.plannedDuration,
@@ -114,6 +145,7 @@ export default function DocumentAppointment() {
   const submitMutation = useMutation({
     mutationFn: async (data: DocumentationFormData) => {
       const payload: Record<string, unknown> = {
+        performedByEmployeeId: data.performedByEmployeeId,
         travelOriginType: data.travelOriginType,
         travelKilometers: data.travelKilometers,
         notes: data.notes || null,
@@ -332,6 +364,24 @@ export default function DocumentAppointment() {
 
       {step === 1 ? (
         <div className="space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <User className={`${iconSize.md} text-primary`} />
+                Durchgeführt von
+              </CardTitle>
+              <CardDescription>
+                Wer hat diesen Termin durchgeführt?
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <PerformedBySelector
+                value={formData.performedByEmployeeId}
+                onChange={(val) => setFormData(prev => ({ ...prev, performedByEmployeeId: val }))}
+              />
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-lg flex items-center gap-2">

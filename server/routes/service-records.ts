@@ -3,6 +3,7 @@ import { storage } from "../storage";
 import { requireAuth, canAccessCustomer } from "../middleware/auth";
 import { insertServiceRecordSchema, signServiceRecordSchema } from "@shared/schema";
 import { handleRouteError } from "../lib/errors";
+import { authService } from "../services/auth";
 
 const router = Router();
 
@@ -27,6 +28,16 @@ router.get("/pending", requireAuth, async (req, res) => {
     res.json(records);
   } catch (error) {
     handleRouteError(res, error, "Ausstehende Leistungsnachweise konnten nicht geladen werden");
+  }
+});
+
+router.get("/employee-names", requireAuth, async (req, res) => {
+  try {
+    const allUsers = await authService.getAllUsers();
+    const names = allUsers.map(u => ({ id: u.id, displayName: u.displayName }));
+    res.json(names);
+  } catch (error) {
+    handleRouteError(res, error, "Mitarbeiternamen konnten nicht geladen werden");
   }
 });
 

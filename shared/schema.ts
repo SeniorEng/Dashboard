@@ -21,6 +21,7 @@ export const users = pgTable("users", {
   stadt: text("stadt"),
   geburtsdatum: date("geburtsdatum"),
   isActive: boolean("is_active").notNull().default(true),
+  deactivatedAt: timestamp("deactivated_at"),
   isAdmin: boolean("is_admin").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -527,6 +528,7 @@ export const appointments = pgTable("appointments", {
   customerId: integer("customer_id").notNull().references(() => customers.id),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
   assignedEmployeeId: integer("assigned_employee_id").references(() => users.id), // Employee assigned to this appointment
+  performedByEmployeeId: integer("performed_by_employee_id").references(() => users.id), // Employee who actually performed the appointment (set during documentation)
   appointmentType: text("appointment_type").notNull(), // "Erstberatung" | "Kundentermin"
   // Service durations in minutes (15-min increments) - for Kundentermin
   hauswirtschaftDauer: integer("hauswirtschaft_dauer"), // null if not selected
@@ -568,6 +570,7 @@ export const appointments = pgTable("appointments", {
   index("appointments_customer_id_idx").on(table.customerId),
   index("appointments_date_idx").on(table.date),
   index("appointments_assigned_employee_id_idx").on(table.assignedEmployeeId),
+  index("appointments_performed_by_employee_id_idx").on(table.performedByEmployeeId),
   index("appointments_date_customer_id_idx").on(table.date, table.customerId),
   index("appointments_status_date_idx").on(table.status, table.date),
 ]);
@@ -680,6 +683,8 @@ export const updateAppointmentSchema = baseAppointmentSchema.partial();
 
 // Schema for documenting any appointment (Kundentermin or Erstberatung)
 export const documentAppointmentSchema = z.object({
+  // Employee who actually performed this appointment (defaults to assignedEmployeeId if not provided)
+  performedByEmployeeId: z.number().nullable().optional(),
   // Service documentation (at least one required based on what was scheduled)
   hauswirtschaftActualDauer: z.number().min(1).nullable().optional(),
   hauswirtschaftDetails: z.string().max(55, "Maximal 55 Zeichen").nullable().optional(),
@@ -1085,7 +1090,7 @@ export type TimeEntryType = typeof TIME_ENTRY_TYPES[number];
 // Employee time entries table
 export const employeeTimeEntries = pgTable("employee_time_entries", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  userId: integer("user_id").notNull().references(() => users.id),
   entryType: text("entry_type").notNull(), // TimeEntryType
   entryDate: date("entry_date").notNull(),
   startTime: time("start_time"), // Optional for full-day entries like vacation
@@ -1104,7 +1109,7 @@ export const employeeTimeEntries = pgTable("employee_time_entries", {
 // Employee vacation allowance per year
 export const employeeVacationAllowance = pgTable("employee_vacation_allowance", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  userId: integer("user_id").notNull().references(() => users.id),
   year: integer("year").notNull(),
   totalDays: integer("total_days").notNull().default(30), // Standard German vacation days
   carryOverDays: integer("carry_over_days").notNull().default(0), // Days carried from previous year
@@ -1158,7 +1163,7 @@ export type ServiceRecordStatus = typeof SERVICE_RECORD_STATUSES[number];
 export const monthlyServiceRecords = pgTable("monthly_service_records", {
   id: serial("id").primaryKey(),
   customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
-  employeeId: integer("employee_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  employeeId: integer("employee_id").notNull().references(() => users.id),
   year: integer("year").notNull(),
   month: integer("month").notNull(), // 1-12
   status: text("status").notNull().default("pending"), // ServiceRecordStatus
@@ -1226,8 +1231,8 @@ export const tasks = pgTable("tasks", {
   dueDate: date("due_date"),
   priority: text("priority").notNull().default("medium"),
   status: text("status").notNull().default("open"),
-  createdByUserId: integer("created_by_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  assignedToUserId: integer("assigned_to_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdByUserId: integer("created_by_user_id").notNull().references(() => users.id),
+  assignedToUserId: integer("assigned_to_user_id").notNull().references(() => users.id),
   customerId: integer("customer_id").references(() => customers.id, { onDelete: "set null" }),
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -1260,3 +1265,27 @@ export const updateTaskSchema = z.object({
 export type Task = typeof tasks.$inferSelect;
 export type InsertTask = z.infer<typeof insertTaskSchema>;
 export type UpdateTask = z.infer<typeof updateTaskSchema>;
+
+// ============================================
+// CUSTOMER ASSIGNMENT HISTORY (ZUWEISUNGS-HISTORIE)
+// ============================================
+
+export const ASSIGNMENT_ROLES = ["primary", "backup"] as const;
+export type AssignmentRole = typeof ASSIGNMENT_ROLES[number];
+
+export const customerAssignmentHistory = pgTable("customer_assignment_history", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  employeeId: integer("employee_id").notNull().references(() => users.id),
+  role: text("role").notNull(), // "primary" | "backup"
+  validFrom: date("valid_from").notNull(),
+  validTo: date("valid_to"), // null = currently active
+  changedByUserId: integer("changed_by_user_id").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("assignment_history_customer_idx").on(table.customerId),
+  index("assignment_history_employee_idx").on(table.employeeId),
+  index("assignment_history_valid_idx").on(table.customerId, table.role, table.validFrom, table.validTo),
+]);
+
+export type CustomerAssignmentHistory = typeof customerAssignmentHistory.$inferSelect;

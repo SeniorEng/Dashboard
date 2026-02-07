@@ -231,6 +231,7 @@ export class DatabaseStorage implements IStorage {
         servicesDone: appointments.servicesDone,
         signatureData: appointments.signatureData,
         createdAt: appointments.createdAt,
+        performedByEmployeeId: appointments.performedByEmployeeId,
         customer: {
           id: customers.id,
           name: customers.name,
@@ -293,6 +294,7 @@ export class DatabaseStorage implements IStorage {
       servicesDone: row.servicesDone,
       signatureData: row.signatureData,
       createdAt: row.createdAt,
+      performedByEmployeeId: row.performedByEmployeeId,
       customer: row.customer?.id ? row.customer : null
     }));
   }
@@ -364,6 +366,7 @@ export class DatabaseStorage implements IStorage {
       servicesDone: appointments.servicesDone,
       signatureData: appointments.signatureData,
       createdAt: appointments.createdAt,
+      performedByEmployeeId: appointments.performedByEmployeeId,
       customer: {
         id: customers.id,
         name: customers.name,
@@ -439,6 +442,7 @@ export class DatabaseStorage implements IStorage {
       servicesDone: row.servicesDone,
       signatureData: row.signatureData,
       createdAt: row.createdAt,
+      performedByEmployeeId: row.performedByEmployeeId,
       customer: row.customer?.id ? row.customer : null
     }));
   }
@@ -489,6 +493,7 @@ export class DatabaseStorage implements IStorage {
       servicesDone: appointments.servicesDone,
       signatureData: appointments.signatureData,
       createdAt: appointments.createdAt,
+      performedByEmployeeId: appointments.performedByEmployeeId,
       customer: {
         id: customers.id,
         name: customers.name,
@@ -558,6 +563,7 @@ export class DatabaseStorage implements IStorage {
       servicesDone: row.servicesDone,
       signatureData: row.signatureData,
       createdAt: row.createdAt,
+      performedByEmployeeId: row.performedByEmployeeId,
       customer: row.customer?.id ? row.customer : null
     }));
 
@@ -599,6 +605,7 @@ export class DatabaseStorage implements IStorage {
         servicesDone: appointments.servicesDone,
         signatureData: appointments.signatureData,
         createdAt: appointments.createdAt,
+        performedByEmployeeId: appointments.performedByEmployeeId,
         customer: {
           id: customers.id,
           name: customers.name,
@@ -663,6 +670,7 @@ export class DatabaseStorage implements IStorage {
       servicesDone: row.servicesDone,
       signatureData: row.signatureData,
       createdAt: row.createdAt,
+      performedByEmployeeId: row.performedByEmployeeId,
       customer: row.customer?.id ? row.customer : null
     };
   }
@@ -711,6 +719,7 @@ export class DatabaseStorage implements IStorage {
         servicesDone: appointments.servicesDone,
         signatureData: appointments.signatureData,
         createdAt: appointments.createdAt,
+        performedByEmployeeId: appointments.performedByEmployeeId,
         customer: {
           id: customers.id,
           name: customers.name,
@@ -772,6 +781,7 @@ export class DatabaseStorage implements IStorage {
       servicesDone: row.servicesDone,
       signatureData: row.signatureData,
       createdAt: row.createdAt,
+      performedByEmployeeId: row.performedByEmployeeId,
       customer: row.customer?.id ? row.customer : null
     }));
   }
@@ -833,6 +843,7 @@ export class DatabaseStorage implements IStorage {
       servicesDone: appointments.servicesDone,
       signatureData: appointments.signatureData,
       createdAt: appointments.createdAt,
+      performedByEmployeeId: appointments.performedByEmployeeId,
       customer: {
         id: customers.id,
         name: customers.name,
@@ -906,6 +917,7 @@ export class DatabaseStorage implements IStorage {
       servicesDone: row.servicesDone,
       signatureData: row.signatureData,
       createdAt: row.createdAt,
+      performedByEmployeeId: row.performedByEmployeeId,
       customer: row.customer?.id ? row.customer : null,
       customerFirstName: row.customer?.vorname || null,
       customerLastName: row.customer?.nachname || null,
@@ -1047,6 +1059,7 @@ export class DatabaseStorage implements IStorage {
       servicesDone: appointments.servicesDone,
       signatureData: appointments.signatureData,
       createdAt: appointments.createdAt,
+      performedByEmployeeId: appointments.performedByEmployeeId,
       customer: customers,
     };
 
@@ -1089,6 +1102,7 @@ export class DatabaseStorage implements IStorage {
       servicesDone: row.servicesDone,
       signatureData: row.signatureData,
       createdAt: row.createdAt,
+      performedByEmployeeId: row.performedByEmployeeId,
       customer: row.customer?.id ? row.customer : null,
       customerFirstName: row.customer?.vorname || null,
       customerLastName: row.customer?.nachname || null,
@@ -1147,6 +1161,7 @@ export class DatabaseStorage implements IStorage {
       servicesDone: appointments.servicesDone,
       signatureData: appointments.signatureData,
       createdAt: appointments.createdAt,
+      performedByEmployeeId: appointments.performedByEmployeeId,
       customer: customers,
     };
 
@@ -1198,6 +1213,7 @@ export class DatabaseStorage implements IStorage {
       servicesDone: row.servicesDone,
       signatureData: row.signatureData,
       createdAt: row.createdAt,
+      performedByEmployeeId: row.performedByEmployeeId,
       customer: row.customer?.id ? row.customer : null,
       customerFirstName: row.customer?.vorname || null,
       customerLastName: row.customer?.nachname || null,
@@ -1243,6 +1259,7 @@ export class DatabaseStorage implements IStorage {
       servicesDone: appointments.servicesDone,
       signatureData: appointments.signatureData,
       createdAt: appointments.createdAt,
+      performedByEmployeeId: appointments.performedByEmployeeId,
       customer: customers,
     };
 
@@ -1295,6 +1312,7 @@ export class DatabaseStorage implements IStorage {
       servicesDone: row.servicesDone,
       signatureData: row.signatureData,
       createdAt: row.createdAt,
+      performedByEmployeeId: row.performedByEmployeeId,
       customer: row.customer?.id ? row.customer : null,
       customerFirstName: row.customer?.vorname || null,
       customerLastName: row.customer?.nachname || null,

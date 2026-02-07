@@ -459,7 +459,7 @@ router.patch("/customers/:id/assign", async (req: Request, res: Response) => {
       }
     }
 
-    const updatedCustomer = await updateCustomerAssignment(id, primaryEmployeeId, backupEmployeeId);
+    const updatedCustomer = await updateCustomerAssignment(id, primaryEmployeeId, backupEmployeeId, req.user?.id);
     
     // Invalidate birthday cache (employee assignments affect which customers appear for each user)
     birthdaysCache.invalidateAll();
@@ -473,12 +473,13 @@ router.patch("/customers/:id/assign", async (req: Request, res: Response) => {
 async function updateCustomerAssignment(
   customerId: number,
   primaryEmployeeId: number | null,
-  backupEmployeeId: number | null
+  backupEmployeeId: number | null,
+  changedByUserId?: number
 ) {
   const { neon } = await import("@neondatabase/serverless");
   const { drizzle } = await import("drizzle-orm/neon-http");
-  const { eq } = await import("drizzle-orm");
-  const { customers } = await import("@shared/schema");
+  const { eq, and, isNull } = await import("drizzle-orm");
+  const { customers, customerAssignmentHistory } = await import("@shared/schema");
   const { customerIdsCache } = await import("../services/cache");
 
   const sql = neon(process.env.DATABASE_URL!);
@@ -486,6 +487,54 @@ async function updateCustomerAssignment(
 
   const [existing] = await db.select().from(customers).where(eq(customers.id, customerId));
   
+  const today = new Date().toISOString().split("T")[0];
+
+  if (existing) {
+    if (existing.primaryEmployeeId !== primaryEmployeeId) {
+      if (existing.primaryEmployeeId) {
+        await db.update(customerAssignmentHistory)
+          .set({ validTo: today })
+          .where(and(
+            eq(customerAssignmentHistory.customerId, customerId),
+            eq(customerAssignmentHistory.employeeId, existing.primaryEmployeeId),
+            eq(customerAssignmentHistory.role, "primary"),
+            isNull(customerAssignmentHistory.validTo)
+          ));
+      }
+      if (primaryEmployeeId) {
+        await db.insert(customerAssignmentHistory).values({
+          customerId,
+          employeeId: primaryEmployeeId,
+          role: "primary",
+          validFrom: today,
+          changedByUserId: changedByUserId ?? null,
+        });
+      }
+    }
+
+    if (existing.backupEmployeeId !== backupEmployeeId) {
+      if (existing.backupEmployeeId) {
+        await db.update(customerAssignmentHistory)
+          .set({ validTo: today })
+          .where(and(
+            eq(customerAssignmentHistory.customerId, customerId),
+            eq(customerAssignmentHistory.employeeId, existing.backupEmployeeId),
+            eq(customerAssignmentHistory.role, "backup"),
+            isNull(customerAssignmentHistory.validTo)
+          ));
+      }
+      if (backupEmployeeId) {
+        await db.insert(customerAssignmentHistory).values({
+          customerId,
+          employeeId: backupEmployeeId,
+          role: "backup",
+          validFrom: today,
+          changedByUserId: changedByUserId ?? null,
+        });
+      }
+    }
+  }
+
   const [updated] = await db
     .update(customers)
     .set({ primaryEmployeeId, backupEmployeeId })

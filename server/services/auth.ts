@@ -1,12 +1,13 @@
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
-import { eq, and, lt, gt } from "drizzle-orm";
+import { eq, and, lt, gt, isNull } from "drizzle-orm";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import {
   users,
   userRoles,
   sessions,
   passwordResetTokens,
+  customerAssignmentHistory,
   type User,
   type UserWithRoles,
   type EmployeeRole,
@@ -331,13 +332,23 @@ export class AuthService {
   }
 
   async deactivateUser(id: number): Promise<boolean> {
+    const now = new Date();
+    const today = now.toISOString().split("T")[0];
+    
     const result = await db
       .update(users)
-      .set({ isActive: false, updatedAt: new Date() })
+      .set({ isActive: false, deactivatedAt: now, updatedAt: now })
       .where(eq(users.id, id))
       .returning();
 
     if (result.length > 0) {
+      await db.update(customerAssignmentHistory)
+        .set({ validTo: today })
+        .where(and(
+          eq(customerAssignmentHistory.employeeId, id),
+          isNull(customerAssignmentHistory.validTo)
+        ));
+
       await this.logoutAllSessions(id);
       return true;
     }

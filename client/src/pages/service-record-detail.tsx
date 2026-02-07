@@ -74,6 +74,18 @@ export default function ServiceRecordDetailPage() {
     enabled: !!recordId,
   });
 
+  const { data: employeeMap = {} } = useQuery<Record<number, string>>({
+    queryKey: ["employee-names-map"],
+    queryFn: async () => {
+      const res = await fetch("/api/service-records/employee-names", { credentials: "include" });
+      if (!res.ok) return {};
+      const employees: { id: number; displayName: string }[] = await res.json();
+      const map: Record<number, string> = {};
+      employees.forEach(e => { map[e.id] = e.displayName; });
+      return map;
+    },
+  });
+
   const signMutation = useMutation({
     mutationFn: async ({ signatureData, signerType }: { signatureData: string; signerType: "employee" | "customer" }) => {
       const result = await api.post<MonthlyServiceRecord>(`/service-records/${recordId}/sign`, { signatureData, signerType });
@@ -207,7 +219,7 @@ export default function ServiceRecordDetailPage() {
             ) : (
               <div className="space-y-3">
                 {appointments.map((apt) => (
-                  <AppointmentSummaryRow key={apt.id} appointment={apt} />
+                  <AppointmentSummaryRow key={apt.id} appointment={apt} employeeMap={employeeMap} />
                 ))}
               </div>
             )}
@@ -295,9 +307,10 @@ export default function ServiceRecordDetailPage() {
 
 interface AppointmentSummaryRowProps {
   appointment: AppointmentWithCustomer;
+  employeeMap: Record<number, string>;
 }
 
-function AppointmentSummaryRow({ appointment }: AppointmentSummaryRowProps) {
+function AppointmentSummaryRow({ appointment, employeeMap }: AppointmentSummaryRowProps) {
   const services: string[] = [];
   
   if (appointment.hauswirtschaftActualDauer) {
@@ -319,6 +332,11 @@ function AppointmentSummaryRow({ appointment }: AppointmentSummaryRowProps) {
     }
   }
 
+  const performerId = appointment.performedByEmployeeId;
+  const assignedId = appointment.assignedEmployeeId;
+  const showPerformer = performerId && performerId !== assignedId;
+  const performerName = performerId ? employeeMap[performerId] : null;
+
   return (
     <div className="border rounded-lg p-3 bg-muted/30" data-testid={`appointment-row-${appointment.id}`}>
       <div className="flex items-start justify-between mb-2">
@@ -331,6 +349,13 @@ function AppointmentSummaryRow({ appointment }: AppointmentSummaryRowProps) {
           {formatTimeHHMM(appointment.actualStart || appointment.scheduledStart)} - {formatTimeHHMM(appointment.actualEnd || appointment.scheduledEnd || "")}
         </div>
       </div>
+
+      {showPerformer && (
+        <div className="flex items-center gap-1.5 text-xs text-blue-700 bg-blue-50 rounded px-2 py-1 mb-2" data-testid={`performer-${appointment.id}`}>
+          <User className={iconSize.xs} />
+          <span>Durchgeführt von: {performerName || "Unbekannter Mitarbeiter"}</span>
+        </div>
+      )}
       
       <div className="space-y-1 text-sm">
         {services.map((service, index) => (

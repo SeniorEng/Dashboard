@@ -31,6 +31,7 @@ import {
   customerContractRates,
   serviceRates,
   users,
+  customerAssignmentHistory,
 } from "@shared/schema";
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
@@ -789,6 +790,50 @@ export class CustomerManagementStorage {
     const updated = result[0];
     
     if (data.primaryEmployeeId !== undefined || data.backupEmployeeId !== undefined) {
+      const today = new Date().toISOString().split("T")[0];
+
+      if (data.primaryEmployeeId !== undefined && oldCustomer.primaryEmployeeId !== data.primaryEmployeeId) {
+        if (oldCustomer.primaryEmployeeId) {
+          await db.update(customerAssignmentHistory)
+            .set({ validTo: today })
+            .where(and(
+              eq(customerAssignmentHistory.customerId, id),
+              eq(customerAssignmentHistory.employeeId, oldCustomer.primaryEmployeeId),
+              eq(customerAssignmentHistory.role, "primary"),
+              isNull(customerAssignmentHistory.validTo)
+            ));
+        }
+        if (data.primaryEmployeeId) {
+          await db.insert(customerAssignmentHistory).values({
+            customerId: id,
+            employeeId: data.primaryEmployeeId,
+            role: "primary",
+            validFrom: today,
+          });
+        }
+      }
+
+      if (data.backupEmployeeId !== undefined && oldCustomer.backupEmployeeId !== data.backupEmployeeId) {
+        if (oldCustomer.backupEmployeeId) {
+          await db.update(customerAssignmentHistory)
+            .set({ validTo: today })
+            .where(and(
+              eq(customerAssignmentHistory.customerId, id),
+              eq(customerAssignmentHistory.employeeId, oldCustomer.backupEmployeeId),
+              eq(customerAssignmentHistory.role, "backup"),
+              isNull(customerAssignmentHistory.validTo)
+            ));
+        }
+        if (data.backupEmployeeId) {
+          await db.insert(customerAssignmentHistory).values({
+            customerId: id,
+            employeeId: data.backupEmployeeId,
+            role: "backup",
+            validFrom: today,
+          });
+        }
+      }
+
       customerIdsCache.invalidateForCustomer(oldCustomer.primaryEmployeeId, oldCustomer.backupEmployeeId);
       customerIdsCache.invalidateForCustomer(updated.primaryEmployeeId, updated.backupEmployeeId);
     }

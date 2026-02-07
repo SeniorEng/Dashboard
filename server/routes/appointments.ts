@@ -8,6 +8,7 @@ import {
   documentKundenterminSchema
 } from "@shared/schema";
 import { appointmentService } from "../services/appointments";
+import { authService } from "../services/auth";
 import { suggestTravelOrigin, validateServiceDocumentation } from "@shared/domain/appointments";
 import { formatTimeHHMMSS, isWeekend } from "@shared/utils/datetime";
 import { 
@@ -24,6 +25,19 @@ import { requireAuth } from "../middleware/auth";
 const router = Router();
 
 router.use(requireAuth);
+
+router.get("/active-employees", async (_req, res) => {
+  try {
+    const employees = await authService.getActiveEmployees();
+    const safeEmployees = employees.map(({ passwordHash, ...employee }) => ({
+      id: employee.id,
+      displayName: employee.displayName,
+    }));
+    res.json(safeEmployees);
+  } catch (error) {
+    handleRouteError(res, error, "Mitarbeiter konnten nicht geladen werden", "Failed to fetch active employees");
+  }
+});
 
 router.get("/", async (req, res) => {
   try {
@@ -421,7 +435,10 @@ router.post("/:id/document", async (req, res) => {
       return sendBadRequest(res, serviceValidation.errors.join(", "));
     }
     
+    const performedBy = validatedData.performedByEmployeeId ?? appointment.assignedEmployeeId ?? req.user?.id ?? null;
+
     const updateData = {
+      performedByEmployeeId: performedBy,
       hauswirtschaftActualDauer: validatedData.hauswirtschaftActualDauer ?? null,
       hauswirtschaftDetails: validatedData.hauswirtschaftDetails ?? null,
       alltagsbegleitungActualDauer: validatedData.alltagsbegleitungActualDauer ?? null,
