@@ -86,11 +86,11 @@ export class CompensationStorage implements ICompensationStorage {
         userId,
         validFrom: newValidFrom,
         validTo: null,
-        hourlyRateHauswirtschaft: rest.hourlyRateHauswirtschaft || null,
-        hourlyRateAlltagsbegleitung: rest.hourlyRateAlltagsbegleitung || null,
+        hourlyRateHauswirtschaftCents: rest.hourlyRateHauswirtschaftCents ?? null,
+        hourlyRateAlltagsbegleitungCents: rest.hourlyRateAlltagsbegleitungCents ?? null,
         travelCostType: rest.travelCostType || null,
-        kilometerRate: rest.kilometerRate || null,
-        monthlyTravelAllowance: rest.monthlyTravelAllowance || null,
+        kilometerRateCents: rest.kilometerRateCents ?? null,
+        monthlyTravelAllowanceCents: rest.monthlyTravelAllowanceCents ?? null,
         createdByUserId,
       })
       .returning();

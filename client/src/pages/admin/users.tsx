@@ -86,11 +86,11 @@ interface UserFormData {
   isAdmin: boolean;
   roles: string[];
   compensation?: {
-    hourlyRateHauswirtschaft?: string;
-    hourlyRateAlltagsbegleitung?: string;
+    hourlyRateHauswirtschaftCents?: number;
+    hourlyRateAlltagsbegleitungCents?: number;
     travelCostType?: "kilometergeld" | "pauschale";
-    kilometerRate?: string;
-    monthlyTravelAllowance?: string;
+    kilometerRateCents?: number;
+    monthlyTravelAllowanceCents?: number;
     validFrom: string;
   };
 }
@@ -536,11 +536,11 @@ function UserForm({
     
     if (mode === "create" && hasCompensationData) {
       data.compensation = {
-        hourlyRateHauswirtschaft: hourlyRateHauswirtschaft || undefined,
-        hourlyRateAlltagsbegleitung: hourlyRateAlltagsbegleitung || undefined,
+        hourlyRateHauswirtschaftCents: hourlyRateHauswirtschaft ? Math.round(parseFloat(hourlyRateHauswirtschaft) * 100) : undefined,
+        hourlyRateAlltagsbegleitungCents: hourlyRateAlltagsbegleitung ? Math.round(parseFloat(hourlyRateAlltagsbegleitung) * 100) : undefined,
         travelCostType: travelCostType || undefined,
-        kilometerRate: travelCostType === "kilometergeld" ? kilometerRate : undefined,
-        monthlyTravelAllowance: travelCostType === "pauschale" ? monthlyTravelAllowance : undefined,
+        kilometerRateCents: travelCostType === "kilometergeld" && kilometerRate ? Math.round(parseFloat(kilometerRate) * 100) : undefined,
+        monthlyTravelAllowanceCents: travelCostType === "pauschale" && monthlyTravelAllowance ? Math.round(parseFloat(monthlyTravelAllowance) * 100) : undefined,
         validFrom: compensationValidFrom,
       };
     }
@@ -873,11 +873,11 @@ function UserForm({
 interface CompensationData {
   id: number;
   userId: number;
-  hourlyRateHauswirtschaft: string | null;
-  hourlyRateAlltagsbegleitung: string | null;
+  hourlyRateHauswirtschaftCents: number | null;
+  hourlyRateAlltagsbegleitungCents: number | null;
   travelCostType: string | null;
-  kilometerRate: string | null;
-  monthlyTravelAllowance: string | null;
+  kilometerRateCents: number | null;
+  monthlyTravelAllowanceCents: number | null;
   validFrom: string;
   validTo: string | null;
   createdAt: string;
@@ -906,11 +906,11 @@ function CompensationSection({ userId, userName }: { userId: number; userName: s
 
   const addCompensationMutation = useMutation({
     mutationFn: async (data: {
-      hourlyRateHauswirtschaft?: string;
-      hourlyRateAlltagsbegleitung?: string;
+      hourlyRateHauswirtschaftCents?: number;
+      hourlyRateAlltagsbegleitungCents?: number;
       travelCostType?: string;
-      kilometerRate?: string;
-      monthlyTravelAllowance?: string;
+      kilometerRateCents?: number;
+      monthlyTravelAllowanceCents?: number;
       validFrom: string;
     }) => {
       const result = await api.post(`/admin/users/${userId}/compensation`, data);
@@ -935,18 +935,18 @@ function CompensationSection({ userId, userName }: { userId: number; userName: s
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     addCompensationMutation.mutate({
-      hourlyRateHauswirtschaft: newHourlyRateHauswirtschaft || undefined,
-      hourlyRateAlltagsbegleitung: newHourlyRateAlltagsbegleitung || undefined,
+      hourlyRateHauswirtschaftCents: newHourlyRateHauswirtschaft ? Math.round(parseFloat(newHourlyRateHauswirtschaft) * 100) : undefined,
+      hourlyRateAlltagsbegleitungCents: newHourlyRateAlltagsbegleitung ? Math.round(parseFloat(newHourlyRateAlltagsbegleitung) * 100) : undefined,
       travelCostType: newTravelCostType || undefined,
-      kilometerRate: newTravelCostType === "kilometergeld" ? newKilometerRate : undefined,
-      monthlyTravelAllowance: newTravelCostType === "pauschale" ? newMonthlyTravelAllowance : undefined,
+      kilometerRateCents: newTravelCostType === "kilometergeld" && newKilometerRate ? Math.round(parseFloat(newKilometerRate) * 100) : undefined,
+      monthlyTravelAllowanceCents: newTravelCostType === "pauschale" && newMonthlyTravelAllowance ? Math.round(parseFloat(newMonthlyTravelAllowance) * 100) : undefined,
       validFrom: newValidFrom,
     });
   };
 
-  const formatCompensationValue = (value: string | null) => {
-    if (!value) return "-";
-    return `${parseFloat(value).toFixed(2)} €`;
+  const formatCompensationValue = (cents: number | null) => {
+    if (cents === null || cents === undefined) return "-";
+    return `${(cents / 100).toFixed(2)} €`;
   };
 
   const currentCompensation = compensationHistory?.find(c => !c.validTo);
@@ -1114,19 +1114,19 @@ function CompensationSection({ userId, userName }: { userId: number; userName: s
               <div className="grid grid-cols-3 gap-3 text-sm">
                 <div>
                   <div className="text-gray-500 text-xs">Hauswirtschaft</div>
-                  <div className="font-medium">{formatCompensationValue(currentCompensation.hourlyRateHauswirtschaft)}/h</div>
+                  <div className="font-medium">{formatCompensationValue(currentCompensation.hourlyRateHauswirtschaftCents)}/h</div>
                 </div>
                 <div>
                   <div className="text-gray-500 text-xs">Alltagsbegleitung</div>
-                  <div className="font-medium">{formatCompensationValue(currentCompensation.hourlyRateAlltagsbegleitung)}/h</div>
+                  <div className="font-medium">{formatCompensationValue(currentCompensation.hourlyRateAlltagsbegleitungCents)}/h</div>
                 </div>
                 <div>
                   <div className="text-gray-500 text-xs">Fahrtkosten</div>
                   <div className="font-medium">
                     {currentCompensation.travelCostType === "kilometergeld" 
-                      ? `${formatCompensationValue(currentCompensation.kilometerRate)}/km`
+                      ? `${formatCompensationValue(currentCompensation.kilometerRateCents)}/km`
                       : currentCompensation.travelCostType === "pauschale"
-                      ? `${formatCompensationValue(currentCompensation.monthlyTravelAllowance)}/Mo`
+                      ? `${formatCompensationValue(currentCompensation.monthlyTravelAllowanceCents)}/Mo`
                       : "-"}
                   </div>
                 </div>
@@ -1144,13 +1144,13 @@ function CompensationSection({ userId, userName }: { userId: number; userName: s
                       {formatDateDisplay(comp.validFrom)} - {formatDateDisplay(comp.validTo!)}
                     </div>
                     <div className="grid grid-cols-3 gap-1 text-xs">
-                      <span>HW: {formatCompensationValue(comp.hourlyRateHauswirtschaft)}/h</span>
-                      <span>AB: {formatCompensationValue(comp.hourlyRateAlltagsbegleitung)}/h</span>
+                      <span>HW: {formatCompensationValue(comp.hourlyRateHauswirtschaftCents)}/h</span>
+                      <span>AB: {formatCompensationValue(comp.hourlyRateAlltagsbegleitungCents)}/h</span>
                       <span>
                         {comp.travelCostType === "kilometergeld" 
-                          ? `${formatCompensationValue(comp.kilometerRate)}/km`
+                          ? `${formatCompensationValue(comp.kilometerRateCents)}/km`
                           : comp.travelCostType === "pauschale"
-                          ? `${formatCompensationValue(comp.monthlyTravelAllowance)}/Mo`
+                          ? `${formatCompensationValue(comp.monthlyTravelAllowanceCents)}/Mo`
                           : "-"}
                       </span>
                     </div>

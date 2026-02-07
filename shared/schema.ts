@@ -63,11 +63,11 @@ export type TravelCostType = typeof TRAVEL_COST_TYPES[number];
 export const employeeCompensationHistory = pgTable("employee_compensation_history", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  hourlyRateHauswirtschaft: text("hourly_rate_hauswirtschaft"), // €/Stunde as string for decimal precision
-  hourlyRateAlltagsbegleitung: text("hourly_rate_alltagsbegleitung"), // €/Stunde as string for decimal precision
+  hourlyRateHauswirtschaftCents: integer("hourly_rate_hauswirtschaft_cents"),
+  hourlyRateAlltagsbegleitungCents: integer("hourly_rate_alltagsbegleitung_cents"),
   travelCostType: text("travel_cost_type"), // "kilometergeld" | "pauschale"
-  kilometerRate: text("kilometer_rate"), // €/km if travelCostType is "kilometergeld"
-  monthlyTravelAllowance: text("monthly_travel_allowance"), // €/Monat if travelCostType is "pauschale"
+  kilometerRateCents: integer("kilometer_rate_cents"),
+  monthlyTravelAllowanceCents: integer("monthly_travel_allowance_cents"),
   validFrom: date("valid_from").notNull(),
   validTo: date("valid_to"), // null = currently valid
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -127,18 +127,18 @@ export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 // Employee compensation schemas
 export const insertEmployeeCompensationSchema = z.object({
   userId: z.number(),
-  hourlyRateHauswirtschaft: z.string().nullable().optional(),
-  hourlyRateAlltagsbegleitung: z.string().nullable().optional(),
+  hourlyRateHauswirtschaftCents: z.number().int().nullable().optional(),
+  hourlyRateAlltagsbegleitungCents: z.number().int().nullable().optional(),
   travelCostType: z.enum(TRAVEL_COST_TYPES).nullable().optional(),
-  kilometerRate: z.string().nullable().optional(),
-  monthlyTravelAllowance: z.string().nullable().optional(),
-  validFrom: z.string(), // ISO date string
+  kilometerRateCents: z.number().int().nullable().optional(),
+  monthlyTravelAllowanceCents: z.number().int().nullable().optional(),
+  validFrom: z.string(),
 }).refine((data) => {
   if (data.travelCostType === "kilometergeld") {
-    return data.kilometerRate && !data.monthlyTravelAllowance;
+    return data.kilometerRateCents && !data.monthlyTravelAllowanceCents;
   }
   if (data.travelCostType === "pauschale") {
-    return data.monthlyTravelAllowance && !data.kilometerRate;
+    return data.monthlyTravelAllowanceCents && !data.kilometerRateCents;
   }
   return true;
 }, {
@@ -561,7 +561,7 @@ export const appointments = pgTable("appointments", {
   // Customer kilometers (for Alltagsbegleitung - trips with/for customer)
   customerKilometers: integer("customer_kilometers"),
   // Legacy kilometers field (kept for backwards compatibility)
-  kilometers: text("kilometers"),
+  kilometers: integer("kilometers"),
   notes: text("notes"),
   servicesDone: text("services_done").array().default([]),
   signatureData: text("signature_data"),
