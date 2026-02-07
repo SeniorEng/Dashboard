@@ -6,60 +6,67 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { Loader2 } from "lucide-react";
+import { lazy, Suspense } from "react";
+
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
-import AppointmentDetail from "@/pages/appointment-detail";
-import NewAppointment from "@/pages/new-appointment";
-import EditAppointment from "@/pages/edit-appointment";
-import DocumentAppointment from "@/pages/document-appointment";
-import Customers from "@/pages/customers";
-import MyTimes from "@/pages/my-times";
-import Birthdays from "@/pages/birthdays";
 import LoginPage from "@/pages/login";
-import ForgotPasswordPage from "@/pages/forgot-password";
-import ResetPasswordPage from "@/pages/reset-password";
-import AdminDashboard from "@/pages/admin/dashboard";
-import AdminUsers from "@/pages/admin/users";
-import AdminCustomerAssignments from "@/pages/admin/customer-assignments";
-import AdminCustomers from "@/pages/admin/customers";
-import AdminCustomerDetail from "@/pages/admin/customer-detail";
-import AdminCustomerNew from "@/pages/admin/customer-new";
-import AdminCustomerEdit from "@/pages/admin/customer-edit";
-import AdminTimeEntries from "@/pages/admin/time-entries";
-import UndocumentedAppointments from "@/pages/undocumented-appointments";
-import CustomerDetail from "@/pages/customer-detail";
-import TasksPage from "@/pages/tasks";
-import ServiceRecordsPage from "@/pages/service-records";
-import ServiceRecordDetailPage from "@/pages/service-record-detail";
+
+const AppointmentDetail = lazy(() => import("@/pages/appointment-detail"));
+const NewAppointment = lazy(() => import("@/pages/new-appointment"));
+const EditAppointment = lazy(() => import("@/pages/edit-appointment"));
+const DocumentAppointment = lazy(() => import("@/pages/document-appointment"));
+const Customers = lazy(() => import("@/pages/customers"));
+const MyTimes = lazy(() => import("@/pages/my-times"));
+const Birthdays = lazy(() => import("@/pages/birthdays"));
+const ForgotPasswordPage = lazy(() => import("@/pages/forgot-password"));
+const ResetPasswordPage = lazy(() => import("@/pages/reset-password"));
+const AdminDashboard = lazy(() => import("@/pages/admin/dashboard"));
+const AdminUsers = lazy(() => import("@/pages/admin/users"));
+const AdminCustomerAssignments = lazy(() => import("@/pages/admin/customer-assignments"));
+const AdminCustomers = lazy(() => import("@/pages/admin/customers"));
+const AdminCustomerDetail = lazy(() => import("@/pages/admin/customer-detail"));
+const AdminCustomerNew = lazy(() => import("@/pages/admin/customer-new"));
+const AdminCustomerEdit = lazy(() => import("@/pages/admin/customer-edit"));
+const AdminTimeEntries = lazy(() => import("@/pages/admin/time-entries"));
+const UndocumentedAppointments = lazy(() => import("@/pages/undocumented-appointments"));
+const CustomerDetail = lazy(() => import("@/pages/customer-detail"));
+const TasksPage = lazy(() => import("@/pages/tasks"));
+const ServiceRecordsPage = lazy(() => import("@/pages/service-records"));
+const ServiceRecordDetailPage = lazy(() => import("@/pages/service-record-detail"));
+
+function PageLoader() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
+      <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+    </div>
+  );
+}
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAuthenticated, isLoading } = useAuth();
   const [, navigate] = useLocation();
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
-        <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
-      </div>
-    );
+    return <PageLoader />;
   }
 
   if (!isAuthenticated) {
     return <Redirect to="/login" />;
   }
 
-  return <Component />;
+  return (
+    <Suspense fallback={<PageLoader />}>
+      <Component />
+    </Suspense>
+  );
 }
 
 function AdminRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAuthenticated, isLoading, user } = useAuth();
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
-        <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
-      </div>
-    );
+    return <PageLoader />;
   }
 
   if (!isAuthenticated) {
@@ -70,15 +77,27 @@ function AdminRoute({ component: Component }: { component: React.ComponentType }
     return <Redirect to="/" />;
   }
 
-  return <Component />;
+  return (
+    <Suspense fallback={<PageLoader />}>
+      <Component />
+    </Suspense>
+  );
 }
 
 function Router() {
   return (
     <Switch>
       <Route path="/login" component={LoginPage} />
-      <Route path="/forgot-password" component={ForgotPasswordPage} />
-      <Route path="/reset-password" component={ResetPasswordPage} />
+      <Route path="/forgot-password">
+        <Suspense fallback={<PageLoader />}>
+          <ForgotPasswordPage />
+        </Suspense>
+      </Route>
+      <Route path="/reset-password">
+        <Suspense fallback={<PageLoader />}>
+          <ResetPasswordPage />
+        </Suspense>
+      </Route>
       <Route path="/">
         <ProtectedRoute component={Dashboard} />
       </Route>

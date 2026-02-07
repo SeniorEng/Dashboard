@@ -65,6 +65,9 @@ export interface IStorage {
   deleteAppointment(id: number): Promise<boolean>;
   getAppointmentsByDate(date: string): Promise<Appointment[]>;
   
+  // Appointments - Counts
+  getAppointmentCountsByDates(dates: string[], customerIds?: number[]): Promise<Record<string, number>>;
+
   // Appointments - With Customer (optimized)
   getAppointmentsWithCustomers(date?: string, customerIds?: number[]): Promise<AppointmentWithCustomer[]>;
   getAppointmentsWithCustomersPaginated(
@@ -341,6 +344,33 @@ export class DatabaseStorage implements IStorage {
 
   async getAppointmentsByDate(date: string): Promise<Appointment[]> {
     return await db.select().from(appointments).where(eq(appointments.date, date));
+  }
+
+  async getAppointmentCountsByDates(dates: string[], customerIds?: number[]): Promise<Record<string, number>> {
+    if (dates.length === 0) return {};
+    
+    const conditions = [inArray(appointments.date, dates)];
+    if (customerIds && customerIds.length > 0) {
+      conditions.push(inArray(appointments.customerId, customerIds));
+    }
+    
+    const results = await db
+      .select({
+        date: appointments.date,
+        count: count(),
+      })
+      .from(appointments)
+      .where(and(...conditions))
+      .groupBy(appointments.date);
+    
+    const counts: Record<string, number> = {};
+    for (const date of dates) {
+      counts[date] = 0;
+    }
+    for (const row of results) {
+      counts[row.date] = row.count;
+    }
+    return counts;
   }
 
   async createAppointment(appointment: InsertAppointment): Promise<Appointment> {

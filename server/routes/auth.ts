@@ -118,7 +118,7 @@ router.post(
       if (token) {
         // SECURITY: Token wird NICHT geloggt um Account-Übernahme zu verhindern
         // In Produktion würde hier eine E-Mail gesendet werden
-        console.log(`Password reset requested for: ${result.data.email}`);
+        console.log("Password reset requested");
       }
 
       res.json({

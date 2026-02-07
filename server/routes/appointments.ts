@@ -70,6 +70,29 @@ router.get("/", async (req, res) => {
   }
 });
 
+router.get("/counts", async (req, res) => {
+  try {
+    const user = req.user!;
+    const datesParam = req.query.dates as string | undefined;
+    if (!datesParam) {
+      return sendBadRequest(res, "Datumsangaben fehlen");
+    }
+    const dates = datesParam.split(",").filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+    if (dates.length === 0 || dates.length > 14) {
+      return sendBadRequest(res, "Ungültige Datumsangaben (max. 14 Tage)");
+    }
+
+    const customerIds = user.isAdmin
+      ? undefined
+      : await storage.getAssignedCustomerIds(user.id);
+
+    const counts = await storage.getAppointmentCountsByDates(dates, customerIds);
+    res.json(counts);
+  } catch (error) {
+    handleRouteError(res, error, "Fehler beim Laden der Terminzähler", "Failed to fetch appointment counts");
+  }
+});
+
 // Get undocumented past appointments (needs documentation)
 router.get("/undocumented", async (req, res) => {
   try {

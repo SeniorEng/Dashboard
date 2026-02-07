@@ -1,7 +1,8 @@
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { eq, and, lt, gt, isNull } from "drizzle-orm";
-import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { createHash, randomBytes } from "crypto";
+import bcrypt from "bcrypt";
 import { formatDateISO } from "@shared/utils/datetime";
 import {
   users,
@@ -20,25 +21,21 @@ const db = drizzle(sql);
 
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const PASSWORD_RESET_DURATION_MS = 60 * 60 * 1000; // 1 hour
+const BCRYPT_ROUNDS = 12;
 
-function hashPassword(password: string): string {
-  const salt = randomBytes(16).toString("hex");
-  const hash = createHash("sha256")
-    .update(password + salt)
-    .digest("hex");
-  return `${salt}:${hash}`;
+async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, BCRYPT_ROUNDS);
 }
 
-function verifyPassword(password: string, storedHash: string): boolean {
-  const [salt, hash] = storedHash.split(":");
-  const inputHash = createHash("sha256")
-    .update(password + salt)
-    .digest("hex");
-  try {
-    return timingSafeEqual(Buffer.from(hash), Buffer.from(inputHash));
-  } catch {
-    return false;
+async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
+  if (storedHash.includes(":") && storedHash.length === 97) {
+    const [salt, hash] = storedHash.split(":");
+    const inputHash = createHash("sha256")
+      .update(password + salt)
+      .digest("hex");
+    return hash === inputHash;
   }
+  return bcrypt.compare(password, storedHash);
 }
 
 function generateToken(): string {
@@ -75,7 +72,7 @@ export class AuthService {
       throw new Error("Ein Benutzer mit dieser E-Mail-Adresse existiert bereits");
     }
 
-    const passwordHash = hashPassword(data.password);
+    const passwordHash = await hashPassword(data.password);
     const displayName = `${data.vorname} ${data.nachname}`;
 
     const [newUser] = await db
@@ -123,7 +120,7 @@ export class AuthService {
       return null;
     }
 
-    if (!verifyPassword(password, user.passwordHash)) {
+    if (!(await verifyPassword(password, user.passwordHash))) {
       return null;
     }
 
@@ -317,7 +314,7 @@ export class AuthService {
   }
 
   async changePassword(userId: number, newPassword: string): Promise<boolean> {
-    const passwordHash = hashPassword(newPassword);
+    const passwordHash = await hashPassword(newPassword);
 
     const result = await db
       .update(users)
@@ -407,7 +404,7 @@ export class AuthService {
       return false;
     }
 
-    const passwordHash = hashPassword(newPassword);
+    const passwordHash = await hashPassword(newPassword);
 
     await db
       .update(users)
