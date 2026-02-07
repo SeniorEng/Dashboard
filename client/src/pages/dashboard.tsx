@@ -14,6 +14,51 @@ import { ErrorState } from "@/components/patterns/error-state";
 
 const WEEKDAY_NAMES_SHORT = ["Mo", "Di", "Mi", "Do", "Fr"];
 
+interface DayButtonProps {
+  dayStr: string;
+  day: Date;
+  index: number;
+  isSelected: boolean;
+  isDayToday: boolean;
+  appointmentCount: number;
+  onSelect: (day: Date) => void;
+}
+
+function DayButton({ dayStr, day, index, isSelected, isDayToday, appointmentCount, onSelect }: DayButtonProps) {
+  const hasAppointments = appointmentCount > 0;
+
+  let bgClass: string;
+  if (isSelected) {
+    bgClass = "bg-primary text-primary-foreground shadow-md";
+  } else if (isDayToday) {
+    bgClass = hasAppointments ? "bg-primary/15 text-primary ring-1 ring-primary/30" : "bg-primary/10 text-primary hover:bg-primary/20";
+  } else if (hasAppointments) {
+    bgClass = "bg-primary/8 ring-1 ring-primary/20 hover:bg-primary/15";
+  } else {
+    bgClass = "bg-background hover:bg-muted";
+  }
+
+  return (
+    <button
+      onClick={() => onSelect(day)}
+      className={`relative flex flex-col items-center justify-center flex-1 max-w-[56px] h-14 rounded-lg transition-all ${bgClass}`}
+      data-testid={`weekday-${dayStr}`}
+    >
+      <span className="text-[10px] font-medium uppercase tracking-wide opacity-70">
+        {WEEKDAY_NAMES_SHORT[index]}
+      </span>
+      <span className={`text-base font-semibold ${isDayToday && !isSelected ? "text-primary" : ""}`}>
+        {format(day, "d")}
+      </span>
+      {hasAppointments && (
+        <span className={`text-[9px] font-semibold leading-none ${isSelected ? "text-primary-foreground/80" : "text-primary"}`}>
+          {appointmentCount === 1 ? "1" : appointmentCount}
+        </span>
+      )}
+    </button>
+  );
+}
+
 export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showTwoWeeks, setShowTwoWeeks] = useState(false);
@@ -215,45 +260,16 @@ export default function Dashboard() {
                 const appointmentCount = weekAppointmentCounts?.[dayStr] || 0;
                 
                 return (
-                  <button
+                  <DayButton
                     key={dayStr}
-                    onClick={() => setSelectedDate(day)}
-                    className={`
-                      relative flex flex-col items-center justify-center flex-1 max-w-[56px] h-12 rounded-lg transition-all
-                      ${isSelected 
-                        ? "bg-primary text-primary-foreground shadow-md" 
-                        : isDayToday 
-                          ? "bg-primary/10 text-primary hover:bg-primary/20" 
-                          : "bg-background hover:bg-muted"
-                      }
-                    `}
-                    data-testid={`weekday-${dayStr}`}
-                  >
-                    <span className="text-[10px] font-medium uppercase tracking-wide opacity-70">
-                      {WEEKDAY_NAMES_SHORT[index]}
-                    </span>
-                    <span className={`text-base font-semibold ${isDayToday && !isSelected ? "text-primary" : ""}`}>
-                      {format(day, "d")}
-                    </span>
-                    {appointmentCount > 0 && (
-                      <div 
-                        className={`absolute -bottom-0.5 left-1/2 -translate-x-1/2 flex gap-0.5 ${isSelected ? "opacity-80" : ""}`}
-                      >
-                        {appointmentCount <= 3 ? (
-                          Array.from({ length: appointmentCount }).map((_, i) => (
-                            <div 
-                              key={i}
-                              className={`w-1 h-1 rounded-full ${isSelected ? "bg-primary-foreground" : "bg-primary"}`} 
-                            />
-                          ))
-                        ) : (
-                          <div className={`text-[8px] font-bold ${isSelected ? "text-primary-foreground" : "text-primary"}`}>
-                            {appointmentCount}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </button>
+                    dayStr={dayStr}
+                    day={day}
+                    index={index}
+                    isSelected={isSelected}
+                    isDayToday={isDayToday}
+                    appointmentCount={appointmentCount}
+                    onSelect={setSelectedDate}
+                  />
                 );
               })}
             </div>
@@ -268,45 +284,16 @@ export default function Dashboard() {
                   const appointmentCount = weekAppointmentCounts?.[dayStr] || 0;
                   
                   return (
-                    <button
+                    <DayButton
                       key={dayStr}
-                      onClick={() => setSelectedDate(day)}
-                      className={`
-                        relative flex flex-col items-center justify-center flex-1 max-w-[56px] h-12 rounded-lg transition-all
-                        ${isSelected 
-                          ? "bg-primary text-primary-foreground shadow-md" 
-                          : isDayToday 
-                            ? "bg-primary/10 text-primary hover:bg-primary/20" 
-                            : "bg-background hover:bg-muted"
-                        }
-                      `}
-                      data-testid={`weekday-${dayStr}`}
-                    >
-                      <span className="text-[10px] font-medium uppercase tracking-wide opacity-70">
-                        {WEEKDAY_NAMES_SHORT[index]}
-                      </span>
-                      <span className={`text-base font-semibold ${isDayToday && !isSelected ? "text-primary" : ""}`}>
-                        {format(day, "d")}
-                      </span>
-                      {appointmentCount > 0 && (
-                        <div 
-                          className={`absolute -bottom-0.5 left-1/2 -translate-x-1/2 flex gap-0.5 ${isSelected ? "opacity-80" : ""}`}
-                        >
-                          {appointmentCount <= 3 ? (
-                            Array.from({ length: appointmentCount }).map((_, i) => (
-                              <div 
-                                key={i}
-                                className={`w-1 h-1 rounded-full ${isSelected ? "bg-primary-foreground" : "bg-primary"}`} 
-                              />
-                            ))
-                          ) : (
-                            <div className={`text-[8px] font-bold ${isSelected ? "text-primary-foreground" : "text-primary"}`}>
-                              {appointmentCount}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </button>
+                      dayStr={dayStr}
+                      day={day}
+                      index={index}
+                      isSelected={isSelected}
+                      isDayToday={isDayToday}
+                      appointmentCount={appointmentCount}
+                      onSelect={setSelectedDate}
+                    />
                   );
                 })}
               </div>
