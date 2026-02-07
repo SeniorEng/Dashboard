@@ -18,12 +18,7 @@ import { format, parseISO, isAfter, isBefore, startOfToday } from "date-fns";
 import { de } from "date-fns/locale";
 import { UNDOCUMENTED_STATUSES } from "@shared/domain/appointments";
 
-function formatAddress(customer: Customer): string {
-  if (customer.strasse && customer.nr && customer.plz && customer.stadt) {
-    return `${customer.strasse} ${customer.nr}, ${customer.plz} ${customer.stadt}`;
-  }
-  return customer.address || "";
-}
+import { formatAddress } from "@shared/utils/format";
 
 function getPflegegradLabel(pflegegrad: number | null): string | null {
   if (!pflegegrad) return null;

@@ -13,9 +13,9 @@ interface DataListProps {
 }
 
 const gapClasses = {
-  sm: "space-y-2",
-  md: "space-y-3",
-  lg: "space-y-4",
+  sm: "flex flex-col gap-2",
+  md: "flex flex-col gap-3",
+  lg: "flex flex-col gap-4",
 };
 
 export function DataList({ 

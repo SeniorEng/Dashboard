@@ -48,21 +48,7 @@ import {
 } from "lucide-react";
 import { BudgetLedgerSection } from "@/components/budget/BudgetLedgerSection";
 
-function formatAddress(customer: {
-  strasse: string | null;
-  nr: string | null;
-  plz: string | null;
-  stadt: string | null;
-}): string {
-  const parts = [];
-  if (customer.strasse) {
-    parts.push(`${customer.strasse}${customer.nr ? ` ${customer.nr}` : ""}`);
-  }
-  if (customer.plz || customer.stadt) {
-    parts.push(`${customer.plz || ""} ${customer.stadt || ""}`.trim());
-  }
-  return parts.join(", ") || "Keine Adresse hinterlegt";
-}
+import { formatAddress } from "@shared/utils/format";
 
 
 function formatPeriodType(type: string): string {

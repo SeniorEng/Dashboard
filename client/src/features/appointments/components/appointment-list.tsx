@@ -47,7 +47,7 @@ function AppointmentListComponent({ appointments, isLoading, error, onRetry }: A
   }
 
   return (
-    <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-700 fade-in fill-mode-backwards">
+    <div className="flex flex-col gap-4 animate-in slide-in-from-bottom-4 duration-700 fade-in fill-mode-backwards">
       {sortedAppointments.map((apt) => (
         <AppointmentCard key={apt.id} appointment={apt} />
       ))}

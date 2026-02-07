@@ -20,12 +20,7 @@ import {
   semanticSpacing 
 } from "@/design-system";
 
-function formatAddress(customer: Customer): string {
-  if (customer.strasse && customer.nr && customer.plz && customer.stadt) {
-    return `${customer.strasse} ${customer.nr}, ${customer.plz} ${customer.stadt}`;
-  }
-  return customer.address;
-}
+import { formatAddress } from "@shared/utils/format";
 
 function getPflegegradLabel(pflegegrad: number | null): string | null {
   if (!pflegegrad) return null;
