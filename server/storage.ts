@@ -44,6 +44,7 @@ export interface IStorage {
   // Customers
   getCustomers(): Promise<Customer[]>;
   getCustomersByIds(ids: number[]): Promise<Customer[]>;
+  getCustomersForEmployee(employeeId: number): Promise<(Customer & { isCurrentlyAssigned: boolean })[]>;
   getCustomer(id: number): Promise<Customer | undefined>;
   createCustomer(customer: InsertCustomer): Promise<Customer>;
   deleteCustomer(id: number): Promise<boolean>;
@@ -186,6 +187,45 @@ export class DatabaseStorage implements IStorage {
     const ids = Array.from(idSet);
     customerIdsCache.set(employeeId, ids);
     return ids;
+  }
+
+  async getCustomersForEmployee(employeeId: number): Promise<(Customer & { isCurrentlyAssigned: boolean })[]> {
+    const result = await db.execute(sqlBuilder`
+      SELECT c.*,
+        (c.primary_employee_id = ${employeeId} OR c.backup_employee_id = ${employeeId}) as is_currently_assigned
+      FROM customers c
+      WHERE c.id IN (
+        SELECT id FROM customers WHERE primary_employee_id = ${employeeId} OR backup_employee_id = ${employeeId}
+        UNION
+        SELECT DISTINCT customer_id FROM appointments WHERE assigned_employee_id = ${employeeId} OR performed_by_employee_id = ${employeeId}
+      )
+      ORDER BY 
+        CASE WHEN (c.primary_employee_id = ${employeeId} OR c.backup_employee_id = ${employeeId}) THEN 0 ELSE 1 END,
+        c.nachname, c.vorname
+    `);
+    return (result.rows as any[]).map(row => ({
+      id: row.id,
+      vorname: row.vorname,
+      nachname: row.nachname,
+      name: `${row.vorname} ${row.nachname}`,
+      email: row.email,
+      telefon: row.telefon,
+      festnetz: row.festnetz,
+      geburtsdatum: row.geburtsdatum,
+      strasse: row.strasse,
+      nr: row.nr,
+      plz: row.plz,
+      stadt: row.stadt,
+      pflegegrad: row.pflegegrad,
+      needs: row.needs ?? [],
+      primaryEmployeeId: row.primary_employee_id,
+      backupEmployeeId: row.backup_employee_id,
+      address: row.address,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      createdByUserId: row.created_by_user_id,
+      isCurrentlyAssigned: row.is_currently_assigned === true || row.is_currently_assigned === 't',
+    }));
   }
 
   async getCustomersByIds(ids: number[]): Promise<Customer[]> {

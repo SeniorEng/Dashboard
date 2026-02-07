@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, memo } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/layout";
 import { useQuery } from "@tanstack/react-query";
@@ -135,7 +135,7 @@ export default function CustomersPage() {
   );
 }
 
-function CustomerCard({ customer }: { customer: CustomerWithAccess }) {
+const CustomerCard = memo(function CustomerCard({ customer }: { customer: CustomerWithAccess }) {
   const address = formatAddress(customer);
   const phone = customer.telefon ? formatPhoneForDisplay(customer.telefon) : null;
   const pflegegradLabel = getPflegegradLabel(customer.pflegegrad);
@@ -231,4 +231,4 @@ function CustomerCard({ customer }: { customer: CustomerWithAccess }) {
     </Card>
     </Link>
   );
-}
+});
