@@ -23,6 +23,7 @@ import { requireAdmin } from "../middleware/auth";
 import { handleRouteError } from "../lib/errors";
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
+import { todayISO } from "@shared/utils/datetime";
 
 const router = Router();
 
@@ -108,7 +109,7 @@ router.post("/users", async (req: Request, res: Response) => {
       const validatedCompensation = insertEmployeeCompensationSchema.safeParse(compensationData);
       if (validatedCompensation.success) {
         // Prevent backdated compensation entries
-        const today = new Date().toISOString().split("T")[0];
+        const today = todayISO();
         if (validatedCompensation.data.validFrom >= today) {
           await compensationStorage.addCompensation(validatedCompensation.data, req.user!.id);
         }
@@ -487,7 +488,7 @@ async function updateCustomerAssignment(
 
   const [existing] = await db.select().from(customers).where(eq(customers.id, customerId));
   
-  const today = new Date().toISOString().split("T")[0];
+  const today = todayISO();
 
   if (existing) {
     if (existing.primaryEmployeeId !== primaryEmployeeId) {
@@ -1011,7 +1012,7 @@ router.post("/users/:userId/compensation", async (req: Request, res: Response) =
     const validatedData = insertEmployeeCompensationSchema.parse(data);
     
     // Prevent backdated compensation entries - only today or future allowed
-    const today = new Date().toISOString().split("T")[0];
+    const today = todayISO();
     if (validatedData.validFrom < today) {
       res.status(400).json({ 
         error: "VALIDATION_ERROR", 
@@ -1077,7 +1078,7 @@ router.post("/customers/:customerId/pricing", async (req: Request, res: Response
     const validatedData = insertCustomerPricingSchema.parse(data);
     
     // Prevent backdated pricing entries - only today or future allowed
-    const today = new Date().toISOString().split("T")[0];
+    const today = todayISO();
     if (validatedData.validFrom < today) {
       res.status(400).json({ 
         error: "VALIDATION_ERROR", 

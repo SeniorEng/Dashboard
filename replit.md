@@ -16,7 +16,28 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Design System**: Centralized `@/design-system` for consistent styling, enforcing the use of tokens for icons, component styles, semantic spacing, and semantic colors (status, service, care level).
   - **PageHeader**: Responsive stacked layout - title wraps naturally on mobile, action buttons go full-width below. Uses `componentStyles.pageHeader*` tokens.
   - **ResponsiveTabs**: Priority+ pattern - shows first N tabs inline, rest collapse into "Mehr" dropdown on mobile. Component at `@/components/patterns/responsive-tabs.tsx`.
-- **Date/Time Handling**: Uses local times without time zone conversion, treating all date/time data as "German local time". `date` columns are "YYYY-MM-DD" strings, `time` columns are "HH:MM:SS" strings. Centralized utilities (`@shared/utils/datetime`) must be used for parsing and formatting.
+- **Date/Time Handling** (verbindliche Konventionen für alle Implementierungen):
+  - **Grundprinzip**: Alle Zeiten sind implizit "deutsche Ortszeit" — keine UTC-Konvertierung, keine Zeitzone-Logik.
+  - **Speicherformate (Datenbank)**:
+    - Datum: `date` → String `"YYYY-MM-DD"` (PostgreSQL `date`)
+    - Uhrzeit: `time` → String `"HH:MM:SS"` (PostgreSQL `time without time zone`)
+    - Dauer: `integer` in Minuten
+    - Systemzeitstempel: `timestamp({ withTimezone: true })` → `timestamptz` (created_at, updated_at etc.)
+  - **Anzeigeformate (Frontend)**:
+    - Uhrzeit: `"HH:MM"` — Sekunden werden NIE angezeigt
+    - Datum: `"DD.MM.YYYY"` (deutsch) oder `"YYYY-MM-DD"` (Formulare, API)
+  - **Verbotene Patterns** (NIEMALS verwenden!):
+    - `new Date()` für Uhrzeiten → Zeitzonen-Probleme! Stattdessen: `currentTimeHHMMSS()` / `currentTimeHHMM()`
+    - `Date`-Objekte an Zeit-Utilities übergeben → alle akzeptieren NUR Strings
+    - ISO-Timestamps (`"2025-12-02T09:45:00.000Z"`) für lokale Zeiten
+    - `date.getHours()` / `date.getMinutes()` für Zeitberechnungen
+  - **Erlaubte Patterns**:
+    - `parseLocalDate("YYYY-MM-DD")` → `Date`-Objekt NUR für Datumsberechnungen (Wochentag, addDays)
+    - `formatDateISO(date)` → zurück zu `"YYYY-MM-DD"` nach Berechnung
+    - `todayISO()` → heutiges Datum als String
+    - `currentTimeHHMMSS()` / `currentTimeHHMM()` → aktuelle Uhrzeit als String
+    - Alle Funktionen in `@shared/utils/datetime` arbeiten mit Strings
+  - **Zentrale Utilities** (`@shared/utils/datetime`): Müssen für ALLE Datums-/Zeitoperationen verwendet werden. Keine eigenen Parsing-/Formatierungsfunktionen schreiben.
 - **DatePicker-Komponente**: Alle Datumsfelder verwenden die zentrale `DatePicker`-Komponente (`@/components/ui/date-picker.tsx`). Diese bietet:
   - Deutsche Lokalisierung (Montag als Wochenbeginn, deutsche Monatsnamen)
   - Touch-optimierte 44px Mindestgröße für Mobile-Kompatibilität (iOS Safari, Android Chrome)

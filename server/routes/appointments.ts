@@ -10,7 +10,7 @@ import {
 import { appointmentService } from "../services/appointments";
 import { authService } from "../services/auth";
 import { suggestTravelOrigin } from "@shared/domain/appointments";
-import { isWeekend } from "@shared/utils/datetime";
+import { isWeekend, currentTimeHHMMSS, todayISO } from "@shared/utils/datetime";
 import { 
   ErrorMessages, 
   handleRouteError, 
@@ -74,7 +74,7 @@ router.get("/", async (req, res) => {
 router.get("/undocumented", async (req, res) => {
   try {
     const user = req.user!;
-    const today = new Date().toISOString().split("T")[0];
+    const today = todayISO();
     
     const customerIds = user.isAdmin 
       ? undefined 
@@ -323,7 +323,7 @@ router.post("/:id/start", async (req, res) => {
     // Store actualStart as time string (HH:MM:SS) - harmonized time system
     const updatedAppointment = await storage.updateAppointment(id, {
       status: "in-progress",
-      actualStart: formatTimeHHMMSS(new Date()),
+      actualStart: currentTimeHHMMSS(),
     });
     
     res.json(updatedAppointment);
@@ -357,7 +357,7 @@ router.post("/:id/end", async (req, res) => {
     // Store actualEnd as time string (HH:MM:SS) - harmonized time system
     const updatedAppointment = await storage.updateAppointment(id, {
       status: "documenting",
-      actualEnd: formatTimeHHMMSS(new Date()),
+      actualEnd: currentTimeHHMMSS(),
     });
     
     res.json(updatedAppointment);

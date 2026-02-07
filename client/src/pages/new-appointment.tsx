@@ -17,7 +17,7 @@ import { iconSize, componentStyles } from "@/design-system";
 import { useCustomerList, useAdminEmployees, useCreateKundentermin, useCreateErstberatung, ServiceSelector, AppointmentSummary } from "@/features/appointments";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS } from "@shared/types";
 import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
-import { timeToMinutes, minutesToTimeDisplay, formatDurationDisplay } from "@shared/utils/datetime";
+import { timeToMinutes, minutesToTimeDisplay, formatDurationDisplay, todayISO } from "@shared/utils/datetime";
 
 export default function NewAppointment() {
   const [, setLocation] = useLocation();
@@ -35,7 +35,7 @@ export default function NewAppointment() {
 
   // Kundentermin state
   const [ktCustomerId, setKtCustomerId] = useState<string>("");
-  const [ktDate, setKtDate] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [ktDate, setKtDate] = useState<string>(todayISO());
   const [ktTime, setKtTime] = useState<string>("09:00");
   const [ktHauswirtschaft, setKtHauswirtschaft] = useState<boolean>(false);
   const [ktHauswirtschaftDauer, setKtHauswirtschaftDauer] = useState<number>(60);
@@ -53,7 +53,7 @@ export default function NewAppointment() {
   const [ebPlz, setEbPlz] = useState<string>("");
   const [ebStadt, setEbStadt] = useState<string>("");
   const [ebPflegegrad, setEbPflegegrad] = useState<string>("1");
-  const [ebDate, setEbDate] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [ebDate, setEbDate] = useState<string>(todayISO());
   const [ebStartTime, setEbStartTime] = useState<string>("09:00");
   const [ebErstberatungDauer, setEbErstberatungDauer] = useState<number>(60);
   const [ebNotes, setEbNotes] = useState<string>("");

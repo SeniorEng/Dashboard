@@ -1,10 +1,27 @@
 /**
  * Zentrale Datum/Zeit-Utilities für CareConnect
  * 
- * WICHTIG: Das System verwendet "Variante C: Lokale Zeiten ohne Zeitzone"
- * - Alle Zeiten sind implizit "deutsche Ortszeit"
- * - Keine UTC-Konvertierung nötig
- * - Datenbank speichert: date als "YYYY-MM-DD", time als "HH:MM:SS"
+ * KONVENTIONEN (verbindlich für alle Implementierungen):
+ * 
+ * 1. SPEICHERFORMATE (Datenbank):
+ *    - Datum: "YYYY-MM-DD" (PostgreSQL `date`)
+ *    - Uhrzeit: "HH:MM:SS" (PostgreSQL `time without time zone`)
+ *    - Dauer: Integer in Minuten (PostgreSQL `integer`)
+ *    - Systemzeitstempel: `timestamptz` (created_at, updated_at etc.)
+ * 
+ * 2. ANZEIGEFORMATE (Frontend):
+ *    - Uhrzeit: "HH:MM" (Sekunden werden nie angezeigt)
+ *    - Datum: "DD.MM.YYYY" (deutsch) oder "YYYY-MM-DD" (Formulare)
+ * 
+ * 3. VERBOTENE PATTERNS:
+ *    - NIEMALS `new Date()` für Uhrzeiten verwenden → Zeitzonen-Probleme!
+ *    - NIEMALS Date-Objekte an Zeit-Utilities übergeben
+ *    - NIEMALS ISO-Timestamps ("2025-12-02T09:45:00.000Z") für lokale Zeiten
+ *    - Alle Zeit-Funktionen akzeptieren NUR Strings
+ * 
+ * 4. SICHERE ALTERNATIVE für "aktuelle Uhrzeit":
+ *    - `currentTimeHHMMSS()` → gibt "HH:MM:SS" als String zurück
+ *    - `todayISO()` → gibt "YYYY-MM-DD" als String zurück
  * 
  * @see replit.md für vollständige Dokumentation
  */
@@ -15,9 +32,14 @@ export interface ParsedTime {
   seconds: number;
 }
 
+// ============================================================
+// DATUM-FUNKTIONEN
+// ============================================================
+
 /**
  * Parst einen Datums-String "YYYY-MM-DD" zu einem Date-Objekt (lokale Mitternacht)
- * WICHTIG: Niemals new Date("2025-12-04") verwenden - führt zu UTC-Problemen!
+ * Nur für Berechnungen (Wochentag, Datumsvergleiche) verwenden,
+ * NICHT für Zeitberechnungen!
  */
 export function parseLocalDate(dateString: string): Date {
   const [year, month, day] = dateString.split("-").map(Number);
@@ -25,7 +47,100 @@ export function parseLocalDate(dateString: string): Date {
 }
 
 /**
+ * Formatiert ein Date-Objekt zu "YYYY-MM-DD" (ISO-Format für Datenbank)
+ * Nur für Datum-Berechnungen (addDays etc.) verwenden.
+ */
+export function formatDateISO(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Gibt das heutige Datum als "YYYY-MM-DD" zurück
+ */
+export function todayISO(): string {
+  return formatDateISO(new Date());
+}
+
+/**
+ * Berechnet das Datum in n Tagen als "YYYY-MM-DD"
+ */
+export function addDays(dateString: string, days: number): string {
+  const date = parseLocalDate(dateString);
+  date.setDate(date.getDate() + days);
+  return formatDateISO(date);
+}
+
+/**
+ * Formatiert ein Datum für die deutsche Anzeige
+ * @param dateStr - Datum als "YYYY-MM-DD" String
+ * @param style - "short" für "04.12.2025", "long" für "4. Dezember 2025"
+ */
+export function formatDateGerman(dateStr: string, style: "short" | "long" = "short"): string {
+  const d = parseLocalDate(dateStr);
+
+  if (style === "long") {
+    const months = [
+      "Januar", "Februar", "März", "April", "Mai", "Juni",
+      "Juli", "August", "September", "Oktober", "November", "Dezember"
+    ];
+    return `${d.getDate()}. ${months[d.getMonth()]} ${d.getFullYear()}`;
+  }
+
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+  return `${day}.${month}.${year}`;
+}
+
+/**
+ * Gibt den Wochentag zurück (Montag = 0, Sonntag = 6)
+ * @param dateStr - Datum als "YYYY-MM-DD" String
+ */
+export function getWeekdayIndex(dateStr: string): number {
+  const d = parseLocalDate(dateStr);
+  const jsDay = d.getDay();
+  return jsDay === 0 ? 6 : jsDay - 1;
+}
+
+/**
+ * Gibt den deutschen Wochentagsnamen zurück
+ * @param dateStr - Datum als "YYYY-MM-DD" String
+ */
+export function getWeekdayName(dateStr: string, style: "short" | "long" = "short"): string {
+  const shortNames = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+  const longNames = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
+  const index = getWeekdayIndex(dateStr);
+  return style === "long" ? longNames[index] : shortNames[index];
+}
+
+/**
+ * Prüft ob ein Datum auf ein Wochenende (Samstag oder Sonntag) fällt
+ * @param dateStr - Datum als "YYYY-MM-DD" String
+ */
+export function isWeekend(dateStr: string): boolean {
+  const index = getWeekdayIndex(dateStr);
+  return index >= 5;
+}
+
+/**
+ * Prüft ob zwei Datums-Strings den gleichen Tag repräsentieren
+ * @param date1 - Datum als "YYYY-MM-DD" String
+ * @param date2 - Datum als "YYYY-MM-DD" String
+ */
+export function isSameDay(date1: string, date2: string): boolean {
+  return date1 === date2;
+}
+
+// ============================================================
+// ZEIT-FUNKTIONEN (NUR Strings, KEINE Date-Objekte!)
+// ============================================================
+
+/**
  * Parst einen Zeit-String "HH:MM:SS" oder "HH:MM" zu ParsedTime
+ * @param timeString - Zeit als "HH:MM" oder "HH:MM:SS"
  */
 export function parseLocalTime(timeString: string): ParsedTime {
   const parts = timeString.split(":").map(Number);
@@ -37,73 +152,49 @@ export function parseLocalTime(timeString: string): ParsedTime {
 }
 
 /**
- * Formatiert ein Date-Objekt zu "YYYY-MM-DD" (ISO-Format für Datenbank)
+ * Gibt die aktuelle Uhrzeit als "HH:MM:SS" String zurück.
+ * Dies ist die EINZIGE Stelle wo `new Date()` für Uhrzeiten erlaubt ist.
  */
-export function formatDateISO(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+export function currentTimeHHMMSS(): string {
+  const now = new Date();
+  const hours = String(now.getHours()).padStart(2, "0");
+  const minutes = String(now.getMinutes()).padStart(2, "0");
+  const seconds = String(now.getSeconds()).padStart(2, "0");
+  return `${hours}:${minutes}:${seconds}`;
+}
+
+/**
+ * Gibt die aktuelle Uhrzeit als "HH:MM" String zurück.
+ */
+export function currentTimeHHMM(): string {
+  return currentTimeHHMMSS().slice(0, 5);
 }
 
 /**
  * Formatiert eine Zeit zu "HH:MM" für Anzeige
- * Akzeptiert: "HH:MM:SS", "HH:MM", Date-Objekt, oder ISO-Timestamp-String
+ * @param time - Zeit als "HH:MM:SS" oder "HH:MM" String
  */
-export function formatTimeHHMM(time: string | Date): string {
-  if (time instanceof Date) {
-    const hours = String(time.getHours()).padStart(2, "0");
-    const minutes = String(time.getMinutes()).padStart(2, "0");
-    return `${hours}:${minutes}`;
-  }
-  
-  // Handle ISO timestamp string (e.g., "2025-12-02T09:45:00.000Z")
-  if (time.includes("T")) {
-    const date = new Date(time);
-    const hours = String(date.getHours()).padStart(2, "0");
-    const minutes = String(date.getMinutes()).padStart(2, "0");
-    return `${hours}:${minutes}`;
-  }
-  
-  // Handle time string "HH:MM:SS" or "HH:MM"
+export function formatTimeHHMM(time: string): string {
   const parts = time.split(":");
   return `${parts[0]}:${parts[1]}`;
 }
 
 /**
  * Formatiert eine Zeit zu "HH:MM:SS" für Datenbank
- * Akzeptiert: Date-Objekt, "HH:MM", oder bereits formatiert "HH:MM:SS"
+ * @param time - Zeit als "HH:MM" oder bereits "HH:MM:SS" String
  */
-export function formatTimeHHMMSS(time: string | Date): string {
-  if (time instanceof Date) {
-    const hours = String(time.getHours()).padStart(2, "0");
-    const minutes = String(time.getMinutes()).padStart(2, "0");
-    const seconds = String(time.getSeconds()).padStart(2, "0");
-    return `${hours}:${minutes}:${seconds}`;
-  }
-  
-  // Handle ISO timestamp string
-  if (time.includes("T")) {
-    const date = new Date(time);
-    const hours = String(date.getHours()).padStart(2, "0");
-    const minutes = String(date.getMinutes()).padStart(2, "0");
-    const seconds = String(date.getSeconds()).padStart(2, "0");
-    return `${hours}:${minutes}:${seconds}`;
-  }
-  
-  // If already "HH:MM:SS", return as-is
+export function formatTimeHHMMSS(time: string): string {
   const parts = time.split(":");
   if (parts.length === 3) {
     return time;
   }
-  
-  // If "HH:MM", add seconds
   return `${parts[0]}:${parts[1]}:00`;
 }
 
 /**
  * Addiert Minuten zu einer Zeit und gibt das Ergebnis als "HH:MM" zurück.
- * Akzeptiert: "HH:MM:SS", "HH:MM"
+ * @param time - Zeit als "HH:MM" oder "HH:MM:SS" String
+ * @param minutes - Anzahl Minuten zum Addieren
  */
 export function addMinutesToTime(time: string, minutes: number): string {
   const parsed = parseLocalTime(time);
@@ -115,6 +206,8 @@ export function addMinutesToTime(time: string, minutes: number): string {
 
 /**
  * Addiert Minuten zu einer Zeit und gibt das Ergebnis als "HH:MM:SS" zurück.
+ * @param time - Zeit als "HH:MM" oder "HH:MM:SS" String
+ * @param minutes - Anzahl Minuten zum Addieren
  */
 export function addMinutesToTimeHHMMSS(time: string, minutes: number): string {
   return addMinutesToTime(time, minutes) + ":00";
@@ -122,6 +215,7 @@ export function addMinutesToTimeHHMMSS(time: string, minutes: number): string {
 
 /**
  * Kombiniert Datum und Zeit zu einem Date-Objekt (lokale Zeit)
+ * Nur für spezielle Berechnungen verwenden, NICHT für Anzeige oder Speicherung!
  */
 export function combineDateAndTime(dateString: string, timeString: string): Date {
   const [year, month, day] = dateString.split("-").map(Number);
@@ -131,36 +225,18 @@ export function combineDateAndTime(dateString: string, timeString: string): Date
 
 /**
  * Konvertiert eine Zeit zu Minuten seit Mitternacht
- * Akzeptiert: "HH:MM:SS", "HH:MM", Date-Objekt, oder ISO-Timestamp-String
- * 
- * WICHTIG: Diese Funktion ist robust gegen verschiedene Eingabeformate,
- * da Drizzle je nach Spaltentyp unterschiedliche Typen zurückgibt.
+ * @param time - Zeit als "HH:MM" oder "HH:MM:SS" String, oder null/undefined
+ * @returns Minuten seit Mitternacht (0 bei null/undefined)
  */
-export function timeToMinutes(time: string | Date | null | undefined): number {
+export function timeToMinutes(time: string | null | undefined): number {
   if (time === null || time === undefined) {
     return 0;
   }
-  
-  // Handle Date object
-  if (time instanceof Date) {
-    return time.getHours() * 60 + time.getMinutes();
-  }
-  
-  // Handle ISO timestamp string (e.g., "2025-12-02T09:45:00.000Z")
-  if (typeof time === "string" && time.includes("T")) {
-    const date = new Date(time);
-    return date.getHours() * 60 + date.getMinutes();
-  }
-  
-  // Handle time string "HH:MM:SS" or "HH:MM"
-  if (typeof time === "string") {
-    const parts = time.split(":").map(Number);
-    const hours = parts[0] || 0;
-    const minutes = parts[1] || 0;
-    return hours * 60 + minutes;
-  }
-  
-  return 0;
+
+  const parts = time.split(":").map(Number);
+  const hours = parts[0] || 0;
+  const minutes = parts[1] || 0;
+  return hours * 60 + minutes;
 }
 
 /**
@@ -183,19 +259,23 @@ export function minutesToTimeDisplay(totalMinutes: number): string {
 
 /**
  * Berechnet die Differenz zwischen zwei Zeiten in Minuten
- * Akzeptiert: "HH:MM:SS", "HH:MM", Date-Objekt, oder ISO-Timestamp-String
+ * @param startTime - Startzeit als "HH:MM" oder "HH:MM:SS" String
+ * @param endTime - Endzeit als "HH:MM" oder "HH:MM:SS" String
  */
-export function timeDifferenceMinutes(startTime: string | Date, endTime: string | Date): number {
+export function timeDifferenceMinutes(startTime: string, endTime: string): number {
   return timeToMinutes(endTime) - timeToMinutes(startTime);
 }
 
 /**
  * Prüft ob eine Zeit zwischen zwei anderen Zeiten liegt (inklusiv)
+ * @param time - Prüfzeit als "HH:MM" oder "HH:MM:SS" String
+ * @param startTime - Startzeit als String
+ * @param endTime - Endzeit als String
  */
 export function isTimeBetween(
-  time: string | Date,
-  startTime: string | Date,
-  endTime: string | Date
+  time: string,
+  startTime: string,
+  endTime: string
 ): boolean {
   const timeMinutes = timeToMinutes(time);
   const startMinutes = timeToMinutes(startTime);
@@ -203,27 +283,25 @@ export function isTimeBetween(
   return timeMinutes >= startMinutes && timeMinutes <= endMinutes;
 }
 
+// ============================================================
+// DAUER-FUNKTIONEN
+// ============================================================
+
 /**
  * Formatiert Minuten als Stunden:Minuten String für Anzeige
  * @param totalMinutes - Gesamtminuten
  * @param style - "compact" für "2:30 Std", "verbose" für "2 Std. 30 Min."
- * 
- * Beispiele:
- * - formatDurationDisplay(90, "compact") → "1:30 Std"
- * - formatDurationDisplay(90, "verbose") → "1 Std. 30 Min."
- * - formatDurationDisplay(30, "verbose") → "30 Min."
  */
 export function formatDurationDisplay(totalMinutes: number, style: "compact" | "verbose" = "compact"): string {
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
-  
+
   if (style === "verbose") {
     if (hours === 0) return `${minutes} Min.`;
     if (minutes === 0) return `${hours} Std.`;
     return `${hours} Std. ${minutes} Min.`;
   }
-  
-  // compact style (default)
+
   if (hours === 0) {
     return `${minutes} Min`;
   }
@@ -231,77 +309,4 @@ export function formatDurationDisplay(totalMinutes: number, style: "compact" | "
     return `${hours} Std`;
   }
   return `${hours}:${String(minutes).padStart(2, "0")} Std`;
-}
-
-/**
- * Formatiert ein Datum für die deutsche Anzeige (z.B. "04.12.2025" oder "4. Dezember 2025")
- */
-export function formatDateGerman(date: Date | string, style: "short" | "long" = "short"): string {
-  const d = typeof date === "string" ? parseLocalDate(date) : date;
-  
-  if (style === "long") {
-    const months = [
-      "Januar", "Februar", "März", "April", "Mai", "Juni",
-      "Juli", "August", "September", "Oktober", "November", "Dezember"
-    ];
-    return `${d.getDate()}. ${months[d.getMonth()]} ${d.getFullYear()}`;
-  }
-  
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const year = d.getFullYear();
-  return `${day}.${month}.${year}`;
-}
-
-/**
- * Gibt den Wochentag zurück (Montag = 0, Sonntag = 6)
- * JavaScript Date verwendet Sonntag = 0, daher Konvertierung
- */
-export function getWeekdayIndex(date: Date | string): number {
-  const d = typeof date === "string" ? parseLocalDate(date) : date;
-  const jsDay = d.getDay(); // 0 = Sunday
-  return jsDay === 0 ? 6 : jsDay - 1; // Convert to Monday = 0
-}
-
-/**
- * Gibt den deutschen Wochentagsnamen zurück
- */
-export function getWeekdayName(date: Date | string, style: "short" | "long" = "short"): string {
-  const shortNames = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
-  const longNames = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
-  const index = getWeekdayIndex(date);
-  return style === "long" ? longNames[index] : shortNames[index];
-}
-
-/**
- * Prüft ob ein Datum auf ein Wochenende (Samstag oder Sonntag) fällt
- */
-export function isWeekend(date: Date | string): boolean {
-  const index = getWeekdayIndex(date);
-  return index >= 5;
-}
-
-/**
- * Prüft ob zwei Datums-Strings den gleichen Tag repräsentieren
- */
-export function isSameDay(date1: string | Date, date2: string | Date): boolean {
-  const d1 = typeof date1 === "string" ? date1 : formatDateISO(date1);
-  const d2 = typeof date2 === "string" ? date2 : formatDateISO(date2);
-  return d1 === d2;
-}
-
-/**
- * Gibt das heutige Datum als "YYYY-MM-DD" zurück
- */
-export function todayISO(): string {
-  return formatDateISO(new Date());
-}
-
-/**
- * Berechnet das Datum in n Tagen als "YYYY-MM-DD"
- */
-export function addDays(dateString: string, days: number): string {
-  const date = parseLocalDate(dateString);
-  date.setDate(date.getDate() + days);
-  return formatDateISO(date);
 }

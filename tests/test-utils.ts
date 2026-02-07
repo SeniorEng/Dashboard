@@ -143,21 +143,34 @@ export async function apiDelete(path: string): Promise<{ status: number; data: u
 export function getFutureDate(daysFromNow: number = 7): string {
   const date = new Date();
   date.setDate(date.getDate() + daysFromNow);
-  return date.toISOString().split("T")[0];
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export function getPastDate(daysAgo: number = 1): string {
   const date = new Date();
   date.setDate(date.getDate() - daysAgo);
-  return date.toISOString().split("T")[0];
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export function getTodayDate(): string {
-  return new Date().toISOString().split("T")[0];
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export function getTimeString(hoursFromNow: number = 0): string {
   const date = new Date();
   date.setHours(date.getHours() + hoursFromNow);
-  return date.toTimeString().slice(0, 8);
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  return `${hours}:${minutes}:${seconds}`;
 }

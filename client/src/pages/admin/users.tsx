@@ -53,6 +53,7 @@ import {
 } from "lucide-react";
 import { api, unwrapResult } from "@/lib/api/client";
 import { formatDateDisplay } from "@shared/utils/format";
+import { todayISO } from "@shared/utils/datetime";
 
 interface UserData {
   id: number;
@@ -479,7 +480,7 @@ function UserForm({
   const [kilometerRate, setKilometerRate] = useState("");
   const [monthlyTravelAllowance, setMonthlyTravelAllowance] = useState("");
   const [compensationValidFrom, setCompensationValidFrom] = useState(
-    new Date().toISOString().split("T")[0]
+    todayISO()
   );
 
   const hasCompensationData = 
@@ -892,7 +893,7 @@ function CompensationSection({ userId, userName }: { userId: number; userName: s
   const [newTravelCostType, setNewTravelCostType] = useState<"kilometergeld" | "pauschale" | "">("");
   const [newKilometerRate, setNewKilometerRate] = useState("");
   const [newMonthlyTravelAllowance, setNewMonthlyTravelAllowance] = useState("");
-  const todayDate = new Date().toISOString().split("T")[0];
+  const todayDate = todayISO();
   const [newValidFrom, setNewValidFrom] = useState(todayDate);
 
   const { data: compensationHistory, isLoading } = useQuery<CompensationData[]>({
@@ -924,7 +925,7 @@ function CompensationSection({ userId, userName }: { userId: number; userName: s
       setNewTravelCostType("");
       setNewKilometerRate("");
       setNewMonthlyTravelAllowance("");
-      setNewValidFrom(new Date().toISOString().split("T")[0]);
+      setNewValidFrom(todayISO());
       toast({ title: "Vergütung hinzugefügt" });
     },
     onError: (error: Error) => {

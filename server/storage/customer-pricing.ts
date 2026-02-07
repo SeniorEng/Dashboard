@@ -6,6 +6,7 @@ import {
   type CustomerPricing,
   type InsertCustomerPricing,
 } from "@shared/schema";
+import { todayISO, formatDateISO } from "@shared/utils/datetime";
 
 const sql = neon(process.env.DATABASE_URL!);
 const db = drizzle(sql);
@@ -18,7 +19,7 @@ export interface ICustomerPricingStorage {
 
 export class CustomerPricingStorage implements ICustomerPricingStorage {
   async getCurrentPricing(customerId: number): Promise<CustomerPricing | null> {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayISO();
     
     const result = await db
       .select()
@@ -55,7 +56,7 @@ export class CustomerPricingStorage implements ICustomerPricingStorage {
     const newValidFrom = validFrom;
     const dayBeforeNew = new Date(newValidFrom);
     dayBeforeNew.setDate(dayBeforeNew.getDate() - 1);
-    const validToForOld = dayBeforeNew.toISOString().split('T')[0];
+    const validToForOld = formatDateISO(dayBeforeNew);
     
     // Close any currently active record that overlaps with new entry
     const currentRecord = await db
@@ -99,7 +100,7 @@ export class CustomerPricingStorage implements ICustomerPricingStorage {
     if (futureRecords.length > 0) {
       const futureStart = new Date(futureRecords[0].validFrom);
       futureStart.setDate(futureStart.getDate() - 1);
-      newValidTo = futureStart.toISOString().split('T')[0];
+      newValidTo = formatDateISO(futureStart);
     }
     
     const [newRecord] = await db

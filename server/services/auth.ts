@@ -2,6 +2,7 @@ import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { eq, and, lt, gt, isNull } from "drizzle-orm";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { formatDateISO } from "@shared/utils/datetime";
 import {
   users,
   userRoles,
@@ -333,7 +334,7 @@ export class AuthService {
 
   async deactivateUser(id: number): Promise<boolean> {
     const now = new Date();
-    const today = now.toISOString().split("T")[0];
+    const today = formatDateISO(now);
     
     const result = await db
       .update(users)

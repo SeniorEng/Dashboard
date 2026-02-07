@@ -14,6 +14,7 @@ import {
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { eq, and, sql, lte, gte, isNull, or, desc, asc } from "drizzle-orm";
+import { todayISO } from "@shared/utils/datetime";
 
 const sqlClient = neon(process.env.DATABASE_URL!);
 const db = drizzle(sqlClient);
@@ -148,7 +149,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     const reversal = await db.insert(budgetTransactions).values({
       customerId: original[0].customerId,
       budgetType: original[0].budgetType,
-      transactionDate: new Date().toISOString().slice(0, 10),
+      transactionDate: todayISO(),
       transactionType: "reversal",
       amountCents: -original[0].amountCents,
       appointmentId: original[0].appointmentId,
@@ -163,7 +164,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth() + 1;
-    const today = now.toISOString().slice(0, 10);
+    const today = todayISO();
     const carryoverDeadline = `${currentYear}-06-30`;
 
     const allocations = await db.select()
@@ -256,7 +257,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
   }
 
   async getCurrentPricing(customerId: number, date?: string): Promise<CustomerPricing | undefined> {
-    const targetDate = date || new Date().toISOString().slice(0, 10);
+    const targetDate = date || todayISO();
     
     const result = await db.select()
       .from(customerPricingHistory)

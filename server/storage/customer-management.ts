@@ -39,6 +39,7 @@ import { eq, and, isNull, isNotNull, desc, count, or, ilike, sql as sqlBuilder }
 import { customerIdsCache } from "../services/cache";
 import { customerPricingStorage } from "./customer-pricing";
 import { budgetLedgerStorage } from "./budget-ledger";
+import { todayISO } from "@shared/utils/datetime";
 
 const sql = neon(process.env.DATABASE_URL!);
 const db = drizzle(sql);
@@ -186,7 +187,7 @@ export class CustomerManagementStorage {
   }
 
   async addCustomerInsurance(data: InsertCustomerInsurance, userId?: number): Promise<CustomerInsuranceHistory> {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayISO();
     
     await db
       .update(customerInsuranceHistory)
@@ -286,7 +287,7 @@ export class CustomerManagementStorage {
   }
 
   async addCareLevelHistory(data: InsertCareLevelHistory, userId?: number): Promise<CustomerCareLevelHistory> {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayISO();
     
     await db
       .update(customerCareLevelHistory)
@@ -356,7 +357,7 @@ export class CustomerManagementStorage {
   }
 
   async addCustomerBudget(data: InsertCustomerBudget, userId?: number): Promise<CustomerBudget> {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayISO();
     
     await db
       .update(customerBudgets)
@@ -411,7 +412,7 @@ export class CustomerManagementStorage {
   }
 
   async addContractRate(data: InsertContractRate, userId?: number): Promise<CustomerContractRate> {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayISO();
     
     await db
       .update(customerContractRates)
@@ -442,7 +443,7 @@ export class CustomerManagementStorage {
   }
 
   async addServiceRate(data: InsertServiceRate, userId?: number): Promise<ServiceRate> {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayISO();
     
     await db
       .update(serviceRates)
@@ -660,7 +661,7 @@ export class CustomerManagementStorage {
         customerId: customer.id,
         insuranceProviderId: data.insuranceProviderId,
         versichertennummer: data.versichertennummer,
-        validFrom: new Date().toISOString().split('T')[0],
+        validFrom: todayISO(),
       }, userId);
 
       await this.addCustomerContact({
@@ -697,7 +698,7 @@ export class CustomerManagementStorage {
       const services = data.services || {};
       await this.createNeedsAssessment({
         customerId: customer.id,
-        assessmentDate: new Date().toISOString().split('T')[0],
+        assessmentDate: todayISO(),
         householdSize: data.householdSize,
         pflegedienstBeauftragt: data.pflegedienstBeauftragt,
         anamnese: data.anamnese,
@@ -725,12 +726,12 @@ export class CustomerManagementStorage {
         entlastungsbetrag45b: Math.round(data.entlastungsbetrag45b * 100),
         verhinderungspflege39: Math.round(data.verhinderungspflege39 * 100),
         pflegesachleistungen36: Math.round(data.pflegesachleistungen36 * 100),
-        validFrom: new Date().toISOString().split('T')[0],
+        validFrom: todayISO(),
       }, userId);
 
       await this.createCustomerContract({
         customerId: customer.id,
-        contractStart: data.contractStart || new Date().toISOString().split('T')[0],
+        contractStart: data.contractStart || todayISO(),
         hoursPerPeriod: data.contractHours,
         periodType: data.contractPeriod,
         hauswirtschaftRateCents: Math.round((data.hauswirtschaftRate ?? 0) * 100),
@@ -790,7 +791,7 @@ export class CustomerManagementStorage {
     const updated = result[0];
     
     if (data.primaryEmployeeId !== undefined || data.backupEmployeeId !== undefined) {
-      const today = new Date().toISOString().split("T")[0];
+      const today = todayISO();
 
       if (data.primaryEmployeeId !== undefined && oldCustomer.primaryEmployeeId !== data.primaryEmployeeId) {
         if (oldCustomer.primaryEmployeeId) {

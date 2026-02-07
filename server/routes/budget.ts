@@ -8,6 +8,7 @@ import {
   insertBudgetPreferencesSchema,
 } from "@shared/schema";
 import { z } from "zod";
+import { todayISO } from "@shared/utils/datetime";
 
 const router = Router();
 
@@ -230,7 +231,7 @@ router.post("/:customerId/manual-adjustment", async (req: Request, res: Response
     }
 
     const userId = req.user?.id;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayISO();
     const currentYear = new Date().getFullYear();
 
     if (result.data.amountCents > 0) {

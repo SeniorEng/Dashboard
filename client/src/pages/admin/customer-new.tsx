@@ -13,6 +13,7 @@ import { Layout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
 import { useEmployees, useInsuranceProviders, useCreateInsuranceProvider, useCreateCustomer } from "@/features/customers";
 import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
+import { todayISO } from "@shared/utils/datetime";
 import {
   ArrowLeft,
   Loader2,
@@ -212,7 +213,7 @@ export default function AdminCustomerNew() {
   };
 
   const handleCreate = () => {
-    const today = new Date().toISOString().split("T")[0];
+    const today = todayISO();
     
     // Validate phone numbers before submission
     const phoneValidationErrors: string[] = [];

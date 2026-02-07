@@ -6,6 +6,7 @@ import {
   type EmployeeCompensation,
   type InsertEmployeeCompensation,
 } from "@shared/schema";
+import { todayISO, formatDateISO } from "@shared/utils/datetime";
 
 const sql = neon(process.env.DATABASE_URL!);
 const db = drizzle(sql);
@@ -18,7 +19,7 @@ export interface ICompensationStorage {
 
 export class CompensationStorage implements ICompensationStorage {
   async getCurrentCompensation(userId: number): Promise<EmployeeCompensation | null> {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayISO();
     
     const result = await db
       .select()
@@ -55,7 +56,7 @@ export class CompensationStorage implements ICompensationStorage {
     const newValidFrom = validFrom;
     const dayBeforeNew = new Date(newValidFrom);
     dayBeforeNew.setDate(dayBeforeNew.getDate() - 1);
-    const validToForOld = dayBeforeNew.toISOString().split('T')[0];
+    const validToForOld = formatDateISO(dayBeforeNew);
     
     const currentRecord = await db
       .select()

@@ -14,6 +14,7 @@ import { iconSize, componentStyles } from "@/design-system/tokens";
 import { toast } from "sonner";
 import { api } from "@/lib/api/client";
 import { formatCurrency, formatDateDisplay } from "@shared/utils/format";
+import { todayISO } from "@shared/utils/datetime";
 
 interface BudgetSummary {
   customerId: number;
@@ -362,7 +363,7 @@ export function BudgetLedgerSection({ customerId, customerName, initialSummary, 
 function InitialBudgetForm({ customerId, onSuccess }: { customerId: number; onSuccess: () => void }) {
   const [currentYearAmount, setCurrentYearAmount] = useState("");
   const [carryoverAmount, setCarryoverAmount] = useState("");
-  const [budgetStartDate, setBudgetStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [budgetStartDate, setBudgetStartDate] = useState(todayISO());
 
   const mutation = useMutation({
     mutationFn: async (data: { currentYearAmountCents: number; carryoverAmountCents: number; budgetStartDate: string }) => {

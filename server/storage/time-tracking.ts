@@ -13,6 +13,7 @@ import {
   type InsertVacationAllowance,
   type Appointment,
 } from "@shared/schema";
+import { todayISO, formatDateISO } from "@shared/utils/datetime";
 
 const sql = neon(process.env.DATABASE_URL!);
 const db = drizzle(sql);
@@ -283,7 +284,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     // Count vacation days taken this year
     const startDate = `${year}-01-01`;
     const endDate = `${year}-12-31`;
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayISO();
     
     // Get vacation entries for this year
     const vacationEntries = await db
@@ -553,7 +554,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     const startDate = new Date(today);
     startDate.setDate(startDate.getDate() - 30);
     
-    const formatDate = (d: Date) => d.toISOString().split('T')[0];
+    const formatDate = (d: Date) => formatDateISO(d);
     const startDateStr = formatDate(startDate);
     const endDateStr = formatDate(endDate);
     

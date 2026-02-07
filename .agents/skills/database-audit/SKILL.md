@@ -65,15 +65,39 @@ Work through all 10 categories. For each, report: PASS, WARN (non-critical), or 
 1. Verify monetary values use `integer` (cents), never `numeric` or `real`
 2. Verify kilometer/distance fields use `integer`, never `real` or `numeric`
 3. Verify date fields use `date` type (stored as "YYYY-MM-DD" strings)
-4. Verify time fields use `time` type (stored as "HH:MM:SS" strings)
-5. Check NOT NULL is only used where truly required
-6. Verify sensible defaults exist for optional fields
-7. Run: `reference/audit-queries.sql` → "Nullable columns without defaults" (advisory: review list, not automatic failure — intentionally nullable fields like `notes` are fine without defaults)
+4. Verify time fields use `time` type (stored as "HH:MM:SS" strings, `time without time zone`)
+5. Verify all system timestamps (created_at, updated_at, expires_at etc.) use `timestamptz` (`timestamp with time zone`), never plain `timestamp`
+6. Check NOT NULL is only used where truly required
+7. Verify sensible defaults exist for optional fields
+8. Run: `reference/audit-queries.sql` → "Nullable columns without defaults" (advisory: review list, not automatic failure — intentionally nullable fields like `notes` are fine without defaults)
 
 ### Red Flags:
 - Money stored as float/real → rounding errors
 - Dates stored as text without validation → format inconsistency
 - NOT NULL without default on optional business fields → insert failures
+- System timestamps using `timestamp without time zone` instead of `timestamptz` → timezone drift risk
+
+## Category 3b: Date/Time Convention Compliance
+
+**Goal**: All code follows the project's mandatory date/time conventions (see replit.md).
+
+### Steps:
+1. Search for `new Date()` usage in time-related contexts → must use `currentTimeHHMMSS()` / `currentTimeHHMM()` instead
+2. Search for `Date` objects passed to datetime utilities (`formatTimeHHMM`, `formatTimeHHMMSS`, `timeToMinutes`, `timeDifferenceMinutes`, `isTimeBetween`) → all must accept only strings
+3. Search for ISO timestamp strings (containing "T") being used as local times
+4. Search for `date.getHours()` / `date.getMinutes()` / `date.getSeconds()` in time calculations → forbidden pattern
+5. Verify all time utility function signatures accept only `string` parameters (not `Date | string`)
+6. Check for local duplicate implementations of datetime functions (e.g., `parseLocalDate` redefined in route files) → must use `@shared/utils/datetime`
+7. Verify all displayed times use "HH:MM" format (no seconds shown to users)
+8. Verify all stored times use "HH:MM:SS" format
+
+### Red Flags:
+- `formatTimeHHMMSS(new Date())` → must be `currentTimeHHMMSS()`
+- `timeToMinutes(someDate)` where `someDate` is a `Date` object → must convert to string first
+- Any function signature like `(time: string | Date)` in datetime utilities → only `string` allowed
+- Local `function parseLocalDate()` in non-utility files → use central import
+- Time displayed with seconds ("09:45:00") → must show only "09:45"
+- `new Date(isoString).getHours()` for time extraction → parse the time string directly
 
 ---
 

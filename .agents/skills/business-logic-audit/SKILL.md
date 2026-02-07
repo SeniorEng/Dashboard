@@ -131,6 +131,7 @@ Fix: Document endpoint sets fallback values when start/end weren't explicitly tr
 4. Verify error recovery: If something fails, can the user retry without losing data?
 5. Check for implicit assumptions: Does the code assume data exists that might not?
 6. Verify German localization: All user-facing text in German, German date/time formats
+7. Verify date/time display conventions: Times shown as "HH:MM" (never seconds), dates as "DD.MM.YYYY" (German) or "YYYY-MM-DD" (forms)
 
 ### Red Flags:
 - Workflow requires multiple page navigations on mobile for a simple task
@@ -138,6 +139,8 @@ Fix: Document endpoint sets fallback values when start/end weren't explicitly tr
 - Error message shows English technical text ("500 Internal Server Error")
 - Feature works only if all optional data is filled in
 - Dates displayed in US format (MM/DD) instead of German (DD.MM.)
+- Times displayed with seconds ("09:45:00") instead of "09:45"
+- Time values computed using `new Date()` instead of string-based utilities from `@shared/utils/datetime`
 
 ---
 

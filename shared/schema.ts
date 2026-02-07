@@ -1,7 +1,11 @@
-import { pgTable, text, integer, timestamp, serial, time, date, boolean, unique, index } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, timestamp as pgTimestamp, serial, time, date, boolean, unique, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
+
 import { z } from "zod";
+
 import { isValidPhoneNumber, parsePhoneNumber } from "libphonenumber-js";
+
+const timestamp = (name: string) => pgTimestamp(name, { withTimezone: true });
 
 // ============================================
 // USER & AUTHENTICATION TABLES

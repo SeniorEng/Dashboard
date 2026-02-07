@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DatePicker } from "@/components/ui/date-picker";
 import { formatDateForDisplay } from "@shared/utils/date";
+import { todayISO } from "@shared/utils/datetime";
 import { formatCurrency } from "@shared/utils/format";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/patterns/page-header";
@@ -95,7 +96,7 @@ function PricingSection({ customerId, customerName, pricingHistory, currentPrici
   const [newHauswirtschaftRate, setNewHauswirtschaftRate] = useState("");
   const [newAlltagsbegleitungRate, setNewAlltagsbegleitungRate] = useState("");
   const [newKilometerRate, setNewKilometerRate] = useState("");
-  const todayDate = new Date().toISOString().split("T")[0];
+  const todayDate = todayISO();
   const [newValidFrom, setNewValidFrom] = useState(todayDate);
 
   const addPricingMutation = useMutation({
@@ -114,7 +115,7 @@ function PricingSection({ customerId, customerName, pricingHistory, currentPrici
       setNewHauswirtschaftRate("");
       setNewAlltagsbegleitungRate("");
       setNewKilometerRate("");
-      setNewValidFrom(new Date().toISOString().split("T")[0]);
+      setNewValidFrom(todayISO());
       toast({ title: "Preise hinzugefügt" });
     },
     onError: (error: Error) => {
