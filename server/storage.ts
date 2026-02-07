@@ -226,7 +226,7 @@ export class DatabaseStorage implements IStorage {
         travelKilometers: appointments.travelKilometers,
         travelMinutes: appointments.travelMinutes,
         customerKilometers: appointments.customerKilometers,
-        kilometers: appointments.kilometers,
+
         notes: appointments.notes,
         servicesDone: appointments.servicesDone,
         signatureData: appointments.signatureData,
@@ -249,7 +249,7 @@ export class DatabaseStorage implements IStorage {
           pflegegrad: customers.pflegegrad,
           primaryEmployeeId: customers.primaryEmployeeId,
           backupEmployeeId: customers.backupEmployeeId,
-          avatar: customers.avatar,
+  
           needs: customers.needs,
           createdAt: customers.createdAt,
           updatedAt: customers.updatedAt,
@@ -289,7 +289,7 @@ export class DatabaseStorage implements IStorage {
       travelKilometers: row.travelKilometers,
       travelMinutes: row.travelMinutes,
       customerKilometers: row.customerKilometers,
-      kilometers: row.kilometers,
+
       notes: row.notes,
       servicesDone: row.servicesDone,
       signatureData: row.signatureData,
@@ -361,7 +361,7 @@ export class DatabaseStorage implements IStorage {
       travelKilometers: appointments.travelKilometers,
       travelMinutes: appointments.travelMinutes,
       customerKilometers: appointments.customerKilometers,
-      kilometers: appointments.kilometers,
+
       notes: appointments.notes,
       servicesDone: appointments.servicesDone,
       signatureData: appointments.signatureData,
@@ -384,7 +384,7 @@ export class DatabaseStorage implements IStorage {
         pflegegrad: customers.pflegegrad,
         primaryEmployeeId: customers.primaryEmployeeId,
         backupEmployeeId: customers.backupEmployeeId,
-        avatar: customers.avatar,
+
         needs: customers.needs,
         createdAt: customers.createdAt,
         updatedAt: customers.updatedAt,
@@ -437,7 +437,7 @@ export class DatabaseStorage implements IStorage {
       travelKilometers: row.travelKilometers,
       travelMinutes: row.travelMinutes,
       customerKilometers: row.customerKilometers,
-      kilometers: row.kilometers,
+
       notes: row.notes,
       servicesDone: row.servicesDone,
       signatureData: row.signatureData,
@@ -488,7 +488,7 @@ export class DatabaseStorage implements IStorage {
       travelKilometers: appointments.travelKilometers,
       travelMinutes: appointments.travelMinutes,
       customerKilometers: appointments.customerKilometers,
-      kilometers: appointments.kilometers,
+
       notes: appointments.notes,
       servicesDone: appointments.servicesDone,
       signatureData: appointments.signatureData,
@@ -511,7 +511,7 @@ export class DatabaseStorage implements IStorage {
         pflegegrad: customers.pflegegrad,
         primaryEmployeeId: customers.primaryEmployeeId,
         backupEmployeeId: customers.backupEmployeeId,
-        avatar: customers.avatar,
+
         needs: customers.needs,
         createdAt: customers.createdAt,
         updatedAt: customers.updatedAt,
@@ -558,7 +558,7 @@ export class DatabaseStorage implements IStorage {
       travelKilometers: row.travelKilometers,
       travelMinutes: row.travelMinutes,
       customerKilometers: row.customerKilometers,
-      kilometers: row.kilometers,
+
       notes: row.notes,
       servicesDone: row.servicesDone,
       signatureData: row.signatureData,
@@ -600,7 +600,7 @@ export class DatabaseStorage implements IStorage {
         travelKilometers: appointments.travelKilometers,
         travelMinutes: appointments.travelMinutes,
         customerKilometers: appointments.customerKilometers,
-        kilometers: appointments.kilometers,
+
         notes: appointments.notes,
         servicesDone: appointments.servicesDone,
         signatureData: appointments.signatureData,
@@ -623,7 +623,7 @@ export class DatabaseStorage implements IStorage {
           pflegegrad: customers.pflegegrad,
           primaryEmployeeId: customers.primaryEmployeeId,
           backupEmployeeId: customers.backupEmployeeId,
-          avatar: customers.avatar,
+  
           needs: customers.needs,
           createdAt: customers.createdAt,
           updatedAt: customers.updatedAt,
@@ -665,7 +665,7 @@ export class DatabaseStorage implements IStorage {
       travelKilometers: row.travelKilometers,
       travelMinutes: row.travelMinutes,
       customerKilometers: row.customerKilometers,
-      kilometers: row.kilometers,
+
       notes: row.notes,
       servicesDone: row.servicesDone,
       signatureData: row.signatureData,
@@ -714,7 +714,7 @@ export class DatabaseStorage implements IStorage {
         travelKilometers: appointments.travelKilometers,
         travelMinutes: appointments.travelMinutes,
         customerKilometers: appointments.customerKilometers,
-        kilometers: appointments.kilometers,
+
         notes: appointments.notes,
         servicesDone: appointments.servicesDone,
         signatureData: appointments.signatureData,
@@ -737,7 +737,7 @@ export class DatabaseStorage implements IStorage {
           pflegegrad: customers.pflegegrad,
           primaryEmployeeId: customers.primaryEmployeeId,
           backupEmployeeId: customers.backupEmployeeId,
-          avatar: customers.avatar,
+  
           needs: customers.needs,
           createdAt: customers.createdAt,
           updatedAt: customers.updatedAt,
@@ -776,7 +776,7 @@ export class DatabaseStorage implements IStorage {
       travelKilometers: row.travelKilometers,
       travelMinutes: row.travelMinutes,
       customerKilometers: row.customerKilometers,
-      kilometers: row.kilometers,
+
       notes: row.notes,
       servicesDone: row.servicesDone,
       signatureData: row.signatureData,
@@ -838,7 +838,7 @@ export class DatabaseStorage implements IStorage {
       travelKilometers: appointments.travelKilometers,
       travelMinutes: appointments.travelMinutes,
       customerKilometers: appointments.customerKilometers,
-      kilometers: appointments.kilometers,
+
       notes: appointments.notes,
       servicesDone: appointments.servicesDone,
       signatureData: appointments.signatureData,
@@ -861,7 +861,7 @@ export class DatabaseStorage implements IStorage {
         pflegegrad: customers.pflegegrad,
         primaryEmployeeId: customers.primaryEmployeeId,
         backupEmployeeId: customers.backupEmployeeId,
-        avatar: customers.avatar,
+
         needs: customers.needs,
         createdAt: customers.createdAt,
         updatedAt: customers.updatedAt,
@@ -912,7 +912,7 @@ export class DatabaseStorage implements IStorage {
       travelKilometers: row.travelKilometers,
       travelMinutes: row.travelMinutes,
       customerKilometers: row.customerKilometers,
-      kilometers: row.kilometers,
+
       notes: row.notes,
       servicesDone: row.servicesDone,
       signatureData: row.signatureData,
@@ -1054,7 +1054,7 @@ export class DatabaseStorage implements IStorage {
       travelKilometers: appointments.travelKilometers,
       travelMinutes: appointments.travelMinutes,
       customerKilometers: appointments.customerKilometers,
-      kilometers: appointments.kilometers,
+
       notes: appointments.notes,
       servicesDone: appointments.servicesDone,
       signatureData: appointments.signatureData,
@@ -1097,7 +1097,7 @@ export class DatabaseStorage implements IStorage {
       travelKilometers: row.travelKilometers,
       travelMinutes: row.travelMinutes,
       customerKilometers: row.customerKilometers,
-      kilometers: row.kilometers,
+
       notes: row.notes,
       servicesDone: row.servicesDone,
       signatureData: row.signatureData,
@@ -1156,7 +1156,7 @@ export class DatabaseStorage implements IStorage {
       travelKilometers: appointments.travelKilometers,
       travelMinutes: appointments.travelMinutes,
       customerKilometers: appointments.customerKilometers,
-      kilometers: appointments.kilometers,
+
       notes: appointments.notes,
       servicesDone: appointments.servicesDone,
       signatureData: appointments.signatureData,
@@ -1208,7 +1208,7 @@ export class DatabaseStorage implements IStorage {
       travelKilometers: row.travelKilometers,
       travelMinutes: row.travelMinutes,
       customerKilometers: row.customerKilometers,
-      kilometers: row.kilometers,
+
       notes: row.notes,
       servicesDone: row.servicesDone,
       signatureData: row.signatureData,
@@ -1254,7 +1254,7 @@ export class DatabaseStorage implements IStorage {
       travelKilometers: appointments.travelKilometers,
       travelMinutes: appointments.travelMinutes,
       customerKilometers: appointments.customerKilometers,
-      kilometers: appointments.kilometers,
+
       notes: appointments.notes,
       servicesDone: appointments.servicesDone,
       signatureData: appointments.signatureData,
@@ -1307,7 +1307,7 @@ export class DatabaseStorage implements IStorage {
       travelKilometers: row.travelKilometers,
       travelMinutes: row.travelMinutes,
       customerKilometers: row.customerKilometers,
-      kilometers: row.kilometers,
+
       notes: row.notes,
       servicesDone: row.servicesDone,
       signatureData: row.signatureData,

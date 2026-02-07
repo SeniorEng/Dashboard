@@ -292,7 +292,6 @@ export interface UpdateAppointmentRequest {
   hauswirtschaftDauer?: number;
   alltagsbegleitungDauer?: number;
   notes?: string;
-  kilometers?: string;
   servicesDone?: string[];
   signatureData?: string;
 }
@@ -406,7 +405,6 @@ export interface AppointmentWithCustomerName {
   travelKilometers: number | null;
   travelMinutes: number | null;
   customerKilometers: number | null;
-  kilometers: string | null;
   signatureData: string | null;
   servicesDone: string[] | null;
   createdAt: string;

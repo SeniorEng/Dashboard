@@ -207,7 +207,6 @@ export const customers = pgTable("customers", {
   primaryEmployeeId: integer("primary_employee_id").references(() => users.id),
   backupEmployeeId: integer("backup_employee_id").references(() => users.id),
   // Legacy fields
-  avatar: text("avatar").notNull().default("person"),
   needs: text("needs").array().notNull().default([]),
   // Audit fields
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -560,8 +559,6 @@ export const appointments = pgTable("appointments", {
   travelMinutes: integer("travel_minutes"),
   // Customer kilometers (for Alltagsbegleitung - trips with/for customer)
   customerKilometers: integer("customer_kilometers"),
-  // Legacy kilometers field (kept for backwards compatibility)
-  kilometers: integer("kilometers"),
   notes: text("notes"),
   servicesDone: text("services_done").array().default([]),
   signatureData: text("signature_data"),

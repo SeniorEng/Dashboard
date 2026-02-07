@@ -404,10 +404,10 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
         travelKilometers: appointments.travelKilometers,
         travelMinutes: appointments.travelMinutes,
         customerKilometers: appointments.customerKilometers,
-        kilometers: appointments.kilometers,
         signatureData: appointments.signatureData,
         servicesDone: appointments.servicesDone,
         createdAt: appointments.createdAt,
+        performedByEmployeeId: appointments.performedByEmployeeId,
         customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as('customer_name'),
       })
       .from(appointments)

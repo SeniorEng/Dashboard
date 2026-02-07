@@ -215,7 +215,6 @@ export class AppointmentService {
 
   validateDocumentationChanges(currentStatus: string, updates: UpdateAppointment): ValidationResult {
     const hasDocumentationChanges = 
-      updates.kilometers !== undefined ||
       updates.servicesDone !== undefined || 
       updates.signatureData !== undefined;
     
@@ -300,7 +299,6 @@ export class AppointmentService {
       plz: string;
       stadt: string;
       pflegegrad: number;
-      avatar: string;
       needs: string[];
     };
     appointmentData: Omit<InsertAppointment, 'customerId'>;
@@ -322,7 +320,6 @@ export class AppointmentService {
       plz: input.customer.plz,
       stadt: input.customer.stadt,
       pflegegrad: input.customer.pflegegrad,
-      avatar: "person",
       needs: [],
     };
     

@@ -437,7 +437,8 @@ router.post("/:id/document", async (req, res) => {
     
     const performedBy = validatedData.performedByEmployeeId ?? appointment.assignedEmployeeId ?? req.user?.id ?? null;
 
-    const updateData = {
+    const now = formatTimeHHMMSS(new Date());
+    const updateData: Record<string, unknown> = {
       performedByEmployeeId: performedBy,
       hauswirtschaftActualDauer: validatedData.hauswirtschaftActualDauer ?? null,
       hauswirtschaftDetails: validatedData.hauswirtschaftDetails ?? null,
@@ -453,6 +454,13 @@ router.post("/:id/document", async (req, res) => {
       notes: validatedData.notes ?? appointment.notes,
       status: "completed" as const,
     };
+
+    if (!appointment.actualStart) {
+      updateData.actualStart = appointment.scheduledStart;
+    }
+    if (!appointment.actualEnd) {
+      updateData.actualEnd = now;
+    }
     
     const hauswirtschaftMinutes = validatedData.hauswirtschaftActualDauer || 0;
     const alltagsbegleitungMinutes = validatedData.alltagsbegleitungActualDauer || 0;

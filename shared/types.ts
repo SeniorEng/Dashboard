@@ -91,7 +91,6 @@ export interface UpdateAppointmentPayload {
   status?: "scheduled" | "in-progress" | "documenting" | "completed";
   actualStart?: string;
   actualEnd?: string;
-  kilometers?: string;
   notes?: string;
   servicesDone?: string[];
   signatureData?: string;
