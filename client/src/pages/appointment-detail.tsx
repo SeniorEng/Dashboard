@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { 
   MapPin, Calendar, FileText, ChevronLeft, Loader2, 
-  Pencil, Trash2, AlertTriangle, Phone, Car, Home, ArrowRight, Plus
+  Pencil, Trash2, AlertTriangle, Phone, Car, Home, ArrowRight
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { formatTimeSlot, getEndTime } from "@/features/appointments/utils";
@@ -179,26 +179,9 @@ export default function AppointmentDetail() {
                     <div className="flex items-center gap-2">
                       <div className={`w-2 h-2 rounded-full ${getServiceColors('hauswirtschaft').bg}`} />
                       <span>Hauswirtschaft</span>
-                      {isCompleted && !hasHauswirtschaft && hasDocumentedHauswirtschaft && (
-                        <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded flex items-center gap-0.5">
-                          <Plus className={iconSize.xs} /> Neu
-                        </span>
-                      )}
-                      {isCompleted && hasHauswirtschaft && !hasDocumentedHauswirtschaft && (
-                        <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Entfernt</span>
-                      )}
                     </div>
                     {isCompleted && hasDocumentedHauswirtschaft ? (
-                      <div className="flex items-center gap-1">
-                        {hasHauswirtschaft && appointment.hauswirtschaftDauer !== appointment.hauswirtschaftActualDauer && (
-                          <span className={`text-xs px-1 py-0.5 rounded ${
-                            appointment.hauswirtschaftActualDauer! > appointment.hauswirtschaftDauer! 
-                              ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"
-                          }`}>
-                            {appointment.hauswirtschaftActualDauer! > appointment.hauswirtschaftDauer! ? "+" : ""}
-                            {appointment.hauswirtschaftActualDauer! - appointment.hauswirtschaftDauer!}
-                          </span>
-                        )}
+                      <div className="flex items-center">
                         <span className="w-16 text-right text-muted-foreground text-sm">
                           {hasHauswirtschaft ? formatDuration(appointment.hauswirtschaftDauer!) : "—"}
                         </span>
@@ -226,26 +209,9 @@ export default function AppointmentDetail() {
                     <div className="flex items-center gap-2">
                       <div className={`w-2 h-2 rounded-full ${getServiceColors('alltagsbegleitung').bg}`} />
                       <span>Alltagsbegleitung</span>
-                      {isCompleted && !hasAlltagsbegleitung && hasDocumentedAlltagsbegleitung && (
-                        <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded flex items-center gap-0.5">
-                          <Plus className={iconSize.xs} /> Neu
-                        </span>
-                      )}
-                      {isCompleted && hasAlltagsbegleitung && !hasDocumentedAlltagsbegleitung && (
-                        <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Entfernt</span>
-                      )}
                     </div>
                     {isCompleted && hasDocumentedAlltagsbegleitung ? (
-                      <div className="flex items-center gap-1">
-                        {hasAlltagsbegleitung && appointment.alltagsbegleitungDauer !== appointment.alltagsbegleitungActualDauer && (
-                          <span className={`text-xs px-1 py-0.5 rounded ${
-                            appointment.alltagsbegleitungActualDauer! > appointment.alltagsbegleitungDauer! 
-                              ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"
-                          }`}>
-                            {appointment.alltagsbegleitungActualDauer! > appointment.alltagsbegleitungDauer! ? "+" : ""}
-                            {appointment.alltagsbegleitungActualDauer! - appointment.alltagsbegleitungDauer!}
-                          </span>
-                        )}
+                      <div className="flex items-center">
                         <span className="w-16 text-right text-muted-foreground text-sm">
                           {hasAlltagsbegleitung ? formatDuration(appointment.alltagsbegleitungDauer!) : "—"}
                         </span>
@@ -275,16 +241,7 @@ export default function AppointmentDetail() {
                       <span>Erstberatung</span>
                     </div>
                     {isCompleted && hasDocumentedErstberatung ? (
-                      <div className="flex items-center gap-1">
-                        {hasErstberatung && appointment.erstberatungDauer !== appointment.erstberatungActualDauer && (
-                          <span className={`text-xs px-1 py-0.5 rounded ${
-                            appointment.erstberatungActualDauer! > appointment.erstberatungDauer! 
-                              ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"
-                          }`}>
-                            {appointment.erstberatungActualDauer! > appointment.erstberatungDauer! ? "+" : ""}
-                            {appointment.erstberatungActualDauer! - appointment.erstberatungDauer!}
-                          </span>
-                        )}
+                      <div className="flex items-center">
                         <span className="w-16 text-right text-muted-foreground text-sm">
                           {hasErstberatung ? formatDuration(appointment.erstberatungDauer!) : "—"}
                         </span>
