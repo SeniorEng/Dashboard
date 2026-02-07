@@ -4,6 +4,7 @@ import { format } from "date-fns";
 import { de } from "date-fns/locale";
 import { requireAuth } from "../middleware/auth";
 import { handleRouteError } from "../lib/errors";
+import { parseLocalDate } from "@shared/utils/datetime";
 
 interface SearchResult {
   type: "customer" | "appointment";
@@ -56,7 +57,7 @@ searchRouter.get("/", async (req: Request, res: Response) => {
 
     for (const apt of matchingAppointments) {
       const customerName = apt.customer?.name || `${apt.customer?.vorname} ${apt.customer?.nachname}`;
-      const dateFormatted = format(new Date(apt.date), "d. MMM yyyy", { locale: de });
+      const dateFormatted = format(parseLocalDate(apt.date), "d. MMM yyyy", { locale: de });
       
       results.push({
         type: "appointment",

@@ -8,7 +8,7 @@ import { format, addDays, startOfWeek, addWeeks, subWeeks, isSameDay } from "dat
 import { de } from "date-fns/locale";
 import { Plus, ChevronsLeft, ChevronsRight, AlertCircle, Coffee, Loader2, FileSignature } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { parseLocalDate, formatDateForDisplay } from "@shared/utils/date";
+import { parseLocalDate, formatDateForDisplay } from "@shared/utils/datetime";
 import { iconSize } from "@/design-system";
 import { ErrorState } from "@/components/patterns/error-state";
 

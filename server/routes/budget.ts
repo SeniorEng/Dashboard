@@ -8,7 +8,7 @@ import {
   insertBudgetPreferencesSchema,
 } from "@shared/schema";
 import { z } from "zod";
-import { todayISO } from "@shared/utils/datetime";
+import { todayISO, parseLocalDate } from "@shared/utils/datetime";
 
 const router = Router();
 
@@ -125,7 +125,7 @@ router.post("/:customerId/initial-budget", async (req: Request, res: Response) =
 
     const { currentYearAmountCents, carryoverAmountCents, budgetStartDate } = result.data;
     const userId = req.user?.id;
-    const startDate = new Date(budgetStartDate);
+    const startDate = parseLocalDate(budgetStartDate);
     const year = startDate.getFullYear();
     const carryoverYear = year + 1;
 

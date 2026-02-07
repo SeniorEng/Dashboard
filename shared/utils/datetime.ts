@@ -134,6 +134,48 @@ export function isSameDay(date1: string, date2: string): boolean {
   return date1 === date2;
 }
 
+/**
+ * Formatiert einen Datumsstring für die deutsche Anzeige mit Intl.DateTimeFormat.
+ * Flexibler als formatDateGerman() - akzeptiert beliebige DateTimeFormatOptions.
+ * @param dateString - Datumsstring im Format "YYYY-MM-DD"
+ * @param options - Intl.DateTimeFormatOptions für die Formatierung
+ */
+export function formatDateForDisplay(
+  dateString: string,
+  options: Intl.DateTimeFormatOptions = { day: "2-digit", month: "2-digit", year: "numeric" }
+): string {
+  const date = parseLocalDate(dateString);
+  return date.toLocaleDateString("de-DE", options);
+}
+
+/**
+ * Prüft ob ein Datumsstring heute ist.
+ */
+export function isToday(dateString: string): boolean {
+  return dateString === todayISO();
+}
+
+/**
+ * Prüft ob ein Datumsstring in der Vergangenheit liegt.
+ */
+export function isPast(dateString: string): boolean {
+  const date = parseLocalDate(dateString);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return date < today;
+}
+
+/**
+ * Berechnet die Differenz in Tagen zwischen zwei Datumsstrings.
+ * @returns Positive Zahl wenn date2 nach date1 liegt, negative wenn davor
+ */
+export function daysBetween(date1: string, date2: string): number {
+  const d1 = parseLocalDate(date1);
+  const d2 = parseLocalDate(date2);
+  const diffTime = d2.getTime() - d1.getTime();
+  return Math.round(diffTime / (1000 * 60 * 60 * 24));
+}
+
 // ============================================================
 // ZEIT-FUNKTIONEN (NUR Strings, KEINE Date-Objekte!)
 // ============================================================

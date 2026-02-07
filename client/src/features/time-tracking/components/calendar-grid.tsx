@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { WEEKDAY_NAMES, MONTH_NAMES } from "../constants";
-import { formatDateString } from "@shared/utils/date";
+import { formatDateISO } from "@shared/utils/datetime";
 
 interface CalendarDay {
   date: string;
@@ -40,7 +40,7 @@ export function CalendarGrid({
   onPrevMonth,
   onNextMonth,
 }: CalendarGridProps) {
-  const todayStr = useMemo(() => formatDateString(new Date()), []);
+  const todayStr = useMemo(() => formatDateISO(new Date()), []);
 
   const calendarDays = useMemo(() => {
     const firstDay = new Date(selectedYear, selectedMonth - 1, 1);
@@ -55,7 +55,7 @@ export function CalendarGrid({
       const day = prevMonthLastDay - i;
       const date = new Date(selectedYear, selectedMonth - 2, day);
       days.push({
-        date: formatDateString(date),
+        date: formatDateISO(date),
         day,
         isCurrentMonth: false,
         isToday: false,
@@ -65,7 +65,7 @@ export function CalendarGrid({
 
     for (let day = 1; day <= daysInMonth; day++) {
       const date = new Date(selectedYear, selectedMonth - 1, day);
-      const dateStr = formatDateString(date);
+      const dateStr = formatDateISO(date);
       days.push({
         date: dateStr,
         day,
@@ -79,7 +79,7 @@ export function CalendarGrid({
     for (let day = 1; day <= remainingDays; day++) {
       const date = new Date(selectedYear, selectedMonth, day);
       days.push({
-        date: formatDateString(date),
+        date: formatDateISO(date),
         day,
         isCurrentMonth: false,
         isToday: false,

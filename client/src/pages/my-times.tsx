@@ -21,13 +21,13 @@ import {
   type DayTimeEntry,
 } from "@/features/time-tracking";
 import type { TimeEntryType } from "@/lib/api/types";
-import { formatDateString } from "@shared/utils/date";
+import { todayISO } from "@shared/utils/datetime";
 import { iconSize } from "@/design-system";
 
 export default function MyTimes() {
   const { toast } = useToast();
   const { user } = useAuth();
-  const todayStr = useMemo(() => formatDateString(new Date()), []);
+  const todayStr = useMemo(() => todayISO(), []);
 
   const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth() + 1);

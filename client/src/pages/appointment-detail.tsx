@@ -30,7 +30,7 @@ import {
   type AppointmentStatus
 } from "@shared/types";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
-import { formatDateForDisplay } from "@shared/utils/date";
+import { formatDateForDisplay } from "@shared/utils/datetime";
 
 export default function AppointmentDetail() {
   const [, params] = useRoute("/appointment/:id");

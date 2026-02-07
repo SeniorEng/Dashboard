@@ -6,7 +6,7 @@ import {
   type CustomerPricing,
   type InsertCustomerPricing,
 } from "@shared/schema";
-import { todayISO, formatDateISO } from "@shared/utils/datetime";
+import { todayISO, formatDateISO, parseLocalDate } from "@shared/utils/datetime";
 
 const sql = neon(process.env.DATABASE_URL!);
 const db = drizzle(sql);
@@ -54,7 +54,7 @@ export class CustomerPricingStorage implements ICustomerPricingStorage {
   ): Promise<CustomerPricing> {
     const { customerId, validFrom, ...rest } = data;
     const newValidFrom = validFrom;
-    const dayBeforeNew = new Date(newValidFrom);
+    const dayBeforeNew = parseLocalDate(newValidFrom);
     dayBeforeNew.setDate(dayBeforeNew.getDate() - 1);
     const validToForOld = formatDateISO(dayBeforeNew);
     
@@ -98,7 +98,7 @@ export class CustomerPricingStorage implements ICustomerPricingStorage {
     // If there's a future record, set validTo to day before it starts
     let newValidTo: string | null = null;
     if (futureRecords.length > 0) {
-      const futureStart = new Date(futureRecords[0].validFrom);
+      const futureStart = parseLocalDate(futureRecords[0].validFrom);
       futureStart.setDate(futureStart.getDate() - 1);
       newValidTo = formatDateISO(futureStart);
     }

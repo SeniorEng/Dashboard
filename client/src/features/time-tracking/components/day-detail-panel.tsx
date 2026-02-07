@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Calendar, Plus, Car, Users, Pencil, Trash2 } from "lucide-react";
 import { iconSize } from "@/design-system";
-import { formatDateForDisplay } from "@shared/utils/date";
+import { formatDateForDisplay } from "@shared/utils/datetime";
 import { TIME_ENTRY_TYPE_CONFIG, formatMinutesToHours, isEntryLocked } from "../constants";
 import type { TimeEntryType, AppointmentWithCustomerName } from "@/lib/api/types";
 

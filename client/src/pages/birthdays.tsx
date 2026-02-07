@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Cake, Loader2, Gift } from "lucide-react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
-import { formatDateForDisplay } from "@shared/utils/date";
+import { formatDateForDisplay } from "@shared/utils/datetime";
 import { iconSize } from "@/design-system";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { ErrorState } from "@/components/patterns/error-state";

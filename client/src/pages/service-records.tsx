@@ -13,7 +13,7 @@ import {
   ChevronRight, Check, AlertCircle, FileText, ArrowLeft, Plus
 } from "lucide-react";
 import { iconSize } from "@/design-system";
-import { formatDateForDisplay } from "@shared/utils/date";
+import { formatDateForDisplay } from "@shared/utils/datetime";
 import { Link, useLocation, useSearch } from "wouter";
 import { toast } from "sonner";
 import { apiRequest } from "@/lib/api/client";

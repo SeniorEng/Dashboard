@@ -6,7 +6,7 @@ import {
   type EmployeeCompensation,
   type InsertEmployeeCompensation,
 } from "@shared/schema";
-import { todayISO, formatDateISO } from "@shared/utils/datetime";
+import { todayISO, formatDateISO, parseLocalDate } from "@shared/utils/datetime";
 
 const sql = neon(process.env.DATABASE_URL!);
 const db = drizzle(sql);
@@ -54,7 +54,7 @@ export class CompensationStorage implements ICompensationStorage {
   ): Promise<EmployeeCompensation> {
     const { userId, validFrom, ...rest } = data;
     const newValidFrom = validFrom;
-    const dayBeforeNew = new Date(newValidFrom);
+    const dayBeforeNew = parseLocalDate(newValidFrom);
     dayBeforeNew.setDate(dayBeforeNew.getDate() - 1);
     const validToForOld = formatDateISO(dayBeforeNew);
     

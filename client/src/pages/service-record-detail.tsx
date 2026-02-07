@@ -12,8 +12,7 @@ import {
   FileText, Check, AlertTriangle, Car
 } from "lucide-react";
 import { iconSize } from "@/design-system";
-import { formatDateForDisplay } from "@shared/utils/date";
-import { formatTimeHHMM } from "@shared/utils/datetime";
+import { formatDateForDisplay, formatTimeHHMM } from "@shared/utils/datetime";
 import { toast } from "sonner";
 import { api } from "@/lib/api/client";
 import type { MonthlyServiceRecord, Customer } from "@shared/schema";

@@ -1,6 +1,6 @@
 import { AlertCircle } from "lucide-react";
 import { iconSize } from "@/design-system";
-import { formatDateForDisplay } from "@shared/utils/date";
+import { formatDateForDisplay } from "@shared/utils/datetime";
 
 interface MissingBreakDay {
   date: string;

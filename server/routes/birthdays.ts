@@ -7,6 +7,7 @@ import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { users, customers } from "@shared/schema";
 import { sql, and, eq, or, isNotNull } from "drizzle-orm";
+import { parseLocalDate } from "@shared/utils/datetime";
 
 const router = Router();
 
@@ -25,7 +26,7 @@ function calculateDaysUntilBirthday(birthDate: string): number {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   
-  const birth = new Date(birthDate);
+  const birth = parseLocalDate(birthDate);
   const thisYearBirthday = new Date(today.getFullYear(), birth.getMonth(), birth.getDate());
   
   if (thisYearBirthday < today) {
@@ -38,7 +39,7 @@ function calculateDaysUntilBirthday(birthDate: string): number {
 
 function calculateAge(birthDate: string): number {
   const today = new Date();
-  const birth = new Date(birthDate);
+  const birth = parseLocalDate(birthDate);
   let age = today.getFullYear() - birth.getFullYear();
   const monthDiff = today.getMonth() - birth.getMonth();
   

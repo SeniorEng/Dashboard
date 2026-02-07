@@ -9,7 +9,7 @@
 
 import { useState, useCallback } from "react";
 import type { TimeEntryType, CreateTimeEntryRequest } from "@/lib/api/types";
-import { formatDateString } from "@shared/utils/date";
+import { todayISO } from "@shared/utils/datetime";
 
 export interface TimeEntryFormState {
   id?: number;
@@ -27,7 +27,7 @@ const FULL_DAY_TYPES: TimeEntryType[] = ["urlaub", "krankheit"];
 function getDefaultFormState(): TimeEntryFormState {
   return {
     entryType: "urlaub",
-    entryDate: formatDateString(new Date()),
+    entryDate: todayISO(),
     endDate: undefined,
     startTime: undefined,
     endTime: undefined,
