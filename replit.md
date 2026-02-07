@@ -72,6 +72,10 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Business Logic**: Separated into a dedicated service layer with dependency injection for testability.
 - **Error Handling**: Centralized error codes and German messages, consistent error formatting via `handleRouteError()`.
 - **Security**: Role-based access control with SQL-level data filtering, CSRF protection for all state-changing requests, and database indexing for performance.
+- **Sanfter Entzug (Soft Revocation)**: Zwei-Stufen-Zugriffsmodell für Mitarbeiter:
+  - **Voller Zugriff** (`getCurrentlyAssignedCustomerIds`): Mitarbeiter ist aktuell als Hauptansprechpartner oder Vertretung zugewiesen → darf neue Termine erstellen, voller Kundenzugriff.
+  - **Legacy-Zugriff** (`getAssignedCustomerIds`): Mitarbeiter hat Termine beim Kunden (auch wenn nicht mehr zugewiesen) → kann bestehende Termine sehen, dokumentieren, abschließen. Keine neuen Termine. Frontend zeigt "Frühere Zuordnung" Badge.
+  - Admins haben uneingeschränkten Zugriff auf alle Kunden.
 
 ### Data Storage
 - **Database**: PostgreSQL via Neon serverless, managed with Drizzle ORM.
