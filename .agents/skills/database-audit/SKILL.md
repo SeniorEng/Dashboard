@@ -272,3 +272,18 @@ After completing all checks, produce a summary:
 - FAIL items: Must fix before completion
 - WARN items: Should fix, document if deferred
 ```
+
+---
+
+## Cross-References to Other Audit Skills
+
+This audit covers the **data layer** (schema, storage, queries, GDPR). For complete coverage, also run:
+
+| Skill | When to Also Run | What It Adds |
+|-------|-----------------|--------------|
+| `code-quality-supervisor` | **ALWAYS** after every task | Duplicate detection, convention compliance, migration completeness, dead code |
+| `business-logic-audit` | When workflows/status transitions are affected | Workflow completeness, domain rules, user perspective |
+| `security-audit` | When auth, API routes, or user input is affected | OWASP checks, secret exposure, CSRF, injection prevention |
+| `performance-audit` | When queries or large components are added | N+1 patterns (detailed), bundle size, rendering efficiency |
+
+See `.agents/skills/code-quality-supervisor/SKILL.md` for the orchestration rules that determine which audits run when.

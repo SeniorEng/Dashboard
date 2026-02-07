@@ -110,6 +110,25 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Open Tasks System**: Dashboard banners alert employees to pending tasks like undocumented appointments or missing break documentation.
 - **Customer Kilometers**: Tracking of kilometers driven with/for the customer ("Km für/mit Kunde") separate from travel kilometers.
 
+## Quality Assurance System
+
+### Audit Skills (Multi-Layer Review)
+5 spezialisierte Audit-Agents bilden ein vollständiges Quality-Gate-System:
+
+| Skill | Fokus | Wann |
+|-------|-------|------|
+| `code-quality-supervisor` | Duplikate, Konventionen, Vollständigkeit, Dead Code | **IMMER** nach jeder Aufgabe |
+| `database-audit` | Schema, Storage, Queries, GDPR, Historisierung | Bei Datenbank-Änderungen |
+| `business-logic-audit` | Workflows, Domain-Regeln, Status-Übergänge | Bei Geschäftslogik-Änderungen |
+| `security-audit` | OWASP, Secrets, Auth/CSRF, Injection, Access Control | Bei Auth/API/Input-Änderungen |
+| `performance-audit` | Queries, Rendering, Bundle, Caching, Mobile | Bei neuen Features, vor Deployment |
+
+### Orchestrierungs-Regeln
+- **`code-quality-supervisor`** läuft IMMER — ist der Gatekeeper
+- FAIL blockiert Fertigstellung, WARN wird berichtet
+- Vor Deployment/Publishing: ALLE 5 Skills mit vollem Scope
+- Details: `.agents/skills/code-quality-supervisor/reference/orchestration.md`
+
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)
 - **Frontend Libraries**: React, TypeScript, Vite, Wouter, `shadcn/ui`, Radix UI, Tailwind CSS v4, TanStack Query, Zod.

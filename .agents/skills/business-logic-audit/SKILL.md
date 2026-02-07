@@ -238,3 +238,18 @@ After completing all checks, produce a summary:
 [For the specific workflow being audited, include the full trace:]
 User Action → UI Component → API Endpoint → Storage Method → DB Table → Response → Display
 ```
+
+---
+
+## Cross-References to Other Audit Skills
+
+This audit covers **business logic** (workflows, domain rules, user perspective). For complete coverage, also run:
+
+| Skill | When to Also Run | What It Adds |
+|-------|-----------------|--------------|
+| `code-quality-supervisor` | **ALWAYS** after every task | Duplicate detection, convention compliance, migration completeness, dead code |
+| `database-audit` | When schema, storage, or queries are affected | Schema consistency, data types, indexing, GDPR |
+| `security-audit` | When auth, API routes, or validation rules change | OWASP checks, secret exposure, access control |
+| `performance-audit` | When new features add complexity | Query efficiency, rendering, bundle size |
+
+See `.agents/skills/code-quality-supervisor/SKILL.md` for the orchestration rules that determine which audits run when.
