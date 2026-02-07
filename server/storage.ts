@@ -207,7 +207,7 @@ export class DatabaseStorage implements IStorage {
       id: row.id,
       vorname: row.vorname,
       nachname: row.nachname,
-      name: `${row.vorname} ${row.nachname}`,
+      name: row.name,
       email: row.email,
       telefon: row.telefon,
       festnetz: row.festnetz,

@@ -15,10 +15,8 @@ import { ErrorState } from "@/components/patterns/error-state";
 import { 
   iconSize, 
   getPflegegradColors,
-  componentStyles,
-  semanticSpacing 
+  componentStyles
 } from "@/design-system";
-import { useAuth } from "@/hooks/use-auth";
 import { formatAddress } from "@shared/utils/format";
 import type { CustomerWithAccess } from "@/features/appointments";
 
@@ -29,7 +27,6 @@ function getPflegegradLabel(pflegegrad: number | null): string | null {
 
 export default function CustomersPage() {
   const [searchQuery, setSearchQuery] = useState("");
-  const { user } = useAuth();
 
   const { data: customers = [], isLoading, error, refetch } = useQuery<CustomerWithAccess[]>({
     queryKey: ["customers"],
