@@ -9,15 +9,9 @@ import { formatDateForDisplay } from "@shared/utils/datetime";
 import { iconSize } from "@/design-system";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { ErrorState } from "@/components/patterns/error-state";
+import type { BirthdayEntry } from "@shared/types";
 
-interface BirthdayEntry {
-  id: number;
-  type: "employee" | "customer";
-  name: string;
-  geburtsdatum: string;
-  daysUntil: number;
-  age: number;
-}
+const BIRTHDAY_HORIZON_DAYS = 30;
 
 function getDaysLabel(days: number): string {
   if (days === 0) return "Heute";
@@ -53,6 +47,7 @@ export default function BirthdaysPage() {
   
   const { data: birthdays = [], isLoading, error, refetch } = useQuery<BirthdayEntry[]>({
     queryKey: ["/api/birthdays"],
+    staleTime: 5 * 60 * 1000,
   });
 
   const groups = groupBirthdays(birthdays);
@@ -93,8 +88,8 @@ export default function BirthdaysPage() {
         </div>
         <p className="text-muted-foreground text-sm ml-10" data-testid="text-birthdays-subtitle">
           {user?.isAdmin 
-            ? "Alle Geburtstage der nächsten 30 Tage"
-            : "Geburtstage meiner Kunden in den nächsten 30 Tagen"
+            ? `Alle Geburtstage der nächsten ${BIRTHDAY_HORIZON_DAYS} Tage`
+            : `Geburtstage in den nächsten ${BIRTHDAY_HORIZON_DAYS} Tagen`
           }
         </p>
       </div>
@@ -104,12 +99,12 @@ export default function BirthdaysPage() {
           <CardContent className="py-10">
             <EmptyState
               icon={<Gift className={`${iconSize["2xl"]} text-muted-foreground/40`} />}
-              title="Keine Geburtstage in den nächsten 30 Tagen"
+              title={`Keine Geburtstage in den nächsten ${BIRTHDAY_HORIZON_DAYS} Tagen`}
             />
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-6">
+        <div className="flex flex-col gap-6">
           {Object.entries(groups).map(([groupName, groupBirthdays]) => {
             if (groupBirthdays.length === 0) return null;
             

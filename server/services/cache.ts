@@ -1,3 +1,5 @@
+import type { BirthdayEntry } from "@shared/types";
+
 interface CacheEntry<T> {
   value: T;
   expiresAt: number;
@@ -140,15 +142,6 @@ export const usersCache = new UsersCacheService();
 
 // Cache for birthdays (1 hour TTL)
 const BIRTHDAYS_CACHE_TTL = 60 * 60 * 1000;
-
-interface BirthdayEntry {
-  id: number;
-  type: "employee" | "customer";
-  name: string;
-  geburtsdatum: string;
-  daysUntil: number;
-  age: number;
-}
 
 class BirthdaysCacheService {
   private cache = new SimpleCache<BirthdayEntry[]>(BIRTHDAYS_CACHE_TTL);

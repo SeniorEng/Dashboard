@@ -3,50 +3,69 @@ import { requireAuth } from "../middleware/auth";
 import { handleRouteError } from "../lib/errors";
 import { storage } from "../storage";
 import { birthdaysCache } from "../services/cache";
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
-import { users, customers } from "@shared/schema";
-import { sql, and, eq, or, isNotNull } from "drizzle-orm";
-import { parseLocalDate } from "@shared/utils/datetime";
+import { parseLocalDate, todayISO } from "@shared/utils/datetime";
+import type { BirthdayEntry } from "@shared/types";
 
 const router = Router();
 
 router.use(requireAuth);
 
-interface BirthdayEntry {
-  id: number;
-  type: "employee" | "customer";
-  name: string;
-  geburtsdatum: string;
-  daysUntil: number;
-  age: number;
-}
+const MAX_HORIZON_DAYS = 365;
+const DEFAULT_HORIZON_DAYS = 30;
 
 function calculateDaysUntilBirthday(birthDate: string): number {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  
+  const todayStr = todayISO();
+  const today = parseLocalDate(todayStr);
+
   const birth = parseLocalDate(birthDate);
-  const thisYearBirthday = new Date(today.getFullYear(), birth.getMonth(), birth.getDate());
-  
-  if (thisYearBirthday < today) {
-    thisYearBirthday.setFullYear(today.getFullYear() + 1);
+  const birthMonth = birth.getMonth();
+  const birthDay = birth.getDate();
+
+  const originalDate = new Date(birth.getFullYear(), birthMonth, birthDay);
+  const wasLeapDayBaby = birthMonth === 1 && birthDay === 29 &&
+    originalDate.getMonth() === 1 && originalDate.getDate() === 29;
+
+  let thisYearBirthday: Date;
+  if (wasLeapDayBaby) {
+    const candidate = new Date(today.getFullYear(), 1, 29);
+    if (candidate.getMonth() === 1 && candidate.getDate() === 29) {
+      thisYearBirthday = candidate;
+    } else {
+      thisYearBirthday = new Date(today.getFullYear(), 1, 28);
+    }
+  } else {
+    thisYearBirthday = new Date(today.getFullYear(), birthMonth, birthDay);
   }
-  
+
+  if (thisYearBirthday < today) {
+    if (wasLeapDayBaby) {
+      let nextYear = today.getFullYear() + 1;
+      let candidate = new Date(nextYear, 1, 29);
+      while (!(candidate.getMonth() === 1 && candidate.getDate() === 29)) {
+        nextYear++;
+        candidate = new Date(nextYear, 1, 29);
+      }
+      thisYearBirthday = candidate;
+    } else {
+      thisYearBirthday.setFullYear(today.getFullYear() + 1);
+    }
+  }
+
   const diffTime = thisYearBirthday.getTime() - today.getTime();
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 }
 
 function calculateAge(birthDate: string): number {
-  const today = new Date();
+  const todayStr = todayISO();
+  const today = parseLocalDate(todayStr);
   const birth = parseLocalDate(birthDate);
   let age = today.getFullYear() - birth.getFullYear();
   const monthDiff = today.getMonth() - birth.getMonth();
-  
+
   if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
     age--;
   }
-  
+
   return age;
 }
 
@@ -58,32 +77,21 @@ function calculateUpcomingAge(birthDate: string, daysUntil: number): number {
 router.get("/", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
-    const horizonDays = parseInt(req.query.days as string) || 30;
-    
-    // Check cache first
+    const rawDays = parseInt(req.query.days as string);
+    const horizonDays = isNaN(rawDays)
+      ? DEFAULT_HORIZON_DAYS
+      : Math.min(Math.max(1, rawDays), MAX_HORIZON_DAYS);
+
     const cached = birthdaysCache.get(user.id, user.isAdmin, horizonDays);
     if (cached) {
       return res.json(cached);
     }
-    
-    const dbConnection = neon(process.env.DATABASE_URL!);
-    const db = drizzle(dbConnection);
-    
+
     const birthdays: BirthdayEntry[] = [];
-    
+
     if (user.isAdmin) {
-      const activeEmployees = await db
-        .select({
-          id: users.id,
-          displayName: users.displayName,
-          geburtsdatum: users.geburtsdatum,
-        })
-        .from(users)
-        .where(and(
-          eq(users.isActive, true),
-          isNotNull(users.geburtsdatum)
-        ));
-      
+      const activeEmployees = await storage.getActiveEmployeesWithBirthday();
+
       for (const emp of activeEmployees) {
         if (emp.geburtsdatum) {
           const daysUntil = calculateDaysUntilBirthday(emp.geburtsdatum);
@@ -99,17 +107,10 @@ router.get("/", async (req: Request, res: Response) => {
           }
         }
       }
-      
-      const allCustomers = await db
-        .select({
-          id: customers.id,
-          name: customers.name,
-          geburtsdatum: customers.geburtsdatum,
-        })
-        .from(customers)
-        .where(isNotNull(customers.geburtsdatum));
-      
-      for (const cust of allCustomers) {
+
+      const activeCustomers = await storage.getActiveCustomersWithBirthday();
+
+      for (const cust of activeCustomers) {
         if (cust.geburtsdatum) {
           const daysUntil = calculateDaysUntilBirthday(cust.geburtsdatum);
           if (daysUntil <= horizonDays) {
@@ -139,12 +140,12 @@ router.get("/", async (req: Request, res: Response) => {
           });
         }
       }
-      
+
       const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-      
+
       if (assignedCustomerIds.length > 0) {
         const assignedCustomers = await storage.getCustomersByIds(assignedCustomerIds);
-        
+
         for (const cust of assignedCustomers) {
           if (cust.geburtsdatum) {
             const daysUntil = calculateDaysUntilBirthday(cust.geburtsdatum);
@@ -162,12 +163,11 @@ router.get("/", async (req: Request, res: Response) => {
         }
       }
     }
-    
+
     birthdays.sort((a, b) => a.daysUntil - b.daysUntil);
-    
-    // Store in cache (1 hour TTL)
+
     birthdaysCache.set(user.id, user.isAdmin, horizonDays, birthdays);
-    
+
     res.json(birthdays);
   } catch (error) {
     handleRouteError(res, error, "Geburtstage konnten nicht geladen werden");

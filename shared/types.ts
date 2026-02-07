@@ -100,6 +100,19 @@ export interface UpdateAppointmentPayload {
 // UTILITY FUNCTIONS
 // ============================================
 
+// ============================================
+// BIRTHDAY TYPES
+// ============================================
+
+export interface BirthdayEntry {
+  id: number;
+  type: "employee" | "customer";
+  name: string;
+  geburtsdatum: string;
+  daysUntil: number;
+  age: number;
+}
+
 /**
  * Ermittelt den primären Service-Typ basierend auf den geplanten Dauern
  */

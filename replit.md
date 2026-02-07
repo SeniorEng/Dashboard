@@ -109,6 +109,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **German Labor Law Compliance**: Automatic detection of missing break documentation based on work hours (`§4 ArbZG`).
 - **Open Tasks System**: Dashboard banners alert employees to pending tasks like undocumented appointments or missing break documentation.
 - **Customer Kilometers**: Tracking of kilometers driven with/for the customer ("Km für/mit Kunde") separate from travel kilometers.
+- **Geburtstage-Tab**: Zeigt bevorstehende Geburtstage (Standard: 30 Tage Horizont). Admin sieht alle aktiven Mitarbeiter + Kunden, Nicht-Admin sieht eigenen Geburtstag + zugewiesene Kunden. Zentrales `BirthdayEntry` Interface in `@shared/types.ts`. Schaltjahr-sichere Berechnung (29. Feb → 28. Feb in Nicht-Schaltjahren). Server-Cache mit 1h TTL, Frontend staleTime 5min.
 
 ## Quality Assurance System
 

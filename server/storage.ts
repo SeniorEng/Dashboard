@@ -11,11 +11,12 @@ import {
   appointments,
   monthlyServiceRecords,
   serviceRecordAppointments,
+  users,
 } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
-import { eq, count, sql as sqlBuilder, lt, ne, and, or, ilike, inArray, isNull } from "drizzle-orm";
+import { eq, count, sql as sqlBuilder, lt, ne, and, or, ilike, inArray, isNull, isNotNull } from "drizzle-orm";
 import { customerIdsCache } from "./services/cache";
 
 const sql = neon(process.env.DATABASE_URL!);
@@ -47,6 +48,10 @@ export interface IStorage {
   createCustomer(customer: InsertCustomer): Promise<Customer>;
   deleteCustomer(id: number): Promise<boolean>;
   getAssignedCustomerIds(employeeId: number): Promise<number[]>;
+
+  // Birthday queries
+  getActiveEmployeesWithBirthday(): Promise<{ id: number; displayName: string; geburtsdatum: string | null }[]>;
+  getActiveCustomersWithBirthday(): Promise<{ id: number; name: string; geburtsdatum: string | null }[]>;
   
   // Optimized search
   searchCustomers(options: SearchOptions): Promise<Customer[]>;
@@ -156,6 +161,31 @@ export class DatabaseStorage implements IStorage {
   async getCustomersByIds(ids: number[]): Promise<Customer[]> {
     if (ids.length === 0) return [];
     return await db.select().from(customers).where(inArray(customers.id, ids));
+  }
+
+  async getActiveEmployeesWithBirthday(): Promise<{ id: number; displayName: string; geburtsdatum: string | null }[]> {
+    return await db
+      .select({
+        id: users.id,
+        displayName: users.displayName,
+        geburtsdatum: users.geburtsdatum,
+      })
+      .from(users)
+      .where(and(
+        eq(users.isActive, true),
+        isNotNull(users.geburtsdatum)
+      ));
+  }
+
+  async getActiveCustomersWithBirthday(): Promise<{ id: number; name: string; geburtsdatum: string | null }[]> {
+    return await db
+      .select({
+        id: customers.id,
+        name: customers.name,
+        geburtsdatum: customers.geburtsdatum,
+      })
+      .from(customers)
+      .where(isNotNull(customers.geburtsdatum));
   }
 
   async searchCustomers(options: SearchOptions): Promise<Customer[]> {
