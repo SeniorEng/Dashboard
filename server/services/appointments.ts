@@ -1,6 +1,7 @@
 import { storage, type IStorage } from "../storage";
 import type { Appointment, InsertAppointment, UpdateAppointment, InsertErstberatungCustomer } from "@shared/schema";
-import { timeToMinutes, addMinutesToTime, addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
+import { timeToMinutes, addMinutesToTime, addMinutesToTimeHHMMSS, formatTimeHHMMSS } from "@shared/utils/datetime";
+import { validateServiceDocumentation } from "@shared/domain/appointments";
 import { 
   doTimesOverlap, 
   calculateTotalDuration,
@@ -29,6 +30,33 @@ export interface ValidationResult {
   valid: boolean;
   error?: string;
   message?: string;
+}
+
+export interface DocumentationInput {
+  performedByEmployeeId?: number | null;
+  actualStart: string;
+  hauswirtschaftActualDauer?: number | null;
+  hauswirtschaftDetails?: string | null;
+  alltagsbegleitungActualDauer?: number | null;
+  alltagsbegleitungDetails?: string | null;
+  erstberatungActualDauer?: number | null;
+  erstberatungDetails?: string | null;
+  travelOriginType: "home" | "appointment";
+  travelFromAppointmentId?: number | null;
+  travelKilometers: number;
+  travelMinutes?: number | null;
+  customerKilometers?: number | null;
+  notes?: string | null;
+}
+
+export interface DocumentationResult {
+  updateData: Record<string, unknown>;
+  totalDurationMinutes: number;
+  hauswirtschaftMinutes: number;
+  alltagsbegleitungMinutes: number;
+  travelKilometers: number;
+  customerKilometers: number;
+  hasUsage: boolean;
 }
 
 export interface KundenterminInput {
@@ -339,6 +367,78 @@ export class AppointmentService {
     };
     
     return { customerData, appointmentData, scheduledEnd };
+  }
+
+  validateDocumentationInput(
+    appointment: Appointment,
+    input: DocumentationInput
+  ): ValidationResult {
+    if (appointment.status === "completed") {
+      return { valid: false, error: "ALREADY_COMPLETED", message: "Dieser Termin wurde bereits dokumentiert" };
+    }
+
+    const serviceValidation = validateServiceDocumentation(
+      appointment,
+      input.hauswirtschaftActualDauer,
+      input.hauswirtschaftDetails,
+      input.alltagsbegleitungActualDauer,
+      input.alltagsbegleitungDetails,
+      input.erstberatungActualDauer,
+      input.erstberatungDetails
+    );
+
+    if (!serviceValidation.valid) {
+      return { valid: false, error: "VALIDATION_ERROR", message: serviceValidation.errors.join(", ") };
+    }
+
+    return { valid: true };
+  }
+
+  buildDocumentationUpdate(
+    appointment: Appointment,
+    input: DocumentationInput,
+    userId?: number
+  ): DocumentationResult {
+    const performedBy = input.performedByEmployeeId ?? appointment.assignedEmployeeId ?? userId ?? null;
+    const actualStartTime = formatTimeHHMMSS(input.actualStart);
+    const totalDurationMinutes = (input.hauswirtschaftActualDauer ?? 0)
+      + (input.alltagsbegleitungActualDauer ?? 0)
+      + (input.erstberatungActualDauer ?? 0);
+    const actualEndTime = addMinutesToTimeHHMMSS(actualStartTime, totalDurationMinutes);
+
+    const hauswirtschaftMinutes = input.hauswirtschaftActualDauer || 0;
+    const alltagsbegleitungMinutes = input.alltagsbegleitungActualDauer || 0;
+    const travelKm = input.travelKilometers || 0;
+    const customerKm = input.customerKilometers || 0;
+
+    const updateData: Record<string, unknown> = {
+      performedByEmployeeId: performedBy,
+      actualStart: actualStartTime,
+      actualEnd: actualEndTime,
+      hauswirtschaftActualDauer: input.hauswirtschaftActualDauer ?? null,
+      hauswirtschaftDetails: input.hauswirtschaftDetails ?? null,
+      alltagsbegleitungActualDauer: input.alltagsbegleitungActualDauer ?? null,
+      alltagsbegleitungDetails: input.alltagsbegleitungDetails ?? null,
+      erstberatungActualDauer: input.erstberatungActualDauer ?? null,
+      erstberatungDetails: input.erstberatungDetails ?? null,
+      travelOriginType: input.travelOriginType,
+      travelFromAppointmentId: input.travelFromAppointmentId ?? null,
+      travelKilometers: input.travelKilometers,
+      travelMinutes: input.travelMinutes ?? null,
+      customerKilometers: input.customerKilometers ?? null,
+      notes: input.notes ?? appointment.notes,
+      status: "completed" as const,
+    };
+
+    return {
+      updateData,
+      totalDurationMinutes,
+      hauswirtschaftMinutes,
+      alltagsbegleitungMinutes,
+      travelKilometers: travelKm,
+      customerKilometers: customerKm,
+      hasUsage: hauswirtschaftMinutes > 0 || alltagsbegleitungMinutes > 0 || travelKm > 0 || customerKm > 0,
+    };
   }
 
   canDeleteAppointment(appointment: Appointment): ValidationResult {

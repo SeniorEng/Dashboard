@@ -1,23 +1,19 @@
 import { useState, useMemo, useEffect } from "react";
 import { useRoute, useLocation } from "wouter";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
 import { DatePicker } from "@/components/ui/date-picker";
 import { ChevronLeft, Loader2, Calendar, Clock, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
-import { useAppointment } from "@/features/appointments";
-import { DURATION_OPTIONS } from "@shared/types";
-import type { Customer } from "@shared/schema";
-import { timeToMinutes, minutesToTimeDisplay, formatDurationDisplay } from "@shared/utils/datetime";
+import { useAppointment, useCustomerList, ServiceSelector, AppointmentSummary } from "@/features/appointments";
+import { addMinutesToTime, timeToMinutes, minutesToTimeDisplay, formatDurationDisplay } from "@shared/utils/datetime";
 
 export default function EditAppointment() {
   const [, params] = useRoute("/edit-appointment/:id");
@@ -28,14 +24,7 @@ export default function EditAppointment() {
 
   const { data: appointment, isLoading: appointmentLoading } = useAppointment(id);
   
-  const { data: customers = [] } = useQuery<Customer[]>({
-    queryKey: ["customers"],
-    queryFn: async () => {
-      const res = await fetch("/api/customers");
-      if (!res.ok) throw new Error("Failed to fetch customers");
-      return res.json();
-    },
-  });
+  const { data: customers = [] } = useCustomerList();
 
   const [date, setDate] = useState<string>("");
   const [time, setTime] = useState<string>("");
@@ -85,7 +74,6 @@ export default function EditAppointment() {
     
     const totalMinutes = services.reduce((sum, s) => sum + s.duration, 0);
     
-    // Calculate end time using central utilities
     let calculatedEndTime = "";
     if (time && totalMinutes > 0) {
       const startMinutes = timeToMinutes(time);
@@ -139,11 +127,7 @@ export default function EditAppointment() {
     
     if (appointment.appointmentType === "Kundentermin") {
       const totalDuration = (hauswirtschaft ? hauswirtschaftDauer : 0) + (alltagsbegleitung ? alltagsbegleitungDauer : 0);
-      const [hours, mins] = time.split(":").map(Number);
-      const totalMins = hours * 60 + mins + totalDuration;
-      const endHours = Math.floor(totalMins / 60) % 24;
-      const endMins = totalMins % 60;
-      const calculatedEndTime = `${endHours.toString().padStart(2, "0")}:${endMins.toString().padStart(2, "0")}`;
+      const calculatedEndTime = addMinutesToTime(time, totalDuration);
       
       let serviceType = null;
       if (hauswirtschaft && alltagsbegleitung) {
@@ -268,109 +252,31 @@ export default function EditAppointment() {
 
           {isKundentermin ? (
             <div className="space-y-4">
-              <Label>Services (mindestens einer)</Label>
-              
-              <div className="flex items-center space-x-3 p-4 rounded-lg border">
-                <Checkbox
-                  id="hauswirtschaft"
-                  checked={hauswirtschaft}
-                  onCheckedChange={(checked) => {
-                    setHauswirtschaft(!!checked);
-                    if (!checked) setHauswirtschaftDauer(60);
-                  }}
-                  data-testid="checkbox-hauswirtschaft"
-                />
-                <div className="flex-1">
-                  <Label htmlFor="hauswirtschaft" className="cursor-pointer font-medium">
-                    Hauswirtschaft
-                  </Label>
-                </div>
-                {hauswirtschaft && (
-                  <Select
-                    value={hauswirtschaftDauer.toString()}
-                    onValueChange={(v) => setHauswirtschaftDauer(parseInt(v))}
-                  >
-                    <SelectTrigger className="w-28" data-testid="select-hauswirtschaft-dauer">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {DURATION_OPTIONS.map((d) => (
-                        <SelectItem key={d} value={d.toString()}>
-                          {d} Min.
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
-
-              <div className="flex items-center space-x-3 p-4 rounded-lg border">
-                <Checkbox
-                  id="alltagsbegleitung"
-                  checked={alltagsbegleitung}
-                  onCheckedChange={(checked) => {
-                    setAlltagsbegleitung(!!checked);
-                    if (!checked) setAlltagsbegleitungDauer(60);
-                  }}
-                  data-testid="checkbox-alltagsbegleitung"
-                />
-                <div className="flex-1">
-                  <Label htmlFor="alltagsbegleitung" className="cursor-pointer font-medium">
-                    Alltagsbegleitung
-                  </Label>
-                </div>
-                {alltagsbegleitung && (
-                  <Select
-                    value={alltagsbegleitungDauer.toString()}
-                    onValueChange={(v) => setAlltagsbegleitungDauer(parseInt(v))}
-                  >
-                    <SelectTrigger className="w-28" data-testid="select-alltagsbegleitung-dauer">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {DURATION_OPTIONS.map((d) => (
-                        <SelectItem key={d} value={d.toString()}>
-                          {d} Min.
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
-
-              {errors.services && <p className="text-destructive text-sm">{errors.services}</p>}
+              <ServiceSelector
+                hauswirtschaft={hauswirtschaft}
+                onHauswirtschaftChange={(checked) => {
+                  setHauswirtschaft(checked);
+                  if (!checked) setHauswirtschaftDauer(60);
+                }}
+                hauswirtschaftDauer={hauswirtschaftDauer}
+                onHauswirtschaftDauerChange={setHauswirtschaftDauer}
+                alltagsbegleitung={alltagsbegleitung}
+                onAlltagsbegleitungChange={(checked) => {
+                  setAlltagsbegleitung(checked);
+                  if (!checked) setAlltagsbegleitungDauer(60);
+                }}
+                alltagsbegleitungDauer={alltagsbegleitungDauer}
+                onAlltagsbegleitungDauerChange={setAlltagsbegleitungDauer}
+                error={errors.services}
+              />
 
               {summary && summary.hasServices && (
-                <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 space-y-3">
-                  <div className="flex items-center gap-2 text-primary font-semibold">
-                    <Clock className={iconSize.sm} />
-                    <span>Terminübersicht</span>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="text-muted-foreground">Von</span>
-                      <p className="font-medium text-lg">{summary.startTime} Uhr</p>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Bis</span>
-                      <p className="font-medium text-lg">{summary.endTime} Uhr</p>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-primary/10 pt-3 space-y-1">
-                    {summary.services?.map((s, i) => (
-                      <div key={i} className="flex justify-between text-sm">
-                        <span>{s.name}</span>
-                        <span className="text-muted-foreground">{s.duration} Min.</span>
-                      </div>
-                    ))}
-                    <div className="flex justify-between font-medium pt-1 border-t border-primary/10">
-                      <span>Gesamt</span>
-                      <span className="text-primary">{summary.totalFormatted}</span>
-                    </div>
-                  </div>
-                </div>
+                <AppointmentSummary
+                  startTime={summary.startTime}
+                  endTime={summary.endTime}
+                  services={summary.services || []}
+                  totalFormatted={summary.totalFormatted}
+                />
               )}
             </div>
           ) : (

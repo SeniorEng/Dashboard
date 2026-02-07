@@ -9,8 +9,8 @@ import {
 } from "@shared/schema";
 import { appointmentService } from "../services/appointments";
 import { authService } from "../services/auth";
-import { suggestTravelOrigin, validateServiceDocumentation } from "@shared/domain/appointments";
-import { formatTimeHHMMSS, addMinutesToTimeHHMMSS, isWeekend } from "@shared/utils/datetime";
+import { suggestTravelOrigin } from "@shared/domain/appointments";
+import { isWeekend } from "@shared/utils/datetime";
 import { 
   ErrorMessages, 
   handleRouteError, 
@@ -415,60 +415,18 @@ router.post("/:id/document", async (req, res) => {
       return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
     }
     
-    if (appointment.status === "completed") {
-      return sendForbidden(res, "ALREADY_COMPLETED", "Dieser Termin wurde bereits dokumentiert");
-    }
-    
     const validatedData = documentKundenterminSchema.parse(req.body);
-    
-    const serviceValidation = validateServiceDocumentation(
-      appointment,
-      validatedData.hauswirtschaftActualDauer,
-      validatedData.hauswirtschaftDetails,
-      validatedData.alltagsbegleitungActualDauer,
-      validatedData.alltagsbegleitungDetails,
-      validatedData.erstberatungActualDauer,
-      validatedData.erstberatungDetails
-    );
-    
-    if (!serviceValidation.valid) {
-      return sendBadRequest(res, serviceValidation.errors.join(", "));
+
+    const validation = appointmentService.validateDocumentationInput(appointment, validatedData);
+    if (!validation.valid) {
+      if (validation.error === "ALREADY_COMPLETED") {
+        return sendForbidden(res, validation.error, validation.message!);
+      }
+      return sendBadRequest(res, validation.message!);
     }
     
-    const performedBy = validatedData.performedByEmployeeId ?? appointment.assignedEmployeeId ?? req.user?.id ?? null;
-
-    const actualStartTime = formatTimeHHMMSS(validatedData.actualStart);
-    const totalDurationMinutes = (validatedData.hauswirtschaftActualDauer ?? 0)
-      + (validatedData.alltagsbegleitungActualDauer ?? 0)
-      + (validatedData.erstberatungActualDauer ?? 0);
-    const actualEndTime = addMinutesToTimeHHMMSS(actualStartTime, totalDurationMinutes);
-
-    const updateData: Record<string, unknown> = {
-      performedByEmployeeId: performedBy,
-      actualStart: actualStartTime,
-      actualEnd: actualEndTime,
-      hauswirtschaftActualDauer: validatedData.hauswirtschaftActualDauer ?? null,
-      hauswirtschaftDetails: validatedData.hauswirtschaftDetails ?? null,
-      alltagsbegleitungActualDauer: validatedData.alltagsbegleitungActualDauer ?? null,
-      alltagsbegleitungDetails: validatedData.alltagsbegleitungDetails ?? null,
-      erstberatungActualDauer: validatedData.erstberatungActualDauer ?? null,
-      erstberatungDetails: validatedData.erstberatungDetails ?? null,
-      travelOriginType: validatedData.travelOriginType,
-      travelFromAppointmentId: validatedData.travelFromAppointmentId ?? null,
-      travelKilometers: validatedData.travelKilometers,
-      travelMinutes: validatedData.travelMinutes ?? null,
-      customerKilometers: validatedData.customerKilometers ?? null,
-      notes: validatedData.notes ?? appointment.notes,
-      status: "completed" as const,
-    };
-    
-    const hauswirtschaftMinutes = validatedData.hauswirtschaftActualDauer || 0;
-    const alltagsbegleitungMinutes = validatedData.alltagsbegleitungActualDauer || 0;
-    const travelKilometers = validatedData.travelKilometers || 0;
-    const customerKilometers = validatedData.customerKilometers || 0;
-    
-    const hasUsage = hauswirtschaftMinutes > 0 || alltagsbegleitungMinutes > 0 || 
-                     travelKilometers > 0 || customerKilometers > 0;
+    const docResult = appointmentService.buildDocumentationUpdate(appointment, validatedData, req.user?.id);
+    const { updateData, hauswirtschaftMinutes, alltagsbegleitungMinutes, travelKilometers, customerKilometers, hasUsage } = docResult;
     
     let budgetTransaction = null;
     let budgetWarning: string | null = null;

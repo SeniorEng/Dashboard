@@ -1,6 +1,5 @@
 import { useState, useMemo } from "react";
 import { useLocation } from "wouter";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,15 +9,13 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import { Checkbox } from "@/components/ui/checkbox";
 import { DatePicker } from "@/components/ui/date-picker";
 import { ChevronLeft, Loader2, Calendar, Clock, User, Home, Plus, Users } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
-import { api, unwrapResult } from "@/lib/api/client";
+import { useCustomerList, useAdminEmployees, useCreateKundentermin, useCreateErstberatung, ServiceSelector, AppointmentSummary } from "@/features/appointments";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS } from "@shared/types";
-import type { Customer, User as UserType } from "@shared/schema";
 import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
 import { timeToMinutes, minutesToTimeDisplay, formatDurationDisplay } from "@shared/utils/datetime";
 
@@ -26,31 +23,15 @@ export default function NewAppointment() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { user } = useAuth();
-  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<string>("kundentermin");
 
   const isAdmin = user?.isAdmin ?? false;
 
-  // Fetch customers for Kundentermin
-  const { data: customers = [], isLoading: customersLoading } = useQuery<Customer[]>({
-    queryKey: ["customers"],
-    queryFn: async () => {
-      const res = await fetch("/api/customers");
-      if (!res.ok) throw new Error("Failed to fetch customers");
-      return res.json();
-    },
-  });
+  const { data: customers = [], isLoading: customersLoading } = useCustomerList();
+  const { data: employees = [] } = useAdminEmployees({ enabled: isAdmin });
 
-  // Fetch employees for admin assignment
-  const { data: employees = [] } = useQuery<UserType[]>({
-    queryKey: ["admin", "employees"],
-    queryFn: async () => {
-      const res = await fetch("/api/admin/employees", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch employees");
-      return res.json();
-    },
-    enabled: isAdmin,
-  });
+  const createKundenterminMutation = useCreateKundentermin();
+  const createErstberatungMutation = useCreateErstberatung();
 
   // Kundentermin state
   const [ktCustomerId, setKtCustomerId] = useState<string>("");
@@ -110,39 +91,6 @@ export default function NewAppointment() {
     };
   }, [ktTime, ktHauswirtschaft, ktHauswirtschaftDauer, ktAlltagsbegleitung, ktAlltagsbegleitungDauer]);
 
-  // Create Kundentermin mutation
-  const createKundentermin = useMutation({
-    mutationFn: async (data: Record<string, unknown>) => {
-      const result = await api.post("/appointments/kundentermin", data);
-      return unwrapResult(result);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["appointments"] });
-      toast({ title: "Termin erstellt", description: "Der Kundentermin wurde erfolgreich angelegt." });
-      setLocation("/");
-    },
-    onError: (error: Error) => {
-      toast({ variant: "destructive", title: "Fehler", description: error.message });
-    },
-  });
-
-  // Create Erstberatung mutation
-  const createErstberatung = useMutation({
-    mutationFn: async (data: Record<string, unknown>) => {
-      const result = await api.post("/appointments/erstberatung", data);
-      return unwrapResult(result);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["appointments"] });
-      queryClient.invalidateQueries({ queryKey: ["customers"] });
-      toast({ title: "Erstberatung erstellt", description: "Die Erstberatung und der neue Kunde wurden erfolgreich angelegt." });
-      setLocation("/");
-    },
-    onError: (error: Error) => {
-      toast({ variant: "destructive", title: "Fehler", description: error.message });
-    },
-  });
-
   const validateKundentermin = (): boolean => {
     const newErrors: Record<string, string> = {};
     if (!ktCustomerId) newErrors.ktCustomerId = "Bitte wählen Sie einen Kunden";
@@ -170,7 +118,7 @@ export default function NewAppointment() {
   const handleKundenterminSubmit = () => {
     if (!validateKundentermin()) return;
     
-    createKundentermin.mutate({
+    createKundenterminMutation.mutate({
       customerId: parseInt(ktCustomerId),
       date: ktDate,
       scheduledStart: ktTime,
@@ -178,6 +126,14 @@ export default function NewAppointment() {
       alltagsbegleitungDauer: ktAlltagsbegleitung ? ktAlltagsbegleitungDauer : null,
       notes: ktNotes || undefined,
       assignedEmployeeId: isAdmin && ktAssignedEmployeeId ? parseInt(ktAssignedEmployeeId) : undefined,
+    }, {
+      onSuccess: () => {
+        toast({ title: "Termin erstellt", description: "Der Kundentermin wurde erfolgreich angelegt." });
+        setLocation("/");
+      },
+      onError: (error: Error) => {
+        toast({ variant: "destructive", title: "Fehler", description: error.message });
+      },
     });
   };
 
@@ -190,7 +146,7 @@ export default function NewAppointment() {
       return;
     }
     
-    createErstberatung.mutate({
+    createErstberatungMutation.mutate({
       customer: {
         vorname: ebVorname,
         nachname: ebNachname,
@@ -206,6 +162,14 @@ export default function NewAppointment() {
       erstberatungDauer: ebErstberatungDauer,
       notes: ebNotes || undefined,
       assignedEmployeeId: isAdmin && ebAssignedEmployeeId ? parseInt(ebAssignedEmployeeId) : undefined,
+    }, {
+      onSuccess: () => {
+        toast({ title: "Erstberatung erstellt", description: "Die Erstberatung und der neue Kunde wurden erfolgreich angelegt." });
+        setLocation("/");
+      },
+      onError: (error: Error) => {
+        toast({ variant: "destructive", title: "Fehler", description: error.message });
+      },
     });
   };
   
@@ -245,7 +209,7 @@ export default function NewAppointment() {
     [employees]
   );
 
-  const isPending = createKundentermin.isPending || createErstberatung.isPending;
+  const isPending = createKundenterminMutation.isPending || createErstberatungMutation.isPending;
 
   return (
     <Layout>
@@ -346,113 +310,31 @@ export default function NewAppointment() {
                 </div>
               </div>
 
-              {/* Services */}
-              <div className="space-y-4">
-                <Label>Services (mindestens einer)</Label>
-                
-                <div className="flex items-center space-x-3 p-4 rounded-lg border">
-                  <Checkbox
-                    id="hauswirtschaft"
-                    checked={ktHauswirtschaft}
-                    onCheckedChange={(checked) => {
-                      setKtHauswirtschaft(!!checked);
-                      if (!checked) setKtHauswirtschaftDauer(60);
-                    }}
-                    data-testid="checkbox-hauswirtschaft"
-                  />
-                  <div className="flex-1">
-                    <Label htmlFor="hauswirtschaft" className="cursor-pointer font-medium">
-                      Hauswirtschaft
-                    </Label>
-                  </div>
-                  {ktHauswirtschaft && (
-                    <Select
-                      value={ktHauswirtschaftDauer.toString()}
-                      onValueChange={(v) => setKtHauswirtschaftDauer(parseInt(v))}
-                    >
-                      <SelectTrigger className="w-28" data-testid="select-hauswirtschaft-dauer">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {DURATION_OPTIONS.map((d) => (
-                          <SelectItem key={d} value={d.toString()}>
-                            {d} Min.
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </div>
+              <ServiceSelector
+                hauswirtschaft={ktHauswirtschaft}
+                onHauswirtschaftChange={(checked) => {
+                  setKtHauswirtschaft(checked);
+                  if (!checked) setKtHauswirtschaftDauer(60);
+                }}
+                hauswirtschaftDauer={ktHauswirtschaftDauer}
+                onHauswirtschaftDauerChange={setKtHauswirtschaftDauer}
+                alltagsbegleitung={ktAlltagsbegleitung}
+                onAlltagsbegleitungChange={(checked) => {
+                  setKtAlltagsbegleitung(checked);
+                  if (!checked) setKtAlltagsbegleitungDauer(60);
+                }}
+                alltagsbegleitungDauer={ktAlltagsbegleitungDauer}
+                onAlltagsbegleitungDauerChange={setKtAlltagsbegleitungDauer}
+                error={errors.ktServices}
+              />
 
-                <div className="flex items-center space-x-3 p-4 rounded-lg border">
-                  <Checkbox
-                    id="alltagsbegleitung"
-                    checked={ktAlltagsbegleitung}
-                    onCheckedChange={(checked) => {
-                      setKtAlltagsbegleitung(!!checked);
-                      if (!checked) setKtAlltagsbegleitungDauer(60);
-                    }}
-                    data-testid="checkbox-alltagsbegleitung"
-                  />
-                  <div className="flex-1">
-                    <Label htmlFor="alltagsbegleitung" className="cursor-pointer font-medium">
-                      Alltagsbegleitung
-                    </Label>
-                  </div>
-                  {ktAlltagsbegleitung && (
-                    <Select
-                      value={ktAlltagsbegleitungDauer.toString()}
-                      onValueChange={(v) => setKtAlltagsbegleitungDauer(parseInt(v))}
-                    >
-                      <SelectTrigger className="w-28" data-testid="select-alltagsbegleitung-dauer">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {DURATION_OPTIONS.map((d) => (
-                          <SelectItem key={d} value={d.toString()}>
-                            {d} Min.
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </div>
-
-                {errors.ktServices && <p className="text-destructive text-sm">{errors.ktServices}</p>}
-              </div>
-
-              {/* Real-time Summary */}
               {ktSummary.hasServices && (
-                <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 space-y-3" data-testid="summary-panel">
-                  <div className="flex items-center gap-2 text-primary font-semibold">
-                    <Clock className={iconSize.sm} />
-                    <span>Terminübersicht</span>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="text-muted-foreground">Von</span>
-                      <p className="font-medium text-lg">{ktSummary.startTime} Uhr</p>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Bis</span>
-                      <p className="font-medium text-lg">{ktSummary.endTime} Uhr</p>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-primary/10 pt-3 space-y-1">
-                    {ktSummary.services.map((s, i) => (
-                      <div key={i} className="flex justify-between text-sm">
-                        <span>{s.name}</span>
-                        <span className="text-muted-foreground">{s.duration} Min.</span>
-                      </div>
-                    ))}
-                    <div className="flex justify-between font-medium pt-1 border-t border-primary/10">
-                      <span>Gesamt</span>
-                      <span className="text-primary">{ktSummary.totalFormatted}</span>
-                    </div>
-                  </div>
-                </div>
+                <AppointmentSummary
+                  startTime={ktSummary.startTime}
+                  endTime={ktSummary.endTime}
+                  services={ktSummary.services}
+                  totalFormatted={ktSummary.totalFormatted}
+                />
               )}
 
               {/* Notes */}

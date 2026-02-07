@@ -1,37 +1,26 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRoute, useLocation } from "wouter";
 import { Layout } from "@/components/layout";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Slider } from "@/components/ui/slider";
 import { 
   ChevronLeft, ChevronRight, Loader2, Clock, 
-  Home, MapPin, Car, Check, AlertCircle, X, Plus, User
+  Car, Check, AlertCircle, X, Plus, User
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
-import { SearchableSelect } from "@/components/ui/searchable-select";
-import { api, unwrapResult } from "@/lib/api/client";
+import { useAppointment, useDocumentAppointment, useTravelSuggestion, PerformedBySelector, TravelDocumentation } from "@/features/appointments";
 import { 
   formatDuration, 
   getServicesToDocument,
   type TravelOriginType,
   type ServiceType
 } from "@shared/types";
-import type { AppointmentWithCustomer } from "@shared/types";
 import { formatTimeHHMM, addMinutesToTime } from "@shared/utils/datetime";
-
-interface TravelSuggestion {
-  suggestedOrigin: TravelOriginType;
-  previousAppointmentId: number | null;
-  previousCustomerName: string | null;
-}
 
 interface ServiceFormData {
   serviceType: ServiceType;
@@ -52,39 +41,12 @@ interface DocumentationFormData {
   notes: string;
 }
 
-function PerformedBySelector({ value, onChange }: { value: number | null; onChange: (val: number | null) => void }) {
-  const { data: employees = [] } = useQuery<{ id: number; displayName: string }[]>({
-    queryKey: ["active-employees"],
-    queryFn: async () => {
-      const res = await fetch("/api/appointments/active-employees", { credentials: "include" });
-      if (!res.ok) throw new Error("Fehler");
-      return res.json();
-    },
-  });
-
-  const options = employees.map(e => ({
-    value: String(e.id),
-    label: e.displayName,
-  }));
-
-  return (
-    <SearchableSelect
-      options={options}
-      value={value ? String(value) : ""}
-      onValueChange={(val) => onChange(val ? parseInt(val) : null)}
-      placeholder="Mitarbeiter auswählen"
-      searchPlaceholder="Mitarbeiter suchen..."
-      data-testid="select-performed-by"
-    />
-  );
-}
-
 export default function DocumentAppointment() {
   const [, params] = useRoute("/document-appointment/:id");
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const { isAdmin } = useAuth();
-  const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.isAdmin ?? false;
   const id = params?.id ? parseInt(params.id) : 0;
 
   const [step, setStep] = useState(1);
@@ -100,25 +62,9 @@ export default function DocumentAppointment() {
     notes: "",
   });
 
-  const { data: appointment, isLoading: appointmentLoading } = useQuery<AppointmentWithCustomer>({
-    queryKey: ["appointment", id],
-    queryFn: async () => {
-      const res = await fetch(`/api/appointments/${id}`);
-      if (!res.ok) throw new Error("Termin nicht gefunden");
-      return res.json();
-    },
-    enabled: id > 0,
-  });
-
-  const { data: travelSuggestion } = useQuery<TravelSuggestion>({
-    queryKey: ["travel-suggestion", id],
-    queryFn: async () => {
-      const res = await fetch(`/api/appointments/${id}/travel-suggestion`);
-      if (!res.ok) throw new Error("Fahrvorschlag nicht verfügbar");
-      return res.json();
-    },
-    enabled: id > 0,
-  });
+  const { data: appointment, isLoading: appointmentLoading } = useAppointment(id);
+  const { data: travelSuggestion } = useTravelSuggestion(id);
+  const documentMutation = useDocumentAppointment(id);
 
   useEffect(() => {
     if (appointment) {
@@ -152,63 +98,6 @@ export default function DocumentAppointment() {
       }));
     }
   }, [travelSuggestion]);
-
-  const submitMutation = useMutation({
-    mutationFn: async (data: DocumentationFormData) => {
-      const payload: Record<string, unknown> = {
-        performedByEmployeeId: data.performedByEmployeeId,
-        actualStart: data.actualStart,
-        travelOriginType: data.travelOriginType,
-        travelKilometers: data.travelKilometers,
-        notes: data.notes || null,
-      };
-
-      if (data.travelOriginType === "appointment") {
-        payload.travelFromAppointmentId = data.travelFromAppointmentId;
-        payload.travelMinutes = data.travelMinutes;
-      }
-
-      const hwService = data.services.find(s => s.serviceType === "Hauswirtschaft");
-      const abService = data.services.find(s => s.serviceType === "Alltagsbegleitung");
-      const ebService = data.services.find(s => s.serviceType === "Erstberatung");
-
-      if (hwService) {
-        payload.hauswirtschaftActualDauer = hwService.actualDuration;
-        payload.hauswirtschaftDetails = hwService.details || null;
-      }
-      if (abService) {
-        payload.alltagsbegleitungActualDauer = abService.actualDuration;
-        payload.alltagsbegleitungDetails = abService.details || null;
-      }
-      if (ebService) {
-        payload.erstberatungActualDauer = ebService.actualDuration;
-        payload.erstberatungDetails = ebService.details || null;
-      }
-      if (data.customerKilometers > 0) {
-        payload.customerKilometers = data.customerKilometers;
-      }
-
-      const result = await api.post(`/appointments/${id}/document`, payload);
-      return unwrapResult(result);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["appointments"] });
-      queryClient.invalidateQueries({ queryKey: ["appointment", id] });
-      queryClient.invalidateQueries({ queryKey: ["time-entries"] });
-      toast({
-        title: "Dokumentation abgeschlossen",
-        description: "Der Termin wurde erfolgreich dokumentiert.",
-      });
-      setLocation("/");
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Fehler",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
 
   const updateService = useCallback((index: number, field: keyof ServiceFormData, value: number | string) => {
     setFormData(prev => ({
@@ -315,8 +204,57 @@ export default function DocumentAppointment() {
       });
       return;
     }
-    submitMutation.mutate(formData);
-  }, [formData, submitMutation, toast]);
+
+    const payload: Record<string, unknown> = {
+      performedByEmployeeId: formData.performedByEmployeeId,
+      actualStart: formData.actualStart,
+      travelOriginType: formData.travelOriginType,
+      travelKilometers: formData.travelKilometers,
+      notes: formData.notes || null,
+    };
+
+    if (formData.travelOriginType === "appointment") {
+      payload.travelFromAppointmentId = formData.travelFromAppointmentId;
+      payload.travelMinutes = formData.travelMinutes;
+    }
+
+    const hwService = formData.services.find(s => s.serviceType === "Hauswirtschaft");
+    const abService = formData.services.find(s => s.serviceType === "Alltagsbegleitung");
+    const ebService = formData.services.find(s => s.serviceType === "Erstberatung");
+
+    if (hwService) {
+      payload.hauswirtschaftActualDauer = hwService.actualDuration;
+      payload.hauswirtschaftDetails = hwService.details || null;
+    }
+    if (abService) {
+      payload.alltagsbegleitungActualDauer = abService.actualDuration;
+      payload.alltagsbegleitungDetails = abService.details || null;
+    }
+    if (ebService) {
+      payload.erstberatungActualDauer = ebService.actualDuration;
+      payload.erstberatungDetails = ebService.details || null;
+    }
+    if (formData.customerKilometers > 0) {
+      payload.customerKilometers = formData.customerKilometers;
+    }
+
+    documentMutation.mutate(payload, {
+      onSuccess: () => {
+        toast({
+          title: "Dokumentation abgeschlossen",
+          description: "Der Termin wurde erfolgreich dokumentiert.",
+        });
+        setLocation("/");
+      },
+      onError: (error: Error) => {
+        toast({
+          title: "Fehler",
+          description: error.message,
+          variant: "destructive",
+        });
+      },
+    });
+  }, [formData, documentMutation, toast, setLocation]);
 
   if (appointmentLoading) {
     return (
@@ -624,121 +562,30 @@ export default function DocumentAppointment() {
         </div>
       ) : (
         <div className="space-y-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Car className={`${iconSize.md} text-primary`} />
-                Anfahrt dokumentieren
-              </CardTitle>
-              <CardDescription>
-                Woher kamen Sie zu diesem Termin?
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <RadioGroup
-                value={formData.travelOriginType}
-                onValueChange={(value: TravelOriginType) => setFormData(prev => ({
-                  ...prev,
-                  travelOriginType: value,
-                  travelMinutes: value === "home" ? 0 : prev.travelMinutes,
-                }))}
-                className="space-y-3"
-              >
-                <div className={`flex items-center space-x-3 p-3 rounded-lg border ${formData.travelOriginType === "home" ? "border-primary bg-primary/5" : "border-border"}`}>
-                  <RadioGroupItem value="home" id="origin-home" data-testid="radio-origin-home" />
-                  <Label htmlFor="origin-home" className="flex items-center gap-2 cursor-pointer flex-1">
-                    <Home className={`${iconSize.sm} text-muted-foreground`} />
-                    <span className="font-medium">Von zu Hause</span>
-                  </Label>
-                </div>
-                
-                <div className={`flex items-center space-x-3 p-3 rounded-lg border ${formData.travelOriginType === "appointment" ? "border-primary bg-primary/5" : "border-border"}`}>
-                  <RadioGroupItem value="appointment" id="origin-appointment" data-testid="radio-origin-appointment" />
-                  <Label htmlFor="origin-appointment" className="flex items-center gap-2 cursor-pointer flex-1">
-                    <MapPin className={`${iconSize.sm} text-muted-foreground`} />
-                    <div>
-                      <span className="font-medium">Vom vorherigen Kunden</span>
-                      {travelSuggestion?.previousCustomerName && (
-                        <p className="text-xs text-muted-foreground">
-                          {travelSuggestion.previousCustomerName}
-                        </p>
-                      )}
-                    </div>
-                  </Label>
-                </div>
-              </RadioGroup>
-
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="kilometers">Gefahrene Kilometer (Anfahrt)</Label>
-                  <div className="relative">
-                    <Input
-                      id="kilometers"
-                      type="number"
-                      min="0"
-                      step="0.1"
-                      value={formData.travelKilometers || ""}
-                      onChange={(e) => setFormData(prev => ({
-                        ...prev,
-                        travelKilometers: parseFloat(e.target.value) || 0,
-                      }))}
-                      placeholder="0"
-                      className="pr-12"
-                      data-testid="input-kilometers"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
-                      km
-                    </span>
-                  </div>
-                </div>
-                
-                {formData.travelOriginType === "appointment" && (
-                  <div className="space-y-2">
-                    <Label htmlFor="travelMinutes">Fahrzeit</Label>
-                    <div className="relative">
-                      <Input
-                        id="travelMinutes"
-                        type="number"
-                        min="0"
-                        value={formData.travelMinutes || ""}
-                        onChange={(e) => setFormData(prev => ({
-                          ...prev,
-                          travelMinutes: parseInt(e.target.value) || 0,
-                        }))}
-                        placeholder="0"
-                        className="pr-12"
-                        data-testid="input-travel-minutes"
-                      />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
-                        Min.
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="notes">Zusätzliche Notizen (optional)</Label>
-                <Textarea
-                  id="notes"
-                  value={formData.notes}
-                  onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-                  placeholder="Weitere Anmerkungen zum Termin..."
-                  rows={3}
-                  data-testid="textarea-notes"
-                />
-              </div>
-            </CardContent>
-          </Card>
+          <TravelDocumentation
+            travelOriginType={formData.travelOriginType}
+            onTravelOriginTypeChange={(value) => setFormData(prev => ({
+              ...prev,
+              travelOriginType: value,
+              travelMinutes: value === "home" ? 0 : prev.travelMinutes,
+            }))}
+            travelKilometers={formData.travelKilometers}
+            onTravelKilometersChange={(value) => setFormData(prev => ({ ...prev, travelKilometers: value }))}
+            travelMinutes={formData.travelMinutes}
+            onTravelMinutesChange={(value) => setFormData(prev => ({ ...prev, travelMinutes: value }))}
+            previousCustomerName={travelSuggestion?.previousCustomerName}
+            notes={formData.notes}
+            onNotesChange={(value) => setFormData(prev => ({ ...prev, notes: value }))}
+          />
           
           <Button 
             className={`w-full ${componentStyles.btnPrimary}`}
             size="lg"
             onClick={handleSubmit}
-            disabled={submitMutation.isPending}
+            disabled={documentMutation.isPending}
             data-testid="button-submit"
           >
-            {submitMutation.isPending ? (
+            {documentMutation.isPending ? (
               <>
                 <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
                 Wird gespeichert...
