@@ -53,15 +53,16 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
   const [, navigate] = useLocation();
   
   const canModify = canModifyAppointment(appointment.status as AppointmentStatus);
+  const isCompleted = appointment.status === "completed";
   const serviceInfo = useMemo(() => 
     getCardServiceInfo(
       appointment.appointmentType,
-      appointment.hauswirtschaftDauer,
-      appointment.alltagsbegleitungDauer,
-      appointment.erstberatungDauer,
+      isCompleted ? (appointment.hauswirtschaftActualDauer ?? appointment.hauswirtschaftDauer) : appointment.hauswirtschaftDauer,
+      isCompleted ? (appointment.alltagsbegleitungActualDauer ?? appointment.alltagsbegleitungDauer) : appointment.alltagsbegleitungDauer,
+      isCompleted ? (appointment.erstberatungActualDauer ?? appointment.erstberatungDauer) : appointment.erstberatungDauer,
       appointment.serviceType
     ),
-    [appointment.appointmentType, appointment.hauswirtschaftDauer, appointment.alltagsbegleitungDauer, appointment.erstberatungDauer, appointment.serviceType]
+    [appointment.appointmentType, appointment.hauswirtschaftDauer, appointment.alltagsbegleitungDauer, appointment.erstberatungDauer, appointment.hauswirtschaftActualDauer, appointment.alltagsbegleitungActualDauer, appointment.erstberatungActualDauer, appointment.status, appointment.serviceType]
   );
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
