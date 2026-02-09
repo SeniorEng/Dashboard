@@ -2,6 +2,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DURATION_OPTIONS } from "@shared/types";
+import { formatDuration } from "@shared/domain/appointments";
 
 interface ServiceSelectorProps {
   hauswirtschaft: boolean;
@@ -47,13 +48,13 @@ export function ServiceSelector({
             value={hauswirtschaftDauer.toString()}
             onValueChange={(v) => onHauswirtschaftDauerChange(parseInt(v))}
           >
-            <SelectTrigger className="w-28" data-testid="select-hauswirtschaft-dauer">
+            <SelectTrigger className="w-auto min-w-[120px]" data-testid="select-hauswirtschaft-dauer">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {DURATION_OPTIONS.map((d) => (
                 <SelectItem key={d} value={d.toString()}>
-                  {d} Min.
+                  {formatDuration(d)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -78,13 +79,13 @@ export function ServiceSelector({
             value={alltagsbegleitungDauer.toString()}
             onValueChange={(v) => onAlltagsbegleitungDauerChange(parseInt(v))}
           >
-            <SelectTrigger className="w-28" data-testid="select-alltagsbegleitung-dauer">
+            <SelectTrigger className="w-auto min-w-[120px]" data-testid="select-alltagsbegleitung-dauer">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {DURATION_OPTIONS.map((d) => (
                 <SelectItem key={d} value={d.toString()}>
-                  {d} Min.
+                  {formatDuration(d)}
                 </SelectItem>
               ))}
             </SelectContent>

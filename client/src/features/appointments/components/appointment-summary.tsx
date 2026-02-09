@@ -1,5 +1,6 @@
 import { Clock } from "lucide-react";
 import { iconSize } from "@/design-system";
+import { formatDuration } from "@shared/domain/appointments";
 
 interface AppointmentSummaryProps {
   startTime: string;
@@ -36,7 +37,7 @@ export function AppointmentSummary({
         {services.map((s, i) => (
           <div key={i} className="flex justify-between text-sm">
             <span>{s.name}</span>
-            <span className="text-muted-foreground">{s.duration} Min.</span>
+            <span className="text-muted-foreground">{formatDuration(s.duration)}</span>
           </div>
         ))}
         <div className="flex justify-between font-medium pt-1 border-t border-primary/10">

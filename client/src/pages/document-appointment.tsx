@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   ChevronLeft, ChevronRight, Loader2, Clock, 
   Car, Check, AlertCircle, X, Plus, User
@@ -17,6 +17,7 @@ import { useAppointment, useDocumentAppointment, useTravelSuggestion, PerformedB
 import { 
   formatDuration, 
   getServicesToDocument,
+  DURATION_OPTIONS,
   type TravelOriginType,
   type ServiceType
 } from "@shared/types";
@@ -443,22 +444,21 @@ export default function DocumentAppointment() {
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <Label>Tatsächliche Dauer</Label>
-                        <span className="text-sm font-medium text-primary">
-                          {formatDuration(service.actualDuration)}
-                        </span>
-                      </div>
-                      <Slider
-                        value={[service.actualDuration]}
-                        onValueChange={([value]) => updateService(index, "actualDuration", value)}
-                        min={15}
-                        max={240}
-                        step={15}
-                        className="w-full"
-                        data-testid={`slider-duration-${service.serviceType.toLowerCase()}`}
-                      />
-                      <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>15 Min.</span>
-                        <span>4 Std.</span>
+                        <Select
+                          value={service.actualDuration.toString()}
+                          onValueChange={(v) => updateService(index, "actualDuration", parseInt(v))}
+                        >
+                          <SelectTrigger className="w-auto min-w-[140px]" data-testid={`select-duration-${service.serviceType.toLowerCase()}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {DURATION_OPTIONS.map((d) => (
+                              <SelectItem key={d} value={d.toString()}>
+                                {formatDuration(d)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
                     

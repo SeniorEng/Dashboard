@@ -16,6 +16,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
 import { useCustomerList, useAdminEmployees, useCreateKundentermin, useCreateErstberatung, ServiceSelector, AppointmentSummary } from "@/features/appointments";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS } from "@shared/types";
+import { formatDuration } from "@shared/domain/appointments";
 import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
 import { timeToMinutes, minutesToTimeDisplay, formatDurationDisplay, todayISO } from "@shared/utils/datetime";
 
@@ -549,13 +550,13 @@ export default function NewAppointment() {
                     value={ebErstberatungDauer.toString()}
                     onValueChange={(v) => setEbErstberatungDauer(parseInt(v))}
                   >
-                    <SelectTrigger className="w-28" data-testid="select-erstberatung-dauer">
+                    <SelectTrigger className="w-auto min-w-[120px]" data-testid="select-erstberatung-dauer">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       {DURATION_OPTIONS.map((d) => (
                         <SelectItem key={d} value={d.toString()}>
-                          {d} Min.
+                          {formatDuration(d)}
                         </SelectItem>
                       ))}
                     </SelectContent>
