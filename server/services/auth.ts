@@ -364,7 +364,11 @@ export class AuthService {
   }
 
   async deleteUser(id: number): Promise<boolean> {
-    const result = await db.delete(users).where(eq(users.id, id)).returning();
+    const result = await db
+      .update(users)
+      .set({ isActive: false, deactivatedAt: new Date(), updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
     return result.length > 0;
   }
 

@@ -1,8 +1,7 @@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { DURATION_OPTIONS } from "@shared/types";
-import { formatDuration } from "@shared/domain/appointments";
+import { DURATION_OPTIONS, formatDuration } from "@shared/types";
 
 interface ServiceSelectorProps {
   hauswirtschaft: boolean;

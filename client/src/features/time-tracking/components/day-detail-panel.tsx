@@ -132,7 +132,7 @@ export function DayDetailPanel({
                           <span>
                             Anfahrt: {appt.travelKilometers ? `${appt.travelKilometers} km` : ""}
                             {appt.travelKilometers && appt.travelMinutes ? " • " : ""}
-                            {appt.travelMinutes ? `${appt.travelMinutes} min` : ""}
+                            {appt.travelMinutes ? `${appt.travelMinutes} Min.` : ""}
                           </span>
                         </div>
                       )}

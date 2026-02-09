@@ -360,16 +360,15 @@ router.delete("/users/:id", async (req: Request, res: Response) => {
       return;
     }
 
-    // Invalidate caches after deleting user (affects users list and birthdays)
     usersCache.invalidateAll();
     birthdaysCache.invalidateAll();
 
     res.json({
       success: true,
-      message: "Benutzer wurde gelöscht",
+      message: "Benutzer wurde deaktiviert",
     });
   } catch (error) {
-    handleRouteError(res, error, "Benutzer konnte nicht gelöscht werden");
+    handleRouteError(res, error, "Benutzer konnte nicht deaktiviert werden");
   }
 });
 

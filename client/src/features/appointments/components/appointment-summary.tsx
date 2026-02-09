@@ -1,6 +1,6 @@
 import { Clock } from "lucide-react";
 import { iconSize } from "@/design-system";
-import { formatDuration } from "@shared/domain/appointments";
+import { formatDuration } from "@shared/types";
 
 interface AppointmentSummaryProps {
   startTime: string;

@@ -4,7 +4,7 @@ import { handleRouteError } from "../lib/errors";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { insertTimeEntrySchema, updateTimeEntrySchema, closeMonthSchema, reopenMonthSchema, employeeMonthClosings } from "@shared/schema";
 import { storage } from "../storage";
-import { timeToMinutes, isWeekend } from "@shared/utils/datetime";
+import { timeToMinutes, isWeekend, parseLocalDate, isPast } from "@shared/utils/datetime";
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { eq, and } from "drizzle-orm";
@@ -336,30 +336,11 @@ function formatLocalDate(date: Date): string {
 }
 
 /**
- * Parse date string as local date components
- */
-function parseLocalDate(dateStr: string): Date {
-  const [year, month, day] = dateStr.split("-").map(Number);
-  return new Date(year, month - 1, day, 12, 0, 0);
-}
-
-/**
- * Check if a date string is in the past (before today)
- */
-function isDateInPast(dateStr: string): boolean {
-  const entryDate = parseLocalDate(dateStr);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  entryDate.setHours(0, 0, 0, 0);
-  return entryDate < today;
-}
-
-/**
  * Check if a time entry is locked (past urlaub/krankheit entries are immutable for non-admins)
  */
 function isEntryLocked(entry: { entryType: string; entryDate: string }): boolean {
   const lockedTypes = ["urlaub", "krankheit"];
-  return lockedTypes.includes(entry.entryType) && isDateInPast(entry.entryDate);
+  return lockedTypes.includes(entry.entryType) && isPast(entry.entryDate);
 }
 
 async function isMonthClosed(userId: number, dateStr: string): Promise<boolean> {
