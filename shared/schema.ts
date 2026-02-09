@@ -417,6 +417,7 @@ export const budgetAllocations = pgTable("budget_allocations", {
   index("budget_allocations_customer_idx").on(table.customerId),
   index("budget_allocations_customer_year_idx").on(table.customerId, table.year),
   index("budget_allocations_expires_idx").on(table.expiresAt),
+  index("budget_allocations_fifo_idx").on(table.customerId, table.budgetType, table.validFrom),
   uniqueIndex("budget_allocations_auto_unique_idx").on(table.customerId, table.budgetType, table.year, table.month, table.source),
 ]);
 
@@ -459,6 +460,7 @@ export const budgetTransactions = pgTable("budget_transactions", {
   index("budget_transactions_customer_date_idx").on(table.customerId, table.transactionDate),
   index("budget_transactions_appointment_idx").on(table.appointmentId),
   index("budget_transactions_allocation_idx").on(table.allocationId),
+  index("budget_transactions_allocation_type_idx").on(table.allocationId, table.transactionType),
 ]);
 
 // Customer budget preferences (monthly limit, etc.)

@@ -73,5 +73,5 @@ export const DEFAULT_BUDGETS = {
   entlastungsbetrag45b: 131,
   verhinderungspflege39: 3539,
   pflegesachleistungen36: 0,
-};
+} as const;
 

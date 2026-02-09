@@ -24,7 +24,7 @@ import { handleRouteError } from "../lib/errors";
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
 import { todayISO } from "@shared/utils/datetime";
-import { validate45aAmount } from "@shared/domain/budgets";
+import { validate45aAmount, validate45bAmount, validate39_42aAmount } from "@shared/domain/budgets";
 
 const router = Router();
 
@@ -873,14 +873,33 @@ router.post("/customers/:id/budgets", async (req: Request, res: Response) => {
     
     const validatedData = insertCustomerBudgetSchema.parse({ ...req.body, customerId });
     
-    if (validatedData.pflegesachleistungen36 > 0) {
-      const customer = await storage.getCustomer(customerId);
-      if (customer) {
-        const error45a = validate45aAmount(validatedData.pflegesachleistungen36, customer.pflegegrad);
-        if (error45a) {
-          res.status(400).json({ error: "VALIDATION_ERROR", message: error45a });
-          return;
-        }
+    const customer = await storage.getCustomer(customerId);
+    if (!customer) {
+      res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+      return;
+    }
+    
+    if (validatedData.entlastungsbetrag45b > 0) {
+      const error45b = validate45bAmount(validatedData.entlastungsbetrag45b);
+      if (error45b) {
+        res.status(400).json({ error: "VALIDATION_ERROR", message: error45b });
+        return;
+      }
+    }
+    
+    if (validatedData.pflegesachleistungen36 > 0 && customer) {
+      const error45a = validate45aAmount(validatedData.pflegesachleistungen36, customer.pflegegrad);
+      if (error45a) {
+        res.status(400).json({ error: "VALIDATION_ERROR", message: error45a });
+        return;
+      }
+    }
+    
+    if (validatedData.verhinderungspflege39 > 0) {
+      const error39 = validate39_42aAmount(validatedData.verhinderungspflege39);
+      if (error39) {
+        res.status(400).json({ error: "VALIDATION_ERROR", message: error39 });
+        return;
       }
     }
     

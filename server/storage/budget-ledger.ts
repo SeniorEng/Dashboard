@@ -14,13 +14,14 @@ import {
 } from "@shared/schema";
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
-import { eq, and, sql, lte, gte, isNull, or, desc, asc } from "drizzle-orm";
-import { todayISO } from "@shared/utils/datetime";
+import { eq, and, sql, lte, gte, isNull, or, desc, asc, inArray } from "drizzle-orm";
+import { todayISO, parseLocalDate } from "@shared/utils/datetime";
+import { BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
 
 const sqlClient = neon(process.env.DATABASE_URL!);
 const db = drizzle(sqlClient);
 
-const DEFAULT_MONTHLY_BUDGET_CENTS = 13100; // 131€ gemäß §45b SGB XI
+const DEFAULT_MONTHLY_BUDGET_CENTS = BUDGET_45B_MAX_MONTHLY_CENTS;
 
 export interface BudgetSummary {
   customerId: number;
@@ -186,22 +187,25 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
   }
 
   async getBudgetTransactions(customerId: number, options?: { year?: number; limit?: number }): Promise<BudgetTransaction[]> {
+    const conditions = [eq(budgetTransactions.customerId, customerId)];
+    
+    if (options?.year) {
+      const yearStart = `${options.year}-01-01`;
+      const yearEnd = `${options.year}-12-31`;
+      conditions.push(gte(budgetTransactions.transactionDate, yearStart));
+      conditions.push(lte(budgetTransactions.transactionDate, yearEnd));
+    }
+
     let query = db.select()
       .from(budgetTransactions)
-      .where(eq(budgetTransactions.customerId, customerId))
+      .where(and(...conditions))
       .orderBy(desc(budgetTransactions.transactionDate), desc(budgetTransactions.createdAt));
 
     if (options?.limit) {
       query = query.limit(options.limit) as typeof query;
     }
 
-    const results = await query;
-    
-    if (options?.year) {
-      return results.filter(t => t.transactionDate.startsWith(String(options.year)));
-    }
-    
-    return results;
+    return await query;
   }
 
   async getTransactionByAppointmentId(appointmentId: number): Promise<BudgetTransaction | undefined> {
@@ -259,10 +263,10 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       return [];
     }
 
-    const startDate = new Date(preferences.budgetStartDate + "T00:00:00");
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth() + 1;
+    const startDate = parseLocalDate(preferences.budgetStartDate);
+    const todayDate = parseLocalDate(todayISO());
+    const currentYear = todayDate.getFullYear();
+    const currentMonth = todayDate.getMonth() + 1;
 
     const existingAllocations = await db.select()
       .from(budgetAllocations)
@@ -316,10 +320,10 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     await this.ensureMonthlyAllocations(customerId);
     await this.processExpiredCarryover(customerId);
 
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth() + 1;
     const today = todayISO();
+    const todayDate = parseLocalDate(today);
+    const currentYear = todayDate.getFullYear();
+    const currentMonth = todayDate.getMonth() + 1;
 
     const allocations = await db.select()
       .from(budgetAllocations)
@@ -408,7 +412,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           monthlyLimitCents: preferences.monthlyLimitCents,
           budgetStartDate: preferences.budgetStartDate,
           notes: preferences.notes,
-          updatedAt: new Date(),
+          updatedAt: sql`now()`,
         })
         .where(eq(customerBudgetPreferences.customerId, preferences.customerId))
         .returning();
@@ -545,10 +549,10 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     }
 
     const monthlyAmount = amounts.pflegesachleistungen36;
-    const startDate = new Date(preferences.budgetStartDate + "T00:00:00");
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth() + 1;
+    const startDate = parseLocalDate(preferences.budgetStartDate);
+    const todayDate = parseLocalDate(todayISO());
+    const currentYear = todayDate.getFullYear();
+    const currentMonth = todayDate.getMonth() + 1;
 
     const existingAllocations = await db.select()
       .from(budgetAllocations)
@@ -611,9 +615,9 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     }
 
     const yearlyAmount = amounts.verhinderungspflege39;
-    const startDate = new Date(preferences.budgetStartDate + "T00:00:00");
-    const now = new Date();
-    const currentYear = now.getFullYear();
+    const startDate = parseLocalDate(preferences.budgetStartDate);
+    const todayDate = parseLocalDate(todayISO());
+    const currentYear = todayDate.getFullYear();
     const startYear = startDate.getFullYear();
 
     const existingAllocations = await db.select()
@@ -662,10 +666,10 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
   async getBudgetSummary45a(customerId: number): Promise<Budget45aSummary> {
     await this.ensureAllocations45a(customerId);
 
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth() + 1;
     const today = todayISO();
+    const todayDate = parseLocalDate(today);
+    const currentYear = todayDate.getFullYear();
+    const currentMonth = todayDate.getMonth() + 1;
 
     const allocations = await db.select()
       .from(budgetAllocations)
@@ -714,9 +718,9 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
   async getBudgetSummary39_42a(customerId: number): Promise<Budget39_42aSummary> {
     await this.ensureAllocations39_42a(customerId);
 
-    const now = new Date();
-    const currentYear = now.getFullYear();
     const today = todayISO();
+    const todayDate = parseLocalDate(today);
+    const currentYear = todayDate.getFullYear();
 
     const allocations = await db.select()
       .from(budgetAllocations)
@@ -760,8 +764,6 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
   }
 
   async getAllBudgetSummaries(customerId: number): Promise<AllBudgetSummaries> {
-    await this.processExpiredCarryover(customerId);
-    
     const [entlastungsbetrag45b, umwandlung45a, ersatzpflege39_42a] = await Promise.all([
       this.getBudgetSummary(customerId),
       this.getBudgetSummary45a(customerId),
@@ -871,20 +873,26 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       return { consumedCents: 0, transactions: [], remainingCents: amountCents };
     }
 
-    const allocationConsumption = await Promise.all(
-      allocations.map(async (a) => {
-        const result = await db.select({
+    const allocationIds = allocations.map(a => a.id);
+    const consumptionByAllocation = allocationIds.length > 0
+      ? await db.select({
+          allocationId: budgetTransactions.allocationId,
           total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
         })
           .from(budgetTransactions)
           .where(and(
-            eq(budgetTransactions.allocationId, a.id),
+            inArray(budgetTransactions.allocationId, allocationIds),
             sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`
-          ));
-        const consumed = Number(result[0]?.total ?? 0);
-        return { allocation: a, consumed, available: Math.max(0, a.amountCents - consumed) };
-      })
-    );
+          ))
+          .groupBy(budgetTransactions.allocationId)
+      : [];
+
+    const consumedMap = new Map(consumptionByAllocation.map(c => [c.allocationId, Number(c.total)]));
+
+    const allocationConsumption = allocations.map(a => {
+      const consumed = consumedMap.get(a.id) ?? 0;
+      return { allocation: a, consumed, available: Math.max(0, a.amountCents - consumed) };
+    });
 
     let remaining = amountCents;
     let totalConsumed = 0;
@@ -969,7 +977,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       let maxConsumable = remaining;
 
       if (budgetType === "entlastungsbetrag_45b" && monthlyLimit45b !== null) {
-        const txDate = new Date(params.transactionDate + "T00:00:00");
+        const txDate = parseLocalDate(params.transactionDate);
         const txYear = txDate.getFullYear();
         const txMonth = txDate.getMonth() + 1;
         const currentMonthStart = `${txYear}-${String(txMonth).padStart(2, '0')}-01`;

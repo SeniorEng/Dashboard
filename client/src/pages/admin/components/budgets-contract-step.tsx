@@ -20,14 +20,16 @@ export function BudgetsStep({ formData, onChange, pflegegrad }: BudgetsStepProps
   const pflegesachleistungen = parseFloat(formData.pflegesachleistungen36) || 0;
   const verhinderungspflege = parseFloat(formData.verhinderungspflege39) || 0;
 
-  const error45b = entlastungsbetrag > 131 ? `Maximal 131,00 €/Monat erlaubt` : null;
+  const max45b = BUDGET_45B_MAX_MONTHLY_CENTS / 100;
+  const error45b = entlastungsbetrag > max45b ? `Maximal ${max45b.toFixed(2)} €/Monat erlaubt` : null;
   const max45a = get45aMaxForPflegegrad(pflegegrad) / 100;
   const error45a = pflegegrad && pflegegrad < 2 && pflegesachleistungen > 0
     ? "§45a ist erst ab Pflegegrad 2 verfügbar"
     : pflegesachleistungen > max45a && max45a > 0
     ? `Maximal ${max45a.toFixed(2)} €/Monat bei Pflegegrad ${pflegegrad}`
     : null;
-  const error39 = verhinderungspflege > 3539 ? `Maximal 3.539,00 €/Jahr erlaubt` : null;
+  const max39 = BUDGET_39_42A_MAX_YEARLY_CENTS / 100;
+  const error39 = verhinderungspflege > max39 ? `Maximal ${max39.toFixed(2)} €/Jahr erlaubt` : null;
 
   return (
     <div className="space-y-6">

@@ -51,6 +51,7 @@ function getTransactionTypeLabel(type: string): string {
   const labels: Record<string, string> = {
     consumption: "Leistung",
     expiration: "Verfall",
+    write_off: "Verfall",
     reversal: "Storno",
     manual_adjustment: "Manuelle Korrektur",
   };
