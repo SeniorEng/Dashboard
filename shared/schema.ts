@@ -426,6 +426,7 @@ export const BUDGET_TRANSACTION_TYPES = [
   "expiration",        // Carryover expiration after June 30
   "reversal",          // Reversal of a consumption (e.g., cancelled appointment)
   "manual_adjustment", // Manual correction
+  "write_off",         // Automatic write-off of expired carryover funds (CORRECTION_WRITE_OFF)
 ] as const;
 
 export type BudgetTransactionType = typeof BUDGET_TRANSACTION_TYPES[number];
@@ -449,6 +450,7 @@ export const budgetTransactions = pgTable("budget_transactions", {
   customerKilometersCents: integer("customer_kilometers_cents"),
   // Reference to source
   appointmentId: integer("appointment_id").references(() => appointments.id),
+  allocationId: integer("allocation_id").references(() => budgetAllocations.id),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
@@ -456,6 +458,7 @@ export const budgetTransactions = pgTable("budget_transactions", {
   index("budget_transactions_customer_idx").on(table.customerId),
   index("budget_transactions_customer_date_idx").on(table.customerId, table.transactionDate),
   index("budget_transactions_appointment_idx").on(table.appointmentId),
+  index("budget_transactions_allocation_idx").on(table.allocationId),
 ]);
 
 // Customer budget preferences (monthly limit, etc.)
@@ -903,6 +906,7 @@ export const insertBudgetTransactionSchema = z.object({
   customerKilometers: z.number().nullable().optional(),
   customerKilometersCents: z.number().nullable().optional(),
   appointmentId: z.number().nullable().optional(),
+  allocationId: z.number().nullable().optional(),
   notes: z.string().max(500).nullable().optional(),
 });
 
