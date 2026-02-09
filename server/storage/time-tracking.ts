@@ -547,28 +547,27 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
   }
   
   async getOpenTasks(userId: number): Promise<OpenTasksSummary> {
-    // Look at the last 30 days plus 7 days in the future
-    // Future dates are included so users get immediate feedback when planning work
+    // Look at the last 30 days only (past days)
+    // Break warnings only make sense for days that are already over
     const today = new Date();
-    const endDate = new Date(today);
-    endDate.setDate(endDate.getDate() + 7); // Include 7 days ahead
     const startDate = new Date(today);
     startDate.setDate(startDate.getDate() - 30);
     
     const formatDate = (d: Date) => formatDateISO(d);
     const startDateStr = formatDate(startDate);
-    const endDateStr = formatDate(endDate);
-    
-    // Get appointments and time entries for this period
+    const yesterdayDate = new Date(today);
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+    const yesterdayStr = formatDate(yesterdayDate);
+
     const [employeeAppointments, timeEntries] = await Promise.all([
-      this.getEmployeeAppointments(userId, startDateStr, endDateStr),
+      this.getEmployeeAppointments(userId, startDateStr, yesterdayStr),
       db.select()
         .from(employeeTimeEntries)
         .where(
           and(
             eq(employeeTimeEntries.userId, userId),
             gte(employeeTimeEntries.entryDate, startDateStr),
-            lte(employeeTimeEntries.entryDate, endDateStr)
+            lte(employeeTimeEntries.entryDate, yesterdayStr)
           )
         ),
     ]);
