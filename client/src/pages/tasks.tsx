@@ -16,14 +16,14 @@ import { useTasks, useCreateTask, useToggleTaskStatus, type TaskWithRelations, T
 import { DatePicker } from "@/components/ui/date-picker";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 
-type TaskFilter = "open" | "completed" | "all";
+type TaskFilter = "open" | "completed";
 
 export default function TasksPage() {
   const [filter, setFilter] = useState<TaskFilter>("open");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<TaskWithRelations | null>(null);
   
-  const includeCompleted = filter === "completed" || filter === "all";
+  const includeCompleted = filter === "completed";
   const { data: tasks, isLoading } = useTasks({ includeCompleted });
   const createTask = useCreateTask();
   const toggleTaskStatus = useToggleTaskStatus();
@@ -97,8 +97,7 @@ export default function TasksPage() {
 
   const filteredTasks = tasks?.filter(task => {
     if (filter === "open") return task.status !== "completed";
-    if (filter === "completed") return task.status === "completed";
-    return true;
+    return task.status === "completed";
   }) || [];
 
 
@@ -252,10 +251,9 @@ export default function TasksPage() {
         </h2>
 
         <Tabs value={filter} onValueChange={(v) => setFilter(v as TaskFilter)} className="mb-4">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="open" data-testid="tab-open">Offen</TabsTrigger>
             <TabsTrigger value="completed" data-testid="tab-completed">Erledigt</TabsTrigger>
-            <TabsTrigger value="all" data-testid="tab-all">Alle</TabsTrigger>
           </TabsList>
         </Tabs>
 
@@ -271,9 +269,7 @@ export default function TasksPage() {
           <Card>
             <CardContent className="py-8">
               <p className="text-center text-muted-foreground" data-testid="no-tasks-message">
-                {filter === "open" && "Keine offenen Aufgaben"}
-                {filter === "completed" && "Keine erledigten Aufgaben"}
-                {filter === "all" && "Keine Aufgaben vorhanden"}
+                {filter === "open" ? "Keine offenen Aufgaben" : "Keine erledigten Aufgaben"}
               </p>
             </CardContent>
           </Card>
