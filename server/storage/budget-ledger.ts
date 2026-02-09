@@ -77,6 +77,8 @@ export interface BudgetLedgerStorage {
     customerKilometers: number;
     userId?: number;
   }): Promise<BudgetTransaction>;
+  
+  getCustomerBudgetAmounts(customerId: number): Promise<{ pflegesachleistungen36: number; verhinderungspflege39: number }>;
 }
 
 export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
@@ -437,6 +439,17 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       customerKilometersCents: costs.customerKilometersCents,
       appointmentId: params.appointmentId,
     }, params.userId);
+  }
+
+  async getCustomerBudgetAmounts(customerId: number): Promise<{ pflegesachleistungen36: number; verhinderungspflege39: number }> {
+    const result = await db.select().from(customerBudgets).where(and(eq(customerBudgets.customerId, customerId), isNull(customerBudgets.validTo))).limit(1);
+    if (result[0]) {
+      return {
+        pflegesachleistungen36: result[0].pflegesachleistungen36 ?? 0,
+        verhinderungspflege39: result[0].verhinderungspflege39 ?? 0,
+      };
+    }
+    return { pflegesachleistungen36: 0, verhinderungspflege39: 0 };
   }
 }
 

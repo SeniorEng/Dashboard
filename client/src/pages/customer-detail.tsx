@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { AppointmentCard } from "@/features/appointments/components/appointment-card";
 import { 
   ArrowLeft, MapPin, Phone, Mail, User, Heart, 
-  Calendar, Loader2, AlertCircle, FileSignature, ChevronRight, X
+  Calendar, Loader2, AlertCircle, FileSignature, ChevronRight, X, Wallet
 } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { ErrorState } from "@/components/patterns/error-state";
@@ -44,6 +44,26 @@ export default function CustomerDetailPage() {
     queryFn: async () => {
       const res = await fetch(`/api/customers/${customerId}`);
       if (!res.ok) throw new Error("Kunde konnte nicht geladen werden");
+      return res.json();
+    },
+    enabled: !!customerId,
+  });
+
+  const { data: budgetOverview } = useQuery<{
+    entlastungsbetrag45b: {
+      totalAllocatedCents: number;
+      totalUsedCents: number;
+      availableCents: number;
+      currentMonthUsedCents: number;
+      monthlyLimitCents: number | null;
+    };
+    umwandlung45a: { monthlyBudgetCents: number; label: string };
+    ersatzpflege39_42a: { yearlyBudgetCents: number; label: string };
+  }>({
+    queryKey: ["budget-overview", customerId],
+    queryFn: async () => {
+      const res = await fetch(`/api/budget/${customerId}/overview`);
+      if (!res.ok) throw new Error("Budget konnte nicht geladen werden");
       return res.json();
     },
     enabled: !!customerId,
@@ -202,6 +222,69 @@ export default function CustomerDetailPage() {
             </div>
           </CardContent>
         </Card>
+
+        {budgetOverview && (
+          budgetOverview.entlastungsbetrag45b.totalAllocatedCents > 0 ||
+          budgetOverview.umwandlung45a.monthlyBudgetCents > 0 ||
+          budgetOverview.ersatzpflege39_42a.yearlyBudgetCents > 0
+        ) && (
+          <Card className="mb-6" data-testid="budget-overview">
+            <CardContent className="p-4">
+              <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+                <Wallet className={`${iconSize.md} text-primary`} />
+                Budgets
+              </h2>
+              <div className="space-y-4">
+                {budgetOverview.entlastungsbetrag45b.totalAllocatedCents > 0 && (() => {
+                  const b = budgetOverview.entlastungsbetrag45b;
+                  const usedPercent = b.totalAllocatedCents > 0 ? Math.min(100, Math.round((b.totalUsedCents / b.totalAllocatedCents) * 100)) : 0;
+                  return (
+                    <div data-testid="budget-45b">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-medium">§45b Entlastungsbetrag</span>
+                        <span className="text-sm text-muted-foreground">
+                          {(b.availableCents / 100).toFixed(2)} € verfügbar
+                        </span>
+                      </div>
+                      <div className="w-full bg-muted rounded-full h-2 mb-1">
+                        <div
+                          className="bg-primary rounded-full h-2 transition-all"
+                          style={{ width: `${usedPercent}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>{(b.totalUsedCents / 100).toFixed(2)} € von {(b.totalAllocatedCents / 100).toFixed(2)} € verbraucht</span>
+                        <span>Monat: {(b.currentMonthUsedCents / 100).toFixed(2)} €</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {budgetOverview.umwandlung45a.monthlyBudgetCents > 0 && (
+                  <div data-testid="budget-45a">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">§45a Umwandlungsanspruch</span>
+                      <Badge variant="secondary" className="text-xs">
+                        {(budgetOverview.umwandlung45a.monthlyBudgetCents / 100).toFixed(2)} € / Monat
+                      </Badge>
+                    </div>
+                  </div>
+                )}
+
+                {budgetOverview.ersatzpflege39_42a.yearlyBudgetCents > 0 && (
+                  <div data-testid="budget-39-42a">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">§39/§42a Gemeinsamer Jahresbetrag</span>
+                      <Badge variant="secondary" className="text-xs">
+                        {(budgetOverview.ersatzpflege39_42a.yearlyBudgetCents / 100).toFixed(2)} € / Jahr
+                      </Badge>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {upcomingAppointments.length > 0 && (
           <div className="mb-6">

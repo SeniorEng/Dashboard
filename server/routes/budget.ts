@@ -128,6 +128,36 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, async (req: Reques
   }
 });
 
+router.get("/:customerId/overview", checkCustomerAccess, async (req: Request, res: Response) => {
+  try {
+    const customerId = parseInt(req.params.customerId);
+    const [summary, budgetAmounts] = await Promise.all([
+      budgetLedgerStorage.getBudgetSummary(customerId),
+      budgetLedgerStorage.getCustomerBudgetAmounts(customerId),
+    ]);
+
+    res.json({
+      entlastungsbetrag45b: {
+        totalAllocatedCents: summary.totalAllocatedCents,
+        totalUsedCents: summary.totalUsedCents,
+        availableCents: summary.availableCents,
+        currentMonthUsedCents: summary.currentMonthUsedCents,
+        monthlyLimitCents: summary.monthlyLimitCents,
+      },
+      umwandlung45a: {
+        monthlyBudgetCents: budgetAmounts.pflegesachleistungen36,
+        label: "§45a Umwandlungsanspruch",
+      },
+      ersatzpflege39_42a: {
+        yearlyBudgetCents: budgetAmounts.verhinderungspflege39,
+        label: "§39/§42a Gemeinsamer Jahresbetrag",
+      },
+    });
+  } catch (error) {
+    handleRouteError(res, error, "Budget-Übersicht konnte nicht geladen werden");
+  }
+});
+
 router.use(requireAdmin);
 
 router.post("/:customerId/allocations", async (req: Request, res: Response) => {

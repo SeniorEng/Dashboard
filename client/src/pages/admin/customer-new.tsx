@@ -15,7 +15,7 @@ import {
   Check,
 } from "lucide-react";
 import { iconSize } from "@/design-system";
-import { CustomerFormData, STEPS, DEFAULT_BUDGETS, BUDGET_AMOUNTS_BY_PFLEGEGRAD } from "./components/customer-types";
+import { CustomerFormData, STEPS, DEFAULT_BUDGETS, UMWANDLUNG_45A_BY_PFLEGEGRAD } from "./components/customer-types";
 import { PersonalDataStep } from "./components/personal-data-step";
 import { InsuranceStep } from "./components/insurance-step";
 import { ContactsStep } from "./components/contacts-step";
@@ -201,8 +201,8 @@ export default function AdminCustomerNew() {
       const newData = { ...prev, [field]: value };
       if (field === "pflegegrad") {
         const pg = parseInt(value as string);
-        const amounts = BUDGET_AMOUNTS_BY_PFLEGEGRAD[pg] || { pflegesachleistungen36: 0 };
-        newData.pflegesachleistungen36 = amounts.pflegesachleistungen36.toString();
+        const amounts = UMWANDLUNG_45A_BY_PFLEGEGRAD[pg] || { umwandlung45a: 0 };
+        newData.pflegesachleistungen36 = amounts.umwandlung45a.toString();
       }
       return newData;
     });

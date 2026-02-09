@@ -31,24 +31,9 @@ export function BudgetsStep({ formData, onChange }: BudgetsStepProps) {
           </div>
         </div>
 
-        <div className="p-4 rounded-lg bg-blue-50 border border-blue-100">
-          <div className="space-y-2">
-            <Label htmlFor="verhinderungspflege39">§39 Verhinderungspflege (€/Jahr)</Label>
-            <Input
-              id="verhinderungspflege39"
-              type="number"
-              step="0.01"
-              value={formData.verhinderungspflege39}
-              onChange={(e) => onChange("verhinderungspflege39", e.target.value)}
-              data-testid="input-budget-39"
-            />
-            <p className="text-xs text-gray-500">Standard: 1.612 €/Jahr</p>
-          </div>
-        </div>
-
         <div className="p-4 rounded-lg bg-purple-50 border border-purple-100">
           <div className="space-y-2">
-            <Label htmlFor="pflegesachleistungen36">§36 Pflegesachleistungen (€/Monat)</Label>
+            <Label htmlFor="pflegesachleistungen36">§45a Umwandlungsanspruch (€/Monat)</Label>
             <Input
               id="pflegesachleistungen36"
               type="number"
@@ -58,8 +43,23 @@ export function BudgetsStep({ formData, onChange }: BudgetsStepProps) {
               data-testid="input-budget-36"
             />
             <p className="text-xs text-gray-500">
-              Abhängig vom Pflegegrad (PG2: 761€, PG3: 1.432€, PG4: 1.778€, PG5: 2.200€)
+              Max. 40% der ungenutzten Sachleistungen (PG2: 318€, PG3: 599€, PG4: 744€, PG5: 920€)
             </p>
+          </div>
+        </div>
+
+        <div className="p-4 rounded-lg bg-blue-50 border border-blue-100">
+          <div className="space-y-2">
+            <Label htmlFor="verhinderungspflege39">§39/§42a Gemeinsamer Jahresbetrag (€/Jahr)</Label>
+            <Input
+              id="verhinderungspflege39"
+              type="number"
+              step="0.01"
+              value={formData.verhinderungspflege39}
+              onChange={(e) => onChange("verhinderungspflege39", e.target.value)}
+              data-testid="input-budget-39"
+            />
+            <p className="text-xs text-gray-500">Standard: 3.539 €/Jahr (Ersatzpflege + Kurzzeitpflege, ab 01.07.2025)</p>
           </div>
         </div>
       </div>
