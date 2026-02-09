@@ -436,10 +436,14 @@ router.post("/", async (req: Request, res: Response) => {
         return res.status(400).json({ error: "Der gewählte Zeitraum enthält nur Wochenendtage. Bitte wählen Sie einen Zeitraum mit Werktagen." });
       }
       
-      // Check month closing for all dates in range
       if (!req.user!.isAdmin) {
+        const checkedMonths = new Map<string, boolean>();
         for (const dateStr of weekdayDates) {
-          if (await isMonthClosed(userId, dateStr)) {
+          const monthKey = dateStr.substring(0, 7);
+          if (!checkedMonths.has(monthKey)) {
+            checkedMonths.set(monthKey, await isMonthClosed(userId, dateStr));
+          }
+          if (checkedMonths.get(monthKey)) {
             return res.status(403).json({ 
               error: `Der Monat für ${dateStr.split('-').reverse().join('.')} ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen.` 
             });
@@ -615,6 +619,31 @@ router.delete("/:id", async (req: Request, res: Response) => {
 // ============================================
 // MONTH CLOSING ENDPOINTS
 // ============================================
+
+router.get("/month-closings/admin/:year/:month", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const year = parseInt(req.params.year);
+    const month = parseInt(req.params.month);
+
+    if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Ungültiges Jahr oder Monat" });
+    }
+
+    const closings = await db
+      .select()
+      .from(employeeMonthClosings)
+      .where(
+        and(
+          eq(employeeMonthClosings.year, year),
+          eq(employeeMonthClosings.month, month)
+        )
+      );
+
+    res.json({ closings });
+  } catch (error) {
+    handleRouteError(res, error, "Monatsabschlüsse konnten nicht geladen werden");
+  }
+});
 
 router.get("/month-closing/:year/:month", async (req: Request, res: Response) => {
   try {

@@ -11,130 +11,51 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 
 ### Frontend
 - **Frameworks**: React 18 with TypeScript, Vite, Wouter for routing.
-- **UI/UX**: Mobile-first responsive design using `shadcn/ui` components on Radix UI primitives, styled with Tailwind CSS v4 and a "Care & Clarity" theme (teal and warm beige).
+- **UI/UX**: Mobile-first responsive design using `shadcn/ui` components on Radix UI primitives, styled with Tailwind CSS v4 and a "Care & Clarity" theme (teal and warm beige). Centralized `@/design-system` for consistent styling.
 - **State Management**: TanStack Query for data fetching (optimistic updates, caching), React memoization, ErrorBoundary for error handling.
-- **Design System**: Centralized `@/design-system` for consistent styling, enforcing the use of tokens for icons, component styles, semantic spacing, and semantic colors (status, service, care level).
-  - **PageHeader**: Responsive stacked layout - title wraps naturally on mobile, action buttons go full-width below. Uses `componentStyles.pageHeader*` tokens.
-  - **ResponsiveTabs**: Priority+ pattern - shows first N tabs inline, rest collapse into "Mehr" dropdown on mobile. Component at `@/components/patterns/responsive-tabs.tsx`.
-- **Date/Time Handling** (verbindliche Konventionen für alle Implementierungen):
-  - **Grundprinzip**: Alle Zeiten sind implizit "deutsche Ortszeit" — keine UTC-Konvertierung, keine Zeitzone-Logik.
-  - **Speicherformate (Datenbank)**:
-    - Datum: `date` → String `"YYYY-MM-DD"` (PostgreSQL `date`)
-    - Uhrzeit: `time` → String `"HH:MM:SS"` (PostgreSQL `time without time zone`)
-    - Dauer: `integer` in Minuten
-    - Systemzeitstempel: `timestamp({ withTimezone: true })` → `timestamptz` (created_at, updated_at etc.)
-  - **Anzeigeformate (Frontend)**:
-    - Uhrzeit: `"HH:MM"` — Sekunden werden NIE angezeigt
-    - Datum: `"DD.MM.YYYY"` (deutsch) oder `"YYYY-MM-DD"` (Formulare, API)
-  - **Verbotene Patterns** (NIEMALS verwenden!):
-    - `new Date()` für Uhrzeiten → Zeitzonen-Probleme! Stattdessen: `currentTimeHHMMSS()` / `currentTimeHHMM()`
-    - `Date`-Objekte an Zeit-Utilities übergeben → alle akzeptieren NUR Strings
-    - ISO-Timestamps (`"2025-12-02T09:45:00.000Z"`) für lokale Zeiten
-    - `date.getHours()` / `date.getMinutes()` für Zeitberechnungen
-  - **Erlaubte Patterns**:
-    - `parseLocalDate("YYYY-MM-DD")` → `Date`-Objekt NUR für Datumsberechnungen (Wochentag, addDays)
-    - `formatDateISO(date)` → zurück zu `"YYYY-MM-DD"` nach Berechnung
-    - `todayISO()` → heutiges Datum als String
-    - `currentTimeHHMMSS()` / `currentTimeHHMM()` → aktuelle Uhrzeit als String
-    - Alle Funktionen in `@shared/utils/datetime` arbeiten mit Strings
-  - **Zentrale Utilities** (`@shared/utils/datetime`): Müssen für ALLE Datums-/Zeitoperationen verwendet werden. Keine eigenen Parsing-/Formatierungsfunktionen schreiben.
-- **DatePicker-Komponente**: Alle Datumsfelder verwenden die zentrale `DatePicker`-Komponente (`@/components/ui/date-picker.tsx`). Diese bietet:
-  - Deutsche Lokalisierung (Montag als Wochenbeginn, deutsche Monatsnamen)
-  - Touch-optimierte 44px Mindestgröße für Mobile-Kompatibilität (iOS Safari, Android Chrome)
-  - Popover-basiertes Kalender-Widget statt nativem `type="date"` Input
-  - ISO-String API (`value: string | null`, `onChange: (date: string | null) => void`)
-  - Optional: `clearable`, `minDate`, `maxDate` Props
-- **Mobile-Kompatibilität**: Die App verwendet touch-optimierte UI-Komponenten mit mindestens 44x44px Touch-Bereichen gemäß WCAG-Richtlinien. Radix UI Popovers verwenden `modal={true}` für korrektes Scroll-Locking auf Mobile.
-  - **Touch-Targets**: Alle interaktiven Elemente (Input, Select, Checkbox, Buttons) haben `min-h-[44px]` für WCAG-konforme Touch-Bereiche.
-  - **iOS Safari Zoom-Prävention**: Inputs verwenden `text-base` (16px) auf Mobile, um automatisches Zoomen bei Fokus zu verhindern.
-  - **Dialog Mobile-Pattern**: Dialoge auf Mobile erscheinen als Bottom-Sheet (slide-up), auf Desktop als zentriertes Modal. Dies verbessert die Bedienung bei virtueller Tastatur.
-  - **Viewport**: `maximum-scale=1` verhindert ungewolltes Pinch-Zooming.
-  - **SearchableSelect**: Für lange Auswahllisten (Kunden, Mitarbeiter, Pflegekassen) wird `SearchableSelect` (`@/components/ui/searchable-select.tsx`) statt `Select` verwendet. Diese Komponente bietet:
-    - Integrierte Suchfunktion (cmdk-basiert) zum Filtern langer Listen
-    - Mobile: Drawer (Bottom-Sheet) mit scrollbarer, durchsuchbarer Liste
-    - Desktop: Popover mit scrollbarer, durchsuchbarer Liste
-    - Touch-optimierte 44px Mindestgröße, sublabel-Support für Zusatzinfos (z.B. Adresse, IK-Nummer)
-    - Kurze/statische Listen (Pflegegrad, Dauer, Status, Monat) verwenden weiterhin die normale `Select`-Komponente
-- **Kartenlisten-Pattern**: Für Listen von Karten (Kunden, Geburtstage, Termine, Leistungsnachweise) wird einheitlich `flex flex-col gap-3` statt `space-y-*` verwendet. Grund: `space-y` nutzt `margin-top`, das bei inline-Elementen (z.B. `<a>` von Link-Wrappern) nicht wirkt. `flex gap` funktioniert unabhängig vom Display-Typ der Kinder. Keine Hover-Effekte auf Karten (mobile-first App).
-- **API Calls**: All state-changing API requests (POST, PATCH, DELETE) must use the central API client (`client/src/lib/api/client.ts`) for CSRF protection (Double-Submit Cookie Pattern). Direct `fetch()` calls for mutations will result in 403 errors.
-- **Phone Number Handling**: Uses `libphonenumber-js` via `@shared/utils/phone.ts` for validating, formatting, and storing German phone numbers in E.164 format (`+49...`).
-- **Type Organization**: Hierarchical type structure with `@shared/schema.ts` (Drizzle, Zod), `@shared/domain/*` (business logic, domain types), `@shared/utils/*` (utilities), and `@shared/types.ts` (re-exports for frontend).
-- **Date-Validierung**: Zentraler Date-Validator in `@shared/utils/date-validation.ts` bietet:
-  - `isValidISODate(dateString)` - Prüft ISO-Format "YYYY-MM-DD"
-  - `parseISODate(dateString)` - Parst zu Date-Objekt
-  - `formatToISODate(date)` - Formatiert Date zu ISO-String
-  - `isoDateSchema` / `isoDateOptionalSchema` - Zod-Schemas für API-Validierung
-  - `isDateInPast()`, `isDateToday()`, `isDateInFuture()` - Datum-Vergleiche
+- **Date/Time Handling**: All times are implicitly "German local time" with no UTC conversion or timezone logic. Storage formats are `"YYYY-MM-DD"` for dates, `"HH:MM:SS"` for time, `integer` for duration, and `timestamptz` for system timestamps. Display formats are `"HH:MM"` for time and `"DD.MM.YYYY"` or `"YYYY-MM-DD"` for dates. Strict conventions and central utilities (`@shared/utils/datetime`) must be used for all date/time operations.
+- **Mobile-Kompatibilität**: Touch-optimized UI components (min 44x44px touch areas), `text-base` for inputs to prevent iOS Safari zoom, dialogs appearing as bottom-sheets on mobile, and `maximum-scale=1` for viewport.
+- **Components**: `DatePicker` for all date fields, `SearchableSelect` for long selection lists (e.g., customers), and a unified `flex flex-col gap-3` pattern for card lists.
+- **API Calls**: All state-changing API requests must use the central API client (`client/src/lib/api/client.ts`) for CSRF protection.
+- **Phone Number Handling**: Uses `libphonenumber-js` for validating, formatting, and storing German phone numbers in E.164 format.
+- **Type Organization**: Hierarchical type structure with `@shared/schema.ts`, `@shared/domain/*`, `@shared/utils/*`, and `@shared/types.ts`.
+- **Date Validation**: Centralized date validator in `@shared/utils/date-validation.ts` provides ISO date validation, parsing, formatting, Zod schemas, and date comparison utilities.
 
 ### Backend
 - **Framework**: Express.js with TypeScript.
 - **API Design**: RESTful endpoints, Zod validation, structured error responses, and modular routing.
-- **Business Logic**: Separated into a dedicated service layer with dependency injection for testability.
-- **Error Handling**: Centralized error codes and German messages, consistent error formatting via `handleRouteError()`.
-- **Security**: Role-based access control with SQL-level data filtering, CSRF protection for all state-changing requests, and database indexing for performance.
-- **Sanfter Entzug (Soft Revocation)**: Zwei-Stufen-Zugriffsmodell für Mitarbeiter:
-  - **Voller Zugriff** (`getCurrentlyAssignedCustomerIds`): Mitarbeiter ist aktuell als Hauptansprechpartner oder Vertretung zugewiesen → darf neue Termine erstellen, voller Kundenzugriff.
-  - **Legacy-Zugriff** (`getAssignedCustomerIds`): Mitarbeiter hat Termine beim Kunden (auch wenn nicht mehr zugewiesen) → kann bestehende Termine sehen, dokumentieren, abschließen. Keine neuen Termine. Frontend zeigt "Frühere Zuordnung" Badge.
-  - Admins haben uneingeschränkten Zugriff auf alle Kunden.
+- **Business Logic**: Separated into a dedicated service layer with dependency injection.
+- **Error Handling**: Centralized error codes, German messages, and consistent error formatting.
+- **Security**: Role-based access control with SQL-level data filtering, CSRF protection, and database indexing.
+- **Sanfter Entzug (Soft Revocation)**: Two-tiered access model for employees (full vs. legacy access based on customer assignment).
 
 ### Data Storage
 - **Database**: PostgreSQL via Neon serverless, managed with Drizzle ORM.
-- **Schema**: Includes tables for `customers`, `appointments`, `insurance_providers`, `employee_time_entries`, and others, utilizing a historization pattern (`valid_from`/`valid_to`) for changing data.
+- **Schema**: Includes tables for `customers`, `appointments`, `insurance_providers`, `employee_time_entries`, utilizing a historization pattern (`valid_from`/`valid_to`).
 - **Data Types**: Strict SQL types for data integrity.
 - **Indexes**: Composite indexes on frequently queried columns.
 - **Data Layer**: `IStorage` interface abstraction with `DatabaseStorage` providing optimized queries, pagination, and application-level rollback.
 - **Caching**: In-memory cache for assigned customer IDs with TTL and invalidation.
 
 ### Business Rules & Patterns
-- **Shared Domain Logic**: Single source of truth for business rules in `@shared/domain/*` (e.g., appointment status transitions).
-- **Termin-Status-Definitionen** (zentral in `@shared/domain/appointments.ts`):
-  - `scheduled` - Geplant (noch nicht durchgeführt)
-  - `in-progress` - Läuft gerade
-  - `documenting` - Dokumentation wird ausgefüllt
-  - `completed` - Abgeschlossen und dokumentiert
-  - **Für Leistungsnachweise gilt**: Nur `completed` Termine gelten als "dokumentiert". Alle anderen Status blockieren die Erstellung eines Leistungsnachweises.
-- **Leistungsnachweis-Workflow**:
-  1. Termine durchführen und dokumentieren (Status → `completed`)
-  2. Leistungsnachweis erstellen (wenn ALLE Termine des Monats `completed` sind)
-  3. Mitarbeiter unterschreibt
-  4. Kunde unterschreibt
-  5. Status wechselt zu `completed`
-- **Field Editing**: Rules govern which fields are editable based on appointment status.
-- **Overlap Checking**: Logic for preventing appointment overlaps.
-- **Service Model**: "Erstberatung" (initial consultation) is a core service type.
-- **Customer Management**: Multi-step customer creation, detailed views, and German-specific validation (IK numbers, insurance numbers).
-- **Budgeting & Pricing**: Supports various budget types and customer-specific service rates.
-  - **§45b Budget Ledger System**: Ledger-based tracking for Entlastungsbetrag with allocations (monthly, carryover, initial, manual) and transactions (consumption at appointment completion, reversals).
-  - **Automatic Budget Booking**: At appointment documentation, the system calculates costs based on: (Hauswirtschaft minutes × rate/h) + (Alltagsbegleitung minutes × rate/h) + (travel km × km rate) + (customer km × km rate).
-  - **Carryover Rules**: §45b budget from previous year expires on June 30 of the following year. System warns about expiring carryover.
-  - **Monthly Limits**: Optional customer preference for monthly usage limits with progress indicators and warnings.
-  - **Pricing Requirement**: Appointment documentation requires a valid pricing agreement for the customer. Missing pricing blocks completion with an actionable error message.
-- **Employee Time Tracking**: Comprehensive tracking for client and non-client work (vacation, sick leave, breaks, office work, etc.), including yearly vacation allowance and multi-day entries. Past entries are locked for non-admin users.
+- **Shared Domain Logic**: Single source of truth for business rules in `@shared/domain/*`.
+- **Appointment Statuses**: `scheduled`, `in-progress`, `documenting`, `completed`. Only `completed` appointments are considered documented for performance records.
+- **Performance Record Workflow**: Appointments must be `completed` before a performance record can be created. Includes employee and customer signature steps.
+- **Field Editing**: Rules based on appointment status.
+- **Overlap Checking**: Prevents appointment overlaps.
+- **Service Model**: "Erstberatung" (initial consultation) as a core service type.
+- **Customer Management**: Multi-step customer creation, detailed views, German-specific validation.
+- **Budgeting & Pricing**: Supports various budget types and customer-specific service rates, including a §45b Budget Ledger System with automatic booking, carryover rules, and monthly limits. Requires valid pricing for appointment completion.
+- **Employee Time Tracking**: Comprehensive tracking for client and non-client work, including yearly vacation allowance and multi-day entries. Past entries are locked for non-admin users.
 - **German Labor Law Compliance**: Automatic detection of missing break documentation based on work hours (`§4 ArbZG`).
-- **Open Tasks System**: Dashboard banners alert employees to pending tasks like undocumented appointments or missing break documentation.
-- **Customer Kilometers**: Tracking of kilometers driven with/for the customer ("Km für/mit Kunde") separate from travel kilometers.
-- **Geburtstage-Tab**: Zeigt bevorstehende Geburtstage (Standard: 30 Tage Horizont). Admin sieht alle aktiven Mitarbeiter + Kunden, Nicht-Admin sieht eigenen Geburtstag + zugewiesene Kunden. Zentrales `BirthdayEntry` Interface in `@shared/types.ts`. Schaltjahr-sichere Berechnung (29. Feb → 28. Feb in Nicht-Schaltjahren). Server-Cache mit 1h TTL, Frontend staleTime 5min.
-
-## Quality Assurance System
-
-### Audit Skills (Multi-Layer Review)
-5 spezialisierte Audit-Agents bilden ein vollständiges Quality-Gate-System:
-
-| Skill | Fokus | Wann |
-|-------|-------|------|
-| `code-quality-supervisor` | Duplikate, Konventionen, Vollständigkeit, Dead Code | **IMMER** nach jeder Aufgabe |
-| `database-audit` | Schema, Storage, Queries, GDPR, Historisierung | Bei Datenbank-Änderungen |
-| `business-logic-audit` | Workflows, Domain-Regeln, Status-Übergänge | Bei Geschäftslogik-Änderungen |
-| `security-audit` | OWASP, Secrets, Auth/CSRF, Injection, Access Control | Bei Auth/API/Input-Änderungen |
-| `performance-audit` | Queries, Rendering, Bundle, Caching, Mobile | Bei neuen Features, vor Deployment |
-
-### Orchestrierungs-Regeln
-- **`code-quality-supervisor`** läuft IMMER — ist der Gatekeeper
-- FAIL blockiert Fertigstellung, WARN wird berichtet
-- Vor Deployment/Publishing: ALLE 5 Skills mit vollem Scope
-- Details: `.agents/skills/code-quality-supervisor/reference/orchestration.md`
+- **Auto-Break System**: Calculates and generates missing breaks according to `§4 ArbZG`, considering actual work time, and is idempotent. Globally activatable via system settings.
+- **Month-Closing Workflow**: Employees can close their month, generating auto-breaks. This locks CRUD operations for non-admins. Admins can reopen months.
+- **Open Tasks System**: Dashboard alerts for pending tasks.
+- **Customer Kilometers**: Separate tracking for kilometers driven with/for the customer.
+- **Birthdays Tab**: Displays upcoming birthdays for employees and assigned customers, with a server-side cache and frontend staleTime.
 
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)
 - **Frontend Libraries**: React, TypeScript, Vite, Wouter, `shadcn/ui`, Radix UI, Tailwind CSS v4, TanStack Query, Zod.
 - **Backend Libraries**: Express.js, TypeScript, Zod, Drizzle ORM.
+- **Utilities**: `libphonenumber-js`.

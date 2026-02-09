@@ -14,6 +14,17 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
 import { useEmployees } from "@/features/customers";
 import { iconSize } from "@/design-system";
+import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   ArrowLeft,
   Calendar,
@@ -27,6 +38,9 @@ import {
   FileText,
   Users,
   Settings,
+  Lock,
+  Unlock,
+  CheckCircle2,
 } from "lucide-react";
 import type { TimeEntryType, TimeEntryWithUser, VacationSummary } from "@/lib/api/types";
 
@@ -58,6 +72,7 @@ export default function AdminTimeEntries() {
   const [vacationEditUser, setVacationEditUser] = useState<{ id: number; name: string } | null>(null);
   const [vacationDays, setVacationDays] = useState("30");
   const [carryOverDays, setCarryOverDays] = useState("0");
+  const [reopenTarget, setReopenTarget] = useState<{ userId: number; userName: string } | null>(null);
 
   const { data: employees } = useEmployees();
 
@@ -106,6 +121,53 @@ export default function AdminTimeEntries() {
       queryClient.invalidateQueries({ queryKey: ["admin-vacation-summary"] });
       setShowVacationDialog(false);
       setVacationEditUser(null);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  interface MonthClosingRecord {
+    id: number;
+    userId: number;
+    year: number;
+    month: number;
+    closedAt: string;
+    closedByUserId: number;
+    reopenedAt: string | null;
+    reopenedByUserId: number | null;
+  }
+
+  const { data: monthClosings } = useQuery({
+    queryKey: ["admin-month-closings", selectedYear, selectedMonth],
+    queryFn: async ({ signal }) => {
+      const result = await api.get<{ closings: MonthClosingRecord[] }>(
+        `/time-entries/month-closings/admin/${selectedYear}/${selectedMonth}`,
+        signal
+      );
+      return unwrapResult(result);
+    },
+  });
+
+  const closedUserIds = useMemo(() => {
+    if (!monthClosings?.closings) return new Set<number>();
+    return new Set(
+      monthClosings.closings
+        .filter((c) => !c.reopenedAt)
+        .map((c) => c.userId)
+    );
+  }, [monthClosings]);
+
+  const reopenMonthMutation = useMutation({
+    mutationFn: async (data: { userId: number; year: number; month: number }) => {
+      const result = await api.post("/time-entries/reopen-month", data);
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      toast({ title: `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear} wieder geöffnet` });
+      queryClient.invalidateQueries({ queryKey: ["admin-month-closings"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-time-entries"] });
+      setReopenTarget(null);
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
@@ -289,18 +351,38 @@ export default function AdminTimeEntries() {
                         <CardTitle className="text-lg flex items-center gap-2">
                           <Users className={iconSize.md} />
                           {employeeName}
+                          {employee && closedUserIds.has(employee.id) && (
+                            <Badge variant="secondary" className="bg-green-100 text-green-700 text-xs gap-1">
+                              <Lock className="h-3 w-3" />
+                              Abgeschlossen
+                            </Badge>
+                          )}
                         </CardTitle>
-                        {employee && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleEditVacation(employee.id, employee.displayName)}
-                            data-testid={`button-edit-vacation-${employee.id}`}
-                          >
-                            <Settings className={`${iconSize.sm} mr-1`} />
-                            Urlaubskontingent
-                          </Button>
-                        )}
+                        <div className="flex items-center gap-1">
+                          {employee && closedUserIds.has(employee.id) && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-amber-700 hover:text-amber-800 hover:bg-amber-50"
+                              onClick={() => setReopenTarget({ userId: employee.id, userName: employee.displayName })}
+                              data-testid={`button-reopen-month-${employee.id}`}
+                            >
+                              <Unlock className={`${iconSize.sm} mr-1`} />
+                              Wiedereröffnen
+                            </Button>
+                          )}
+                          {employee && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleEditVacation(employee.id, employee.displayName)}
+                              data-testid={`button-edit-vacation-${employee.id}`}
+                            >
+                              <Settings className={`${iconSize.sm} mr-1`} />
+                              Urlaubskontingent
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </CardHeader>
                     <CardContent>
@@ -353,6 +435,100 @@ export default function AdminTimeEntries() {
               </CardContent>
             </Card>
           )}
+
+          {/* Closed months for employees without entries in current view */}
+          {(() => {
+            if (!monthClosings?.closings || !employees) return null;
+            const employeesInList = new Set(
+              Object.entries(entriesByEmployee)
+                .map(([name]) => employees?.find(e => e.displayName === name)?.id)
+                .filter(Boolean)
+            );
+            const closedWithoutEntries = monthClosings.closings
+              .filter((c) => !c.reopenedAt && !employeesInList.has(c.userId));
+            if (closedWithoutEntries.length === 0) return null;
+            return (
+              <div className="flex flex-col gap-3 mt-4">
+                {closedWithoutEntries.map((closing) => {
+                  const emp = employees?.find((e) => e.id === closing.userId);
+                  if (!emp) return null;
+                  return (
+                    <Card key={closing.id}>
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-lg flex items-center gap-2">
+                            <Users className={iconSize.md} />
+                            {emp.displayName}
+                            <Badge variant="secondary" className="bg-green-100 text-green-700 text-xs gap-1">
+                              <Lock className="h-3 w-3" />
+                              Abgeschlossen
+                            </Badge>
+                          </CardTitle>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-amber-700 hover:text-amber-800 hover:bg-amber-50"
+                            onClick={() => setReopenTarget({ userId: emp.id, userName: emp.displayName })}
+                            data-testid={`button-reopen-month-${emp.id}`}
+                          >
+                            <Unlock className={`${iconSize.sm} mr-1`} />
+                            Wiedereröffnen
+                          </Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="text-sm text-gray-500">Keine Zeiteinträge in diesem Monat.</p>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          {/* Reopen Month Confirmation */}
+          <AlertDialog open={!!reopenTarget} onOpenChange={(open) => !open && setReopenTarget(null)}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Monat wiedereröffnen?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Der {MONTH_NAMES[selectedMonth - 1]} {selectedYear} für{" "}
+                  <span className="font-medium">{reopenTarget?.userName}</span> wird wieder
+                  geöffnet. Alle automatisch generierten Pausen werden dabei entfernt.
+                  Der Mitarbeiter kann danach wieder Einträge bearbeiten.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Abbrechen</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-amber-600 hover:bg-amber-700"
+                  onClick={() => {
+                    if (reopenTarget) {
+                      reopenMonthMutation.mutate({
+                        userId: reopenTarget.userId,
+                        year: selectedYear,
+                        month: selectedMonth,
+                      });
+                    }
+                  }}
+                  disabled={reopenMonthMutation.isPending}
+                  data-testid="button-confirm-reopen"
+                >
+                  {reopenMonthMutation.isPending ? (
+                    <>
+                      <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                      Wird geöffnet...
+                    </>
+                  ) : (
+                    <>
+                      <Unlock className={`${iconSize.sm} mr-1`} />
+                      Wiedereröffnen
+                    </>
+                  )}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
 
           {/* Vacation Edit Dialog */}
           <Dialog open={showVacationDialog} onOpenChange={setShowVacationDialog}>
