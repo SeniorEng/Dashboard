@@ -27,20 +27,6 @@ export function useTasks(options: { includeCompleted?: boolean; all?: boolean } 
   });
 }
 
-export function useTaskCount() {
-  return useQuery<{ count: number }>({
-    queryKey: ["tasks", "count"],
-    queryFn: async () => {
-      const response = await fetch(`/api/tasks/count`);
-      if (!response.ok) {
-        throw new Error("Aufgabenanzahl konnte nicht geladen werden");
-      }
-      return response.json();
-    },
-    staleTime: 30000,
-  });
-}
-
 export function useCreateTask() {
   const queryClient = useQueryClient();
 
@@ -114,16 +100,3 @@ export function useToggleTaskStatus() {
   });
 }
 
-export function useCompleteTask() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async (id: number) => {
-      const result = await api.patch<Task>(`/tasks/${id}`, { status: "completed" });
-      return unwrapResult(result);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["tasks"] });
-    },
-  });
-}

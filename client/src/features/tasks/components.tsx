@@ -1,10 +1,9 @@
 import { useState, useEffect } from "react";
-import { Link } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter, DrawerDescription } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DatePicker } from "@/components/ui/date-picker";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { CheckSquare, Plus, Calendar, Flag, Loader2, Trash2, Pencil } from "lucide-react";
+import { Calendar, Flag, Loader2, Trash2, Pencil } from "lucide-react";
 import { format, parseISO, isToday, isTomorrow, isPast, isValid } from "date-fns";
 import { de } from "date-fns/locale";
 import { iconSize } from "@/design-system";
@@ -378,122 +377,5 @@ export function TaskCard({
   );
 }
 
-export function TaskListSection() {
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [selectedTask, setSelectedTask] = useState<TaskWithRelations | null>(null);
-  const { data: tasks, isLoading } = useTasks();
-  const createTask = useCreateTask();
-  const toggleTaskStatus = useToggleTaskStatus();
 
-  const [newTask, setNewTask] = useState<TaskFormData>({
-    title: "",
-    description: "",
-    dueDate: "",
-    priority: "medium",
-  });
-
-  const handleCreateTask = async () => {
-    if (!newTask.title.trim()) return;
-    
-    await createTask.mutateAsync({
-      title: newTask.title,
-      description: newTask.description || undefined,
-      dueDate: newTask.dueDate || undefined,
-      priority: newTask.priority,
-    });
-    
-    setNewTask({ title: "", description: "", dueDate: "", priority: "medium" });
-    setIsCreateDialogOpen(false);
-  };
-
-  const handleToggleStatus = async (id: number, currentStatus: string) => {
-    await toggleTaskStatus.mutateAsync({ id, currentStatus });
-  };
-
-  const openTasks = tasks?.filter(t => t.status !== "completed") || [];
-
-  if (isLoading) {
-    return (
-      <Card className="mt-4" data-testid="tasks-section">
-        <CardContent className="py-4">
-          <div className="flex items-center justify-center py-4">
-            <Loader2 className={`${iconSize.md} animate-spin text-muted-foreground`} />
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <>
-      <Card className="mt-4" data-testid="tasks-section">
-        <CardContent className="py-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <CheckSquare className={`${iconSize.sm} text-primary`} />
-              <h3 className="font-semibold text-sm">Meine Aufgaben</h3>
-              {openTasks.length > 0 && (
-                <Badge variant="secondary" className="text-xs" data-testid="task-count">
-                  {openTasks.length}
-                </Badge>
-              )}
-            </div>
-            <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-              <DialogTrigger asChild>
-                <Button variant="ghost" size="sm" className="h-7 text-xs" data-testid="button-add-task">
-                  <Plus className={iconSize.xs} />
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle>Neue Aufgabe</DialogTitle>
-                </DialogHeader>
-                <TaskForm
-                  data={newTask}
-                  onChange={setNewTask}
-                  onSubmit={handleCreateTask}
-                  isSubmitting={createTask.isPending}
-                  submitLabel="Aufgabe erstellen"
-                />
-              </DialogContent>
-            </Dialog>
-          </div>
-
-          {openTasks.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4" data-testid="no-tasks-message">
-              Keine offenen Aufgaben
-            </p>
-          ) : (
-            <div className="space-y-0">
-              {openTasks.slice(0, 5).map((task) => (
-                <TaskCard 
-                  key={task.id} 
-                  task={task} 
-                  onToggleStatus={handleToggleStatus}
-                  onClick={() => setSelectedTask(task)}
-                />
-              ))}
-              {openTasks.length > 5 && (
-                <Link href="/tasks">
-                  <Button variant="ghost" size="sm" className="w-full mt-2 text-xs" data-testid="link-all-tasks">
-                    Alle {openTasks.length} Aufgaben anzeigen
-                  </Button>
-                </Link>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {selectedTask && (
-        <TaskDetailSheet
-          task={selectedTask}
-          open={!!selectedTask}
-          onOpenChange={(open) => !open && setSelectedTask(null)}
-          onToggleStatus={handleToggleStatus}
-        />
-      )}
-    </>
-  );
-}
 

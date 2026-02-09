@@ -1,7 +1,7 @@
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { tasks, users, customers, Task, InsertTask, UpdateTask } from "@shared/schema";
-import { eq, and, desc, asc, ne, sql as sqlBuilder, inArray } from "drizzle-orm";
+import { eq, and, desc, asc, ne, sql as sqlBuilder, inArray, count } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 const sql = neon(process.env.DATABASE_URL!);
@@ -206,7 +206,7 @@ export async function deleteTask(
 
 export async function getOpenTaskCount(userId: number): Promise<number> {
   const result = await db
-    .select()
+    .select({ count: count() })
     .from(tasks)
     .where(
       and(
@@ -215,5 +215,5 @@ export async function getOpenTaskCount(userId: number): Promise<number> {
       )
     );
 
-  return result.length;
+  return result[0]?.count ?? 0;
 }
