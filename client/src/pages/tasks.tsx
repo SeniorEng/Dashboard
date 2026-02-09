@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Layout } from "@/components/layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -102,8 +101,6 @@ export default function TasksPage() {
     return true;
   }) || [];
 
-  const openCount = tasks?.filter(t => t.status !== "completed").length || 0;
-  const completedCount = tasks?.filter(t => t.status === "completed").length || 0;
 
   return (
     <Layout>
@@ -256,25 +253,9 @@ export default function TasksPage() {
 
         <Tabs value={filter} onValueChange={(v) => setFilter(v as TaskFilter)} className="mb-4">
           <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="open" data-testid="tab-open">
-              Offen
-              {openCount > 0 && (
-                <Badge variant="secondary" className="ml-2 text-xs">
-                  {openCount}
-                </Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="completed" data-testid="tab-completed">
-              Erledigt
-              {completedCount > 0 && (
-                <Badge variant="secondary" className="ml-2 text-xs">
-                  {completedCount}
-                </Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="all" data-testid="tab-all">
-              Alle
-            </TabsTrigger>
+            <TabsTrigger value="open" data-testid="tab-open">Offen</TabsTrigger>
+            <TabsTrigger value="completed" data-testid="tab-completed">Erledigt</TabsTrigger>
+            <TabsTrigger value="all" data-testid="tab-all">Alle</TabsTrigger>
           </TabsList>
         </Tabs>
 
