@@ -283,7 +283,9 @@ export const customerContacts = pgTable("customer_contacts", {
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  index("customer_contacts_customer_id_idx").on(table.customerId),
+]);
 
 // ============================================
 // CARE LEVEL HISTORY
@@ -299,7 +301,9 @@ export const customerCareLevelHistory = pgTable("customer_care_level_history", {
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
-});
+}, (table) => [
+  index("customer_care_level_history_customer_id_idx").on(table.customerId),
+]);
 
 // ============================================
 // NEEDS ASSESSMENT
@@ -375,7 +379,9 @@ export const customerBudgets = pgTable("customer_budgets", {
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
-});
+}, (table) => [
+  index("customer_budgets_customer_id_idx").on(table.customerId),
+]);
 
 // ============================================
 // BUDGET LEDGER SYSTEM (§45b Entlastungsbetrag)
