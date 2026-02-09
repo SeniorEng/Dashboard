@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DatePicker } from "@/components/ui/date-picker";
-import { ChevronLeft, Loader2, Calendar, Clock, User, Home, Plus, Users } from "lucide-react";
+import { ChevronLeft, Loader2, Calendar, Clock, User, Home, Plus, Users, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
@@ -61,6 +62,34 @@ export default function NewAppointment() {
 
   // Validation errors
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const budgetEstimateParams = useMemo(() => {
+    if (!ktCustomerId || (!ktHauswirtschaft && !ktAlltagsbegleitung)) return null;
+    const params = new URLSearchParams();
+    if (ktHauswirtschaft) params.set("hauswirtschaftMinutes", String(ktHauswirtschaftDauer));
+    if (ktAlltagsbegleitung) params.set("alltagsbegleitungMinutes", String(ktAlltagsbegleitungDauer));
+    params.set("date", ktDate);
+    return params.toString();
+  }, [ktCustomerId, ktHauswirtschaft, ktHauswirtschaftDauer, ktAlltagsbegleitung, ktAlltagsbegleitungDauer, ktDate]);
+
+  const { data: costEstimate } = useQuery<{
+    totalCents: number;
+    warning: string | null;
+    noPricing?: boolean;
+    availableCents?: number;
+    currentMonthUsedCents?: number;
+    monthlyLimitCents?: number | null;
+    projectedMonthUsedCents?: number;
+  }>({
+    queryKey: ["/api/budget", ktCustomerId, "cost-estimate", budgetEstimateParams],
+    queryFn: async () => {
+      const res = await fetch(`/api/budget/${ktCustomerId}/cost-estimate?${budgetEstimateParams}`);
+      if (!res.ok) return { totalCents: 0, warning: null };
+      return res.json();
+    },
+    enabled: !!ktCustomerId && !!budgetEstimateParams,
+    staleTime: 30_000,
+  });
 
   // Computed summary for Kundentermin
   const ktSummary = useMemo(() => {
@@ -337,6 +366,26 @@ export default function NewAppointment() {
                   services={ktSummary.services}
                   totalFormatted={ktSummary.totalFormatted}
                 />
+              )}
+
+              {costEstimate && !costEstimate.noPricing && costEstimate.totalCents > 0 && (
+                <div className="rounded-lg border bg-blue-50 border-blue-200 p-3 text-sm" data-testid="budget-cost-estimate">
+                  <p className="font-medium text-blue-800">
+                    Geschätzte Kosten: {(costEstimate.totalCents / 100).toFixed(2)} €
+                  </p>
+                  {costEstimate.availableCents !== undefined && (
+                    <p className="text-blue-600 text-xs mt-1">
+                      Verfügbares Budget: {(costEstimate.availableCents / 100).toFixed(2)} €
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {costEstimate?.warning && (
+                <div className="rounded-lg border bg-amber-50 border-amber-200 p-3 text-sm flex items-start gap-2" data-testid="budget-warning">
+                  <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <p className="text-amber-800">{costEstimate.warning}</p>
+                </div>
               )}
 
               {/* Notes */}

@@ -46,7 +46,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Overlap Checking**: Prevents appointment overlaps.
 - **Service Model**: "Erstberatung" (initial consultation) as a core service type.
 - **Customer Management**: Multi-step customer creation, detailed views, German-specific validation. Pflegegrad ist immer 1–5 (kein "0" oder "Ohne Pflegegrad") — wird in UI und Backend (Zod) einheitlich erzwungen.
-- **Budgeting & Pricing**: Supports various budget types and customer-specific service rates, including a §45b Budget Ledger System with automatic booking, carryover rules, and monthly limits. Requires valid pricing for appointment completion.
+- **Budgeting & Pricing**: Supports various budget types and customer-specific service rates, including a §45b Budget Ledger System with automatic booking, carryover rules, and monthly limits (131€/Monat). Lazy auto-allocation creates monthly budget entries when summary is fetched (idempotent via unique index + ON CONFLICT DO NOTHING). Cost estimation endpoint provides proactive warnings during appointment creation when monthly limit or total budget would be exceeded. Requires valid pricing for appointment completion.
 - **Employee Time Tracking**: Comprehensive tracking for client and non-client work, including yearly vacation allowance and multi-day entries. Past entries are locked for non-admin users.
 - **German Labor Law Compliance**: Automatic detection of missing break documentation based on work hours (`§4 ArbZG`).
 - **Auto-Break System**: Calculates and generates missing breaks according to `§4 ArbZG`, considering actual work time, and is idempotent. Globally activatable via system settings.

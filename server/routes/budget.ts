@@ -65,6 +65,69 @@ router.get("/:customerId/preferences", checkCustomerAccess, async (req: Request,
   }
 });
 
+router.get("/:customerId/cost-estimate", checkCustomerAccess, async (req: Request, res: Response) => {
+  try {
+    const customerId = parseInt(req.params.customerId);
+    const hauswirtschaftMinutes = parseInt(req.query.hauswirtschaftMinutes as string) || 0;
+    const alltagsbegleitungMinutes = parseInt(req.query.alltagsbegleitungMinutes as string) || 0;
+    const travelKilometers = parseFloat(req.query.travelKilometers as string) || 0;
+    const customerKilometers = parseFloat(req.query.customerKilometers as string) || 0;
+    const date = (req.query.date as string) || todayISO();
+
+    const costs = await budgetLedgerStorage.calculateAppointmentCost({
+      customerId,
+      hauswirtschaftMinutes,
+      alltagsbegleitungMinutes,
+      travelKilometers,
+      customerKilometers,
+      date,
+    });
+
+    const summary = await budgetLedgerStorage.getBudgetSummary(customerId);
+
+    const monthlyLimitCents = summary.monthlyLimitCents;
+    const currentMonthUsedCents = summary.currentMonthUsedCents;
+    const projectedMonthUsedCents = currentMonthUsedCents + costs.totalCents;
+
+    let warning: string | null = null;
+    if (monthlyLimitCents !== null && projectedMonthUsedCents > monthlyLimitCents) {
+      const limitEuro = (monthlyLimitCents / 100).toFixed(2);
+      const projectedEuro = (projectedMonthUsedCents / 100).toFixed(2);
+      warning = `Das vereinbarte Monatslimit von ${limitEuro} € würde mit diesem Termin überschritten (${projectedEuro} €).`;
+    }
+
+    if (costs.totalCents > summary.availableCents) {
+      const availableEuro = (summary.availableCents / 100).toFixed(2);
+      const costEuro = (costs.totalCents / 100).toFixed(2);
+      const budgetWarning = `Das verfügbare Gesamtbudget (${availableEuro} €) reicht nicht für diesen Termin (${costEuro} €).`;
+      warning = warning ? `${warning} ${budgetWarning}` : budgetWarning;
+    }
+
+    res.json({
+      ...costs,
+      availableCents: summary.availableCents,
+      currentMonthUsedCents,
+      monthlyLimitCents,
+      projectedMonthUsedCents,
+      warning,
+    });
+  } catch (error: any) {
+    if (error?.message?.includes("Preisvereinbarung")) {
+      res.json({
+        hauswirtschaftCents: 0,
+        alltagsbegleitungCents: 0,
+        travelCents: 0,
+        customerKilometersCents: 0,
+        totalCents: 0,
+        warning: "Keine Preisvereinbarung hinterlegt – Kosten können nicht berechnet werden.",
+        noPricing: true,
+      });
+      return;
+    }
+    handleRouteError(res, error, "Kostenschätzung konnte nicht berechnet werden");
+  }
+});
+
 router.use(requireAdmin);
 
 router.post("/:customerId/allocations", async (req: Request, res: Response) => {

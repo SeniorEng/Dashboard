@@ -70,7 +70,7 @@ export const PERIOD_TYPES = [
 ];
 
 export const DEFAULT_BUDGETS = {
-  entlastungsbetrag45b: 125,
+  entlastungsbetrag45b: 131,
   verhinderungspflege39: 1612,
   pflegesachleistungen36: 0,
 };

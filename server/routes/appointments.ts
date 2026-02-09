@@ -489,6 +489,16 @@ router.post("/:id/document", async (req, res) => {
           customerKilometers,
           userId: req.user?.id,
         });
+
+        try {
+          const summary = await budgetLedgerStorage.getBudgetSummary(appointment.customerId);
+          if (summary.monthlyLimitCents !== null && summary.currentMonthUsedCents > summary.monthlyLimitCents) {
+            const limitEuro = (summary.monthlyLimitCents / 100).toFixed(2);
+            const usedEuro = (summary.currentMonthUsedCents / 100).toFixed(2);
+            budgetWarning = `Hinweis: Das vereinbarte Monatslimit von ${limitEuro} € wurde überschritten (aktuell ${usedEuro} €).`;
+          }
+        } catch {
+        }
       } catch (budgetError: any) {
         const errorMessage = budgetError?.message || "Budget-Abbuchung fehlgeschlagen";
         if (errorMessage.includes("Preisvereinbarung")) {

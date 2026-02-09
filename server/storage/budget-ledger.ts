@@ -2,6 +2,7 @@ import {
   budgetAllocations, 
   budgetTransactions, 
   customerBudgetPreferences,
+  customerBudgets,
   customerPricingHistory,
   type BudgetAllocation,
   type InsertBudgetAllocation,
@@ -18,6 +19,8 @@ import { todayISO } from "@shared/utils/datetime";
 
 const sqlClient = neon(process.env.DATABASE_URL!);
 const db = drizzle(sqlClient);
+
+const DEFAULT_MONTHLY_BUDGET_CENTS = 13100; // 131€ gemäß §45b SGB XI
 
 export interface BudgetSummary {
   customerId: number;
@@ -40,7 +43,9 @@ export interface BudgetLedgerStorage {
   getTransactionByAppointmentId(appointmentId: number): Promise<BudgetTransaction | undefined>;
   reverseBudgetTransaction(transactionId: number, userId?: number): Promise<BudgetTransaction | undefined>;
   
+  ensureMonthlyAllocations(customerId: number): Promise<BudgetAllocation[]>;
   getBudgetSummary(customerId: number): Promise<BudgetSummary>;
+  getMonthlyBudgetAmountCents(customerId: number): Promise<number>;
   
   getBudgetPreferences(customerId: number): Promise<CustomerBudgetPreferences | undefined>;
   upsertBudgetPreferences(preferences: InsertBudgetPreferences, userId?: number): Promise<CustomerBudgetPreferences>;
@@ -160,7 +165,84 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return reversal[0];
   }
 
+  async getMonthlyBudgetAmountCents(customerId: number): Promise<number> {
+    const customerBudget = await db.select()
+      .from(customerBudgets)
+      .where(and(
+        eq(customerBudgets.customerId, customerId),
+        isNull(customerBudgets.validTo)
+      ))
+      .limit(1);
+
+    if (customerBudget[0]?.entlastungsbetrag45b) {
+      return customerBudget[0].entlastungsbetrag45b;
+    }
+
+    return DEFAULT_MONTHLY_BUDGET_CENTS;
+  }
+
+  async ensureMonthlyAllocations(customerId: number): Promise<BudgetAllocation[]> {
+    const preferences = await this.getBudgetPreferences(customerId);
+    if (!preferences?.budgetStartDate) {
+      return [];
+    }
+
+    const startDate = new Date(preferences.budgetStartDate + "T00:00:00");
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+
+    const existingAllocations = await db.select()
+      .from(budgetAllocations)
+      .where(and(
+        eq(budgetAllocations.customerId, customerId),
+        eq(budgetAllocations.source, "monthly_auto")
+      ));
+
+    const existingSet = new Set(
+      existingAllocations.map(a => `${a.year}-${a.month}`)
+    );
+
+    const monthlyAmount = await this.getMonthlyBudgetAmountCents(customerId);
+    const created: BudgetAllocation[] = [];
+
+    let year = startDate.getFullYear();
+    let month = startDate.getMonth() + 1;
+
+    while (year < currentYear || (year === currentYear && month <= currentMonth)) {
+      const key = `${year}-${month}`;
+
+      if (!existingSet.has(key)) {
+        const validFrom = `${year}-${String(month).padStart(2, '0')}-01`;
+        const result = await db.insert(budgetAllocations).values({
+          customerId,
+          budgetType: "entlastungsbetrag_45b",
+          year,
+          month,
+          amountCents: monthlyAmount,
+          source: "monthly_auto",
+          validFrom,
+          expiresAt: null,
+          notes: `Automatische Zuweisung ${String(month).padStart(2, '0')}/${year}`,
+        }).onConflictDoNothing().returning();
+        if (result[0]) {
+          created.push(result[0]);
+        }
+      }
+
+      month++;
+      if (month > 12) {
+        month = 1;
+        year++;
+      }
+    }
+
+    return created;
+  }
+
   async getBudgetSummary(customerId: number): Promise<BudgetSummary> {
+    await this.ensureMonthlyAllocations(customerId);
+
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth() + 1;

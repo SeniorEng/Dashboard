@@ -27,7 +27,7 @@ export function BudgetsStep({ formData, onChange }: BudgetsStepProps) {
               onChange={(e) => onChange("entlastungsbetrag45b", e.target.value)}
               data-testid="input-budget-45b"
             />
-            <p className="text-xs text-gray-500">Standard: 125 €/Monat</p>
+            <p className="text-xs text-gray-500">Standard: 131 €/Monat</p>
           </div>
         </div>
 

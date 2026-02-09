@@ -1,4 +1,4 @@
-import { pgTable, text, integer, timestamp as pgTimestamp, serial, time, date, boolean, unique, index } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, timestamp as pgTimestamp, serial, time, date, boolean, unique, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 
 import { z } from "zod";
@@ -415,6 +415,7 @@ export const budgetAllocations = pgTable("budget_allocations", {
   index("budget_allocations_customer_idx").on(table.customerId),
   index("budget_allocations_customer_year_idx").on(table.customerId, table.year),
   index("budget_allocations_expires_idx").on(table.expiresAt),
+  uniqueIndex("budget_allocations_auto_unique_idx").on(table.customerId, table.year, table.month, table.source),
 ]);
 
 // Budget transaction types
