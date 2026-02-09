@@ -84,21 +84,25 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, async (req: Reques
       date,
     });
 
-    const summary = await budgetLedgerStorage.getBudgetSummary(customerId);
+    const summaries = await budgetLedgerStorage.getAllBudgetSummaries(customerId);
+    const summary45b = summaries.entlastungsbetrag45b;
+    const summary45a = summaries.umwandlung45a;
 
-    const monthlyLimitCents = summary.monthlyLimitCents;
-    const currentMonthUsedCents = summary.currentMonthUsedCents;
-    const projectedMonthUsedCents = currentMonthUsedCents + costs.totalCents;
+    const totalAvailable = summary45a.currentMonthAvailableCents + summary45b.availableCents;
 
     let warning: string | null = null;
-    if (monthlyLimitCents !== null && projectedMonthUsedCents > monthlyLimitCents) {
-      const limitEuro = (monthlyLimitCents / 100).toFixed(2);
-      const projectedEuro = (projectedMonthUsedCents / 100).toFixed(2);
-      warning = `Das vereinbarte Monatslimit von ${limitEuro} € würde mit diesem Termin überschritten (${projectedEuro} €).`;
+
+    if (summary45b.monthlyLimitCents !== null) {
+      const monthlyRemaining45b = Math.max(0, summary45b.monthlyLimitCents - summary45b.currentMonthUsedCents);
+      const effectiveAvailable = summary45a.currentMonthAvailableCents + monthlyRemaining45b;
+      if (costs.totalCents > effectiveAvailable) {
+        const limitEuro = (summary45b.monthlyLimitCents / 100).toFixed(2);
+        warning = `Unter Berücksichtigung des §45b-Monatslimits (${limitEuro} €) reicht das Budget nicht vollständig.`;
+      }
     }
 
-    if (costs.totalCents > summary.availableCents) {
-      const availableEuro = (summary.availableCents / 100).toFixed(2);
+    if (costs.totalCents > totalAvailable) {
+      const availableEuro = (totalAvailable / 100).toFixed(2);
       const costEuro = (costs.totalCents / 100).toFixed(2);
       const budgetWarning = `Das verfügbare Gesamtbudget (${availableEuro} €) reicht nicht für diesen Termin (${costEuro} €).`;
       warning = warning ? `${warning} ${budgetWarning}` : budgetWarning;
@@ -106,10 +110,9 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, async (req: Reques
 
     res.json({
       ...costs,
-      availableCents: summary.availableCents,
-      currentMonthUsedCents,
-      monthlyLimitCents,
-      projectedMonthUsedCents,
+      availableCents: totalAvailable,
+      currentMonthUsedCents: summary45b.currentMonthUsedCents,
+      monthlyLimitCents: summary45b.monthlyLimitCents,
       warning,
     });
   } catch (error: any) {

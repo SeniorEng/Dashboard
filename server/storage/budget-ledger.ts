@@ -107,6 +107,48 @@ export interface BudgetLedgerStorage {
   getBudgetSummary45a(customerId: number): Promise<Budget45aSummary>;
   getBudgetSummary39_42a(customerId: number): Promise<Budget39_42aSummary>;
   getAllBudgetSummaries(customerId: number): Promise<AllBudgetSummaries>;
+  
+  processExpiredCarryover(customerId: number): Promise<BudgetTransaction[]>;
+  
+  consumeFifo(customerId: number, budgetType: string, amountCents: number, transactionDate: string, params?: {
+    appointmentId?: number;
+    notes?: string;
+    userId?: number;
+    hauswirtschaftMinutes?: number;
+    hauswirtschaftCents?: number;
+    alltagsbegleitungMinutes?: number;
+    alltagsbegleitungCents?: number;
+    travelKilometers?: number;
+    travelCents?: number;
+    customerKilometers?: number;
+    customerKilometersCents?: number;
+  }): Promise<{ consumedCents: number; transactions: BudgetTransaction[]; remainingCents: number }>;
+
+  createCascadeConsumption(params: {
+    customerId: number;
+    appointmentId: number;
+    transactionDate: string;
+    totalAmountCents: number;
+    hauswirtschaftMinutes: number;
+    hauswirtschaftCents: number;
+    alltagsbegleitungMinutes: number;
+    alltagsbegleitungCents: number;
+    travelKilometers: number;
+    travelCents: number;
+    customerKilometers: number;
+    customerKilometersCents: number;
+    userId?: number;
+  }): Promise<CascadeResult>;
+}
+
+export interface CascadeResult {
+  transactions: BudgetTransaction[];
+  totalConsumedCents: number;
+  outstandingCents: number;
+  breakdown: Array<{
+    budgetType: string;
+    consumedCents: number;
+  }>;
 }
 
 export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
@@ -272,17 +314,18 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
   async getBudgetSummary(customerId: number): Promise<BudgetSummary> {
     await this.ensureMonthlyAllocations(customerId);
+    await this.processExpiredCarryover(customerId);
 
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth() + 1;
     const today = todayISO();
-    const carryoverDeadline = `${currentYear}-06-30`;
 
     const allocations = await db.select()
       .from(budgetAllocations)
       .where(and(
         eq(budgetAllocations.customerId, customerId),
+        eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
         lte(budgetAllocations.validFrom, today),
         or(
           isNull(budgetAllocations.expiresAt),
@@ -292,17 +335,27 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
     const transactions = await db.select()
       .from(budgetTransactions)
-      .where(eq(budgetTransactions.customerId, customerId));
+      .where(and(
+        eq(budgetTransactions.customerId, customerId),
+        eq(budgetTransactions.budgetType, "entlastungsbetrag_45b")
+      ));
 
     const totalAllocatedCents = allocations.reduce((sum, a) => sum + a.amountCents, 0);
-    const totalUsedCents = transactions
-      .filter(t => t.transactionType !== "reversal")
+    
+    const consumptionCents = transactions
+      .filter(t => t.transactionType === "consumption")
+      .reduce((sum, t) => sum + Math.abs(t.amountCents), 0);
+    const writeOffCents = transactions
+      .filter(t => t.transactionType === "write_off")
+      .reduce((sum, t) => sum + Math.abs(t.amountCents), 0);
+    const manualAdjustmentCents = transactions
+      .filter(t => t.transactionType === "manual_adjustment")
       .reduce((sum, t) => sum + Math.abs(t.amountCents), 0);
     const reversalsCents = transactions
       .filter(t => t.transactionType === "reversal")
       .reduce((sum, t) => sum + t.amountCents, 0);
     
-    const netUsedCents = totalUsedCents + reversalsCents;
+    const netUsedCents = consumptionCents + writeOffCents + manualAdjustmentCents + reversalsCents;
     
     const currentYearAllocations = allocations.filter(a => a.year === currentYear && a.source !== "carryover");
     const currentYearAllocatedCents = currentYearAllocations.reduce((sum, a) => sum + a.amountCents, 0);
@@ -437,11 +490,6 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     customerKilometers: number;
     userId?: number;
   }): Promise<BudgetTransaction> {
-    const existingTransaction = await this.getTransactionByAppointmentId(params.appointmentId);
-    if (existingTransaction) {
-      throw new Error(`Für diesen Termin wurde bereits eine Budget-Abbuchung erstellt (Transaktion #${existingTransaction.id})`);
-    }
-
     const costs = await this.calculateAppointmentCost({
       customerId: params.customerId,
       hauswirtschaftMinutes: params.hauswirtschaftMinutes,
@@ -451,12 +499,11 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       date: params.transactionDate,
     });
 
-    return await this.createBudgetTransaction({
+    const cascadeResult = await this.createCascadeConsumption({
       customerId: params.customerId,
-      budgetType: "entlastungsbetrag_45b",
+      appointmentId: params.appointmentId,
       transactionDate: params.transactionDate,
-      transactionType: "consumption",
-      amountCents: -costs.totalCents,
+      totalAmountCents: costs.totalCents,
       hauswirtschaftMinutes: params.hauswirtschaftMinutes,
       hauswirtschaftCents: costs.hauswirtschaftCents,
       alltagsbegleitungMinutes: params.alltagsbegleitungMinutes,
@@ -465,8 +512,14 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       travelCents: costs.travelCents,
       customerKilometers: Math.round(params.customerKilometers * 10),
       customerKilometersCents: costs.customerKilometersCents,
-      appointmentId: params.appointmentId,
-    }, params.userId);
+      userId: params.userId,
+    });
+
+    if (cascadeResult.transactions.length === 0) {
+      throw new Error("Kein Budget verfügbar für diese Buchung");
+    }
+
+    return cascadeResult.transactions[0];
   }
 
   async getCustomerBudgetAmounts(customerId: number): Promise<{ pflegesachleistungen36: number; verhinderungspflege39: number }> {
@@ -707,12 +760,275 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
   }
 
   async getAllBudgetSummaries(customerId: number): Promise<AllBudgetSummaries> {
+    await this.processExpiredCarryover(customerId);
+    
     const [entlastungsbetrag45b, umwandlung45a, ersatzpflege39_42a] = await Promise.all([
       this.getBudgetSummary(customerId),
       this.getBudgetSummary45a(customerId),
       this.getBudgetSummary39_42a(customerId),
     ]);
     return { entlastungsbetrag45b, umwandlung45a, ersatzpflege39_42a };
+  }
+
+  async processExpiredCarryover(customerId: number): Promise<BudgetTransaction[]> {
+    const today = todayISO();
+
+    const expiredAllocations = await db.select()
+      .from(budgetAllocations)
+      .where(and(
+        eq(budgetAllocations.customerId, customerId),
+        eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
+        eq(budgetAllocations.source, "carryover"),
+        sql`${budgetAllocations.expiresAt} IS NOT NULL`,
+        sql`${budgetAllocations.expiresAt} < ${today}`
+      ))
+      .orderBy(asc(budgetAllocations.validFrom));
+
+    if (expiredAllocations.length === 0) return [];
+
+    const existingWriteOffs = await db.select()
+      .from(budgetTransactions)
+      .where(and(
+        eq(budgetTransactions.customerId, customerId),
+        eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
+        eq(budgetTransactions.transactionType, "write_off")
+      ));
+
+    const writtenOffAllocationIds = new Set(
+      existingWriteOffs.filter(t => t.allocationId !== null).map(t => t.allocationId)
+    );
+
+    const created: BudgetTransaction[] = [];
+
+    for (const allocation of expiredAllocations) {
+      if (writtenOffAllocationIds.has(allocation.id)) continue;
+
+      const consumedFromAllocation = await db.select({
+        total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+      })
+        .from(budgetTransactions)
+        .where(and(
+          eq(budgetTransactions.allocationId, allocation.id),
+          eq(budgetTransactions.transactionType, "consumption")
+        ));
+
+      const consumed = Number(consumedFromAllocation[0]?.total ?? 0);
+      const remaining = allocation.amountCents - consumed;
+
+      if (remaining <= 0) continue;
+
+      const writeOff = await db.insert(budgetTransactions).values({
+        customerId,
+        budgetType: "entlastungsbetrag_45b",
+        transactionDate: allocation.expiresAt!,
+        transactionType: "write_off",
+        amountCents: -remaining,
+        allocationId: allocation.id,
+        notes: `Verfallenes Guthaben aus ${allocation.year}: ${(remaining / 100).toFixed(2)} € (Frist ${allocation.expiresAt})`,
+      }).returning();
+
+      if (writeOff[0]) created.push(writeOff[0]);
+    }
+
+    return created;
+  }
+
+  async consumeFifo(
+    customerId: number,
+    budgetType: string,
+    amountCents: number,
+    transactionDate: string,
+    params?: {
+      appointmentId?: number;
+      notes?: string;
+      userId?: number;
+      hauswirtschaftMinutes?: number;
+      hauswirtschaftCents?: number;
+      alltagsbegleitungMinutes?: number;
+      alltagsbegleitungCents?: number;
+      travelKilometers?: number;
+      travelCents?: number;
+      customerKilometers?: number;
+      customerKilometersCents?: number;
+    }
+  ): Promise<{ consumedCents: number; transactions: BudgetTransaction[]; remainingCents: number }> {
+    const today = transactionDate;
+
+    const allocations = await db.select()
+      .from(budgetAllocations)
+      .where(and(
+        eq(budgetAllocations.customerId, customerId),
+        eq(budgetAllocations.budgetType, budgetType),
+        lte(budgetAllocations.validFrom, today),
+        or(
+          isNull(budgetAllocations.expiresAt),
+          gte(budgetAllocations.expiresAt, today)
+        )
+      ))
+      .orderBy(asc(budgetAllocations.validFrom), asc(budgetAllocations.id));
+
+    if (allocations.length === 0) {
+      return { consumedCents: 0, transactions: [], remainingCents: amountCents };
+    }
+
+    const allocationConsumption = await Promise.all(
+      allocations.map(async (a) => {
+        const result = await db.select({
+          total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+        })
+          .from(budgetTransactions)
+          .where(and(
+            eq(budgetTransactions.allocationId, a.id),
+            sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`
+          ));
+        const consumed = Number(result[0]?.total ?? 0);
+        return { allocation: a, consumed, available: Math.max(0, a.amountCents - consumed) };
+      })
+    );
+
+    let remaining = amountCents;
+    let totalConsumed = 0;
+    const transactions: BudgetTransaction[] = [];
+    let isFirstTransaction = true;
+
+    for (const { allocation, available } of allocationConsumption) {
+      if (remaining <= 0 || available <= 0) continue;
+
+      const consumeAmount = Math.min(remaining, available);
+
+      const txData: any = {
+        customerId,
+        budgetType,
+        transactionDate,
+        transactionType: "consumption" as const,
+        amountCents: -consumeAmount,
+        allocationId: allocation.id,
+        appointmentId: params?.appointmentId ?? null,
+        notes: params?.notes ?? null,
+        createdByUserId: params?.userId,
+      };
+
+      if (isFirstTransaction && params) {
+        txData.hauswirtschaftMinutes = params.hauswirtschaftMinutes ?? null;
+        txData.hauswirtschaftCents = params.hauswirtschaftCents ?? null;
+        txData.alltagsbegleitungMinutes = params.alltagsbegleitungMinutes ?? null;
+        txData.alltagsbegleitungCents = params.alltagsbegleitungCents ?? null;
+        txData.travelKilometers = params.travelKilometers ?? null;
+        txData.travelCents = params.travelCents ?? null;
+        txData.customerKilometers = params.customerKilometers ?? null;
+        txData.customerKilometersCents = params.customerKilometersCents ?? null;
+      }
+
+      const result = await db.insert(budgetTransactions).values(txData).returning();
+      if (result[0]) transactions.push(result[0]);
+
+      remaining -= consumeAmount;
+      totalConsumed += consumeAmount;
+      isFirstTransaction = false;
+    }
+
+    return { consumedCents: totalConsumed, transactions, remainingCents: remaining };
+  }
+
+  async createCascadeConsumption(params: {
+    customerId: number;
+    appointmentId: number;
+    transactionDate: string;
+    totalAmountCents: number;
+    hauswirtschaftMinutes: number;
+    hauswirtschaftCents: number;
+    alltagsbegleitungMinutes: number;
+    alltagsbegleitungCents: number;
+    travelKilometers: number;
+    travelCents: number;
+    customerKilometers: number;
+    customerKilometersCents: number;
+    userId?: number;
+  }): Promise<CascadeResult> {
+    const existingTransaction = await this.getTransactionByAppointmentId(params.appointmentId);
+    if (existingTransaction) {
+      throw new Error(`Für diesen Termin wurde bereits eine Budget-Abbuchung erstellt (Transaktion #${existingTransaction.id})`);
+    }
+
+    await this.ensureMonthlyAllocations(params.customerId);
+    await this.ensureAllocations45a(params.customerId);
+    await this.processExpiredCarryover(params.customerId);
+
+    const preferences = await this.getBudgetPreferences(params.customerId);
+    const monthlyLimit45b = preferences?.monthlyLimitCents ?? null;
+
+    const priorityOrder: string[] = ["umwandlung_45a", "entlastungsbetrag_45b"];
+
+    let remaining = params.totalAmountCents;
+    const allTransactions: BudgetTransaction[] = [];
+    const breakdown: Array<{ budgetType: string; consumedCents: number }> = [];
+
+    for (const budgetType of priorityOrder) {
+      if (remaining <= 0) break;
+
+      let maxConsumable = remaining;
+
+      if (budgetType === "entlastungsbetrag_45b" && monthlyLimit45b !== null) {
+        const txDate = new Date(params.transactionDate + "T00:00:00");
+        const txYear = txDate.getFullYear();
+        const txMonth = txDate.getMonth() + 1;
+        const currentMonthStart = `${txYear}-${String(txMonth).padStart(2, '0')}-01`;
+
+        const monthTransactions = await db.select({
+          total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+        })
+          .from(budgetTransactions)
+          .where(and(
+            eq(budgetTransactions.customerId, params.customerId),
+            eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
+            eq(budgetTransactions.transactionType, "consumption"),
+            gte(budgetTransactions.transactionDate, currentMonthStart)
+          ));
+
+        const alreadyUsedThisMonth = Number(monthTransactions[0]?.total ?? 0);
+        const monthlyRemaining = Math.max(0, monthlyLimit45b - alreadyUsedThisMonth);
+        maxConsumable = Math.min(remaining, monthlyRemaining);
+      }
+
+      if (maxConsumable <= 0) {
+        breakdown.push({ budgetType, consumedCents: 0 });
+        continue;
+      }
+
+      const isFirstPot = allTransactions.length === 0;
+      const fifoResult = await this.consumeFifo(
+        params.customerId,
+        budgetType,
+        maxConsumable,
+        params.transactionDate,
+        isFirstPot ? {
+          appointmentId: params.appointmentId,
+          userId: params.userId,
+          hauswirtschaftMinutes: params.hauswirtschaftMinutes,
+          hauswirtschaftCents: params.hauswirtschaftCents,
+          alltagsbegleitungMinutes: params.alltagsbegleitungMinutes,
+          alltagsbegleitungCents: params.alltagsbegleitungCents,
+          travelKilometers: params.travelKilometers,
+          travelCents: params.travelCents,
+          customerKilometers: params.customerKilometers,
+          customerKilometersCents: params.customerKilometersCents,
+        } : {
+          appointmentId: params.appointmentId,
+          userId: params.userId,
+        }
+      );
+
+      allTransactions.push(...fifoResult.transactions);
+      remaining -= fifoResult.consumedCents;
+      breakdown.push({ budgetType, consumedCents: fifoResult.consumedCents });
+    }
+
+    return {
+      transactions: allTransactions,
+      totalConsumedCents: params.totalAmountCents - remaining,
+      outstandingCents: remaining,
+      breakdown,
+    };
   }
 }
 

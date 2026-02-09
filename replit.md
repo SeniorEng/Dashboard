@@ -50,7 +50,10 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
   - **§45b Entlastungsbetrag**: 131€/Monat max (admin-setzbar ≤131€), ansparbar mit Übertrag bis 30.06. des Folgejahres. Vollständiges Ledger mit auto-allocation, consumption tracking, initial balance, carryover.
   - **§45a Umwandlungsanspruch**: Monatlich verfügbar, KEIN Anspareffekt (verfällt am Monatsende). Max abhängig vom Pflegegrad (PG2: 318€, PG3: 599€, PG4: 744€, PG5: 920€). PG1 nicht berechtigt. System validiert Obergrenze.
   - **§39/§42a Gemeinsamer Jahresbetrag**: 3.539€/Jahr, sukzessiv verbrauchbar. Jährliche auto-allocation mit Startwert durch Admin.
-  - Shared tables `budget_allocations` + `budget_transactions` mit `budgetType` Diskriminator. Lazy auto-allocation (idempotent via unique index + ON CONFLICT DO NOTHING). Zentrale Validierungskonstanten in `@shared/domain/budgets.ts`.
+  - Shared tables `budget_allocations` + `budget_transactions` mit `budgetType` Diskriminator und `allocationId` FK für FIFO-Tracking. Lazy auto-allocation (idempotent via unique index + ON CONFLICT DO NOTHING). Zentrale Validierungskonstanten in `@shared/domain/budgets.ts`.
+  - **Kaskaden-Buchung**: Rechnungen werden automatisch auf Töpfe verteilt: Prio 1 = §45a, Prio 2 = §45b. Admin-`monthlyLimitCents` greift als harte Obergrenze pro Monat für §45b. Restbetrag wird als `outstandingCents` ausgewiesen.
+  - **FIFO-Verbrauch**: §45b verbraucht älteste Allocations zuerst (sortiert nach `validFrom ASC`). Jede Consumption-Transaktion referenziert die Quell-Allocation via `allocationId`.
+  - **Carryover-Verfall**: Abgelaufene Übertrags-Allocations (`source=carryover`, `expiresAt < today`) werden lazy mit `write_off`-Transaktionen abgeschrieben (idempotent via `allocationId`-Check).
   - Cost estimation endpoint provides proactive warnings during appointment creation. Requires valid pricing for appointment completion.
   - Employee-facing customer detail shows all 3 budget pots with progress bars via `/api/budget/:customerId/overview`.
 - **Employee Time Tracking**: Comprehensive tracking for client and non-client work, including yearly vacation allowance and multi-day entries. Past entries are locked for non-admin users.
