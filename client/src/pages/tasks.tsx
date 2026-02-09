@@ -210,7 +210,7 @@ export default function TasksPage() {
             )}
 
             {missingBreaksCount > 0 && (
-              <Link href="/my-times">
+              <Link href="/my-times#missing-breaks">
                 <div
                   className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 hover:bg-blue-100 transition-colors cursor-pointer"
                   data-testid="banner-missing-breaks"

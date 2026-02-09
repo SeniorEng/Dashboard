@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
@@ -30,6 +30,7 @@ export default function MyTimes() {
   const { user } = useAuth();
   const todayStr = useMemo(() => todayISO(), []);
   const dayDetailRef = useRef<HTMLDivElement>(null);
+  const missingBreaksRef = useRef<HTMLDivElement>(null);
 
   const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth() + 1);
@@ -186,6 +187,15 @@ export default function MyTimes() {
     });
   }, [deleteMutation, toast]);
 
+  useEffect(() => {
+    if (window.location.hash === "#missing-breaks" && daysWithMissingBreaks.length > 0) {
+      requestAnimationFrame(() => {
+        missingBreaksRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      history.replaceState(null, "", window.location.pathname);
+    }
+  }, [daysWithMissingBreaks]);
+
   const handleSelectMissingBreakDate = useCallback((date: string, year: number, month: number) => {
     setSelectedYear(year);
     setSelectedMonth(month);
@@ -202,10 +212,12 @@ export default function MyTimes() {
     <Layout>
       <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
         <div className="container mx-auto px-4 py-6 max-w-6xl">
-          <MissingBreaksBanner
-            daysWithMissingBreaks={daysWithMissingBreaks}
-            onSelectDate={handleSelectMissingBreakDate}
-          />
+          <div ref={missingBreaksRef}>
+            <MissingBreaksBanner
+              daysWithMissingBreaks={daysWithMissingBreaks}
+              onSelectDate={handleSelectMissingBreakDate}
+            />
+          </div>
 
           <div className="flex items-center justify-between mb-6">
             <div>
