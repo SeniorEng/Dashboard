@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
@@ -29,6 +29,7 @@ export default function MyTimes() {
   const { toast } = useToast();
   const { user } = useAuth();
   const todayStr = useMemo(() => todayISO(), []);
+  const dayDetailRef = useRef<HTMLDivElement>(null);
 
   const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth() + 1);
@@ -189,6 +190,9 @@ export default function MyTimes() {
     setSelectedYear(year);
     setSelectedMonth(month);
     setSelectedDate(date);
+    requestAnimationFrame(() => {
+      dayDetailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   }, []);
 
   const selectedDayEntries = selectedDate ? entriesByDate[selectedDate] || [] : [];
@@ -271,16 +275,18 @@ export default function MyTimes() {
               onNextMonth={handleNextMonth}
             />
 
-            <DayDetailPanel
-              selectedDate={selectedDate}
-              entries={selectedDayEntries as DayTimeEntry[]}
-              appointments={selectedDayAppointments}
-              onEditEntry={handleEditEntry}
-              onDeleteEntry={handleDeleteEntry}
-              onAddEntry={handleOpenCreateDialog}
-              isAdmin={!!user?.isAdmin}
-              isDeleting={deleteMutation.isPending}
-            />
+            <div ref={dayDetailRef}>
+              <DayDetailPanel
+                selectedDate={selectedDate}
+                entries={selectedDayEntries as DayTimeEntry[]}
+                appointments={selectedDayAppointments}
+                onEditEntry={handleEditEntry}
+                onDeleteEntry={handleDeleteEntry}
+                onAddEntry={handleOpenCreateDialog}
+                isAdmin={!!user?.isAdmin}
+                isDeleting={deleteMutation.isPending}
+              />
+            </div>
           </div>
         </div>
       </div>
