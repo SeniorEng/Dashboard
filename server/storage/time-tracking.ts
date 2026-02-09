@@ -1,6 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
-import { eq, and, gte, lte, sql as sqlBuilder, asc } from "drizzle-orm";
+import { eq, and, gte, lte, inArray, sql as sqlBuilder, asc } from "drizzle-orm";
 import {
   employeeTimeEntries,
   employeeVacationAllowance,
@@ -268,10 +268,28 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
   }
   
   async getVacationSummary(userId: number, year: number): Promise<VacationSummary> {
-    // Get allowance for this year
-    let allowance = await this.getVacationAllowance(userId, year);
-    
-    // Create default allowance if not exists
+    const startDate = `${year}-01-01`;
+    const endDate = `${year}-12-31`;
+    const today = todayISO();
+
+    const [allowanceResult, absenceEntries] = await Promise.all([
+      this.getVacationAllowance(userId, year),
+      db.select({
+        entryType: employeeTimeEntries.entryType,
+        entryDate: employeeTimeEntries.entryDate,
+      })
+        .from(employeeTimeEntries)
+        .where(
+          and(
+            eq(employeeTimeEntries.userId, userId),
+            inArray(employeeTimeEntries.entryType, ['urlaub', 'krankheit']),
+            gte(employeeTimeEntries.entryDate, startDate),
+            lte(employeeTimeEntries.entryDate, endDate)
+          )
+        ),
+    ]);
+
+    let allowance = allowanceResult;
     if (!allowance) {
       allowance = await this.setVacationAllowance({
         userId,
@@ -280,55 +298,26 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
         carryOverDays: 0,
       });
     }
-    
-    // Count vacation days taken this year
-    const startDate = `${year}-01-01`;
-    const endDate = `${year}-12-31`;
-    const today = todayISO();
-    
-    // Get vacation entries for this year
-    const vacationEntries = await db
-      .select()
-      .from(employeeTimeEntries)
-      .where(
-        and(
-          eq(employeeTimeEntries.userId, userId),
-          eq(employeeTimeEntries.entryType, 'urlaub'),
-          gte(employeeTimeEntries.entryDate, startDate),
-          lte(employeeTimeEntries.entryDate, endDate)
-        )
-      );
-    
-    // Split into used (past) and planned (future)
+
     let usedDays = 0;
     let plannedDays = 0;
-    
-    for (const entry of vacationEntries) {
-      if (entry.entryDate <= today) {
-        usedDays++;
+    let sickDays = 0;
+
+    for (const entry of absenceEntries) {
+      if (entry.entryType === 'urlaub') {
+        if (entry.entryDate <= today) {
+          usedDays++;
+        } else {
+          plannedDays++;
+        }
       } else {
-        plannedDays++;
+        sickDays++;
       }
     }
-    
-    // Count sick days
-    const sickEntries = await db
-      .select()
-      .from(employeeTimeEntries)
-      .where(
-        and(
-          eq(employeeTimeEntries.userId, userId),
-          eq(employeeTimeEntries.entryType, 'krankheit'),
-          gte(employeeTimeEntries.entryDate, startDate),
-          lte(employeeTimeEntries.entryDate, endDate)
-        )
-      );
-    
-    const sickDays = sickEntries.length;
-    
+
     const totalAvailable = allowance.totalDays + allowance.carryOverDays;
     const remainingDays = totalAvailable - usedDays - plannedDays;
-    
+
     return {
       year,
       totalDays: allowance.totalDays,
@@ -559,9 +548,37 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     yesterdayDate.setDate(yesterdayDate.getDate() - 1);
     const yesterdayStr = formatDate(yesterdayDate);
 
-    const [employeeAppointments, timeEntries] = await Promise.all([
-      this.getEmployeeAppointments(userId, startDateStr, yesterdayStr),
-      db.select()
+    const [apptDurations, timeEntries] = await Promise.all([
+      db.select({
+        date: appointments.date,
+        status: appointments.status,
+        hauswirtschaftDauer: appointments.hauswirtschaftDauer,
+        alltagsbegleitungDauer: appointments.alltagsbegleitungDauer,
+        erstberatungDauer: appointments.erstberatungDauer,
+        hauswirtschaftActualDauer: appointments.hauswirtschaftActualDauer,
+        alltagsbegleitungActualDauer: appointments.alltagsbegleitungActualDauer,
+        erstberatungActualDauer: appointments.erstberatungActualDauer,
+      })
+        .from(appointments)
+        .innerJoin(customers, eq(appointments.customerId, customers.id))
+        .where(
+          and(
+            sqlBuilder`(
+              ${appointments.assignedEmployeeId} = ${userId} 
+              OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId}))
+            )`,
+            gte(appointments.date, startDateStr),
+            lte(appointments.date, yesterdayStr),
+            inArray(appointments.status, ['completed', 'documenting'])
+          )
+        ),
+      db.select({
+        entryDate: employeeTimeEntries.entryDate,
+        entryType: employeeTimeEntries.entryType,
+        durationMinutes: employeeTimeEntries.durationMinutes,
+        startTime: employeeTimeEntries.startTime,
+        endTime: employeeTimeEntries.endTime,
+      })
         .from(employeeTimeEntries)
         .where(
           and(
@@ -571,28 +588,19 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
           )
         ),
     ]);
-    
-    // Group work time by date
+
     const workByDate: Record<string, { workMinutes: number; breakMinutes: number }> = {};
-    
-    // Add appointment durations (only completed/documenting)
-    // Note: Only count actual service time, not travel time, for break requirements
-    // Travel time is generally not counted as "Arbeitszeit" for break calculation purposes
-    for (const appt of employeeAppointments) {
-      if (appt.status === 'completed' || appt.status === 'documenting') {
-        const date = appt.date;
-        if (!workByDate[date]) {
-          workByDate[date] = { workMinutes: 0, breakMinutes: 0 };
-        }
-        // Sum up service durations (actual work time)
-        workByDate[date].workMinutes += (appt.hauswirtschaftActualDauer || appt.hauswirtschaftDauer || 0);
-        workByDate[date].workMinutes += (appt.alltagsbegleitungActualDauer || appt.alltagsbegleitungDauer || 0);
-        workByDate[date].workMinutes += (appt.erstberatungActualDauer || appt.erstberatungDauer || 0);
-        // Travel time is excluded from break calculation as it's not continuous work
+
+    for (const appt of apptDurations) {
+      const date = appt.date;
+      if (!workByDate[date]) {
+        workByDate[date] = { workMinutes: 0, breakMinutes: 0 };
       }
+      workByDate[date].workMinutes += (appt.hauswirtschaftActualDauer || appt.hauswirtschaftDauer || 0);
+      workByDate[date].workMinutes += (appt.alltagsbegleitungActualDauer || appt.alltagsbegleitungDauer || 0);
+      workByDate[date].workMinutes += (appt.erstberatungActualDauer || appt.erstberatungDauer || 0);
     }
-    
-    // Helper to calculate duration from startTime and endTime if durationMinutes is not set
+
     const getEntryDuration = (entry: { durationMinutes: number | null; startTime: string | null; endTime: string | null }): number => {
       if (entry.durationMinutes && entry.durationMinutes > 0) {
         return entry.durationMinutes;
@@ -600,28 +608,22 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       if (entry.startTime && entry.endTime) {
         const [startH, startM] = entry.startTime.split(':').map(Number);
         const [endH, endM] = entry.endTime.split(':').map(Number);
-        const startMinutes = startH * 60 + startM;
-        const endMinutes = endH * 60 + endM;
-        return Math.max(0, endMinutes - startMinutes);
+        return Math.max(0, (endH * 60 + endM) - (startH * 60 + startM));
       }
       return 0;
     };
-    
-    // Add time entries (work types add to work, pause adds to breaks)
+
     for (const entry of timeEntries) {
       const date = entry.entryDate;
       if (!workByDate[date]) {
         workByDate[date] = { workMinutes: 0, breakMinutes: 0 };
       }
-      
       const duration = getEntryDuration(entry);
-      
       if (entry.entryType === 'pause') {
         workByDate[date].breakMinutes += duration;
       } else if (['bueroarbeit', 'vertrieb', 'schulung', 'besprechung', 'sonstiges'].includes(entry.entryType)) {
         workByDate[date].workMinutes += duration;
       }
-      // urlaub and krankheit are full days off, don't count as work
     }
     
     // Find days with missing breaks (>6h work needs 30min, >9h needs 45min)

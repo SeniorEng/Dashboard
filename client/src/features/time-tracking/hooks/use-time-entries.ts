@@ -75,6 +75,7 @@ export function useVacationSummary(year: number) {
       return unwrapResult(result);
     },
     enabled: year >= 2020 && year <= 2100,
+    staleTime: 60000,
   });
 }
 
@@ -142,5 +143,6 @@ export function useTimeOverview(year: number, month: number) {
       return unwrapResult(result);
     },
     enabled: year >= 2020 && year <= 2100 && month >= 1 && month <= 12,
+    staleTime: 30000,
   });
 }

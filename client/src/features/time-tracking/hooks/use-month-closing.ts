@@ -30,6 +30,7 @@ export function useMonthClosingStatus(year: number, month: number) {
       if (!res.ok) throw new Error("Status konnte nicht geladen werden");
       return res.json();
     },
+    staleTime: 60000,
   });
 }
 
