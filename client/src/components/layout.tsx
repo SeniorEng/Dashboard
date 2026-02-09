@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Shield, LogOut, Search, X, User as UserIcon, Calendar, Cake, FileSignature } from "lucide-react";
+import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature } from "lucide-react";
 
 interface SearchResult {
   type: "customer" | "appointment";
@@ -136,6 +136,18 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [location, navigate] = useLocation();
   const { user, logout, isAuthenticated } = useAuth();
 
+  const { data: badgeData } = useQuery<{ count: number }>({
+    queryKey: ["tasks", "badge-count"],
+    queryFn: async () => {
+      const response = await fetch("/api/tasks/badge-count");
+      if (!response.ok) return { count: 0 };
+      return response.json();
+    },
+    staleTime: 60000,
+    enabled: isAuthenticated,
+  });
+  const hasBadge = (badgeData?.count || 0) > 0;
+
   const handleLogout = async () => {
     try {
       await logout();
@@ -204,7 +216,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {children}
       </main>
 
-      {/* Mobile Bottom Nav (Optional visual flair for app-feel) */}
+      {/* Mobile Bottom Nav */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-card border-t border-border p-2 flex justify-around items-center pb-safe z-40 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
          <Link href="/" className={`p-2 rounded-xl flex flex-col items-center gap-1 transition-colors ${location === '/' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground'}`}>
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
@@ -214,9 +226,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
            <span className="text-[10px] font-medium">Kunden</span>
         </Link>
-        <Link href="/birthdays" className={`p-2 rounded-xl flex flex-col items-center gap-1 transition-colors ${location === '/birthdays' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground'}`}>
-          <Cake className="w-6 h-6" />
-          <span className="text-[10px] font-medium">Geburtstage</span>
+        <Link href="/tasks" className={`p-2 rounded-xl flex flex-col items-center gap-1 transition-colors relative ${location === '/tasks' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground'}`} data-testid="nav-tasks">
+          <div className="relative">
+            <CheckSquare className="w-6 h-6" />
+            {hasBadge && (
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full" data-testid="badge-tasks-dot" />
+            )}
+          </div>
+          <span className="text-[10px] font-medium">Aufgaben</span>
         </Link>
         <Link href="/service-records" className={`p-2 rounded-xl flex flex-col items-center gap-1 transition-colors ${location.startsWith('/service-records') ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground'}`}>
           <FileSignature className="w-6 h-6" />

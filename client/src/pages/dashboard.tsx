@@ -1,14 +1,12 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo } from "react";
 import { Link, useSearch } from "wouter";
 import { Layout } from "@/components/layout";
 import { useAppointments, useWeekAppointmentCounts, AppointmentList } from "@/features/appointments";
-import { TaskListSection } from "@/features/tasks";
 import { Button } from "@/components/ui/button";
 import { format, addDays, startOfWeek, addWeeks, subWeeks, isSameDay } from "date-fns";
 import { de } from "date-fns/locale";
-import { Plus, ChevronsLeft, ChevronsRight, AlertCircle, Coffee, Loader2, FileSignature, ChevronDown, ChevronUp } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import { parseLocalDate, formatDateForDisplay } from "@shared/utils/datetime";
+import { Plus, ChevronsLeft, ChevronsRight, Loader2 } from "lucide-react";
+import { parseLocalDate } from "@shared/utils/datetime";
 import { iconSize } from "@/design-system";
 import { ErrorState } from "@/components/patterns/error-state";
 
@@ -59,113 +57,6 @@ function DayButton({ dayStr, day, index, isSelected, isDayToday, appointmentCoun
   );
 }
 
-const OPEN_TASKS_STORAGE_KEY = "careconnect-open-tasks-collapsed";
-
-interface OpenTasksBannerProps {
-  undocumentedCount: number;
-  missingBreaksCount: number;
-  pendingServiceRecordsCount: number;
-  totalOpenTasks: number;
-  openTasks: {
-    daysWithMissingBreaks: Array<{ date: string }>;
-  } | undefined;
-}
-
-function OpenTasksBanner({ undocumentedCount, missingBreaksCount, pendingServiceRecordsCount, totalOpenTasks, openTasks }: OpenTasksBannerProps) {
-  const [collapsed, setCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(OPEN_TASKS_STORAGE_KEY) === "true";
-    } catch {
-      return false;
-    }
-  });
-
-  const toggleCollapsed = useCallback(() => {
-    setCollapsed(prev => {
-      const next = !prev;
-      try {
-        localStorage.setItem(OPEN_TASKS_STORAGE_KEY, String(next));
-      } catch {}
-      return next;
-    });
-  }, []);
-
-  return (
-    <div className="mb-3" data-testid="open-tasks-section">
-      <button
-        onClick={toggleCollapsed}
-        className="w-full flex items-center justify-between px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 hover:bg-amber-100 transition-colors"
-        data-testid="button-toggle-open-tasks"
-      >
-        <div className="flex items-center gap-2">
-          <AlertCircle className={`${iconSize.sm} shrink-0`} />
-          <span className="text-sm font-medium">
-            {totalOpenTasks} offene {totalOpenTasks === 1 ? "Aufgabe" : "Aufgaben"}
-          </span>
-        </div>
-        {collapsed ? (
-          <ChevronDown className={`${iconSize.sm} shrink-0`} />
-        ) : (
-          <ChevronUp className={`${iconSize.sm} shrink-0`} />
-        )}
-      </button>
-
-      {!collapsed && (
-        <div className="mt-2 space-y-2">
-          {undocumentedCount > 0 && (
-            <Link href="/undocumented">
-              <div
-                className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 hover:bg-amber-100 transition-colors cursor-pointer"
-                data-testid="banner-undocumented"
-              >
-                <AlertCircle className={`${iconSize.sm} shrink-0`} />
-                <span className="text-sm font-medium">
-                  {undocumentedCount} {undocumentedCount === 1 ? "offene Dokumentation" : "offene Dokumentationen"}
-                </span>
-              </div>
-            </Link>
-          )}
-
-          {missingBreaksCount > 0 && (
-            <Link href="/my-times">
-              <div
-                className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 hover:bg-blue-100 transition-colors cursor-pointer"
-                data-testid="banner-missing-breaks"
-              >
-                <Coffee className={`${iconSize.sm} shrink-0`} />
-                <div className="text-sm">
-                  <span className="font-medium">Fehlende Pausendokumentation: </span>
-                  <span>
-                    {openTasks?.daysWithMissingBreaks
-                      ?.slice(0, 5)
-                      .map(d => formatDateForDisplay(d.date, { day: "numeric", month: "numeric" }))
-                      .join(", ")}
-                    {missingBreaksCount > 5 && ` (+${missingBreaksCount - 5} weitere)`}
-                  </span>
-                </div>
-              </div>
-            </Link>
-          )}
-
-          {pendingServiceRecordsCount > 0 && (
-            <Link href="/service-records">
-              <div
-                className="flex items-center gap-2 px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg text-purple-800 hover:bg-purple-100 transition-colors cursor-pointer"
-                data-testid="banner-pending-service-records"
-              >
-                <FileSignature className={`${iconSize.sm} shrink-0`} />
-                <span className="text-sm font-medium">
-                  {pendingServiceRecordsCount} {pendingServiceRecordsCount === 1 ? "Leistungsnachweis" : "Leistungsnachweise"} zum Unterschreiben
-                </span>
-              </div>
-            </Link>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function Dashboard() {
   const searchString = useSearch();
   const [selectedDate, setSelectedDate] = useState(() => {
@@ -186,99 +77,32 @@ export default function Dashboard() {
   const todayString = format(today, "yyyy-MM-dd");
   const isToday = todayString === dateString;
 
-  // Fetch undocumented past appointments
-  const { data: undocumentedAppointments } = useQuery({
-    queryKey: ["appointments", "undocumented"],
-    queryFn: async () => {
-      const response = await fetch(`/api/appointments/undocumented`);
-      if (!response.ok) {
-        throw new Error("Failed to fetch undocumented appointments");
-      }
-      return response.json();
-    },
-    staleTime: 60000,
-  });
-  const undocumentedCount = undocumentedAppointments?.length || 0;
-
-  // Fetch open tasks (missing breaks, etc.)
-  const { data: openTasks } = useQuery({
-    queryKey: ["time-entries", "open-tasks"],
-    queryFn: async () => {
-      const response = await fetch(`/api/time-entries/open-tasks`);
-      if (!response.ok) {
-        throw new Error("Failed to fetch open tasks");
-      }
-      return response.json() as Promise<{
-        daysWithMissingBreaks: Array<{
-          date: string;
-          totalWorkMinutes: number;
-          requiredBreakMinutes: number;
-          documentedBreakMinutes: number;
-        }>;
-      }>;
-    },
-    staleTime: 60000,
-  });
-  const missingBreaksCount = openTasks?.daysWithMissingBreaks?.length || 0;
-
-  // Fetch pending service records
-  const { data: pendingServiceRecords } = useQuery({
-    queryKey: ["/api/service-records/pending"],
-    queryFn: async () => {
-      const response = await fetch(`/api/service-records/pending`);
-      if (!response.ok) {
-        throw new Error("Failed to fetch pending service records");
-      }
-      return response.json();
-    },
-    staleTime: 60000,
-  });
-  const pendingServiceRecordsCount = pendingServiceRecords?.length || 0;
-
-  const totalOpenTasks = undocumentedCount + missingBreaksCount + pendingServiceRecordsCount;
-
-  // Get weekdays only (Monday to Friday) for the week(s) containing selectedDate
   const weekDays = useMemo(() => {
-    const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 }); // Monday
-    const days = Array.from({ length: 5 }, (_, i) => addDays(weekStart, i)); // Mo-Fr week 1
+    const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 });
+    const days = Array.from({ length: 5 }, (_, i) => addDays(weekStart, i));
     if (showTwoWeeks) {
       const week2Start = addWeeks(weekStart, 1);
-      days.push(...Array.from({ length: 5 }, (_, i) => addDays(week2Start, i))); // Mo-Fr week 2
+      days.push(...Array.from({ length: 5 }, (_, i) => addDays(week2Start, i)));
     }
     return days;
   }, [selectedDate, showTwoWeeks]);
 
-  // Get date strings for the week(s) to fetch appointment counts
   const weekDateStrings = useMemo(() => 
     weekDays.map(d => format(d, "yyyy-MM-dd")), 
     [weekDays]
   );
   
-  // Fetch appointment counts for the week(s)
   const { data: weekAppointmentCounts } = useWeekAppointmentCounts(weekDateStrings);
 
   const goToPreviousWeek = () => setSelectedDate(prev => subWeeks(prev, 1));
   const goToNextWeek = () => setSelectedDate(prev => addWeeks(prev, 1));
 
-  // Split week days into rows for display
   const week1Days = weekDays.slice(0, 5);
   const week2Days = showTwoWeeks ? weekDays.slice(5, 10) : [];
 
   return (
     <Layout>
       <div className="mb-6 animate-in slide-in-from-top-4 duration-500">
-        {/* Open Tasks Banner - Collapsible */}
-        {totalOpenTasks > 0 && (
-          <OpenTasksBanner
-            undocumentedCount={undocumentedCount}
-            missingBreaksCount={missingBreaksCount}
-            pendingServiceRecordsCount={pendingServiceRecordsCount}
-            totalOpenTasks={totalOpenTasks}
-            openTasks={openTasks}
-          />
-        )}
-
-        {/* Header with week toggle and new appointment button */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-1 bg-muted rounded-lg p-0.5">
             <button
@@ -307,7 +131,6 @@ export default function Dashboard() {
           </Link>
         </div>
 
-        {/* Week Navigation Strip */}
         <div className="flex items-center gap-1">
           <Button
             variant="ghost"
@@ -321,7 +144,6 @@ export default function Dashboard() {
           </Button>
           
           <div className="flex-1 space-y-1">
-            {/* Week 1 */}
             <div className="flex gap-1 justify-center">
               {week1Days.map((day, index) => {
                 const dayStr = format(day, "yyyy-MM-dd");
@@ -344,7 +166,6 @@ export default function Dashboard() {
               })}
             </div>
             
-            {/* Week 2 (if showing 2 weeks) */}
             {showTwoWeeks && week2Days.length > 0 && (
               <div className="flex gap-1 justify-center">
                 {week2Days.map((day, index) => {
@@ -403,8 +224,6 @@ export default function Dashboard() {
           error={error}
           onRetry={() => refetch()}
         />
-
-        <TaskListSection />
       </div>
     </Layout>
   );

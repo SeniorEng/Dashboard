@@ -50,9 +50,10 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **German Labor Law Compliance**: Automatic detection of missing break documentation based on work hours (`§4 ArbZG`).
 - **Auto-Break System**: Calculates and generates missing breaks according to `§4 ArbZG`, considering actual work time, and is idempotent. Globally activatable via system settings.
 - **Month-Closing Workflow**: Employees can close their month, generating auto-breaks. This locks CRUD operations for non-admins. Admins can reopen months.
-- **Open Tasks System**: Dashboard alerts for pending tasks.
+- **Aufgaben-System**: Zentrale Aufgaben-Seite (`/tasks`) vereint System-Hinweise (offene Dokumentationen, fehlende Pausen, Leistungsnachweise) und eigene Aufgaben. Navigation-Badge zeigt offene Aufgaben-Anzahl via `/api/tasks/badge-count`.
 - **Customer Kilometers**: Separate tracking for kilometers driven with/for the customer.
-- **Birthdays Tab**: Displays upcoming birthdays for employees and assigned customers, with a server-side cache and frontend staleTime.
+- **Birthdays**: Integrated as tab in the Customers page (`/customers`), showing upcoming birthdays for employees and assigned customers with server-side cache and frontend staleTime.
+- **Navigation Structure**: Bottom nav tabs: Termine (`/`), Kunden (`/customers` with Geburtstage tab), Aufgaben (`/tasks` with red badge dot), Nachweise (`/service-records`), Zeiten (`/my-times`).
 
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)

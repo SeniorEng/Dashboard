@@ -10,6 +10,9 @@ import {
   getOpenTaskCount 
 } from "../storage/tasks";
 import { requireAuth, requireAdmin } from "../middleware/auth";
+import { storage } from "../storage";
+import { timeTrackingStorage } from "../storage/time-tracking";
+import { todayISO } from "@shared/utils/datetime";
 
 const router = Router();
 
@@ -42,6 +45,29 @@ router.get("/count", requireAuth, async (req, res) => {
   } catch (error) {
     console.error("Error fetching task count:", error);
     res.status(500).json({ error: "Aufgabenanzahl konnte nicht geladen werden" });
+  }
+});
+
+router.get("/badge-count", requireAuth, async (req, res) => {
+  try {
+    const userId = req.user!.id;
+    const isAdmin = req.user!.isAdmin;
+
+    const today = todayISO();
+    const customerIds = isAdmin ? undefined : await storage.getAssignedCustomerIds(userId);
+
+    const [userTaskCount, undocumentedAppts, openTasks, pendingRecords] = await Promise.all([
+      getOpenTaskCount(userId),
+      storage.getUndocumentedAppointments(today, customerIds).then(a => a.length),
+      timeTrackingStorage.getOpenTasks(userId).then(t => t.daysWithMissingBreaks?.length || 0),
+      storage.getPendingServiceRecords(userId).then(r => r.length),
+    ]);
+
+    const count = userTaskCount + undocumentedAppts + openTasks + pendingRecords;
+    res.json({ count });
+  } catch (error) {
+    console.error("Error fetching badge count:", error);
+    res.status(500).json({ error: "Badge-Anzahl konnte nicht geladen werden" });
   }
 });
 

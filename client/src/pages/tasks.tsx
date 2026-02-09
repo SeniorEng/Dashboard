@@ -9,11 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CheckSquare, Plus, Loader2, ArrowLeft } from "lucide-react";
+import { CheckSquare, Plus, Loader2, AlertCircle, Coffee, FileSignature } from "lucide-react";
 import { Link } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { iconSize, componentStyles } from "@/design-system";
 import { useTasks, useCreateTask, useToggleTaskStatus, type TaskWithRelations, TaskCard, TaskDetailSheet } from "@/features/tasks";
 import { DatePicker } from "@/components/ui/date-picker";
+import { formatDateForDisplay } from "@shared/utils/datetime";
 
 type TaskFilter = "open" | "completed" | "all";
 
@@ -26,6 +28,48 @@ export default function TasksPage() {
   const { data: tasks, isLoading } = useTasks({ includeCompleted });
   const createTask = useCreateTask();
   const toggleTaskStatus = useToggleTaskStatus();
+
+  const { data: undocumentedAppointments } = useQuery({
+    queryKey: ["appointments", "undocumented"],
+    queryFn: async () => {
+      const response = await fetch(`/api/appointments/undocumented`);
+      if (!response.ok) throw new Error("Failed to fetch");
+      return response.json();
+    },
+    staleTime: 60000,
+  });
+  const undocumentedCount = undocumentedAppointments?.length || 0;
+
+  const { data: openTimeTasks } = useQuery({
+    queryKey: ["time-entries", "open-tasks"],
+    queryFn: async () => {
+      const response = await fetch(`/api/time-entries/open-tasks`);
+      if (!response.ok) throw new Error("Failed to fetch");
+      return response.json() as Promise<{
+        daysWithMissingBreaks: Array<{
+          date: string;
+          totalWorkMinutes: number;
+          requiredBreakMinutes: number;
+          documentedBreakMinutes: number;
+        }>;
+      }>;
+    },
+    staleTime: 60000,
+  });
+  const missingBreaksCount = openTimeTasks?.daysWithMissingBreaks?.length || 0;
+
+  const { data: pendingServiceRecords } = useQuery({
+    queryKey: ["/api/service-records/pending"],
+    queryFn: async () => {
+      const response = await fetch(`/api/service-records/pending`);
+      if (!response.ok) throw new Error("Failed to fetch");
+      return response.json();
+    },
+    staleTime: 60000,
+  });
+  const pendingServiceRecordsCount = pendingServiceRecords?.length || 0;
+
+  const totalSystemHints = undocumentedCount + missingBreaksCount + pendingServiceRecordsCount;
 
   const [newTask, setNewTask] = useState({
     title: "",
@@ -64,16 +108,11 @@ export default function TasksPage() {
   return (
     <Layout>
       <div className="animate-in slide-in-from-top-4 duration-500">
-<div className={componentStyles.pageHeader}>
+        <div className={componentStyles.pageHeader}>
           <div className={componentStyles.pageHeaderTop}>
-            <Link href="/">
-              <Button variant="ghost" size="icon" className="h-8 w-8" data-testid="button-back">
-                <ArrowLeft className={iconSize.sm} />
-              </Button>
-            </Link>
             <CheckSquare className={`${iconSize.md} text-primary`} />
             <div className={componentStyles.pageHeaderTitleWrap}>
-              <h1 className={componentStyles.pageTitle}>Aufgaben</h1>
+              <h1 className={componentStyles.pageTitle} data-testid="text-tasks-title">Aufgaben</h1>
             </div>
           </div>
           <div className={componentStyles.pageHeaderActions}>
@@ -153,6 +192,67 @@ export default function TasksPage() {
             </Dialog>
           </div>
         </div>
+
+        {totalSystemHints > 0 && (
+          <div className="mb-4 space-y-2" data-testid="system-hints-section">
+            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+              System-Hinweise
+            </h2>
+
+            {undocumentedCount > 0 && (
+              <Link href="/undocumented">
+                <div
+                  className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 hover:bg-amber-100 transition-colors cursor-pointer"
+                  data-testid="banner-undocumented"
+                >
+                  <AlertCircle className={`${iconSize.sm} shrink-0`} />
+                  <span className="text-sm font-medium">
+                    {undocumentedCount} {undocumentedCount === 1 ? "offene Dokumentation" : "offene Dokumentationen"}
+                  </span>
+                </div>
+              </Link>
+            )}
+
+            {missingBreaksCount > 0 && (
+              <Link href="/my-times">
+                <div
+                  className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 hover:bg-blue-100 transition-colors cursor-pointer"
+                  data-testid="banner-missing-breaks"
+                >
+                  <Coffee className={`${iconSize.sm} shrink-0`} />
+                  <div className="text-sm">
+                    <span className="font-medium">Fehlende Pausendokumentation: </span>
+                    <span>
+                      {openTimeTasks?.daysWithMissingBreaks
+                        ?.slice(0, 5)
+                        .map(d => formatDateForDisplay(d.date, { day: "numeric", month: "numeric" }))
+                        .join(", ")}
+                      {missingBreaksCount > 5 && ` (+${missingBreaksCount - 5} weitere)`}
+                    </span>
+                  </div>
+                </div>
+              </Link>
+            )}
+
+            {pendingServiceRecordsCount > 0 && (
+              <Link href="/service-records">
+                <div
+                  className="flex items-center gap-2 px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg text-purple-800 hover:bg-purple-100 transition-colors cursor-pointer"
+                  data-testid="banner-pending-service-records"
+                >
+                  <FileSignature className={`${iconSize.sm} shrink-0`} />
+                  <span className="text-sm font-medium">
+                    {pendingServiceRecordsCount} {pendingServiceRecordsCount === 1 ? "Leistungsnachweis" : "Leistungsnachweise"} zum Unterschreiben
+                  </span>
+                </div>
+              </Link>
+            )}
+          </div>
+        )}
+
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+          Eigene Aufgaben
+        </h2>
 
         <Tabs value={filter} onValueChange={(v) => setFilter(v as TaskFilter)} className="mb-4">
           <TabsList className="grid w-full grid-cols-3">
