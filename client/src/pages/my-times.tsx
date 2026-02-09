@@ -5,14 +5,12 @@ import { Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import {
-  useTimeOverview,
-  useVacationSummary,
+  useTimesPageData,
   useCreateTimeEntry,
   useDeleteTimeEntry,
   useUpdateTimeEntry,
   useTimeEntryConflict,
   useTimeEntryForm,
-  useOpenTasks,
   TimeEntryDialog,
   MissingBreaksBanner,
   TimeOverviewSummary,
@@ -39,8 +37,9 @@ export default function MyTimes() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
 
-  const { data: timeOverview, isLoading } = useTimeOverview(selectedYear, selectedMonth);
-  const { data: vacationSummary } = useVacationSummary(selectedYear);
+  const { data: pageData, isLoading } = useTimesPageData(selectedYear, selectedMonth);
+  const timeOverview = pageData?.overview;
+  const vacationSummary = pageData?.vacationSummary;
   const createMutation = useCreateTimeEntry();
   const deleteMutation = useDeleteTimeEntry();
   const updateMutation = useUpdateTimeEntry();
@@ -71,8 +70,7 @@ export default function MyTimes() {
     showEditDialog
   );
 
-  const { data: openTasks } = useOpenTasks();
-  const daysWithMissingBreaks = openTasks?.daysWithMissingBreaks || [];
+  const daysWithMissingBreaks = pageData?.openTasks?.daysWithMissingBreaks || [];
   const missingBreakDates = useMemo(
     () => new Set(daysWithMissingBreaks.map(d => d.date)),
     [daysWithMissingBreaks]

@@ -186,42 +186,26 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getCustomersForEmployee(employeeId: number): Promise<(Customer & { isCurrentlyAssigned: boolean })[]> {
-    const result = await db.execute(sqlBuilder`
-      SELECT c.*,
-        (c.primary_employee_id = ${employeeId} OR c.backup_employee_id = ${employeeId}) as is_currently_assigned
-      FROM customers c
-      WHERE c.id IN (
-        SELECT id FROM customers WHERE primary_employee_id = ${employeeId} OR backup_employee_id = ${employeeId}
-        UNION
-        SELECT DISTINCT customer_id FROM appointments WHERE assigned_employee_id = ${employeeId} OR performed_by_employee_id = ${employeeId}
-      )
-      ORDER BY 
-        CASE WHEN (c.primary_employee_id = ${employeeId} OR c.backup_employee_id = ${employeeId}) THEN 0 ELSE 1 END,
-        c.nachname, c.vorname
-    `);
-    return (result.rows as any[]).map(row => ({
-      id: row.id,
-      vorname: row.vorname,
-      nachname: row.nachname,
-      name: row.name,
-      email: row.email,
-      telefon: row.telefon,
-      festnetz: row.festnetz,
-      geburtsdatum: row.geburtsdatum,
-      strasse: row.strasse,
-      nr: row.nr,
-      plz: row.plz,
-      stadt: row.stadt,
-      pflegegrad: row.pflegegrad,
-      needs: row.needs ?? [],
-      primaryEmployeeId: row.primary_employee_id,
-      backupEmployeeId: row.backup_employee_id,
-      address: row.address,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      createdByUserId: row.created_by_user_id,
-      isCurrentlyAssigned: row.is_currently_assigned === true || row.is_currently_assigned === 't',
-    }));
+    const assignedIds = await this.getAssignedCustomerIds(employeeId);
+    if (assignedIds.length === 0) return [];
+
+    const customerRows = await db
+      .select()
+      .from(customers)
+      .where(inArray(customers.id, assignedIds))
+      .orderBy(customers.nachname, customers.vorname);
+
+    return customerRows.map(c => ({
+      ...c,
+      isCurrentlyAssigned: c.primaryEmployeeId === employeeId || c.backupEmployeeId === employeeId,
+    })).sort((a, b) => {
+      const aLegacy = a.isCurrentlyAssigned ? 0 : 1;
+      const bLegacy = b.isCurrentlyAssigned ? 0 : 1;
+      if (aLegacy !== bLegacy) return aLegacy - bLegacy;
+      const nachnameCompare = (a.nachname ?? '').localeCompare(b.nachname ?? '', 'de');
+      if (nachnameCompare !== 0) return nachnameCompare;
+      return (a.vorname ?? '').localeCompare(b.vorname ?? '', 'de');
+    });
   }
 
   async getCustomersByIds(ids: number[]): Promise<Customer[]> {
@@ -438,6 +422,9 @@ export class DatabaseStorage implements IStorage {
 
   async createAppointment(appointment: InsertAppointment): Promise<Appointment> {
     const result = await db.insert(appointments).values(appointment).returning();
+    if (appointment.assignedEmployeeId) {
+      customerIdsCache.invalidateForEmployee(appointment.assignedEmployeeId);
+    }
     return result[0];
   }
 

@@ -588,6 +588,7 @@ export const appointments = pgTable("appointments", {
   index("appointments_performed_by_employee_id_idx").on(table.performedByEmployeeId),
   index("appointments_date_customer_id_idx").on(table.date, table.customerId),
   index("appointments_status_date_idx").on(table.status, table.date),
+  index("appointments_employee_date_idx").on(table.assignedEmployeeId, table.date),
 ]);
 
 // Base customer schema from Drizzle, with phone validation override

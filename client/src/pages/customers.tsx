@@ -68,7 +68,7 @@ export default function CustomersPage() {
 
   const { data: customers = [], isLoading, error, refetch } = useQuery<CustomerWithAccess[]>({
     queryKey: ["customers"],
-    staleTime: 30000,
+    staleTime: 60000,
     queryFn: async () => {
       const res = await fetch("/api/customers");
       if (!res.ok) throw new Error("Kunden konnten nicht geladen werden");

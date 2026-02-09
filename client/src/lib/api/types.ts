@@ -442,3 +442,16 @@ export interface TimeOverviewData {
   appointments: AppointmentWithCustomerName[];
   otherEntries: TimeEntry[];
 }
+
+export interface TimesPageData {
+  overview: TimeOverviewData;
+  vacationSummary: VacationSummary;
+  openTasks: {
+    daysWithMissingBreaks: Array<{
+      date: string;
+      totalWorkMinutes: number;
+      requiredBreakMinutes: number;
+      documentedBreakMinutes: number;
+    }>;
+  };
+}

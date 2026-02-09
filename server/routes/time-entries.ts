@@ -229,6 +229,36 @@ router.get("/vacation-summary/:year", async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /time-entries/page-data/:year/:month
+ * Combined endpoint: overview + vacation-summary + open-tasks in one call
+ */
+router.get("/page-data/:year/:month", async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const year = parseInt(req.params.year);
+    const month = parseInt(req.params.month);
+    
+    if (isNaN(year) || year < 2020 || year > 2100) {
+      return res.status(400).json({ error: "Ungültiges Jahr" });
+    }
+    
+    if (isNaN(month) || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Ungültiger Monat" });
+    }
+    
+    const [overview, vacationSummary, openTasks] = await Promise.all([
+      timeTrackingStorage.getTimeOverview(userId, { year, month }),
+      timeTrackingStorage.getVacationSummary(userId, year),
+      timeTrackingStorage.getOpenTasks(userId),
+    ]);
+    
+    res.json({ overview, vacationSummary, openTasks });
+  } catch (error) {
+    handleRouteError(res, error, "Zeitdaten konnten nicht geladen werden");
+  }
+});
+
+/**
  * GET /time-entries/overview/:year/:month
  * Get complete time overview for a month (appointments + time entries)
  */

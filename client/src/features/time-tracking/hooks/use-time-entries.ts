@@ -11,7 +11,8 @@ import type {
   CreateTimeEntryRequest, 
   UpdateTimeEntryRequest,
   VacationSummary,
-  TimeOverviewData 
+  TimeOverviewData,
+  TimesPageData 
 } from "@/lib/api/types";
 
 export const timeEntryKeys = {
@@ -140,6 +141,22 @@ export function useTimeOverview(year: number, month: number) {
     queryKey: timeEntryKeys.overview(year, month),
     queryFn: async ({ signal }) => {
       const result = await api.get<TimeOverviewData>(`/time-entries/overview/${year}/${month}`, signal);
+      return unwrapResult(result);
+    },
+    enabled: year >= 2020 && year <= 2100 && month >= 1 && month <= 12,
+    staleTime: 30000,
+  });
+}
+
+/**
+ * Fetch all page data for My Times in a single API call
+ * Combines: overview + vacation-summary + open-tasks
+ */
+export function useTimesPageData(year: number, month: number) {
+  return useQuery({
+    queryKey: [...timeEntryKeys.all, "page-data", { year, month }] as const,
+    queryFn: async ({ signal }) => {
+      const result = await api.get<TimesPageData>(`/time-entries/page-data/${year}/${month}`, signal);
       return unwrapResult(result);
     },
     enabled: year >= 2020 && year <= 2100 && month >= 1 && month <= 12,
