@@ -236,9 +236,6 @@ export default function CustomersPage() {
                     <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
                       {groupName === "Heute" && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
                       {groupName}
-                      <Badge variant="secondary" className="text-xs">
-                        {groupBirthdays.length}
-                      </Badge>
                     </h2>
                     
                     <div className="flex flex-col gap-3">
