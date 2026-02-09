@@ -13,7 +13,7 @@ router.use(requireAuth);
 const MAX_HORIZON_DAYS = 365;
 const DEFAULT_HORIZON_DAYS = 30;
 
-function calculateDaysUntilBirthday(birthDate: string): number {
+export function calculateDaysUntilBirthday(birthDate: string): number {
   const todayStr = todayISO();
   const today = parseLocalDate(todayStr);
 
@@ -90,7 +90,10 @@ router.get("/", async (req: Request, res: Response) => {
     const birthdays: BirthdayEntry[] = [];
 
     if (user.isAdmin) {
-      const activeEmployees = await storage.getActiveEmployeesWithBirthday();
+      const [activeEmployees, activeCustomers] = await Promise.all([
+        storage.getActiveEmployeesWithBirthday(),
+        storage.getActiveCustomersWithBirthday(),
+      ]);
 
       for (const emp of activeEmployees) {
         if (emp.geburtsdatum) {
@@ -107,8 +110,6 @@ router.get("/", async (req: Request, res: Response) => {
           }
         }
       }
-
-      const activeCustomers = await storage.getActiveCustomersWithBirthday();
 
       for (const cust of activeCustomers) {
         if (cust.geburtsdatum) {

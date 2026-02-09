@@ -12,14 +12,10 @@ import {
   type InsertBudgetPreferences,
   type CustomerPricing,
 } from "@shared/schema";
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
 import { eq, and, sql, lte, gte, isNull, or, desc, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";
 import { BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
-
-const sqlClient = neon(process.env.DATABASE_URL!);
-const db = drizzle(sqlClient);
+import { db } from "../lib/db";
 
 const DEFAULT_MONTHLY_BUDGET_CENTS = BUDGET_45B_MAX_MONTHLY_CENTS;
 

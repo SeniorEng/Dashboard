@@ -5,13 +5,9 @@ import { timeTrackingStorage } from "../storage/time-tracking";
 import { insertTimeEntrySchema, updateTimeEntrySchema, closeMonthSchema, reopenMonthSchema, employeeMonthClosings } from "@shared/schema";
 import { storage } from "../storage";
 import { timeToMinutes, isWeekend, parseLocalDate, isPast } from "@shared/utils/datetime";
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
 import { eq, and } from "drizzle-orm";
 import { generateAutoBreaksForMonth, insertAutoBreaks, previewAutoBreaksForMonth, removeAutoBreaksForMonth } from "../services/auto-breaks";
-
-const sqlClient = neon(process.env.DATABASE_URL!);
-const db = drizzle(sqlClient);
+import { db } from "../lib/db";
 
 const entryTypeLabels: Record<string, string> = {
   urlaub: "Urlaub",

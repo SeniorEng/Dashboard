@@ -477,14 +477,10 @@ async function updateCustomerAssignment(
   backupEmployeeId: number | null,
   changedByUserId?: number
 ) {
-  const { neon } = await import("@neondatabase/serverless");
-  const { drizzle } = await import("drizzle-orm/neon-http");
   const { eq, and, isNull } = await import("drizzle-orm");
   const { customers, customerAssignmentHistory } = await import("@shared/schema");
   const { customerIdsCache } = await import("../services/cache");
-
-  const sql = neon(process.env.DATABASE_URL!);
-  const db = drizzle(sql);
+  const { db } = await import("../lib/db");
 
   const [existing] = await db.select().from(customers).where(eq(customers.id, customerId));
   

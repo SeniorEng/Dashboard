@@ -14,13 +14,9 @@ import {
   users,
 } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
 import { eq, count, sql as sqlBuilder, lt, ne, and, or, ilike, inArray, isNull, isNotNull } from "drizzle-orm";
 import { customerIdsCache } from "./services/cache";
-
-const sql = neon(process.env.DATABASE_URL!);
-const db = drizzle(sql);
+import { db } from "./lib/db";
 
 export interface PaginationOptions {
   limit?: number;

@@ -1,5 +1,3 @@
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
 import { eq, and, gte, lte, inArray } from "drizzle-orm";
 import {
   employeeTimeEntries,
@@ -7,9 +5,7 @@ import {
   appointments,
 } from "@shared/schema";
 import { timeTrackingStorage } from "../storage/time-tracking";
-
-const sql = neon(process.env.DATABASE_URL!);
-const db = drizzle(sql);
+import { db } from "../lib/db";
 
 export interface AutoBreakResult {
   date: string;

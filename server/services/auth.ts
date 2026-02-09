@@ -1,5 +1,3 @@
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
 import { eq, and, lt, gt, isNull } from "drizzle-orm";
 import { createHash, randomBytes } from "crypto";
 import bcrypt from "bcrypt";
@@ -15,9 +13,8 @@ import {
   type EmployeeRole,
   EMPLOYEE_ROLES,
 } from "@shared/schema";
-
-const sql = neon(process.env.DATABASE_URL!);
-const db = drizzle(sql);
+import { db } from "../lib/db";
+import { sessionCache } from "./cache";
 
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const PASSWORD_RESET_DURATION_MS = 60 * 60 * 1000; // 1 hour
@@ -144,6 +141,7 @@ export class AuthService {
 
   async logout(token: string): Promise<boolean> {
     const tokenHash = hashToken(token);
+    sessionCache.invalidateByTokenHash(tokenHash);
     const result = await db
       .delete(sessions)
       .where(eq(sessions.tokenHash, tokenHash))
@@ -152,11 +150,17 @@ export class AuthService {
   }
 
   async logoutAllSessions(userId: number): Promise<void> {
+    sessionCache.invalidateByUserId(userId);
     await db.delete(sessions).where(eq(sessions.userId, userId));
   }
 
   async validateSession(token: string): Promise<UserWithRoles | null> {
     const tokenHash = hashToken(token);
+
+    const cached = sessionCache.get(tokenHash);
+    if (cached) {
+      return cached;
+    }
 
     const [session] = await db
       .select()
@@ -182,7 +186,9 @@ export class AuthService {
     }
 
     const roles = await this.getUserRoles(user.id);
-    return { ...user, roles };
+    const userWithRoles = { ...user, roles };
+    sessionCache.set(tokenHash, userWithRoles);
+    return userWithRoles;
   }
 
   async getUserRoles(userId: number): Promise<EmployeeRole[]> {
@@ -205,6 +211,7 @@ export class AuthService {
         }))
       );
     }
+    sessionCache.invalidateByUserId(userId);
   }
 
   async getUser(id: number): Promise<UserWithRoles | null> {
@@ -309,6 +316,7 @@ export class AuthService {
       return null;
     }
 
+    sessionCache.invalidateByUserId(id);
     const roles = await this.getUserRoles(id);
     return { ...updatedUser, roles };
   }

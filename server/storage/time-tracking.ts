@@ -1,5 +1,3 @@
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
 import { eq, and, gte, lte, inArray, sql as sqlBuilder, asc } from "drizzle-orm";
 import {
   employeeTimeEntries,
@@ -14,9 +12,7 @@ import {
   type Appointment,
 } from "@shared/schema";
 import { todayISO, formatDateISO } from "@shared/utils/datetime";
-
-const sql = neon(process.env.DATABASE_URL!);
-const db = drizzle(sql);
+import { db } from "../lib/db";
 
 export interface TimeEntryFilters {
   year?: number;

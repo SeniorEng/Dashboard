@@ -1,11 +1,7 @@
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
 import { tasks, users, customers, Task, InsertTask, UpdateTask } from "@shared/schema";
 import { eq, and, desc, asc, ne, sql as sqlBuilder, inArray, count } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-
-const sql = neon(process.env.DATABASE_URL!);
-const db = drizzle(sql);
+import { db } from "../lib/db";
 
 const creatorUsers = alias(users, "creator_users");
 const assigneeUsers = alias(users, "assignee_users");

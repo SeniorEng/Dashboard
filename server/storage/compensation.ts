@@ -1,5 +1,3 @@
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
 import { eq, and, isNull, desc, lte, or, gte } from "drizzle-orm";
 import { 
   employeeCompensationHistory,
@@ -7,9 +5,7 @@ import {
   type InsertEmployeeCompensation,
 } from "@shared/schema";
 import { todayISO, formatDateISO, parseLocalDate } from "@shared/utils/datetime";
-
-const sql = neon(process.env.DATABASE_URL!);
-const db = drizzle(sql);
+import { db } from "../lib/db";
 
 export interface ICompensationStorage {
   getCurrentCompensation(userId: number): Promise<EmployeeCompensation | null>;

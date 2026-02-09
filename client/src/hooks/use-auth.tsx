@@ -25,6 +25,8 @@ export interface AuthState {
   availableServices: string[];
   isLoading: boolean;
   isAuthenticated: boolean;
+  badgeCount: number;
+  birthdayCount: number;
 }
 
 interface AuthContextType extends AuthState {
@@ -35,7 +37,7 @@ interface AuthContextType extends AuthState {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-async function fetchCurrentUser(): Promise<{ user: User; availableServices: string[] } | null> {
+async function fetchCurrentUser(): Promise<{ user: User; availableServices: string[]; badgeCount?: number; birthdayCount?: number } | null> {
   const res = await fetch("/api/auth/me", {
     credentials: "include",
   });
@@ -113,6 +115,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     availableServices: data?.availableServices ?? [],
     isLoading,
     isAuthenticated: !!data?.user,
+    badgeCount: data?.badgeCount ?? 0,
+    birthdayCount: data?.birthdayCount ?? 0,
     login,
     logout,
     refetch,

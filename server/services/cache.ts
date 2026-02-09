@@ -164,3 +164,50 @@ class BirthdaysCacheService {
 }
 
 export const birthdaysCache = new BirthdaysCacheService();
+
+const SESSION_CACHE_TTL = 2 * 60 * 1000;
+
+interface CachedSession {
+  user: import("@shared/schema").UserWithRoles;
+  cachedAt: number;
+}
+
+class SessionCacheService {
+  private cache = new Map<string, CachedSession>();
+
+  get(tokenHash: string): import("@shared/schema").UserWithRoles | undefined {
+    const entry = this.cache.get(tokenHash);
+    if (!entry) return undefined;
+
+    if (Date.now() - entry.cachedAt > SESSION_CACHE_TTL) {
+      this.cache.delete(tokenHash);
+      return undefined;
+    }
+
+    return entry.user;
+  }
+
+  set(tokenHash: string, user: import("@shared/schema").UserWithRoles): void {
+    this.cache.set(tokenHash, { user, cachedAt: Date.now() });
+  }
+
+  invalidateByTokenHash(tokenHash: string): void {
+    this.cache.delete(tokenHash);
+  }
+
+  invalidateByUserId(userId: number): void {
+    const keysToDelete: string[] = [];
+    this.cache.forEach((entry, key) => {
+      if (entry.user.id === userId) {
+        keysToDelete.push(key);
+      }
+    });
+    keysToDelete.forEach(key => this.cache.delete(key));
+  }
+
+  invalidateAll(): void {
+    this.cache.clear();
+  }
+}
+
+export const sessionCache = new SessionCacheService();

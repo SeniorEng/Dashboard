@@ -134,31 +134,10 @@ function GlobalSearch() {
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location, navigate] = useLocation();
-  const { user, logout, isAuthenticated } = useAuth();
+  const { user, logout, isAuthenticated, badgeCount, birthdayCount } = useAuth();
 
-  const { data: badgeData } = useQuery<{ count: number }>({
-    queryKey: ["tasks", "badge-count"],
-    queryFn: async () => {
-      const response = await fetch("/api/tasks/badge-count");
-      if (!response.ok) return { count: 0 };
-      return response.json();
-    },
-    staleTime: 60000,
-    enabled: isAuthenticated,
-  });
-  const hasBadge = (badgeData?.count || 0) > 0;
-
-  const { data: birthdayData } = useQuery<Array<{ daysUntil: number }>>({
-    queryKey: ["birthdays", "nav-check"],
-    queryFn: async () => {
-      const response = await fetch("/api/birthdays?days=7");
-      if (!response.ok) return [];
-      return response.json();
-    },
-    staleTime: 300000,
-    enabled: isAuthenticated,
-  });
-  const hasBirthdayBadge = (birthdayData?.length || 0) > 0;
+  const hasBadge = badgeCount > 0;
+  const hasBirthdayBadge = birthdayCount > 0;
 
   const handleLogout = async () => {
     try {

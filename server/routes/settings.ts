@@ -1,14 +1,10 @@
 import { Router, Request, Response } from "express";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { handleRouteError } from "../lib/errors";
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
 import { systemSettings, updateSystemSettingsSchema } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { fromError } from "zod-validation-error";
-
-const sql = neon(process.env.DATABASE_URL!);
-const db = drizzle(sql);
+import { db } from "../lib/db";
 
 const router = Router();
 

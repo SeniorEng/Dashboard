@@ -36,7 +36,9 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Data Types**: Strict SQL types for data integrity.
 - **Indexes**: Composite indexes on frequently queried columns.
 - **Data Layer**: `IStorage` interface abstraction with `DatabaseStorage` providing optimized queries, pagination, and application-level rollback.
-- **Caching**: In-memory cache for assigned customer IDs with TTL and invalidation.
+- **Caching**: In-memory cache for assigned customer IDs with TTL and invalidation. Session cache (2min TTL) for auth validation. Birthday cache (1h TTL).
+- **Database Connection**: Single shared `neon()` + `drizzle()` instance in `server/lib/db.ts`. All storage/route/service files import from this central module.
+- **Performance**: Session cache eliminates 3 DB queries per request. Combined `/api/auth/me` returns badge + birthday counts to avoid 3 separate layout API calls. Logging middleware only records timing (no JSON body capture).
 
 ### Business Rules & Patterns
 - **Shared Domain Logic**: Single source of truth for business rules in `@shared/domain/*`.

@@ -17,6 +17,12 @@ import {
 } from "../middleware/auth";
 import { handleRouteError } from "../lib/errors";
 import { generateCsrfToken, setCsrfCookie, csrfProtection } from "../middleware/csrf";
+import { getOpenTaskCount } from "../storage/tasks";
+import { storage } from "../storage";
+import { timeTrackingStorage } from "../storage/time-tracking";
+import { birthdaysCache } from "../services/cache";
+import { todayISO } from "@shared/utils/datetime";
+import { calculateDaysUntilBirthday } from "./birthdays";
 
 const router = Router();
 
@@ -88,12 +94,67 @@ router.get("/me", async (req: Request, res: Response) => {
     }
 
     const { passwordHash, ...userWithoutPassword } = req.user;
+
+    const userId = req.user.id;
+    const isAdmin = req.user.isAdmin;
+    const today = todayISO();
+
+    const [badgeCount, birthdayCount] = await Promise.all([
+      (async () => {
+        try {
+          const customerIds = isAdmin ? undefined : await storage.getAssignedCustomerIds(userId);
+          const [userTaskCount, undocumentedAppts, openTasks, pendingRecords] = await Promise.all([
+            getOpenTaskCount(userId),
+            storage.getUndocumentedAppointments(today, customerIds).then(a => a.length),
+            timeTrackingStorage.getOpenTasks(userId).then(t => t.daysWithMissingBreaks?.length || 0),
+            storage.getPendingServiceRecords(userId).then(r => r.length),
+          ]);
+          return userTaskCount + undocumentedAppts + openTasks + pendingRecords;
+        } catch {
+          return 0;
+        }
+      })(),
+      (async () => {
+        try {
+          const cached = birthdaysCache.get(userId, isAdmin, 7);
+          if (cached) return cached.length;
+          let count = 0;
+          if (isAdmin) {
+            const [employees, customers] = await Promise.all([
+              storage.getActiveEmployeesWithBirthday(),
+              storage.getActiveCustomersWithBirthday(),
+            ]);
+            for (const emp of employees) {
+              if (emp.geburtsdatum && calculateDaysUntilBirthday(emp.geburtsdatum) <= 7) count++;
+            }
+            for (const cust of customers) {
+              if (cust.geburtsdatum && calculateDaysUntilBirthday(cust.geburtsdatum) <= 7) count++;
+            }
+          } else {
+            if (req.user!.geburtsdatum && calculateDaysUntilBirthday(req.user!.geburtsdatum) <= 7) count++;
+            const assignedIds = await storage.getAssignedCustomerIds(userId);
+            if (assignedIds.length > 0) {
+              const customers = await storage.getCustomersByIds(assignedIds);
+              for (const cust of customers) {
+                if (cust.geburtsdatum && calculateDaysUntilBirthday(cust.geburtsdatum) <= 7) count++;
+              }
+            }
+          }
+          return count;
+        } catch {
+          return 0;
+        }
+      })(),
+    ]);
+
     res.json({
       user: userWithoutPassword,
       availableServices: getAvailableServiceTypes(
         req.user.roles,
         req.user.isAdmin
       ),
+      badgeCount,
+      birthdayCount,
     });
   } catch (error) {
     handleRouteError(res, error, "Benutzerinformationen konnten nicht geladen werden");

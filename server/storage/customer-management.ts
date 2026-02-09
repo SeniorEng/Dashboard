@@ -33,16 +33,12 @@ import {
   users,
   customerAssignmentHistory,
 } from "@shared/schema";
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
 import { eq, and, isNull, isNotNull, desc, count, or, ilike, sql as sqlBuilder } from "drizzle-orm";
 import { customerIdsCache } from "../services/cache";
 import { customerPricingStorage } from "./customer-pricing";
 import { budgetLedgerStorage } from "./budget-ledger";
 import { todayISO } from "@shared/utils/datetime";
-
-const sql = neon(process.env.DATABASE_URL!);
-const db = drizzle(sql);
+import { db } from "../lib/db";
 
 export interface CustomerListFilters {
   search?: string;
