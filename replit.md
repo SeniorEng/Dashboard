@@ -39,6 +39,13 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Caching**: In-memory cache for assigned customer IDs with TTL and invalidation. Session cache (2min TTL) for auth validation. Birthday cache (1h TTL).
 - **Database Connection**: Single shared `neon()` + `drizzle()` instance in `server/lib/db.ts`. All storage/route/service files import from this central module.
 - **Performance**: Session cache eliminates 3 DB queries per request. Combined `/api/auth/me` returns badge + birthday counts to avoid 3 separate layout API calls. Logging middleware only records timing (no JSON body capture).
+- **Combined Endpoint Pattern**: Seiten, die mehrere unabhängige Daten brauchen, nutzen einen einzigen `/page-data` Endpoint, der intern `Promise.all` für parallele Queries verwendet (z.B. `/api/time-entries/page-data/:year/:month` kombiniert overview + vacation-summary + open-tasks). Reduziert HTTP-Roundtrips und vereinfacht Frontend-Code.
+- **Cache-Invalidierung**: Jeder Cache hat definierte Invalidierungspunkte:
+  - `customerIdsCache`: Invalidiert bei Kunden-CRUD, Admin-Zuweisungsänderungen, Termin-Erstellung mit `assignedEmployeeId`.
+  - `sessionCache`: Invalidiert bei Logout und Passwort-Änderung.
+  - `birthdayCache`: Invalidiert bei Kunden-CRUD.
+  - Neue Mutations müssen prüfen, ob bestehende Caches betroffen sind.
+- **Frontend staleTime-Strategie**: Stabile Daten (Kundenliste) nutzen 60s staleTime. Volatile Daten (Termine des Tages) nutzen kürzere Werte. `Infinity` für Session-Daten die sich selten ändern.
 
 ### Business Rules & Patterns
 - **Shared Domain Logic**: Single source of truth for business rules in `@shared/domain/*`.

@@ -212,11 +212,49 @@ This agent checks for performance issues that degrade user experience, especiall
    ```
    - Verify: Independent API calls are made in parallel, not sequentially
 
+5. **Multiple frontend API calls per page load**:
+   ```bash
+   # Find pages/components that make multiple useQuery calls
+   for f in $(find client/src/pages -name "*.tsx"); do
+     count=$(grep -c "useQuery\|useSuspenseQuery" "$f" 2>/dev/null)
+     if [ "$count" -gt 2 ]; then echo "$f: $count queries"; fi
+   done
+   ```
+   - If a page makes 3+ independent queries on mount, consider combining into a single `/page-data` endpoint
+   - Pattern: Backend endpoint uses `Promise.all` to parallelize queries, returns combined result
+   - Example: `/api/time-entries/page-data/:year/:month` combines overview + vacation-summary + open-tasks
+
+6. **Cache invalidation completeness**:
+   ```bash
+   # Find all cache instances and their invalidation calls
+   grep -rn "invalidate\|\.delete\|\.clear" server/ --include="*.ts" | grep -i "cache"
+   
+   # Find all mutation operations (create/update/delete) in storage
+   grep -rn "async create\|async update\|async delete\|db\.insert\|db\.update\|db\.delete" server/storage.ts
+   ```
+   - Cross-reference: Every mutation that changes cached data must invalidate the relevant cache
+   - Known caches and their invalidation triggers (see replit.md for full list):
+     - `customerIdsCache`: Customer CRUD, admin assignments, appointment creation with assignedEmployeeId
+     - `sessionCache`: Logout, password change
+     - `birthdayCache`: Customer CRUD
+   - New mutations must check if they affect any existing cache
+
+7. **Expensive subqueries replaceable by cache**:
+   ```bash
+   # Find UNION subqueries or complex WHERE IN subqueries in storage
+   grep -rn "union\|UNION\|subquery\|\.where.*inArray.*select" server/storage.ts --include="*.ts"
+   ```
+   - Complex subqueries (e.g., UNION to find all customer IDs across assignments + appointments) should be replaced with cached ID lists when called frequently
+   - Pattern: Cache the ID list with TTL, invalidate on relevant mutations
+
 ### Red Flags:
 - List endpoint returning 100+ items without pagination → FAIL
 - Same data fetched from multiple components without shared cache → WARN
 - Sequential API calls that could be parallel → WARN
 - Large response payloads (>50KB for list endpoints) → WARN
+- Page making 3+ separate API calls that could be one combined endpoint → WARN
+- Mutation operation that doesn't invalidate affected caches → FAIL
+- Complex subquery running on every request when result could be cached → WARN
 
 ---
 
