@@ -37,7 +37,6 @@ import {
 } from "lucide-react";
 
 const PFLEGEGRAD_OPTIONS = [
-  { value: "0", label: "Ohne Pflegegrad" },
   { value: "1", label: "Pflegegrad 1" },
   { value: "2", label: "Pflegegrad 2" },
   { value: "3", label: "Pflegegrad 3" },
