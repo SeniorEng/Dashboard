@@ -1,10 +1,17 @@
 import { Router, Request, Response } from "express";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requireAdmin } from "../middleware/auth";
 import { handleRouteError } from "../lib/errors";
 import { timeTrackingStorage } from "../storage/time-tracking";
-import { insertTimeEntrySchema, updateTimeEntrySchema } from "@shared/schema";
+import { insertTimeEntrySchema, updateTimeEntrySchema, closeMonthSchema, reopenMonthSchema, employeeMonthClosings } from "@shared/schema";
 import { storage } from "../storage";
 import { timeToMinutes, isWeekend } from "@shared/utils/datetime";
+import { neon } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-http";
+import { eq, and } from "drizzle-orm";
+import { generateAutoBreaksForMonth, insertAutoBreaks, previewAutoBreaksForMonth, removeAutoBreaksForMonth } from "../services/auto-breaks";
+
+const sqlClient = neon(process.env.DATABASE_URL!);
+const db = drizzle(sqlClient);
 
 const entryTypeLabels: Record<string, string> = {
   urlaub: "Urlaub",
@@ -355,6 +362,39 @@ function isEntryLocked(entry: { entryType: string; entryDate: string }): boolean
   return lockedTypes.includes(entry.entryType) && isDateInPast(entry.entryDate);
 }
 
+async function isMonthClosed(userId: number, dateStr: string): Promise<boolean> {
+  const [yearStr, monthStr] = dateStr.split("-");
+  const year = parseInt(yearStr);
+  const month = parseInt(monthStr);
+  const closing = await db
+    .select()
+    .from(employeeMonthClosings)
+    .where(
+      and(
+        eq(employeeMonthClosings.userId, userId),
+        eq(employeeMonthClosings.year, year),
+        eq(employeeMonthClosings.month, month)
+      )
+    )
+    .limit(1);
+  return closing.length > 0 && !closing[0].reopenedAt;
+}
+
+async function getMonthClosing(userId: number, year: number, month: number) {
+  const rows = await db
+    .select()
+    .from(employeeMonthClosings)
+    .where(
+      and(
+        eq(employeeMonthClosings.userId, userId),
+        eq(employeeMonthClosings.year, year),
+        eq(employeeMonthClosings.month, month)
+      )
+    )
+    .limit(1);
+  return rows[0] || null;
+}
+
 /**
  * POST /time-entries
  * Create a new time entry (or multiple for date ranges)
@@ -396,6 +436,17 @@ router.post("/", async (req: Request, res: Response) => {
         return res.status(400).json({ error: "Der gewählte Zeitraum enthält nur Wochenendtage. Bitte wählen Sie einen Zeitraum mit Werktagen." });
       }
       
+      // Check month closing for all dates in range
+      if (!req.user!.isAdmin) {
+        for (const dateStr of weekdayDates) {
+          if (await isMonthClosed(userId, dateStr)) {
+            return res.status(403).json({ 
+              error: `Der Monat für ${dateStr.split('-').reverse().join('.')} ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen.` 
+            });
+          }
+        }
+      }
+      
       // Check conflicts for all weekdays first
       for (const dateStr of weekdayDates) {
         const conflict = await checkTimeConflicts(
@@ -427,6 +478,11 @@ router.post("/", async (req: Request, res: Response) => {
         ...entries[0],
         _multiDay: { count: entries.length, message: `${entries.length} Einträge erstellt` }
       });
+    }
+    
+    // Check month closing for single day
+    if (!req.user!.isAdmin && await isMonthClosed(userId, validatedData.entryDate)) {
+      return res.status(403).json({ error: "Dieser Monat ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen." });
     }
     
     // Single day entry - block weekends
@@ -477,6 +533,11 @@ router.put("/:id", async (req: Request, res: Response) => {
       return res.status(403).json({ 
         error: "Vergangene Urlaubs- oder Krankheitstage können nicht mehr geändert werden" 
       });
+    }
+    
+    // Month closing lock
+    if (!req.user!.isAdmin && await isMonthClosed(existing.userId, existing.entryDate)) {
+      return res.status(403).json({ error: "Dieser Monat ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen." });
     }
     
     const validatedData = updateTimeEntrySchema.parse(req.body);
@@ -539,10 +600,129 @@ router.delete("/:id", async (req: Request, res: Response) => {
       });
     }
     
+    // Month closing lock
+    if (!req.user!.isAdmin && await isMonthClosed(existing.userId, existing.entryDate)) {
+      return res.status(403).json({ error: "Dieser Monat ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen." });
+    }
+    
     await timeTrackingStorage.deleteTimeEntry(entryId);
     res.status(204).send();
   } catch (error) {
     handleRouteError(res, error, "Zeiteintrag konnte nicht gelöscht werden");
+  }
+});
+
+// ============================================
+// MONTH CLOSING ENDPOINTS
+// ============================================
+
+router.get("/month-closing/:year/:month", async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const year = parseInt(req.params.year);
+    const month = parseInt(req.params.month);
+
+    if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Ungültiges Jahr oder Monat" });
+    }
+
+    const closing = await getMonthClosing(userId, year, month);
+    res.json({ closing: closing || null });
+  } catch (error) {
+    handleRouteError(res, error, "Monatsabschluss konnte nicht geladen werden");
+  }
+});
+
+router.get("/month-closing/:year/:month/preview", async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const year = parseInt(req.params.year);
+    const month = parseInt(req.params.month);
+
+    if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Ungültiges Jahr oder Monat" });
+    }
+
+    const autoBreaks = await previewAutoBreaksForMonth(userId, year, month);
+    res.json({ autoBreaks });
+  } catch (error) {
+    handleRouteError(res, error, "Vorschau konnte nicht erstellt werden");
+  }
+});
+
+router.post("/close-month", async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const parsed = closeMonthSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Ungültige Eingabe" });
+    }
+
+    const { year, month } = parsed.data;
+
+    const existing = await getMonthClosing(userId, year, month);
+    if (existing && !existing.reopenedAt) {
+      return res.status(400).json({ error: "Dieser Monat ist bereits abgeschlossen." });
+    }
+
+    const autoBreaks = await generateAutoBreaksForMonth(userId, year, month);
+    const insertedCount = await insertAutoBreaks(userId, autoBreaks);
+
+    if (existing && existing.reopenedAt) {
+      await db
+        .update(employeeMonthClosings)
+        .set({
+          closedAt: new Date(),
+          closedByUserId: userId,
+          reopenedAt: null,
+          reopenedByUserId: null,
+        })
+        .where(eq(employeeMonthClosings.id, existing.id));
+    } else {
+      await db.insert(employeeMonthClosings).values({
+        userId,
+        year,
+        month,
+        closedByUserId: userId,
+      });
+    }
+
+    res.json({
+      message: `Monat ${month}/${year} abgeschlossen`,
+      autoBreaksInserted: insertedCount,
+    });
+  } catch (error) {
+    handleRouteError(res, error, "Monatsabschluss fehlgeschlagen");
+  }
+});
+
+router.post("/reopen-month", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const parsed = reopenMonthSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Ungültige Eingabe: year, month und userId erforderlich" });
+    }
+
+    const { year, month, userId: targetUserId } = parsed.data;
+
+    const existing = await getMonthClosing(targetUserId, year, month);
+    if (!existing || existing.reopenedAt) {
+      return res.status(400).json({ error: "Dieser Monat ist nicht abgeschlossen." });
+    }
+
+    await db
+      .update(employeeMonthClosings)
+      .set({
+        reopenedAt: new Date(),
+        reopenedByUserId: req.user!.id,
+      })
+      .where(eq(employeeMonthClosings.id, existing.id));
+
+    await removeAutoBreaksForMonth(targetUserId, year, month);
+
+    res.json({ message: `Monat ${month}/${year} wieder geöffnet` });
+  } catch (error) {
+    handleRouteError(res, error, "Monat konnte nicht wieder geöffnet werden");
   }
 });
 

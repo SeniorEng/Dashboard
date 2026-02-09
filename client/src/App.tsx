@@ -29,6 +29,7 @@ const AdminCustomerDetail = lazy(() => import("@/pages/admin/customer-detail"));
 const AdminCustomerNew = lazy(() => import("@/pages/admin/customer-new"));
 const AdminCustomerEdit = lazy(() => import("@/pages/admin/customer-edit"));
 const AdminTimeEntries = lazy(() => import("@/pages/admin/time-entries"));
+const AdminSettings = lazy(() => import("@/pages/admin/settings"));
 const UndocumentedAppointments = lazy(() => import("@/pages/undocumented-appointments"));
 const CustomerDetail = lazy(() => import("@/pages/customer-detail"));
 const TasksPage = lazy(() => import("@/pages/tasks"));
@@ -160,6 +161,9 @@ function Router() {
       </Route>
       <Route path="/admin/time-entries">
         <AdminRoute component={AdminTimeEntries} />
+      </Route>
+      <Route path="/admin/settings">
+        <AdminRoute component={AdminSettings} />
       </Route>
       <Route component={NotFound} />
     </Switch>

@@ -9,6 +9,7 @@ import budgetRouter from "./budget";
 import tasksRouter from "./tasks";
 import serviceRecordsRouter from "./service-records";
 import { searchRouter } from "./search";
+import settingsRouter from "./settings";
 import { csrfProtection, csrfTokenHandler } from "../middleware/csrf";
 
 const router = Router();
@@ -29,5 +30,6 @@ router.use("/budget", budgetRouter);
 router.use("/tasks", tasksRouter);
 router.use("/service-records", serviceRecordsRouter);
 router.use("/search", searchRouter);
+router.use("/settings", settingsRouter);
 
 export default router;

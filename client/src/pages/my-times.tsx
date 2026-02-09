@@ -18,6 +18,7 @@ import {
   TimeOverviewSummary,
   CalendarGrid,
   DayDetailPanel,
+  MonthClosingSection,
   type DayTimeEntry,
 } from "@/features/time-tracking";
 import type { TimeEntryType } from "@/lib/api/types";
@@ -253,6 +254,8 @@ export default function MyTimes() {
             selectedMonth={selectedMonth}
             selectedYear={selectedYear}
           />
+
+          <MonthClosingSection year={selectedYear} month={selectedMonth} />
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <CalendarGrid
