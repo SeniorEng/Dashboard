@@ -15,7 +15,8 @@ import {
   Check,
 } from "lucide-react";
 import { iconSize } from "@/design-system";
-import { CustomerFormData, STEPS, DEFAULT_BUDGETS, UMWANDLUNG_45A_BY_PFLEGEGRAD } from "./components/customer-types";
+import { CustomerFormData, STEPS, DEFAULT_BUDGETS } from "./components/customer-types";
+import { BUDGET_45A_MAX_BY_PFLEGEGRAD } from "@shared/domain/budgets";
 import { PersonalDataStep } from "./components/personal-data-step";
 import { InsuranceStep } from "./components/insurance-step";
 import { ContactsStep } from "./components/contacts-step";
@@ -201,8 +202,8 @@ export default function AdminCustomerNew() {
       const newData = { ...prev, [field]: value };
       if (field === "pflegegrad") {
         const pg = parseInt(value as string);
-        const amounts = UMWANDLUNG_45A_BY_PFLEGEGRAD[pg] || { umwandlung45a: 0 };
-        newData.pflegesachleistungen36 = amounts.umwandlung45a.toString();
+        const maxCents = BUDGET_45A_MAX_BY_PFLEGEGRAD[pg] ?? 0;
+        newData.pflegesachleistungen36 = (maxCents / 100).toString();
       }
       return newData;
     });
@@ -291,6 +292,7 @@ export default function AdminCustomerNew() {
           <BudgetsStep
             formData={formData}
             onChange={handleChange}
+            pflegegrad={formData.pflegegrad ? parseInt(formData.pflegegrad) : null}
           />
         );
       case 4:

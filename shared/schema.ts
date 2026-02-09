@@ -4,6 +4,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 import { isValidPhoneNumber, parsePhoneNumber } from "libphonenumber-js";
+import { BUDGET_45B_MAX_MONTHLY_CENTS, BUDGET_39_42A_MAX_YEARLY_CENTS } from "./domain/budgets";
 
 const timestamp = (name: string) => pgTimestamp(name, { withTimezone: true });
 
@@ -384,15 +385,16 @@ export const customerBudgets = pgTable("customer_budgets", {
 ]);
 
 // ============================================
-// BUDGET LEDGER SYSTEM (§45b Entlastungsbetrag)
+// BUDGET LEDGER SYSTEM (§45b, §45a, §39/§42a)
 // ============================================
 
 // Budget allocation sources
 export const BUDGET_ALLOCATION_SOURCES = [
-  "monthly",           // Regular monthly allocation (131€)
+  "monthly_auto",      // Regular monthly auto-allocation
   "carryover",         // Carryover from previous year (expires June 30)
   "initial_balance",   // Initial balance when customer joins
   "manual_adjustment", // Manual correction/adjustment
+  "yearly_auto",       // Yearly auto-allocation (for §39/§42a)
 ] as const;
 
 export type BudgetAllocationSource = typeof BUDGET_ALLOCATION_SOURCES[number];
@@ -415,7 +417,7 @@ export const budgetAllocations = pgTable("budget_allocations", {
   index("budget_allocations_customer_idx").on(table.customerId),
   index("budget_allocations_customer_year_idx").on(table.customerId, table.year),
   index("budget_allocations_expires_idx").on(table.expiresAt),
-  uniqueIndex("budget_allocations_auto_unique_idx").on(table.customerId, table.year, table.month, table.source),
+  uniqueIndex("budget_allocations_auto_unique_idx").on(table.customerId, table.budgetType, table.year, table.month, table.source),
 ]);
 
 // Budget transaction types
@@ -858,9 +860,9 @@ export type InsertCustomerPricing = z.infer<typeof insertCustomerPricingSchema>;
 // Budget schemas
 export const insertCustomerBudgetSchema = z.object({
   customerId: z.number(),
-  entlastungsbetrag45b: z.number().min(0).default(0), // In cents
-  verhinderungspflege39: z.number().min(0).default(0), // In cents
-  pflegesachleistungen36: z.number().min(0).default(0), // In cents
+  entlastungsbetrag45b: z.number().min(0).max(BUDGET_45B_MAX_MONTHLY_CENTS).default(0),
+  verhinderungspflege39: z.number().min(0).max(BUDGET_39_42A_MAX_YEARLY_CENTS).default(0),
+  pflegesachleistungen36: z.number().min(0).default(0), // Max depends on Pflegegrad, validated in route
   validFrom: z.string(),
   validTo: z.string().optional().nullable(),
   notes: z.string().max(500).optional().nullable(),

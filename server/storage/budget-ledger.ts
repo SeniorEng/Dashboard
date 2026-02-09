@@ -34,6 +34,28 @@ export interface BudgetSummary {
   currentMonthUsedCents: number;
 }
 
+export interface Budget45aSummary {
+  customerId: number;
+  monthlyBudgetCents: number;
+  currentMonthAllocatedCents: number;
+  currentMonthUsedCents: number;
+  currentMonthAvailableCents: number;
+}
+
+export interface Budget39_42aSummary {
+  customerId: number;
+  yearlyBudgetCents: number;
+  currentYearAllocatedCents: number;
+  currentYearUsedCents: number;
+  currentYearAvailableCents: number;
+}
+
+export interface AllBudgetSummaries {
+  entlastungsbetrag45b: BudgetSummary;
+  umwandlung45a: Budget45aSummary;
+  ersatzpflege39_42a: Budget39_42aSummary;
+}
+
 export interface BudgetLedgerStorage {
   createBudgetAllocation(allocation: InsertBudgetAllocation, userId?: number): Promise<BudgetAllocation>;
   getBudgetAllocations(customerId: number, year?: number): Promise<BudgetAllocation[]>;
@@ -79,6 +101,12 @@ export interface BudgetLedgerStorage {
   }): Promise<BudgetTransaction>;
   
   getCustomerBudgetAmounts(customerId: number): Promise<{ pflegesachleistungen36: number; verhinderungspflege39: number }>;
+  
+  ensureAllocations45a(customerId: number): Promise<BudgetAllocation[]>;
+  ensureAllocations39_42a(customerId: number): Promise<BudgetAllocation[]>;
+  getBudgetSummary45a(customerId: number): Promise<Budget45aSummary>;
+  getBudgetSummary39_42a(customerId: number): Promise<Budget39_42aSummary>;
+  getAllBudgetSummaries(customerId: number): Promise<AllBudgetSummaries>;
 }
 
 export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
@@ -451,6 +479,246 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     }
     return { pflegesachleistungen36: 0, verhinderungspflege39: 0 };
   }
+
+  async ensureAllocations45a(customerId: number): Promise<BudgetAllocation[]> {
+    const preferences = await this.getBudgetPreferences(customerId);
+    if (!preferences?.budgetStartDate) {
+      return [];
+    }
+
+    const amounts = await this.getCustomerBudgetAmounts(customerId);
+    if (!amounts.pflegesachleistungen36 || amounts.pflegesachleistungen36 === 0) {
+      return [];
+    }
+
+    const monthlyAmount = amounts.pflegesachleistungen36;
+    const startDate = new Date(preferences.budgetStartDate + "T00:00:00");
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+
+    const existingAllocations = await db.select()
+      .from(budgetAllocations)
+      .where(and(
+        eq(budgetAllocations.customerId, customerId),
+        eq(budgetAllocations.budgetType, "umwandlung_45a"),
+        eq(budgetAllocations.source, "monthly_auto")
+      ));
+
+    const existingSet = new Set(
+      existingAllocations.map(a => `${a.year}-${a.month}`)
+    );
+
+    const created: BudgetAllocation[] = [];
+
+    let year = startDate.getFullYear();
+    let month = startDate.getMonth() + 1;
+
+    while (year < currentYear || (year === currentYear && month <= currentMonth)) {
+      const key = `${year}-${month}`;
+
+      if (!existingSet.has(key)) {
+        const validFrom = `${year}-${String(month).padStart(2, '0')}-01`;
+        const expires = lastDayOfMonth(year, month);
+        const result = await db.insert(budgetAllocations).values({
+          customerId,
+          budgetType: "umwandlung_45a",
+          year,
+          month,
+          amountCents: monthlyAmount,
+          source: "monthly_auto",
+          validFrom,
+          expiresAt: expires,
+          notes: `Automatische Zuweisung §45a ${String(month).padStart(2, '0')}/${year}`,
+        }).onConflictDoNothing().returning();
+        if (result[0]) {
+          created.push(result[0]);
+        }
+      }
+
+      month++;
+      if (month > 12) {
+        month = 1;
+        year++;
+      }
+    }
+
+    return created;
+  }
+
+  async ensureAllocations39_42a(customerId: number): Promise<BudgetAllocation[]> {
+    const preferences = await this.getBudgetPreferences(customerId);
+    if (!preferences?.budgetStartDate) {
+      return [];
+    }
+
+    const amounts = await this.getCustomerBudgetAmounts(customerId);
+    if (!amounts.verhinderungspflege39 || amounts.verhinderungspflege39 === 0) {
+      return [];
+    }
+
+    const yearlyAmount = amounts.verhinderungspflege39;
+    const startDate = new Date(preferences.budgetStartDate + "T00:00:00");
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const startYear = startDate.getFullYear();
+
+    const existingAllocations = await db.select()
+      .from(budgetAllocations)
+      .where(and(
+        eq(budgetAllocations.customerId, customerId),
+        eq(budgetAllocations.budgetType, "ersatzpflege_39_42a"),
+        eq(budgetAllocations.source, "yearly_auto")
+      ));
+
+    const existingYears = new Set(
+      existingAllocations.map(a => a.year)
+    );
+
+    const created: BudgetAllocation[] = [];
+
+    for (let year = startYear; year <= currentYear; year++) {
+      if (existingYears.has(year)) {
+        continue;
+      }
+
+      const validFrom = (year === startYear)
+        ? preferences.budgetStartDate
+        : `${year}-01-01`;
+      const expiresAt = `${year}-12-31`;
+
+      const result = await db.insert(budgetAllocations).values({
+        customerId,
+        budgetType: "ersatzpflege_39_42a",
+        year,
+        month: null,
+        amountCents: yearlyAmount,
+        source: "yearly_auto",
+        validFrom,
+        expiresAt,
+        notes: `Automatische Zuweisung §39/§42a ${year}`,
+      }).onConflictDoNothing().returning();
+      if (result[0]) {
+        created.push(result[0]);
+      }
+    }
+
+    return created;
+  }
+
+  async getBudgetSummary45a(customerId: number): Promise<Budget45aSummary> {
+    await this.ensureAllocations45a(customerId);
+
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+    const today = todayISO();
+
+    const allocations = await db.select()
+      .from(budgetAllocations)
+      .where(and(
+        eq(budgetAllocations.customerId, customerId),
+        eq(budgetAllocations.budgetType, "umwandlung_45a"),
+        eq(budgetAllocations.year, currentYear),
+        eq(budgetAllocations.month, currentMonth),
+        lte(budgetAllocations.validFrom, today),
+        or(
+          isNull(budgetAllocations.expiresAt),
+          gte(budgetAllocations.expiresAt, today)
+        )
+      ));
+
+    const currentMonthAllocatedCents = allocations.reduce((sum, a) => sum + a.amountCents, 0);
+
+    const currentMonthStart = `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`;
+    const nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
+    const nextMonthYear = currentMonth === 12 ? currentYear + 1 : currentYear;
+    const currentMonthEnd = `${nextMonthYear}-${String(nextMonth).padStart(2, '0')}-01`;
+
+    const transactions = await db.select()
+      .from(budgetTransactions)
+      .where(and(
+        eq(budgetTransactions.customerId, customerId),
+        eq(budgetTransactions.budgetType, "umwandlung_45a"),
+        eq(budgetTransactions.transactionType, "consumption"),
+        gte(budgetTransactions.transactionDate, currentMonthStart),
+        lte(budgetTransactions.transactionDate, lastDayOfMonth(currentYear, currentMonth))
+      ));
+
+    const currentMonthUsedCents = transactions.reduce((sum, t) => sum + Math.abs(t.amountCents), 0);
+
+    const amounts = await this.getCustomerBudgetAmounts(customerId);
+
+    return {
+      customerId,
+      monthlyBudgetCents: amounts.pflegesachleistungen36,
+      currentMonthAllocatedCents,
+      currentMonthUsedCents,
+      currentMonthAvailableCents: currentMonthAllocatedCents - currentMonthUsedCents,
+    };
+  }
+
+  async getBudgetSummary39_42a(customerId: number): Promise<Budget39_42aSummary> {
+    await this.ensureAllocations39_42a(customerId);
+
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const today = todayISO();
+
+    const allocations = await db.select()
+      .from(budgetAllocations)
+      .where(and(
+        eq(budgetAllocations.customerId, customerId),
+        eq(budgetAllocations.budgetType, "ersatzpflege_39_42a"),
+        eq(budgetAllocations.year, currentYear),
+        lte(budgetAllocations.validFrom, today),
+        or(
+          isNull(budgetAllocations.expiresAt),
+          gte(budgetAllocations.expiresAt, today)
+        )
+      ));
+
+    const currentYearAllocatedCents = allocations.reduce((sum, a) => sum + a.amountCents, 0);
+
+    const yearStart = `${currentYear}-01-01`;
+    const yearEnd = `${currentYear}-12-31`;
+
+    const transactions = await db.select()
+      .from(budgetTransactions)
+      .where(and(
+        eq(budgetTransactions.customerId, customerId),
+        eq(budgetTransactions.budgetType, "ersatzpflege_39_42a"),
+        eq(budgetTransactions.transactionType, "consumption"),
+        gte(budgetTransactions.transactionDate, yearStart),
+        lte(budgetTransactions.transactionDate, yearEnd)
+      ));
+
+    const currentYearUsedCents = transactions.reduce((sum, t) => sum + Math.abs(t.amountCents), 0);
+
+    const amounts = await this.getCustomerBudgetAmounts(customerId);
+
+    return {
+      customerId,
+      yearlyBudgetCents: amounts.verhinderungspflege39,
+      currentYearAllocatedCents,
+      currentYearUsedCents,
+      currentYearAvailableCents: currentYearAllocatedCents - currentYearUsedCents,
+    };
+  }
+
+  async getAllBudgetSummaries(customerId: number): Promise<AllBudgetSummaries> {
+    const [entlastungsbetrag45b, umwandlung45a, ersatzpflege39_42a] = await Promise.all([
+      this.getBudgetSummary(customerId),
+      this.getBudgetSummary45a(customerId),
+      this.getBudgetSummary39_42a(customerId),
+    ]);
+    return { entlastungsbetrag45b, umwandlung45a, ersatzpflege39_42a };
+  }
+}
+
+function lastDayOfMonth(year: number, month: number): string {
+  const d = new Date(year, month, 0);
+  return `${year}-${String(month).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 export const budgetLedgerStorage = new DatabaseBudgetLedgerStorage();

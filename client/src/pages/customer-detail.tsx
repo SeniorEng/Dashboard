@@ -57,8 +57,20 @@ export default function CustomerDetailPage() {
       currentMonthUsedCents: number;
       monthlyLimitCents: number | null;
     };
-    umwandlung45a: { monthlyBudgetCents: number; label: string };
-    ersatzpflege39_42a: { yearlyBudgetCents: number; label: string };
+    umwandlung45a: { 
+      monthlyBudgetCents: number; 
+      currentMonthAllocatedCents: number;
+      currentMonthUsedCents: number;
+      currentMonthAvailableCents: number;
+      label: string;
+    };
+    ersatzpflege39_42a: { 
+      yearlyBudgetCents: number;
+      currentYearAllocatedCents: number;
+      currentYearUsedCents: number;
+      currentYearAvailableCents: number;
+      label: string;
+    };
   }>({
     queryKey: ["budget-overview", customerId],
     queryFn: async () => {
@@ -260,27 +272,55 @@ export default function CustomerDetailPage() {
                   );
                 })()}
 
-                {budgetOverview.umwandlung45a.monthlyBudgetCents > 0 && (
-                  <div data-testid="budget-45a">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">§45a Umwandlungsanspruch</span>
-                      <Badge variant="secondary" className="text-xs">
-                        {(budgetOverview.umwandlung45a.monthlyBudgetCents / 100).toFixed(2)} € / Monat
-                      </Badge>
+                {budgetOverview.umwandlung45a.monthlyBudgetCents > 0 && (() => {
+                  const b = budgetOverview.umwandlung45a;
+                  const usedPercent = b.currentMonthAllocatedCents > 0 ? Math.min(100, Math.round((b.currentMonthUsedCents / b.currentMonthAllocatedCents) * 100)) : 0;
+                  return (
+                    <div data-testid="budget-45a">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-medium">§45a Umwandlungsanspruch</span>
+                        <span className="text-sm text-muted-foreground">
+                          {(b.currentMonthAvailableCents / 100).toFixed(2)} € verfügbar
+                        </span>
+                      </div>
+                      <div className="w-full bg-muted rounded-full h-2 mb-1">
+                        <div
+                          className="bg-purple-500 rounded-full h-2 transition-all"
+                          style={{ width: `${usedPercent}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>{(b.currentMonthUsedCents / 100).toFixed(2)} € von {(b.currentMonthAllocatedCents / 100).toFixed(2)} € verbraucht</span>
+                        <span>nur aktueller Monat</span>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
-                {budgetOverview.ersatzpflege39_42a.yearlyBudgetCents > 0 && (
-                  <div data-testid="budget-39-42a">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">§39/§42a Gemeinsamer Jahresbetrag</span>
-                      <Badge variant="secondary" className="text-xs">
-                        {(budgetOverview.ersatzpflege39_42a.yearlyBudgetCents / 100).toFixed(2)} € / Jahr
-                      </Badge>
+                {budgetOverview.ersatzpflege39_42a.yearlyBudgetCents > 0 && (() => {
+                  const b = budgetOverview.ersatzpflege39_42a;
+                  const usedPercent = b.currentYearAllocatedCents > 0 ? Math.min(100, Math.round((b.currentYearUsedCents / b.currentYearAllocatedCents) * 100)) : 0;
+                  return (
+                    <div data-testid="budget-39-42a">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-medium">§39/§42a Gemeinsamer Jahresbetrag</span>
+                        <span className="text-sm text-muted-foreground">
+                          {(b.currentYearAvailableCents / 100).toFixed(2)} € verfügbar
+                        </span>
+                      </div>
+                      <div className="w-full bg-muted rounded-full h-2 mb-1">
+                        <div
+                          className="bg-blue-500 rounded-full h-2 transition-all"
+                          style={{ width: `${usedPercent}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>{(b.currentYearUsedCents / 100).toFixed(2)} € von {(b.currentYearAllocatedCents / 100).toFixed(2)} € verbraucht</span>
+                        <span>Jahresbudget</span>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             </CardContent>
           </Card>

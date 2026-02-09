@@ -75,10 +75,3 @@ export const DEFAULT_BUDGETS = {
   pflegesachleistungen36: 0,
 };
 
-export const UMWANDLUNG_45A_BY_PFLEGEGRAD: Record<number, { sachleistung36: number; umwandlung45a: number }> = {
-  1: { sachleistung36: 0, umwandlung45a: 0 },
-  2: { sachleistung36: 796, umwandlung45a: 318 },
-  3: { sachleistung36: 1497, umwandlung45a: 599 },
-  4: { sachleistung36: 1859, umwandlung45a: 744 },
-  5: { sachleistung36: 2299, umwandlung45a: 920 },
-};

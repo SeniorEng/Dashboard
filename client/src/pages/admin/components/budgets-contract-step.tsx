@@ -2,13 +2,33 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CustomerFormData, PERIOD_TYPES } from "./customer-types";
+import { 
+  BUDGET_45B_MAX_MONTHLY_CENTS, 
+  BUDGET_45A_MAX_BY_PFLEGEGRAD, 
+  BUDGET_39_42A_MAX_YEARLY_CENTS,
+  get45aMaxForPflegegrad 
+} from "@shared/domain/budgets";
 
 interface BudgetsStepProps {
   formData: CustomerFormData;
   onChange: (field: string, value: string | boolean) => void;
+  pflegegrad: number | null;
 }
 
-export function BudgetsStep({ formData, onChange }: BudgetsStepProps) {
+export function BudgetsStep({ formData, onChange, pflegegrad }: BudgetsStepProps) {
+  const entlastungsbetrag = parseFloat(formData.entlastungsbetrag45b) || 0;
+  const pflegesachleistungen = parseFloat(formData.pflegesachleistungen36) || 0;
+  const verhinderungspflege = parseFloat(formData.verhinderungspflege39) || 0;
+
+  const error45b = entlastungsbetrag > 131 ? `Maximal 131,00 €/Monat erlaubt` : null;
+  const max45a = get45aMaxForPflegegrad(pflegegrad) / 100;
+  const error45a = pflegegrad && pflegegrad < 2 && pflegesachleistungen > 0
+    ? "§45a ist erst ab Pflegegrad 2 verfügbar"
+    : pflegesachleistungen > max45a && max45a > 0
+    ? `Maximal ${max45a.toFixed(2)} €/Monat bei Pflegegrad ${pflegegrad}`
+    : null;
+  const error39 = verhinderungspflege > 3539 ? `Maximal 3.539,00 €/Jahr erlaubt` : null;
+
   return (
     <div className="space-y-6">
       <p className="text-sm text-gray-600">
@@ -28,6 +48,7 @@ export function BudgetsStep({ formData, onChange }: BudgetsStepProps) {
               data-testid="input-budget-45b"
             />
             <p className="text-xs text-gray-500">Standard: 131 €/Monat</p>
+            {error45b && <p className="text-xs text-red-600 font-medium">{error45b}</p>}
           </div>
         </div>
 
@@ -45,6 +66,10 @@ export function BudgetsStep({ formData, onChange }: BudgetsStepProps) {
             <p className="text-xs text-gray-500">
               Max. 40% der ungenutzten Sachleistungen (PG2: 318€, PG3: 599€, PG4: 744€, PG5: 920€)
             </p>
+            {error45a && <p className="text-xs text-red-600 font-medium">{error45a}</p>}
+            {(!pflegegrad || pflegegrad < 2) && (
+              <p className="text-xs text-amber-600">Erst ab Pflegegrad 2 verfügbar</p>
+            )}
           </div>
         </div>
 
@@ -60,6 +85,7 @@ export function BudgetsStep({ formData, onChange }: BudgetsStepProps) {
               data-testid="input-budget-39"
             />
             <p className="text-xs text-gray-500">Standard: 3.539 €/Jahr (Ersatzpflege + Kurzzeitpflege, ab 01.07.2025)</p>
+            {error39 && <p className="text-xs text-red-600 font-medium">{error39}</p>}
           </div>
         </div>
       </div>

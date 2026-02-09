@@ -9,6 +9,7 @@ import {
 } from "@shared/schema";
 import { z } from "zod";
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";
+import { BUDGET_TYPES } from "@shared/domain/budgets";
 
 const router = Router();
 
@@ -131,25 +132,28 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, async (req: Reques
 router.get("/:customerId/overview", checkCustomerAccess, async (req: Request, res: Response) => {
   try {
     const customerId = parseInt(req.params.customerId);
-    const [summary, budgetAmounts] = await Promise.all([
-      budgetLedgerStorage.getBudgetSummary(customerId),
-      budgetLedgerStorage.getCustomerBudgetAmounts(customerId),
-    ]);
+    const summaries = await budgetLedgerStorage.getAllBudgetSummaries(customerId);
 
     res.json({
       entlastungsbetrag45b: {
-        totalAllocatedCents: summary.totalAllocatedCents,
-        totalUsedCents: summary.totalUsedCents,
-        availableCents: summary.availableCents,
-        currentMonthUsedCents: summary.currentMonthUsedCents,
-        monthlyLimitCents: summary.monthlyLimitCents,
+        totalAllocatedCents: summaries.entlastungsbetrag45b.totalAllocatedCents,
+        totalUsedCents: summaries.entlastungsbetrag45b.totalUsedCents,
+        availableCents: summaries.entlastungsbetrag45b.availableCents,
+        currentMonthUsedCents: summaries.entlastungsbetrag45b.currentMonthUsedCents,
+        monthlyLimitCents: summaries.entlastungsbetrag45b.monthlyLimitCents,
       },
       umwandlung45a: {
-        monthlyBudgetCents: budgetAmounts.pflegesachleistungen36,
+        monthlyBudgetCents: summaries.umwandlung45a.monthlyBudgetCents,
+        currentMonthAllocatedCents: summaries.umwandlung45a.currentMonthAllocatedCents,
+        currentMonthUsedCents: summaries.umwandlung45a.currentMonthUsedCents,
+        currentMonthAvailableCents: summaries.umwandlung45a.currentMonthAvailableCents,
         label: "§45a Umwandlungsanspruch",
       },
       ersatzpflege39_42a: {
-        yearlyBudgetCents: budgetAmounts.verhinderungspflege39,
+        yearlyBudgetCents: summaries.ersatzpflege39_42a.yearlyBudgetCents,
+        currentYearAllocatedCents: summaries.ersatzpflege39_42a.currentYearAllocatedCents,
+        currentYearUsedCents: summaries.ersatzpflege39_42a.currentYearUsedCents,
+        currentYearAvailableCents: summaries.ersatzpflege39_42a.currentYearAvailableCents,
         label: "§39/§42a Gemeinsamer Jahresbetrag",
       },
     });
@@ -190,6 +194,7 @@ router.post("/:customerId/allocations", async (req: Request, res: Response) => {
 });
 
 const initialBudgetSchema = z.object({
+  budgetType: z.enum(BUDGET_TYPES).default("entlastungsbetrag_45b"),
   currentYearAmountCents: z.number().min(0),
   carryoverAmountCents: z.number().min(0).optional().default(0),
   budgetStartDate: z.string(),
@@ -216,30 +221,30 @@ router.post("/:customerId/initial-budget", async (req: Request, res: Response) =
       return;
     }
 
-    const { currentYearAmountCents, carryoverAmountCents, budgetStartDate } = result.data;
+    const { budgetType, currentYearAmountCents, carryoverAmountCents, budgetStartDate } = result.data;
     const userId = req.user?.id;
     const startDate = parseLocalDate(budgetStartDate);
     const year = startDate.getFullYear();
-    const carryoverYear = year + 1;
 
     const allocations: any[] = [];
 
     if (currentYearAmountCents > 0) {
+      const expiresAt = budgetType === "ersatzpflege_39_42a" ? `${year}-12-31` : null;
       const currentYearAllocation = await budgetLedgerStorage.createBudgetAllocation({
         customerId,
-        budgetType: "entlastungsbetrag_45b",
+        budgetType,
         year,
         month: null,
         amountCents: currentYearAmountCents,
         source: "initial_balance",
         validFrom: budgetStartDate,
-        expiresAt: null,
+        expiresAt,
         notes: `Startguthaben ${year}`,
       }, userId);
       allocations.push(currentYearAllocation);
     }
 
-    if (carryoverAmountCents > 0) {
+    if (carryoverAmountCents > 0 && budgetType === "entlastungsbetrag_45b") {
       const carryoverAllocation = await budgetLedgerStorage.createBudgetAllocation({
         customerId,
         budgetType: "entlastungsbetrag_45b",
@@ -248,7 +253,7 @@ router.post("/:customerId/initial-budget", async (req: Request, res: Response) =
         amountCents: carryoverAmountCents,
         source: "carryover",
         validFrom: budgetStartDate,
-        expiresAt: `${carryoverYear}-06-30`,
+        expiresAt: `${year + 1}-06-30`,
         notes: `Übertrag aus ${year - 1}`,
       }, userId);
       allocations.push(carryoverAllocation);
@@ -298,6 +303,7 @@ router.put("/:customerId/preferences", async (req: Request, res: Response) => {
 });
 
 const manualAdjustmentSchema = z.object({
+  budgetType: z.enum(BUDGET_TYPES).default("entlastungsbetrag_45b"),
   amountCents: z.number(),
   notes: z.string().min(1, "Begründung ist erforderlich").max(500),
 });
@@ -327,27 +333,30 @@ router.post("/:customerId/manual-adjustment", async (req: Request, res: Response
     const today = todayISO();
     const currentYear = new Date().getFullYear();
 
-    if (result.data.amountCents > 0) {
+    const { budgetType, amountCents, notes } = result.data;
+    
+    if (amountCents > 0) {
+      const expiresAt = budgetType === "ersatzpflege_39_42a" ? `${currentYear}-12-31` : null;
       const allocation = await budgetLedgerStorage.createBudgetAllocation({
         customerId,
-        budgetType: "entlastungsbetrag_45b",
+        budgetType,
         year: currentYear,
         month: null,
-        amountCents: result.data.amountCents,
+        amountCents,
         source: "manual_adjustment",
         validFrom: today,
-        expiresAt: null,
-        notes: result.data.notes,
+        expiresAt,
+        notes,
       }, userId);
       res.status(201).json({ type: "allocation", data: allocation });
     } else {
       const transaction = await budgetLedgerStorage.createBudgetTransaction({
         customerId,
-        budgetType: "entlastungsbetrag_45b",
+        budgetType,
         transactionDate: today,
         transactionType: "manual_adjustment",
-        amountCents: result.data.amountCents,
-        notes: result.data.notes,
+        amountCents,
+        notes,
       }, userId);
       res.status(201).json({ type: "transaction", data: transaction });
     }

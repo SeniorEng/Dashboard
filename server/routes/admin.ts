@@ -24,6 +24,7 @@ import { handleRouteError } from "../lib/errors";
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
 import { todayISO } from "@shared/utils/datetime";
+import { validate45aAmount } from "@shared/domain/budgets";
 
 const router = Router();
 
@@ -871,6 +872,18 @@ router.post("/customers/:id/budgets", async (req: Request, res: Response) => {
     }
     
     const validatedData = insertCustomerBudgetSchema.parse({ ...req.body, customerId });
+    
+    if (validatedData.pflegesachleistungen36 > 0) {
+      const customer = await storage.getCustomer(customerId);
+      if (customer) {
+        const error45a = validate45aAmount(validatedData.pflegesachleistungen36, customer.pflegegrad);
+        if (error45a) {
+          res.status(400).json({ error: "VALIDATION_ERROR", message: error45a });
+          return;
+        }
+      }
+    }
+    
     const budget = await customerManagementStorage.addCustomerBudget(validatedData, req.user!.id);
     res.status(201).json(budget);
   } catch (error: any) {
