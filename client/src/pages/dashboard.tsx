@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { Link, useSearch } from "wouter";
 import { Layout } from "@/components/layout";
 import { useAppointments, useWeekAppointmentCounts, AppointmentList } from "@/features/appointments";
@@ -6,7 +6,7 @@ import { TaskListSection } from "@/features/tasks";
 import { Button } from "@/components/ui/button";
 import { format, addDays, startOfWeek, addWeeks, subWeeks, isSameDay } from "date-fns";
 import { de } from "date-fns/locale";
-import { Plus, ChevronsLeft, ChevronsRight, AlertCircle, Coffee, Loader2, FileSignature } from "lucide-react";
+import { Plus, ChevronsLeft, ChevronsRight, AlertCircle, Coffee, Loader2, FileSignature, ChevronDown, ChevronUp } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { parseLocalDate, formatDateForDisplay } from "@shared/utils/datetime";
 import { iconSize } from "@/design-system";
@@ -56,6 +56,113 @@ function DayButton({ dayStr, day, index, isSelected, isDayToday, appointmentCoun
         </span>
       )}
     </button>
+  );
+}
+
+const OPEN_TASKS_STORAGE_KEY = "careconnect-open-tasks-collapsed";
+
+interface OpenTasksBannerProps {
+  undocumentedCount: number;
+  missingBreaksCount: number;
+  pendingServiceRecordsCount: number;
+  totalOpenTasks: number;
+  openTasks: {
+    daysWithMissingBreaks: Array<{ date: string }>;
+  } | undefined;
+}
+
+function OpenTasksBanner({ undocumentedCount, missingBreaksCount, pendingServiceRecordsCount, totalOpenTasks, openTasks }: OpenTasksBannerProps) {
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(OPEN_TASKS_STORAGE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem(OPEN_TASKS_STORAGE_KEY, String(next));
+      } catch {}
+      return next;
+    });
+  }, []);
+
+  return (
+    <div className="mb-3" data-testid="open-tasks-section">
+      <button
+        onClick={toggleCollapsed}
+        className="w-full flex items-center justify-between px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 hover:bg-amber-100 transition-colors"
+        data-testid="button-toggle-open-tasks"
+      >
+        <div className="flex items-center gap-2">
+          <AlertCircle className={`${iconSize.sm} shrink-0`} />
+          <span className="text-sm font-medium">
+            {totalOpenTasks} offene {totalOpenTasks === 1 ? "Aufgabe" : "Aufgaben"}
+          </span>
+        </div>
+        {collapsed ? (
+          <ChevronDown className={`${iconSize.sm} shrink-0`} />
+        ) : (
+          <ChevronUp className={`${iconSize.sm} shrink-0`} />
+        )}
+      </button>
+
+      {!collapsed && (
+        <div className="mt-2 space-y-2">
+          {undocumentedCount > 0 && (
+            <Link href="/undocumented">
+              <div
+                className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 hover:bg-amber-100 transition-colors cursor-pointer"
+                data-testid="banner-undocumented"
+              >
+                <AlertCircle className={`${iconSize.sm} shrink-0`} />
+                <span className="text-sm font-medium">
+                  {undocumentedCount} {undocumentedCount === 1 ? "offene Dokumentation" : "offene Dokumentationen"}
+                </span>
+              </div>
+            </Link>
+          )}
+
+          {missingBreaksCount > 0 && (
+            <Link href="/my-times">
+              <div
+                className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 hover:bg-blue-100 transition-colors cursor-pointer"
+                data-testid="banner-missing-breaks"
+              >
+                <Coffee className={`${iconSize.sm} shrink-0`} />
+                <div className="text-sm">
+                  <span className="font-medium">Fehlende Pausendokumentation: </span>
+                  <span>
+                    {openTasks?.daysWithMissingBreaks
+                      ?.slice(0, 5)
+                      .map(d => formatDateForDisplay(d.date, { day: "numeric", month: "numeric" }))
+                      .join(", ")}
+                    {missingBreaksCount > 5 && ` (+${missingBreaksCount - 5} weitere)`}
+                  </span>
+                </div>
+              </div>
+            </Link>
+          )}
+
+          {pendingServiceRecordsCount > 0 && (
+            <Link href="/service-records">
+              <div
+                className="flex items-center gap-2 px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg text-purple-800 hover:bg-purple-100 transition-colors cursor-pointer"
+                data-testid="banner-pending-service-records"
+              >
+                <FileSignature className={`${iconSize.sm} shrink-0`} />
+                <span className="text-sm font-medium">
+                  {pendingServiceRecordsCount} {pendingServiceRecordsCount === 1 ? "Leistungsnachweis" : "Leistungsnachweise"} zum Unterschreiben
+                </span>
+              </div>
+            </Link>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -160,61 +267,15 @@ export default function Dashboard() {
   return (
     <Layout>
       <div className="mb-6 animate-in slide-in-from-top-4 duration-500">
-        {/* Open Tasks Banner */}
+        {/* Open Tasks Banner - Collapsible */}
         {totalOpenTasks > 0 && (
-          <div className="mb-3 space-y-2" data-testid="open-tasks-section">
-            {/* Undocumented appointments */}
-            {undocumentedCount > 0 && (
-              <Link href="/undocumented">
-                <div 
-                  className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 hover:bg-amber-100 transition-colors cursor-pointer"
-                  data-testid="banner-undocumented"
-                >
-                  <AlertCircle className={`${iconSize.sm} shrink-0`} />
-                  <span className="text-sm font-medium">
-                    {undocumentedCount} {undocumentedCount === 1 ? "offene Dokumentation" : "offene Dokumentationen"}
-                  </span>
-                </div>
-              </Link>
-            )}
-            
-            {/* Missing breaks */}
-            {missingBreaksCount > 0 && (
-              <Link href="/my-times">
-                <div 
-                  className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 hover:bg-blue-100 transition-colors cursor-pointer"
-                  data-testid="banner-missing-breaks"
-                >
-                  <Coffee className={`${iconSize.sm} shrink-0`} />
-                  <div className="text-sm">
-                    <span className="font-medium">Fehlende Pausendokumentation: </span>
-                    <span>
-                      {openTasks?.daysWithMissingBreaks
-                        ?.slice(0, 5)
-                        .map(d => formatDateForDisplay(d.date, { day: "numeric", month: "numeric" }))
-                        .join(", ")}
-                      {missingBreaksCount > 5 && ` (+${missingBreaksCount - 5} weitere)`}
-                    </span>
-                  </div>
-                </div>
-              </Link>
-            )}
-
-            {/* Pending service records */}
-            {pendingServiceRecordsCount > 0 && (
-              <Link href="/service-records">
-                <div 
-                  className="flex items-center gap-2 px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg text-purple-800 hover:bg-purple-100 transition-colors cursor-pointer"
-                  data-testid="banner-pending-service-records"
-                >
-                  <FileSignature className={`${iconSize.sm} shrink-0`} />
-                  <span className="text-sm font-medium">
-                    {pendingServiceRecordsCount} {pendingServiceRecordsCount === 1 ? "Leistungsnachweis" : "Leistungsnachweise"} zum Unterschreiben
-                  </span>
-                </div>
-              </Link>
-            )}
-          </div>
+          <OpenTasksBanner
+            undocumentedCount={undocumentedCount}
+            missingBreaksCount={missingBreaksCount}
+            pendingServiceRecordsCount={pendingServiceRecordsCount}
+            totalOpenTasks={totalOpenTasks}
+            openTasks={openTasks}
+          />
         )}
 
         {/* Header with week toggle and new appointment button */}
