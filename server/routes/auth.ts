@@ -16,7 +16,7 @@ import {
   getAvailableServiceTypes,
 } from "../middleware/auth";
 import { handleRouteError } from "../lib/errors";
-import { generateCsrfToken, setCsrfCookie } from "../middleware/csrf";
+import { generateCsrfToken, setCsrfCookie, csrfProtection } from "../middleware/csrf";
 
 const router = Router();
 
@@ -168,6 +168,7 @@ router.post("/password-reset/confirm", async (req: Request, res: Response) => {
 
 router.post(
   "/change-password",
+  csrfProtection,
   requireAuth,
   async (req: Request, res: Response) => {
     try {

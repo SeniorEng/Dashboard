@@ -78,7 +78,7 @@ export function addDays(dateString: string, days: number): string {
  * @param dateStr - Datum als "YYYY-MM-DD" String
  * @param style - "short" für "04.12.2025", "long" für "4. Dezember 2025"
  */
-export function formatDateGerman(dateStr: string, style: "short" | "long" = "short"): string {
+function formatDateGerman(dateStr: string, style: "short" | "long" = "short"): string {
   const d = parseLocalDate(dateStr);
 
   if (style === "long") {
@@ -99,7 +99,7 @@ export function formatDateGerman(dateStr: string, style: "short" | "long" = "sho
  * Gibt den Wochentag zurück (Montag = 0, Sonntag = 6)
  * @param dateStr - Datum als "YYYY-MM-DD" String
  */
-export function getWeekdayIndex(dateStr: string): number {
+function getWeekdayIndex(dateStr: string): number {
   const d = parseLocalDate(dateStr);
   const jsDay = d.getDay();
   return jsDay === 0 ? 6 : jsDay - 1;
@@ -109,7 +109,7 @@ export function getWeekdayIndex(dateStr: string): number {
  * Gibt den deutschen Wochentagsnamen zurück
  * @param dateStr - Datum als "YYYY-MM-DD" String
  */
-export function getWeekdayName(dateStr: string, style: "short" | "long" = "short"): string {
+function getWeekdayName(dateStr: string, style: "short" | "long" = "short"): string {
   const shortNames = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
   const longNames = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
   const index = getWeekdayIndex(dateStr);
@@ -169,7 +169,7 @@ export function isPast(dateString: string): boolean {
  * Berechnet die Differenz in Tagen zwischen zwei Datumsstrings.
  * @returns Positive Zahl wenn date2 nach date1 liegt, negative wenn davor
  */
-export function daysBetween(date1: string, date2: string): number {
+function daysBetween(date1: string, date2: string): number {
   const d1 = parseLocalDate(date1);
   const d2 = parseLocalDate(date2);
   const diffTime = d2.getTime() - d1.getTime();
@@ -184,7 +184,7 @@ export function daysBetween(date1: string, date2: string): number {
  * Parst einen Zeit-String "HH:MM:SS" oder "HH:MM" zu ParsedTime
  * @param timeString - Zeit als "HH:MM" oder "HH:MM:SS"
  */
-export function parseLocalTime(timeString: string): ParsedTime {
+function parseLocalTime(timeString: string): ParsedTime {
   const parts = timeString.split(":").map(Number);
   return {
     hours: parts[0] || 0,
@@ -259,7 +259,7 @@ export function addMinutesToTimeHHMMSS(time: string, minutes: number): string {
  * Kombiniert Datum und Zeit zu einem Date-Objekt (lokale Zeit)
  * Nur für spezielle Berechnungen verwenden, NICHT für Anzeige oder Speicherung!
  */
-export function combineDateAndTime(dateString: string, timeString: string): Date {
+function combineDateAndTime(dateString: string, timeString: string): Date {
   const [year, month, day] = dateString.split("-").map(Number);
   const parsed = parseLocalTime(timeString);
   return new Date(year, month - 1, day, parsed.hours, parsed.minutes, parsed.seconds);
@@ -304,7 +304,7 @@ export function minutesToTimeDisplay(totalMinutes: number): string {
  * @param startTime - Startzeit als "HH:MM" oder "HH:MM:SS" String
  * @param endTime - Endzeit als "HH:MM" oder "HH:MM:SS" String
  */
-export function timeDifferenceMinutes(startTime: string, endTime: string): number {
+function timeDifferenceMinutes(startTime: string, endTime: string): number {
   return timeToMinutes(endTime) - timeToMinutes(startTime);
 }
 
@@ -314,7 +314,7 @@ export function timeDifferenceMinutes(startTime: string, endTime: string): numbe
  * @param startTime - Startzeit als String
  * @param endTime - Endzeit als String
  */
-export function isTimeBetween(
+function isTimeBetween(
   time: string,
   startTime: string,
   endTime: string

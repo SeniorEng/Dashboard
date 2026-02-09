@@ -25,8 +25,8 @@ import {
   UserFormData,
   ROLE_LABELS,
   AVAILABLE_ROLES,
-  formatPhoneDisplay,
-  validateGermanPhoneNumber,
+  formatPhoneForDisplay,
+  validateGermanPhone,
 } from "./user-types";
 
 export function UserForm({
@@ -44,7 +44,7 @@ export function UserForm({
   const [password, setPassword] = useState("");
   const [vorname, setVorname] = useState(user?.vorname ?? "");
   const [nachname, setNachname] = useState(user?.nachname ?? "");
-  const [telefon, setTelefon] = useState(user?.telefon ? formatPhoneDisplay(user.telefon) : "");
+  const [telefon, setTelefon] = useState(user?.telefon ? formatPhoneForDisplay(user.telefon) : "");
   const [telefonError, setTelefonError] = useState("");
   const [strasse, setStrasse] = useState(user?.strasse ?? "");
   const [hausnummer, setHausnummer] = useState(user?.hausnummer ?? "");
@@ -73,7 +73,7 @@ export function UserForm({
       setTelefonError("");
       return;
     }
-    const result = validateGermanPhoneNumber(telefon);
+    const result = validateGermanPhone(telefon);
     if (result.valid) {
       setTelefon(result.formatted);
       setTelefonError("");
@@ -87,7 +87,7 @@ export function UserForm({
     
     let normalizedTelefon: string | undefined = undefined;
     if (telefon.trim()) {
-      const result = validateGermanPhoneNumber(telefon);
+      const result = validateGermanPhone(telefon);
       if (!result.valid) {
         setTelefonError(result.error);
         return;

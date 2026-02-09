@@ -37,7 +37,7 @@ import {
   UserData,
   UserFormData,
   ROLE_LABELS,
-  formatPhoneDisplay,
+  formatPhoneForDisplay,
 } from "./components/user-types";
 import { UserForm } from "./components/user-form";
 import { CompensationSection } from "./components/compensation-section";
@@ -192,7 +192,7 @@ export default function AdminUsers() {
                               <span className="font-semibold text-gray-900">{user.displayName}</span>
                               <span className="text-gray-400">·</span>
                               <span className="text-sm text-gray-500">
-                                {user.telefon ? formatPhoneDisplay(user.telefon) : '–'}
+                                {user.telefon ? formatPhoneForDisplay(user.telefon) : '–'}
                               </span>
                             </div>
                           </div>

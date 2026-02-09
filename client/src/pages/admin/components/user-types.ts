@@ -68,41 +68,4 @@ export const AVAILABLE_ROLES = [
   "kinderbetreuung",
 ];
 
-export function formatPhoneDisplay(phone: string): string {
-  if (!phone) return '';
-  if (phone.startsWith('+49')) {
-    return '0' + phone.slice(3).replace(/(\d{3})(\d+)/, '$1 $2');
-  }
-  return phone;
-}
-
-export function validateGermanPhoneNumber(input: string): 
-  | { valid: true; normalized: string; formatted: string }
-  | { valid: false; error: string } {
-  if (!input || input.trim() === "") {
-    return { valid: false, error: "Telefonnummer ist erforderlich" };
-  }
-  
-  const cleaned = input.trim().replace(/\s+/g, '');
-  
-  const germanPattern = /^(\+49|0049|0)[1-9]\d{6,13}$/;
-  if (!germanPattern.test(cleaned)) {
-    return { valid: false, error: "Ungültige deutsche Telefonnummer" };
-  }
-  
-  let normalized: string;
-  if (cleaned.startsWith('+49')) {
-    normalized = cleaned;
-  } else if (cleaned.startsWith('0049')) {
-    normalized = '+49' + cleaned.slice(4);
-  } else if (cleaned.startsWith('0')) {
-    normalized = '+49' + cleaned.slice(1);
-  } else {
-    normalized = '+49' + cleaned;
-  }
-  
-  const nationalNumber = normalized.slice(3);
-  const formatted = '0' + nationalNumber.slice(0, 3) + ' ' + nationalNumber.slice(3);
-  
-  return { valid: true, normalized, formatted };
-}
+export { formatPhoneForDisplay, validateGermanPhone } from "@shared/utils/phone";

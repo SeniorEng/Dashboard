@@ -19,14 +19,15 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **API Calls**: All state-changing API requests must use the central API client (`client/src/lib/api/client.ts`) for CSRF protection.
 - **Phone Number Handling**: Uses `libphonenumber-js` for validating, formatting, and storing German phone numbers in E.164 format.
 - **Type Organization**: Hierarchical type structure with `@shared/schema.ts`, `@shared/domain/*`, `@shared/utils/*`, and `@shared/types.ts`.
-- **Date Validation**: Centralized date validator in `@shared/utils/date-validation.ts` provides ISO date validation, parsing, formatting, Zod schemas, and date comparison utilities.
+- **Phone Number Validation**: Single source of truth in `@shared/utils/phone.ts` using `libphonenumber-js`. All phone validation/formatting must use this utility — no local reimplementations.
+- **Admin Component Structure**: Large admin pages are split into sub-components under `client/src/pages/admin/components/` (e.g., `user-form.tsx`, `personal-data-step.tsx`, `customer-overview-tab.tsx`). Type definitions in `*-types.ts` files.
 
 ### Backend
 - **Framework**: Express.js with TypeScript.
 - **API Design**: RESTful endpoints, Zod validation, structured error responses, and modular routing.
 - **Business Logic**: Separated into a dedicated service layer with dependency injection.
 - **Error Handling**: Centralized error codes, German messages, and consistent error formatting.
-- **Security**: Role-based access control with SQL-level data filtering, CSRF protection, and database indexing.
+- **Security**: Role-based access control with SQL-level data filtering, CSRF protection (including on `/api/auth/change-password`), and database indexing.
 - **Sanfter Entzug (Soft Revocation)**: Two-tiered access model for employees (full vs. legacy access based on customer assignment).
 
 ### Data Storage

@@ -640,7 +640,7 @@ export const insertErstberatungCustomerSchema = z.object({
   nr: z.string().min(1, "Hausnummer ist erforderlich"),
   plz: z.string().regex(/^\d{5}$/, "PLZ muss 5 Ziffern haben"),
   stadt: z.string().min(1, "Stadt ist erforderlich"),
-  pflegegrad: z.number().min(1).max(5),
+  pflegegrad: z.number().min(0).max(5),
 });
 
 // Base appointment insert schema
@@ -799,8 +799,8 @@ export type InsertCustomerContact = z.infer<typeof insertCustomerContactSchema>;
 // Care Level History schemas
 export const insertCareLevelHistorySchema = z.object({
   customerId: z.number(),
-  pflegegrad: z.number().min(1).max(5),
-  pflegegradBeantragt: z.number().min(1).max(5).optional().nullable(),
+  pflegegrad: z.number().min(0).max(5),
+  pflegegradBeantragt: z.number().min(0).max(5).optional().nullable(),
   validFrom: z.string(), // Date string
   validTo: z.string().optional().nullable(),
   notes: z.string().max(500).optional().nullable(),
@@ -1005,9 +1005,9 @@ export const createFullCustomerSchema = z.object({
   
   // Needs assessment
   householdSize: z.number().min(1).default(1),
-  pflegegrad: z.number().min(1).max(5),
+  pflegegrad: z.number().min(0).max(5),
   pflegegradSeit: z.string().min(1, "Pflegegrad seit ist erforderlich"),
-  pflegegradBeantragt: z.number().min(1).max(5).optional().nullable(),
+  pflegegradBeantragt: z.number().min(0).max(5).optional().nullable(),
   pflegedienstBeauftragt: z.boolean().default(false),
   anamnese: z.string().max(2000).optional().nullable(),
   

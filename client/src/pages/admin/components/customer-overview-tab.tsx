@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { formatAddress } from "@shared/utils/format";
+import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { SectionCard } from "@/components/patterns/section-card";
 import { iconSize } from "@/design-system";
 import {
@@ -41,7 +42,7 @@ export function CustomerOverviewTab({ customer }: CustomerOverviewTabProps) {
             {(customer.telefon || customer.festnetz) && (
               <div className="flex items-center gap-2 text-gray-700">
                 <Phone className={`${iconSize.sm} text-gray-400`} />
-                {customer.telefon || customer.festnetz}
+                {customer.telefon ? formatPhoneForDisplay(customer.telefon) : customer.festnetz}
               </div>
             )}
             {customer.email && (
