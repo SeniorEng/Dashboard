@@ -2,16 +2,9 @@ import { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { SearchableSelect } from "@/components/ui/searchable-select";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Textarea } from "@/components/ui/textarea";
-import { DatePicker } from "@/components/ui/date-picker";
 import { Layout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
-import { useEmployees, useInsuranceProviders, useCreateInsuranceProvider, useCreateCustomer } from "@/features/customers";
+import { useEmployees, useInsuranceProviders, useCreateCustomer } from "@/features/customers";
 import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
 import { todayISO } from "@shared/utils/datetime";
 import {
@@ -19,71 +12,21 @@ import {
   Loader2,
   ChevronRight,
   ChevronLeft,
-  User2,
-  MapPin,
-  Phone,
-  Heart,
-  Users,
-  Wallet,
-  FileText,
   Check,
-  Plus,
-  X,
 } from "lucide-react";
-import { iconSize, getPflegegradColors, componentStyles } from "@/design-system";
-
-const STEPS = [
-  { id: "personal", title: "Persönliche Daten", icon: User2 },
-  { id: "insurance", title: "Pflegekasse", icon: Heart },
-  { id: "contacts", title: "Kontakte", icon: Users },
-  { id: "budgets", title: "Budgets", icon: Wallet },
-  { id: "contract", title: "Vertrag", icon: FileText },
-];
-
-const PFLEGEGRAD_OPTIONS = [
-  { value: "0", label: "Ohne Pflegegrad" },
-  { value: "1", label: "Pflegegrad 1" },
-  { value: "2", label: "Pflegegrad 2" },
-  { value: "3", label: "Pflegegrad 3" },
-  { value: "4", label: "Pflegegrad 4" },
-  { value: "5", label: "Pflegegrad 5" },
-];
-
-const CONTACT_TYPES = [
-  { value: "familie", label: "Familienmitglied" },
-  { value: "angehoerige", label: "Angehörige" },
-  { value: "nachbar", label: "Nachbar/in" },
-  { value: "hausarzt", label: "Hausarzt" },
-  { value: "betreuer", label: "Betreuer/in" },
-  { value: "sonstige", label: "Sonstige" },
-];
-
-const PERIOD_TYPES = [
-  { value: "weekly", label: "Pro Woche" },
-  { value: "monthly", label: "Pro Monat" },
-];
-
-const DEFAULT_BUDGETS = {
-  entlastungsbetrag45b: 125,
-  verhinderungspflege39: 1612,
-  pflegesachleistungen36: 0,
-};
-
-const BUDGET_AMOUNTS_BY_PFLEGEGRAD: Record<number, { pflegesachleistungen36: number }> = {
-  0: { pflegesachleistungen36: 0 },
-  1: { pflegesachleistungen36: 0 },
-  2: { pflegesachleistungen36: 761 },
-  3: { pflegesachleistungen36: 1432 },
-  4: { pflegesachleistungen36: 1778 },
-  5: { pflegesachleistungen36: 2200 },
-};
+import { iconSize } from "@/design-system";
+import { CustomerFormData, STEPS, DEFAULT_BUDGETS, BUDGET_AMOUNTS_BY_PFLEGEGRAD } from "./components/customer-types";
+import { PersonalDataStep } from "./components/personal-data-step";
+import { InsuranceStep } from "./components/insurance-step";
+import { ContactsStep } from "./components/contacts-step";
+import { BudgetsStep, ContractStep } from "./components/budgets-contract-step";
 
 export default function AdminCustomerNew() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const [currentStep, setCurrentStep] = useState(0);
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<CustomerFormData>({
     vorname: "",
     nachname: "",
     email: "",
@@ -109,7 +52,7 @@ export default function AdminCustomerNew() {
     verhinderungspflege39: DEFAULT_BUDGETS.verhinderungspflege39.toString(),
     pflegesachleistungen36: DEFAULT_BUDGETS.pflegesachleistungen36.toString(),
     contractHours: "10",
-    contractPeriod: "weekly" as "weekly" | "monthly",
+    contractPeriod: "weekly",
     hauswirtschaftRate: "38",
     alltagsbegleitungRate: "42",
     erstberatungRate: "",
@@ -119,7 +62,6 @@ export default function AdminCustomerNew() {
   const { data: insuranceProviders } = useInsuranceProviders();
   const { data: employees } = useEmployees();
   const createMutation = useCreateCustomer();
-  const createProviderMutation = useCreateInsuranceProvider();
 
   const employeeOptions = useMemo(() =>
     employees?.map((emp) => ({
@@ -138,84 +80,11 @@ export default function AdminCustomerNew() {
     [insuranceProviders]
   );
 
-  const [showNewProviderForm, setShowNewProviderForm] = useState(false);
   const [phoneErrors, setPhoneErrors] = useState<Record<string, string | null>>({});
-  const [newProvider, setNewProvider] = useState({
-    name: "",
-    ikNummer: "",
-    strasse: "",
-    hausnummer: "",
-    plz: "",
-    stadt: "",
-    telefon: "",
-    email: "",
-  });
-
-  const handleNewProviderChange = (field: string, value: string) => {
-    setNewProvider((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const handleCreateProvider = () => {
-    if (!newProvider.name.trim() || !newProvider.ikNummer.trim()) {
-      toast({
-        title: "Pflichtfelder ausfüllen",
-        description: "Name und IK-Nummer sind erforderlich.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!/^\d{9}$/.test(newProvider.ikNummer)) {
-      toast({
-        title: "Ungültige IK-Nummer",
-        description: "Die IK-Nummer muss genau 9 Ziffern enthalten.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    createProviderMutation.mutate(
-      {
-        name: newProvider.name.trim(),
-        ikNummer: newProvider.ikNummer.trim(),
-        strasse: newProvider.strasse.trim() || undefined,
-        hausnummer: newProvider.hausnummer.trim() || undefined,
-        plz: newProvider.plz.trim() || undefined,
-        stadt: newProvider.stadt.trim() || undefined,
-        telefon: newProvider.telefon.trim() || undefined,
-        email: newProvider.email.trim() || undefined,
-      },
-      {
-        onSuccess: (provider) => {
-          toast({ title: "Pflegekasse erfolgreich erstellt" });
-          setFormData((prev) => ({ ...prev, insuranceProviderId: provider.id.toString() }));
-          setShowNewProviderForm(false);
-          setNewProvider({
-            name: "",
-            ikNummer: "",
-            strasse: "",
-            hausnummer: "",
-            plz: "",
-            stadt: "",
-            telefon: "",
-            email: "",
-          });
-        },
-        onError: (error: Error) => {
-          toast({
-            title: "Fehler",
-            description: error.message,
-            variant: "destructive",
-          });
-        },
-      }
-    );
-  };
 
   const handleCreate = () => {
     const today = todayISO();
     
-    // Validate phone numbers before submission
     const phoneValidationErrors: string[] = [];
     if (formData.telefon.trim()) {
       const result = validateGermanPhone(formData.telefon);
@@ -239,7 +108,6 @@ export default function AdminCustomerNew() {
       return;
     }
     
-    // Build optional sections
     const insurance = formData.insuranceProviderId && formData.versichertennummer.trim() 
       ? {
           providerId: parseInt(formData.insuranceProviderId),
@@ -391,628 +259,47 @@ export default function AdminCustomerNew() {
     switch (currentStep) {
       case 0:
         return (
-          <div className="space-y-6">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="vorname">Vorname *</Label>
-                <Input
-                  id="vorname"
-                  value={formData.vorname}
-                  onChange={(e) => handleChange("vorname", e.target.value)}
-                  required
-                  data-testid="input-vorname"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="nachname">Nachname *</Label>
-                <Input
-                  id="nachname"
-                  value={formData.nachname}
-                  onChange={(e) => handleChange("nachname", e.target.value)}
-                  required
-                  data-testid="input-nachname"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="email">E-Mail</Label>
-              <Input
-                id="email"
-                type="email"
-                value={formData.email}
-                onChange={(e) => handleChange("email", e.target.value)}
-                data-testid="input-email"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="telefon">Mobiltelefon</Label>
-                <Input
-                  id="telefon"
-                  value={formData.telefon}
-                  onChange={(e) => handleChange("telefon", e.target.value)}
-                  placeholder="0170 1234567"
-                  className={phoneErrors.telefon ? "border-red-500" : ""}
-                  data-testid="input-telefon"
-                />
-                {phoneErrors.telefon && (
-                  <p className="text-xs text-red-500">{phoneErrors.telefon}</p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="festnetz">Festnetz</Label>
-                <Input
-                  id="festnetz"
-                  value={formData.festnetz}
-                  onChange={(e) => handleChange("festnetz", e.target.value)}
-                  placeholder="030 1234567"
-                  className={phoneErrors.festnetz ? "border-red-500" : ""}
-                  data-testid="input-festnetz"
-                />
-                {phoneErrors.festnetz && (
-                  <p className="text-xs text-red-500">{phoneErrors.festnetz}</p>
-                )}
-              </div>
-            </div>
-
-            <div className="border-t pt-4">
-              <h3 className="font-medium mb-4 flex items-center gap-2">
-                <MapPin className={iconSize.sm} />
-                Adresse
-              </h3>
-              <div className="space-y-4">
-                <div className="grid grid-cols-4 gap-4">
-                  <div className="col-span-3 space-y-2">
-                    <Label htmlFor="strasse">Straße *</Label>
-                    <Input
-                      id="strasse"
-                      value={formData.strasse}
-                      onChange={(e) => handleChange("strasse", e.target.value)}
-                      required
-                      data-testid="input-strasse"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="nr">Nr. *</Label>
-                    <Input
-                      id="nr"
-                      value={formData.nr}
-                      onChange={(e) => handleChange("nr", e.target.value)}
-                      required
-                      data-testid="input-nr"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="plz">PLZ *</Label>
-                    <Input
-                      id="plz"
-                      value={formData.plz}
-                      onChange={(e) => handleChange("plz", e.target.value)}
-                      maxLength={5}
-                      required
-                      data-testid="input-plz"
-                    />
-                  </div>
-                  <div className="col-span-2 space-y-2">
-                    <Label htmlFor="stadt">Stadt *</Label>
-                    <Input
-                      id="stadt"
-                      value={formData.stadt}
-                      onChange={(e) => handleChange("stadt", e.target.value)}
-                      required
-                      data-testid="input-stadt"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="border-t pt-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="pflegegrad">Pflegegrad</Label>
-                  <Select
-                    value={formData.pflegegrad}
-                    onValueChange={(value) => handleChange("pflegegrad", value)}
-                  >
-                    <SelectTrigger data-testid="select-pflegegrad">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PFLEGEGRAD_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Pflegegrad seit</Label>
-                  <DatePicker
-                    value={formData.pflegegradSeit || null}
-                    onChange={(val) => handleChange("pflegegradSeit", val || "")}
-                    data-testid="input-pflegegrad-seit"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="border-t pt-4">
-              <h3 className="font-medium mb-4">Zuständige Mitarbeiter</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="primaryEmployeeId">Hauptansprechpartner</Label>
-                  <SearchableSelect
-                    options={employeeOptions}
-                    value={formData.primaryEmployeeId}
-                    onValueChange={(value) => handleChange("primaryEmployeeId", value)}
-                    placeholder="Auswählen..."
-                    searchPlaceholder="Mitarbeiter suchen..."
-                    emptyText="Kein Mitarbeiter gefunden."
-                    data-testid="select-primary-employee"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="backupEmployeeId">Vertretung</Label>
-                  <SearchableSelect
-                    options={employeeOptions}
-                    value={formData.backupEmployeeId}
-                    onValueChange={(value) => handleChange("backupEmployeeId", value)}
-                    placeholder="Auswählen..."
-                    searchPlaceholder="Mitarbeiter suchen..."
-                    emptyText="Kein Mitarbeiter gefunden."
-                    data-testid="select-backup-employee"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
+          <PersonalDataStep
+            formData={formData}
+            phoneErrors={phoneErrors}
+            employeeOptions={employeeOptions}
+            onChange={handleChange}
+          />
         );
-
       case 1:
         return (
-          <div className="space-y-6">
-            {!showNewProviderForm ? (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="insuranceProviderId">Pflegekasse</Label>
-                  <div className="flex gap-2">
-                    <SearchableSelect
-                      options={insuranceOptions}
-                      value={formData.insuranceProviderId}
-                      onValueChange={(value) => handleChange("insuranceProviderId", value)}
-                      placeholder="Pflegekasse auswählen..."
-                      searchPlaceholder="Pflegekasse suchen..."
-                      emptyText="Keine Pflegekasse gefunden."
-                      className="flex-1"
-                      data-testid="select-insurance-provider"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setShowNewProviderForm(true)}
-                      data-testid="button-add-new-provider"
-                    >
-                      <Plus className={`${iconSize.sm} mr-1`} />
-                      Neu
-                    </Button>
-                  </div>
-                </div>
-
-                {formData.insuranceProviderId && (
-                  <div className="space-y-2">
-                    <Label htmlFor="versichertennummer">Versichertennummer *</Label>
-                    <Input
-                      id="versichertennummer"
-                      value={formData.versichertennummer}
-                      onChange={(e) => handleChange("versichertennummer", e.target.value.toUpperCase())}
-                      placeholder="A123456789"
-                      maxLength={10}
-                      required
-                      data-testid="input-versichertennummer"
-                    />
-                    <p className="text-xs text-gray-500">
-                      Format: Buchstabe + 9 Ziffern (z.B. A123456789)
-                    </p>
-                  </div>
-                )}
-
-                {!insuranceProviders?.length && !showNewProviderForm && (
-                  <div className="p-4 rounded-lg bg-amber-50 border border-amber-200">
-                    <p className="text-amber-800 text-sm">
-                      Es sind noch keine Pflegekassen im System hinterlegt.{" "}
-                      <button
-                        type="button"
-                        onClick={() => setShowNewProviderForm(true)}
-                        className="font-medium underline hover:text-amber-900"
-                        data-testid="link-add-first-provider"
-                      >
-                        Neue Pflegekasse hinzufügen
-                      </button>
-                    </p>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="p-4 rounded-lg border border-teal-200 bg-teal-50">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-medium text-teal-900">Neue Pflegekasse anlegen</h3>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowNewProviderForm(false)}
-                    data-testid="button-cancel-new-provider"
-                  >
-                    <X className={iconSize.sm} />
-                  </Button>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="col-span-2 space-y-2">
-                      <Label htmlFor="newProviderName">Name der Pflegekasse *</Label>
-                      <Input
-                        id="newProviderName"
-                        value={newProvider.name}
-                        onChange={(e) => handleNewProviderChange("name", e.target.value)}
-                        placeholder="z.B. AOK Bayern"
-                        data-testid="input-new-provider-name"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="newProviderIk">IK-Nummer *</Label>
-                      <Input
-                        id="newProviderIk"
-                        value={newProvider.ikNummer}
-                        onChange={(e) => handleNewProviderChange("ikNummer", e.target.value.replace(/\D/g, ""))}
-                        placeholder="123456789"
-                        maxLength={9}
-                        data-testid="input-new-provider-ik"
-                      />
-                      <p className="text-xs text-gray-500">9-stellige Institutionskennzeichen</p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="newProviderTelefon">Telefon</Label>
-                      <Input
-                        id="newProviderTelefon"
-                        value={newProvider.telefon}
-                        onChange={(e) => handleNewProviderChange("telefon", e.target.value)}
-                        placeholder="+49 89 1234567"
-                        data-testid="input-new-provider-telefon"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="newProviderEmail">E-Mail</Label>
-                    <Input
-                      id="newProviderEmail"
-                      type="email"
-                      value={newProvider.email}
-                      onChange={(e) => handleNewProviderChange("email", e.target.value)}
-                      placeholder="kontakt@pflegekasse.de"
-                      data-testid="input-new-provider-email"
-                    />
-                  </div>
-
-                  <div className="border-t border-teal-200 pt-4">
-                    <p className="text-xs text-gray-500 mb-2">Adresse (optional)</p>
-                    <div className="grid grid-cols-4 gap-4">
-                      <div className="col-span-3 space-y-2">
-                        <Label htmlFor="newProviderStrasse">Straße</Label>
-                        <Input
-                          id="newProviderStrasse"
-                          value={newProvider.strasse}
-                          onChange={(e) => handleNewProviderChange("strasse", e.target.value)}
-                          data-testid="input-new-provider-strasse"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="newProviderHausnummer">Nr.</Label>
-                        <Input
-                          id="newProviderHausnummer"
-                          value={newProvider.hausnummer}
-                          onChange={(e) => handleNewProviderChange("hausnummer", e.target.value)}
-                          data-testid="input-new-provider-hausnummer"
-                        />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4 mt-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="newProviderPlz">PLZ</Label>
-                        <Input
-                          id="newProviderPlz"
-                          value={newProvider.plz}
-                          onChange={(e) => handleNewProviderChange("plz", e.target.value)}
-                          maxLength={5}
-                          data-testid="input-new-provider-plz"
-                        />
-                      </div>
-                      <div className="col-span-2 space-y-2">
-                        <Label htmlFor="newProviderStadt">Stadt</Label>
-                        <Input
-                          id="newProviderStadt"
-                          value={newProvider.stadt}
-                          onChange={(e) => handleNewProviderChange("stadt", e.target.value)}
-                          data-testid="input-new-provider-stadt"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end gap-2 pt-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setShowNewProviderForm(false)}
-                      data-testid="button-cancel-provider-form"
-                    >
-                      Abbrechen
-                    </Button>
-                    <Button
-                      type="button"
-                      className="bg-teal-600 hover:bg-teal-700"
-                      onClick={handleCreateProvider}
-                      disabled={createProviderMutation.isPending}
-                      data-testid="button-save-new-provider"
-                    >
-                      {createProviderMutation.isPending ? (
-                        <>
-                          <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
-                          Speichern...
-                        </>
-                      ) : (
-                        <>
-                          <Check className={`${iconSize.sm} mr-2`} />
-                          Pflegekasse speichern
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+          <InsuranceStep
+            formData={formData}
+            insuranceOptions={insuranceOptions}
+            insuranceProvidersEmpty={!insuranceProviders?.length}
+            onChange={handleChange}
+            onInsuranceProviderCreated={(providerId) =>
+              setFormData((prev) => ({ ...prev, insuranceProviderId: providerId }))
+            }
+          />
         );
-
       case 2:
         return (
-          <div className="space-y-6">
-            <p className="text-sm text-gray-600">
-              Fügen Sie einen Notfallkontakt hinzu. Weitere Kontakte können Sie später ergänzen.
-            </p>
-
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="contactVorname">Vorname</Label>
-                  <Input
-                    id="contactVorname"
-                    value={formData.contactVorname}
-                    onChange={(e) => handleChange("contactVorname", e.target.value)}
-                    data-testid="input-contact-vorname"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="contactNachname">Nachname</Label>
-                  <Input
-                    id="contactNachname"
-                    value={formData.contactNachname}
-                    onChange={(e) => handleChange("contactNachname", e.target.value)}
-                    data-testid="input-contact-nachname"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="contactType">Kontaktart</Label>
-                  <Select
-                    value={formData.contactType}
-                    onValueChange={(value) => handleChange("contactType", value)}
-                  >
-                    <SelectTrigger data-testid="select-contact-type">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {CONTACT_TYPES.map((type) => (
-                        <SelectItem key={type.value} value={type.value}>
-                          {type.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="contactTelefon">Telefon</Label>
-                  <Input
-                    id="contactTelefon"
-                    value={formData.contactTelefon}
-                    onChange={(e) => handleChange("contactTelefon", e.target.value)}
-                    placeholder="0170 1234567"
-                    className={phoneErrors.contactTelefon ? "border-red-500" : ""}
-                    data-testid="input-contact-telefon"
-                  />
-                  {phoneErrors.contactTelefon && (
-                    <p className="text-xs text-red-500">{phoneErrors.contactTelefon}</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="contactEmail">E-Mail (optional)</Label>
-                <Input
-                  id="contactEmail"
-                  type="email"
-                  value={formData.contactEmail}
-                  onChange={(e) => handleChange("contactEmail", e.target.value)}
-                  data-testid="input-contact-email"
-                />
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="contactIsPrimary"
-                  checked={formData.contactIsPrimary}
-                  onCheckedChange={(checked) => handleChange("contactIsPrimary", !!checked)}
-                  data-testid="checkbox-contact-primary"
-                />
-                <Label htmlFor="contactIsPrimary">Hauptkontakt</Label>
-              </div>
-            </div>
-          </div>
+          <ContactsStep
+            formData={formData}
+            phoneErrors={phoneErrors}
+            onChange={handleChange}
+          />
         );
-
       case 3:
         return (
-          <div className="space-y-6">
-            <p className="text-sm text-gray-600">
-              Erfassen Sie die monatlichen Leistungsansprüche des Kunden.
-            </p>
-
-            <div className="space-y-4">
-              <div className="p-4 rounded-lg bg-green-50 border border-green-100">
-                <div className="space-y-2">
-                  <Label htmlFor="entlastungsbetrag45b">§45b Entlastungsbetrag (€/Monat)</Label>
-                  <Input
-                    id="entlastungsbetrag45b"
-                    type="number"
-                    step="0.01"
-                    value={formData.entlastungsbetrag45b}
-                    onChange={(e) => handleChange("entlastungsbetrag45b", e.target.value)}
-                    data-testid="input-budget-45b"
-                  />
-                  <p className="text-xs text-gray-500">Standard: 125 €/Monat</p>
-                </div>
-              </div>
-
-              <div className="p-4 rounded-lg bg-blue-50 border border-blue-100">
-                <div className="space-y-2">
-                  <Label htmlFor="verhinderungspflege39">§39 Verhinderungspflege (€/Jahr)</Label>
-                  <Input
-                    id="verhinderungspflege39"
-                    type="number"
-                    step="0.01"
-                    value={formData.verhinderungspflege39}
-                    onChange={(e) => handleChange("verhinderungspflege39", e.target.value)}
-                    data-testid="input-budget-39"
-                  />
-                  <p className="text-xs text-gray-500">Standard: 1.612 €/Jahr</p>
-                </div>
-              </div>
-
-              <div className="p-4 rounded-lg bg-purple-50 border border-purple-100">
-                <div className="space-y-2">
-                  <Label htmlFor="pflegesachleistungen36">§36 Pflegesachleistungen (€/Monat)</Label>
-                  <Input
-                    id="pflegesachleistungen36"
-                    type="number"
-                    step="0.01"
-                    value={formData.pflegesachleistungen36}
-                    onChange={(e) => handleChange("pflegesachleistungen36", e.target.value)}
-                    data-testid="input-budget-36"
-                  />
-                  <p className="text-xs text-gray-500">
-                    Abhängig vom Pflegegrad (PG2: 761€, PG3: 1.432€, PG4: 1.778€, PG5: 2.200€)
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
+          <BudgetsStep
+            formData={formData}
+            onChange={handleChange}
+          />
         );
-
       case 4:
         return (
-          <div className="space-y-6">
-            <p className="text-sm text-gray-600">
-              Legen Sie die Vertragsbedingungen und Stundensätze fest.
-            </p>
-
-            <div className="border-b pb-4">
-              <h3 className="font-medium mb-4">Vereinbarte Leistungen</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="contractHours">Stunden pro Zeitraum</Label>
-                  <Input
-                    id="contractHours"
-                    type="number"
-                    step="0.5"
-                    value={formData.contractHours}
-                    onChange={(e) => handleChange("contractHours", e.target.value)}
-                    data-testid="input-contract-hours"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="contractPeriod">Zeitraum</Label>
-                  <Select
-                    value={formData.contractPeriod}
-                    onValueChange={(value) => handleChange("contractPeriod", value)}
-                  >
-                    <SelectTrigger data-testid="select-contract-period">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PERIOD_TYPES.map((type) => (
-                        <SelectItem key={type.value} value={type.value}>
-                          {type.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <h3 className="font-medium mb-4">Stundensätze</h3>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="hauswirtschaftRate">Hauswirtschaft (€/Std)</Label>
-                  <Input
-                    id="hauswirtschaftRate"
-                    type="number"
-                    step="0.01"
-                    value={formData.hauswirtschaftRate}
-                    onChange={(e) => handleChange("hauswirtschaftRate", e.target.value)}
-                    data-testid="input-rate-hauswirtschaft"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="alltagsbegleitungRate">Alltagsbegleitung (€/Std)</Label>
-                  <Input
-                    id="alltagsbegleitungRate"
-                    type="number"
-                    step="0.01"
-                    value={formData.alltagsbegleitungRate}
-                    onChange={(e) => handleChange("alltagsbegleitungRate", e.target.value)}
-                    data-testid="input-rate-alltagsbegleitung"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="erstberatungRate">Erstberatung (€/Std)</Label>
-                  <Input
-                    id="erstberatungRate"
-                    type="number"
-                    step="0.01"
-                    value={formData.erstberatungRate}
-                    onChange={(e) => handleChange("erstberatungRate", e.target.value)}
-                    data-testid="input-rate-erstberatung"
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-gray-500 mt-2">
-                Standardsätze: Hauswirtschaft 38€/Std, Alltagsbegleitung 42€/Std
-              </p>
-            </div>
-          </div>
+          <ContractStep
+            formData={formData}
+            onChange={handleChange}
+          />
         );
-
       default:
         return null;
     }

@@ -1,5 +1,5 @@
 import type { Appointment } from "../schema";
-import { timeToMinutes, addMinutesToTime } from "../utils/datetime";
+import { timeToMinutes, addMinutesToTime, formatDurationDisplay } from "../utils/datetime";
 
 // ============================================
 // TYPES
@@ -110,11 +110,7 @@ export function formatTimeSlot(time: string | null): string {
 }
 
 export function formatDuration(minutes: number): string {
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  if (h === 0) return `${m} Min.`;
-  if (m === 0) return `${h} Std.`;
-  return `${h} Std. ${m} Min.`;
+  return formatDurationDisplay(minutes, "verbose");
 }
 
 export function doTimesOverlap(
