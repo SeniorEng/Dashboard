@@ -211,13 +211,18 @@ export default function ServiceRecordsPage() {
         </p>
       </div>
 
-      {pendingCount > 0 && (
-        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg" data-testid="banner-pending">
+      {pendingCount > 0 && pendingRecords && (
+        <div
+          className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg cursor-pointer hover:bg-amber-100 transition-colors"
+          data-testid="banner-pending"
+          onClick={() => navigate(`/service-records/${pendingRecords[0].id}`)}
+        >
           <div className="flex items-center gap-2 text-amber-800">
             <AlertCircle className={iconSize.sm} />
             <span className="text-sm font-medium">
               {pendingCount} {pendingCount === 1 ? "Leistungsnachweis benötigt" : "Leistungsnachweise benötigen"} noch Unterschriften
             </span>
+            <ChevronRight className={`${iconSize.sm} ml-auto`} />
           </div>
         </div>
       )}
