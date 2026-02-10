@@ -80,6 +80,8 @@ export default function NewAppointment() {
     currentMonthUsedCents?: number;
     monthlyLimitCents?: number | null;
     projectedMonthUsedCents?: number;
+    isHardBlock?: boolean;
+    acceptsPrivatePayment?: boolean;
   }>({
     queryKey: ["/api/budget", ktCustomerId, "cost-estimate", budgetEstimateParams],
     queryFn: async () => {
@@ -381,7 +383,14 @@ export default function NewAppointment() {
                 </div>
               )}
 
-              {costEstimate?.warning && (
+              {costEstimate?.isHardBlock && (
+                <div className="rounded-lg border bg-red-50 border-red-300 p-3 text-sm flex items-start gap-2" data-testid="budget-hard-block">
+                  <AlertTriangle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
+                  <p className="text-red-800 font-medium">Budget reicht nicht aus. Termin kann nicht erstellt werden.</p>
+                </div>
+              )}
+
+              {costEstimate?.warning && !costEstimate?.isHardBlock && (
                 <div className="rounded-lg border bg-amber-50 border-amber-200 p-3 text-sm flex items-start gap-2" data-testid="budget-warning">
                   <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
                   <p className="text-amber-800">{costEstimate.warning}</p>
@@ -406,7 +415,7 @@ export default function NewAppointment() {
                 className={`w-full ${componentStyles.btnPrimary}`}
                 size="lg"
                 onClick={handleKundenterminSubmit}
-                disabled={isPending}
+                disabled={isPending || costEstimate?.isHardBlock === true}
                 data-testid="button-create-kundentermin"
               >
                 {isPending ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : null}

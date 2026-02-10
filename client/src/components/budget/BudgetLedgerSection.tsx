@@ -11,8 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Plus, Wallet, History, AlertTriangle, Calendar, Settings, Euro } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system/tokens";
-import { toast } from "sonner";
-import { api } from "@/lib/api/client";
+import { useToast } from "@/hooks/use-toast";
+import { api, unwrapResult } from "@/lib/api/client";
 import { formatCurrency, formatDateDisplay } from "@shared/utils/format";
 import { todayISO } from "@shared/utils/datetime";
 
@@ -362,20 +362,21 @@ export function BudgetLedgerSection({ customerId, customerName, initialSummary, 
 }
 
 function InitialBudgetForm({ customerId, onSuccess }: { customerId: number; onSuccess: () => void }) {
+  const { toast } = useToast();
   const [currentYearAmount, setCurrentYearAmount] = useState("");
   const [carryoverAmount, setCarryoverAmount] = useState("");
   const [budgetStartDate, setBudgetStartDate] = useState(todayISO());
 
   const mutation = useMutation({
     mutationFn: async (data: { currentYearAmountCents: number; carryoverAmountCents: number; budgetStartDate: string }) => {
-      return await api.post(`/budget/${customerId}/initial-budget`, data);
+      return unwrapResult(await api.post(`/budget/${customerId}/initial-budget`, data));
     },
     onSuccess: () => {
-      toast.success("Startbudget erfolgreich erfasst");
+      toast({ title: "Startbudget erfolgreich erfasst" });
       onSuccess();
     },
     onError: (error) => {
-      toast.error("Fehler beim Erfassen des Startbudgets");
+      toast({ variant: "destructive", title: "Fehler", description: "Fehler beim Erfassen des Startbudgets" });
       console.error(error);
     },
   });
@@ -444,20 +445,21 @@ function InitialBudgetForm({ customerId, onSuccess }: { customerId: number; onSu
 }
 
 function ManualAdjustmentForm({ customerId, onSuccess }: { customerId: number; onSuccess: () => void }) {
+  const { toast } = useToast();
   const [amount, setAmount] = useState("");
   const [isNegative, setIsNegative] = useState(false);
   const [notes, setNotes] = useState("");
 
   const mutation = useMutation({
     mutationFn: async (data: { amountCents: number; notes: string }) => {
-      return await api.post(`/budget/${customerId}/manual-adjustment`, data);
+      return unwrapResult(await api.post(`/budget/${customerId}/manual-adjustment`, data));
     },
     onSuccess: () => {
-      toast.success("Korrektur erfolgreich gespeichert");
+      toast({ title: "Korrektur erfolgreich gespeichert" });
       onSuccess();
     },
     onError: (error) => {
-      toast.error("Fehler bei der Korrektur");
+      toast({ variant: "destructive", title: "Fehler", description: "Fehler bei der Korrektur" });
       console.error(error);
     },
   });
@@ -529,18 +531,19 @@ function ManualAdjustmentForm({ customerId, onSuccess }: { customerId: number; o
 }
 
 function PreferencesForm({ customerId, currentLimit, onSuccess }: { customerId: number; currentLimit: number | null; onSuccess: () => void }) {
+  const { toast } = useToast();
   const [monthlyLimit, setMonthlyLimit] = useState(currentLimit ? (currentLimit / 100).toString() : "");
 
   const mutation = useMutation({
     mutationFn: async (data: { monthlyLimitCents: number | null }) => {
-      return await api.put(`/budget/${customerId}/preferences`, data);
+      return unwrapResult(await api.put(`/budget/${customerId}/preferences`, data));
     },
     onSuccess: () => {
-      toast.success("Einstellungen gespeichert");
+      toast({ title: "Einstellungen gespeichert" });
       onSuccess();
     },
     onError: (error) => {
-      toast.error("Fehler beim Speichern");
+      toast({ variant: "destructive", title: "Fehler", description: "Fehler beim Speichern" });
       console.error(error);
     },
   });

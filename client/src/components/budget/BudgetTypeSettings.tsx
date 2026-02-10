@@ -5,9 +5,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { ArrowUp, ArrowDown, Save } from "lucide-react";
-import { toast } from "sonner";
+import { useToast } from "@/hooks/use-toast";
 import { BUDGET_TYPE_LABELS, type BudgetType } from "@shared/domain/budgets";
-import { api } from "@/lib/api/client";
+import { api, unwrapResult } from "@/lib/api/client";
 
 interface BudgetTypeSetting {
   id: number | null;
@@ -48,6 +48,7 @@ function getCurrentYearMonth(): string {
 }
 
 export function BudgetTypeSettings({ customerId }: BudgetTypeSettingsProps) {
+  const { toast } = useToast();
   const queryClient = useQueryClient();
   const [settings, setSettings] = useState<BudgetTypeSetting[]>([]);
   const [hasChanges, setHasChanges] = useState(false);
@@ -73,7 +74,7 @@ export function BudgetTypeSettings({ customerId }: BudgetTypeSettingsProps) {
 
   const saveMutation = useMutation({
     mutationFn: async (newSettings: BudgetTypeSetting[]) => {
-      return await api.put(`/budget/${customerId}/type-settings`, {
+      return unwrapResult(await api.put(`/budget/${customerId}/type-settings`, {
         settings: newSettings.map(s => ({
           budgetType: s.budgetType,
           enabled: s.enabled,
@@ -83,15 +84,15 @@ export function BudgetTypeSettings({ customerId }: BudgetTypeSettingsProps) {
           initialBalanceCents: s.initialBalanceCents,
           initialBalanceMonth: s.initialBalanceMonth,
         })),
-      });
+      }));
     },
     onSuccess: () => {
-      toast.success("Budget-Einstellungen gespeichert");
+      toast({ title: "Budget-Einstellungen gespeichert" });
       queryClient.invalidateQueries({ queryKey: ["budget-type-settings", customerId] });
       setHasChanges(false);
     },
     onError: (error: Error) => {
-      toast.error(error.message);
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
     },
   });
 
@@ -124,7 +125,8 @@ export function BudgetTypeSettings({ customerId }: BudgetTypeSettingsProps) {
   };
 
   const updateCentsField = (index: number, field: "monthlyLimitCents" | "yearlyLimitCents" | "initialBalanceCents", value: string) => {
-    const cents = value === "" ? null : Math.round(parseFloat(value) * 100);
+    const parsed = parseFloat(value);
+    const cents = value === "" ? null : (isNaN(parsed) ? null : Math.round(parsed * 100));
     const newSettings = [...settings];
     newSettings[index] = { ...newSettings[index], [field]: cents };
     if (field === "initialBalanceCents") {

@@ -708,8 +708,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           travelCents: Math.round(costs.travelCents * privateRatio),
           customerKilometers: Math.round(Math.round(params.customerKilometers * 10) * privateRatio),
           customerKilometersCents: Math.round(costs.customerKilometersCents * privateRatio),
-          userId: params.userId,
-          description: `Privatzahlung: ${(cascadeResult.outstandingCents / 100).toFixed(2)} €`,
+          createdByUserId: params.userId,
+          notes: `Privatzahlung: ${(cascadeResult.outstandingCents / 100).toFixed(2)} €`,
         }).returning();
         return cascadeResult.transactions[0] ?? privateTransaction;
       }

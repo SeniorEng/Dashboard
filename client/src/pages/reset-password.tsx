@@ -36,7 +36,7 @@ export default function ResetPasswordPage() {
         throw new Error("Das Passwort muss mindestens 8 Zeichen lang sein");
       }
       const result = await api.post<{ success: boolean }>(
-        "/api/auth/password-reset/confirm",
+        "/auth/password-reset/confirm",
         { token, newPassword }
       );
       return unwrapResult(result);

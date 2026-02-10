@@ -15,7 +15,7 @@ import {
 import { iconSize } from "@/design-system";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { Link, useLocation, useSearch } from "wouter";
-import { toast } from "sonner";
+import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/api/client";
 import { useAuth } from "@/hooks/use-auth";
 import type { MonthlyServiceRecord, Customer, Appointment } from "@shared/schema";
@@ -58,6 +58,7 @@ function getStatusBadge(status: string) {
 }
 
 export default function ServiceRecordsPage() {
+  const { toast } = useToast();
   const currentDate = new Date();
   const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
@@ -146,13 +147,13 @@ export default function ServiceRecordsPage() {
       return result.data;
     },
     onSuccess: (newRecord) => {
-      toast.success("Leistungsnachweis erstellt");
+      toast({ title: "Leistungsnachweis erstellt" });
       queryClient.invalidateQueries({ queryKey: ["/api/service-records"] });
       queryClient.invalidateQueries({ queryKey: ["/api/service-records/check-period"] });
       navigate(`/service-records/${newRecord.id}`);
     },
     onError: (error: Error) => {
-      toast.error(error.message || "Fehler beim Erstellen des Leistungsnachweises");
+      toast({ variant: "destructive", title: "Fehler", description: error.message || "Fehler beim Erstellen des Leistungsnachweises" });
     },
   });
 

@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { formatDateForDisplay, formatTimeHHMM } from "@shared/utils/datetime";
-import { toast } from "sonner";
+import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api/client";
 import type { MonthlyServiceRecord, Customer } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
@@ -37,6 +37,7 @@ function getStatusBadge(status: string) {
 }
 
 export default function ServiceRecordDetailPage() {
+  const { toast } = useToast();
   const [, params] = useRoute("/service-records/:id");
   const recordId = params?.id ? parseInt(params.id, 10) : null;
   const queryClient = useQueryClient();
@@ -95,16 +96,16 @@ export default function ServiceRecordDetailPage() {
     },
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/service-records"] });
-      toast.success(
-        variables.signerType === "employee"
+      toast({
+        title: variables.signerType === "employee"
           ? "Mitarbeiter-Unterschrift gespeichert"
-          : "Kundenunterschrift gespeichert - Leistungsnachweis abgeschlossen"
-      );
+          : "Kundenunterschrift gespeichert - Leistungsnachweis abgeschlossen",
+      });
       setShowEmployeeSignature(false);
       setShowCustomerSignature(false);
     },
     onError: (error: Error) => {
-      toast.error(error.message);
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
     },
   });
 
