@@ -3,7 +3,7 @@
 import * as React from "react"
 import { format, parseISO, isValid } from "date-fns"
 import { de } from "date-fns/locale"
-import { CalendarIcon, X } from "lucide-react"
+import { CalendarIcon, X, ChevronLeft, ChevronRight } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -27,6 +27,123 @@ export interface DatePickerProps {
   "data-testid"?: string
 }
 
+type PickerView = "days" | "years" | "months"
+
+const MONTH_NAMES_DE = [
+  "Jan", "Feb", "Mär", "Apr", "Mai", "Jun",
+  "Jul", "Aug", "Sep", "Okt", "Nov", "Dez",
+]
+
+const YEARS_PER_PAGE = 12
+
+function YearPicker({
+  selectedYear,
+  onSelect,
+  minYear,
+  maxYear,
+}: {
+  selectedYear: number
+  onSelect: (year: number) => void
+  minYear: number
+  maxYear: number
+}) {
+  const [pageStart, setPageStart] = React.useState(() => {
+    const page = Math.floor((selectedYear - minYear) / YEARS_PER_PAGE)
+    return minYear + page * YEARS_PER_PAGE
+  })
+
+  const pageEnd = Math.min(pageStart + YEARS_PER_PAGE - 1, maxYear)
+  const canPrev = pageStart > minYear
+  const canNext = pageStart + YEARS_PER_PAGE <= maxYear
+
+  const years: number[] = []
+  for (let y = pageStart; y <= pageEnd; y++) {
+    years.push(y)
+  }
+
+  return (
+    <div className="p-3 w-[280px]">
+      <div className="flex items-center justify-between mb-3">
+        <button
+          type="button"
+          onClick={() => setPageStart(Math.max(minYear, pageStart - YEARS_PER_PAGE))}
+          disabled={!canPrev}
+          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-md hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
+          data-testid="btn-year-page-prev"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <span className="text-sm font-medium">
+          {pageStart} – {pageEnd}
+        </span>
+        <button
+          type="button"
+          onClick={() => setPageStart(Math.min(maxYear - YEARS_PER_PAGE + 1, pageStart + YEARS_PER_PAGE))}
+          disabled={!canNext}
+          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-md hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
+          data-testid="btn-year-page-next"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {years.map((year) => (
+          <button
+            key={year}
+            type="button"
+            onClick={() => onSelect(year)}
+            className={cn(
+              "min-h-[44px] rounded-md text-sm font-medium transition-colors",
+              year === selectedYear
+                ? "bg-primary text-primary-foreground"
+                : "hover:bg-muted"
+            )}
+            data-testid={`btn-year-${year}`}
+          >
+            {year}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function MonthPicker({
+  selectedMonth,
+  selectedYear,
+  onSelect,
+}: {
+  selectedMonth: number
+  selectedYear: number
+  onSelect: (month: number) => void
+}) {
+  return (
+    <div className="p-3 w-[280px]">
+      <div className="flex items-center justify-center mb-3">
+        <span className="text-sm font-medium">{selectedYear}</span>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {MONTH_NAMES_DE.map((name, index) => (
+          <button
+            key={index}
+            type="button"
+            onClick={() => onSelect(index)}
+            className={cn(
+              "min-h-[44px] rounded-md text-sm font-medium transition-colors",
+              index === selectedMonth
+                ? "bg-primary text-primary-foreground"
+                : "hover:bg-muted"
+            )}
+            data-testid={`btn-month-${index}`}
+          >
+            {name}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function DatePicker({
   value,
   onChange,
@@ -40,6 +157,12 @@ export function DatePicker({
   "data-testid": testId,
 }: DatePickerProps) {
   const [open, setOpen] = React.useState(false)
+  const [view, setView] = React.useState<PickerView>("days")
+  const [navMonth, setNavMonth] = React.useState<Date>(() => new Date())
+
+  const currentYear = new Date().getFullYear()
+  const minYear = minDate ? minDate.getFullYear() : 1900
+  const maxYear = maxDate ? maxDate.getFullYear() : currentYear + 10
 
   const dateValue = React.useMemo(() => {
     if (!value) return undefined
@@ -50,6 +173,17 @@ export function DatePicker({
       return undefined
     }
   }, [value])
+
+  React.useEffect(() => {
+    if (open) {
+      setView("days")
+      if (dateValue) {
+        setNavMonth(dateValue)
+      } else {
+        setNavMonth(new Date())
+      }
+    }
+  }, [open, dateValue])
 
   const handleSelect = (date: Date | undefined) => {
     if (date) {
@@ -65,6 +199,20 @@ export function DatePicker({
     e.stopPropagation()
     e.preventDefault()
     onChange?.(null)
+  }
+
+  const handleYearSelect = (year: number) => {
+    setNavMonth(new Date(year, navMonth.getMonth(), 1))
+    setView("months")
+  }
+
+  const handleMonthSelect = (month: number) => {
+    setNavMonth(new Date(navMonth.getFullYear(), month, 1))
+    setView("days")
+  }
+
+  const handleCaptionClick = () => {
+    setView("years")
   }
 
   const displayValue = React.useMemo(() => {
@@ -114,26 +262,57 @@ export function DatePicker({
         sideOffset={4}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
-        <Calendar
-          mode="single"
-          selected={dateValue}
-          onSelect={handleSelect}
-          disabled={(date) => {
-            if (minDate && date < minDate) return true
-            if (maxDate && date > maxDate) return true
-            if (disableWeekends) {
-              const day = date.getDay()
-              if (day === 0 || day === 6) return true
-            }
-            return false
-          }}
-          locale={de}
-          weekStartsOn={1}
-          initialFocus
-          classNames={{
-            day: "min-w-[44px] min-h-[44px] text-base",
-          }}
-        />
+        {view === "years" && (
+          <YearPicker
+            selectedYear={navMonth.getFullYear()}
+            onSelect={handleYearSelect}
+            minYear={minYear}
+            maxYear={maxYear}
+          />
+        )}
+        {view === "months" && (
+          <MonthPicker
+            selectedMonth={navMonth.getMonth()}
+            selectedYear={navMonth.getFullYear()}
+            onSelect={handleMonthSelect}
+          />
+        )}
+        {view === "days" && (
+          <Calendar
+            mode="single"
+            selected={dateValue}
+            onSelect={handleSelect}
+            month={navMonth}
+            onMonthChange={setNavMonth}
+            disabled={(date) => {
+              if (minDate && date < minDate) return true
+              if (maxDate && date > maxDate) return true
+              if (disableWeekends) {
+                const day = date.getDay()
+                if (day === 0 || day === 6) return true
+              }
+              return false
+            }}
+            locale={de}
+            weekStartsOn={1}
+            initialFocus
+            classNames={{
+              day: "min-w-[44px] min-h-[44px] text-base",
+            }}
+            components={{
+              CaptionLabel: ({ children }) => (
+                <button
+                  type="button"
+                  onClick={handleCaptionClick}
+                  className="text-sm font-medium hover:bg-muted px-2 py-1 rounded-md transition-colors cursor-pointer"
+                  data-testid="btn-caption-year-month"
+                >
+                  {children}
+                </button>
+              ),
+            }}
+          />
+        )}
       </PopoverContent>
     </Popover>
   )
