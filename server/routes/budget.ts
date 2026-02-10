@@ -176,9 +176,9 @@ router.get("/:customerId/type-settings", async (req: Request, res: Response) => 
     }
     const settings = await budgetLedgerStorage.getBudgetTypeSettings(customerId);
     const defaults = [
-      { budgetType: "umwandlung_45a", enabled: true, priority: 1, monthlyLimitCents: null },
-      { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 2, monthlyLimitCents: null },
-      { budgetType: "ersatzpflege_39_42a", enabled: true, priority: 3, monthlyLimitCents: null },
+      { budgetType: "umwandlung_45a", enabled: true, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null, initialBalanceCents: null, initialBalanceMonth: null },
+      { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null, initialBalanceCents: null, initialBalanceMonth: null },
+      { budgetType: "ersatzpflege_39_42a", enabled: true, priority: 3, monthlyLimitCents: null, yearlyLimitCents: null, initialBalanceCents: null, initialBalanceMonth: null },
     ];
     if (settings.length === 0) {
       const prefs = await budgetLedgerStorage.getBudgetPreferences(customerId);
@@ -206,6 +206,9 @@ const bulkBudgetTypeSettingsSchema = z.object({
     enabled: z.boolean(),
     priority: z.number().min(1).max(3),
     monthlyLimitCents: z.number().min(0).nullable().optional(),
+    yearlyLimitCents: z.number().min(0).nullable().optional(),
+    initialBalanceCents: z.number().min(0).nullable().optional(),
+    initialBalanceMonth: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
   })).min(1).max(3),
 });
 
@@ -230,6 +233,29 @@ router.put("/:customerId/type-settings", async (req: Request, res: Response) => 
     }
 
     const saved = await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, result.data.settings);
+
+    const userId = req.user?.id;
+    for (const s of result.data.settings) {
+      if (s.initialBalanceCents != null && s.initialBalanceCents > 0 && s.initialBalanceMonth) {
+        const [yearStr, monthStr] = s.initialBalanceMonth.split("-");
+        const year = parseInt(yearStr);
+        const validFrom = `${s.initialBalanceMonth}-01`;
+        const expiresAt = s.budgetType === "ersatzpflege_39_42a" ? `${year}-12-31` : null;
+
+        await budgetLedgerStorage.upsertInitialBalanceAllocation({
+          customerId,
+          budgetType: s.budgetType,
+          year,
+          amountCents: s.initialBalanceCents,
+          validFrom,
+          expiresAt,
+          notes: `Startwert ab ${monthStr}/${yearStr}`,
+        }, userId);
+      } else {
+        await budgetLedgerStorage.deleteInitialBalanceAllocations(customerId, s.budgetType);
+      }
+    }
+
     res.json(saved);
   } catch (error) {
     handleRouteError(res, error, "Budget-Typ-Einstellungen konnten nicht gespeichert werden");

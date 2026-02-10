@@ -16,10 +16,35 @@ interface BudgetTypeSetting {
   enabled: boolean;
   priority: number;
   monthlyLimitCents: number | null;
+  yearlyLimitCents: number | null;
+  initialBalanceCents: number | null;
+  initialBalanceMonth: string | null;
 }
 
 interface BudgetTypeSettingsProps {
   customerId: number;
+}
+
+const MONTH_OPTIONS = [
+  { value: "01", label: "Januar" },
+  { value: "02", label: "Februar" },
+  { value: "03", label: "März" },
+  { value: "04", label: "April" },
+  { value: "05", label: "Mai" },
+  { value: "06", label: "Juni" },
+  { value: "07", label: "Juli" },
+  { value: "08", label: "August" },
+  { value: "09", label: "September" },
+  { value: "10", label: "Oktober" },
+  { value: "11", label: "November" },
+  { value: "12", label: "Dezember" },
+];
+
+function getCurrentYearMonth(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
 }
 
 export function BudgetTypeSettings({ customerId }: BudgetTypeSettingsProps) {
@@ -54,6 +79,9 @@ export function BudgetTypeSettings({ customerId }: BudgetTypeSettingsProps) {
           enabled: s.enabled,
           priority: s.priority,
           monthlyLimitCents: s.monthlyLimitCents,
+          yearlyLimitCents: s.yearlyLimitCents,
+          initialBalanceCents: s.initialBalanceCents,
+          initialBalanceMonth: s.initialBalanceMonth,
         })),
       });
     },
@@ -88,16 +116,37 @@ export function BudgetTypeSettings({ customerId }: BudgetTypeSettingsProps) {
     setHasChanges(true);
   };
 
-  const updateMonthlyLimit = (index: number, value: string) => {
+  const updateField = (index: number, field: keyof BudgetTypeSetting, value: any) => {
     const newSettings = [...settings];
+    newSettings[index] = { ...newSettings[index], [field]: value };
+    setSettings(newSettings);
+    setHasChanges(true);
+  };
+
+  const updateCentsField = (index: number, field: "monthlyLimitCents" | "yearlyLimitCents" | "initialBalanceCents", value: string) => {
     const cents = value === "" ? null : Math.round(parseFloat(value) * 100);
-    newSettings[index] = { ...newSettings[index], monthlyLimitCents: cents };
+    const newSettings = [...settings];
+    newSettings[index] = { ...newSettings[index], [field]: cents };
+    if (field === "initialBalanceCents") {
+      if (cents !== null && cents > 0 && !newSettings[index].initialBalanceMonth) {
+        newSettings[index] = { ...newSettings[index], initialBalanceMonth: getCurrentYearMonth() };
+      }
+      if (cents === null || cents === 0) {
+        newSettings[index] = { ...newSettings[index], initialBalanceMonth: null };
+      }
+    }
     setSettings(newSettings);
     setHasChanges(true);
   };
 
   const isMonthlyBudget = (budgetType: string) =>
     budgetType === "entlastungsbetrag_45b" || budgetType === "umwandlung_45a";
+
+  const isYearlyBudget = (budgetType: string) =>
+    budgetType === "ersatzpflege_39_42a";
+
+  const centsToEuro = (cents: number | null) =>
+    cents !== null ? (cents / 100).toFixed(2) : "";
 
   if (isLoading) {
     return <div className="text-sm text-gray-500">Laden...</div>;
@@ -112,9 +161,6 @@ export function BudgetTypeSettings({ customerId }: BudgetTypeSettingsProps) {
       <div className="space-y-3">
         {settings.map((setting, index) => {
           const label = BUDGET_TYPE_LABELS[setting.budgetType as BudgetType] || setting.budgetType;
-          const limitEuro = setting.monthlyLimitCents !== null
-            ? (setting.monthlyLimitCents / 100).toFixed(2)
-            : "";
 
           return (
             <div
@@ -157,19 +203,86 @@ export function BudgetTypeSettings({ customerId }: BudgetTypeSettingsProps) {
                     />
                   </div>
 
-                  {isMonthlyBudget(setting.budgetType) && setting.enabled && (
-                    <div className="mt-2">
-                      <Label className="text-xs text-gray-500">Unser Anteil (€/Monat)</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        placeholder="Voller Betrag"
-                        value={limitEuro}
-                        onChange={(e) => updateMonthlyLimit(index, e.target.value)}
-                        className="h-8 mt-1 text-base"
-                        data-testid={`input-monthly-limit-${setting.budgetType}`}
-                      />
+                  {setting.enabled && (
+                    <div className="mt-3 space-y-3">
+                      {isMonthlyBudget(setting.budgetType) && (
+                        <div>
+                          <Label className="text-xs text-gray-500">Unser Anteil (€/Monat)</Label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            placeholder="Voller Betrag"
+                            value={centsToEuro(setting.monthlyLimitCents)}
+                            onChange={(e) => updateCentsField(index, "monthlyLimitCents", e.target.value)}
+                            className="h-8 mt-1 text-base"
+                            data-testid={`input-monthly-limit-${setting.budgetType}`}
+                          />
+                        </div>
+                      )}
+
+                      {isYearlyBudget(setting.budgetType) && (
+                        <div>
+                          <Label className="text-xs text-gray-500">Unser Anteil (€/Jahr)</Label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            placeholder="Voller Betrag"
+                            value={centsToEuro(setting.yearlyLimitCents)}
+                            onChange={(e) => updateCentsField(index, "yearlyLimitCents", e.target.value)}
+                            className="h-8 mt-1 text-base"
+                            data-testid={`input-yearly-limit-${setting.budgetType}`}
+                          />
+                        </div>
+                      )}
+
+                      <div className="border-t border-gray-100 pt-3">
+                        <Label className="text-xs text-gray-500">Verfügbarer Startwert (€)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="Kein Startwert"
+                          value={centsToEuro(setting.initialBalanceCents)}
+                          onChange={(e) => updateCentsField(index, "initialBalanceCents", e.target.value)}
+                          className="h-8 mt-1 text-base"
+                          data-testid={`input-initial-balance-${setting.budgetType}`}
+                        />
+                        {setting.initialBalanceCents !== null && setting.initialBalanceCents > 0 && (
+                          <div className="mt-2">
+                            <Label className="text-xs text-gray-500">Gültig ab</Label>
+                            <div className="flex gap-2 mt-1">
+                              <select
+                                value={setting.initialBalanceMonth?.split("-")[1] || String(new Date().getMonth() + 1).padStart(2, "0")}
+                                onChange={(e) => {
+                                  const year = setting.initialBalanceMonth?.split("-")[0] || String(new Date().getFullYear());
+                                  updateField(index, "initialBalanceMonth", `${year}-${e.target.value}`);
+                                }}
+                                className="h-8 text-sm border border-gray-200 rounded-md px-2 flex-1"
+                                data-testid={`select-balance-month-${setting.budgetType}`}
+                              >
+                                {MONTH_OPTIONS.map(m => (
+                                  <option key={m.value} value={m.value}>{m.label}</option>
+                                ))}
+                              </select>
+                              <select
+                                value={setting.initialBalanceMonth?.split("-")[0] || String(new Date().getFullYear())}
+                                onChange={(e) => {
+                                  const month = setting.initialBalanceMonth?.split("-")[1] || String(new Date().getMonth() + 1).padStart(2, "0");
+                                  updateField(index, "initialBalanceMonth", `${e.target.value}-${month}`);
+                                }}
+                                className="h-8 text-sm border border-gray-200 rounded-md px-2 w-20"
+                                data-testid={`select-balance-year-${setting.budgetType}`}
+                              >
+                                {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map(y => (
+                                  <option key={y} value={String(y)}>{y}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>

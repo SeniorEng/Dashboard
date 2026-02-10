@@ -513,6 +513,9 @@ export const customerBudgetTypeSettings = pgTable("customer_budget_type_settings
   enabled: boolean("enabled").notNull().default(true),
   priority: integer("priority").notNull().default(1),
   monthlyLimitCents: integer("monthly_limit_cents"),
+  yearlyLimitCents: integer("yearly_limit_cents"),
+  initialBalanceCents: integer("initial_balance_cents"),
+  initialBalanceMonth: text("initial_balance_month"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [
