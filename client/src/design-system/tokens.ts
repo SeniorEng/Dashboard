@@ -180,7 +180,7 @@ export const colors = {
   surface: {
     page: 'bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]', // Warm beige gradient
     card: 'bg-white',
-    cardMuted: 'bg-white/80 backdrop-blur-sm',
+    cardMuted: 'bg-white',
     cardTinted: 'bg-gray-50',
   },
 } as const;
@@ -279,7 +279,7 @@ export const componentStyles = {
   // Cards (verwende Standard-Card-Komponente, keine custom bg/border)
   card: '',
   cardHover: 'cursor-pointer',
-  cardMuted: 'bg-white/80 backdrop-blur-sm rounded-xl shadow-sm',
+  cardMuted: 'bg-white rounded-xl shadow-sm',
   
   // Lists (flex gap statt space-y, damit Links korrekt dargestellt werden)
   listContainer: 'flex flex-col gap-3',

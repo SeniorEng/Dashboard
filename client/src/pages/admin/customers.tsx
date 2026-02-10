@@ -257,7 +257,7 @@ export default function AdminCustomers() {
                 <DataListItem
                   key={customer.id}
                   onClick={() => setLocation(`/admin/customers/${customer.id}`)}
-                  className="bg-white/80 backdrop-blur-sm"
+                  className="bg-white"
                   data-testid={`card-customer-${customer.id}`}
                 >
                   <div className="flex items-start justify-between">

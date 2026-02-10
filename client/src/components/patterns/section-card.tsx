@@ -20,7 +20,7 @@ interface SectionCardProps {
 
 const variantClasses = {
   default: "bg-white",
-  muted: "bg-white/80 backdrop-blur-sm",
+  muted: "bg-white",
   tinted: "bg-gray-50",
 };
 
