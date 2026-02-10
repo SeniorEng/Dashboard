@@ -7,6 +7,7 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
     return (
       <input
         type={type}
+        autoComplete="off"
         className={cn(
           // min-h-[44px] ensures WCAG touch target compliance on mobile
           // text-base (16px) on mobile prevents iOS Safari zoom on focus
