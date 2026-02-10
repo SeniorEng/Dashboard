@@ -106,6 +106,17 @@ export class CustomerManagementStorage {
     return result[0];
   }
 
+  async getActiveCustomerCountForProvider(providerId: number): Promise<number> {
+    const result = await db
+      .select({ count: count() })
+      .from(customerInsuranceHistory)
+      .where(and(
+        eq(customerInsuranceHistory.insuranceProviderId, providerId),
+        isNull(customerInsuranceHistory.validTo)
+      ));
+    return Number(result[0]?.count ?? 0);
+  }
+
   // ============================================
   // CUSTOMER INSURANCE HISTORY
   // ============================================

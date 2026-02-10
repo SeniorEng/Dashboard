@@ -14,6 +14,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   useInsuranceProviders,
   useCreateInsuranceProvider,
   useUpdateInsuranceProvider,
@@ -27,7 +37,8 @@ import {
   ZAHLUNGSARTEN_LABELS,
 } from "@shared/schema";
 import { formatAddress } from "@shared/utils/format";
-import { ArrowLeft, Plus, Pencil, Loader2, Building2 } from "lucide-react";
+import { api, unwrapResult } from "@/lib/api";
+import { ArrowLeft, Plus, Pencil, Loader2, Building2, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -57,6 +68,7 @@ export default function AdminInsuranceProviders() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProvider, setEditingProvider] = useState<InsuranceProviderItem | null>(null);
   const [form, setForm] = useState<InsuranceProviderFormData>(EMPTY_FORM);
+  const [deactivateConfirm, setDeactivateConfirm] = useState<{ count: number; payload: InsuranceProviderFormData } | null>(null);
 
   const openCreate = () => {
     setEditingProvider(null);
@@ -89,22 +101,22 @@ export default function AdminInsuranceProviders() {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSave = () => {
+  const buildPayload = (): InsuranceProviderFormData | null => {
     if (!form.name.trim()) {
       toast({ title: "Suchbegriff ist erforderlich", variant: "destructive" });
-      return;
+      return null;
     }
     if (!form.ikNummer.trim() || !/^\d{9}$/.test(form.ikNummer)) {
       toast({ title: "IK-Nummer muss genau 9 Ziffern haben", variant: "destructive" });
-      return;
+      return null;
     }
     const plzValue = typeof form.plz === 'string' ? form.plz.trim() : "";
     if (plzValue && !/^\d{5}$/.test(plzValue)) {
       toast({ title: "PLZ muss genau 5 Ziffern haben", variant: "destructive" });
-      return;
+      return null;
     }
 
-    const payload: InsuranceProviderFormData = {
+    return {
       ...form,
       empfaenger: form.empfaenger?.trim() || null,
       empfaengerZeile2: form.empfaengerZeile2?.trim() || null,
@@ -115,7 +127,9 @@ export default function AdminInsuranceProviders() {
       telefon: form.telefon?.trim() || null,
       email: form.email?.trim() || null,
     };
+  };
 
+  const executeSave = (payload: InsuranceProviderFormData) => {
     if (editingProvider) {
       updateMutation.mutate(
         { id: editingProvider.id, data: payload },
@@ -140,6 +154,27 @@ export default function AdminInsuranceProviders() {
         },
       });
     }
+  };
+
+  const handleSave = async () => {
+    const payload = buildPayload();
+    if (!payload) return;
+
+    const isDeactivating = editingProvider && editingProvider.isActive && payload.isActive === false;
+    if (isDeactivating) {
+      try {
+        const result = await api.get<{ count: number }>(`/admin/insurance-providers/${editingProvider.id}/active-customers`);
+        const { count } = unwrapResult(result);
+        if (count > 0) {
+          setDeactivateConfirm({ count, payload });
+          return;
+        }
+      } catch {
+        // If check fails, proceed without warning
+      }
+    }
+
+    executeSave(payload);
   };
 
   const isSaving = createMutation.isPending || updateMutation.isPending;
@@ -451,6 +486,36 @@ export default function AdminInsuranceProviders() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deactivateConfirm} onOpenChange={(open) => !open && setDeactivateConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className={`${iconSize.md} text-amber-500`} />
+              Kostenträger deaktivieren?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Dieser Kostenträger ist aktuell noch {deactivateConfirm?.count} {deactivateConfirm?.count === 1 ? "Kunden" : "Kunden"} zugewiesen.
+              Nach der Deaktivierung kann er nicht mehr für neue Zuweisungen ausgewählt werden. Bestehende Zuweisungen bleiben erhalten.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-deactivate">Abbrechen</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-amber-600 hover:bg-amber-700"
+              onClick={() => {
+                if (deactivateConfirm) {
+                  executeSave(deactivateConfirm.payload);
+                  setDeactivateConfirm(null);
+                }
+              }}
+              data-testid="button-confirm-deactivate"
+            >
+              Trotzdem deaktivieren
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Layout>
   );
 }

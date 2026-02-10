@@ -961,6 +961,20 @@ router.get("/insurance-providers/:id", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/insurance-providers/:id/active-customers", async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" });
+      return;
+    }
+    const count = await customerManagementStorage.getActiveCustomerCountForProvider(id);
+    res.json({ count });
+  } catch (error) {
+    handleRouteError(res, error, "Kundenzuweisungen konnten nicht geprüft werden");
+  }
+});
+
 router.put("/insurance-providers/:id", async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
