@@ -227,19 +227,45 @@ export const customers = pgTable("customers", {
 // INSURANCE TABLES
 // ============================================
 
-// Lookup table for Pflegekassen (insurance providers)
+// Lookup table for Pflegekassen / Kostenträger (insurance providers)
+export const ZAHLUNGSBEDINGUNGEN = ["sofort", "7_tage", "14_tage", "30_tage", "45_tage", "60_tage"] as const;
+export const ZAHLUNGSARTEN = ["ueberweisung", "lastschrift", "bar"] as const;
+
+export const ZAHLUNGSBEDINGUNGEN_LABELS: Record<string, string> = {
+  sofort: "Sofort",
+  "7_tage": "7 Tage",
+  "14_tage": "14 Tage",
+  "30_tage": "30 Tage",
+  "45_tage": "45 Tage",
+  "60_tage": "60 Tage",
+};
+
+export const ZAHLUNGSARTEN_LABELS: Record<string, string> = {
+  ueberweisung: "Überweisung",
+  lastschrift: "Lastschrift",
+  bar: "Bar",
+};
+
 export const insuranceProviders = pgTable("insurance_providers", {
   id: serial("id").primaryKey(),
-  name: text("name").notNull(),
+  name: text("name").notNull(), // Suchbegriff (z.B. "DAK")
+  empfaenger: text("empfaenger"), // Empfänger (z.B. "DAK NordWest")
+  empfaengerZeile2: text("empfaenger_zeile2"), // Empfänger Zeile 2 (optional, z.B. "z.H. Herrn Mustermann")
   ikNummer: text("ik_nummer").notNull().unique(), // 9-digit Institutionskennzeichen
+  anschrift: text("anschrift"), // Anschrift (z.B. "Musterstr. 2")
+  plzOrt: text("plz_ort"), // PLZ & Ort (z.B. "12345 Musterstadt")
+  telefon: text("telefon"),
+  email: text("email"),
+  emailInvoiceEnabled: boolean("email_invoice_enabled").notNull().default(false),
+  zahlungsbedingungen: text("zahlungsbedingungen").default("30_tage"),
+  zahlungsart: text("zahlungsart").default("ueberweisung"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  // Legacy columns (kept for backward compatibility)
   strasse: text("strasse"),
   hausnummer: text("hausnummer"),
   plz: text("plz"),
   stadt: text("stadt"),
-  telefon: text("telefon"),
-  email: text("email"),
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 // Customer insurance history (tracks changes over time)
@@ -777,14 +803,17 @@ export const plzSchema = z.string()
 
 // Insurance Provider schemas
 export const insertInsuranceProviderSchema = z.object({
-  name: z.string().min(1, "Name ist erforderlich"),
+  name: z.string().min(1, "Suchbegriff ist erforderlich"),
+  empfaenger: z.string().optional().nullable(),
+  empfaengerZeile2: z.string().optional().nullable(),
   ikNummer: ikNummerSchema,
-  strasse: z.string().optional(),
-  hausnummer: z.string().optional(),
-  plz: plzSchema.optional(),
-  stadt: z.string().optional(),
+  anschrift: z.string().optional().nullable(),
+  plzOrt: z.string().optional().nullable(),
   telefon: optionalGermanPhoneSchema,
   email: z.string().email("Ungültige E-Mail-Adresse").optional().nullable(),
+  emailInvoiceEnabled: z.boolean().optional().default(false),
+  zahlungsbedingungen: z.enum(ZAHLUNGSBEDINGUNGEN).optional().default("30_tage"),
+  zahlungsart: z.enum(ZAHLUNGSARTEN).optional().default("ueberweisung"),
   isActive: z.boolean().optional().default(true),
 });
 

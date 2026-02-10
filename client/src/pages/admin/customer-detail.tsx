@@ -21,7 +21,6 @@ import {
   Loader2,
   Users,
   Wallet,
-  Heart,
   Edit,
   Euro,
   AlertCircle,
@@ -32,8 +31,8 @@ import { BudgetTypeSettings } from "@/components/budget/BudgetTypeSettings";
 import { CustomerOverviewTab } from "./components/customer-overview-tab";
 import { CustomerServicesTab } from "./components/customer-services-tab";
 import { CustomerHistoryTab } from "./components/customer-history-tab";
+import { CustomerInsuranceTab } from "./components/customer-insurance-tab";
 import { PricingSection } from "./components/customer-pricing-section";
-import { formatDateForDisplay } from "@shared/utils/datetime";
 
 export default function AdminCustomerDetail() {
   const { id } = useParams<{ id: string }>();
@@ -226,41 +225,10 @@ export default function AdminCustomerDetail() {
             </TabsContent>
 
             <TabsContent value="insurance" className="space-y-4">
-              <SectionCard
-                title="Aktuelle Pflegekasse"
-                icon={<Heart className={iconSize.sm} />}
-                actions={
-                  <Button size="sm" variant="outline" data-testid="button-change-insurance">
-                    Kasse wechseln
-                  </Button>
-                }
-              >
-                {customer.currentInsurance ? (
-                  <div className="p-4 rounded-lg bg-blue-50 border border-blue-100">
-                    <p className="font-medium text-gray-900">
-                      {customer.currentInsurance.providerName}
-                    </p>
-                    <p className="text-sm text-gray-600 mt-1">
-                      Versichertennummer: {customer.currentInsurance.versichertennummer}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-2">
-                      Gültig seit {formatDateForDisplay(customer.currentInsurance.validFrom)}
-                    </p>
-                  </div>
-                ) : (
-                  <EmptyState
-                    icon={<Heart className={iconSize.xl} />}
-                    title="Keine Pflegekasse"
-                    description="Keine Pflegekasse hinterlegt"
-                    action={
-                      <Button size="sm" className={componentStyles.btnPrimary}>
-                        Pflegekasse hinzufügen
-                      </Button>
-                    }
-                    className="py-6"
-                  />
-                )}
-              </SectionCard>
+              <CustomerInsuranceTab
+                customerId={customerId}
+                currentInsurance={customer.currentInsurance}
+              />
             </TabsContent>
 
             <TabsContent value="history" className="space-y-4">

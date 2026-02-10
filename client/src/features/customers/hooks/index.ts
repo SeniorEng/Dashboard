@@ -12,6 +12,8 @@ export { useEmployees, employeeKeys } from './use-employees';
 export { 
   useInsuranceProviders, 
   useCreateInsuranceProvider,
+  useUpdateInsuranceProvider,
   insuranceProviderKeys,
   type CreateInsuranceProviderData,
+  type InsuranceProviderFormData,
 } from './use-insurance-providers';

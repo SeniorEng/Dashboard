@@ -317,7 +317,18 @@ export interface DocumentAppointmentRequest {
 export interface InsuranceProviderItem {
   id: number;
   name: string;
+  empfaenger: string | null;
+  empfaengerZeile2: string | null;
   ikNummer: string;
+  anschrift: string | null;
+  plzOrt: string | null;
+  telefon: string | null;
+  email: string | null;
+  emailInvoiceEnabled: boolean;
+  zahlungsbedingungen: string | null;
+  zahlungsart: string | null;
+  isActive: boolean;
+  createdAt: string;
 }
 
 // ============================================
