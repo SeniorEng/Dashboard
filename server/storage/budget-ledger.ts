@@ -5,6 +5,7 @@ import {
   customerBudgetTypeSettings,
   customerBudgets,
   customerPricingHistory,
+  customers,
   type BudgetAllocation,
   type InsertBudgetAllocation,
   type BudgetTransaction,
@@ -18,6 +19,7 @@ import { eq, and, sql, lte, gte, isNull, or, desc, asc, inArray } from "drizzle-
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";
 import { BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
 import { db } from "../lib/db";
+import { serviceCatalogStorage } from "./service-catalog";
 
 const DEFAULT_MONTHLY_BUDGET_CENTS = BUDGET_45B_MAX_MONTHLY_CENTS;
 
@@ -555,15 +557,33 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     customerKilometersCents: number;
     totalCents: number;
   }> {
-    const pricing = await this.getCurrentPricing(params.customerId, params.date);
-    
-    if (!pricing) {
-      throw new Error(`Keine Preisvereinbarung für Kunde ${params.customerId} zum Datum ${params.date} gefunden`);
+    const resolvedPrices = await serviceCatalogStorage.resolveAllPrices(params.customerId, params.date);
+
+    const hwService = resolvedPrices.find(p => p.service.code === "hauswirtschaft");
+    const abService = resolvedPrices.find(p => p.service.code === "alltagsbegleitung");
+    const kmService = resolvedPrices.find(p => p.service.code === "kilometer");
+
+    if (!hwService && !abService && !kmService) {
+      const legacyPricing = await this.getCurrentPricing(params.customerId, params.date);
+      if (!legacyPricing) {
+        throw new Error(`Keine Preisvereinbarung für Kunde ${params.customerId} zum Datum ${params.date} gefunden`);
+      }
+      const hauswirtschaftRateCents = legacyPricing.hauswirtschaftRateCents || 0;
+      const alltagsbegleitungRateCents = legacyPricing.alltagsbegleitungRateCents || 0;
+      const kilometerRateCents = legacyPricing.kilometerRateCents || 0;
+      const hauswirtschaftCents = Math.round((params.hauswirtschaftMinutes / 60) * hauswirtschaftRateCents);
+      const alltagsbegleitungCents = Math.round((params.alltagsbegleitungMinutes / 60) * alltagsbegleitungRateCents);
+      const travelCents = Math.round(params.travelKilometers * kilometerRateCents);
+      const customerKilometersCents = Math.round(params.customerKilometers * kilometerRateCents);
+      return {
+        hauswirtschaftCents, alltagsbegleitungCents, travelCents, customerKilometersCents,
+        totalCents: hauswirtschaftCents + alltagsbegleitungCents + travelCents + customerKilometersCents,
+      };
     }
 
-    const hauswirtschaftRateCents = pricing.hauswirtschaftRateCents || 0;
-    const alltagsbegleitungRateCents = pricing.alltagsbegleitungRateCents || 0;
-    const kilometerRateCents = pricing.kilometerRateCents || 0;
+    const hauswirtschaftRateCents = hwService?.priceCents || 0;
+    const alltagsbegleitungRateCents = abService?.priceCents || 0;
+    const kilometerRateCents = kmService?.priceCents || 0;
 
     const hauswirtschaftCents = Math.round((params.hauswirtschaftMinutes / 60) * hauswirtschaftRateCents);
     const alltagsbegleitungCents = Math.round((params.alltagsbegleitungMinutes / 60) * alltagsbegleitungRateCents);
@@ -616,8 +636,34 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       userId: params.userId,
     });
 
-    if (cascadeResult.transactions.length === 0) {
-      throw new Error("Kein Budget verfügbar für diese Buchung");
+    if (cascadeResult.outstandingCents > 0) {
+      const [customer] = await db.select({ acceptsPrivatePayment: customers.acceptsPrivatePayment })
+        .from(customers).where(eq(customers.id, params.customerId)).limit(1);
+      if (customer?.acceptsPrivatePayment) {
+        const privateRatio = costs.totalCents > 0 ? cascadeResult.outstandingCents / costs.totalCents : 1;
+        const [privateTransaction] = await db.insert(budgetTransactions).values({
+          customerId: params.customerId,
+          budgetType: "private",
+          transactionDate: params.transactionDate,
+          transactionType: "consumption",
+          amountCents: -cascadeResult.outstandingCents,
+          appointmentId: params.appointmentId,
+          hauswirtschaftMinutes: Math.round(params.hauswirtschaftMinutes * privateRatio),
+          hauswirtschaftCents: Math.round(costs.hauswirtschaftCents * privateRatio),
+          alltagsbegleitungMinutes: Math.round(params.alltagsbegleitungMinutes * privateRatio),
+          alltagsbegleitungCents: Math.round(costs.alltagsbegleitungCents * privateRatio),
+          travelKilometers: Math.round(Math.round(params.travelKilometers * 10) * privateRatio),
+          travelCents: Math.round(costs.travelCents * privateRatio),
+          customerKilometers: Math.round(Math.round(params.customerKilometers * 10) * privateRatio),
+          customerKilometersCents: Math.round(costs.customerKilometersCents * privateRatio),
+          userId: params.userId,
+          description: `Privatzahlung: ${(cascadeResult.outstandingCents / 100).toFixed(2)} €`,
+        }).returning();
+        return cascadeResult.transactions[0] ?? privateTransaction;
+      }
+      if (cascadeResult.transactions.length === 0) {
+        throw new Error("Kein Budget verfügbar für diese Buchung");
+      }
     }
 
     return cascadeResult.transactions[0];

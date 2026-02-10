@@ -18,6 +18,7 @@ import { PageHeader } from "@/components/patterns/page-header";
 import { useToast } from "@/hooks/use-toast";
 import { useCustomer, useUpdateCustomer, useEmployees } from "@/features/customers";
 import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
+import { Switch } from "@/components/ui/switch";
 import {
   Loader2,
   User2,
@@ -25,6 +26,7 @@ import {
   Phone,
   Users,
   Save,
+  CreditCard,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -68,6 +70,7 @@ export default function AdminCustomerEdit() {
     pflegegrad: "0",
     primaryEmployeeId: "",
     backupEmployeeId: "",
+    acceptsPrivatePayment: false,
   });
 
   const [phoneErrors, setPhoneErrors] = useState<Record<string, string | null>>({});
@@ -88,6 +91,7 @@ export default function AdminCustomerEdit() {
         pflegegrad: (customer.pflegegrad ?? 0).toString(),
         primaryEmployeeId: customer.primaryEmployee?.id?.toString() || "",
         backupEmployeeId: customer.backupEmployee?.id?.toString() || "",
+        acceptsPrivatePayment: customer.acceptsPrivatePayment ?? false,
       });
     }
   }, [customer]);
@@ -154,6 +158,7 @@ export default function AdminCustomerEdit() {
       stadt: formData.stadt.trim() || null,
       primaryEmployeeId: primaryId,
       backupEmployeeId: backupId,
+      acceptsPrivatePayment: formData.acceptsPrivatePayment,
     };
 
     updateMutation.mutate(
@@ -388,6 +393,31 @@ export default function AdminCustomerEdit() {
                     searchPlaceholder="Mitarbeiter suchen..."
                     emptyText="Kein Mitarbeiter gefunden."
                     data-testid="select-backup-employee"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <CreditCard className={iconSize.sm} />
+                  Abrechnung
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="acceptsPrivatePayment">Akzeptiert private Zuzahlung</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Restbeträge über das Budget hinaus werden dem Kunden privat mit MwSt. berechnet
+                    </p>
+                  </div>
+                  <Switch
+                    id="acceptsPrivatePayment"
+                    checked={formData.acceptsPrivatePayment}
+                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, acceptsPrivatePayment: checked }))}
+                    data-testid="switch-accepts-private-payment"
                   />
                 </div>
               </CardContent>

@@ -30,6 +30,7 @@ const AdminCustomerNew = lazy(() => import("@/pages/admin/customer-new"));
 const AdminCustomerEdit = lazy(() => import("@/pages/admin/customer-edit"));
 const AdminTimeEntries = lazy(() => import("@/pages/admin/time-entries"));
 const AdminInsuranceProviders = lazy(() => import("@/pages/admin/insurance-providers"));
+const AdminServices = lazy(() => import("@/pages/admin/services"));
 const AdminSettings = lazy(() => import("@/pages/admin/settings"));
 const UndocumentedAppointments = lazy(() => import("@/pages/undocumented-appointments"));
 const CustomerDetail = lazy(() => import("@/pages/customer-detail"));
@@ -162,6 +163,9 @@ function Router() {
       </Route>
       <Route path="/admin/insurance-providers">
         <AdminRoute component={AdminInsuranceProviders} />
+      </Route>
+      <Route path="/admin/services">
+        <AdminRoute component={AdminServices} />
       </Route>
       <Route path="/admin/time-entries">
         <AdminRoute component={AdminTimeEntries} />

@@ -75,14 +75,42 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, async (req: Reques
     const customerKilometers = parseFloat(req.query.customerKilometers as string) || 0;
     const date = (req.query.date as string) || todayISO();
 
-    const costs = await budgetLedgerStorage.calculateAppointmentCost({
-      customerId,
-      hauswirtschaftMinutes,
-      alltagsbegleitungMinutes,
-      travelKilometers,
-      customerKilometers,
-      date,
+    const { serviceCatalogStorage } = await import("../storage/service-catalog");
+    const [costs, customer, resolvedPrices] = await Promise.all([
+      budgetLedgerStorage.calculateAppointmentCost({
+        customerId,
+        hauswirtschaftMinutes,
+        alltagsbegleitungMinutes,
+        travelKilometers,
+        customerKilometers,
+        date,
+      }),
+      storage.getCustomer(customerId),
+      serviceCatalogStorage.resolveAllPrices(customerId, date),
+    ]);
+
+    const acceptsPrivatePayment = customer?.acceptsPrivatePayment ?? false;
+
+    const usedServices = resolvedPrices.filter(p => {
+      if (p.service.code === "hauswirtschaft" && hauswirtschaftMinutes > 0) return true;
+      if (p.service.code === "alltagsbegleitung" && alltagsbegleitungMinutes > 0) return true;
+      if (p.service.code === "kilometer" && (travelKilometers > 0 || customerKilometers > 0)) return true;
+      return false;
     });
+
+    const weightedVatRate = usedServices.length > 0
+      ? (() => {
+          const serviceCosts: { vatRate: number; cost: number }[] = usedServices.map(p => {
+            if (p.service.code === "hauswirtschaft") return { vatRate: p.service.vatRate, cost: costs.hauswirtschaftCents };
+            if (p.service.code === "alltagsbegleitung") return { vatRate: p.service.vatRate, cost: costs.alltagsbegleitungCents };
+            if (p.service.code === "kilometer") return { vatRate: p.service.vatRate, cost: costs.travelCents + costs.customerKilometersCents };
+            return { vatRate: p.service.vatRate, cost: 0 };
+          });
+          const totalCost = serviceCosts.reduce((s, c) => s + c.cost, 0);
+          if (totalCost === 0) return 19;
+          return serviceCosts.reduce((s, c) => s + (c.vatRate * c.cost / totalCost), 0);
+        })()
+      : 19;
 
     const summaries = await budgetLedgerStorage.getAllBudgetSummaries(customerId);
     const summary45b = summaries.entlastungsbetrag45b;
@@ -91,6 +119,9 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, async (req: Reques
     const totalAvailable = summary45a.currentMonthAvailableCents + summary45b.availableCents;
 
     let warning: string | null = null;
+    let isHardBlock = false;
+    let privateCents = 0;
+    let vatCents = 0;
 
     if (summary45b.monthlyLimitCents !== null) {
       const monthlyRemaining45b = Math.max(0, summary45b.monthlyLimitCents - summary45b.currentMonthUsedCents);
@@ -102,10 +133,22 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, async (req: Reques
     }
 
     if (costs.totalCents > totalAvailable) {
+      const shortfall = costs.totalCents - totalAvailable;
       const availableEuro = (totalAvailable / 100).toFixed(2);
       const costEuro = (costs.totalCents / 100).toFixed(2);
-      const budgetWarning = `Das verfügbare Gesamtbudget (${availableEuro} €) reicht nicht für diesen Termin (${costEuro} €).`;
-      warning = warning ? `${warning} ${budgetWarning}` : budgetWarning;
+
+      if (acceptsPrivatePayment) {
+        privateCents = shortfall;
+        vatCents = Math.round(shortfall * (weightedVatRate / 100));
+        const privateEuro = (privateCents / 100).toFixed(2);
+        const vatEuro = (vatCents / 100).toFixed(2);
+        const budgetWarning = `Budget reicht nur für ${availableEuro} €. Restbetrag ${privateEuro} € wird privat berechnet (zzgl. ${vatEuro} € MwSt.).`;
+        warning = warning ? `${warning} ${budgetWarning}` : budgetWarning;
+      } else {
+        const budgetWarning = `Das verfügbare Gesamtbudget (${availableEuro} €) reicht nicht für diesen Termin (${costEuro} €).`;
+        warning = warning ? `${warning} ${budgetWarning}` : budgetWarning;
+        isHardBlock = true;
+      }
     }
 
     res.json({
@@ -114,6 +157,11 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, async (req: Reques
       currentMonthUsedCents: summary45b.currentMonthUsedCents,
       monthlyLimitCents: summary45b.monthlyLimitCents,
       warning,
+      isHardBlock,
+      privateCents,
+      vatCents,
+      vatRate: Math.round(weightedVatRate),
+      acceptsPrivatePayment,
     });
   } catch (error: any) {
     if (error?.message?.includes("Preisvereinbarung")) {

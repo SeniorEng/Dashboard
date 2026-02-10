@@ -8,6 +8,7 @@ import birthdaysRouter from "./birthdays";
 import budgetRouter from "./budget";
 import tasksRouter from "./tasks";
 import serviceRecordsRouter from "./service-records";
+import servicesRouter from "./services";
 import { searchRouter } from "./search";
 import settingsRouter from "./settings";
 import { csrfProtection, csrfTokenHandler } from "../middleware/csrf";
@@ -29,6 +30,7 @@ router.use("/birthdays", birthdaysRouter);
 router.use("/budget", budgetRouter);
 router.use("/tasks", tasksRouter);
 router.use("/service-records", serviceRecordsRouter);
+router.use("/services", servicesRouter);
 router.use("/search", searchRouter);
 router.use("/settings", settingsRouter);
 

@@ -3,7 +3,7 @@ import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/ca
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { Layout } from "@/components/layout";
-import { Users, UserCog, ArrowLeft, Contact2, Clock, Settings, Building2 } from "lucide-react";
+import { Users, UserCog, ArrowLeft, Contact2, Clock, Settings, Building2, ClipboardList } from "lucide-react";
 import { iconSize } from "@/design-system";
 
 export default function AdminDashboard() {
@@ -73,6 +73,24 @@ export default function AdminDashboard() {
                       <CardTitle>Kundenverwaltung</CardTitle>
                       <CardDescription>
                         Kunden anlegen, bearbeiten und verwalten
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+              </Card>
+            </Link>
+
+            <Link href="/admin/services" className="block h-full">
+              <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid="card-services">
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-cyan-100 rounded-lg">
+                      <ClipboardList className={`${iconSize.lg} text-cyan-600`} />
+                    </div>
+                    <div>
+                      <CardTitle>Dienstleistungen</CardTitle>
+                      <CardDescription>
+                        Leistungskatalog und Standardpreise verwalten
                       </CardDescription>
                     </div>
                   </div>

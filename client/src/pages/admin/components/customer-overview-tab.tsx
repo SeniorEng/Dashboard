@@ -4,6 +4,7 @@ import { formatAddress } from "@shared/utils/format";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { SectionCard } from "@/components/patterns/section-card";
 import { iconSize } from "@/design-system";
+import { Badge } from "@/components/ui/badge";
 import {
   User2,
   MapPin,
@@ -13,6 +14,7 @@ import {
   Shield,
   Users,
   Calendar,
+  CreditCard,
 } from "lucide-react";
 import type { CustomerDetail } from "@/lib/api/types";
 
@@ -93,6 +95,25 @@ export function CustomerOverviewTab({ customer }: CustomerOverviewTabProps) {
           </div>
         ) : (
           <p className="text-gray-500">Keine Pflegekasse hinterlegt</p>
+        )}
+      </SectionCard>
+
+      <SectionCard
+        title="Abrechnung"
+        icon={<CreditCard className={iconSize.sm} />}
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-600">Private Zuzahlung:</span>
+          {customer.acceptsPrivatePayment ? (
+            <Badge className="bg-blue-50 text-blue-700 border-blue-200">Aktiviert</Badge>
+          ) : (
+            <Badge variant="outline" className="text-gray-500">Nicht aktiviert</Badge>
+          )}
+        </div>
+        {customer.acceptsPrivatePayment && (
+          <p className="text-xs text-gray-500 mt-1">
+            Restbeträge über das Budget hinaus werden privat mit MwSt. berechnet
+          </p>
         )}
       </SectionCard>
 
