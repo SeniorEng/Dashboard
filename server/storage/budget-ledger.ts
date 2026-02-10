@@ -661,9 +661,10 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         }).returning();
         return cascadeResult.transactions[0] ?? privateTransaction;
       }
-      if (cascadeResult.transactions.length === 0) {
-        throw new Error("Kein Budget verfügbar für diese Buchung");
-      }
+      throw new Error(
+        `Budget reicht nicht aus. Fehlbetrag: ${(cascadeResult.outstandingCents / 100).toFixed(2)} €. ` +
+        `Kunde akzeptiert keine Privatzahlung.`
+      );
     }
 
     return cascadeResult.transactions[0];
@@ -1114,7 +1115,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       { budgetType: "ersatzpflege_39_42a", enabled: true, priority: 3, monthlyLimitCents: null },
     ];
 
-    let priorityOrder: Array<{ budgetType: string; enabled: boolean; monthlyLimitCents: number | null }>;
+    let priorityOrder: Array<{ budgetType: string; enabled: boolean; monthlyLimitCents: number | null; yearlyLimitCents: number | null }>;
 
     if (typeSettings.length > 0) {
       const settingsMap = new Map(typeSettings.map(s => [s.budgetType, s]));
@@ -1124,6 +1125,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           budgetType: d.budgetType,
           enabled: s ? s.enabled : d.enabled,
           monthlyLimitCents: s ? s.monthlyLimitCents : d.monthlyLimitCents,
+          yearlyLimitCents: s?.yearlyLimitCents ?? null,
         };
       });
       priorityOrder.sort((a, b) => {
@@ -1136,6 +1138,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       priorityOrder = defaultPriority.map(d => ({
         ...d,
         monthlyLimitCents: d.budgetType === "entlastungsbetrag_45b" ? (preferences?.monthlyLimitCents ?? null) : null,
+        yearlyLimitCents: null,
       }));
     }
 
@@ -1173,6 +1176,27 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         const alreadyUsedThisMonth = Number(monthTransactions[0]?.total ?? 0);
         const monthlyRemaining = Math.max(0, pot.monthlyLimitCents - alreadyUsedThisMonth);
         maxConsumable = Math.min(remaining, monthlyRemaining);
+      }
+
+      if (pot.budgetType === "ersatzpflege_39_42a" && pot.yearlyLimitCents !== null) {
+        const txDate = parseLocalDate(params.transactionDate);
+        const txYear = txDate.getFullYear();
+        const yearStart = `${txYear}-01-01`;
+
+        const yearTransactions = await db.select({
+          total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+        })
+          .from(budgetTransactions)
+          .where(and(
+            eq(budgetTransactions.customerId, params.customerId),
+            eq(budgetTransactions.budgetType, "ersatzpflege_39_42a"),
+            eq(budgetTransactions.transactionType, "consumption"),
+            gte(budgetTransactions.transactionDate, yearStart)
+          ));
+
+        const alreadyUsedThisYear = Number(yearTransactions[0]?.total ?? 0);
+        const yearlyRemaining = Math.max(0, pot.yearlyLimitCents - alreadyUsedThisYear);
+        maxConsumable = Math.min(maxConsumable, yearlyRemaining);
       }
 
       if (maxConsumable <= 0) {

@@ -115,8 +115,9 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, async (req: Reques
     const summaries = await budgetLedgerStorage.getAllBudgetSummaries(customerId);
     const summary45b = summaries.entlastungsbetrag45b;
     const summary45a = summaries.umwandlung45a;
+    const summary39_42a = summaries.ersatzpflege39_42a;
 
-    const totalAvailable = summary45a.currentMonthAvailableCents + summary45b.availableCents;
+    const totalAvailable = summary45a.currentMonthAvailableCents + summary45b.availableCents + summary39_42a.currentYearAvailableCents;
 
     let warning: string | null = null;
     let isHardBlock = false;
