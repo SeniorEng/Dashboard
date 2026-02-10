@@ -620,6 +620,60 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       date: params.transactionDate,
     });
 
+    const [customer] = await db.select({ acceptsPrivatePayment: customers.acceptsPrivatePayment })
+      .from(customers).where(eq(customers.id, params.customerId)).limit(1);
+    const acceptsPrivatePayment = customer?.acceptsPrivatePayment ?? false;
+
+    if (!acceptsPrivatePayment && costs.totalCents > 0) {
+      const summaries = await this.getAllBudgetSummaries(params.customerId);
+      const typeSettings = await this.getBudgetTypeSettings(params.customerId);
+
+      let effective45b = summaries.entlastungsbetrag45b.availableCents;
+      let effective45a = summaries.umwandlung45a.currentMonthAvailableCents;
+      let effective39_42a = summaries.ersatzpflege39_42a.currentYearAvailableCents;
+
+      if (typeSettings.length > 0) {
+        const settingsMap = new Map(typeSettings.map(s => [s.budgetType, s]));
+
+        const s45b = settingsMap.get("entlastungsbetrag_45b");
+        if (s45b && !s45b.enabled) effective45b = 0;
+        if (s45b?.monthlyLimitCents !== null && s45b?.monthlyLimitCents !== undefined) {
+          const monthlyRemaining45b = Math.max(0, s45b.monthlyLimitCents - summaries.entlastungsbetrag45b.currentMonthUsedCents);
+          effective45b = Math.min(effective45b, monthlyRemaining45b);
+        }
+
+        const s45a = settingsMap.get("umwandlung_45a");
+        if (s45a && !s45a.enabled) effective45a = 0;
+        if (s45a?.monthlyLimitCents !== null && s45a?.monthlyLimitCents !== undefined) {
+          const monthlyRemaining45a = Math.max(0, s45a.monthlyLimitCents - summaries.umwandlung45a.currentMonthUsedCents);
+          effective45a = Math.min(effective45a, monthlyRemaining45a);
+        }
+
+        const s39 = settingsMap.get("ersatzpflege_39_42a");
+        if (s39 && !s39.enabled) effective39_42a = 0;
+        if (s39?.yearlyLimitCents !== null && s39?.yearlyLimitCents !== undefined) {
+          const yearlyRemaining = Math.max(0, s39.yearlyLimitCents - summaries.ersatzpflege39_42a.currentYearUsedCents);
+          effective39_42a = Math.min(effective39_42a, yearlyRemaining);
+        }
+      } else {
+        const preferences = await this.getBudgetPreferences(params.customerId);
+        if (preferences?.monthlyLimitCents !== null && preferences?.monthlyLimitCents !== undefined) {
+          const monthlyRemaining45b = Math.max(0, preferences.monthlyLimitCents - summaries.entlastungsbetrag45b.currentMonthUsedCents);
+          effective45b = Math.min(effective45b, monthlyRemaining45b);
+        }
+      }
+
+      const totalAvailable = effective45a + effective45b + effective39_42a;
+
+      if (costs.totalCents > totalAvailable) {
+        throw new Error(
+          `Budget reicht nicht aus. Kosten: ${(costs.totalCents / 100).toFixed(2)} €, ` +
+          `verfügbar: ${(totalAvailable / 100).toFixed(2)} €. ` +
+          `Kunde akzeptiert keine Privatzahlung.`
+        );
+      }
+    }
+
     const cascadeResult = await this.createCascadeConsumption({
       customerId: params.customerId,
       appointmentId: params.appointmentId,
@@ -637,9 +691,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     });
 
     if (cascadeResult.outstandingCents > 0) {
-      const [customer] = await db.select({ acceptsPrivatePayment: customers.acceptsPrivatePayment })
-        .from(customers).where(eq(customers.id, params.customerId)).limit(1);
-      if (customer?.acceptsPrivatePayment) {
+      if (acceptsPrivatePayment) {
         const privateRatio = costs.totalCents > 0 ? cascadeResult.outstandingCents / costs.totalCents : 1;
         const [privateTransaction] = await db.insert(budgetTransactions).values({
           customerId: params.customerId,
@@ -1182,6 +1234,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         const txDate = parseLocalDate(params.transactionDate);
         const txYear = txDate.getFullYear();
         const yearStart = `${txYear}-01-01`;
+        const yearEnd = `${txYear}-12-31`;
 
         const yearTransactions = await db.select({
           total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
@@ -1191,7 +1244,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
             eq(budgetTransactions.customerId, params.customerId),
             eq(budgetTransactions.budgetType, "ersatzpflege_39_42a"),
             eq(budgetTransactions.transactionType, "consumption"),
-            gte(budgetTransactions.transactionDate, yearStart)
+            gte(budgetTransactions.transactionDate, yearStart),
+            lte(budgetTransactions.transactionDate, yearEnd)
           ));
 
         const alreadyUsedThisYear = Number(yearTransactions[0]?.total ?? 0);
