@@ -678,6 +678,25 @@ export const appointments = pgTable("appointments", {
   index("appointments_employee_date_idx").on(table.assignedEmployeeId, table.date),
 ]);
 
+// ============================================
+// APPOINTMENT SERVICES (junction table for dynamic service selection)
+// ============================================
+
+export const appointmentServices = pgTable("appointment_services", {
+  id: serial("id").primaryKey(),
+  appointmentId: integer("appointment_id").notNull().references(() => appointments.id, { onDelete: "cascade" }),
+  serviceId: integer("service_id").notNull().references(() => services.id),
+  plannedDurationMinutes: integer("planned_duration_minutes").notNull(),
+  actualDurationMinutes: integer("actual_duration_minutes"),
+  details: text("details"),
+}, (table) => [
+  index("appointment_services_appointment_id_idx").on(table.appointmentId),
+  index("appointment_services_service_id_idx").on(table.serviceId),
+]);
+
+export type AppointmentService = typeof appointmentServices.$inferSelect;
+export type InsertAppointmentService = typeof appointmentServices.$inferInsert;
+
 // Base customer schema from Drizzle, with phone validation override
 const baseCustomerSchema = createInsertSchema(customers).omit({
   id: true,
@@ -745,19 +764,23 @@ const baseAppointmentSchema = createInsertSchema(appointments).omit({
   createdAt: true,
 });
 
-// Schema for Kundentermin appointment
+// Service entry for dynamic appointment service selection
+export const appointmentServiceEntrySchema = z.object({
+  serviceId: z.number(),
+  durationMinutes: z.number().min(15).multipleOf(15),
+});
+
+export type AppointmentServiceEntry = z.infer<typeof appointmentServiceEntrySchema>;
+
+// Schema for Kundentermin appointment (supports dynamic services array)
 export const insertKundenterminSchema = z.object({
   customerId: z.number(),
   date: z.string(),
   scheduledStart: z.string(),
-  hauswirtschaftDauer: z.number().min(15).multipleOf(15).nullable().optional(),
-  alltagsbegleitungDauer: z.number().min(15).multipleOf(15).nullable().optional(),
+  services: z.array(appointmentServiceEntrySchema).min(1, "Mindestens ein Service muss ausgewählt werden"),
   notes: z.string().max(255).optional(),
-  assignedEmployeeId: z.number().nullable().optional(), // Admin can assign employee
-}).refine(
-  (data) => data.hauswirtschaftDauer || data.alltagsbegleitungDauer,
-  { message: "Mindestens ein Service muss ausgewählt werden" }
-);
+  assignedEmployeeId: z.number().nullable().optional(),
+});
 
 // Schema for Erstberatung appointment
 export const insertErstberatungSchema = z.object({

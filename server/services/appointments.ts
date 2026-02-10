@@ -63,8 +63,7 @@ export interface KundenterminInput {
   customerId: number;
   date: string;
   scheduledStart: string;
-  hauswirtschaftDauer: number | null;
-  alltagsbegleitungDauer: number | null;
+  services: Array<{ serviceId: number; durationMinutes: number; serviceCode?: string | null }>;
   notes?: string;
   assignedEmployeeId?: number | null;
 }
@@ -284,25 +283,28 @@ export class AppointmentService {
     appointmentData: InsertAppointment;
     scheduledEnd: string;
     totalDuration: number;
+    serviceEntries: Array<{ serviceId: number; plannedDurationMinutes: number }>;
   } {
-    const totalDuration = calculateTotalDuration(
-      input.hauswirtschaftDauer,
-      input.alltagsbegleitungDauer
-    );
+    const totalDuration = input.services.reduce((sum, s) => sum + s.durationMinutes, 0);
     
     const scheduledEnd = addMinutesToTimeHHMMSS(input.scheduledStart, totalDuration);
     
+    const hauswirtschaftService = input.services.find(s => s.serviceCode === 'hauswirtschaft');
+    const alltagsbegleitungService = input.services.find(s => s.serviceCode === 'alltagsbegleitung');
+    const hauswirtschaftDauer = hauswirtschaftService?.durationMinutes ?? null;
+    const alltagsbegleitungDauer = alltagsbegleitungService?.durationMinutes ?? null;
+    
     const serviceType = getServiceTypeFromDurations(
-      input.hauswirtschaftDauer,
-      input.alltagsbegleitungDauer
+      hauswirtschaftDauer,
+      alltagsbegleitungDauer
     );
     
     const appointmentData: InsertAppointment = {
       customerId: input.customerId,
       appointmentType: "Kundentermin",
       serviceType,
-      hauswirtschaftDauer: input.hauswirtschaftDauer,
-      alltagsbegleitungDauer: input.alltagsbegleitungDauer,
+      hauswirtschaftDauer,
+      alltagsbegleitungDauer,
       date: input.date,
       scheduledStart: input.scheduledStart,
       scheduledEnd,
@@ -312,7 +314,12 @@ export class AppointmentService {
       assignedEmployeeId: input.assignedEmployeeId ?? null,
     };
     
-    return { appointmentData, scheduledEnd, totalDuration };
+    const serviceEntries = input.services.map(s => ({
+      serviceId: s.serviceId,
+      plannedDurationMinutes: s.durationMinutes,
+    }));
+    
+    return { appointmentData, scheduledEnd, totalDuration, serviceEntries };
   }
 
   prepareErstberatungData(input: ErstberatungInput): {

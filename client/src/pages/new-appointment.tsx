@@ -17,6 +17,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
 import { useCustomerList, useAdminEmployees, useCreateKundentermin, useCreateErstberatung, ServiceSelector, AppointmentSummary } from "@/features/appointments";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS, formatDuration } from "@shared/types";
+import type { Service } from "@shared/schema";
 import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
 import { timeToMinutes, minutesToTimeDisplay, formatDurationDisplay, todayISO } from "@shared/utils/datetime";
 
@@ -34,14 +35,16 @@ export default function NewAppointment() {
   const createKundenterminMutation = useCreateKundentermin();
   const createErstberatungMutation = useCreateErstberatung();
 
+  const { data: catalogServices = [] } = useQuery<Service[]>({
+    queryKey: ["/api/services"],
+    staleTime: 60_000,
+  });
+
   // Kundentermin state
   const [ktCustomerId, setKtCustomerId] = useState<string>("");
   const [ktDate, setKtDate] = useState<string>(todayISO());
   const [ktTime, setKtTime] = useState<string>("09:00");
-  const [ktHauswirtschaft, setKtHauswirtschaft] = useState<boolean>(false);
-  const [ktHauswirtschaftDauer, setKtHauswirtschaftDauer] = useState<number>(60);
-  const [ktAlltagsbegleitung, setKtAlltagsbegleitung] = useState<boolean>(false);
-  const [ktAlltagsbegleitungDauer, setKtAlltagsbegleitungDauer] = useState<number>(60);
+  const [ktServices, setKtServices] = useState<Array<{ serviceId: number; durationMinutes: number }>>([]);
   const [ktNotes, setKtNotes] = useState<string>("");
   const [ktAssignedEmployeeId, setKtAssignedEmployeeId] = useState<string>("");
 
@@ -64,13 +67,17 @@ export default function NewAppointment() {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const budgetEstimateParams = useMemo(() => {
-    if (!ktCustomerId || (!ktHauswirtschaft && !ktAlltagsbegleitung)) return null;
+    if (!ktCustomerId || ktServices.length === 0) return null;
     const params = new URLSearchParams();
-    if (ktHauswirtschaft) params.set("hauswirtschaftMinutes", String(ktHauswirtschaftDauer));
-    if (ktAlltagsbegleitung) params.set("alltagsbegleitungMinutes", String(ktAlltagsbegleitungDauer));
+    for (const s of ktServices) {
+      const catalog = catalogServices.find(c => c.id === s.serviceId);
+      if (catalog?.code === 'hauswirtschaft') params.set("hauswirtschaftMinutes", String(s.durationMinutes));
+      if (catalog?.code === 'alltagsbegleitung') params.set("alltagsbegleitungMinutes", String(s.durationMinutes));
+    }
+    if (params.toString() === '') return null;
     params.set("date", ktDate);
     return params.toString();
-  }, [ktCustomerId, ktHauswirtschaft, ktHauswirtschaftDauer, ktAlltagsbegleitung, ktAlltagsbegleitungDauer, ktDate]);
+  }, [ktCustomerId, ktServices, catalogServices, ktDate]);
 
   const { data: costEstimate } = useQuery<{
     totalCents: number;
@@ -95,37 +102,30 @@ export default function NewAppointment() {
 
   // Computed summary for Kundentermin
   const ktSummary = useMemo(() => {
-    const services: { name: string; duration: number }[] = [];
-    if (ktHauswirtschaft) {
-      services.push({ name: "Hauswirtschaft", duration: ktHauswirtschaftDauer });
-    }
-    if (ktAlltagsbegleitung) {
-      services.push({ name: "Alltagsbegleitung", duration: ktAlltagsbegleitungDauer });
-    }
-    
-    const totalMinutes = services.reduce((sum, s) => sum + s.duration, 0);
-    
-    // Calculate end time using central utilities
+    const servicesList = ktServices.map(s => {
+      const catalog = catalogServices.find(c => c.id === s.serviceId);
+      return { name: catalog?.name || "Service", duration: s.durationMinutes };
+    });
+    const totalMinutes = servicesList.reduce((sum, s) => sum + s.duration, 0);
     let endTime = "";
     if (ktTime && totalMinutes > 0) {
       const startMinutes = timeToMinutes(ktTime);
       endTime = minutesToTimeDisplay((startMinutes + totalMinutes) % (24 * 60));
     }
-    
     return {
-      services,
+      services: servicesList,
       totalMinutes,
       totalFormatted: formatDurationDisplay(totalMinutes, "verbose"),
       startTime: ktTime,
       endTime,
-      hasServices: services.length > 0
+      hasServices: servicesList.length > 0
     };
-  }, [ktTime, ktHauswirtschaft, ktHauswirtschaftDauer, ktAlltagsbegleitung, ktAlltagsbegleitungDauer]);
+  }, [ktTime, ktServices, catalogServices]);
 
   const validateKundentermin = (): boolean => {
     const newErrors: Record<string, string> = {};
     if (!ktCustomerId) newErrors.ktCustomerId = "Bitte wählen Sie einen Kunden";
-    if (!ktHauswirtschaft && !ktAlltagsbegleitung) newErrors.ktServices = "Bitte wählen Sie mindestens einen Service";
+    if (ktServices.length === 0) newErrors.ktServices = "Bitte wählen Sie mindestens einen Service";
     if (isAdmin && !ktAssignedEmployeeId) newErrors.ktAssignedEmployeeId = "Bitte wählen Sie einen Mitarbeiter";
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -153,8 +153,7 @@ export default function NewAppointment() {
       customerId: parseInt(ktCustomerId),
       date: ktDate,
       scheduledStart: ktTime,
-      hauswirtschaftDauer: ktHauswirtschaft ? ktHauswirtschaftDauer : null,
-      alltagsbegleitungDauer: ktAlltagsbegleitung ? ktAlltagsbegleitungDauer : null,
+      services: ktServices,
       notes: ktNotes || undefined,
       assignedEmployeeId: isAdmin && ktAssignedEmployeeId ? parseInt(ktAssignedEmployeeId) : undefined,
     }, {
@@ -344,20 +343,8 @@ export default function NewAppointment() {
               </div>
 
               <ServiceSelector
-                hauswirtschaft={ktHauswirtschaft}
-                onHauswirtschaftChange={(checked) => {
-                  setKtHauswirtschaft(checked);
-                  if (!checked) setKtHauswirtschaftDauer(60);
-                }}
-                hauswirtschaftDauer={ktHauswirtschaftDauer}
-                onHauswirtschaftDauerChange={setKtHauswirtschaftDauer}
-                alltagsbegleitung={ktAlltagsbegleitung}
-                onAlltagsbegleitungChange={(checked) => {
-                  setKtAlltagsbegleitung(checked);
-                  if (!checked) setKtAlltagsbegleitungDauer(60);
-                }}
-                alltagsbegleitungDauer={ktAlltagsbegleitungDauer}
-                onAlltagsbegleitungDauerChange={setKtAlltagsbegleitungDauer}
+                services={ktServices}
+                onChange={setKtServices}
                 error={errors.ktServices}
               />
 

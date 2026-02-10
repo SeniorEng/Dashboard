@@ -56,8 +56,10 @@ describe("Termine (Appointments) CRUD", () => {
         customerId: testCustomerId,
         date: testDate,
         scheduledStart: "10:00",
-        hauswirtschaftDauer: 60,
-        alltagsbegleitungDauer: 30,
+        services: [
+          { serviceId: 1, durationMinutes: 60 },
+          { serviceId: 2, durationMinutes: 30 },
+        ],
         assignedEmployeeId: auth.user.id,
       });
 
@@ -78,7 +80,9 @@ describe("Termine (Appointments) CRUD", () => {
         customerId: testCustomerId,
         date: testDate,
         scheduledStart: "10:30",
-        hauswirtschaftDauer: 60,
+        services: [
+          { serviceId: 1, durationMinutes: 60 },
+        ],
         assignedEmployeeId: auth.user.id,
       });
 
@@ -153,7 +157,9 @@ describe("Termine (Appointments) CRUD", () => {
         customerId: testCustomerId,
         date: getFutureDate(15),
         scheduledStart: "14:00",
-        hauswirtschaftDauer: 30,
+        services: [
+          { serviceId: 1, durationMinutes: 30 },
+        ],
         assignedEmployeeId: auth.user.id,
       });
       
@@ -181,8 +187,10 @@ describe("Termine (Appointments) CRUD", () => {
         customerId: testCustomerId,
         date: getFutureDate(50),
         scheduledStart: "09:00",
-        hauswirtschaftDauer: 60,
-        alltagsbegleitungDauer: 30,
+        services: [
+          { serviceId: 1, durationMinutes: 60 },
+          { serviceId: 2, durationMinutes: 30 },
+        ],
         assignedEmployeeId: auth.user.id,
       });
       
@@ -253,7 +261,9 @@ describe("Termine (Appointments) CRUD", () => {
         customerId: testCustomerId,
         date: getFutureDate(20),
         scheduledStart: "16:00",
-        hauswirtschaftDauer: 45,
+        services: [
+          { serviceId: 1, durationMinutes: 45 },
+        ],
         assignedEmployeeId: auth.user.id,
       });
       

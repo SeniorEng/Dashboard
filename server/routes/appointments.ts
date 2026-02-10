@@ -5,7 +5,9 @@ import {
   updateAppointmentSchema, 
   insertKundenterminSchema,
   insertErstberatungSchema,
-  documentKundenterminSchema
+  documentKundenterminSchema,
+  services as servicesTable,
+  appointmentServices,
 } from "@shared/schema";
 import { appointmentService } from "../services/appointments";
 import { authService } from "../services/auth";
@@ -21,6 +23,8 @@ import {
   sendServerError
 } from "../lib/errors";
 import { requireAuth } from "../middleware/auth";
+import { db } from "../lib/db";
+import { eq, inArray } from "drizzle-orm";
 import type { Response } from "express";
 
 const router = Router();
@@ -122,6 +126,31 @@ router.get("/undocumented", async (req, res) => {
   }
 });
 
+router.get("/:id/services", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return sendBadRequest(res, "Ungültige Termin-ID");
+    
+    const result = await db.select({
+      id: appointmentServices.id,
+      serviceId: appointmentServices.serviceId,
+      plannedDurationMinutes: appointmentServices.plannedDurationMinutes,
+      actualDurationMinutes: appointmentServices.actualDurationMinutes,
+      details: appointmentServices.details,
+      serviceName: servicesTable.name,
+      serviceCode: servicesTable.code,
+      serviceUnitType: servicesTable.unitType,
+    })
+    .from(appointmentServices)
+    .innerJoin(servicesTable, eq(appointmentServices.serviceId, servicesTable.id))
+    .where(eq(appointmentServices.appointmentId, id));
+    
+    res.json(result);
+  } catch (error) {
+    handleRouteError(res, error, "Fehler beim Laden der Termin-Services", "Failed to fetch appointment services");
+  }
+});
+
 router.get("/:id", async (req, res) => {
   try {
     const user = req.user!;
@@ -192,13 +221,19 @@ router.post("/kundentermin", async (req, res) => {
       }
     }
     
-    const { appointmentData, scheduledEnd } = appointmentService.prepareKundenterminData({
-      customerId: validatedData.customerId,
-      date: validatedData.date,
-      scheduledStart: validatedData.scheduledStart,
-      hauswirtschaftDauer: validatedData.hauswirtschaftDauer ?? null,
-      alltagsbegleitungDauer: validatedData.alltagsbegleitungDauer ?? null,
-      notes: validatedData.notes,
+    const serviceIds = validatedData.services.map(s => s.serviceId);
+    const serviceRecords = await db.select({ id: servicesTable.id, code: servicesTable.code }).from(servicesTable).where(inArray(servicesTable.id, serviceIds));
+    const serviceCodeMap = Object.fromEntries(serviceRecords.map(s => [s.id, s.code]));
+
+    const servicesWithCodes = validatedData.services.map(s => ({
+      serviceId: s.serviceId,
+      durationMinutes: s.durationMinutes,
+      serviceCode: serviceCodeMap[s.serviceId] || null,
+    }));
+
+    const { appointmentData, scheduledEnd, serviceEntries } = appointmentService.prepareKundenterminData({
+      ...validatedData,
+      services: servicesWithCodes,
       assignedEmployeeId,
     });
     
@@ -221,6 +256,17 @@ router.post("/kundentermin", async (req, res) => {
     }
     
     const appointment = await storage.createAppointment(appointmentData);
+
+    if (serviceEntries.length > 0) {
+      await db.insert(appointmentServices).values(
+        serviceEntries.map(entry => ({
+          appointmentId: appointment.id,
+          serviceId: entry.serviceId,
+          plannedDurationMinutes: entry.plannedDurationMinutes,
+        }))
+      );
+    }
+
     res.status(201).json(appointment);
   } catch (error) {
     handleRouteError(res, error, ErrorMessages.createAppointmentFailed, "Failed to create Kundentermin");

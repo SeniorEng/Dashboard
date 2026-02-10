@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useRoute, useLocation } from "wouter";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +14,7 @@ import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useAppointment, useCustomerList, ServiceSelector, AppointmentSummary } from "@/features/appointments";
 import { addMinutesToTime, timeToMinutes, minutesToTimeDisplay, formatDurationDisplay } from "@shared/utils/datetime";
+import type { Service } from "@shared/schema";
 
 export default function EditAppointment() {
   const [, params] = useRoute("/edit-appointment/:id");
@@ -26,12 +27,29 @@ export default function EditAppointment() {
   
   const { data: customers = [] } = useCustomerList();
 
+  const { data: appointmentServiceEntries = [] } = useQuery<Array<{
+    serviceId: number;
+    plannedDurationMinutes: number;
+    serviceName: string;
+    serviceCode: string | null;
+  }>>({
+    queryKey: ["appointments", id, "services"],
+    queryFn: async () => {
+      const res = await fetch(`/api/appointments/${id}/services`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: id > 0,
+  });
+
+  const { data: catalogServices = [] } = useQuery<Service[]>({
+    queryKey: ["/api/services"],
+    staleTime: 60_000,
+  });
+
   const [date, setDate] = useState<string>("");
   const [time, setTime] = useState<string>("");
-  const [hauswirtschaft, setHauswirtschaft] = useState<boolean>(false);
-  const [hauswirtschaftDauer, setHauswirtschaftDauer] = useState<number>(60);
-  const [alltagsbegleitung, setAlltagsbegleitung] = useState<boolean>(false);
-  const [alltagsbegleitungDauer, setAlltagsbegleitungDauer] = useState<number>(60);
+  const [services, setServices] = useState<Array<{ serviceId: number; durationMinutes: number }>>([]);
   const [notes, setNotes] = useState<string>("");
   const [endTime, setEndTime] = useState<string>("");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -43,15 +61,28 @@ export default function EditAppointment() {
       setNotes(appointment.notes || "");
       
       if (appointment.appointmentType === "Kundentermin") {
-        setHauswirtschaft(!!appointment.hauswirtschaftDauer);
-        setHauswirtschaftDauer(appointment.hauswirtschaftDauer || 60);
-        setAlltagsbegleitung(!!appointment.alltagsbegleitungDauer);
-        setAlltagsbegleitungDauer(appointment.alltagsbegleitungDauer || 60);
+        if (appointmentServiceEntries.length > 0) {
+          setServices(appointmentServiceEntries.map(e => ({
+            serviceId: e.serviceId,
+            durationMinutes: e.plannedDurationMinutes,
+          })));
+        } else {
+          const legacyServices: Array<{ serviceId: number; durationMinutes: number }> = [];
+          if (appointment.hauswirtschaftDauer) {
+            const hwService = catalogServices.find(s => s.code === 'hauswirtschaft');
+            if (hwService) legacyServices.push({ serviceId: hwService.id, durationMinutes: appointment.hauswirtschaftDauer });
+          }
+          if (appointment.alltagsbegleitungDauer) {
+            const abService = catalogServices.find(s => s.code === 'alltagsbegleitung');
+            if (abService) legacyServices.push({ serviceId: abService.id, durationMinutes: appointment.alltagsbegleitungDauer });
+          }
+          if (legacyServices.length > 0) setServices(legacyServices);
+        }
       } else if (appointment.scheduledEnd) {
         setEndTime(appointment.scheduledEnd.slice(0, 5));
       }
     }
-  }, [appointment]);
+  }, [appointment, appointmentServiceEntries, catalogServices]);
 
   const summary = useMemo(() => {
     if (!appointment) return null;
@@ -64,15 +95,12 @@ export default function EditAppointment() {
       };
     }
     
-    const services: { name: string; duration: number }[] = [];
-    if (hauswirtschaft) {
-      services.push({ name: "Hauswirtschaft", duration: hauswirtschaftDauer });
-    }
-    if (alltagsbegleitung) {
-      services.push({ name: "Alltagsbegleitung", duration: alltagsbegleitungDauer });
-    }
+    const servicesList = services.map(s => {
+      const catalog = catalogServices.find(c => c.id === s.serviceId);
+      return { name: catalog?.name || "Service", duration: s.durationMinutes };
+    });
     
-    const totalMinutes = services.reduce((sum, s) => sum + s.duration, 0);
+    const totalMinutes = servicesList.reduce((sum, s) => sum + s.duration, 0);
     
     let calculatedEndTime = "";
     if (time && totalMinutes > 0) {
@@ -81,14 +109,14 @@ export default function EditAppointment() {
     }
     
     return {
-      services,
+      services: servicesList,
       totalMinutes,
       totalFormatted: formatDurationDisplay(totalMinutes, "verbose"),
       startTime: time,
       endTime: calculatedEndTime,
-      hasServices: services.length > 0
+      hasServices: servicesList.length > 0
     };
-  }, [appointment, time, endTime, hauswirtschaft, hauswirtschaftDauer, alltagsbegleitung, alltagsbegleitungDauer]);
+  }, [appointment, time, endTime, services, catalogServices]);
 
   const updateMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
@@ -109,7 +137,7 @@ export default function EditAppointment() {
     const newErrors: Record<string, string> = {};
     
     if (appointment?.appointmentType === "Kundentermin") {
-      if (!hauswirtschaft && !alltagsbegleitung) {
+      if (services.length === 0) {
         newErrors.services = "Bitte wählen Sie mindestens einen Service";
       }
     } else {
@@ -126,25 +154,29 @@ export default function EditAppointment() {
     if (!validate() || !appointment) return;
     
     if (appointment.appointmentType === "Kundentermin") {
-      const totalDuration = (hauswirtschaft ? hauswirtschaftDauer : 0) + (alltagsbegleitung ? alltagsbegleitungDauer : 0);
+      let hauswirtschaftDauerVal: number | null = null;
+      let alltagsbegleitungDauerVal: number | null = null;
+      
+      for (const s of services) {
+        const catalog = catalogServices.find(c => c.id === s.serviceId);
+        if (catalog?.code === 'hauswirtschaft') hauswirtschaftDauerVal = s.durationMinutes;
+        if (catalog?.code === 'alltagsbegleitung') alltagsbegleitungDauerVal = s.durationMinutes;
+      }
+      
+      const totalDuration = services.reduce((sum, s) => sum + s.durationMinutes, 0);
       const calculatedEndTime = addMinutesToTime(time, totalDuration);
       
-      let serviceType = null;
-      if (hauswirtschaft && alltagsbegleitung) {
-        serviceType = "Hauswirtschaft";
-      } else if (hauswirtschaft) {
-        serviceType = "Hauswirtschaft";
-      } else if (alltagsbegleitung) {
-        serviceType = "Alltagsbegleitung";
-      }
+      let serviceType: string | null = null;
+      if (hauswirtschaftDauerVal) serviceType = "Hauswirtschaft";
+      else if (alltagsbegleitungDauerVal) serviceType = "Alltagsbegleitung";
       
       updateMutation.mutate({
         date,
         scheduledStart: time,
         scheduledEnd: calculatedEndTime,
         durationPromised: totalDuration,
-        hauswirtschaftDauer: hauswirtschaft ? hauswirtschaftDauer : null,
-        alltagsbegleitungDauer: alltagsbegleitung ? alltagsbegleitungDauer : null,
+        hauswirtschaftDauer: hauswirtschaftDauerVal,
+        alltagsbegleitungDauer: alltagsbegleitungDauerVal,
         serviceType,
         notes: notes || null,
       });
@@ -253,20 +285,8 @@ export default function EditAppointment() {
           {isKundentermin ? (
             <div className="space-y-4">
               <ServiceSelector
-                hauswirtschaft={hauswirtschaft}
-                onHauswirtschaftChange={(checked) => {
-                  setHauswirtschaft(checked);
-                  if (!checked) setHauswirtschaftDauer(60);
-                }}
-                hauswirtschaftDauer={hauswirtschaftDauer}
-                onHauswirtschaftDauerChange={setHauswirtschaftDauer}
-                alltagsbegleitung={alltagsbegleitung}
-                onAlltagsbegleitungChange={(checked) => {
-                  setAlltagsbegleitung(checked);
-                  if (!checked) setAlltagsbegleitungDauer(60);
-                }}
-                alltagsbegleitungDauer={alltagsbegleitungDauer}
-                onAlltagsbegleitungDauerChange={setAlltagsbegleitungDauer}
+                services={services}
+                onChange={setServices}
                 error={errors.services}
               />
 

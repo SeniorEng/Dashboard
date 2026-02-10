@@ -1,40 +1,61 @@
 import { useQuery } from "@tanstack/react-query";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DURATION_OPTIONS, formatDuration } from "@shared/types";
 import type { Service } from "@shared/schema";
-import { Loader2 } from "lucide-react";
+import { Loader2, Plus, X } from "lucide-react";
+
+export interface ServiceEntry {
+  serviceId: number;
+  durationMinutes: number;
+}
 
 interface ServiceSelectorProps {
-  hauswirtschaft: boolean;
-  onHauswirtschaftChange: (checked: boolean) => void;
-  hauswirtschaftDauer: number;
-  onHauswirtschaftDauerChange: (value: number) => void;
-  alltagsbegleitung: boolean;
-  onAlltagsbegleitungChange: (checked: boolean) => void;
-  alltagsbegleitungDauer: number;
-  onAlltagsbegleitungDauerChange: (value: number) => void;
+  services: ServiceEntry[];
+  onChange: (services: ServiceEntry[]) => void;
   error?: string;
 }
 
-const CODE_MAP: Record<string, { checkedKey: keyof ServiceSelectorProps; dauerKey: keyof ServiceSelectorProps; onChangeKey: keyof ServiceSelectorProps; onDauerChangeKey: keyof ServiceSelectorProps }> = {
-  hauswirtschaft: { checkedKey: "hauswirtschaft", dauerKey: "hauswirtschaftDauer", onChangeKey: "onHauswirtschaftChange", onDauerChangeKey: "onHauswirtschaftDauerChange" },
-  alltagsbegleitung: { checkedKey: "alltagsbegleitung", dauerKey: "alltagsbegleitungDauer", onChangeKey: "onAlltagsbegleitungChange", onDauerChangeKey: "onAlltagsbegleitungDauerChange" },
-};
+const EXCLUDED_CODES = ["erstberatung", "kilometer"];
 
-export function ServiceSelector(props: ServiceSelectorProps) {
-  const { error } = props;
-
+export function ServiceSelector({ services, onChange, error }: ServiceSelectorProps) {
   const { data: catalogServices, isLoading } = useQuery<Service[]>({
     queryKey: ["/api/services"],
     staleTime: 60_000,
   });
 
-  const BOOKABLE_CODES = Object.keys(CODE_MAP);
   const selectableServices = (catalogServices || []).filter(
-    s => s.isActive && s.code && BOOKABLE_CODES.includes(s.code)
+    s => s.isActive && s.unitType === "hours" && (!s.code || !EXCLUDED_CODES.includes(s.code))
   );
+
+  const selectedIds = new Set(services.map(s => s.serviceId));
+
+  const getFirstAvailable = () => {
+    return selectableServices.find(s => !selectedIds.has(s.id));
+  };
+
+  const handleAddService = () => {
+    const first = getFirstAvailable();
+    if (!first) return;
+    onChange([...services, { serviceId: first.id, durationMinutes: 60 }]);
+  };
+
+  const handleRemoveService = (index: number) => {
+    onChange(services.filter((_, i) => i !== index));
+  };
+
+  const handleServiceChange = (index: number, serviceId: number) => {
+    const updated = [...services];
+    updated[index] = { ...updated[index], serviceId };
+    onChange(updated);
+  };
+
+  const handleDurationChange = (index: number, durationMinutes: number) => {
+    const updated = [...services];
+    updated[index] = { ...updated[index], durationMinutes };
+    onChange(updated);
+  };
 
   if (isLoading) {
     return (
@@ -54,53 +75,98 @@ export function ServiceSelector(props: ServiceSelectorProps) {
     );
   }
 
+  const rows = services.length > 0
+    ? services
+    : [{ serviceId: 0, durationMinutes: 60 }];
+
+  const hasMoreAvailable = selectableServices.length > services.length;
+
   return (
     <div className="space-y-4">
       <Label>Services (mindestens einer)</Label>
 
-      {selectableServices.map((service) => {
-        const mapping = CODE_MAP[service.code!];
-        const isChecked = props[mapping.checkedKey] as boolean;
-        const dauer = props[mapping.dauerKey] as number;
-        const onChange = props[mapping.onChangeKey] as (checked: boolean) => void;
-        const onDauerChange = props[mapping.onDauerChangeKey] as (value: number) => void;
-
+      {rows.map((entry, index) => {
+        const isPlaceholder = entry.serviceId === 0;
         return (
-          <div key={service.id} className="flex items-center space-x-3 p-4 rounded-lg border" data-testid={`service-row-${service.code}`}>
-            <Checkbox
-              id={`service-${service.code}`}
-              checked={isChecked}
-              onCheckedChange={(checked) => onChange(!!checked)}
-              data-testid={`checkbox-${service.code}`}
-            />
-            <div className="flex-1">
-              <Label htmlFor={`service-${service.code}`} className="cursor-pointer font-medium">
-                {service.name}
-              </Label>
-              {service.description && (
-                <p className="text-xs text-muted-foreground">{service.description}</p>
-              )}
-            </div>
-            {isChecked && (
-              <Select
-                value={dauer.toString()}
-                onValueChange={(v) => onDauerChange(parseInt(v))}
+          <div key={index} className="flex items-center gap-2" data-testid={`service-row-${index}`}>
+            <Select
+              value={isPlaceholder ? "" : String(entry.serviceId)}
+              onValueChange={(v) => {
+                const id = parseInt(v);
+                if (services.length === 0) {
+                  onChange([{ serviceId: id, durationMinutes: 60 }]);
+                } else {
+                  handleServiceChange(index, id);
+                }
+              }}
+            >
+              <SelectTrigger className="flex-1" data-testid={`service-select-${index}`}>
+                <SelectValue placeholder="Service wählen..." />
+              </SelectTrigger>
+              <SelectContent>
+                {selectableServices.map((s) => (
+                  <SelectItem
+                    key={s.id}
+                    value={String(s.id)}
+                    disabled={selectedIds.has(s.id) && s.id !== entry.serviceId}
+                  >
+                    {s.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={String(entry.durationMinutes)}
+              onValueChange={(v) => {
+                if (services.length === 0) {
+                  return;
+                }
+                handleDurationChange(index, parseInt(v));
+              }}
+            >
+              <SelectTrigger className="w-auto min-w-[120px]" data-testid={`duration-select-${index}`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {DURATION_OPTIONS.map((d) => (
+                  <SelectItem key={d} value={String(d)}>
+                    {formatDuration(d)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {services.length > 1 && index > 0 && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => handleRemoveService(index)}
+                data-testid={`remove-service-${index}`}
               >
-                <SelectTrigger className="w-auto min-w-[120px]" data-testid={`select-${service.code}-dauer`}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {DURATION_OPTIONS.map((d) => (
-                    <SelectItem key={d} value={d.toString()}>
-                      {formatDuration(d)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                <X className="h-4 w-4" />
+              </Button>
+            )}
+            {(services.length <= 1 || index === 0) && services.length > 0 && (
+              <div className="w-9" />
             )}
           </div>
         );
       })}
+
+      {hasMoreAvailable && services.length > 0 && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handleAddService}
+          data-testid="add-service-button"
+        >
+          <Plus className="h-4 w-4 mr-1" />
+          Service hinzufügen
+        </Button>
+      )}
 
       {error && <p className="text-destructive text-sm">{error}</p>}
     </div>
