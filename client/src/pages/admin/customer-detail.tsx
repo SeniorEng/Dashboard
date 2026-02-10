@@ -25,8 +25,10 @@ import {
   Edit,
   Euro,
   AlertCircle,
+  Settings,
 } from "lucide-react";
 import { BudgetLedgerSection } from "@/components/budget/BudgetLedgerSection";
+import { BudgetTypeSettings } from "@/components/budget/BudgetTypeSettings";
 import { CustomerOverviewTab } from "./components/customer-overview-tab";
 import { CustomerServicesTab } from "./components/customer-services-tab";
 import { CustomerHistoryTab } from "./components/customer-history-tab";
@@ -190,6 +192,13 @@ export default function AdminCustomerDetail() {
             </TabsContent>
 
             <TabsContent value="budgets" className="space-y-4">
+              <SectionCard
+                title="Budget-Einstellungen"
+                icon={<Settings className={iconSize.sm} />}
+              >
+                <BudgetTypeSettings customerId={customerId} />
+              </SectionCard>
+
               <SectionCard
                 title="§45b Entlastungsbetrag"
                 icon={<Wallet className={iconSize.sm} />}

@@ -2,6 +2,7 @@ import {
   budgetAllocations, 
   budgetTransactions, 
   customerBudgetPreferences,
+  customerBudgetTypeSettings,
   customerBudgets,
   customerPricingHistory,
   type BudgetAllocation,
@@ -10,6 +11,7 @@ import {
   type InsertBudgetTransaction,
   type CustomerBudgetPreferences,
   type InsertBudgetPreferences,
+  type CustomerBudgetTypeSetting,
   type CustomerPricing,
 } from "@shared/schema";
 import { eq, and, sql, lte, gte, isNull, or, desc, asc, inArray } from "drizzle-orm";
@@ -104,6 +106,9 @@ export interface BudgetLedgerStorage {
   getBudgetSummary45a(customerId: number): Promise<Budget45aSummary>;
   getBudgetSummary39_42a(customerId: number): Promise<Budget39_42aSummary>;
   getAllBudgetSummaries(customerId: number): Promise<AllBudgetSummaries>;
+  
+  getBudgetTypeSettings(customerId: number): Promise<CustomerBudgetTypeSetting[]>;
+  upsertBudgetTypeSettings(customerId: number, settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null }>): Promise<CustomerBudgetTypeSetting[]>;
   
   processExpiredCarryover(customerId: number): Promise<BudgetTransaction[]>;
   
@@ -419,6 +424,44 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       .values(preferences)
       .returning();
     return result[0];
+  }
+
+  async getBudgetTypeSettings(customerId: number): Promise<CustomerBudgetTypeSetting[]> {
+    return db.select()
+      .from(customerBudgetTypeSettings)
+      .where(eq(customerBudgetTypeSettings.customerId, customerId))
+      .orderBy(asc(customerBudgetTypeSettings.priority));
+  }
+
+  async upsertBudgetTypeSettings(
+    customerId: number,
+    settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null }>
+  ): Promise<CustomerBudgetTypeSetting[]> {
+    return await db.transaction(async (tx) => {
+      const results: CustomerBudgetTypeSetting[] = [];
+      for (const s of settings) {
+        const result = await tx.insert(customerBudgetTypeSettings)
+          .values({
+            customerId,
+            budgetType: s.budgetType,
+            enabled: s.enabled,
+            priority: s.priority,
+            monthlyLimitCents: s.monthlyLimitCents ?? null,
+          })
+          .onConflictDoUpdate({
+            target: [customerBudgetTypeSettings.customerId, customerBudgetTypeSettings.budgetType],
+            set: {
+              enabled: sql`EXCLUDED.enabled`,
+              priority: sql`EXCLUDED.priority`,
+              monthlyLimitCents: sql`EXCLUDED.monthly_limit_cents`,
+              updatedAt: sql`now()`,
+            },
+          })
+          .returning();
+        results.push(result[0]);
+      }
+      return results;
+    });
   }
 
   async getCurrentPricing(customerId: number, date?: string): Promise<CustomerPricing | undefined> {
@@ -956,23 +999,57 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
     await this.ensureMonthlyAllocations(params.customerId);
     await this.ensureAllocations45a(params.customerId);
+    await this.ensureAllocations39_42a(params.customerId);
     await this.processExpiredCarryover(params.customerId);
 
-    const preferences = await this.getBudgetPreferences(params.customerId);
-    const monthlyLimit45b = preferences?.monthlyLimitCents ?? null;
+    const typeSettings = await this.getBudgetTypeSettings(params.customerId);
 
-    const priorityOrder: string[] = ["umwandlung_45a", "entlastungsbetrag_45b"];
+    const defaultPriority: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null }> = [
+      { budgetType: "umwandlung_45a", enabled: true, priority: 1, monthlyLimitCents: null },
+      { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 2, monthlyLimitCents: null },
+      { budgetType: "ersatzpflege_39_42a", enabled: true, priority: 3, monthlyLimitCents: null },
+    ];
+
+    let priorityOrder: Array<{ budgetType: string; enabled: boolean; monthlyLimitCents: number | null }>;
+
+    if (typeSettings.length > 0) {
+      const settingsMap = new Map(typeSettings.map(s => [s.budgetType, s]));
+      priorityOrder = defaultPriority.map(d => {
+        const s = settingsMap.get(d.budgetType);
+        return {
+          budgetType: d.budgetType,
+          enabled: s ? s.enabled : d.enabled,
+          monthlyLimitCents: s ? s.monthlyLimitCents : d.monthlyLimitCents,
+        };
+      });
+      priorityOrder.sort((a, b) => {
+        const aPrio = settingsMap.get(a.budgetType)?.priority ?? defaultPriority.find(d => d.budgetType === a.budgetType)!.priority;
+        const bPrio = settingsMap.get(b.budgetType)?.priority ?? defaultPriority.find(d => d.budgetType === b.budgetType)!.priority;
+        return aPrio - bPrio;
+      });
+    } else {
+      const preferences = await this.getBudgetPreferences(params.customerId);
+      priorityOrder = defaultPriority.map(d => ({
+        ...d,
+        monthlyLimitCents: d.budgetType === "entlastungsbetrag_45b" ? (preferences?.monthlyLimitCents ?? null) : null,
+      }));
+    }
 
     let remaining = params.totalAmountCents;
     const allTransactions: BudgetTransaction[] = [];
     const breakdown: Array<{ budgetType: string; consumedCents: number }> = [];
 
-    for (const budgetType of priorityOrder) {
+    for (const pot of priorityOrder) {
       if (remaining <= 0) break;
+      if (!pot.enabled) {
+        breakdown.push({ budgetType: pot.budgetType, consumedCents: 0 });
+        continue;
+      }
 
       let maxConsumable = remaining;
 
-      if (budgetType === "entlastungsbetrag_45b" && monthlyLimit45b !== null) {
+      const isMonthlyBudget = pot.budgetType === "entlastungsbetrag_45b" || pot.budgetType === "umwandlung_45a";
+      if (isMonthlyBudget && pot.monthlyLimitCents !== null) {
         const txDate = parseLocalDate(params.transactionDate);
         const txYear = txDate.getFullYear();
         const txMonth = txDate.getMonth() + 1;
@@ -984,25 +1061,25 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           .from(budgetTransactions)
           .where(and(
             eq(budgetTransactions.customerId, params.customerId),
-            eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
+            eq(budgetTransactions.budgetType, pot.budgetType),
             eq(budgetTransactions.transactionType, "consumption"),
             gte(budgetTransactions.transactionDate, currentMonthStart)
           ));
 
         const alreadyUsedThisMonth = Number(monthTransactions[0]?.total ?? 0);
-        const monthlyRemaining = Math.max(0, monthlyLimit45b - alreadyUsedThisMonth);
+        const monthlyRemaining = Math.max(0, pot.monthlyLimitCents - alreadyUsedThisMonth);
         maxConsumable = Math.min(remaining, monthlyRemaining);
       }
 
       if (maxConsumable <= 0) {
-        breakdown.push({ budgetType, consumedCents: 0 });
+        breakdown.push({ budgetType: pot.budgetType, consumedCents: 0 });
         continue;
       }
 
       const isFirstPot = allTransactions.length === 0;
       const fifoResult = await this.consumeFifo(
         params.customerId,
-        budgetType,
+        pot.budgetType,
         maxConsumable,
         params.transactionDate,
         isFirstPot ? {
@@ -1024,7 +1101,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
       allTransactions.push(...fifoResult.transactions);
       remaining -= fifoResult.consumedCents;
-      breakdown.push({ budgetType, consumedCents: fifoResult.consumedCents });
+      breakdown.push({ budgetType: pot.budgetType, consumedCents: fifoResult.consumedCents });
     }
 
     return {

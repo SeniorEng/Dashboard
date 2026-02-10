@@ -476,6 +476,21 @@ export const customerBudgetPreferences = pgTable("customer_budget_preferences", 
   index("customer_budget_preferences_customer_idx").on(table.customerId),
 ]);
 
+// Per-budget-type settings per customer (enabled, priority, monthly limit)
+export const customerBudgetTypeSettings = pgTable("customer_budget_type_settings", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  budgetType: text("budget_type").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  priority: integer("priority").notNull().default(1),
+  monthlyLimitCents: integer("monthly_limit_cents"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("customer_budget_type_settings_unique_idx").on(table.customerId, table.budgetType),
+  index("customer_budget_type_settings_customer_idx").on(table.customerId),
+]);
+
 // ============================================
 // CONTRACTS & PRICING
 // ============================================
@@ -928,6 +943,24 @@ export const updateBudgetPreferencesSchema = insertBudgetPreferencesSchema.parti
 
 export type CustomerBudgetPreferences = typeof customerBudgetPreferences.$inferSelect;
 export type InsertBudgetPreferences = z.infer<typeof insertBudgetPreferencesSchema>;
+
+// Customer Budget Type Settings schemas
+export const insertBudgetTypeSettingsSchema = createInsertSchema(customerBudgetTypeSettings).omit({
+  id: true,
+}).extend({
+  budgetType: z.enum(["entlastungsbetrag_45b", "umwandlung_45a", "ersatzpflege_39_42a"]),
+  priority: z.number().min(1).max(3),
+  monthlyLimitCents: z.number().min(0).nullable().optional(),
+});
+
+export const updateBudgetTypeSettingsSchema = z.object({
+  enabled: z.boolean().optional(),
+  priority: z.number().min(1).max(3).optional(),
+  monthlyLimitCents: z.number().min(0).nullable().optional(),
+});
+
+export type CustomerBudgetTypeSetting = typeof customerBudgetTypeSettings.$inferSelect;
+export type InsertBudgetTypeSetting = z.infer<typeof insertBudgetTypeSettingsSchema>;
 
 // Contract schemas
 export const CONTRACT_PERIOD_TYPES = ["week", "month", "year"] as const;

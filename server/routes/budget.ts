@@ -6,6 +6,7 @@ import { handleRouteError } from "../lib/errors";
 import { 
   insertBudgetAllocationSchema, 
   insertBudgetPreferencesSchema,
+  insertBudgetTypeSettingsSchema,
 } from "@shared/schema";
 import { z } from "zod";
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";
@@ -166,6 +167,75 @@ router.get("/:customerId/overview", checkCustomerAccess, async (req: Request, re
 });
 
 router.use(requireAdmin);
+
+router.get("/:customerId/type-settings", async (req: Request, res: Response) => {
+  try {
+    const customerId = parseInt(req.params.customerId);
+    if (isNaN(customerId)) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
+      return;
+    }
+    const settings = await budgetLedgerStorage.getBudgetTypeSettings(customerId);
+    const defaults = [
+      { budgetType: "umwandlung_45a", enabled: true, priority: 1, monthlyLimitCents: null },
+      { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 2, monthlyLimitCents: null },
+      { budgetType: "ersatzpflege_39_42a", enabled: true, priority: 3, monthlyLimitCents: null },
+    ];
+    if (settings.length === 0) {
+      const prefs = await budgetLedgerStorage.getBudgetPreferences(customerId);
+      if (prefs?.monthlyLimitCents !== null && prefs?.monthlyLimitCents !== undefined) {
+        defaults[1].monthlyLimitCents = prefs.monthlyLimitCents;
+      }
+      res.json(defaults.map(d => ({ ...d, customerId, id: null })));
+    } else {
+      const settingsMap = new Map(settings.map(s => [s.budgetType, s]));
+      const merged = defaults.map(d => {
+        const s = settingsMap.get(d.budgetType);
+        return s || { ...d, customerId, id: null };
+      });
+      merged.sort((a, b) => a.priority - b.priority);
+      res.json(merged);
+    }
+  } catch (error) {
+    handleRouteError(res, error, "Budget-Typ-Einstellungen konnten nicht geladen werden");
+  }
+});
+
+const bulkBudgetTypeSettingsSchema = z.object({
+  settings: z.array(z.object({
+    budgetType: z.enum(["entlastungsbetrag_45b", "umwandlung_45a", "ersatzpflege_39_42a"]),
+    enabled: z.boolean(),
+    priority: z.number().min(1).max(3),
+    monthlyLimitCents: z.number().min(0).nullable().optional(),
+  })).min(1).max(3),
+});
+
+router.put("/:customerId/type-settings", async (req: Request, res: Response) => {
+  try {
+    const customerId = parseInt(req.params.customerId);
+    if (isNaN(customerId)) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
+      return;
+    }
+
+    const result = bulkBudgetTypeSettingsSchema.safeParse(req.body);
+    if (!result.success) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Daten", details: result.error.issues });
+      return;
+    }
+
+    const priorities = result.data.settings.map(s => s.priority);
+    if (new Set(priorities).size !== priorities.length) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: "Jeder Budget-Topf muss eine eindeutige Priorität haben" });
+      return;
+    }
+
+    const saved = await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, result.data.settings);
+    res.json(saved);
+  } catch (error) {
+    handleRouteError(res, error, "Budget-Typ-Einstellungen konnten nicht gespeichert werden");
+  }
+});
 
 router.post("/:customerId/allocations", async (req: Request, res: Response) => {
   try {
