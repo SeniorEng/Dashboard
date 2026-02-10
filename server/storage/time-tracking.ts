@@ -532,17 +532,15 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
   }
   
   async getOpenTasks(userId: number): Promise<OpenTasksSummary> {
-    // Look at the last 30 days only (past days)
-    // Break warnings only make sense for days that are already over
+    // Look at the last 30 days including today
+    // Include today so employees see break warnings while they can still add a pause
     const today = new Date();
     const startDate = new Date(today);
     startDate.setDate(startDate.getDate() - 30);
     
     const formatDate = (d: Date) => formatDateISO(d);
     const startDateStr = formatDate(startDate);
-    const yesterdayDate = new Date(today);
-    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-    const yesterdayStr = formatDate(yesterdayDate);
+    const todayStr = formatDate(today);
 
     const [apptDurations, timeEntries] = await Promise.all([
       db.select({
@@ -564,7 +562,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
               OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId}))
             )`,
             gte(appointments.date, startDateStr),
-            lte(appointments.date, yesterdayStr),
+            lte(appointments.date, todayStr),
             inArray(appointments.status, ['completed', 'documenting'])
           )
         ),
@@ -580,7 +578,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
           and(
             eq(employeeTimeEntries.userId, userId),
             gte(employeeTimeEntries.entryDate, startDateStr),
-            lte(employeeTimeEntries.entryDate, yesterdayStr)
+            lte(employeeTimeEntries.entryDate, todayStr)
           )
         ),
     ]);
