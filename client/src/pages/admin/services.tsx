@@ -179,77 +179,74 @@ export default function AdminServices() {
 
   return (
     <Layout>
-      <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
-        <div className="container mx-auto px-4 py-6 max-w-4xl">
-          <div className="flex items-center gap-4 mb-6">
-            <Link href="/admin">
-              <Button variant="ghost" size="icon" data-testid="button-back">
-                <ArrowLeft className={iconSize.md} />
-              </Button>
-            </Link>
-            <div className="flex-1">
-              <h1 className="text-2xl font-bold text-gray-900">Dienstleistungskatalog</h1>
-              <p className="text-gray-600">Leistungen und Standardpreise verwalten</p>
-            </div>
-            <Button onClick={openCreate} className={componentStyles.btnPrimary} data-testid="button-add-service">
-              <Plus className={`${iconSize.sm} mr-1`} />
-              Neue Dienstleistung
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <Link href="/admin">
+            <Button variant="ghost" size="icon" data-testid="button-back">
+              <ArrowLeft className={iconSize.md} />
             </Button>
+          </Link>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-xl font-bold text-gray-900">Dienstleistungskatalog</h1>
+            <p className="text-sm text-gray-600">Leistungen und Standardpreise</p>
           </div>
+          <Button onClick={openCreate} className={componentStyles.btnPrimary} size="sm" data-testid="button-add-service">
+            <Plus className={`${iconSize.sm} mr-1`} />
+            Neue Dienstleistung
+          </Button>
+        </div>
 
-          {isLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
-            </div>
-          ) : !services?.length ? (
-            <Card>
-              <CardContent className="py-12 text-center">
-                <ClipboardList className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                <p className="text-gray-500 mb-4">Noch keine Dienstleistungen angelegt</p>
-                <Button onClick={openCreate} className={componentStyles.btnPrimary} data-testid="button-add-first-service">
-                  <Plus className={`${iconSize.sm} mr-1`} />
-                  Dienstleistung hinzufügen
-                </Button>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {services.map((service) => (
-                <Card
-                  key={service.id}
-                  className={`cursor-pointer border ${!service.isActive ? "opacity-60" : ""}`}
-                  onClick={() => openEdit(service)}
-                  data-testid={`card-service-${service.id}`}
-                >
-                  <CardContent className="py-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-medium text-gray-900 truncate" data-testid={`text-service-name-${service.id}`}>{service.name}</span>
-                          {!service.isActive && (
-                            <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full" data-testid={`badge-inactive-${service.id}`}>Inaktiv</span>
-                          )}
-                          {service.isActive && (
-                            <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full" data-testid={`badge-active-${service.id}`}>Aktiv</span>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
-                          <span data-testid={`text-unit-type-${service.id}`}>{UNIT_TYPE_LABELS[service.unitType] || service.unitType}</span>
-                          <span data-testid={`text-price-${service.id}`}>· {formatPrice(service.defaultPriceCents)} €</span>
-                          <span data-testid={`text-vat-${service.id}`}>· {service.vatRate}% MwSt</span>
-                        </div>
-                        {service.description && (
-                          <p className="text-xs text-gray-400 mt-1 truncate" data-testid={`text-description-${service.id}`}>{service.description}</p>
+        {isLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+          </div>
+        ) : !services?.length ? (
+          <Card>
+            <CardContent className="py-12 text-center">
+              <ClipboardList className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+              <p className="text-gray-500 mb-4">Noch keine Dienstleistungen angelegt</p>
+              <Button onClick={openCreate} className={componentStyles.btnPrimary} data-testid="button-add-first-service">
+                <Plus className={`${iconSize.sm} mr-1`} />
+                Dienstleistung hinzufügen
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {services.map((service) => (
+              <Card
+                key={service.id}
+                className={`cursor-pointer border ${!service.isActive ? "opacity-60" : ""}`}
+                onClick={() => openEdit(service)}
+                data-testid={`card-service-${service.id}`}
+              >
+                <CardContent className="py-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-medium text-gray-900 truncate" data-testid={`text-service-name-${service.id}`}>{service.name}</span>
+                        {service.isActive ? (
+                          <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-active-${service.id}`}>Aktiv</span>
+                        ) : (
+                          <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-inactive-${service.id}`}>Inaktiv</span>
                         )}
                       </div>
-                      <Pencil className={`${iconSize.sm} text-gray-400 shrink-0`} />
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
+                        <span data-testid={`text-unit-type-${service.id}`}>{UNIT_TYPE_LABELS[service.unitType] || service.unitType}</span>
+                        <span data-testid={`text-price-${service.id}`}>· {formatPrice(service.defaultPriceCents)} €</span>
+                        <span data-testid={`text-vat-${service.id}`}>· {service.vatRate}% MwSt</span>
+                      </div>
+                      {service.description && (
+                        <p className="text-xs text-gray-400 mt-1 truncate" data-testid={`text-description-${service.id}`}>{service.description}</p>
+                      )}
                     </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-        </div>
+                    <Pencil className={`${iconSize.sm} text-gray-400 shrink-0`} />
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
