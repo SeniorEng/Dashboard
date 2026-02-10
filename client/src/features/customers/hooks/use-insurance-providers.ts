@@ -13,8 +13,10 @@ export interface InsuranceProviderFormData {
   empfaenger?: string | null;
   empfaengerZeile2?: string | null;
   ikNummer: string;
-  anschrift?: string | null;
-  plzOrt?: string | null;
+  strasse?: string | null;
+  hausnummer?: string | null;
+  plz?: string | null;
+  stadt?: string | null;
   telefon?: string | null;
   email?: string | null;
   emailInvoiceEnabled?: boolean;

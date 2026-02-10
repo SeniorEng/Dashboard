@@ -134,22 +134,24 @@ export function formatDateDisplay(
  * @param style - "short" für "Dez 2025", "long" für "Dezember 2025"
  * @returns Formatierter String
  */
-export function formatAddress(customer: {
+export function formatAddress(entity: {
   strasse?: string | null;
   nr?: string | null;
+  hausnummer?: string | null;
   plz?: string | null;
   stadt?: string | null;
   address?: string | null;
 }): string {
   const parts = [];
-  if (customer.strasse) {
-    parts.push(`${customer.strasse}${customer.nr ? ` ${customer.nr}` : ""}`);
+  const houseNumber = entity.nr || entity.hausnummer;
+  if (entity.strasse) {
+    parts.push(`${entity.strasse}${houseNumber ? ` ${houseNumber}` : ""}`);
   }
-  if (customer.plz || customer.stadt) {
-    parts.push(`${customer.plz || ""} ${customer.stadt || ""}`.trim());
+  if (entity.plz || entity.stadt) {
+    parts.push(`${entity.plz || ""} ${entity.stadt || ""}`.trim());
   }
   if (parts.length > 0) return parts.join(", ");
-  return customer.address || "Keine Adresse hinterlegt";
+  return entity.address || "Keine Adresse hinterlegt";
 }
 
 export function formatMonthYear(
