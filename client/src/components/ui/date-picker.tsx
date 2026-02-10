@@ -34,6 +34,11 @@ const MONTH_NAMES_DE = [
   "Jul", "Aug", "Sep", "Okt", "Nov", "Dez",
 ]
 
+const MONTH_NAMES_FULL_DE = [
+  "Januar", "Februar", "März", "April", "Mai", "Juni",
+  "Juli", "August", "September", "Oktober", "November", "Dezember",
+]
+
 const YEARS_PER_PAGE = 12
 
 function YearPicker({
@@ -112,15 +117,24 @@ function MonthPicker({
   selectedMonth,
   selectedYear,
   onSelect,
+  onBack,
 }: {
   selectedMonth: number
   selectedYear: number
   onSelect: (month: number) => void
+  onBack: () => void
 }) {
   return (
     <div className="p-3 w-[280px]">
       <div className="flex items-center justify-center mb-3">
-        <span className="text-sm font-medium">{selectedYear}</span>
+        <button
+          type="button"
+          onClick={onBack}
+          className="text-sm font-medium hover:bg-muted px-3 py-1.5 rounded-md transition-colors"
+          data-testid="btn-back-to-years"
+        >
+          {selectedYear}
+        </button>
       </div>
       <div className="grid grid-cols-3 gap-2">
         {MONTH_NAMES_DE.map((name, index) => (
@@ -211,10 +225,6 @@ export function DatePicker({
     setView("days")
   }
 
-  const handleCaptionClick = () => {
-    setView("years")
-  }
-
   const displayValue = React.useMemo(() => {
     if (!dateValue) return null
     return format(dateValue, "d. MMMM yyyy", { locale: de })
@@ -275,43 +285,68 @@ export function DatePicker({
             selectedMonth={navMonth.getMonth()}
             selectedYear={navMonth.getFullYear()}
             onSelect={handleMonthSelect}
+            onBack={() => setView("years")}
           />
         )}
         {view === "days" && (
-          <Calendar
-            mode="single"
-            selected={dateValue}
-            onSelect={handleSelect}
-            month={navMonth}
-            onMonthChange={setNavMonth}
-            disabled={(date) => {
-              if (minDate && date < minDate) return true
-              if (maxDate && date > maxDate) return true
-              if (disableWeekends) {
-                const day = date.getDay()
-                if (day === 0 || day === 6) return true
-              }
-              return false
-            }}
-            locale={de}
-            weekStartsOn={1}
-            initialFocus
-            classNames={{
-              day: "min-w-[44px] min-h-[44px] text-base",
-            }}
-            components={{
-              CaptionLabel: ({ children }) => (
-                <button
-                  type="button"
-                  onClick={handleCaptionClick}
-                  className="text-sm font-medium hover:bg-muted px-2 py-1 rounded-md transition-colors cursor-pointer"
-                  data-testid="btn-caption-year-month"
-                >
-                  {children}
-                </button>
-              ),
-            }}
-          />
+          <div>
+            <div className="flex items-center justify-between px-3 pt-3 pb-0">
+              <button
+                type="button"
+                onClick={() => {
+                  const prev = new Date(navMonth.getFullYear(), navMonth.getMonth() - 1, 1)
+                  setNavMonth(prev)
+                }}
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-md hover:bg-muted"
+                data-testid="btn-month-prev"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setView("years")}
+                className="text-sm font-medium hover:bg-muted px-3 py-1.5 rounded-md transition-colors cursor-pointer"
+                data-testid="btn-quick-year-month"
+              >
+                {MONTH_NAMES_FULL_DE[navMonth.getMonth()]} {navMonth.getFullYear()}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = new Date(navMonth.getFullYear(), navMonth.getMonth() + 1, 1)
+                  setNavMonth(next)
+                }}
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-md hover:bg-muted"
+                data-testid="btn-month-next"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+            <Calendar
+              mode="single"
+              selected={dateValue}
+              onSelect={handleSelect}
+              month={navMonth}
+              onMonthChange={setNavMonth}
+              disabled={(date) => {
+                if (minDate && date < minDate) return true
+                if (maxDate && date > maxDate) return true
+                if (disableWeekends) {
+                  const day = date.getDay()
+                  if (day === 0 || day === 6) return true
+                }
+                return false
+              }}
+              locale={de}
+              weekStartsOn={1}
+              initialFocus
+              classNames={{
+                day: "min-w-[44px] min-h-[44px] text-base",
+                month_caption: "hidden",
+                nav: "hidden",
+              }}
+            />
+          </div>
         )}
       </PopoverContent>
     </Popover>
