@@ -31,8 +31,9 @@ export function ServiceSelector(props: ServiceSelectorProps) {
     staleTime: 60_000,
   });
 
+  const BOOKABLE_CODES = Object.keys(CODE_MAP);
   const selectableServices = (catalogServices || []).filter(
-    s => s.unitType === "hours" && s.isActive && s.code !== "erstberatung"
+    s => s.isActive && s.code && BOOKABLE_CODES.includes(s.code)
   );
 
   if (isLoading) {
@@ -58,60 +59,45 @@ export function ServiceSelector(props: ServiceSelectorProps) {
       <Label>Services (mindestens einer)</Label>
 
       {selectableServices.map((service) => {
-        const mapping = service.code ? CODE_MAP[service.code] : null;
-
-        if (mapping) {
-          const isChecked = props[mapping.checkedKey] as boolean;
-          const dauer = props[mapping.dauerKey] as number;
-          const onChange = props[mapping.onChangeKey] as (checked: boolean) => void;
-          const onDauerChange = props[mapping.onDauerChangeKey] as (value: number) => void;
-
-          return (
-            <div key={service.id} className="flex items-center space-x-3 p-4 rounded-lg border" data-testid={`service-row-${service.code}`}>
-              <Checkbox
-                id={`service-${service.code}`}
-                checked={isChecked}
-                onCheckedChange={(checked) => onChange(!!checked)}
-                data-testid={`checkbox-${service.code}`}
-              />
-              <div className="flex-1">
-                <Label htmlFor={`service-${service.code}`} className="cursor-pointer font-medium">
-                  {service.name}
-                </Label>
-                {service.description && (
-                  <p className="text-xs text-muted-foreground">{service.description}</p>
-                )}
-              </div>
-              {isChecked && (
-                <Select
-                  value={dauer.toString()}
-                  onValueChange={(v) => onDauerChange(parseInt(v))}
-                >
-                  <SelectTrigger className="w-auto min-w-[120px]" data-testid={`select-${service.code}-dauer`}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {DURATION_OPTIONS.map((d) => (
-                      <SelectItem key={d} value={d.toString()}>
-                        {formatDuration(d)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
-          );
-        }
+        const mapping = CODE_MAP[service.code!];
+        const isChecked = props[mapping.checkedKey] as boolean;
+        const dauer = props[mapping.dauerKey] as number;
+        const onChange = props[mapping.onChangeKey] as (checked: boolean) => void;
+        const onDauerChange = props[mapping.onDauerChangeKey] as (value: number) => void;
 
         return (
-          <div key={service.id} className="flex items-center space-x-3 p-4 rounded-lg border border-dashed opacity-60" data-testid={`service-row-${service.code || service.id}`}>
-            <Checkbox disabled checked={false} />
+          <div key={service.id} className="flex items-center space-x-3 p-4 rounded-lg border" data-testid={`service-row-${service.code}`}>
+            <Checkbox
+              id={`service-${service.code}`}
+              checked={isChecked}
+              onCheckedChange={(checked) => onChange(!!checked)}
+              data-testid={`checkbox-${service.code}`}
+            />
             <div className="flex-1">
-              <Label className="font-medium text-muted-foreground">
+              <Label htmlFor={`service-${service.code}`} className="cursor-pointer font-medium">
                 {service.name}
               </Label>
-              <p className="text-xs text-muted-foreground">Noch nicht für Terminbuchung verfügbar</p>
+              {service.description && (
+                <p className="text-xs text-muted-foreground">{service.description}</p>
+              )}
             </div>
+            {isChecked && (
+              <Select
+                value={dauer.toString()}
+                onValueChange={(v) => onDauerChange(parseInt(v))}
+              >
+                <SelectTrigger className="w-auto min-w-[120px]" data-testid={`select-${service.code}-dauer`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DURATION_OPTIONS.map((d) => (
+                    <SelectItem key={d} value={d.toString()}>
+                      {formatDuration(d)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
         );
       })}
