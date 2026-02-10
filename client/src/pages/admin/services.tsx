@@ -180,20 +180,22 @@ export default function AdminServices() {
   return (
     <Layout>
       <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <Link href="/admin">
-            <Button variant="ghost" size="icon" data-testid="button-back">
-              <ArrowLeft className={iconSize.md} />
-            </Button>
-          </Link>
-          <div className="flex-1 min-w-0">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Link href="/admin">
+              <Button variant="ghost" size="icon" className="shrink-0" data-testid="button-back">
+                <ArrowLeft className={iconSize.md} />
+              </Button>
+            </Link>
             <h1 className="text-xl font-bold text-gray-900">Dienstleistungskatalog</h1>
-            <p className="text-sm text-gray-600">Leistungen und Standardpreise</p>
           </div>
-          <Button onClick={openCreate} className={componentStyles.btnPrimary} size="sm" data-testid="button-add-service">
-            <Plus className={`${iconSize.sm} mr-1`} />
-            Neue Dienstleistung
-          </Button>
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-gray-600">Leistungen und Standardpreise</p>
+            <Button onClick={openCreate} className={componentStyles.btnPrimary} size="sm" data-testid="button-add-service">
+              <Plus className={`${iconSize.sm} mr-1`} />
+              Neue Dienstleistung
+            </Button>
+          </div>
         </div>
 
         {isLoading ? (
