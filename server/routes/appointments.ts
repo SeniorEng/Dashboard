@@ -128,8 +128,13 @@ router.get("/undocumented", async (req, res) => {
 
 router.get("/:id/services", async (req, res) => {
   try {
+    const user = req.user!;
     const id = parseInt(req.params.id);
     if (isNaN(id)) return sendBadRequest(res, "Ungültige Termin-ID");
+    
+    const appointment = await storage.getAppointment(id);
+    if (!appointment) return sendNotFound(res, "Termin nicht gefunden");
+    if (!(await checkCustomerAccess(user, appointment.customerId, res))) return;
     
     const result = await db.select({
       id: appointmentServices.id,
