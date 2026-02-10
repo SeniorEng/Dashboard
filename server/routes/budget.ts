@@ -6,7 +6,6 @@ import { handleRouteError } from "../lib/errors";
 import { 
   insertBudgetAllocationSchema, 
   insertBudgetPreferencesSchema,
-  insertBudgetTypeSettingsSchema,
 } from "@shared/schema";
 import { z } from "zod";
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";

@@ -112,7 +112,7 @@ export function BudgetTypeSettings({ customerId }: BudgetTypeSettingsProps) {
       <div className="space-y-3">
         {settings.map((setting, index) => {
           const label = BUDGET_TYPE_LABELS[setting.budgetType as BudgetType] || setting.budgetType;
-          const limitEuro = setting.monthlyLimitCents !== null && setting.monthlyLimitCents > 0
+          const limitEuro = setting.monthlyLimitCents !== null
             ? (setting.monthlyLimitCents / 100).toFixed(2)
             : "";
 
@@ -129,19 +129,19 @@ export function BudgetTypeSettings({ customerId }: BudgetTypeSettingsProps) {
                       type="button"
                       onClick={() => movePriority(index, "up")}
                       disabled={index === 0}
-                      className="p-0.5 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                      className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
                       data-testid={`btn-priority-up-${setting.budgetType}`}
                     >
-                      <ArrowUp className="h-3.5 w-3.5" />
+                      <ArrowUp className="h-4 w-4" />
                     </button>
                     <button
                       type="button"
                       onClick={() => movePriority(index, "down")}
                       disabled={index === settings.length - 1}
-                      className="p-0.5 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                      className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
                       data-testid={`btn-priority-down-${setting.budgetType}`}
                     >
-                      <ArrowDown className="h-3.5 w-3.5" />
+                      <ArrowDown className="h-4 w-4" />
                     </button>
                   </div>
 

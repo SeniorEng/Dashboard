@@ -953,12 +953,6 @@ export const insertBudgetTypeSettingsSchema = createInsertSchema(customerBudgetT
   monthlyLimitCents: z.number().min(0).nullable().optional(),
 });
 
-export const updateBudgetTypeSettingsSchema = z.object({
-  enabled: z.boolean().optional(),
-  priority: z.number().min(1).max(3).optional(),
-  monthlyLimitCents: z.number().min(0).nullable().optional(),
-});
-
 export type CustomerBudgetTypeSetting = typeof customerBudgetTypeSettings.$inferSelect;
 export type InsertBudgetTypeSetting = z.infer<typeof insertBudgetTypeSettingsSchema>;
 
