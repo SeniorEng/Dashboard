@@ -11,6 +11,18 @@ import { useState, useCallback } from "react";
 import type { TimeEntryType, CreateTimeEntryRequest } from "@/lib/api/types";
 import { todayISO } from "@shared/utils/datetime";
 
+function getCurrentTimeRounded(): string {
+  const now = new Date();
+  const minutes = Math.floor(now.getMinutes() / 5) * 5;
+  return `${String(now.getHours()).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function addOneHour(time: string): string {
+  const [h, m] = time.split(":").map(Number);
+  const newH = Math.min(h + 1, 23);
+  return `${String(newH).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
 export interface TimeEntryFormState {
   id?: number;
   entryType: TimeEntryType;
@@ -52,6 +64,17 @@ export function useTimeEntryForm(initialState?: Partial<TimeEntryFormState>) {
       if (field === "entryType") {
         const newType = value as TimeEntryType;
         const isFullDayType = FULL_DAY_TYPES.includes(newType);
+        
+        if (!isFullDayType && !prev.startTime && !prev.endTime) {
+          const start = getCurrentTimeRounded();
+          return {
+            ...updated,
+            isFullDay: false,
+            endDate: undefined,
+            startTime: start,
+            endTime: addOneHour(start),
+          };
+        }
         
         return {
           ...updated,
