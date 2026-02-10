@@ -58,22 +58,43 @@ export async function getAuthCookie(): Promise<AuthCookie> {
   return authCookie;
 }
 
-export async function apiGet<T = unknown>(path: string): Promise<{ status: number; data: T }> {
-  const auth = await getAuthCookie();
+export function resetAuthCache(): void {
+  authCookie = null;
+}
+
+export async function loginAs(email: string, password: string): Promise<AuthCookie> {
+  const loginResponse = await fetch(`${BASE_URL}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+
+  if (!loginResponse.ok) {
+    throw new Error(`Login as ${email} failed: ${loginResponse.status}`);
+  }
+
+  const cookies = loginResponse.headers.get("set-cookie") || "";
+  const csrfMatch = cookies.match(/careconnect_csrf=([^;]+)/);
+  const csrfToken = csrfMatch ? csrfMatch[1] : "";
+
+  const userData = await loginResponse.json();
+
+  return {
+    cookie: cookies,
+    user: userData.user,
+    csrfToken,
+  };
+}
+
+export async function apiGetAs<T = unknown>(auth: AuthCookie, path: string): Promise<{ status: number; data: T }> {
   const response = await fetch(`${BASE_URL}${path}`, {
-    headers: {
-      Cookie: auth.cookie,
-    },
+    headers: { Cookie: auth.cookie },
   });
   const data = await response.json().catch(() => null);
   return { status: response.status, data: data as T };
 }
 
-export async function apiPost<T = unknown>(
-  path: string,
-  body: unknown
-): Promise<{ status: number; data: T }> {
-  const auth = await getAuthCookie();
+export async function apiPostAs<T = unknown>(auth: AuthCookie, path: string, body: unknown): Promise<{ status: number; data: T }> {
   const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
   const response = await fetch(`${BASE_URL}${path}`, {
     method: "POST",
@@ -86,6 +107,19 @@ export async function apiPost<T = unknown>(
   });
   const data = await response.json().catch(() => null);
   return { status: response.status, data: data as T };
+}
+
+export async function apiGet<T = unknown>(path: string): Promise<{ status: number; data: T }> {
+  const auth = await getAuthCookie();
+  return apiGetAs<T>(auth, path);
+}
+
+export async function apiPost<T = unknown>(
+  path: string,
+  body: unknown
+): Promise<{ status: number; data: T }> {
+  const auth = await getAuthCookie();
+  return apiPostAs<T>(auth, path, body);
 }
 
 export async function apiPatch<T = unknown>(
@@ -173,4 +207,26 @@ export function getTimeString(hoursFromNow: number = 0): string {
   const minutes = String(date.getMinutes()).padStart(2, "0");
   const seconds = String(date.getSeconds()).padStart(2, "0");
   return `${hours}:${minutes}:${seconds}`;
+}
+
+export function uniqueId(): string {
+  return `test_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+const cleanupQueue: Array<() => Promise<void>> = [];
+
+export function trackCleanup(fn: () => Promise<void>): void {
+  cleanupQueue.push(fn);
+}
+
+export async function runCleanup(): Promise<void> {
+  while (cleanupQueue.length > 0) {
+    const fn = cleanupQueue.pop();
+    if (fn) {
+      try {
+        await fn();
+      } catch (e) {
+      }
+    }
+  }
 }

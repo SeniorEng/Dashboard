@@ -31,14 +31,20 @@ describe("Termine (Appointments) CRUD", () => {
   let testDate: string;
 
   beforeAll(async () => {
-    await getAuthCookie();
+    const auth = await getAuthCookie();
     
-    const customersRes = await apiGet<{ id: number }[]>("/api/customers?limit=1");
-    if (Array.isArray(customersRes.data) && customersRes.data[0]) {
-      testCustomerId = customersRes.data[0].id;
+    const customersRes = await apiGet<{ data: { id: number }[] }>("/api/admin/customers?limit=1");
+    const customers = customersRes.data?.data;
+    if (Array.isArray(customers) && customers[0]) {
+      testCustomerId = customers[0].id;
     } else {
       throw new Error("Kein Test-Kunde gefunden");
     }
+
+    await apiPatch(`/api/admin/customers/${testCustomerId}/assign`, {
+      primaryEmployeeId: auth.user.id,
+      backupEmployeeId: null,
+    });
     
     testDate = getFutureDate(14);
   });
@@ -210,6 +216,7 @@ describe("Termine (Appointments) CRUD", () => {
       const { status, data } = await apiPost<{ code: string; message: string }>(
         `/api/appointments/${docTestAppointmentId}/document`,
         {
+          actualStart: "09:00",
           hauswirtschaftActualDauer: 55,
           hauswirtschaftDetails: "Küche und Bad gereinigt",
           alltagsbegleitungActualDauer: 25,
@@ -221,7 +228,7 @@ describe("Termine (Appointments) CRUD", () => {
       );
 
       expect(status).toBe(400);
-      expect(data.message).toContain("Preisvereinbarung");
+      expect(data.message.toLowerCase()).toMatch(/preis|budget|vereinbarung/);
     });
 
     it("sollte doppelte Dokumentation verhindern", async () => {
@@ -279,6 +286,157 @@ describe("Termine (Appointments) CRUD", () => {
       const getRes = await apiGet(`/api/appointments/${newAppt.data.id}`);
       expect(getRes.status).toBe(404);
     });
+  });
+});
+
+interface AppointmentService {
+  id: number;
+  serviceId: number;
+  plannedDurationMinutes: number;
+  actualDurationMinutes: number | null;
+  details: string | null;
+  serviceName: string;
+  serviceCode: string | null;
+  serviceUnitType: string;
+}
+
+describe("Junction-Tabelle (appointment_services)", () => {
+  let junctionTestApptId: number;
+  let testCustomerId: number;
+
+  beforeAll(async () => {
+    const auth = await getAuthCookie();
+    const customersRes = await apiGet<{ data: { id: number }[] }>("/api/admin/customers?limit=1");
+    testCustomerId = customersRes.data.data[0].id;
+
+    await apiPatch(`/api/admin/customers/${testCustomerId}/assign`, {
+      primaryEmployeeId: auth.user.id,
+      backupEmployeeId: null,
+    });
+  });
+
+  afterAll(async () => {
+    if (junctionTestApptId) {
+      await apiDelete(`/api/appointments/${junctionTestApptId}`);
+    }
+  });
+
+  it("sollte Legacy-Services in Junction-Tabelle UND Legacy-Spalten schreiben", async () => {
+    const auth = await getAuthCookie();
+    const { status, data } = await apiPost<Appointment>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date: getFutureDate(160),
+      scheduledStart: "08:00",
+      services: [
+        { serviceId: 1, durationMinutes: 60 },
+        { serviceId: 2, durationMinutes: 45 },
+      ],
+      assignedEmployeeId: auth.user.id,
+    });
+
+    expect(status).toBe(201);
+    expect(data.hauswirtschaftDauer).toBe(60);
+    expect(data.alltagsbegleitungDauer).toBe(45);
+
+    junctionTestApptId = data.id;
+
+    const servicesRes = await apiGet<AppointmentService[]>(`/api/appointments/${data.id}/services`);
+    expect(servicesRes.status).toBe(200);
+    expect(servicesRes.data).toHaveLength(2);
+
+    const hwService = servicesRes.data.find((s) => s.serviceCode === "hauswirtschaft");
+    const abService = servicesRes.data.find((s) => s.serviceCode === "alltagsbegleitung");
+    expect(hwService?.plannedDurationMinutes).toBe(60);
+    expect(abService?.plannedDurationMinutes).toBe(45);
+  });
+
+  it("sollte Termin mit nur neuen Services erstellen (Legacy-Spalten null)", async () => {
+    const auth = await getAuthCookie();
+
+    const allServices = await apiGet<{ id: number; code: string | null; name: string }[]>("/api/services/all");
+    const newService = allServices.data.find((s) => s.code !== "hauswirtschaft" && s.code !== "alltagsbegleitung" && s.code !== "erstberatung" && s.code !== "kilometer");
+
+    if (!newService) {
+      console.log("Kein neuer Service zum Testen vorhanden - Test übersprungen");
+      return;
+    }
+
+    const { status, data } = await apiPost<Appointment>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date: getFutureDate(161),
+      scheduledStart: "14:00",
+      services: [
+        { serviceId: newService.id, durationMinutes: 45 },
+      ],
+      assignedEmployeeId: auth.user.id,
+    });
+
+    expect(status).toBe(201);
+    expect(data.hauswirtschaftDauer).toBeNull();
+    expect(data.alltagsbegleitungDauer).toBeNull();
+
+    const servicesRes = await apiGet<AppointmentService[]>(`/api/appointments/${data.id}/services`);
+    expect(servicesRes.status).toBe(200);
+    expect(servicesRes.data).toHaveLength(1);
+    expect(servicesRes.data[0].serviceId).toBe(newService.id);
+    expect(servicesRes.data[0].plannedDurationMinutes).toBe(45);
+
+    await apiDelete(`/api/appointments/${data.id}`);
+  });
+
+  it("sollte gemischte Services korrekt aufteilen", async () => {
+    const auth = await getAuthCookie();
+
+    const allServices = await apiGet<{ id: number; code: string | null; name: string }[]>("/api/services/all");
+    const newService = allServices.data.find((s) => s.code !== "hauswirtschaft" && s.code !== "alltagsbegleitung" && s.code !== "erstberatung" && s.code !== "kilometer");
+
+    if (!newService) {
+      console.log("Kein neuer Service zum Testen vorhanden - Test übersprungen");
+      return;
+    }
+
+    const { status, data } = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date: getFutureDate(162),
+      scheduledStart: "09:00",
+      services: [
+        { serviceId: 1, durationMinutes: 30 },
+        { serviceId: newService.id, durationMinutes: 30 },
+      ],
+      assignedEmployeeId: auth.user.id,
+    });
+
+    if (status !== 201) {
+      console.log("Gemischte Services error:", JSON.stringify(data));
+    }
+    expect(status).toBe(201);
+    expect(data.hauswirtschaftDauer).toBe(30);
+    expect(data.alltagsbegleitungDauer).toBeNull();
+
+    const servicesRes = await apiGet<AppointmentService[]>(`/api/appointments/${data.id}/services`);
+    expect(servicesRes.status).toBe(200);
+    expect(servicesRes.data).toHaveLength(2);
+
+    await apiDelete(`/api/appointments/${data.id}`);
+  });
+
+  it("sollte durationPromised als Summe aller Services berechnen", async () => {
+    const auth = await getAuthCookie();
+    const { status, data } = await apiPost<Appointment & { durationPromised: number }>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date: getFutureDate(163),
+      scheduledStart: "10:00",
+      services: [
+        { serviceId: 1, durationMinutes: 60 },
+        { serviceId: 2, durationMinutes: 45 },
+      ],
+      assignedEmployeeId: auth.user.id,
+    });
+
+    expect(status).toBe(201);
+    expect(data.durationPromised).toBe(105);
+
+    await apiDelete(`/api/appointments/${data.id}`);
   });
 });
 

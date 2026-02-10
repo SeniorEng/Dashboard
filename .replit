@@ -41,3 +41,9 @@ waitForPort = 5000
 
 [agent]
 mockupState = "FULLSTACK"
+
+[userenv]
+
+[userenv.development]
+TEST_USER_EMAIL = "test@test.de"
+TEST_USER_PASSWORD_INTERNAL = "TestPasswort2024!"
