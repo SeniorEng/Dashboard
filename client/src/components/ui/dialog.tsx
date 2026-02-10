@@ -32,20 +32,17 @@ const DialogContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
 >(({ className, children, ...props }, ref) => (
   <DialogPortal>
-    <DialogOverlay />
+    <DialogOverlay className="sm:flex sm:items-center sm:justify-center" />
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        // Mobile: full-width at bottom for better keyboard handling, scrollable content
-        // Desktop: centered modal with max-width
         "fixed z-50 grid w-full gap-4 border bg-background p-6 shadow-lg duration-200",
         "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-        // Mobile: slide up from bottom, max height with scroll
         "bottom-0 left-0 right-0 max-h-[85vh] overflow-y-auto rounded-t-xl",
         "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
-        // Desktop: centered with original behavior
         "sm:bottom-auto sm:left-[50%] sm:right-auto sm:top-[50%] sm:max-w-lg sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg sm:max-h-[90vh]",
         "sm:data-[state=closed]:zoom-out-95 sm:data-[state=open]:zoom-in-95 sm:data-[state=closed]:slide-out-to-left-1/2 sm:data-[state=closed]:slide-out-to-top-[48%] sm:data-[state=open]:slide-in-from-left-1/2 sm:data-[state=open]:slide-in-from-top-[48%]",
+        "[backface-visibility:hidden] [transform-style:preserve-3d]",
         className
       )}
       {...props}
