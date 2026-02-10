@@ -14,6 +14,5 @@ export {
   useCreateInsuranceProvider,
   useUpdateInsuranceProvider,
   insuranceProviderKeys,
-  type CreateInsuranceProviderData,
   type InsuranceProviderFormData,
 } from './use-insurance-providers';

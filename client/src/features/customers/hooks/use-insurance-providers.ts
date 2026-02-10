@@ -25,8 +25,6 @@ export interface InsuranceProviderFormData {
   isActive?: boolean;
 }
 
-export type CreateInsuranceProviderData = InsuranceProviderFormData;
-
 export function useInsuranceProviders(includeInactive = false) {
   return useQuery({
     queryKey: insuranceProviderKeys.list(includeInactive),

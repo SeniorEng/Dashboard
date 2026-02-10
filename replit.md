@@ -55,6 +55,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Overlap Checking**: Prevents appointment overlaps.
 - **Service Model**: "Erstberatung" (initial consultation) as a core service type.
 - **Customer Management**: Multi-step customer creation, detailed views, German-specific validation. Pflegegrad ist immer 1–5 (kein "0" oder "Ohne Pflegegrad") — wird in UI und Backend (Zod) einheitlich erzwungen.
+- **Kostenträger (Insurance Providers)**: Admin-Verwaltung unter `/admin/insurance-providers`. Tabelle `insurance_providers` mit IK-Nummer (9-stellig, `ikNummerSchema`), 4-Feld-Adressmodell (strasse, hausnummer, plz, stadt), Zahlungsbedingungen/Zahlungsart, E-Mail-Rechnungsversand-Flag. Zuweisung an Kunden über `customer_insurance_history` mit Historisierung (valid_from/valid_to). Versichertennummer-Format: 1 Großbuchstabe + 9 Ziffern (`versichertennummerSchema`). Soft-Deaktivierung statt Löschung. Shared Validierungsschemas in `@shared/schema.ts`.
 - **Budgeting & Pricing**: Three-pot budget ledger system per German care law (PUEG 2025):
   - **§45b Entlastungsbetrag**: 131€/Monat max (admin-setzbar ≤131€), ansparbar mit Übertrag bis 30.06. des Folgejahres. Vollständiges Ledger mit auto-allocation, consumption tracking, initial balance, carryover.
   - **§45a Umwandlungsanspruch**: Monatlich verfügbar, KEIN Anspareffekt (verfällt am Monatsende). Max abhängig vom Pflegegrad (PG2: 318€, PG3: 599€, PG4: 744€, PG5: 920€). PG1 nicht berechtigt. System validiert Obergrenze.

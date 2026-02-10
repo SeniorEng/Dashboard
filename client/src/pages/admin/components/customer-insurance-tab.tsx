@@ -43,7 +43,7 @@ interface CustomerInsuranceTabProps {
   } | null;
 }
 
-const VERSICHERTENNUMMER_REGEX = /^[A-Z]\d{9}$/;
+const VERSICHERTENNUMMER_REGEX = /^[A-Z]\d{9}$/; // matches versichertennummerSchema from @shared/schema
 
 export function CustomerInsuranceTab({ customerId, currentInsurance }: CustomerInsuranceTabProps) {
   const { toast } = useToast();
@@ -68,6 +68,7 @@ export function CustomerInsuranceTab({ customerId, currentInsurance }: CustomerI
       return unwrapResult(result);
     },
     enabled: showHistory,
+    staleTime: 60_000,
   });
 
   const addInsuranceMutation = useMutation({

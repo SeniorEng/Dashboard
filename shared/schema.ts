@@ -273,13 +273,16 @@ export const customerInsuranceHistory = pgTable("customer_insurance_history", {
   id: serial("id").primaryKey(),
   customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
   insuranceProviderId: integer("insurance_provider_id").notNull().references(() => insuranceProviders.id),
-  versichertennummer: text("versichertennummer").notNull(), // Format: 1 letter + 8 digits + 1 check digit
+  versichertennummer: text("versichertennummer").notNull(),
   validFrom: date("valid_from").notNull(),
-  validTo: date("valid_to"), // null = current
+  validTo: date("valid_to"),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
-});
+}, (table) => [
+  index("customer_insurance_history_customer_id_idx").on(table.customerId),
+  index("customer_insurance_history_provider_id_idx").on(table.insuranceProviderId),
+]);
 
 // ============================================
 // EMERGENCY CONTACTS

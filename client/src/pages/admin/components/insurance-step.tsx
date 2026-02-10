@@ -6,7 +6,7 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { useToast } from "@/hooks/use-toast";
 import { useCreateInsuranceProvider } from "@/features/customers";
 import { Loader2, Check, Plus, X } from "lucide-react";
-import { iconSize } from "@/design-system";
+import { iconSize, componentStyles } from "@/design-system";
 import { CustomerFormData, SelectOption } from "./customer-types";
 
 interface InsuranceStepProps {
@@ -281,7 +281,7 @@ export function InsuranceStep({
               </Button>
               <Button
                 type="button"
-                className="bg-teal-600 hover:bg-teal-700"
+                className={componentStyles.btnPrimary}
                 onClick={handleCreateProvider}
                 disabled={createProviderMutation.isPending}
                 data-testid="button-save-new-provider"

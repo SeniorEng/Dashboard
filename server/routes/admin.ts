@@ -12,6 +12,7 @@ import {
   type EmployeeRole,
   createFullCustomerSchema,
   insertInsuranceProviderSchema,
+  insertCustomerInsuranceSchema,
   insertCustomerContactSchema,
   insertCareLevelHistorySchema,
   insertCustomerBudgetSchema,
@@ -715,7 +716,7 @@ router.post("/customers/:id/insurance", async (req: Request, res: Response) => {
       return;
     }
     
-    const data = { ...req.body, customerId };
+    const data = insertCustomerInsuranceSchema.parse({ ...req.body, customerId });
     const insurance = await customerManagementStorage.addCustomerInsurance(data, req.user!.id);
     res.status(201).json(insurance);
   } catch (error: any) {
