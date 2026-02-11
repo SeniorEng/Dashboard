@@ -3,12 +3,11 @@ import { Link, useSearch } from "wouter";
 import { Layout } from "@/components/layout";
 import { useAppointments, useWeekAppointmentCounts, AppointmentList } from "@/features/appointments";
 import { Button } from "@/components/ui/button";
-import { format, addDays, startOfWeek, addWeeks, subWeeks, isSameDay } from "date-fns";
+import { format, addDays, startOfWeek, subWeeks, isSameDay } from "date-fns";
 import { de } from "date-fns/locale";
-import { Plus, ChevronsLeft, ChevronsRight, Loader2 } from "lucide-react";
+import { Plus, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { iconSize } from "@/design-system";
-import { ErrorState } from "@/components/patterns/error-state";
 
 const WEEKDAY_NAMES_SHORT = ["Mo", "Di", "Mi", "Do", "Fr"];
 
@@ -68,7 +67,6 @@ export default function Dashboard() {
     }
     return new Date();
   });
-  const [showTwoWeeks, setShowTwoWeeks] = useState(false);
   const dateString = format(selectedDate, "yyyy-MM-dd");
   
   const { data: appointments, isLoading, error, refetch } = useAppointments(dateString);
@@ -79,13 +77,8 @@ export default function Dashboard() {
 
   const weekDays = useMemo(() => {
     const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 });
-    const days = Array.from({ length: 5 }, (_, i) => addDays(weekStart, i));
-    if (showTwoWeeks) {
-      const week2Start = addWeeks(weekStart, 1);
-      days.push(...Array.from({ length: 5 }, (_, i) => addDays(week2Start, i)));
-    }
-    return days;
-  }, [selectedDate, showTwoWeeks]);
+    return Array.from({ length: 5 }, (_, i) => addDays(weekStart, i));
+  }, [selectedDate]);
 
   const weekDateStrings = useMemo(() => 
     weekDays.map(d => format(d, "yyyy-MM-dd")), 
@@ -95,35 +88,15 @@ export default function Dashboard() {
   const { data: weekAppointmentCounts } = useWeekAppointmentCounts(weekDateStrings);
 
   const goToPreviousWeek = () => setSelectedDate(prev => subWeeks(prev, 1));
-  const goToNextWeek = () => setSelectedDate(prev => addWeeks(prev, 1));
-
-  const week1Days = weekDays.slice(0, 5);
-  const week2Days = showTwoWeeks ? weekDays.slice(5, 10) : [];
+  const goToNextWeek = () => setSelectedDate(prev => {
+    const weekStart = startOfWeek(prev, { weekStartsOn: 1 });
+    return addDays(weekStart, 7);
+  });
 
   return (
     <Layout>
       <div className="mb-6 animate-in slide-in-from-top-4 duration-500">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-1 bg-muted rounded-lg p-0.5">
-            <button
-              onClick={() => setShowTwoWeeks(false)}
-              className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
-                !showTwoWeeks ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
-              }`}
-              data-testid="toggle-1-week"
-            >
-              1 Wo
-            </button>
-            <button
-              onClick={() => setShowTwoWeeks(true)}
-              className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
-                showTwoWeeks ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
-              }`}
-              data-testid="toggle-2-weeks"
-            >
-              2 Wo
-            </button>
-          </div>
+        <div className="flex items-center justify-end mb-3">
           <Link href="/new-appointment">
             <Button size="sm" className="shadow-lg shadow-primary/20" data-testid="button-new-appointment">
               <Plus className={`${iconSize.sm} mr-1`} /> Neuer Termin
@@ -143,52 +116,26 @@ export default function Dashboard() {
             <ChevronsLeft className={iconSize.sm} />
           </Button>
           
-          <div className="flex-1 space-y-1">
-            <div className="flex gap-1 justify-center">
-              {week1Days.map((day, index) => {
-                const dayStr = format(day, "yyyy-MM-dd");
-                const isSelected = dayStr === dateString;
-                const isDayToday = isSameDay(day, today);
-                const appointmentCount = weekAppointmentCounts?.[dayStr] || 0;
-                
-                return (
-                  <DayButton
-                    key={dayStr}
-                    dayStr={dayStr}
-                    day={day}
-                    index={index}
-                    isSelected={isSelected}
-                    isDayToday={isDayToday}
-                    appointmentCount={appointmentCount}
-                    onSelect={setSelectedDate}
-                  />
-                );
-              })}
-            </div>
-            
-            {showTwoWeeks && week2Days.length > 0 && (
-              <div className="flex gap-1 justify-center">
-                {week2Days.map((day, index) => {
-                  const dayStr = format(day, "yyyy-MM-dd");
-                  const isSelected = dayStr === dateString;
-                  const isDayToday = isSameDay(day, today);
-                  const appointmentCount = weekAppointmentCounts?.[dayStr] || 0;
-                  
-                  return (
-                    <DayButton
-                      key={dayStr}
-                      dayStr={dayStr}
-                      day={day}
-                      index={index}
-                      isSelected={isSelected}
-                      isDayToday={isDayToday}
-                      appointmentCount={appointmentCount}
-                      onSelect={setSelectedDate}
-                    />
-                  );
-                })}
-              </div>
-            )}
+          <div className="flex gap-1 justify-center flex-1">
+            {weekDays.map((day, index) => {
+              const dayStr = format(day, "yyyy-MM-dd");
+              const isSelected = dayStr === dateString;
+              const isDayToday = isSameDay(day, today);
+              const appointmentCount = weekAppointmentCounts?.[dayStr] || 0;
+              
+              return (
+                <DayButton
+                  key={dayStr}
+                  dayStr={dayStr}
+                  day={day}
+                  index={index}
+                  isSelected={isSelected}
+                  isDayToday={isDayToday}
+                  appointmentCount={appointmentCount}
+                  onSelect={setSelectedDate}
+                />
+              );
+            })}
           </div>
           
           <Button
