@@ -112,18 +112,3 @@ export interface BirthdayEntry {
   age: number;
 }
 
-/**
- * @deprecated Use getServiceInfoFromServices() with junction table data instead.
- * Ermittelt den primären Service-Typ basierend auf den geplanten Dauern
- */
-export function getServiceTypeFromDurations(
-  hauswirtschaftDauer: number | null | undefined,
-  alltagsbegleitungDauer: number | null | undefined
-): "Hauswirtschaft" | "Alltagsbegleitung" | null {
-  if (hauswirtschaftDauer && alltagsbegleitungDauer) {
-    return "Hauswirtschaft";
-  }
-  if (hauswirtschaftDauer) return "Hauswirtschaft";
-  if (alltagsbegleitungDauer) return "Alltagsbegleitung";
-  return null;
-}

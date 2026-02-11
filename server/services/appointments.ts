@@ -385,13 +385,9 @@ export class AppointmentService {
   ): DocumentationResult {
     const performedBy = input.performedByEmployeeId ?? appointment.assignedEmployeeId ?? userId ?? null;
     const actualStartTime = formatTimeHHMMSS(input.actualStart);
-    const totalDurationMinutes = (input.hauswirtschaftActualDauer ?? 0)
-      + (input.alltagsbegleitungActualDauer ?? 0)
-      + (input.erstberatungActualDauer ?? 0);
+    const totalDurationMinutes = input.services.reduce((sum, s) => sum + (s.actualDurationMinutes || 0), 0);
     const actualEndTime = addMinutesToTimeHHMMSS(actualStartTime, totalDurationMinutes);
 
-    const hauswirtschaftMinutes = input.hauswirtschaftActualDauer || 0;
-    const alltagsbegleitungMinutes = input.alltagsbegleitungActualDauer || 0;
     const travelKm = input.travelKilometers || 0;
     const customerKm = input.customerKilometers || 0;
 
@@ -399,12 +395,6 @@ export class AppointmentService {
       performedByEmployeeId: performedBy,
       actualStart: actualStartTime,
       actualEnd: actualEndTime,
-      hauswirtschaftActualDauer: input.hauswirtschaftActualDauer ?? null,
-      hauswirtschaftDetails: input.hauswirtschaftDetails ?? null,
-      alltagsbegleitungActualDauer: input.alltagsbegleitungActualDauer ?? null,
-      alltagsbegleitungDetails: input.alltagsbegleitungDetails ?? null,
-      erstberatungActualDauer: input.erstberatungActualDauer ?? null,
-      erstberatungDetails: input.erstberatungDetails ?? null,
       travelOriginType: input.travelOriginType,
       travelFromAppointmentId: input.travelFromAppointmentId ?? null,
       travelKilometers: input.travelKilometers,
@@ -417,12 +407,12 @@ export class AppointmentService {
     return {
       updateData,
       totalDurationMinutes,
-      hauswirtschaftMinutes,
-      alltagsbegleitungMinutes,
+      hauswirtschaftMinutes: 0,
+      alltagsbegleitungMinutes: 0,
       travelKilometers: travelKm,
       customerKilometers: customerKm,
-      hasUsage: hauswirtschaftMinutes > 0 || alltagsbegleitungMinutes > 0 || travelKm > 0 || customerKm > 0,
-      serviceUpdates: input.services || undefined,
+      hasUsage: totalDurationMinutes > 0 || travelKm > 0 || customerKm > 0,
+      serviceUpdates: input.services,
     };
   }
 
