@@ -63,11 +63,11 @@ export interface IServiceCatalogStorage {
 export class ServiceCatalogStorage implements IServiceCatalogStorage {
   async getAllServices(includeInactive = false): Promise<Service[]> {
     if (includeInactive) {
-      return db.select().from(services).orderBy(asc(services.sortOrder), asc(services.name));
+      return db.select().from(services).orderBy(asc(services.name));
     }
     return db.select().from(services)
       .where(eq(services.isActive, true))
-      .orderBy(asc(services.sortOrder), asc(services.name));
+      .orderBy(asc(services.name));
   }
 
   async getServiceById(id: number): Promise<Service | null> {

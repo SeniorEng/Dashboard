@@ -487,21 +487,6 @@ export default function AdminServices() {
               </div>
             )}
 
-            {!editingService?.isSystem && (
-              <div className="space-y-2">
-                <Label htmlFor="sortOrder">Sortierung</Label>
-                <Input
-                  id="sortOrder"
-                  className="text-base"
-                  type="number"
-                  inputMode="numeric"
-                  value={form.sortOrder}
-                  onChange={(e) => handleChange("sortOrder", e.target.value)}
-                  placeholder="0"
-                  data-testid="input-service-sort-order"
-                />
-              </div>
-            )}
 
             {!editingService?.isSystem && (
               <div className="flex items-center gap-3 py-2">
