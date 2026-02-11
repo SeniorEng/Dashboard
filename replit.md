@@ -54,6 +54,11 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Birthdays**: Integrated tab in Customers page, showing upcoming birthdays for employees and assigned customers, utilizing server-side cache.
 - **Navigation Structure**: Bottom navigation tabs: Termine, Kunden (with Birthdays tab), Aufgaben, Nachweise, Zeiten.
 
+## Performance
+- **Performance-Guide:** Detaillierte Analyse und Optimierungsempfehlungen in `PERFORMANCE_GUIDE.md`
+- **Offene Haupt-Themen:** Bundle-Splitting (559 kB Haupt-Chunk), ungenutzte UI-Komponenten (recharts etc.), libphonenumber-js Optimierung, HTTP Cache-Headers, Prefetching
+- **Bereits optimiert:** DB Connection Pool (WebSocket), Auth-Scope, N+1 Fixes, Session-JOIN, Indexes, Cache-GC, Route-Level Code Splitting, staleTime-Strategie
+
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)
 - **Frontend Libraries**: React, TypeScript, Vite, Wouter, `shadcn/ui`, Radix UI, Tailwind CSS v4, TanStack Query, Zod.
