@@ -5,6 +5,9 @@ import { timestamp } from "./common";
 export const SERVICE_UNIT_TYPES = ["hours", "kilometers", "flat"] as const;
 export type ServiceUnitType = typeof SERVICE_UNIT_TYPES[number];
 
+export const SYSTEM_SERVICE_CODES = ["hauswirtschaft", "alltagsbegleitung", "travel_km", "customer_km"] as const;
+export type SystemServiceCode = typeof SYSTEM_SERVICE_CODES[number];
+
 export const services = pgTable("services", {
   id: serial("id").primaryKey(),
   code: text("code").unique(),
@@ -16,6 +19,7 @@ export const services = pgTable("services", {
   minDurationMinutes: integer("min_duration_minutes"),
   isActive: boolean("is_active").notNull().default(true),
   isDefault: boolean("is_default").notNull().default(false),
+  isSystem: boolean("is_system").notNull().default(false),
   isBillable: boolean("is_billable").notNull().default(true),
   employeeRateCents: integer("employee_rate_cents").notNull().default(0),
   sortOrder: integer("sort_order").notNull().default(0),

@@ -42,6 +42,7 @@ interface ServiceWithPots {
   minDurationMinutes: number | null;
   isActive: boolean;
   isDefault: boolean;
+  isSystem: boolean;
   isBillable: boolean;
   employeeRateCents: number;
   sortOrder: number;
@@ -296,6 +297,9 @@ export default function AdminServices() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="font-medium text-gray-900 truncate" data-testid={`text-service-name-${service.id}`}>{service.name}</span>
+                          {service.isSystem && (
+                            <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-system-${service.id}`}>System</span>
+                          )}
                           {service.isDefault && (
                             <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-default-${service.id}`}>Standard</span>
                           )}
@@ -304,11 +308,11 @@ export default function AdminServices() {
                           ) : (
                             <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-not-billable-${service.id}`}>Nicht abrechenbar</span>
                           )}
-                          {service.isActive ? (
+                          {!service.isSystem && (service.isActive ? (
                             <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-active-${service.id}`}>Aktiv</span>
                           ) : (
                             <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-inactive-${service.id}`}>Inaktiv</span>
-                          )}
+                          ))}
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
                           <span data-testid={`text-unit-type-${service.id}`}>{UNIT_TYPE_LABELS[service.unitType] || service.unitType}</span>
@@ -347,6 +351,12 @@ export default function AdminServices() {
           </DialogHeader>
 
           <div className="space-y-4 mt-2">
+            {editingService?.isSystem && (
+              <div className="bg-purple-50 border border-purple-200 rounded-lg px-3 py-2 text-sm text-purple-700" data-testid="info-system-service">
+                System-Service: Name, Code, Einheit und Status können nicht geändert werden.
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="name">Name *</Label>
               <Input
@@ -355,6 +365,7 @@ export default function AdminServices() {
                 value={form.name}
                 onChange={(e) => handleChange("name", e.target.value)}
                 placeholder="z. B. Hauswirtschaftliche Versorgung"
+                disabled={editingService?.isSystem}
                 data-testid="input-service-name"
               />
             </div>
@@ -367,6 +378,7 @@ export default function AdminServices() {
                 value={form.code}
                 onChange={(e) => handleChange("code", e.target.value)}
                 placeholder="z. B. hw"
+                disabled={editingService?.isSystem}
                 data-testid="input-service-code"
               />
             </div>
@@ -376,6 +388,7 @@ export default function AdminServices() {
               <Select
                 value={form.unitType}
                 onValueChange={(value) => handleChange("unitType", value)}
+                disabled={editingService?.isSystem}
               >
                 <SelectTrigger className="text-base" data-testid="select-unit-type">
                   <SelectValue />
@@ -487,43 +500,49 @@ export default function AdminServices() {
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label htmlFor="sortOrder">Sortierung</Label>
-              <Input
-                id="sortOrder"
-                className="text-base"
-                type="number"
-                inputMode="numeric"
-                value={form.sortOrder}
-                onChange={(e) => handleChange("sortOrder", e.target.value)}
-                placeholder="0"
-                data-testid="input-service-sort-order"
-              />
-            </div>
+            {!editingService?.isSystem && (
+              <div className="space-y-2">
+                <Label htmlFor="sortOrder">Sortierung</Label>
+                <Input
+                  id="sortOrder"
+                  className="text-base"
+                  type="number"
+                  inputMode="numeric"
+                  value={form.sortOrder}
+                  onChange={(e) => handleChange("sortOrder", e.target.value)}
+                  placeholder="0"
+                  data-testid="input-service-sort-order"
+                />
+              </div>
+            )}
 
-            <div className="flex items-center gap-3 py-2">
-              <Switch
-                id="isDefault"
-                checked={form.isDefault}
-                onCheckedChange={(checked) => handleChange("isDefault", checked)}
-                data-testid="switch-is-default"
-              />
-              <Label htmlFor="isDefault" className="cursor-pointer">
-                Standard bei Terminanlage
-              </Label>
-            </div>
+            {!editingService?.isSystem && (
+              <div className="flex items-center gap-3 py-2">
+                <Switch
+                  id="isDefault"
+                  checked={form.isDefault}
+                  onCheckedChange={(checked) => handleChange("isDefault", checked)}
+                  data-testid="switch-is-default"
+                />
+                <Label htmlFor="isDefault" className="cursor-pointer">
+                  Standard bei Terminanlage
+                </Label>
+              </div>
+            )}
 
-            <div className="flex items-center gap-3 py-2">
-              <Switch
-                id="isActive"
-                checked={form.isActive}
-                onCheckedChange={(checked) => handleChange("isActive", checked)}
-                data-testid="switch-is-active"
-              />
-              <Label htmlFor="isActive" className="cursor-pointer">
-                Dienstleistung aktiv
-              </Label>
-            </div>
+            {!editingService?.isSystem && (
+              <div className="flex items-center gap-3 py-2">
+                <Switch
+                  id="isActive"
+                  checked={form.isActive}
+                  onCheckedChange={(checked) => handleChange("isActive", checked)}
+                  data-testid="switch-is-active"
+                />
+                <Label htmlFor="isActive" className="cursor-pointer">
+                  Dienstleistung aktiv
+                </Label>
+              </div>
+            )}
 
             <div className="flex justify-end gap-2 pt-4 border-t">
               <Button

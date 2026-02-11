@@ -555,24 +555,26 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     customerKilometersCents: number;
     totalCents: number;
   }> {
-    const [hwService, abService, kmService] = await Promise.all([
+    const [hwService, abService, travelKmService, customerKmService] = await Promise.all([
       serviceCatalogStorage.getServiceByCode("hauswirtschaft"),
       serviceCatalogStorage.getServiceByCode("alltagsbegleitung"),
-      serviceCatalogStorage.getServiceByCode("kilometer"),
+      serviceCatalogStorage.getServiceByCode("travel_km"),
+      serviceCatalogStorage.getServiceByCode("customer_km"),
     ]);
 
-    if (!hwService && !abService && !kmService) {
+    if (!hwService && !abService && !travelKmService && !customerKmService) {
       throw new Error(`Keine Preisvereinbarung für Kunde ${params.customerId} zum Datum ${params.date} gefunden`);
     }
 
     const hauswirtschaftRateCents = (hwService?.isBillable !== false) ? (hwService?.defaultPriceCents || 0) : 0;
     const alltagsbegleitungRateCents = (abService?.isBillable !== false) ? (abService?.defaultPriceCents || 0) : 0;
-    const kilometerRateCents = (kmService?.isBillable !== false) ? (kmService?.defaultPriceCents || 0) : 0;
+    const travelKmRateCents = (travelKmService?.isBillable !== false) ? (travelKmService?.defaultPriceCents || 0) : 0;
+    const customerKmRateCents = (customerKmService?.isBillable !== false) ? (customerKmService?.defaultPriceCents || 0) : 0;
 
     const hauswirtschaftCents = Math.round((params.hauswirtschaftMinutes / 60) * hauswirtschaftRateCents);
     const alltagsbegleitungCents = Math.round((params.alltagsbegleitungMinutes / 60) * alltagsbegleitungRateCents);
-    const travelCents = Math.round(params.travelKilometers * kilometerRateCents);
-    const customerKilometersCents = Math.round(params.customerKilometers * kilometerRateCents);
+    const travelCents = Math.round(params.travelKilometers * travelKmRateCents);
+    const customerKilometersCents = Math.round(params.customerKilometers * customerKmRateCents);
 
     const totalCents = hauswirtschaftCents + alltagsbegleitungCents + travelCents + customerKilometersCents;
 

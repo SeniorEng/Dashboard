@@ -55,6 +55,9 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  const { serviceCatalogStorage } = await import("./storage/service-catalog");
+  await serviceCatalogStorage.ensureSystemServices();
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
