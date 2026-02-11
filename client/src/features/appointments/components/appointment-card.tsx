@@ -15,7 +15,7 @@ import {
 import { MapPin, CheckCircle2, Clock, FileText, Pencil, Trash2, MoreVertical } from "lucide-react";
 import { useLocation } from "wouter";
 import type { AppointmentWithCustomer, AppointmentStatus } from "@shared/types";
-import { getCardServiceInfo, canModifyAppointment } from "@shared/types";
+import { getCardServiceInfoFromAppointment, canModifyAppointment } from "@shared/types";
 import { formatTimeSlot, getEndTime } from "../utils";
 import { useDeleteAppointment } from "../hooks";
 import { useToast } from "@/hooks/use-toast";
@@ -53,16 +53,9 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
   const [, navigate] = useLocation();
   
   const canModify = canModifyAppointment(appointment.status as AppointmentStatus);
-  const isCompleted = appointment.status === "completed";
   const serviceInfo = useMemo(() => 
-    getCardServiceInfo(
-      appointment.appointmentType,
-      isCompleted ? (appointment.hauswirtschaftActualDauer ?? appointment.hauswirtschaftDauer) : appointment.hauswirtschaftDauer,
-      isCompleted ? (appointment.alltagsbegleitungActualDauer ?? appointment.alltagsbegleitungDauer) : appointment.alltagsbegleitungDauer,
-      isCompleted ? (appointment.erstberatungActualDauer ?? appointment.erstberatungDauer) : appointment.erstberatungDauer,
-      appointment.serviceType
-    ),
-    [appointment.appointmentType, appointment.hauswirtschaftDauer, appointment.alltagsbegleitungDauer, appointment.erstberatungDauer, appointment.hauswirtschaftActualDauer, appointment.alltagsbegleitungActualDauer, appointment.erstberatungActualDauer, appointment.status, appointment.serviceType]
+    getCardServiceInfoFromAppointment(appointment),
+    [appointment.appointmentType, appointment.serviceType, appointment.durationPromised, appointment.status]
   );
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {

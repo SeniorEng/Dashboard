@@ -362,6 +362,77 @@ export function getCardServiceInfo(
   return { ...info, borderClass };
 }
 
+export function getCardServiceInfoFromAppointment(appointment: {
+  appointmentType: string;
+  serviceType: string | null;
+  durationPromised: number | null;
+  status: string;
+}): CardServiceInfo {
+  const { appointmentType, serviceType, durationPromised } = appointment;
+  
+  if (appointmentType === "Erstberatung") {
+    return {
+      hasHauswirtschaft: false,
+      hasAlltagsbegleitung: false,
+      hasErstberatung: true,
+      hasBoth: false,
+      label: "Erstberatung",
+      primaryType: "Erstberatung",
+      borderClass: "bg-purple-500",
+    };
+  }
+
+  const hasHauswirtschaft = serviceType === "Hauswirtschaft" || serviceType === "Hauswirtschaft & Alltagsbegleitung";
+  const hasAlltagsbegleitung = serviceType === "Alltagsbegleitung" || serviceType === "Hauswirtschaft & Alltagsbegleitung";
+  const hasBoth = hasHauswirtschaft && hasAlltagsbegleitung;
+
+  let label: string;
+  let primaryType: ServiceType | null = null;
+  let borderClass: string;
+
+  if (hasBoth) {
+    label = "Hauswirtschaft & Alltagsbegleitung";
+    primaryType = "Hauswirtschaft";
+    borderClass = "";
+  } else if (hasHauswirtschaft) {
+    label = "Hauswirtschaft";
+    primaryType = "Hauswirtschaft";
+    borderClass = "bg-amber-500";
+  } else if (hasAlltagsbegleitung) {
+    label = "Alltagsbegleitung";
+    primaryType = "Alltagsbegleitung";
+    borderClass = "bg-sky-500";
+  } else {
+    label = serviceType || "Kundentermin";
+    primaryType = null;
+    borderClass = "bg-teal-500";
+  }
+
+  return { hasHauswirtschaft, hasAlltagsbegleitung, hasErstberatung: false, hasBoth, label, primaryType, borderClass };
+}
+
+export function getCardServiceInfoFromServices(
+  appointmentType: string,
+  services: Array<{ serviceCode?: string | null; plannedDurationMinutes: number; actualDurationMinutes?: number | null }>
+): CardServiceInfo {
+  const info = getServiceInfoFromServices(appointmentType, services);
+  
+  let borderClass: string;
+  if (appointmentType === "Erstberatung") {
+    borderClass = "bg-purple-500";
+  } else if (info.hasBoth) {
+    borderClass = "";
+  } else if (info.primaryType === "Hauswirtschaft") {
+    borderClass = "bg-amber-500";
+  } else if (info.primaryType === "Alltagsbegleitung") {
+    borderClass = "bg-sky-500";
+  } else {
+    borderClass = "bg-teal-500";
+  }
+  
+  return { ...info, borderClass };
+}
+
 export interface TravelOriginSuggestion {
   suggestedOrigin: TravelOriginType;
   previousAppointment: Appointment | null;

@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useRoute, useLocation } from "wouter";
 import { Layout } from "@/components/layout";
 import { useAppointment } from "@/features/appointments";
@@ -38,6 +39,24 @@ export default function AppointmentDetail() {
   const id = params?.id ? parseInt(params.id) : 0;
   
   const { data: appointment, isLoading } = useAppointment(id);
+  const { data: appointmentServices } = useQuery<Array<{ 
+    id: number;
+    serviceId: number; 
+    serviceName: string;
+    serviceCode: string;
+    serviceUnitType: string;
+    plannedDurationMinutes: number; 
+    actualDurationMinutes: number | null; 
+    details: string | null;
+  }>>({
+    queryKey: [`/api/appointments/${id}/services`],
+    queryFn: async () => {
+      const res = await fetch(`/api/appointments/${id}/services`);
+      if (!res.ok) throw new Error("Failed to fetch services");
+      return res.json();
+    },
+    enabled: !!id && !!appointment,
+  });
   const deleteMutation = useDeleteAppointment();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
@@ -83,14 +102,9 @@ export default function AppointmentDetail() {
   const canModify = canModifyAppointment(appointment.status as AppointmentStatus);
   const isErstberatung = appointment.appointmentType === "Erstberatung";
 
-  const hasHauswirtschaft = !!appointment.hauswirtschaftDauer;
-  const hasAlltagsbegleitung = !!appointment.alltagsbegleitungDauer;
-  const hasErstberatung = !!appointment.erstberatungDauer;
-
-  const hasDocumentedHauswirtschaft = !!appointment.hauswirtschaftActualDauer;
-  const hasDocumentedAlltagsbegleitung = !!appointment.alltagsbegleitungActualDauer;
-  const hasDocumentedErstberatung = !!appointment.erstberatungActualDauer;
-  const hasAnyDocumentedService = hasDocumentedHauswirtschaft || hasDocumentedAlltagsbegleitung || hasDocumentedErstberatung;
+  const services = appointmentServices || [];
+  const hasAnyService = services.length > 0;
+  const hasAnyDocumentedService = services.some(s => s.actualDurationMinutes !== null && s.actualDurationMinutes > 0);
   const isCompleted = appointment.status === "completed";
 
   return (
@@ -163,7 +177,7 @@ export default function AppointmentDetail() {
             </span>
           </div>
 
-          {(hasHauswirtschaft || hasAlltagsbegleitung || hasErstberatung || (isCompleted && hasAnyDocumentedService)) && (
+          {(hasAnyService || (isCompleted && hasAnyDocumentedService)) && (
             <>
               {isCompleted && hasAnyDocumentedService && (
                 <div className="flex items-center justify-between pt-1 text-xs text-muted-foreground">
@@ -173,95 +187,41 @@ export default function AppointmentDetail() {
                 </div>
               )}
 
-              {(hasHauswirtschaft || (isCompleted && hasDocumentedHauswirtschaft)) && (
-                <div className="py-2 border-b border-border/50">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${getServiceColors('hauswirtschaft').bg}`} />
-                      <span>Hauswirtschaft</span>
-                    </div>
-                    {isCompleted && hasDocumentedHauswirtschaft ? (
-                      <div className="flex items-center">
-                        <span className="w-16 text-right text-muted-foreground text-sm">
-                          {hasHauswirtschaft ? formatDuration(appointment.hauswirtschaftDauer!) : "—"}
-                        </span>
-                        <span className="w-16 text-right font-medium text-primary">
-                          {formatDuration(appointment.hauswirtschaftActualDauer!)}
-                        </span>
+              {services.map((service) => {
+                const hasDocumented = service.actualDurationMinutes !== null && service.actualDurationMinutes > 0;
+                const serviceColorKey = service.serviceCode as string;
+                if (!service.plannedDurationMinutes && !(isCompleted && hasDocumented)) return null;
+                
+                return (
+                  <div key={service.id} className="py-2 border-b border-border/50">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full ${getServiceColors(serviceColorKey).bg}`} />
+                        <span>{service.serviceName}</span>
                       </div>
-                    ) : (
-                      <span className="text-muted-foreground">
-                        {hasHauswirtschaft ? formatDuration(appointment.hauswirtschaftDauer!) : "—"}
-                      </span>
+                      {isCompleted && hasDocumented ? (
+                        <div className="flex items-center">
+                          <span className="w-16 text-right text-muted-foreground text-sm">
+                            {service.plannedDurationMinutes ? formatDuration(service.plannedDurationMinutes) : "—"}
+                          </span>
+                          <span className="w-16 text-right font-medium text-primary">
+                            {formatDuration(service.actualDurationMinutes!)}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">
+                          {service.plannedDurationMinutes ? formatDuration(service.plannedDurationMinutes) : "—"}
+                        </span>
+                      )}
+                    </div>
+                    {isCompleted && service.details && (
+                      <p className="text-sm text-muted-foreground mt-1 ml-4">
+                        {service.details}
+                      </p>
                     )}
                   </div>
-                  {isCompleted && appointment.hauswirtschaftDetails && (
-                    <p className="text-sm text-muted-foreground mt-1 ml-4">
-                      {appointment.hauswirtschaftDetails}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {(hasAlltagsbegleitung || (isCompleted && hasDocumentedAlltagsbegleitung)) && (
-                <div className="py-2 border-b border-border/50">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${getServiceColors('alltagsbegleitung').bg}`} />
-                      <span>Alltagsbegleitung</span>
-                    </div>
-                    {isCompleted && hasDocumentedAlltagsbegleitung ? (
-                      <div className="flex items-center">
-                        <span className="w-16 text-right text-muted-foreground text-sm">
-                          {hasAlltagsbegleitung ? formatDuration(appointment.alltagsbegleitungDauer!) : "—"}
-                        </span>
-                        <span className="w-16 text-right font-medium text-primary">
-                          {formatDuration(appointment.alltagsbegleitungActualDauer!)}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-muted-foreground">
-                        {hasAlltagsbegleitung ? formatDuration(appointment.alltagsbegleitungDauer!) : "—"}
-                      </span>
-                    )}
-                  </div>
-                  {isCompleted && appointment.alltagsbegleitungDetails && (
-                    <p className="text-sm text-muted-foreground mt-1 ml-4">
-                      {appointment.alltagsbegleitungDetails}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {(hasErstberatung || (isCompleted && hasDocumentedErstberatung)) && (
-                <div className="py-2 border-b border-border/50">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${getServiceColors('erstberatung').bg}`} />
-                      <span>Erstberatung</span>
-                    </div>
-                    {isCompleted && hasDocumentedErstberatung ? (
-                      <div className="flex items-center">
-                        <span className="w-16 text-right text-muted-foreground text-sm">
-                          {hasErstberatung ? formatDuration(appointment.erstberatungDauer!) : "—"}
-                        </span>
-                        <span className="w-16 text-right font-medium text-primary">
-                          {formatDuration(appointment.erstberatungActualDauer!)}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-muted-foreground">
-                        {hasErstberatung ? formatDuration(appointment.erstberatungDauer!) : "—"}
-                      </span>
-                    )}
-                  </div>
-                  {isCompleted && appointment.erstberatungDetails && (
-                    <p className="text-sm text-muted-foreground mt-1 ml-4">
-                      {appointment.erstberatungDetails}
-                    </p>
-                  )}
-                </div>
-              )}
+                );
+              })}
 
               <div className="flex items-center justify-between py-2 pt-2 border-t border-border">
                 <span className="font-medium">Gesamt</span>
@@ -272,9 +232,7 @@ export default function AppointmentDetail() {
                     </span>
                     <span className="w-16 text-right font-medium text-primary">
                       {formatDuration(
-                        (appointment.hauswirtschaftActualDauer || 0) + 
-                        (appointment.alltagsbegleitungActualDauer || 0) + 
-                        (appointment.erstberatungActualDauer || 0)
+                        services.reduce((sum, s) => sum + (s.actualDurationMinutes || 0), 0)
                       )}
                     </span>
                   </div>

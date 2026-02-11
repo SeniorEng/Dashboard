@@ -17,7 +17,6 @@ import { iconSize, componentStyles } from "@/design-system";
 import { useAppointment, useDocumentAppointment, useTravelSuggestion, PerformedBySelector, TravelDocumentation } from "@/features/appointments";
 import { 
   formatDuration, 
-  getServicesToDocument,
   DURATION_OPTIONS,
   type TravelOriginType,
   type ServiceType
@@ -82,42 +81,31 @@ export default function DocumentAppointment() {
   const servicesInitialized = useRef(false);
 
   useEffect(() => {
-    if (appointment && !servicesInitialized.current) {
-      const services = getServicesToDocument(appointment);
+    if (appointment && appointmentServicesData && !servicesInitialized.current) {
       const prefillStart = appointment.actualStart
         ? formatTimeHHMM(appointment.actualStart)
         : appointment.scheduledStart
           ? formatTimeHHMM(appointment.scheduledStart)
           : "";
 
-      const serviceCodeToTypeMap: Record<string, ServiceType> = {
-        hauswirtschaft: "Hauswirtschaft",
-        alltagsbegleitung: "Alltagsbegleitung",
-        erstberatung: "Erstberatung",
-      };
-
       setFormData(prev => ({
         ...prev,
         performedByEmployeeId: appointment.assignedEmployeeId ?? null,
         actualStart: prefillStart,
-        services: services.map(s => {
-          const junctionEntry = appointmentServicesData?.find(
-            as => serviceCodeToTypeMap[as.serviceCode] === s.serviceType
-          );
-          return {
-            serviceId: junctionEntry?.serviceId,
-            serviceType: s.serviceType,
-            plannedDuration: s.plannedDuration,
-            actualDuration: s.actualDuration ?? s.plannedDuration,
-            details: s.details ?? "",
-          };
-        }),
+        services: appointmentServicesData.map(as => ({
+          serviceId: as.serviceId,
+          serviceType: as.serviceCode === 'hauswirtschaft' ? "Hauswirtschaft" as ServiceType
+            : as.serviceCode === 'alltagsbegleitung' ? "Alltagsbegleitung" as ServiceType
+            : as.serviceCode === 'erstberatung' ? "Erstberatung" as ServiceType
+            : as.serviceCode as ServiceType,
+          plannedDuration: as.plannedDurationMinutes,
+          actualDuration: as.actualDurationMinutes ?? as.plannedDurationMinutes,
+          details: as.details ?? "",
+        })),
         notes: appointment.notes ?? "",
       }));
 
-      if (appointmentServicesData) {
-        servicesInitialized.current = true;
-      }
+      servicesInitialized.current = true;
     }
   }, [appointment, appointmentServicesData]);
 

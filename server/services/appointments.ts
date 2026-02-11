@@ -1,7 +1,7 @@
 import { storage, type IStorage } from "../storage";
 import type { Appointment, InsertAppointment, UpdateAppointment, InsertErstberatungCustomer } from "@shared/schema";
 import { timeToMinutes, addMinutesToTime, addMinutesToTimeHHMMSS, formatTimeHHMMSS } from "@shared/utils/datetime";
-import { validateServiceDocumentation } from "@shared/domain/appointments";
+import { validateServiceDocumentation, validateServiceDocumentationFromServices } from "@shared/domain/appointments";
 import { 
   doTimesOverlap, 
   calculateTotalDuration,
@@ -392,18 +392,29 @@ export class AppointmentService {
       return { valid: false, error: "ALREADY_COMPLETED", message: "Dieser Termin wurde bereits dokumentiert" };
     }
 
-    const serviceValidation = validateServiceDocumentation(
-      appointment,
-      input.hauswirtschaftActualDauer,
-      input.hauswirtschaftDetails,
-      input.alltagsbegleitungActualDauer,
-      input.alltagsbegleitungDetails,
-      input.erstberatungActualDauer,
-      input.erstberatungDetails
-    );
-
-    if (!serviceValidation.valid) {
-      return { valid: false, error: "VALIDATION_ERROR", message: serviceValidation.errors.join(", ") };
+    if (input.services && input.services.length > 0) {
+      const serviceValidation = validateServiceDocumentationFromServices(
+        input.services.map(s => ({
+          actualDurationMinutes: s.actualDurationMinutes,
+          details: s.details,
+        }))
+      );
+      if (!serviceValidation.valid) {
+        return { valid: false, error: "VALIDATION_ERROR", message: serviceValidation.errors.join(", ") };
+      }
+    } else {
+      const serviceValidation = validateServiceDocumentation(
+        appointment,
+        input.hauswirtschaftActualDauer,
+        input.hauswirtschaftDetails,
+        input.alltagsbegleitungActualDauer,
+        input.alltagsbegleitungDetails,
+        input.erstberatungActualDauer,
+        input.erstberatungDetails
+      );
+      if (!serviceValidation.valid) {
+        return { valid: false, error: "VALIDATION_ERROR", message: serviceValidation.errors.join(", ") };
+      }
     }
 
     return { valid: true };

@@ -74,6 +74,30 @@ export default function ServiceRecordDetailPage() {
     enabled: !!recordId,
   });
 
+  const { data: allAppointmentServices = {} } = useQuery<Record<number, Array<{
+    serviceId: number;
+    serviceName: string;
+    serviceCode: string;
+    plannedDurationMinutes: number;
+    actualDurationMinutes: number | null;
+    details: string | null;
+  }>>>({
+    queryKey: ["/api/service-records", recordId, "appointment-services"],
+    queryFn: async () => {
+      const result: Record<number, Array<any>> = {};
+      await Promise.all(
+        appointments.map(async (apt) => {
+          const res = await fetch(`/api/appointments/${apt.id}/services`);
+          if (res.ok) {
+            result[apt.id] = await res.json();
+          }
+        })
+      );
+      return result;
+    },
+    enabled: appointments.length > 0,
+  });
+
   const { data: employeeMap = {} } = useQuery<Record<number, string>>({
     queryKey: ["employee-names-map"],
     queryFn: async () => {
@@ -145,10 +169,8 @@ export default function ServiceRecordDetailPage() {
   };
 
   const totalMinutes = appointments.reduce((sum, apt) => {
-    return sum + 
-      (apt.hauswirtschaftActualDauer || 0) + 
-      (apt.alltagsbegleitungActualDauer || 0) + 
-      (apt.erstberatungActualDauer || 0);
+    const aptServices = allAppointmentServices[apt.id] || [];
+    return sum + aptServices.reduce((s, svc) => s + (svc.actualDurationMinutes || 0), 0);
   }, 0);
 
   const totalTravelKm = appointments.reduce((sum, apt) => sum + (apt.travelKilometers || 0), 0);
@@ -219,7 +241,7 @@ export default function ServiceRecordDetailPage() {
             ) : (
               <div className="space-y-3">
                 {appointments.map((apt) => (
-                  <AppointmentSummaryRow key={apt.id} appointment={apt} employeeMap={employeeMap} />
+                  <AppointmentSummaryRow key={apt.id} appointment={apt} employeeMap={employeeMap} services={allAppointmentServices[apt.id] || []} />
                 ))}
               </div>
             )}
@@ -308,27 +330,18 @@ export default function ServiceRecordDetailPage() {
 interface AppointmentSummaryRowProps {
   appointment: AppointmentWithCustomer;
   employeeMap: Record<number, string>;
+  services: Array<{ serviceName: string; actualDurationMinutes: number | null; details: string | null }>;
 }
 
-function AppointmentSummaryRow({ appointment, employeeMap }: AppointmentSummaryRowProps) {
+function AppointmentSummaryRow({ appointment, employeeMap, services: aptServices }: AppointmentSummaryRowProps) {
   const services: string[] = [];
   
-  if (appointment.hauswirtschaftActualDauer) {
-    services.push(`Hauswirtschaft: ${appointment.hauswirtschaftActualDauer} min`);
-    if (appointment.hauswirtschaftDetails) {
-      services.push(`  → ${appointment.hauswirtschaftDetails}`);
-    }
-  }
-  if (appointment.alltagsbegleitungActualDauer) {
-    services.push(`Alltagsbegleitung: ${appointment.alltagsbegleitungActualDauer} min`);
-    if (appointment.alltagsbegleitungDetails) {
-      services.push(`  → ${appointment.alltagsbegleitungDetails}`);
-    }
-  }
-  if (appointment.erstberatungActualDauer) {
-    services.push(`Erstberatung: ${appointment.erstberatungActualDauer} min`);
-    if (appointment.erstberatungDetails) {
-      services.push(`  → ${appointment.erstberatungDetails}`);
+  for (const svc of aptServices) {
+    if (svc.actualDurationMinutes) {
+      services.push(`${svc.serviceName}: ${svc.actualDurationMinutes} min`);
+      if (svc.details) {
+        services.push(`  → ${svc.details}`);
+      }
     }
   }
 

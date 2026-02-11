@@ -167,7 +167,8 @@ export default function EditAppointment() {
       const calculatedEndTime = addMinutesToTime(time, totalDuration);
       
       let serviceType: string | null = null;
-      if (hauswirtschaftDauerVal) serviceType = "Hauswirtschaft";
+      if (hauswirtschaftDauerVal && alltagsbegleitungDauerVal) serviceType = "Hauswirtschaft & Alltagsbegleitung";
+      else if (hauswirtschaftDauerVal) serviceType = "Hauswirtschaft";
       else if (alltagsbegleitungDauerVal) serviceType = "Alltagsbegleitung";
       
       updateMutation.mutate({
@@ -179,6 +180,10 @@ export default function EditAppointment() {
         alltagsbegleitungDauer: alltagsbegleitungDauerVal,
         serviceType,
         notes: notes || null,
+        services: services.map(s => ({
+          serviceId: s.serviceId,
+          plannedDurationMinutes: s.durationMinutes,
+        })),
       });
     } else {
       const startMinutes = parseInt(time.split(":")[0]) * 60 + parseInt(time.split(":")[1]);

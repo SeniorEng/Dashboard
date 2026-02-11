@@ -11,6 +11,8 @@ import {
   type InsertVacationAllowance,
   type Appointment,
 } from "@shared/schema";
+import { appointmentServices as appointmentServicesTable } from "@shared/schema/appointments";
+import { services as servicesTable } from "@shared/schema/services";
 import { todayISO, formatDateISO } from "@shared/utils/datetime";
 import { db } from "../lib/db";
 
@@ -429,6 +431,21 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       this.getTimeEntries(userId, { year, month }),
     ]);
     
+    const appointmentIds = employeeAppointments.map(a => a.id);
+    
+    let serviceBreakdown: Array<{ appointmentId: number; serviceCode: string | null; plannedDurationMinutes: number; actualDurationMinutes: number | null }> = [];
+    if (appointmentIds.length > 0) {
+      serviceBreakdown = await db.select({
+        appointmentId: appointmentServicesTable.appointmentId,
+        serviceCode: servicesTable.code,
+        plannedDurationMinutes: appointmentServicesTable.plannedDurationMinutes,
+        actualDurationMinutes: appointmentServicesTable.actualDurationMinutes,
+      })
+      .from(appointmentServicesTable)
+      .innerJoin(servicesTable, eq(appointmentServicesTable.serviceId, servicesTable.id))
+      .where(inArray(appointmentServicesTable.appointmentId, appointmentIds));
+    }
+    
     const serviceHours: ServiceHoursSummary = {
       hauswirtschaftMinutes: 0,
       alltagsbegleitungMinutes: 0,
@@ -441,23 +458,34 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       totalMinutes: 0,
     };
     
+    const servicesByAppointment = new Map<number, typeof serviceBreakdown>();
+    for (const svc of serviceBreakdown) {
+      if (!servicesByAppointment.has(svc.appointmentId)) {
+        servicesByAppointment.set(svc.appointmentId, []);
+      }
+      servicesByAppointment.get(svc.appointmentId)!.push(svc);
+    }
+    
     for (const appt of employeeAppointments) {
-      if (appt.status === 'completed') {
-        // For completed appointments: ONLY count documented (actual) durations
-        // If a service was removed during documentation, ActualDauer is NULL → counts as 0
-        serviceHours.hauswirtschaftMinutes += appt.hauswirtschaftActualDauer || 0;
-        serviceHours.alltagsbegleitungMinutes += appt.alltagsbegleitungActualDauer || 0;
-        serviceHours.erstberatungMinutes += appt.erstberatungActualDauer || 0;
-      } else if (appt.status === 'documenting') {
-        // For documenting appointments: use actual if available, otherwise planned
-        serviceHours.hauswirtschaftMinutes += appt.hauswirtschaftActualDauer ?? appt.hauswirtschaftDauer ?? 0;
-        serviceHours.alltagsbegleitungMinutes += appt.alltagsbegleitungActualDauer ?? appt.alltagsbegleitungDauer ?? 0;
-        serviceHours.erstberatungMinutes += appt.erstberatungActualDauer ?? appt.erstberatungDauer ?? 0;
-      } else {
-        // For scheduled/in-progress: use planned durations
-        serviceHours.hauswirtschaftMinutes += appt.hauswirtschaftDauer || 0;
-        serviceHours.alltagsbegleitungMinutes += appt.alltagsbegleitungDauer || 0;
-        serviceHours.erstberatungMinutes += appt.erstberatungDauer || 0;
+      const apptServices = servicesByAppointment.get(appt.id) || [];
+      
+      for (const svc of apptServices) {
+        let minutes = 0;
+        if (appt.status === 'completed') {
+          minutes = svc.actualDurationMinutes || 0;
+        } else if (appt.status === 'documenting') {
+          minutes = svc.actualDurationMinutes ?? svc.plannedDurationMinutes ?? 0;
+        } else {
+          minutes = svc.plannedDurationMinutes || 0;
+        }
+        
+        if (svc.serviceCode === 'hauswirtschaft') {
+          serviceHours.hauswirtschaftMinutes += minutes;
+        } else if (svc.serviceCode === 'alltagsbegleitung') {
+          serviceHours.alltagsbegleitungMinutes += minutes;
+        } else if (svc.serviceCode === 'erstberatung') {
+          serviceHours.erstberatungMinutes += minutes;
+        }
       }
       
       travel.totalKilometers += appt.travelKilometers || 0;

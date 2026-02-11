@@ -31,14 +31,18 @@ interface DayDetailPanelProps {
 
 function getAppointmentServices(appt: AppointmentWithCustomerName) {
   const services: { name: string; minutes: number }[] = [];
-  if (appt.hauswirtschaftDauer || appt.hauswirtschaftActualDauer) {
-    services.push({ name: "HW", minutes: appt.hauswirtschaftActualDauer || appt.hauswirtschaftDauer || 0 });
-  }
-  if (appt.alltagsbegleitungDauer || appt.alltagsbegleitungActualDauer) {
-    services.push({ name: "AB", minutes: appt.alltagsbegleitungActualDauer || appt.alltagsbegleitungDauer || 0 });
-  }
-  if (appt.erstberatungDauer || appt.erstberatungActualDauer) {
-    services.push({ name: "EB", minutes: appt.erstberatungActualDauer || appt.erstberatungDauer || 0 });
+  const duration = appt.durationPromised || 0;
+
+  if (appt.appointmentType === "Erstberatung") {
+    services.push({ name: "EB", minutes: duration });
+  } else if (appt.serviceType === "Hauswirtschaft & Alltagsbegleitung") {
+    services.push({ name: "HW+AB", minutes: duration });
+  } else if (appt.serviceType === "Hauswirtschaft") {
+    services.push({ name: "HW", minutes: duration });
+  } else if (appt.serviceType === "Alltagsbegleitung") {
+    services.push({ name: "AB", minutes: duration });
+  } else if (duration > 0) {
+    services.push({ name: appt.serviceType || "Service", minutes: duration });
   }
   return services;
 }

@@ -57,6 +57,8 @@ export {
   getServiceInfo,
   getServiceInfoFromServices,
   getCardServiceInfo,
+  getCardServiceInfoFromAppointment,
+  getCardServiceInfoFromServices,
   getServicesToDocument,
   validateServiceDocumentation,
   validateServiceDocumentationFromServices,

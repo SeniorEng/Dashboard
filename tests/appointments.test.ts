@@ -15,11 +15,20 @@ interface Appointment {
   scheduledStart: string;
   scheduledEnd: string;
   status: string;
+  durationPromised: number | null;
+  serviceType: string | null;
+  appointmentType: string;
+  /** @deprecated Legacy column — use appointment_services junction table */
   hauswirtschaftDauer: number | null;
+  /** @deprecated Legacy column — use appointment_services junction table */
   alltagsbegleitungDauer: number | null;
+  /** @deprecated Legacy column — use appointment_services junction table */
   erstberatungDauer: number | null;
+  /** @deprecated Legacy column — use appointment_services junction table */
   hauswirtschaftActualDauer: number | null;
+  /** @deprecated Legacy column — use appointment_services junction table */
   alltagsbegleitungActualDauer: number | null;
+  /** @deprecated Legacy column — use appointment_services junction table */
   erstberatungActualDauer: number | null;
   actualStart: string | null;
   actualEnd: string | null;
@@ -74,6 +83,7 @@ describe("Termine (Appointments) CRUD", () => {
       expect(data.customerId).toBe(testCustomerId);
       expect(data.date).toBe(testDate);
       expect(data.status).toBe("scheduled");
+      expect(data.durationPromised).toBe(90);
       expect(data.hauswirtschaftDauer).toBe(60);
       expect(data.alltagsbegleitungDauer).toBe(30);
 

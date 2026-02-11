@@ -8,6 +8,7 @@ import {
   documentKundenterminSchema,
   services as servicesTable,
   appointmentServices,
+  appointments,
 } from "@shared/schema";
 import { appointmentService } from "../services/appointments";
 import { authService } from "../services/auth";
@@ -377,7 +378,30 @@ router.patch("/:id", async (req, res) => {
       return sendForbidden(res, validation.error!, validation.message!);
     }
     
-    const appointment = await storage.updateAppointment(id, validatedData);
+    const appointment = await db.transaction(async (tx) => {
+      const [updated] = await tx.update(appointments)
+        .set(validatedData)
+        .where(eq(appointments.id, id))
+        .returning();
+      
+      if (!updated) return null;
+      
+      if (req.body.services && Array.isArray(req.body.services)) {
+        await tx.delete(appointmentServices).where(eq(appointmentServices.appointmentId, id));
+        
+        if (req.body.services.length > 0) {
+          await tx.insert(appointmentServices).values(
+            req.body.services.map((s: { serviceId: number; plannedDurationMinutes: number }) => ({
+              appointmentId: id,
+              serviceId: s.serviceId,
+              plannedDurationMinutes: s.plannedDurationMinutes,
+            }))
+          );
+        }
+      }
+      
+      return updated;
+    });
     
     if (!appointment) {
       return sendNotFound(res, ErrorMessages.appointmentNotFound);
@@ -560,26 +584,35 @@ router.post("/:id/document", async (req, res) => {
       }
     }
     
-    const updatedAppointment = await storage.updateAppointment(id, updateData);
+    const updatedAppointment = await db.transaction(async (tx) => {
+      const [updated] = await tx.update(appointments)
+        .set(updateData)
+        .where(eq(appointments.id, id))
+        .returning();
+      
+      if (!updated) return null;
+      
+      if (docResult.serviceUpdates && docResult.serviceUpdates.length > 0) {
+        for (const serviceUpdate of docResult.serviceUpdates) {
+          await tx.update(appointmentServices)
+            .set({
+              actualDurationMinutes: serviceUpdate.actualDurationMinutes,
+              details: serviceUpdate.details ?? null,
+            })
+            .where(
+              and(
+                eq(appointmentServices.appointmentId, id),
+                eq(appointmentServices.serviceId, serviceUpdate.serviceId)
+              )
+            );
+        }
+      }
+      
+      return updated;
+    });
     
     if (!updatedAppointment) {
       return sendServerError(res, "Fehler beim Speichern der Dokumentation");
-    }
-
-    if (docResult.serviceUpdates && docResult.serviceUpdates.length > 0) {
-      for (const serviceUpdate of docResult.serviceUpdates) {
-        await db.update(appointmentServices)
-          .set({
-            actualDurationMinutes: serviceUpdate.actualDurationMinutes,
-            details: serviceUpdate.details ?? null,
-          })
-          .where(
-            and(
-              eq(appointmentServices.appointmentId, id),
-              eq(appointmentServices.serviceId, serviceUpdate.serviceId)
-            )
-          );
-      }
     }
     
     res.json({
