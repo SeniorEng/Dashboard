@@ -577,20 +577,19 @@ router.post("/:id/document", async (req, res) => {
     const validatedData = documentKundenterminSchema.parse(req.body);
 
     const docServiceIds = validatedData.services.map(s => s.serviceId);
-    const validServices = await db.select({ id: servicesTable.id, code: servicesTable.code, billingCategory: servicesTable.billingCategory }).from(servicesTable).where(inArray(servicesTable.id, docServiceIds));
+    const validServices = await db.select({ id: servicesTable.id, code: servicesTable.code }).from(servicesTable).where(inArray(servicesTable.id, docServiceIds));
     if (validServices.length !== docServiceIds.length) {
       const validIds = new Set(validServices.map(s => s.id));
       const invalidIds = docServiceIds.filter(sid => !validIds.has(sid));
       return sendBadRequest(res, `Ungültige Service-IDs: ${invalidIds.join(', ')}`);
     }
 
-    const serviceInfoMap = Object.fromEntries(validServices.map(s => [s.id, { code: s.code, billingCategory: s.billingCategory }]));
+    const serviceInfoMap = Object.fromEntries(validServices.map(s => [s.id, { code: s.code }]));
     const enrichedData = {
       ...validatedData,
       services: validatedData.services.map(s => ({
         ...s,
         serviceCode: serviceInfoMap[s.serviceId]?.code || null,
-        billingCategory: serviceInfoMap[s.serviceId]?.billingCategory || 'none',
       })),
     };
 

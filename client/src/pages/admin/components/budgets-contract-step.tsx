@@ -103,7 +103,6 @@ interface ServiceInfo {
   name: string;
   defaultPriceCents: number;
   unitType: string;
-  billingCategory?: string;
 }
 
 interface ContractStepProps {

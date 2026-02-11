@@ -1,7 +1,6 @@
 import { Router, Request, Response } from "express";
 import { storage } from "../../storage";
 import { customerManagementStorage } from "../../storage/customer-management";
-import { serviceCatalogStorage } from "../../storage/service-catalog";
 import { authService } from "../../services/auth";
 import { birthdaysCache } from "../../services/cache";
 import { 
@@ -416,21 +415,6 @@ router.post("/customers", async (req: Request, res: Response) => {
         }
       } catch {}
     }
-
-    try {
-      const activeServices = await serviceCatalogStorage.getAllServices(false);
-      const contractStart = data.contract?.contractStart || today;
-      for (const service of activeServices) {
-        if (service.defaultPriceCents > 0) {
-          await serviceCatalogStorage.upsertCustomerServicePrice({
-            customerId: customer.id,
-            serviceId: service.id,
-            priceCents: service.defaultPriceCents,
-            validFrom: contractStart,
-          }, userId);
-        }
-      }
-    } catch {}
 
     birthdaysCache.invalidateAll();
     

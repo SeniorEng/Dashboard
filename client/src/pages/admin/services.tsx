@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -21,15 +22,32 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { DatePicker } from "@/components/ui/date-picker";
 import { api, unwrapResult } from "@/lib/api";
-import { ArrowLeft, Plus, Pencil, Loader2, ClipboardList, Users, Check, X } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Loader2, ClipboardList } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, componentStyles } from "@/design-system";
 import { formatCurrency } from "@shared/utils/format";
-import { todayISO } from "@shared/utils/datetime";
-import type { Service, InsertService } from "@shared/schema";
-import { SERVICE_UNIT_TYPES, SERVICE_BILLING_CATEGORIES } from "@shared/schema";
+import type { InsertService } from "@shared/schema";
+import { SERVICE_UNIT_TYPES } from "@shared/schema";
+import { BUDGET_TYPES, BUDGET_TYPE_LABELS } from "@shared/domain/budgets";
+
+interface ServiceWithPots {
+  id: number;
+  code: string | null;
+  name: string;
+  description: string | null;
+  unitType: string;
+  defaultPriceCents: number;
+  vatRate: number;
+  minDurationMinutes: number | null;
+  isActive: boolean;
+  isDefault: boolean;
+  isBillable: boolean;
+  employeeRateCents: number;
+  sortOrder: number;
+  budgetPots: string[];
+  createdAt: string;
+}
 
 const UNIT_TYPE_LABELS: Record<string, string> = {
   hours: "Stunden",
@@ -37,10 +55,10 @@ const UNIT_TYPE_LABELS: Record<string, string> = {
   flat: "Pauschale",
 };
 
-const BILLING_CATEGORY_LABELS: Record<string, string> = {
-  hauswirtschaft: "Hauswirtschaft",
-  alltagsbegleitung: "Alltagsbegleitung",
-  none: "Nicht budgetrelevant",
+const UNIT_SUFFIX: Record<string, string> = {
+  hours: "/Std.",
+  kilometers: "/km",
+  flat: " pauschal",
 };
 
 function formatPrice(cents: number): string {
@@ -49,43 +67,51 @@ function formatPrice(cents: number): string {
 
 interface ServiceFormData {
   name: string;
+  code: string;
   description: string;
   unitType: string;
   defaultPriceCents: string;
   vatRate: string;
   minDurationMinutes: string;
-  billingCategory: string;
+  isBillable: boolean;
+  employeeRateCents: string;
+  budgetPots: string[];
   isDefault: boolean;
   isActive: boolean;
+  sortOrder: string;
 }
 
 const EMPTY_FORM: ServiceFormData = {
   name: "",
+  code: "",
   description: "",
   unitType: "hours",
   defaultPriceCents: "",
   vatRate: "19",
   minDurationMinutes: "",
-  billingCategory: "none",
+  isBillable: true,
+  employeeRateCents: "",
+  budgetPots: [],
   isDefault: false,
   isActive: true,
+  sortOrder: "0",
 };
 
 export default function AdminServices() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: services, isLoading } = useQuery<Service[]>({
+  const { data: services, isLoading } = useQuery<ServiceWithPots[]>({
     queryKey: ["/api/services/all"],
     queryFn: async () => {
-      const result = await api.get<Service[]>("/services/all");
+      const result = await api.get<ServiceWithPots[]>("/services/all");
       return unwrapResult(result);
     },
   });
 
   const createMutation = useMutation({
     mutationFn: async (data: InsertService) => {
-      const result = await api.post<Service, InsertService>("/services", data);
+      const result = await api.post<ServiceWithPots, InsertService>("/services", data);
       return unwrapResult(result);
     },
     onSuccess: () => {
@@ -95,7 +121,7 @@ export default function AdminServices() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: number; data: Partial<InsertService> }) => {
-      const result = await api.put<Service, Partial<InsertService>>(`/services/${id}`, data);
+      const result = await api.put<ServiceWithPots, Partial<InsertService>>(`/services/${id}`, data);
       return unwrapResult(result);
     },
     onSuccess: () => {
@@ -104,7 +130,7 @@ export default function AdminServices() {
   });
 
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingService, setEditingService] = useState<Service | null>(null);
+  const [editingService, setEditingService] = useState<ServiceWithPots | null>(null);
   const [form, setForm] = useState<ServiceFormData>(EMPTY_FORM);
 
   const openCreate = () => {
@@ -113,24 +139,37 @@ export default function AdminServices() {
     setDialogOpen(true);
   };
 
-  const openEdit = (service: Service) => {
+  const openEdit = (service: ServiceWithPots) => {
     setEditingService(service);
     setForm({
       name: service.name,
+      code: service.code || "",
       description: service.description || "",
       unitType: service.unitType,
       defaultPriceCents: formatPrice(service.defaultPriceCents),
       vatRate: String(service.vatRate),
       minDurationMinutes: service.minDurationMinutes ? String(service.minDurationMinutes) : "",
-      billingCategory: service.billingCategory || "none",
+      isBillable: service.isBillable,
+      employeeRateCents: service.employeeRateCents ? formatPrice(service.employeeRateCents) : "",
+      budgetPots: service.budgetPots || [],
       isDefault: service.isDefault ?? false,
       isActive: service.isActive,
+      sortOrder: String(service.sortOrder),
     });
     setDialogOpen(true);
   };
 
-  const handleChange = (field: keyof ServiceFormData, value: string | boolean) => {
+  const handleChange = (field: keyof ServiceFormData, value: string | boolean | string[]) => {
     setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const toggleBudgetPot = (pot: string) => {
+    setForm((prev) => ({
+      ...prev,
+      budgetPots: prev.budgetPots.includes(pot)
+        ? prev.budgetPots.filter(p => p !== pot)
+        : [...prev.budgetPots, pot],
+    }));
   };
 
   const handleSave = () => {
@@ -139,32 +178,42 @@ export default function AdminServices() {
       return;
     }
 
-    const priceValue = parseFloat(form.defaultPriceCents.replace(",", "."));
-    if (isNaN(priceValue) || priceValue < 0) {
+    const priceValue = form.isBillable ? parseFloat(form.defaultPriceCents.replace(",", ".")) : 0;
+    if (form.isBillable && (isNaN(priceValue) || priceValue < 0)) {
       toast({ title: "Ungültiger Preis", variant: "destructive" });
       return;
     }
 
-    const vatValue = parseInt(form.vatRate, 10);
-    if (isNaN(vatValue) || vatValue < 0 || vatValue > 100) {
+    const vatValue = form.isBillable ? parseInt(form.vatRate, 10) : 0;
+    if (form.isBillable && (isNaN(vatValue) || vatValue < 0 || vatValue > 100)) {
       toast({ title: "Ungültiger MwSt-Satz", variant: "destructive" });
       return;
     }
 
+    const employeeRateValue = form.employeeRateCents ? parseFloat(form.employeeRateCents.replace(",", ".")) : 0;
+    if (isNaN(employeeRateValue) || employeeRateValue < 0) {
+      toast({ title: "Ungültiger Vergütungssatz", variant: "destructive" });
+      return;
+    }
+
     const priceCents = Math.round(priceValue * 100);
+    const employeeRateCents = Math.round(employeeRateValue * 100);
     const minDuration = form.minDurationMinutes ? parseInt(form.minDurationMinutes, 10) : null;
 
     const payload: InsertService = {
       name: form.name.trim(),
+      code: form.code.trim() || undefined,
       description: form.description.trim() || null,
       unitType: form.unitType as any,
       defaultPriceCents: priceCents,
       vatRate: vatValue,
       minDurationMinutes: form.unitType === "hours" && minDuration && minDuration > 0 ? minDuration : null,
-      billingCategory: form.billingCategory as any,
+      isBillable: form.isBillable,
+      employeeRateCents,
+      budgetPots: form.isBillable ? form.budgetPots : [],
       isDefault: form.isDefault,
       isActive: form.isActive,
-      sortOrder: editingService?.sortOrder ?? 0,
+      sortOrder: parseInt(form.sortOrder, 10) || 0,
     };
 
     if (editingService) {
@@ -233,47 +282,61 @@ export default function AdminServices() {
           </Card>
         ) : (
           <div className="flex flex-col gap-3">
-            {services.map((service) => (
-              <Card
-                key={service.id}
-                className={`cursor-pointer border ${!service.isActive ? "opacity-60" : ""}`}
-                onClick={() => openEdit(service)}
-                data-testid={`card-service-${service.id}`}
-              >
-                <CardContent className="py-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-medium text-gray-900 truncate" data-testid={`text-service-name-${service.id}`}>{service.name}</span>
-                        {service.isDefault && (
-                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-default-${service.id}`}>Standard</span>
-                        )}
-                        {service.isActive ? (
-                          <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-active-${service.id}`}>Aktiv</span>
-                        ) : (
-                          <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-inactive-${service.id}`}>Inaktiv</span>
+            {services.map((service) => {
+              const suffix = UNIT_SUFFIX[service.unitType] || "";
+              return (
+                <Card
+                  key={service.id}
+                  className={`cursor-pointer border ${!service.isActive ? "opacity-60" : ""}`}
+                  onClick={() => openEdit(service)}
+                  data-testid={`card-service-${service.id}`}
+                >
+                  <CardContent className="py-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-medium text-gray-900 truncate" data-testid={`text-service-name-${service.id}`}>{service.name}</span>
+                          {service.isDefault && (
+                            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-default-${service.id}`}>Standard</span>
+                          )}
+                          {service.isBillable ? (
+                            <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-billable-${service.id}`}>Abrechenbar</span>
+                          ) : (
+                            <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-not-billable-${service.id}`}>Nicht abrechenbar</span>
+                          )}
+                          {service.isActive ? (
+                            <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-active-${service.id}`}>Aktiv</span>
+                          ) : (
+                            <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-inactive-${service.id}`}>Inaktiv</span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
+                          <span data-testid={`text-unit-type-${service.id}`}>{UNIT_TYPE_LABELS[service.unitType] || service.unitType}</span>
+                          {service.isBillable && (
+                            <span data-testid={`text-price-${service.id}`}>· {formatPrice(service.defaultPriceCents)} €{suffix}</span>
+                          )}
+                          {service.isBillable && (
+                            <span data-testid={`text-vat-${service.id}`}>· {service.vatRate}% MwSt</span>
+                          )}
+                          {service.employeeRateCents > 0 && (
+                            <span data-testid={`text-employee-rate-${service.id}`}>
+                              · Vergütung: {formatCurrency(service.employeeRateCents)}{suffix}
+                            </span>
+                          )}
+                        </div>
+                        {service.description && (
+                          <p className="text-xs text-gray-400 mt-1 truncate" data-testid={`text-description-${service.id}`}>{service.description}</p>
                         )}
                       </div>
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
-                        <span data-testid={`text-unit-type-${service.id}`}>{UNIT_TYPE_LABELS[service.unitType] || service.unitType}</span>
-                        <span data-testid={`text-price-${service.id}`}>· {formatPrice(service.defaultPriceCents)} €</span>
-                        <span data-testid={`text-vat-${service.id}`}>· {service.vatRate}% MwSt</span>
-                        <span data-testid={`text-billing-category-${service.id}`}>· {BILLING_CATEGORY_LABELS[service.billingCategory] || service.billingCategory}</span>
-                      </div>
-                      {service.description && (
-                        <p className="text-xs text-gray-400 mt-1 truncate" data-testid={`text-description-${service.id}`}>{service.description}</p>
-                      )}
+                      <Pencil className={`${iconSize.sm} text-gray-400 shrink-0`} />
                     </div>
-                    <Pencil className={`${iconSize.sm} text-gray-400 shrink-0`} />
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         )}
       </div>
-
-      <EmployeeRatesSection services={services || []} />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
@@ -297,14 +360,14 @@ export default function AdminServices() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="description">Beschreibung</Label>
+              <Label htmlFor="code">Code</Label>
               <Input
-                id="description"
+                id="code"
                 className="text-base"
-                value={form.description}
-                onChange={(e) => handleChange("description", e.target.value)}
-                placeholder="Optionale Beschreibung"
-                data-testid="input-service-description"
+                value={form.code}
+                onChange={(e) => handleChange("code", e.target.value)}
+                placeholder="z. B. hw"
+                data-testid="input-service-code"
               />
             </div>
 
@@ -327,53 +390,86 @@ export default function AdminServices() {
               </Select>
             </div>
 
+            <div className="flex items-center gap-3 py-2">
+              <Switch
+                id="isBillable"
+                checked={form.isBillable}
+                onCheckedChange={(checked) => handleChange("isBillable", checked)}
+                data-testid="switch-is-billable"
+              />
+              <Label htmlFor="isBillable" className="cursor-pointer">
+                Abrechenbar (wird dem Kunden berechnet)
+              </Label>
+            </div>
+
+            {form.isBillable && (
+              <div className="space-y-2">
+                <Label htmlFor="defaultPriceCents">Standardpreis (€)</Label>
+                <Input
+                  id="defaultPriceCents"
+                  className="text-base"
+                  type="text"
+                  inputMode="decimal"
+                  value={form.defaultPriceCents}
+                  onChange={(e) => handleChange("defaultPriceCents", e.target.value)}
+                  placeholder="0,00"
+                  data-testid="input-service-price"
+                />
+              </div>
+            )}
+
             <div className="space-y-2">
-              <Label htmlFor="defaultPriceCents">Standardpreis (€)</Label>
+              <Label htmlFor="employeeRateCents">Mitarbeiter-Vergütung (€)</Label>
               <Input
-                id="defaultPriceCents"
+                id="employeeRateCents"
                 className="text-base"
                 type="text"
                 inputMode="decimal"
-                value={form.defaultPriceCents}
-                onChange={(e) => handleChange("defaultPriceCents", e.target.value)}
+                value={form.employeeRateCents}
+                onChange={(e) => handleChange("employeeRateCents", e.target.value)}
                 placeholder="0,00"
-                data-testid="input-service-price"
+                data-testid="input-service-employee-rate"
               />
+              <p className="text-xs text-gray-500">Interne Vergütung pro Einheit (was Mitarbeiter erhalten)</p>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="vatRate">MwSt-Satz (%)</Label>
-              <Input
-                id="vatRate"
-                className="text-base"
-                type="number"
-                inputMode="numeric"
-                value={form.vatRate}
-                onChange={(e) => handleChange("vatRate", e.target.value)}
-                placeholder="19"
-                data-testid="input-service-vat"
-              />
-            </div>
+            {form.isBillable && (
+              <div className="space-y-2">
+                <Label htmlFor="vatRate">MwSt-Satz (%)</Label>
+                <Input
+                  id="vatRate"
+                  className="text-base"
+                  type="number"
+                  inputMode="numeric"
+                  value={form.vatRate}
+                  onChange={(e) => handleChange("vatRate", e.target.value)}
+                  placeholder="19"
+                  data-testid="input-service-vat"
+                />
+              </div>
+            )}
 
-            <div className="space-y-2">
-              <Label htmlFor="billingCategory">Abrechnungskategorie</Label>
-              <Select
-                value={form.billingCategory}
-                onValueChange={(value) => handleChange("billingCategory", value)}
-              >
-                <SelectTrigger className="text-base" data-testid="select-billing-category">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SERVICE_BILLING_CATEGORIES.map((cat) => (
-                    <SelectItem key={cat} value={cat} data-testid={`select-billing-category-option-${cat}`}>
-                      {BILLING_CATEGORY_LABELS[cat]}
-                    </SelectItem>
+            {form.isBillable && (
+              <div className="space-y-2">
+                <Label>Budget-Töpfe</Label>
+                <div className="space-y-2">
+                  {BUDGET_TYPES.map((pot) => (
+                    <div key={pot} className="flex items-center gap-2">
+                      <Checkbox
+                        id={`pot-${pot}`}
+                        checked={form.budgetPots.includes(pot)}
+                        onCheckedChange={() => toggleBudgetPot(pot)}
+                        data-testid={`checkbox-budget-pot-${pot}`}
+                      />
+                      <Label htmlFor={`pot-${pot}`} className="cursor-pointer text-sm font-normal">
+                        {BUDGET_TYPE_LABELS[pot]}
+                      </Label>
+                    </div>
                   ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-gray-500">Bestimmt, über welchen Budget-Topf die Leistung abgerechnet wird</p>
-            </div>
+                </div>
+                <p className="text-xs text-gray-500">Über welche Budget-Töpfe kann diese Leistung abgerechnet werden?</p>
+              </div>
+            )}
 
             {form.unitType === "hours" && (
               <div className="space-y-2">
@@ -390,6 +486,20 @@ export default function AdminServices() {
                 />
               </div>
             )}
+
+            <div className="space-y-2">
+              <Label htmlFor="sortOrder">Sortierung</Label>
+              <Input
+                id="sortOrder"
+                className="text-base"
+                type="number"
+                inputMode="numeric"
+                value={form.sortOrder}
+                onChange={(e) => handleChange("sortOrder", e.target.value)}
+                placeholder="0"
+                data-testid="input-service-sort-order"
+              />
+            </div>
 
             <div className="flex items-center gap-3 py-2">
               <Switch
@@ -447,181 +557,5 @@ export default function AdminServices() {
         </DialogContent>
       </Dialog>
     </Layout>
-  );
-}
-
-interface EmployeeRate {
-  id: number;
-  serviceId: number;
-  rateCents: number;
-  validFrom: string;
-  validTo: string | null;
-  service: Service;
-}
-
-const UNIT_SUFFIX: Record<string, string> = {
-  hours: "/Std.",
-  kilometers: "/km",
-  flat: " pauschal",
-};
-
-function EmployeeRatesSection({ services }: { services: Service[] }) {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const [editingServiceId, setEditingServiceId] = useState<number | null>(null);
-  const [editRate, setEditRate] = useState("");
-  const [editValidFrom, setEditValidFrom] = useState(todayISO());
-
-  const { data: currentRates, isLoading } = useQuery<EmployeeRate[]>({
-    queryKey: ["employee-service-rates"],
-    queryFn: async () => {
-      const result = await api.get<EmployeeRate[]>("/services/employee-rates");
-      return unwrapResult(result);
-    },
-    staleTime: 60000,
-  });
-
-  const saveMutation = useMutation({
-    mutationFn: async (data: { serviceId: number; rateCents: number; validFrom: string }) => {
-      return unwrapResult(await api.post("/services/employee-rates", data));
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["employee-service-rates"] });
-      setEditingServiceId(null);
-      setEditRate("");
-      setEditValidFrom(todayISO());
-      toast({ title: "Vergütungssatz gespeichert" });
-    },
-    onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message, variant: "destructive" });
-    },
-  });
-
-  const handleSave = (serviceId: number) => {
-    const cents = Math.round(parseFloat(editRate.replace(",", ".")) * 100);
-    if (isNaN(cents) || cents < 0) {
-      toast({ title: "Bitte gültigen Betrag eingeben", variant: "destructive" });
-      return;
-    }
-    saveMutation.mutate({ serviceId, rateCents: cents, validFrom: editValidFrom });
-  };
-
-  const startEdit = (serviceId: number, currentCents?: number) => {
-    setEditingServiceId(serviceId);
-    setEditRate(currentCents !== undefined ? (currentCents / 100).toFixed(2) : "");
-    setEditValidFrom(todayISO());
-  };
-
-  const rateMap = new Map<number, EmployeeRate>();
-  currentRates?.forEach(r => rateMap.set(r.serviceId, r));
-
-  const activeServices = services.filter(s => s.isActive);
-
-  return (
-    <div className="mt-8" data-testid="employee-rates-section">
-      <div className="flex items-center gap-2 mb-3">
-        <Users className={iconSize.sm} />
-        <h2 className="text-lg font-bold text-gray-900">Mitarbeiter-Vergütungssätze</h2>
-      </div>
-      <p className="text-sm text-gray-600 mb-4">
-        Interne Vergütung pro Dienstleistung (was Mitarbeiter erhalten)
-      </p>
-
-      {isLoading ? (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="h-6 w-6 animate-spin text-teal-600" />
-        </div>
-      ) : activeServices.length === 0 ? (
-        <p className="text-sm text-gray-500 text-center py-4">Keine aktiven Dienstleistungen</p>
-      ) : (
-        <Card>
-          <CardContent className="py-2 px-0">
-            <div className="divide-y">
-              {activeServices.map((service) => {
-                const rate = rateMap.get(service.id);
-                const isEditing = editingServiceId === service.id;
-                const suffix = UNIT_SUFFIX[service.unitType] || "";
-
-                return (
-                  <div key={service.id} className="px-4" data-testid={`employee-rate-row-${service.id}`}>
-                    <div className="flex items-center justify-between py-3">
-                      <div className="min-w-0">
-                        <span className="text-sm font-medium">{service.name}</span>
-                        <div className="text-xs text-gray-500">
-                          Kundenpreis: {formatCurrency(service.defaultPriceCents)}{suffix}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {rate ? (
-                          <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold" data-testid={`text-employee-rate-${service.id}`}>
-                            {formatCurrency(rate.rateCents)}{suffix}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="bg-gray-50 text-gray-400 border-gray-200" data-testid={`text-employee-rate-${service.id}`}>
-                            Nicht festgelegt
-                          </Badge>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => startEdit(service.id, rate?.rateCents)}
-                          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded text-gray-400 hover:text-gray-700"
-                          data-testid={`btn-edit-employee-rate-${service.id}`}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {isEditing && (
-                      <div className="pb-3">
-                        <div className="p-3 bg-gray-50 rounded-lg space-y-3">
-                          <div className="space-y-1">
-                            <Label className="text-xs">Vergütung (€{suffix})</Label>
-                            <Input
-                              type="text"
-                              inputMode="decimal"
-                              value={editRate}
-                              onChange={(e) => setEditRate(e.target.value)}
-                              className="h-8 text-base"
-                              autoFocus
-                              data-testid={`input-employee-rate-${service.id}`}
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Gültig ab</Label>
-                            <DatePicker
-                              value={editValidFrom || null}
-                              onChange={(val) => setEditValidFrom(val || "")}
-                              data-testid={`input-employee-rate-valid-from-${service.id}`}
-                            />
-                          </div>
-                          <div className="flex gap-2">
-                            <Button
-                              size="sm"
-                              onClick={() => handleSave(service.id)}
-                              disabled={saveMutation.isPending}
-                              data-testid={`btn-save-employee-rate-${service.id}`}
-                            >
-                              {saveMutation.isPending ? (
-                                <Loader2 className={`${iconSize.sm} animate-spin`} />
-                              ) : (
-                                <><Check className={`${iconSize.sm} mr-1`} />Speichern</>
-                              )}
-                            </Button>
-                            <Button size="sm" variant="outline" onClick={() => setEditingServiceId(null)}>
-                              <X className={`${iconSize.sm} mr-1`} />Abbrechen
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-    </div>
   );
 }

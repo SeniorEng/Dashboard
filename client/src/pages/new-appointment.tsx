@@ -81,22 +81,15 @@ export default function NewAppointment() {
 
   const budgetEstimateParams = useMemo(() => {
     if (!ktCustomerId || ktServices.length === 0) return null;
+    const serviceIds = ktServices.map(s => s.serviceId).join(",");
+    const serviceDurations = ktServices.map(s => s.durationMinutes).join(",");
+    if (!serviceIds) return null;
     const params = new URLSearchParams();
-    for (const s of ktServices) {
-      const catalog = catalogServices.find(c => c.id === s.serviceId);
-      if (catalog?.billingCategory === 'hauswirtschaft') {
-        const current = parseInt(params.get("hauswirtschaftMinutes") || "0");
-        params.set("hauswirtschaftMinutes", String(current + s.durationMinutes));
-      }
-      if (catalog?.billingCategory === 'alltagsbegleitung') {
-        const current = parseInt(params.get("alltagsbegleitungMinutes") || "0");
-        params.set("alltagsbegleitungMinutes", String(current + s.durationMinutes));
-      }
-    }
-    if (params.toString() === '') return null;
+    params.set("serviceIds", serviceIds);
+    params.set("serviceDurations", serviceDurations);
     params.set("date", ktDate);
     return params.toString();
-  }, [ktCustomerId, ktServices, catalogServices, ktDate]);
+  }, [ktCustomerId, ktServices, ktDate]);
 
   const { data: costEstimate } = useQuery<{
     totalCents: number;

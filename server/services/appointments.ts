@@ -35,7 +35,6 @@ export interface DocumentationServiceEntry {
   actualDurationMinutes: number;
   details?: string | null;
   serviceCode?: string | null;
-  billingCategory?: string | null;
 }
 
 export interface DocumentationInput {
@@ -407,10 +406,10 @@ export class AppointmentService {
     };
 
     const hauswirtschaftMinutes = input.services
-      .filter(s => s.billingCategory === 'hauswirtschaft')
+      .filter(s => s.serviceCode === 'hauswirtschaft')
       .reduce((sum, s) => sum + (s.actualDurationMinutes || 0), 0);
     const alltagsbegleitungMinutes = input.services
-      .filter(s => s.billingCategory === 'alltagsbegleitung')
+      .filter(s => s.serviceCode === 'alltagsbegleitung')
       .reduce((sum, s) => sum + (s.actualDurationMinutes || 0), 0);
 
     return {

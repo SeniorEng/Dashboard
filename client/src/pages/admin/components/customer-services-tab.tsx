@@ -7,7 +7,6 @@ import { EmptyState } from "@/components/patterns/empty-state";
 import { iconSize, componentStyles } from "@/design-system";
 import { FileText, ClipboardList, Car, Loader2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { api, unwrapResult } from "@/lib/api";
 import type { CustomerDetail } from "@/lib/api/types";
 
 const SERVICE_LABELS: Record<string, string> = {
@@ -52,18 +51,17 @@ interface CustomerServicesTabProps {
 export function CustomerServicesTab({ customer }: CustomerServicesTabProps) {
   const selectedServices = getSelectedServices(customer.needsAssessment);
 
-  interface ResolvedPrice {
-    service: { id: number; name: string; unitType: string; billingCategory: string | null };
-    priceCents: number;
-    isOverride: boolean;
+  interface CatalogService {
+    id: number;
+    name: string;
+    unitType: string;
+    defaultPriceCents: number;
+    isBillable: boolean;
+    isActive: boolean;
   }
 
-  const { data: resolvedPrices, isLoading: pricesLoading } = useQuery<ResolvedPrice[]>({
-    queryKey: ["customer-service-prices", customer.id],
-    queryFn: async () => {
-      const result = await api.get<ResolvedPrice[]>(`/services/customer/${customer.id}/prices`);
-      return unwrapResult(result);
-    },
+  const { data: catalogServices, isLoading: pricesLoading } = useQuery<CatalogService[]>({
+    queryKey: ["/api/services"],
     staleTime: 60000,
   });
 
@@ -104,18 +102,15 @@ export function CustomerServicesTab({ customer }: CustomerServicesTabProps) {
                 <div className="flex justify-center py-4">
                   <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
                 </div>
-              ) : resolvedPrices && resolvedPrices.length > 0 ? (
+              ) : catalogServices && catalogServices.filter(s => s.isActive && s.isBillable).length > 0 ? (
                 <div className="space-y-2">
-                  {resolvedPrices.map(rp => (
-                    <div key={rp.service.id} className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded" data-testid={`text-service-price-${rp.service.id}`}>
+                  {catalogServices.filter(s => s.isActive && s.isBillable).map(service => (
+                    <div key={service.id} className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded" data-testid={`text-service-price-${service.id}`}>
                       <div className="flex items-center gap-2">
-                        <span className="text-sm text-gray-700">{rp.service.name}</span>
-                        {rp.isOverride && (
-                          <Badge variant="outline" className="text-xs bg-teal-50 text-teal-700 border-teal-200">Individuell</Badge>
-                        )}
+                        <span className="text-sm text-gray-700">{service.name}</span>
                       </div>
                       <span className="text-sm font-semibold text-gray-900">
-                        {formatCurrency(rp.priceCents)}{unitLabel(rp.service.unitType)}
+                        {formatCurrency(service.defaultPriceCents)}{unitLabel(service.unitType)}
                       </span>
                     </div>
                   ))}

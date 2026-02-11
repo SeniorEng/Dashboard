@@ -69,48 +69,72 @@ router.get("/:customerId/preferences", checkCustomerAccess, async (req: Request,
 router.get("/:customerId/cost-estimate", checkCustomerAccess, async (req: Request, res: Response) => {
   try {
     const customerId = parseInt(req.params.customerId);
-    const hauswirtschaftMinutes = parseInt(req.query.hauswirtschaftMinutes as string) || 0;
-    const alltagsbegleitungMinutes = parseInt(req.query.alltagsbegleitungMinutes as string) || 0;
-    const travelKilometers = parseFloat(req.query.travelKilometers as string) || 0;
-    const customerKilometers = parseFloat(req.query.customerKilometers as string) || 0;
     const date = (req.query.date as string) || todayISO();
 
     const { serviceCatalogStorage } = await import("../storage/service-catalog");
-    const [costs, customer, resolvedPrices] = await Promise.all([
-      budgetLedgerStorage.calculateAppointmentCost({
+
+    let totalCostCents = 0;
+    let weightedVatRate = 19;
+    const costDetails: { serviceId: number; costCents: number; vatRate: number }[] = [];
+
+    const serviceIdsParam = req.query.serviceIds as string | undefined;
+    const serviceDurationsParam = req.query.serviceDurations as string | undefined;
+
+    if (serviceIdsParam && serviceDurationsParam) {
+      const serviceIds = serviceIdsParam.split(",").map(Number);
+      const durations = serviceDurationsParam.split(",").map(Number);
+      
+      for (let i = 0; i < serviceIds.length; i++) {
+        const service = await serviceCatalogStorage.getServiceById(serviceIds[i]);
+        if (!service || !service.isBillable) continue;
+        
+        const durationMinutes = durations[i] || 0;
+        let costCents = 0;
+        if (service.unitType === "hours") {
+          costCents = Math.round((durationMinutes / 60) * service.defaultPriceCents);
+        } else if (service.unitType === "flat") {
+          costCents = service.defaultPriceCents;
+        }
+        if (costCents > 0) {
+          totalCostCents += costCents;
+          costDetails.push({ serviceId: service.id, costCents, vatRate: service.vatRate });
+        }
+      }
+    } else {
+      const hauswirtschaftMinutes = parseInt(req.query.hauswirtschaftMinutes as string) || 0;
+      const alltagsbegleitungMinutes = parseInt(req.query.alltagsbegleitungMinutes as string) || 0;
+      const travelKilometers = parseFloat(req.query.travelKilometers as string) || 0;
+      const customerKilometers = parseFloat(req.query.customerKilometers as string) || 0;
+      
+      const costs = await budgetLedgerStorage.calculateAppointmentCost({
         customerId,
         hauswirtschaftMinutes,
         alltagsbegleitungMinutes,
         travelKilometers,
         customerKilometers,
         date,
-      }),
-      storage.getCustomer(customerId),
-      serviceCatalogStorage.resolveAllPrices(customerId, date),
-    ]);
+      });
+      totalCostCents = costs.totalCents;
 
+      const [hwService, abService, kmService] = await Promise.all([
+        serviceCatalogStorage.getServiceByCode("hauswirtschaft"),
+        serviceCatalogStorage.getServiceByCode("alltagsbegleitung"),
+        serviceCatalogStorage.getServiceByCode("kilometer"),
+      ]);
+      if (hwService && hauswirtschaftMinutes > 0) costDetails.push({ serviceId: hwService.id, costCents: costs.hauswirtschaftCents, vatRate: hwService.vatRate });
+      if (abService && alltagsbegleitungMinutes > 0) costDetails.push({ serviceId: abService.id, costCents: costs.alltagsbegleitungCents, vatRate: abService.vatRate });
+      if (kmService && (travelKilometers > 0 || customerKilometers > 0)) costDetails.push({ serviceId: kmService.id, costCents: costs.travelCents + costs.customerKilometersCents, vatRate: kmService.vatRate });
+    }
+
+    const customer = await storage.getCustomer(customerId);
     const acceptsPrivatePayment = customer?.acceptsPrivatePayment ?? false;
 
-    const usedServices = resolvedPrices.filter(p => {
-      if (p.service.billingCategory === "hauswirtschaft" && hauswirtschaftMinutes > 0) return true;
-      if (p.service.billingCategory === "alltagsbegleitung" && alltagsbegleitungMinutes > 0) return true;
-      if (p.service.code === "kilometer" && (travelKilometers > 0 || customerKilometers > 0)) return true;
-      return false;
-    });
-
-    const weightedVatRate = usedServices.length > 0
-      ? (() => {
-          const serviceCosts: { vatRate: number; cost: number }[] = usedServices.map(p => {
-            if (p.service.billingCategory === "hauswirtschaft") return { vatRate: p.service.vatRate, cost: costs.hauswirtschaftCents };
-            if (p.service.billingCategory === "alltagsbegleitung") return { vatRate: p.service.vatRate, cost: costs.alltagsbegleitungCents };
-            if (p.service.code === "kilometer") return { vatRate: p.service.vatRate, cost: costs.travelCents + costs.customerKilometersCents };
-            return { vatRate: p.service.vatRate, cost: 0 };
-          });
-          const totalCost = serviceCosts.reduce((s, c) => s + c.cost, 0);
-          if (totalCost === 0) return 19;
-          return serviceCosts.reduce((s, c) => s + (c.vatRate * c.cost / totalCost), 0);
-        })()
-      : 19;
+    if (costDetails.length > 0) {
+      const totalCost = costDetails.reduce((s, c) => s + c.costCents, 0);
+      if (totalCost > 0) {
+        weightedVatRate = costDetails.reduce((s, c) => s + (c.vatRate * c.costCents / totalCost), 0);
+      }
+    }
 
     const summaries = await budgetLedgerStorage.getAllBudgetSummaries(customerId);
     const summary45b = summaries.entlastungsbetrag45b;
@@ -127,16 +151,16 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, async (req: Reques
     if (summary45b.monthlyLimitCents !== null) {
       const monthlyRemaining45b = Math.max(0, summary45b.monthlyLimitCents - summary45b.currentMonthUsedCents);
       const effectiveAvailable = summary45a.currentMonthAvailableCents + monthlyRemaining45b;
-      if (costs.totalCents > effectiveAvailable) {
+      if (totalCostCents > effectiveAvailable) {
         const limitEuro = (summary45b.monthlyLimitCents / 100).toFixed(2);
         warning = `Unter Berücksichtigung des §45b-Monatslimits (${limitEuro} €) reicht das Budget nicht vollständig.`;
       }
     }
 
-    if (costs.totalCents > totalAvailable) {
-      const shortfall = costs.totalCents - totalAvailable;
+    if (totalCostCents > totalAvailable) {
+      const shortfall = totalCostCents - totalAvailable;
       const availableEuro = (totalAvailable / 100).toFixed(2);
-      const costEuro = (costs.totalCents / 100).toFixed(2);
+      const costEuro = (totalCostCents / 100).toFixed(2);
 
       if (acceptsPrivatePayment) {
         privateCents = shortfall;
@@ -153,7 +177,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, async (req: Reques
     }
 
     res.json({
-      ...costs,
+      totalCents: totalCostCents,
       availableCents: totalAvailable,
       currentMonthUsedCents: summary45b.currentMonthUsedCents,
       monthlyLimitCents: summary45b.monthlyLimitCents,

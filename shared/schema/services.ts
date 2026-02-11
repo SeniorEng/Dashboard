@@ -1,18 +1,9 @@
-import { pgTable, text, integer, serial, date, boolean, index } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, boolean, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp } from "./common";
-import { customers } from "./customers";
-import { users } from "./users";
-
-// ============================================
-// SERVICE CATALOG (centrally managed)
-// ============================================
 
 export const SERVICE_UNIT_TYPES = ["hours", "kilometers", "flat"] as const;
 export type ServiceUnitType = typeof SERVICE_UNIT_TYPES[number];
-
-export const SERVICE_BILLING_CATEGORIES = ["hauswirtschaft", "alltagsbegleitung", "none"] as const;
-export type ServiceBillingCategory = typeof SERVICE_BILLING_CATEGORIES[number];
 
 export const services = pgTable("services", {
   id: serial("id").primaryKey(),
@@ -25,29 +16,23 @@ export const services = pgTable("services", {
   minDurationMinutes: integer("min_duration_minutes"),
   isActive: boolean("is_active").notNull().default(true),
   isDefault: boolean("is_default").notNull().default(false),
-  billingCategory: text("billing_category").notNull().default("none"),
+  isBillable: boolean("is_billable").notNull().default(true),
+  employeeRateCents: integer("employee_rate_cents").notNull().default(0),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [
   index("services_active_sort_idx").on(table.isActive, table.sortOrder),
 ]);
 
-export const customerServicePrices = pgTable("customer_service_prices", {
+export const serviceBudgetPots = pgTable("service_budget_pots", {
   id: serial("id").primaryKey(),
-  customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
   serviceId: integer("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
-  priceCents: integer("price_cents").notNull(),
-  validFrom: date("valid_from").notNull(),
-  validTo: date("valid_to"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  createdByUserId: integer("created_by_user_id").references(() => users.id),
+  budgetType: text("budget_type").notNull(),
 }, (table) => [
-  index("customer_service_prices_customer_idx").on(table.customerId),
-  index("customer_service_prices_service_idx").on(table.serviceId),
-  index("customer_service_prices_valid_idx").on(table.customerId, table.serviceId, table.validFrom, table.validTo),
+  index("service_budget_pots_service_idx").on(table.serviceId),
+  uniqueIndex("service_budget_pots_unique_idx").on(table.serviceId, table.budgetType),
 ]);
 
-// Service catalog schemas
 export const insertServiceSchema = z.object({
   code: z.string().max(50).nullable().optional(),
   name: z.string().min(1, "Name ist erforderlich").max(100),
@@ -58,45 +43,14 @@ export const insertServiceSchema = z.object({
   minDurationMinutes: z.number().int().min(1).nullable().optional(),
   isActive: z.boolean().default(true),
   isDefault: z.boolean().default(false),
-  billingCategory: z.enum(SERVICE_BILLING_CATEGORIES).default("none"),
+  isBillable: z.boolean().default(true),
+  employeeRateCents: z.number().int().min(0).default(0),
   sortOrder: z.number().int().default(0),
+  budgetPots: z.array(z.enum(["entlastungsbetrag_45b", "umwandlung_45a", "ersatzpflege_39_42a"])).default([]),
 });
 
 export const updateServiceSchema = insertServiceSchema.partial();
 
 export type Service = typeof services.$inferSelect;
 export type InsertService = z.infer<typeof insertServiceSchema>;
-
-export const insertCustomerServicePriceSchema = z.object({
-  customerId: z.number(),
-  serviceId: z.number(),
-  priceCents: z.number().int().min(0, "Preis muss positiv sein"),
-  validFrom: z.string(),
-  validTo: z.string().nullable().optional(),
-});
-
-export type CustomerServicePrice = typeof customerServicePrices.$inferSelect;
-export type InsertCustomerServicePrice = z.infer<typeof insertCustomerServicePriceSchema>;
-
-export const employeeServiceRates = pgTable("employee_service_rates", {
-  id: serial("id").primaryKey(),
-  serviceId: integer("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
-  rateCents: integer("rate_cents").notNull(),
-  validFrom: date("valid_from").notNull(),
-  validTo: date("valid_to"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  createdByUserId: integer("created_by_user_id").references(() => users.id),
-}, (table) => [
-  index("employee_service_rates_service_idx").on(table.serviceId),
-  index("employee_service_rates_valid_idx").on(table.serviceId, table.validFrom, table.validTo),
-]);
-
-export const insertEmployeeServiceRateSchema = z.object({
-  serviceId: z.number(),
-  rateCents: z.number().int().min(0, "Vergütungssatz muss positiv sein"),
-  validFrom: z.string(),
-  validTo: z.string().nullable().optional(),
-});
-
-export type EmployeeServiceRate = typeof employeeServiceRates.$inferSelect;
-export type InsertEmployeeServiceRate = z.infer<typeof insertEmployeeServiceRateSchema>;
+export type ServiceBudgetPot = typeof serviceBudgetPots.$inferSelect;

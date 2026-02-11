@@ -555,33 +555,19 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     customerKilometersCents: number;
     totalCents: number;
   }> {
-    const resolvedPrices = await serviceCatalogStorage.resolveAllPrices(params.customerId, params.date);
-
-    const hwService = resolvedPrices.find(p => p.service.billingCategory === "hauswirtschaft");
-    const abService = resolvedPrices.find(p => p.service.billingCategory === "alltagsbegleitung");
-    const kmService = resolvedPrices.find(p => p.service.code === "kilometer");
+    const [hwService, abService, kmService] = await Promise.all([
+      serviceCatalogStorage.getServiceByCode("hauswirtschaft"),
+      serviceCatalogStorage.getServiceByCode("alltagsbegleitung"),
+      serviceCatalogStorage.getServiceByCode("kilometer"),
+    ]);
 
     if (!hwService && !abService && !kmService) {
-      const legacyPricing = await this.getCurrentPricing(params.customerId, params.date);
-      if (!legacyPricing) {
-        throw new Error(`Keine Preisvereinbarung für Kunde ${params.customerId} zum Datum ${params.date} gefunden`);
-      }
-      const hauswirtschaftRateCents = legacyPricing.hauswirtschaftRateCents || 0;
-      const alltagsbegleitungRateCents = legacyPricing.alltagsbegleitungRateCents || 0;
-      const kilometerRateCents = legacyPricing.kilometerRateCents || 0;
-      const hauswirtschaftCents = Math.round((params.hauswirtschaftMinutes / 60) * hauswirtschaftRateCents);
-      const alltagsbegleitungCents = Math.round((params.alltagsbegleitungMinutes / 60) * alltagsbegleitungRateCents);
-      const travelCents = Math.round(params.travelKilometers * kilometerRateCents);
-      const customerKilometersCents = Math.round(params.customerKilometers * kilometerRateCents);
-      return {
-        hauswirtschaftCents, alltagsbegleitungCents, travelCents, customerKilometersCents,
-        totalCents: hauswirtschaftCents + alltagsbegleitungCents + travelCents + customerKilometersCents,
-      };
+      throw new Error(`Keine Preisvereinbarung für Kunde ${params.customerId} zum Datum ${params.date} gefunden`);
     }
 
-    const hauswirtschaftRateCents = hwService?.priceCents || 0;
-    const alltagsbegleitungRateCents = abService?.priceCents || 0;
-    const kilometerRateCents = kmService?.priceCents || 0;
+    const hauswirtschaftRateCents = (hwService?.isBillable !== false) ? (hwService?.defaultPriceCents || 0) : 0;
+    const alltagsbegleitungRateCents = (abService?.isBillable !== false) ? (abService?.defaultPriceCents || 0) : 0;
+    const kilometerRateCents = (kmService?.isBillable !== false) ? (kmService?.defaultPriceCents || 0) : 0;
 
     const hauswirtschaftCents = Math.round((params.hauswirtschaftMinutes / 60) * hauswirtschaftRateCents);
     const alltagsbegleitungCents = Math.round((params.alltagsbegleitungMinutes / 60) * alltagsbegleitungRateCents);
