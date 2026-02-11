@@ -18,18 +18,6 @@ interface Appointment {
   durationPromised: number | null;
   serviceType: string | null;
   appointmentType: string;
-  /** @deprecated Legacy column — use appointment_services junction table */
-  hauswirtschaftDauer: number | null;
-  /** @deprecated Legacy column — use appointment_services junction table */
-  alltagsbegleitungDauer: number | null;
-  /** @deprecated Legacy column — use appointment_services junction table */
-  erstberatungDauer: number | null;
-  /** @deprecated Legacy column — use appointment_services junction table */
-  hauswirtschaftActualDauer: number | null;
-  /** @deprecated Legacy column — use appointment_services junction table */
-  alltagsbegleitungActualDauer: number | null;
-  /** @deprecated Legacy column — use appointment_services junction table */
-  erstberatungActualDauer: number | null;
   actualStart: string | null;
   actualEnd: string | null;
 }
@@ -84,8 +72,6 @@ describe("Termine (Appointments) CRUD", () => {
       expect(data.date).toBe(testDate);
       expect(data.status).toBe("scheduled");
       expect(data.durationPromised).toBe(90);
-      expect(data.hauswirtschaftDauer).toBe(60);
-      expect(data.alltagsbegleitungDauer).toBe(30);
 
       testAppointmentId = data.id;
     });
@@ -133,12 +119,10 @@ describe("Termine (Appointments) CRUD", () => {
   describe("Termin bearbeiten (PATCH /appointments/:id)", () => {
     it("sollte einen Termin bearbeiten können", async () => {
       const { status, data } = await apiPatch<Appointment>(`/api/appointments/${testAppointmentId}`, {
-        hauswirtschaftDauer: 90,
         notes: "Test-Notiz aktualisiert",
       });
 
       expect(status).toBe(200);
-      expect(data.hauswirtschaftDauer).toBe(90);
     });
 
     it("sollte ungültige Status-Übergänge ablehnen", async () => {
@@ -227,10 +211,6 @@ describe("Termine (Appointments) CRUD", () => {
         `/api/appointments/${docTestAppointmentId}/document`,
         {
           actualStart: "09:00",
-          hauswirtschaftActualDauer: 55,
-          hauswirtschaftDetails: "Küche und Bad gereinigt",
-          alltagsbegleitungActualDauer: 25,
-          alltagsbegleitungDetails: "Spaziergang im Park",
           travelOriginType: "home",
           travelKilometers: 15,
           travelMinutes: 20,
@@ -250,8 +230,6 @@ describe("Termine (Appointments) CRUD", () => {
       const { status } = await apiPost<{ code: string; message: string }>(
         `/api/appointments/${docTestAppointmentId}/document`,
         {
-          hauswirtschaftActualDauer: 60,
-          hauswirtschaftDetails: "Test",
           travelOriginType: "home",
           travelKilometers: 10,
         }
@@ -331,7 +309,7 @@ describe("Junction-Tabelle (appointment_services)", () => {
     }
   });
 
-  it("sollte Legacy-Services in Junction-Tabelle UND Legacy-Spalten schreiben", async () => {
+  it("sollte Services in Junction-Tabelle schreiben", async () => {
     const auth = await getAuthCookie();
     const { status, data } = await apiPost<Appointment>("/api/appointments/kundentermin", {
       customerId: testCustomerId,
@@ -345,8 +323,6 @@ describe("Junction-Tabelle (appointment_services)", () => {
     });
 
     expect(status).toBe(201);
-    expect(data.hauswirtschaftDauer).toBe(60);
-    expect(data.alltagsbegleitungDauer).toBe(45);
 
     junctionTestApptId = data.id;
 
@@ -360,7 +336,7 @@ describe("Junction-Tabelle (appointment_services)", () => {
     expect(abService?.plannedDurationMinutes).toBe(45);
   });
 
-  it("sollte Termin mit nur neuen Services erstellen (Legacy-Spalten null)", async () => {
+  it("sollte Termin mit nur neuen Services erstellen", async () => {
     const auth = await getAuthCookie();
 
     const allServices = await apiGet<{ id: number; code: string | null; name: string }[]>("/api/services/all");
@@ -382,8 +358,6 @@ describe("Junction-Tabelle (appointment_services)", () => {
     });
 
     expect(status).toBe(201);
-    expect(data.hauswirtschaftDauer).toBeNull();
-    expect(data.alltagsbegleitungDauer).toBeNull();
 
     const servicesRes = await apiGet<AppointmentService[]>(`/api/appointments/${data.id}/services`);
     expect(servicesRes.status).toBe(200);
@@ -420,8 +394,6 @@ describe("Junction-Tabelle (appointment_services)", () => {
       console.log("Gemischte Services error:", JSON.stringify(data));
     }
     expect(status).toBe(201);
-    expect(data.hauswirtschaftDauer).toBe(30);
-    expect(data.alltagsbegleitungDauer).toBeNull();
 
     const servicesRes = await apiGet<AppointmentService[]>(`/api/appointments/${data.id}/services`);
     expect(servicesRes.status).toBe(200);
@@ -477,7 +449,6 @@ describe("Erstberatung (Initial Consultation)", () => {
         },
         date: getFutureDate(21),
         scheduledStart: "11:00",
-        erstberatungDauer: 90,
         assignedEmployeeId: auth.user.id,
       }
     );
@@ -485,7 +456,6 @@ describe("Erstberatung (Initial Consultation)", () => {
     expect(status).toBe(201);
     expect(data.appointment).toHaveProperty("id");
     expect(data.customer).toHaveProperty("id");
-    expect(data.appointment.erstberatungDauer).toBe(90);
 
     createdAppointmentId = data.appointment.id;
     createdCustomerId = data.customer.id;
