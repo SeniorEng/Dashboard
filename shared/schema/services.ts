@@ -24,6 +24,7 @@ export const services = pgTable("services", {
   vatRate: integer("vat_rate").notNull().default(19),
   minDurationMinutes: integer("min_duration_minutes"),
   isActive: boolean("is_active").notNull().default(true),
+  isDefault: boolean("is_default").notNull().default(false),
   billingCategory: text("billing_category").notNull().default("none"),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -56,6 +57,7 @@ export const insertServiceSchema = z.object({
   vatRate: z.number().int().min(0).max(100).default(19),
   minDurationMinutes: z.number().int().min(1).nullable().optional(),
   isActive: z.boolean().default(true),
+  isDefault: z.boolean().default(false),
   billingCategory: z.enum(SERVICE_BILLING_CATEGORIES).default("none"),
   sortOrder: z.number().int().default(0),
 });
