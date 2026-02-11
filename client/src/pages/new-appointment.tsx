@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
@@ -62,6 +62,19 @@ export default function NewAppointment() {
   const [ebErstberatungDauer, setEbErstberatungDauer] = useState<number>(60);
   const [ebNotes, setEbNotes] = useState<string>("");
   const [ebAssignedEmployeeId, setEbAssignedEmployeeId] = useState<string>("");
+
+  const defaultsInitialized = useRef(false);
+  useEffect(() => {
+    if (catalogServices.length > 0 && !defaultsInitialized.current) {
+      defaultsInitialized.current = true;
+      const defaults = catalogServices
+        .filter(s => s.isDefault && s.isActive && s.unitType === "hours" && (!s.code || !["erstberatung", "kilometer"].includes(s.code)))
+        .map(s => ({ serviceId: s.id, durationMinutes: s.minDurationMinutes || 60 }));
+      if (defaults.length > 0) {
+        setKtServices(defaults);
+      }
+    }
+  }, [catalogServices]);
 
   // Validation errors
   const [errors, setErrors] = useState<Record<string, string>>({});
