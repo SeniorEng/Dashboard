@@ -1,7 +1,7 @@
 # CareConnect - Elderly Care Service Management System
 
 ## Overview
-CareConnect is a full-stack, mobile-first web application designed to streamline operations for caregivers managing elderly care services. It provides functionalities for scheduling, tracking, and documenting appointments, including digital signatures and real-time data management. The system aims to enhance efficiency for care professionals with features like comprehensive customer management, unified service models, robust data historization for compliance, and adherence to German labor laws. The business vision includes expanding customer management capabilities, unifying service models, and ensuring data integrity for auditing.
+CareConnect is a full-stack, mobile-first web application designed to streamline operations for caregivers managing elderly care services. It provides functionalities for scheduling, tracking, and documenting appointments, including digital signatures and real-time data management. The system aims to enhance efficiency for care professionals, offer comprehensive customer management, unify service models, ensure robust data historization for compliance, and adhere to German labor laws. The business vision includes expanding customer management capabilities, unifying service models, and ensuring data integrity for auditing.
 
 ## User Preferences
 - Preferred communication style: Simple, everyday language
@@ -13,73 +13,45 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 
 ### Frontend
 - **Frameworks**: React 18 with TypeScript, Vite, Wouter for routing.
-- **UI/UX**: Mobile-first responsive design using `shadcn/ui` components on Radix UI primitives, styled with Tailwind CSS v4 and a "Care & Clarity" theme (teal and warm beige). Centralized `@/design-system` for consistent styling.
-- **State Management**: TanStack Query for data fetching (optimistic updates, caching), React memoization, ErrorBoundary for error handling.
-- **Date/Time Handling**: All times are implicitly "German local time" with no UTC conversion or timezone logic. Storage formats are `"YYYY-MM-DD"` for dates, `"HH:MM:SS"` for time, `integer` for duration, and `timestamptz` for system timestamps. Display formats are `"HH:MM"` for time and `"DD.MM.YYYY"` or `"YYYY-MM-DD"` for dates. Strict conventions and central utilities (`@shared/utils/datetime`) must be used for all date/time operations.
-- **Mobile-Kompatibilität**: Touch-optimized UI components (min 44x44px touch areas), `text-base` for inputs to prevent iOS Safari zoom, dialogs appearing as bottom-sheets on mobile, and `maximum-scale=1` for viewport.
-- **Components**: `DatePicker` for all date fields, `SearchableSelect` for long selection lists (e.g., customers), and a unified `flex flex-col gap-3` pattern for card lists.
-- **API Calls**: All state-changing API requests must use the central API client (`client/src/lib/api/client.ts`) for CSRF protection.
-- **Phone Number Handling**: Uses `libphonenumber-js` for validating, formatting, and storing German phone numbers in E.164 format.
+- **UI/UX**: Mobile-first responsive design using `shadcn/ui` components on Radix UI primitives, styled with Tailwind CSS v4 and a "Care & Clarity" theme. Centralized `@/design-system` for consistent styling. Touch-optimized UI components and `text-base` for inputs to prevent iOS Safari zoom.
+- **State Management**: TanStack Query for data fetching (optimistic updates, caching), React memoization, ErrorBoundary.
+- **Date/Time Handling**: All times are implicitly "German local time" with no UTC conversion or timezone logic. Strict conventions and central utilities (`@shared/utils/datetime`) must be used for all date/time operations.
+- **Components**: `DatePicker` for all date fields, `SearchableSelect` for long selection lists.
+- **API Calls**: All state-changing API requests use a central API client for CSRF protection.
+- **Phone Number Handling**: Uses `libphonenumber-js` for validating, formatting, and storing German phone numbers in E.164 format via `@shared/utils/phone.ts`.
 - **Type Organization**: Hierarchical type structure with `@shared/schema.ts`, `@shared/domain/*`, `@shared/utils/*`, and `@shared/types.ts`.
-- **Phone Number Validation**: Single source of truth in `@shared/utils/phone.ts` using `libphonenumber-js`. All phone validation/formatting must use this utility — no local reimplementations.
-- **Admin Component Structure**: Large admin pages are split into sub-components under `client/src/pages/admin/components/` (e.g., `user-form.tsx`, `personal-data-step.tsx`, `customer-overview-tab.tsx`). Type definitions in `*-types.ts` files.
 
 ### Backend
 - **Framework**: Express.js with TypeScript.
-- **API Design**: RESTful endpoints, Zod validation, structured error responses, and modular routing.
+- **API Design**: RESTful endpoints, Zod validation, structured error responses, modular routing. Admin routes are split into sub-modules.
 - **Business Logic**: Separated into a dedicated service layer with dependency injection.
 - **Error Handling**: Centralized error codes, German messages, and consistent error formatting.
-- **Security**: Role-based access control with SQL-level data filtering, CSRF protection (including on `/api/auth/change-password`), and database indexing.
-- **Sanfter Entzug (Soft Revocation)**: Two-tiered access model for employees (full vs. legacy access based on customer assignment).
+- **Security**: Role-based access control with SQL-level data filtering, CSRF protection, and database indexing.
+- **Access Model**: Two-tiered access for employees (full vs. legacy based on customer assignment).
 
 ### Data Storage
 - **Database**: PostgreSQL via Neon serverless, managed with Drizzle ORM.
 - **Schema**: Includes tables for `customers`, `appointments`, `insurance_providers`, `employee_time_entries`, utilizing a historization pattern (`valid_from`/`valid_to`).
-- **Data Types**: Strict SQL types for data integrity.
-- **Indexes**: Composite indexes on frequently queried columns.
-- **Data Layer**: `IStorage` interface abstraction with `DatabaseStorage` providing optimized queries, pagination, and application-level rollback.
-- **Caching**: In-memory cache for assigned customer IDs with TTL and invalidation. Session cache (2min TTL) for auth validation. Birthday cache (1h TTL).
-- **Database Connection**: Single shared `neon()` + `drizzle()` instance in `server/lib/db.ts`. All storage/route/service files import from this central module.
-- **Performance**: Session cache eliminates 3 DB queries per request. Combined `/api/auth/me` returns badge + birthday counts to avoid 3 separate layout API calls. Logging middleware only records timing (no JSON body capture).
-- **Combined Endpoint Pattern**: Seiten, die mehrere unabhängige Daten brauchen, nutzen einen einzigen `/page-data` Endpoint, der intern `Promise.all` für parallele Queries verwendet (z.B. `/api/time-entries/page-data/:year/:month` kombiniert overview + vacation-summary + open-tasks). Reduziert HTTP-Roundtrips und vereinfacht Frontend-Code.
-- **Cache-Invalidierung**: Jeder Cache hat definierte Invalidierungspunkte:
-  - `customerIdsCache`: Invalidiert bei Kunden-CRUD, Admin-Zuweisungsänderungen, Termin-Erstellung mit `assignedEmployeeId`.
-  - `sessionCache`: Invalidiert bei Logout und Passwort-Änderung.
-  - `birthdayCache`: Invalidiert bei Kunden-CRUD.
-  - Neue Mutations müssen prüfen, ob bestehende Caches betroffen sind.
-- **Frontend staleTime-Strategie**: Stabile Daten (Kundenliste) nutzen 60s staleTime. Volatile Daten (Termine des Tages) nutzen kürzere Werte. `Infinity` für Session-Daten die sich selten ändern.
+- **Data Layer**: `IStorage` interface abstraction with `DatabaseStorage` for optimized queries, pagination, and application-level rollback.
+- **Caching**: In-memory cache for assigned customer IDs (TTL, invalidation), session cache (2min TTL), and birthday cache (1h TTL). Cache invalidation is defined for each cache type upon relevant CRUD or assignment changes.
+- **Performance**: Combined API endpoints for pages needing multiple independent data sources, reducing HTTP round-trips.
+- **Frontend staleTime-Strategie**: Stable data uses 60s `staleTime`, volatile data uses shorter values, `Infinity` for session data.
 
 ### Business Rules & Patterns
 - **Shared Domain Logic**: Single source of truth for business rules in `@shared/domain/*`.
-- **Appointment Statuses**: `scheduled`, `in-progress`, `documenting`, `completed`. Only `completed` appointments are considered documented for performance records.
-- **Performance Record Workflow**: Appointments must be `completed` before a performance record can be created. Includes employee and customer signature steps.
-- **Field Editing**: Rules based on appointment status.
-- **Overlap Checking**: Prevents appointment overlaps.
-- **Service Model**: "Erstberatung" (initial consultation) as a core service type.
-- **Customer Management**: Multi-step customer creation, detailed views, German-specific validation. Pflegegrad ist immer 1–5 (kein "0" oder "Ohne Pflegegrad") — wird in UI und Backend (Zod) einheitlich erzwungen.
-- **Kostenträger (Insurance Providers)**: Admin-Verwaltung unter `/admin/insurance-providers`. Tabelle `insurance_providers` mit IK-Nummer (9-stellig, `ikNummerSchema`), 4-Feld-Adressmodell (strasse, hausnummer, plz, stadt), Zahlungsbedingungen/Zahlungsart, E-Mail-Rechnungsversand-Flag. Zuweisung an Kunden über `customer_insurance_history` mit Historisierung (valid_from/valid_to). Versichertennummer-Format: 1 Großbuchstabe + 9 Ziffern (`versichertennummerSchema`). Soft-Deaktivierung statt Löschung. Shared Validierungsschemas in `@shared/schema.ts`.
-- **Budgeting & Pricing**: Three-pot budget ledger system per German care law (PUEG 2025):
-  - **§45b Entlastungsbetrag**: 131€/Monat max (admin-setzbar ≤131€), ansparbar mit Übertrag bis 30.06. des Folgejahres. Vollständiges Ledger mit auto-allocation, consumption tracking, initial balance, carryover.
-  - **§45a Umwandlungsanspruch**: Monatlich verfügbar, KEIN Anspareffekt (verfällt am Monatsende). Max abhängig vom Pflegegrad (PG2: 318€, PG3: 599€, PG4: 744€, PG5: 920€). PG1 nicht berechtigt. System validiert Obergrenze.
-  - **§39/§42a Gemeinsamer Jahresbetrag**: 3.539€/Jahr, sukzessiv verbrauchbar. Jährliche auto-allocation mit Startwert durch Admin.
-  - Shared tables `budget_allocations` + `budget_transactions` mit `budgetType` Diskriminator und `allocationId` FK für FIFO-Tracking. Lazy auto-allocation (idempotent via unique index + ON CONFLICT DO NOTHING). Zentrale Validierungskonstanten in `@shared/domain/budgets.ts`.
-  - **Budget-Typ-Einstellungen pro Kunde**: Tabelle `customer_budget_type_settings` ermöglicht pro Kunde: Prioritätsreihenfolge der Töpfe konfigurieren (Drag-Reorder), einzelne Töpfe deaktivieren, monatliche Obergrenzen (`monthlyLimitCents`) pro Topf setzen (z.B. "wir bekommen 80€ der 131€"). API: `GET/PUT /api/budget/:customerId/type-settings` (admin-only). Falls keine Einstellungen existieren, gelten Defaults: §45a (Prio 1), §45b (Prio 2), §39/42a (Prio 3).
-  - **Kaskaden-Buchung**: Rechnungen werden automatisch auf Töpfe verteilt nach kundenspezifischer Prioritätsreihenfolge (Standard: Prio 1 = §45a, Prio 2 = §45b, Prio 3 = §39/42a). Deaktivierte Töpfe werden übersprungen. `monthlyLimitCents` greift als harte Obergrenze pro Monat für §45b und §45a. Restbetrag wird als `outstandingCents` ausgewiesen.
-  - **FIFO-Verbrauch**: §45b verbraucht älteste Allocations zuerst (sortiert nach `validFrom ASC`). Jede Consumption-Transaktion referenziert die Quell-Allocation via `allocationId`.
-  - **Carryover-Verfall**: Abgelaufene Übertrags-Allocations (`source=carryover`, `expiresAt < today`) werden lazy mit `write_off`-Transaktionen abgeschrieben (idempotent via `allocationId`-Check).
-  - **Privatzahlung**: Kunden mit `acceptsPrivatePayment = true` können Termine auch bei Budget-Unterschreitung buchen. Restbeträge werden als `budgetType: "private"` Transaktion mit proportionaler Service-Aufschlüsselung persistiert. MwSt. wird gewichtet nach genutzten Services berechnet (service.vatRate). Kunden ohne Flag erhalten einen Hard-Block bei Budget-Mangel.
-  - Cost estimation endpoint provides proactive warnings during appointment creation. Requires valid pricing for appointment completion. Returns `isHardBlock`, `privateCents`, `vatCents`, `vatRate`, `acceptsPrivatePayment` for UI-Steuerung.
-  - Employee-facing customer detail shows all 3 budget pots with progress bars via `/api/budget/:customerId/overview`.
-- **Dienstleistungskatalog**: Zentrale Verwaltung unter `/admin/services`. Tabelle `services` mit Code, Name, Einheitstyp (hours/kilometers/flat), Standardpreis, MwSt.-Satz, Aktiv-Status. Seed: Hauswirtschaft, Alltagsbegleitung, Erstberatung, Kilometergeld. Kundenspezifische Preisüberschreibungen via `customer_service_prices` mit Historisierung. Preisauflösung: Katalog-Default → Kunden-Override. API: `GET /api/services`, `GET /api/services/all` (Admin), `POST/PUT /api/services`, `GET /api/services/customer/:id/prices`.
-- **Dynamische Service-Auswahl (Hybrid)**: Junction-Tabelle `appointment_services` speichert die gewählten Services pro Termin (serviceId, plannedDurationMinutes, actualDurationMinutes, details). ServiceSelector im Frontend zeigt alle aktiven `unitType='hours'`-Services als Dropdown + Plus-Button Pattern (exkl. Erstberatung/Kilometer). Bei Termin-Erstellung werden BEIDE geschrieben: Junction-Tabelle UND legacy-Spalten (hauswirtschaftDauer, alltagsbegleitungDauer) für Rückwärtskompatibilität mit Dokumentation, Budget, Anzeige. Neue Services ohne Legacy-Code werden nur in der Junction-Tabelle gespeichert. API: `GET /api/appointments/:id/services`. Schema: `insertKundenterminSchema` akzeptiert `services: Array<{ serviceId, durationMinutes }>` statt fixer Felder.
+- **Appointment Workflow**: Statuses (`scheduled`, `in-progress`, `documenting`, `completed`). `completed` is required for performance records. Field editing rules based on appointment status. Overlap checking.
+- **Service Model**: "Erstberatung" as a core service type.
+- **Customer Management**: Multi-step customer creation, detailed views, German-specific validation (e.g., `Pflegegrad` 1-5).
+- **Insurance Providers**: Admin management, historized assignment to customers, validation of IK-Nummer and Versichertennummer.
+- **Budgeting & Pricing**: Three-pot budget ledger system based on German care law (§45b Entlastungsbetrag, §45a Umwandlungsanspruch, §39/§42a Gemeinsamer Jahresbetrag). Budget types can be prioritized and deactivated per customer, with monthly limits. Kaskaden-Buchung (cascading allocation) distributes invoice amounts across pots. FIFO consumption for §45b. Carryover budgets have write-off for expired allocations. Cost estimation endpoint provides proactive warnings and calculates private payment amounts with VAT.
+- **Dienstleistungskatalog (Service Catalog)**: Central management of services with code, name, unit type, standard price, VAT rate. Customer-specific price overrides are supported. Dynamic service selection for appointments, storing services in a junction table while maintaining backward compatibility with legacy columns.
 - **Employee Time Tracking**: Comprehensive tracking for client and non-client work, including yearly vacation allowance and multi-day entries. Past entries are locked for non-admin users.
-- **German Labor Law Compliance**: Automatic detection of missing break documentation based on work hours (`§4 ArbZG`).
-- **Auto-Break System**: Calculates and generates missing breaks according to `§4 ArbZG`, considering actual work time, and is idempotent. Globally activatable via system settings.
-- **Month-Closing Workflow**: Employees can close their month, generating auto-breaks. This locks CRUD operations for non-admins. Admins can reopen months.
-- **Aufgaben-System**: Zentrale Aufgaben-Seite (`/tasks`) vereint System-Hinweise (offene Dokumentationen, fehlende Pausen, Leistungsnachweise) und eigene Aufgaben. Navigation-Badge zeigt offene Aufgaben-Anzahl via `/api/tasks/badge-count`.
+- **German Labor Law Compliance**: Automatic detection and generation of missing break documentation (`§4 ArbZG`), which can be globally activated.
+- **Month-Closing Workflow**: Employees can close their month, triggering auto-breaks and locking CRUD operations for non-admins. Admins can reopen months.
+- **Aufgaben-System (Task System)**: Centralized task page for system notices (open documentations, missing breaks) and personal tasks.
 - **Customer Kilometers**: Separate tracking for kilometers driven with/for the customer.
-- **Birthdays**: Integrated as tab in the Customers page (`/customers`), showing upcoming birthdays for employees and assigned customers with server-side cache and frontend staleTime.
-- **Navigation Structure**: Bottom nav tabs: Termine (`/`), Kunden (`/customers` with Geburtstage tab), Aufgaben (`/tasks` with red badge dot), Nachweise (`/service-records`), Zeiten (`/my-times`).
+- **Birthdays**: Integrated tab in Customers page, showing upcoming birthdays for employees and assigned customers, utilizing server-side cache.
+- **Navigation Structure**: Bottom navigation tabs: Termine, Kunden (with Birthdays tab), Aufgaben, Nachweise, Zeiten.
 
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)
