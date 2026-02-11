@@ -546,12 +546,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       db.select({
         date: appointments.date,
         status: appointments.status,
-        hauswirtschaftDauer: appointments.hauswirtschaftDauer,
-        alltagsbegleitungDauer: appointments.alltagsbegleitungDauer,
-        erstberatungDauer: appointments.erstberatungDauer,
-        hauswirtschaftActualDauer: appointments.hauswirtschaftActualDauer,
-        alltagsbegleitungActualDauer: appointments.alltagsbegleitungActualDauer,
-        erstberatungActualDauer: appointments.erstberatungActualDauer,
+        durationPromised: appointments.durationPromised,
       })
         .from(appointments)
         .innerJoin(customers, eq(appointments.customerId, customers.id))
@@ -590,9 +585,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       if (!workByDate[date]) {
         workByDate[date] = { workMinutes: 0, breakMinutes: 0 };
       }
-      workByDate[date].workMinutes += (appt.hauswirtschaftActualDauer || appt.hauswirtschaftDauer || 0);
-      workByDate[date].workMinutes += (appt.alltagsbegleitungActualDauer || appt.alltagsbegleitungDauer || 0);
-      workByDate[date].workMinutes += (appt.erstberatungActualDauer || appt.erstberatungDauer || 0);
+      workByDate[date].workMinutes += appt.durationPromised || 0;
     }
 
     const getEntryDuration = (entry: { durationMinutes: number | null; startTime: string | null; endTime: string | null }): number => {

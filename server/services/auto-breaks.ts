@@ -64,12 +64,7 @@ export async function generateAutoBreaksForMonth(
       const date = appt.date;
       if (!workByDate[date])
         workByDate[date] = { workMinutes: 0, breakMinutes: 0, hasAutoBreak: false };
-      workByDate[date].workMinutes +=
-        appt.hauswirtschaftActualDauer || appt.hauswirtschaftDauer || 0;
-      workByDate[date].workMinutes +=
-        appt.alltagsbegleitungActualDauer || appt.alltagsbegleitungDauer || 0;
-      workByDate[date].workMinutes +=
-        appt.erstberatungActualDauer || appt.erstberatungDauer || 0;
+      workByDate[date].workMinutes += appt.durationPromised || 0;
     }
   }
 

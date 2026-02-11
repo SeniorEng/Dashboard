@@ -51,12 +51,15 @@ export {
   // Time comparison
   doTimesOverlap,
   calculateTotalDuration,
+  calculateTotalDurationFromServices,
   getEndTime,
   // Service helpers
   getServiceInfo,
+  getServiceInfoFromServices,
   getCardServiceInfo,
   getServicesToDocument,
   validateServiceDocumentation,
+  validateServiceDocumentationFromServices,
   // Status helpers
   isValidStatusTransition,
   canModifyAppointment,
@@ -114,6 +117,7 @@ export interface BirthdayEntry {
 }
 
 /**
+ * @deprecated Use getServiceInfoFromServices() with junction table data instead.
  * Ermittelt den primären Service-Typ basierend auf den geplanten Dauern
  */
 export function getServiceTypeFromDurations(

@@ -38,51 +38,28 @@ function timeRangesOverlap(
   return start1 < end2 && start2 < end1;
 }
 
-/**
- * Calculate appointment end time in minutes from midnight
- * Uses actualEnd > scheduledEnd > calculated duration (based on services + travel)
- * Note: actualEnd is now stored as time string "HH:MM:SS" (harmonized system)
- */
 function getAppointmentEndMinutes(appt: {
   scheduledStart: string;
   scheduledEnd: string | null;
   actualEnd: string | null;
-  hauswirtschaftActualDauer: number | null;
-  hauswirtschaftDauer: number | null;
-  alltagsbegleitungActualDauer: number | null;
-  alltagsbegleitungDauer: number | null;
-  erstberatungActualDauer: number | null;
-  erstberatungDauer: number | null;
+  durationPromised: number;
   travelMinutes: number | null;
 }): number {
   const apptStart = timeToMinutes(appt.scheduledStart);
   
-  // Prefer actualEnd if available (completed appointments)
   if (appt.actualEnd) {
     return timeToMinutes(appt.actualEnd);
   }
   
-  // Then try scheduledEnd
   if (appt.scheduledEnd) {
     return timeToMinutes(appt.scheduledEnd);
   }
   
-  // Calculate from service durations
-  let duration = 0;
-  if (appt.hauswirtschaftActualDauer) duration += appt.hauswirtschaftActualDauer;
-  else if (appt.hauswirtschaftDauer) duration += appt.hauswirtschaftDauer;
-  if (appt.alltagsbegleitungActualDauer) duration += appt.alltagsbegleitungActualDauer;
-  else if (appt.alltagsbegleitungDauer) duration += appt.alltagsbegleitungDauer;
-  if (appt.erstberatungActualDauer) duration += appt.erstberatungActualDauer;
-  else if (appt.erstberatungDauer) duration += appt.erstberatungDauer;
-  duration += appt.travelMinutes || 0;
-  
-  // Only use calculated duration if we have any service data
+  const duration = appt.durationPromised + (appt.travelMinutes || 0);
   if (duration > 0) {
     return apptStart + duration;
   }
   
-  // No duration data at all - cannot determine end time, skip this appointment
   return -1;
 }
 

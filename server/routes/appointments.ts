@@ -24,7 +24,7 @@ import {
 } from "../lib/errors";
 import { requireAuth } from "../middleware/auth";
 import { db } from "../lib/db";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, and } from "drizzle-orm";
 import type { Response } from "express";
 
 const router = Router();
@@ -564,6 +564,22 @@ router.post("/:id/document", async (req, res) => {
     
     if (!updatedAppointment) {
       return sendServerError(res, "Fehler beim Speichern der Dokumentation");
+    }
+
+    if (docResult.serviceUpdates && docResult.serviceUpdates.length > 0) {
+      for (const serviceUpdate of docResult.serviceUpdates) {
+        await db.update(appointmentServices)
+          .set({
+            actualDurationMinutes: serviceUpdate.actualDurationMinutes,
+            details: serviceUpdate.details ?? null,
+          })
+          .where(
+            and(
+              eq(appointmentServices.appointmentId, id),
+              eq(appointmentServices.serviceId, serviceUpdate.serviceId)
+            )
+          );
+      }
     }
     
     res.json({

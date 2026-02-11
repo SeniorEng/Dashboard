@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRoute, useLocation } from "wouter";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import {
   ChevronLeft, ChevronRight, Loader2, Clock, 
   Car, Check, AlertCircle, X, Plus, User
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
@@ -24,6 +25,7 @@ import {
 import { formatTimeHHMM, addMinutesToTime } from "@shared/utils/datetime";
 
 interface ServiceFormData {
+  serviceId?: number;
   serviceType: ServiceType;
   plannedDuration: number;
   actualDuration: number;
@@ -67,28 +69,57 @@ export default function DocumentAppointment() {
   const { data: travelSuggestion } = useTravelSuggestion(id);
   const documentMutation = useDocumentAppointment(id);
 
+  const { data: appointmentServicesData } = useQuery<Array<{ serviceId: number; serviceCode: string; plannedDurationMinutes: number; actualDurationMinutes: number | null; details: string | null }>>({
+    queryKey: ["appointments", id, "services"],
+    queryFn: async () => {
+      const res = await fetch(`/api/appointments/${id}/services`);
+      if (!res.ok) throw new Error("Failed to fetch appointment services");
+      return res.json();
+    },
+    enabled: id > 0,
+  });
+
+  const servicesInitialized = useRef(false);
+
   useEffect(() => {
-    if (appointment) {
+    if (appointment && !servicesInitialized.current) {
       const services = getServicesToDocument(appointment);
       const prefillStart = appointment.actualStart
         ? formatTimeHHMM(appointment.actualStart)
         : appointment.scheduledStart
           ? formatTimeHHMM(appointment.scheduledStart)
           : "";
+
+      const serviceCodeToTypeMap: Record<string, ServiceType> = {
+        hauswirtschaft: "Hauswirtschaft",
+        alltagsbegleitung: "Alltagsbegleitung",
+        erstberatung: "Erstberatung",
+      };
+
       setFormData(prev => ({
         ...prev,
         performedByEmployeeId: appointment.assignedEmployeeId ?? null,
         actualStart: prefillStart,
-        services: services.map(s => ({
-          serviceType: s.serviceType,
-          plannedDuration: s.plannedDuration,
-          actualDuration: s.actualDuration ?? s.plannedDuration,
-          details: s.details ?? "",
-        })),
+        services: services.map(s => {
+          const junctionEntry = appointmentServicesData?.find(
+            as => serviceCodeToTypeMap[as.serviceCode] === s.serviceType
+          );
+          return {
+            serviceId: junctionEntry?.serviceId,
+            serviceType: s.serviceType,
+            plannedDuration: s.plannedDuration,
+            actualDuration: s.actualDuration ?? s.plannedDuration,
+            details: s.details ?? "",
+          };
+        }),
         notes: appointment.notes ?? "",
       }));
+
+      if (appointmentServicesData) {
+        servicesInitialized.current = true;
+      }
     }
-  }, [appointment]);
+  }, [appointment, appointmentServicesData]);
 
   useEffect(() => {
     if (travelSuggestion) {
@@ -235,6 +266,17 @@ export default function DocumentAppointment() {
       payload.erstberatungActualDauer = ebService.actualDuration;
       payload.erstberatungDetails = ebService.details || null;
     }
+
+    if (formData.services && formData.services.length > 0) {
+      payload.services = formData.services
+        .filter(s => s.serviceId && s.actualDuration && s.actualDuration > 0)
+        .map(s => ({
+          serviceId: s.serviceId,
+          actualDurationMinutes: s.actualDuration,
+          details: s.details || null,
+        }));
+    }
+
     if (formData.customerKilometers > 0) {
       payload.customerKilometers = formData.customerKilometers;
     }

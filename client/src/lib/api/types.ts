@@ -256,6 +256,7 @@ export interface CreateCustomerRequest {
 // Re-export from shared for consistency
 export type { AppointmentWithCustomer } from "@shared/types";
 
+/** @deprecated Use insertKundenterminSchema with services array instead */
 export interface CreateAppointmentRequest {
   customerId: number;
   date: string;
@@ -296,6 +297,7 @@ export interface UpdateAppointmentRequest {
   signatureData?: string;
 }
 
+/** @deprecated Legacy fields retained for backward compatibility. New code should use services array. */
 export interface DocumentAppointmentRequest {
   hauswirtschaftActualDauer?: number | null;
   hauswirtschaftDetails?: string | null;
@@ -303,6 +305,7 @@ export interface DocumentAppointmentRequest {
   alltagsbegleitungDetails?: string | null;
   erstberatungActualDauer?: number | null;
   erstberatungDetails?: string | null;
+  services?: Array<{ serviceId: number; actualDurationMinutes: number; details?: string | null }>;
   travelOriginType: 'home' | 'appointment';
   travelFromAppointmentId?: number | null;
   travelKilometers: number;

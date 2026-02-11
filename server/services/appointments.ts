@@ -32,6 +32,12 @@ export interface ValidationResult {
   message?: string;
 }
 
+export interface DocumentationServiceEntry {
+  serviceId: number;
+  actualDurationMinutes: number;
+  details?: string | null;
+}
+
 export interface DocumentationInput {
   performedByEmployeeId?: number | null;
   actualStart: string;
@@ -47,6 +53,7 @@ export interface DocumentationInput {
   travelMinutes?: number | null;
   customerKilometers?: number | null;
   notes?: string | null;
+  services?: DocumentationServiceEntry[];
 }
 
 export interface DocumentationResult {
@@ -57,6 +64,7 @@ export interface DocumentationResult {
   travelKilometers: number;
   customerKilometers: number;
   hasUsage: boolean;
+  serviceUpdates?: DocumentationServiceEntry[];
 }
 
 export interface KundenterminInput {
@@ -445,6 +453,7 @@ export class AppointmentService {
       travelKilometers: travelKm,
       customerKilometers: customerKm,
       hasUsage: hauswirtschaftMinutes > 0 || alltagsbegleitungMinutes > 0 || travelKm > 0 || customerKm > 0,
+      serviceUpdates: input.services || undefined,
     };
   }
 

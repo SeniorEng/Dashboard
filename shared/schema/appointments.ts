@@ -17,19 +17,17 @@ export const appointments = pgTable("appointments", {
   assignedEmployeeId: integer("assigned_employee_id").references(() => users.id), // Employee assigned to this appointment
   performedByEmployeeId: integer("performed_by_employee_id").references(() => users.id), // Employee who actually performed the appointment (set during documentation)
   appointmentType: text("appointment_type").notNull(), // "Erstberatung" | "Kundentermin"
-  // Service durations in minutes (15-min increments) - for Kundentermin
-  hauswirtschaftDauer: integer("hauswirtschaft_dauer"), // null if not selected
-  alltagsbegleitungDauer: integer("alltagsbegleitung_dauer"), // null if not selected
-  // Service durations in minutes (15-min increments) - for Erstberatung
-  erstberatungDauer: integer("erstberatung_dauer"), // null if not Erstberatung
-  // Service documentation - actual duration and details (max 55 chars)
+  // @deprecated — Use appointment_services junction table instead. Kept for backward compatibility.
+  hauswirtschaftDauer: integer("hauswirtschaft_dauer"),
+  alltagsbegleitungDauer: integer("alltagsbegleitung_dauer"),
+  erstberatungDauer: integer("erstberatung_dauer"),
   hauswirtschaftActualDauer: integer("hauswirtschaft_actual_dauer"),
   hauswirtschaftDetails: text("hauswirtschaft_details"),
   alltagsbegleitungActualDauer: integer("alltagsbegleitung_actual_dauer"),
   alltagsbegleitungDetails: text("alltagsbegleitung_details"),
   erstberatungActualDauer: integer("erstberatung_actual_dauer"),
   erstberatungDetails: text("erstberatung_details"),
-  // Legacy serviceType field (for display compatibility)
+  // @deprecated — Derived from appointment_services. Kept for backward compatibility.
   serviceType: text("service_type"),
   date: date("date").notNull(),
   // Scheduled times (planned appointment slot)
@@ -114,7 +112,7 @@ export const insertErstberatungSchema = z.object({
   assignedEmployeeId: z.number().nullable().optional(), // Admin can assign employee
 });
 
-// Refined schema for general appointment insert
+/** @deprecated Use insertKundenterminSchema (with services array) or insertErstberatungSchema instead */
 export const insertAppointmentSchema = baseAppointmentSchema.superRefine((data, ctx) => {
   if (data.appointmentType === "Kundentermin") {
     if (!data.hauswirtschaftDauer && !data.alltagsbegleitungDauer) {
@@ -128,6 +126,14 @@ export const insertAppointmentSchema = baseAppointmentSchema.superRefine((data, 
 });
 
 export const updateAppointmentSchema = baseAppointmentSchema.partial();
+
+export const documentServiceEntrySchema = z.object({
+  serviceId: z.number(),
+  actualDurationMinutes: z.number().min(1),
+  details: z.string().max(55, "Maximal 55 Zeichen").nullable().optional(),
+});
+
+export type DocumentServiceEntry = z.infer<typeof documentServiceEntrySchema>;
 
 // Schema for documenting any appointment (Kundentermin or Erstberatung)
 export const documentAppointmentSchema = z.object({
@@ -151,6 +157,7 @@ export const documentAppointmentSchema = z.object({
   customerKilometers: z.number().min(0).nullable().optional(),
   // Optional notes
   notes: z.string().max(255).nullable().optional(),
+  services: z.array(documentServiceEntrySchema).optional(),
 }).refine(
   (data) => {
     // If origin is "appointment", travelMinutes is required

@@ -126,12 +126,19 @@ export function doTimesOverlap(
   return s1 < e2 && s2 < e1;
 }
 
+/** @deprecated Use appointment.durationPromised or calculateTotalDurationFromServices() instead */
 export function calculateTotalDuration(
   hauswirtschaftDauer: number | null | undefined,
   alltagsbegleitungDauer: number | null | undefined,
   erstberatungDauer: number | null | undefined = 0
 ): number {
   return (hauswirtschaftDauer || 0) + (alltagsbegleitungDauer || 0) + (erstberatungDauer || 0);
+}
+
+export function calculateTotalDurationFromServices(
+  services: Array<{ plannedDurationMinutes: number; actualDurationMinutes?: number | null }>
+): number {
+  return services.reduce((sum, s) => sum + (s.actualDurationMinutes ?? s.plannedDurationMinutes), 0);
 }
 
 export function getEndTime(
@@ -161,6 +168,7 @@ export interface CardServiceInfo extends ServiceInfo {
   borderClass: string;
 }
 
+/** @deprecated Use getServiceInfoFromServices() with junction table data instead */
 export function getServiceInfo(
   appointmentType: string,
   hauswirtschaftDauer: number | null | undefined,
@@ -289,6 +297,46 @@ export const STATUS_PRIORITY: Record<AppointmentStatus, number> = {
   "completed": 3,
 };
 
+export function getServiceInfoFromServices(
+  appointmentType: string,
+  services: Array<{ serviceCode?: string | null; plannedDurationMinutes: number; actualDurationMinutes?: number | null }>
+): ServiceInfo {
+  if (appointmentType === "Erstberatung") {
+    return {
+      hasHauswirtschaft: false,
+      hasAlltagsbegleitung: false,
+      hasErstberatung: services.some(s => s.serviceCode === 'erstberatung' && s.plannedDurationMinutes > 0),
+      hasBoth: false,
+      label: "Erstberatung",
+      primaryType: "Erstberatung",
+    };
+  }
+
+  const hasHauswirtschaft = services.some(s => s.serviceCode === 'hauswirtschaft' && s.plannedDurationMinutes > 0);
+  const hasAlltagsbegleitung = services.some(s => s.serviceCode === 'alltagsbegleitung' && s.plannedDurationMinutes > 0);
+  const hasBoth = hasHauswirtschaft && hasAlltagsbegleitung;
+
+  let label: string;
+  let primaryType: ServiceType | null = null;
+
+  if (hasBoth) {
+    label = "Hauswirtschaft & Alltagsbegleitung";
+    primaryType = "Hauswirtschaft";
+  } else if (hasHauswirtschaft) {
+    label = "Hauswirtschaft";
+    primaryType = "Hauswirtschaft";
+  } else if (hasAlltagsbegleitung) {
+    label = "Alltagsbegleitung";
+    primaryType = "Alltagsbegleitung";
+  } else {
+    label = services.length > 0 ? services.map(s => s.serviceCode || 'Service').join(' & ') : "Kundentermin";
+    primaryType = null;
+  }
+
+  return { hasHauswirtschaft, hasAlltagsbegleitung, hasErstberatung: false, hasBoth, label, primaryType };
+}
+
+/** @deprecated Use getServiceInfoFromServices() with junction table data instead */
 export function getCardServiceInfo(
   appointmentType: string,
   hauswirtschaftDauer: number | null | undefined,
@@ -372,6 +420,7 @@ export interface ServiceDocumentation {
   details: string | null;
 }
 
+/** @deprecated Use junction table data from GET /appointments/:id/services instead */
 export function getServicesToDocument(appointment: Appointment): ServiceDocumentation[] {
   const services: ServiceDocumentation[] = [];
   
@@ -405,6 +454,7 @@ export function getServicesToDocument(appointment: Appointment): ServiceDocument
   return services;
 }
 
+/** @deprecated Use validateServiceDocumentationFromServices() with junction table data instead */
 export function validateServiceDocumentation(
   _appointment: Appointment,
   hauswirtschaftActualDauer: number | null | undefined,
@@ -443,5 +493,25 @@ export function validateServiceDocumentation(
     }
   }
   
+  return { valid: errors.length === 0, errors };
+}
+
+export function validateServiceDocumentationFromServices(
+  services: Array<{ actualDurationMinutes: number; details?: string | null; serviceName?: string }>
+): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  const hasAny = services.some(s => s.actualDurationMinutes > 0);
+  if (!hasAny) {
+    errors.push("Mindestens ein Service muss dokumentiert werden");
+    return { valid: false, errors };
+  }
+
+  for (const s of services) {
+    if (s.actualDurationMinutes > 0 && s.details && s.details.length > 55) {
+      errors.push(`${s.serviceName || 'Service'} Details dürfen maximal 55 Zeichen haben`);
+    }
+  }
+
   return { valid: errors.length === 0, errors };
 }
