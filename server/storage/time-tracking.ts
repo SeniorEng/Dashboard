@@ -2,6 +2,7 @@ import { eq, and, gte, lte, inArray, sql as sqlBuilder, asc } from "drizzle-orm"
 import {
   employeeTimeEntries,
   employeeVacationAllowance,
+  employeeMonthClosings,
   appointments,
   customers,
   type EmployeeTimeEntry,
@@ -659,6 +660,82 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     return {
       daysWithMissingBreaks,
     };
+  }
+
+  async isMonthClosed(userId: number, dateStr: string): Promise<boolean> {
+    const [yearStr, monthStr] = dateStr.split("-");
+    const year = parseInt(yearStr);
+    const month = parseInt(monthStr);
+    const closing = await db
+      .select()
+      .from(employeeMonthClosings)
+      .where(
+        and(
+          eq(employeeMonthClosings.userId, userId),
+          eq(employeeMonthClosings.year, year),
+          eq(employeeMonthClosings.month, month)
+        )
+      )
+      .limit(1);
+    return closing.length > 0 && !closing[0].reopenedAt;
+  }
+
+  async getMonthClosing(userId: number, year: number, month: number) {
+    const rows = await db
+      .select()
+      .from(employeeMonthClosings)
+      .where(
+        and(
+          eq(employeeMonthClosings.userId, userId),
+          eq(employeeMonthClosings.year, year),
+          eq(employeeMonthClosings.month, month)
+        )
+      )
+      .limit(1);
+    return rows[0] || null;
+  }
+
+  async getAdminMonthClosings(year: number, month: number) {
+    return await db
+      .select()
+      .from(employeeMonthClosings)
+      .where(
+        and(
+          eq(employeeMonthClosings.year, year),
+          eq(employeeMonthClosings.month, month)
+        )
+      );
+  }
+
+  async closeMonth(userId: number, year: number, month: number, closedByUserId: number, existingId?: number) {
+    if (existingId) {
+      await db
+        .update(employeeMonthClosings)
+        .set({
+          closedAt: new Date(),
+          closedByUserId,
+          reopenedAt: null,
+          reopenedByUserId: null,
+        })
+        .where(eq(employeeMonthClosings.id, existingId));
+    } else {
+      await db.insert(employeeMonthClosings).values({
+        userId,
+        year,
+        month,
+        closedByUserId,
+      });
+    }
+  }
+
+  async reopenMonth(closingId: number, reopenedByUserId: number) {
+    await db
+      .update(employeeMonthClosings)
+      .set({
+        reopenedAt: new Date(),
+        reopenedByUserId,
+      })
+      .where(eq(employeeMonthClosings.id, closingId));
   }
 }
 

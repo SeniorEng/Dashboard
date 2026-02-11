@@ -149,6 +149,8 @@ export class CustomerManagementStorage {
           zahlungsbedingungen: insuranceProviders.zahlungsbedingungen,
           zahlungsart: insuranceProviders.zahlungsart,
           isActive: insuranceProviders.isActive,
+          anschrift: insuranceProviders.anschrift,
+          plzOrt: insuranceProviders.plzOrt,
           createdAt: insuranceProviders.createdAt,
         },
       })
@@ -192,6 +194,8 @@ export class CustomerManagementStorage {
           zahlungsbedingungen: insuranceProviders.zahlungsbedingungen,
           zahlungsart: insuranceProviders.zahlungsart,
           isActive: insuranceProviders.isActive,
+          anschrift: insuranceProviders.anschrift,
+          plzOrt: insuranceProviders.plzOrt,
           createdAt: insuranceProviders.createdAt,
         },
       })
@@ -860,6 +864,82 @@ export class CustomerManagementStorage {
     }
     
     return updated;
+  }
+
+  async updateCustomerAssignment(
+    customerId: number,
+    primaryEmployeeId: number | null,
+    backupEmployeeId: number | null,
+    changedByUserId?: number
+  ) {
+    const { customerIdsCache } = await import("../services/cache");
+    const today = todayISO();
+    
+    const [existing] = await db.select().from(customers).where(eq(customers.id, customerId));
+    
+    if (existing) {
+      if (existing.primaryEmployeeId !== primaryEmployeeId) {
+        if (existing.primaryEmployeeId) {
+          await db.update(customerAssignmentHistory)
+            .set({ validTo: today })
+            .where(and(
+              eq(customerAssignmentHistory.customerId, customerId),
+              eq(customerAssignmentHistory.employeeId, existing.primaryEmployeeId),
+              eq(customerAssignmentHistory.role, "primary"),
+              isNull(customerAssignmentHistory.validTo)
+            ));
+        }
+        if (primaryEmployeeId) {
+          await db.insert(customerAssignmentHistory).values({
+            customerId,
+            employeeId: primaryEmployeeId,
+            role: "primary",
+            validFrom: today,
+            changedByUserId: changedByUserId ?? null,
+          });
+        }
+      }
+
+      if (existing.backupEmployeeId !== backupEmployeeId) {
+        if (existing.backupEmployeeId) {
+          await db.update(customerAssignmentHistory)
+            .set({ validTo: today })
+            .where(and(
+              eq(customerAssignmentHistory.customerId, customerId),
+              eq(customerAssignmentHistory.employeeId, existing.backupEmployeeId),
+              eq(customerAssignmentHistory.role, "backup"),
+              isNull(customerAssignmentHistory.validTo)
+            ));
+        }
+        if (backupEmployeeId) {
+          await db.insert(customerAssignmentHistory).values({
+            customerId,
+            employeeId: backupEmployeeId,
+            role: "backup",
+            validFrom: today,
+            changedByUserId: changedByUserId ?? null,
+          });
+        }
+      }
+    }
+
+    const [updated] = await db
+      .update(customers)
+      .set({ primaryEmployeeId, backupEmployeeId })
+      .where(eq(customers.id, customerId))
+      .returning();
+
+    if (existing) {
+      customerIdsCache.invalidateForCustomer(existing.primaryEmployeeId, existing.backupEmployeeId);
+    }
+    customerIdsCache.invalidateForCustomer(primaryEmployeeId, backupEmployeeId);
+
+    return updated;
+  }
+
+  async createCustomerDirect(customerData: any) {
+    const [customer] = await db.insert(customers).values(customerData).returning();
+    return customer;
   }
 }
 

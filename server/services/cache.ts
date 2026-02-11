@@ -17,11 +17,11 @@ class SimpleCache<T> {
 
   private evictExpired(): void {
     const now = Date.now();
-    for (const [key, entry] of this.cache) {
+    this.cache.forEach((entry, key) => {
       if (now > entry.expiresAt) {
         this.cache.delete(key);
       }
-    }
+    });
   }
 
   get(key: string): T | undefined {
@@ -192,11 +192,11 @@ class SessionCacheService {
 
   private evictExpired(): void {
     const now = Date.now();
-    for (const [key, entry] of this.cache) {
+    this.cache.forEach((entry, key) => {
       if (now - entry.cachedAt > SESSION_CACHE_TTL) {
         this.cache.delete(key);
       }
-    }
+    });
   }
 
   get(tokenHash: string): import("@shared/schema").UserWithRoles | undefined {

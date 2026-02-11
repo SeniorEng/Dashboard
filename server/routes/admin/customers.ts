@@ -12,7 +12,6 @@ import {
 import { handleRouteError } from "../../lib/errors";
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
-import { todayISO } from "@shared/utils/datetime";
 import { validate45aAmount, validate45bAmount, validate39_42aAmount } from "@shared/domain/budgets";
 
 const router = Router();
@@ -84,7 +83,7 @@ router.patch("/customers/:id/assign", async (req: Request, res: Response) => {
       }
     }
 
-    const updatedCustomer = await updateCustomerAssignment(id, primaryEmployeeId, backupEmployeeId, req.user?.id);
+    const updatedCustomer = await customerManagementStorage.updateCustomerAssignment(id, primaryEmployeeId, backupEmployeeId, req.user?.id);
     
     // Invalidate birthday cache (employee assignments affect which customers appear for each user)
     birthdaysCache.invalidateAll();
@@ -94,81 +93,6 @@ router.patch("/customers/:id/assign", async (req: Request, res: Response) => {
     handleRouteError(res, error, "Zuordnung konnte nicht aktualisiert werden");
   }
 });
-
-async function updateCustomerAssignment(
-  customerId: number,
-  primaryEmployeeId: number | null,
-  backupEmployeeId: number | null,
-  changedByUserId?: number
-) {
-  const { eq, and, isNull } = await import("drizzle-orm");
-  const { customers, customerAssignmentHistory } = await import("@shared/schema");
-  const { customerIdsCache } = await import("../../services/cache");
-  const { db } = await import("../../lib/db");
-
-  const [existing] = await db.select().from(customers).where(eq(customers.id, customerId));
-  
-  const today = todayISO();
-
-  if (existing) {
-    if (existing.primaryEmployeeId !== primaryEmployeeId) {
-      if (existing.primaryEmployeeId) {
-        await db.update(customerAssignmentHistory)
-          .set({ validTo: today })
-          .where(and(
-            eq(customerAssignmentHistory.customerId, customerId),
-            eq(customerAssignmentHistory.employeeId, existing.primaryEmployeeId),
-            eq(customerAssignmentHistory.role, "primary"),
-            isNull(customerAssignmentHistory.validTo)
-          ));
-      }
-      if (primaryEmployeeId) {
-        await db.insert(customerAssignmentHistory).values({
-          customerId,
-          employeeId: primaryEmployeeId,
-          role: "primary",
-          validFrom: today,
-          changedByUserId: changedByUserId ?? null,
-        });
-      }
-    }
-
-    if (existing.backupEmployeeId !== backupEmployeeId) {
-      if (existing.backupEmployeeId) {
-        await db.update(customerAssignmentHistory)
-          .set({ validTo: today })
-          .where(and(
-            eq(customerAssignmentHistory.customerId, customerId),
-            eq(customerAssignmentHistory.employeeId, existing.backupEmployeeId),
-            eq(customerAssignmentHistory.role, "backup"),
-            isNull(customerAssignmentHistory.validTo)
-          ));
-      }
-      if (backupEmployeeId) {
-        await db.insert(customerAssignmentHistory).values({
-          customerId,
-          employeeId: backupEmployeeId,
-          role: "backup",
-          validFrom: today,
-          changedByUserId: changedByUserId ?? null,
-        });
-      }
-    }
-  }
-
-  const [updated] = await db
-    .update(customers)
-    .set({ primaryEmployeeId, backupEmployeeId })
-    .where(eq(customers.id, customerId))
-    .returning();
-
-  if (existing) {
-    customerIdsCache.invalidateForCustomer(existing.primaryEmployeeId, existing.backupEmployeeId);
-  }
-  customerIdsCache.invalidateForCustomer(primaryEmployeeId, backupEmployeeId);
-
-  return updated;
-}
 
 // ============================================
 // CUSTOMER MANAGEMENT (Full Admin Access)
@@ -329,10 +253,7 @@ router.post("/customers", async (req: Request, res: Response) => {
       createdByUserId: userId,
     };
 
-    const { db } = await import("../../lib/db");
-    const { customers: customersTable } = await import("@shared/schema");
-
-    const [customer] = await db.insert(customersTable).values(customerData).returning();
+    const customer = await customerManagementStorage.createCustomerDirect(customerData);
 
     if (data.pflegegrad && data.pflegegradSeit) {
       try {
@@ -361,7 +282,7 @@ router.post("/customers", async (req: Request, res: Response) => {
         try {
           await customerManagementStorage.addCustomerContact({
             customerId: customer.id,
-            contactType: c.contactType,
+            contactType: c.contactType as "familie" | "angehoerige" | "nachbar" | "hausarzt" | "betreuer" | "sonstige",
             isPrimary: c.isPrimary,
             vorname: c.vorname,
             nachname: c.nachname,
@@ -396,7 +317,7 @@ router.post("/customers", async (req: Request, res: Response) => {
           contractDate: data.contract.contractDate || null,
           vereinbarteLeistungen: data.contract.vereinbarteLeistungen || null,
           hoursPerPeriod: data.contract.hoursPerPeriod,
-          periodType: data.contract.periodType,
+          periodType: data.contract.periodType as "week" | "month" | "year",
           hauswirtschaftRateCents: hauswirtschaftRate?.hourlyRateCents || 0,
           alltagsbegleitungRateCents: alltagsbegleitungRate?.hourlyRateCents || 0,
           kilometerRateCents: kilometerRate?.hourlyRateCents || 0,
@@ -407,7 +328,7 @@ router.post("/customers", async (req: Request, res: Response) => {
           for (const rate of data.contract.rates) {
             await customerManagementStorage.addContractRate({
               contractId: contract.id,
-              serviceCategory: rate.serviceCategory,
+              serviceCategory: rate.serviceCategory as "hauswirtschaft" | "alltagsbegleitung" | "erstberatung",
               hourlyRateCents: rate.hourlyRateCents,
               validFrom: data.contract.contractStart,
             }, userId);

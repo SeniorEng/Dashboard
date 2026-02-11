@@ -248,7 +248,7 @@ router.get("/:customerId/type-settings", async (req: Request, res: Response) => 
       return;
     }
     const settings = await budgetLedgerStorage.getBudgetTypeSettings(customerId);
-    const defaults = [
+    const defaults: { budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null; yearlyLimitCents: number | null; initialBalanceCents: number | null; initialBalanceMonth: string | null }[] = [
       { budgetType: "umwandlung_45a", enabled: true, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null, initialBalanceCents: null, initialBalanceMonth: null },
       { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null, initialBalanceCents: null, initialBalanceMonth: null },
       { budgetType: "ersatzpflege_39_42a", enabled: true, priority: 3, monthlyLimitCents: null, yearlyLimitCents: null, initialBalanceCents: null, initialBalanceMonth: null },

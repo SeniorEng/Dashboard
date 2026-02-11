@@ -6,9 +6,6 @@ import {
   insertKundenterminSchema,
   insertErstberatungSchema,
   documentKundenterminSchema,
-  services as servicesTable,
-  appointmentServices,
-  appointments,
 } from "@shared/schema";
 import { appointmentService } from "../services/appointments";
 import { authService } from "../services/auth";
@@ -24,13 +21,11 @@ import {
   sendServerError
 } from "../lib/errors";
 import { requireAuth } from "../middleware/auth";
-import { db } from "../lib/db";
-import { eq, inArray, and } from "drizzle-orm";
 import type { Response } from "express";
 
 const router = Router();
 
-async function checkCustomerAccess(user: Express.User, customerId: number, res: Response): Promise<boolean> {
+async function checkCustomerAccess(user: { id: number; isAdmin: boolean }, customerId: number, res: Response): Promise<boolean> {
   if (user.isAdmin) return true;
   const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
   if (!assignedCustomerIds.includes(customerId)) {
@@ -138,26 +133,7 @@ router.get("/batch-services", async (req, res) => {
       return sendBadRequest(res, "Ungültige Termin-IDs (max. 100)");
     }
 
-    const result = await db.select({
-      appointmentId: appointmentServices.appointmentId,
-      id: appointmentServices.id,
-      serviceId: appointmentServices.serviceId,
-      plannedDurationMinutes: appointmentServices.plannedDurationMinutes,
-      actualDurationMinutes: appointmentServices.actualDurationMinutes,
-      details: appointmentServices.details,
-      serviceName: servicesTable.name,
-      serviceCode: servicesTable.code,
-      serviceUnitType: servicesTable.unitType,
-    })
-    .from(appointmentServices)
-    .innerJoin(servicesTable, eq(appointmentServices.serviceId, servicesTable.id))
-    .where(inArray(appointmentServices.appointmentId, ids));
-
-    const grouped: Record<number, typeof result> = {};
-    for (const row of result) {
-      if (!grouped[row.appointmentId]) grouped[row.appointmentId] = [];
-      grouped[row.appointmentId].push(row);
-    }
+    const grouped = await storage.getBatchAppointmentServices(ids);
 
     res.json(grouped);
   } catch (error) {
@@ -175,19 +151,7 @@ router.get("/:id/services", async (req, res) => {
     if (!appointment) return sendNotFound(res, "Termin nicht gefunden");
     if (!(await checkCustomerAccess(user, appointment.customerId, res))) return;
     
-    const result = await db.select({
-      id: appointmentServices.id,
-      serviceId: appointmentServices.serviceId,
-      plannedDurationMinutes: appointmentServices.plannedDurationMinutes,
-      actualDurationMinutes: appointmentServices.actualDurationMinutes,
-      details: appointmentServices.details,
-      serviceName: servicesTable.name,
-      serviceCode: servicesTable.code,
-      serviceUnitType: servicesTable.unitType,
-    })
-    .from(appointmentServices)
-    .innerJoin(servicesTable, eq(appointmentServices.serviceId, servicesTable.id))
-    .where(eq(appointmentServices.appointmentId, id));
+    const result = await storage.getAppointmentServices(id);
     
     res.json(result);
   } catch (error) {
@@ -266,7 +230,7 @@ router.post("/kundentermin", async (req, res) => {
     }
     
     const serviceIds = validatedData.services.map(s => s.serviceId);
-    const serviceRecords = await db.select({ id: servicesTable.id, code: servicesTable.code }).from(servicesTable).where(inArray(servicesTable.id, serviceIds));
+    const serviceRecords = await storage.getServicesByIds(serviceIds);
     const serviceCodeMap = Object.fromEntries(serviceRecords.map(s => [s.id, s.code]));
 
     const servicesWithCodes = validatedData.services.map(s => ({
@@ -302,13 +266,7 @@ router.post("/kundentermin", async (req, res) => {
     const appointment = await storage.createAppointment(appointmentData);
 
     if (serviceEntries.length > 0) {
-      await db.insert(appointmentServices).values(
-        serviceEntries.map(entry => ({
-          appointmentId: appointment.id,
-          serviceId: entry.serviceId,
-          plannedDurationMinutes: entry.plannedDurationMinutes,
-        }))
-      );
+      await storage.createAppointmentServices(appointment.id, serviceEntries);
     }
 
     res.status(201).json(appointment);
@@ -416,36 +374,16 @@ router.patch("/:id", async (req, res) => {
       return sendForbidden(res, validation.error!, validation.message!);
     }
     
-    const appointment = await db.transaction(async (tx) => {
-      const [updated] = await tx.update(appointments)
-        .set(validatedData)
-        .where(eq(appointments.id, id))
-        .returning();
-      
-      if (!updated) return null;
-      
-      if (req.body.services && Array.isArray(req.body.services)) {
-        await tx.delete(appointmentServices).where(eq(appointmentServices.appointmentId, id));
-        
-        if (req.body.services.length > 0) {
-          await tx.insert(appointmentServices).values(
-            req.body.services.map((s: { serviceId: number; plannedDurationMinutes: number }) => ({
-              appointmentId: id,
-              serviceId: s.serviceId,
-              plannedDurationMinutes: s.plannedDurationMinutes,
-            }))
-          );
-        }
-      }
-      
-      return updated;
-    });
-    
-    if (!appointment) {
+    const updated = await storage.updateAppointment(id, validatedData);
+    if (!updated) {
       return sendNotFound(res, ErrorMessages.appointmentNotFound);
     }
     
-    res.json(appointment);
+    if (req.body.services && Array.isArray(req.body.services)) {
+      await storage.replaceAppointmentServices(id, req.body.services);
+    }
+    
+    res.json(updated);
   } catch (error) {
     handleRouteError(res, error, ErrorMessages.updateAppointmentFailed, "Failed to update appointment");
   }
@@ -577,7 +515,7 @@ router.post("/:id/document", async (req, res) => {
     const validatedData = documentKundenterminSchema.parse(req.body);
 
     const docServiceIds = validatedData.services.map(s => s.serviceId);
-    const validServices = await db.select({ id: servicesTable.id, code: servicesTable.code }).from(servicesTable).where(inArray(servicesTable.id, docServiceIds));
+    const validServices = await storage.getServicesByIds(docServiceIds);
     if (validServices.length !== docServiceIds.length) {
       const validIds = new Set(validServices.map(s => s.id));
       const invalidIds = docServiceIds.filter(sid => !validIds.has(sid));
@@ -639,35 +577,14 @@ router.post("/:id/document", async (req, res) => {
       }
     }
     
-    const updatedAppointment = await db.transaction(async (tx) => {
-      const [updated] = await tx.update(appointments)
-        .set(updateData)
-        .where(eq(appointments.id, id))
-        .returning();
-      
-      if (!updated) return null;
-      
-      if (docResult.serviceUpdates && docResult.serviceUpdates.length > 0) {
-        for (const serviceUpdate of docResult.serviceUpdates) {
-          await tx.update(appointmentServices)
-            .set({
-              actualDurationMinutes: serviceUpdate.actualDurationMinutes,
-              details: serviceUpdate.details ?? null,
-            })
-            .where(
-              and(
-                eq(appointmentServices.appointmentId, id),
-                eq(appointmentServices.serviceId, serviceUpdate.serviceId)
-              )
-            );
-        }
-      }
-      
-      return updated;
-    });
+    const updatedAppointment = await storage.updateAppointment(id, updateData);
     
     if (!updatedAppointment) {
       return sendServerError(res, "Fehler beim Speichern der Dokumentation");
+    }
+    
+    if (docResult.serviceUpdates && docResult.serviceUpdates.length > 0) {
+      await storage.updateAppointmentServiceDocumentation(id, docResult.serviceUpdates);
     }
     
     res.json({

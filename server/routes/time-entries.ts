@@ -2,12 +2,10 @@ import { Router, Request, Response } from "express";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { handleRouteError } from "../lib/errors";
 import { timeTrackingStorage } from "../storage/time-tracking";
-import { insertTimeEntrySchema, updateTimeEntrySchema, closeMonthSchema, reopenMonthSchema, employeeMonthClosings } from "@shared/schema";
+import { insertTimeEntrySchema, updateTimeEntrySchema, closeMonthSchema, reopenMonthSchema } from "@shared/schema";
 import { storage } from "../storage";
 import { timeToMinutes, isWeekend, parseLocalDate, isPast } from "@shared/utils/datetime";
-import { eq, and } from "drizzle-orm";
 import { generateAutoBreaksForMonth, insertAutoBreaks, previewAutoBreaksForMonth, removeAutoBreaksForMonth } from "../services/auto-breaks";
-import { db } from "../lib/db";
 
 const entryTypeLabels: Record<string, string> = {
   urlaub: "Urlaub",
@@ -346,38 +344,6 @@ function isEntryLocked(entry: { entryType: string; entryDate: string }): boolean
   return lockedTypes.includes(entry.entryType) && isPast(entry.entryDate);
 }
 
-async function isMonthClosed(userId: number, dateStr: string): Promise<boolean> {
-  const [yearStr, monthStr] = dateStr.split("-");
-  const year = parseInt(yearStr);
-  const month = parseInt(monthStr);
-  const closing = await db
-    .select()
-    .from(employeeMonthClosings)
-    .where(
-      and(
-        eq(employeeMonthClosings.userId, userId),
-        eq(employeeMonthClosings.year, year),
-        eq(employeeMonthClosings.month, month)
-      )
-    )
-    .limit(1);
-  return closing.length > 0 && !closing[0].reopenedAt;
-}
-
-async function getMonthClosing(userId: number, year: number, month: number) {
-  const rows = await db
-    .select()
-    .from(employeeMonthClosings)
-    .where(
-      and(
-        eq(employeeMonthClosings.userId, userId),
-        eq(employeeMonthClosings.year, year),
-        eq(employeeMonthClosings.month, month)
-      )
-    )
-    .limit(1);
-  return rows[0] || null;
-}
 
 /**
  * POST /time-entries
@@ -425,7 +391,7 @@ router.post("/", async (req: Request, res: Response) => {
         for (const dateStr of weekdayDates) {
           const monthKey = dateStr.substring(0, 7);
           if (!checkedMonths.has(monthKey)) {
-            checkedMonths.set(monthKey, await isMonthClosed(userId, dateStr));
+            checkedMonths.set(monthKey, await timeTrackingStorage.isMonthClosed(userId, dateStr));
           }
           if (checkedMonths.get(monthKey)) {
             return res.status(403).json({ 
@@ -469,7 +435,7 @@ router.post("/", async (req: Request, res: Response) => {
     }
     
     // Check month closing for single day
-    if (!req.user!.isAdmin && await isMonthClosed(userId, validatedData.entryDate)) {
+    if (!req.user!.isAdmin && await timeTrackingStorage.isMonthClosed(userId, validatedData.entryDate)) {
       return res.status(403).json({ error: "Dieser Monat ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen." });
     }
     
@@ -524,7 +490,7 @@ router.put("/:id", async (req: Request, res: Response) => {
     }
     
     // Month closing lock
-    if (!req.user!.isAdmin && await isMonthClosed(existing.userId, existing.entryDate)) {
+    if (!req.user!.isAdmin && await timeTrackingStorage.isMonthClosed(existing.userId, existing.entryDate)) {
       return res.status(403).json({ error: "Dieser Monat ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen." });
     }
     
@@ -589,7 +555,7 @@ router.delete("/:id", async (req: Request, res: Response) => {
     }
     
     // Month closing lock
-    if (!req.user!.isAdmin && await isMonthClosed(existing.userId, existing.entryDate)) {
+    if (!req.user!.isAdmin && await timeTrackingStorage.isMonthClosed(existing.userId, existing.entryDate)) {
       return res.status(403).json({ error: "Dieser Monat ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen." });
     }
     
@@ -613,15 +579,7 @@ router.get("/month-closings/admin/:year/:month", requireAdmin, async (req: Reque
       return res.status(400).json({ error: "Ungültiges Jahr oder Monat" });
     }
 
-    const closings = await db
-      .select()
-      .from(employeeMonthClosings)
-      .where(
-        and(
-          eq(employeeMonthClosings.year, year),
-          eq(employeeMonthClosings.month, month)
-        )
-      );
+    const closings = await timeTrackingStorage.getAdminMonthClosings(year, month);
 
     res.json({ closings });
   } catch (error) {
@@ -639,7 +597,7 @@ router.get("/month-closing/:year/:month", async (req: Request, res: Response) =>
       return res.status(400).json({ error: "Ungültiges Jahr oder Monat" });
     }
 
-    const closing = await getMonthClosing(userId, year, month);
+    const closing = await timeTrackingStorage.getMonthClosing(userId, year, month);
     res.json({ closing: closing || null });
   } catch (error) {
     handleRouteError(res, error, "Monatsabschluss konnte nicht geladen werden");
@@ -673,7 +631,7 @@ router.post("/close-month", async (req: Request, res: Response) => {
 
     const { year, month } = parsed.data;
 
-    const existing = await getMonthClosing(userId, year, month);
+    const existing = await timeTrackingStorage.getMonthClosing(userId, year, month);
     if (existing && !existing.reopenedAt) {
       return res.status(400).json({ error: "Dieser Monat ist bereits abgeschlossen." });
     }
@@ -681,24 +639,7 @@ router.post("/close-month", async (req: Request, res: Response) => {
     const autoBreaks = await generateAutoBreaksForMonth(userId, year, month);
     const insertedCount = await insertAutoBreaks(userId, autoBreaks);
 
-    if (existing && existing.reopenedAt) {
-      await db
-        .update(employeeMonthClosings)
-        .set({
-          closedAt: new Date(),
-          closedByUserId: userId,
-          reopenedAt: null,
-          reopenedByUserId: null,
-        })
-        .where(eq(employeeMonthClosings.id, existing.id));
-    } else {
-      await db.insert(employeeMonthClosings).values({
-        userId,
-        year,
-        month,
-        closedByUserId: userId,
-      });
-    }
+    await timeTrackingStorage.closeMonth(userId, year, month, userId, existing?.id);
 
     res.json({
       message: `Monat ${month}/${year} abgeschlossen`,
@@ -718,18 +659,12 @@ router.post("/reopen-month", requireAdmin, async (req: Request, res: Response) =
 
     const { year, month, userId: targetUserId } = parsed.data;
 
-    const existing = await getMonthClosing(targetUserId, year, month);
+    const existing = await timeTrackingStorage.getMonthClosing(targetUserId, year, month);
     if (!existing || existing.reopenedAt) {
       return res.status(400).json({ error: "Dieser Monat ist nicht abgeschlossen." });
     }
 
-    await db
-      .update(employeeMonthClosings)
-      .set({
-        reopenedAt: new Date(),
-        reopenedByUserId: req.user!.id,
-      })
-      .where(eq(employeeMonthClosings.id, existing.id));
+    await timeTrackingStorage.reopenMonth(existing.id, req.user!.id);
 
     await removeAutoBreaksForMonth(targetUserId, year, month);
 

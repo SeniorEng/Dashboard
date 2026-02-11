@@ -273,9 +273,6 @@ export const componentStyles = {
   pageHeaderActions: 'flex flex-col gap-2 w-full sm:flex-row sm:w-auto sm:items-center',
   pageHeaderActionBtn: 'w-full sm:w-auto', // Full-width on mobile, auto on desktop
   
-  // Legacy (deprecated) - für Rückwärtskompatibilität
-  pageHeaderLegacy: 'flex items-center justify-between mb-6',
-  
   // Cards (verwende Standard-Card-Komponente, keine custom bg/border)
   card: '',
   cardHover: 'cursor-pointer',
@@ -284,13 +281,6 @@ export const componentStyles = {
   // Lists (flex gap statt space-y, damit Links korrekt dargestellt werden)
   listContainer: 'flex flex-col gap-3',
   listItem: 'flex items-center justify-between p-4 rounded-xl bg-white shadow-sm',
-  
-  // Avatar/Icon containers (DEPRECATED - nicht für Kunden/Mitarbeiter verwenden!)
-  // Diese App verwendet keine Fotos für Kunden oder Mitarbeiter.
-  // Verwende stattdessen Text-Badges oder direkte Informationsdarstellung.
-  avatarContainer: 'h-10 w-10 rounded-full flex items-center justify-center',
-  avatarContainerSm: 'h-8 w-8 rounded-full flex items-center justify-center',
-  avatarContainerLg: 'h-12 w-12 rounded-full flex items-center justify-center',
   
   // Buttons (semantic)
   btnPrimary: 'bg-teal-600 hover:bg-teal-700 text-white',

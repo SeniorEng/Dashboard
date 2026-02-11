@@ -180,6 +180,18 @@ export interface IStorage {
   
   // Optimized period check - counts only
   getAppointmentCountsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<{ documentedCount: number; undocumentedCount: number }>;
+
+  // Appointment Services
+  getAppointmentServices(appointmentId: number): Promise<any[]>;
+  getBatchAppointmentServices(appointmentIds: number[]): Promise<Record<number, any[]>>;
+  createAppointmentServices(appointmentId: number, services: { serviceId: number; plannedDurationMinutes: number }[]): Promise<void>;
+  replaceAppointmentServices(appointmentId: number, services: { serviceId: number; plannedDurationMinutes: number }[]): Promise<void>;
+  updateAppointmentServiceDocumentation(appointmentId: number, serviceUpdates: { serviceId: number; actualDurationMinutes: number; details?: string | null }[]): Promise<void>;
+  getServicesByIds(serviceIds: number[]): Promise<{ id: number; code: string }[]>;
+
+  // System Settings
+  getSystemSettings(): Promise<any>;
+  updateSystemSettings(id: number, data: any, userId: number): Promise<any>;
 }
 
 export interface ServiceRecordOverviewItem {
@@ -842,6 +854,122 @@ export class DatabaseStorage implements IStorage {
       documentedCount: result[0]?.documentedCount ?? 0,
       undocumentedCount: result[0]?.undocumentedCount ?? 0,
     };
+  }
+
+  async getAppointmentServices(appointmentId: number): Promise<any[]> {
+    const { appointmentServices, services: servicesTable } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    return await db.select({
+      id: appointmentServices.id,
+      serviceId: appointmentServices.serviceId,
+      plannedDurationMinutes: appointmentServices.plannedDurationMinutes,
+      actualDurationMinutes: appointmentServices.actualDurationMinutes,
+      details: appointmentServices.details,
+      serviceName: servicesTable.name,
+      serviceCode: servicesTable.code,
+      serviceUnitType: servicesTable.unitType,
+    })
+    .from(appointmentServices)
+    .innerJoin(servicesTable, eq(appointmentServices.serviceId, servicesTable.id))
+    .where(eq(appointmentServices.appointmentId, appointmentId));
+  }
+
+  async getBatchAppointmentServices(appointmentIds: number[]): Promise<Record<number, any[]>> {
+    if (appointmentIds.length === 0) return {};
+    const { appointmentServices, services: servicesTable } = await import("@shared/schema");
+    const { eq, inArray } = await import("drizzle-orm");
+    const result = await db.select({
+      appointmentId: appointmentServices.appointmentId,
+      id: appointmentServices.id,
+      serviceId: appointmentServices.serviceId,
+      plannedDurationMinutes: appointmentServices.plannedDurationMinutes,
+      actualDurationMinutes: appointmentServices.actualDurationMinutes,
+      details: appointmentServices.details,
+      serviceName: servicesTable.name,
+      serviceCode: servicesTable.code,
+      serviceUnitType: servicesTable.unitType,
+    })
+    .from(appointmentServices)
+    .innerJoin(servicesTable, eq(appointmentServices.serviceId, servicesTable.id))
+    .where(inArray(appointmentServices.appointmentId, appointmentIds));
+
+    const grouped: Record<number, typeof result> = {};
+    for (const row of result) {
+      if (!grouped[row.appointmentId]) grouped[row.appointmentId] = [];
+      grouped[row.appointmentId].push(row);
+    }
+    return grouped;
+  }
+
+  async createAppointmentServices(appointmentId: number, services: { serviceId: number; plannedDurationMinutes: number }[]): Promise<void> {
+    if (services.length === 0) return;
+    const { appointmentServices } = await import("@shared/schema");
+    await db.insert(appointmentServices).values(
+      services.map(entry => ({
+        appointmentId,
+        serviceId: entry.serviceId,
+        plannedDurationMinutes: entry.plannedDurationMinutes,
+      }))
+    );
+  }
+
+  async replaceAppointmentServices(appointmentId: number, services: { serviceId: number; plannedDurationMinutes: number }[]): Promise<void> {
+    const { appointmentServices } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    await db.transaction(async (tx) => {
+      await tx.delete(appointmentServices).where(eq(appointmentServices.appointmentId, appointmentId));
+      if (services.length > 0) {
+        await tx.insert(appointmentServices).values(
+          services.map(s => ({
+            appointmentId,
+            serviceId: s.serviceId,
+            plannedDurationMinutes: s.plannedDurationMinutes,
+          }))
+        );
+      }
+    });
+  }
+
+  async updateAppointmentServiceDocumentation(appointmentId: number, serviceUpdates: { serviceId: number; actualDurationMinutes: number; details?: string | null }[]): Promise<void> {
+    if (serviceUpdates.length === 0) return;
+    const { appointmentServices } = await import("@shared/schema");
+    const { eq, and } = await import("drizzle-orm");
+    for (const serviceUpdate of serviceUpdates) {
+      await db.update(appointmentServices)
+        .set({
+          actualDurationMinutes: serviceUpdate.actualDurationMinutes,
+          details: serviceUpdate.details ?? null,
+        })
+        .where(
+          and(
+            eq(appointmentServices.appointmentId, appointmentId),
+            eq(appointmentServices.serviceId, serviceUpdate.serviceId)
+          )
+        );
+    }
+  }
+
+  async getServicesByIds(serviceIds: number[]): Promise<{ id: number; code: string }[]> {
+    if (serviceIds.length === 0) return [];
+    const { services: servicesTable } = await import("@shared/schema");
+    const { inArray } = await import("drizzle-orm");
+    const rows = await db.select({ id: servicesTable.id, code: servicesTable.code }).from(servicesTable).where(inArray(servicesTable.id, serviceIds));
+    return rows.filter((r): r is { id: number; code: string } => r.code !== null);
+  }
+
+  async getSystemSettings(): Promise<any> {
+    const { systemSettings } = await import("@shared/schema");
+    const existing = await db.select().from(systemSettings).limit(1);
+    if (existing.length > 0) return existing[0];
+    const [created] = await db.insert(systemSettings).values({ autoBreaksEnabled: true }).returning();
+    return created;
+  }
+
+  async updateSystemSettings(id: number, data: any, userId: number): Promise<any> {
+    const { systemSettings } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    const [updated] = await db.update(systemSettings).set({ ...data, updatedAt: new Date(), updatedByUserId: userId }).where(eq(systemSettings.id, id)).returning();
+    return updated;
   }
 }
 

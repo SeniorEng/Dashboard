@@ -211,7 +211,7 @@ export default function AdminServices() {
       minDurationMinutes: form.unitType === "hours" && minDuration && minDuration > 0 ? minDuration : null,
       isBillable: form.isBillable,
       employeeRateCents,
-      budgetPots: form.isBillable ? form.budgetPots : [],
+      budgetPots: form.isBillable ? form.budgetPots as ("entlastungsbetrag_45b" | "umwandlung_45a" | "ersatzpflege_39_42a")[] : [],
       isDefault: form.isDefault,
       isActive: form.isActive,
       sortOrder: parseInt(form.sortOrder, 10) || 0,
