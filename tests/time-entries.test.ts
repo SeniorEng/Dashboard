@@ -36,6 +36,15 @@ describe("Zeiterfassung (Time Entries) CRUD", () => {
 
   beforeAll(async () => {
     await getAuthCookie();
+    const d = new Date(testDate);
+    const existing = await apiGet<TimeEntry[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
+    if (existing.status === 200 && Array.isArray(existing.data)) {
+      for (const entry of existing.data) {
+        if (entry.entryDate === testDate) {
+          await apiDelete(`/api/time-entries/${entry.id}`);
+        }
+      }
+    }
   });
 
   afterAll(async () => {
@@ -232,8 +241,26 @@ describe("Pausenprüfung §4 ArbZG", () => {
     daysWithMissingBreaks: { date: string; workMinutes: number }[];
   }
 
+  const pauseTestDate1 = getFutureDate(100);
+  const pauseTestDate2 = getFutureDate(101);
+
+  beforeAll(async () => {
+    await getAuthCookie();
+    for (const date of [pauseTestDate1, pauseTestDate2]) {
+      const d = new Date(date);
+      const existing = await apiGet<TimeEntry[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
+      if (existing.status === 200 && Array.isArray(existing.data)) {
+        for (const entry of existing.data) {
+          if (entry.entryDate === date) {
+            await apiDelete(`/api/time-entries/${entry.id}`);
+          }
+        }
+      }
+    }
+  });
+
   it("sollte Zeiteinträge mit korrektem Zeitformat erstellen können", async () => {
-    const testDate = getFutureDate(100);
+    const testDate = pauseTestDate1;
     
     const entry = await apiPost<TimeEntry>("/api/time-entries", {
       entryDate: testDate,
@@ -258,7 +285,7 @@ describe("Pausenprüfung §4 ArbZG", () => {
   });
 
   it("sollte Arbeitszeit korrekt berechnen", async () => {
-    const testDate = getFutureDate(101);
+    const testDate = pauseTestDate2;
     
     const entry = await apiPost<TimeEntry>("/api/time-entries", {
       entryDate: testDate,

@@ -177,6 +177,9 @@ export async function apiDelete(path: string): Promise<{ status: number; data: u
 export function getFutureDate(daysFromNow: number = 7): string {
   const date = new Date();
   date.setDate(date.getDate() + daysFromNow);
+  const dayOfWeek = date.getDay();
+  if (dayOfWeek === 0) date.setDate(date.getDate() + 1);
+  else if (dayOfWeek === 6) date.setDate(date.getDate() + 2);
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
