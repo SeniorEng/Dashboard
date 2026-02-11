@@ -1,11 +1,11 @@
 import { Router, Request, Response } from "express";
 import { requireAuth, requireAdmin } from "../middleware/auth";
-import { handleRouteError } from "../lib/errors";
+import { asyncHandler } from "../lib/errors";
 import { timeTrackingStorage } from "../storage/time-tracking";
-import { insertTimeEntrySchema, updateTimeEntrySchema, closeMonthSchema, reopenMonthSchema } from "@shared/schema";
+import { insertTimeEntrySchema, updateTimeEntrySchema } from "@shared/schema";
 import { storage } from "../storage";
 import { timeToMinutes, isWeekend, parseLocalDate, isPast } from "@shared/utils/datetime";
-import { generateAutoBreaksForMonth, insertAutoBreaks, previewAutoBreaksForMonth, removeAutoBreaksForMonth } from "../services/auto-breaks";
+import monthClosingRouter from "./month-closing";
 
 const entryTypeLabels: Record<string, string> = {
   urlaub: "Urlaub",
@@ -166,165 +166,137 @@ router.use(requireAuth);
  * Get time entries for the authenticated user
  * Query params: year, month, entryType
  */
-router.get("/", async (req: Request, res: Response) => {
-  try {
-    const userId = req.user!.id;
-    const { year, month, entryType } = req.query;
-    
-    const entries = await timeTrackingStorage.getTimeEntries(userId, {
-      year: year ? parseInt(year as string) : undefined,
-      month: month ? parseInt(month as string) : undefined,
-      entryType: entryType as string | undefined,
-    });
-    
-    res.json(entries);
-  } catch (error) {
-    handleRouteError(res, error, "Zeiteinträge konnten nicht geladen werden");
-  }
-});
+router.get("/", asyncHandler("Zeiteinträge konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  const { year, month, entryType } = req.query;
+  
+  const entries = await timeTrackingStorage.getTimeEntries(userId, {
+    year: year ? parseInt(year as string) : undefined,
+    month: month ? parseInt(month as string) : undefined,
+    entryType: entryType as string | undefined,
+  });
+  
+  res.json(entries);
+}));
 
 /**
  * GET /time-entries/vacation-summary/:year
  * Get vacation summary for a specific year
  */
-router.get("/vacation-summary/:year", async (req: Request, res: Response) => {
-  try {
-    const userId = req.user!.id;
-    const year = parseInt(req.params.year);
-    
-    if (isNaN(year) || year < 2020 || year > 2100) {
-      return res.status(400).json({ error: "Ungültiges Jahr" });
-    }
-    
-    const summary = await timeTrackingStorage.getVacationSummary(userId, year);
-    res.json(summary);
-  } catch (error) {
-    handleRouteError(res, error, "Urlaubsübersicht konnte nicht geladen werden");
+router.get("/vacation-summary/:year", asyncHandler("Urlaubsübersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  const year = parseInt(req.params.year);
+  
+  if (isNaN(year) || year < 2020 || year > 2100) {
+    return res.status(400).json({ error: "Ungültiges Jahr" });
   }
-});
+  
+  const summary = await timeTrackingStorage.getVacationSummary(userId, year);
+  res.json(summary);
+}));
 
 /**
  * GET /time-entries/page-data/:year/:month
  * Combined endpoint: overview + vacation-summary + open-tasks in one call
  */
-router.get("/page-data/:year/:month", async (req: Request, res: Response) => {
-  try {
-    const userId = req.user!.id;
-    const year = parseInt(req.params.year);
-    const month = parseInt(req.params.month);
-    
-    if (isNaN(year) || year < 2020 || year > 2100) {
-      return res.status(400).json({ error: "Ungültiges Jahr" });
-    }
-    
-    if (isNaN(month) || month < 1 || month > 12) {
-      return res.status(400).json({ error: "Ungültiger Monat" });
-    }
-    
-    const [overview, vacationSummary, openTasks] = await Promise.all([
-      timeTrackingStorage.getTimeOverview(userId, { year, month }),
-      timeTrackingStorage.getVacationSummary(userId, year),
-      timeTrackingStorage.getOpenTasks(userId),
-    ]);
-    
-    res.json({ overview, vacationSummary, openTasks });
-  } catch (error) {
-    handleRouteError(res, error, "Zeitdaten konnten nicht geladen werden");
+router.get("/page-data/:year/:month", asyncHandler("Zeitdaten konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  const year = parseInt(req.params.year);
+  const month = parseInt(req.params.month);
+  
+  if (isNaN(year) || year < 2020 || year > 2100) {
+    return res.status(400).json({ error: "Ungültiges Jahr" });
   }
-});
+  
+  if (isNaN(month) || month < 1 || month > 12) {
+    return res.status(400).json({ error: "Ungültiger Monat" });
+  }
+  
+  const [overview, vacationSummary, openTasks] = await Promise.all([
+    timeTrackingStorage.getTimeOverview(userId, { year, month }),
+    timeTrackingStorage.getVacationSummary(userId, year),
+    timeTrackingStorage.getOpenTasks(userId),
+  ]);
+  
+  res.json({ overview, vacationSummary, openTasks });
+}));
 
 /**
  * GET /time-entries/overview/:year/:month
  * Get complete time overview for a month (appointments + time entries)
  */
-router.get("/overview/:year/:month", async (req: Request, res: Response) => {
-  try {
-    const userId = req.user!.id;
-    const year = parseInt(req.params.year);
-    const month = parseInt(req.params.month);
-    
-    if (isNaN(year) || year < 2020 || year > 2100) {
-      return res.status(400).json({ error: "Ungültiges Jahr" });
-    }
-    
-    if (isNaN(month) || month < 1 || month > 12) {
-      return res.status(400).json({ error: "Ungültiger Monat" });
-    }
-    
-    const overview = await timeTrackingStorage.getTimeOverview(userId, { year, month });
-    res.json(overview);
-  } catch (error) {
-    handleRouteError(res, error, "Zeitübersicht konnte nicht geladen werden");
+router.get("/overview/:year/:month", asyncHandler("Zeitübersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  const year = parseInt(req.params.year);
+  const month = parseInt(req.params.month);
+  
+  if (isNaN(year) || year < 2020 || year > 2100) {
+    return res.status(400).json({ error: "Ungültiges Jahr" });
   }
-});
+  
+  if (isNaN(month) || month < 1 || month > 12) {
+    return res.status(400).json({ error: "Ungültiger Monat" });
+  }
+  
+  const overview = await timeTrackingStorage.getTimeOverview(userId, { year, month });
+  res.json(overview);
+}));
 
 /**
  * GET /time-entries/open-tasks
  * Get open tasks (missing breaks, etc.)
  */
-router.get("/open-tasks", async (req: Request, res: Response) => {
-  try {
-    const userId = req.user!.id;
-    const openTasks = await timeTrackingStorage.getOpenTasks(userId);
-    res.json(openTasks);
-  } catch (error) {
-    handleRouteError(res, error, "Offene Aufgaben konnten nicht geladen werden");
-  }
-});
+router.get("/open-tasks", asyncHandler("Offene Aufgaben konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  const openTasks = await timeTrackingStorage.getOpenTasks(userId);
+  res.json(openTasks);
+}));
 
 /**
  * POST /time-entries/check-conflicts
  * Real-time check for time conflicts (for validation while typing)
  */
-router.post("/check-conflicts", async (req: Request, res: Response) => {
-  try {
-    const userId = req.user!.id;
-    const { date, startTime, endTime, isFullDay, excludeEntryId } = req.body;
-    
-    if (!date || typeof date !== "string") {
-      return res.status(400).json({ error: "Datum erforderlich" });
-    }
-    
-    const conflict = await checkTimeConflicts(
-      userId,
-      date,
-      startTime || null,
-      endTime || null,
-      isFullDay ?? false,
-      excludeEntryId
-    );
-    
-    res.json({ conflict });
-  } catch (error) {
-    handleRouteError(res, error, "Konfliktprüfung fehlgeschlagen");
+router.post("/check-conflicts", asyncHandler("Konfliktprüfung fehlgeschlagen", async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  const { date, startTime, endTime, isFullDay, excludeEntryId } = req.body;
+  
+  if (!date || typeof date !== "string") {
+    return res.status(400).json({ error: "Datum erforderlich" });
   }
-});
+  
+  const conflict = await checkTimeConflicts(
+    userId,
+    date,
+    startTime || null,
+    endTime || null,
+    isFullDay ?? false,
+    excludeEntryId
+  );
+  
+  res.json({ conflict });
+}));
 
 /**
  * GET /time-entries/:id
  * Get a specific time entry
  */
-router.get("/:id", async (req: Request, res: Response) => {
-  try {
-    const userId = req.user!.id;
-    const entryId = parseInt(req.params.id);
-    
-    const entry = await timeTrackingStorage.getTimeEntry(entryId);
-    
-    if (!entry) {
-      return res.status(404).json({ error: "Zeiteintrag nicht gefunden" });
-    }
-    
-    // Users can only view their own entries (unless admin)
-    if (entry.userId !== userId && !req.user!.isAdmin) {
-      return res.status(403).json({ error: "Keine Berechtigung" });
-    }
-    
-    res.json(entry);
-  } catch (error) {
-    handleRouteError(res, error, "Zeiteintrag konnte nicht geladen werden");
+router.get("/:id", asyncHandler("Zeiteintrag konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  const entryId = parseInt(req.params.id);
+  
+  const entry = await timeTrackingStorage.getTimeEntry(entryId);
+  
+  if (!entry) {
+    return res.status(404).json({ error: "Zeiteintrag nicht gefunden" });
   }
-});
+  
+  // Users can only view their own entries (unless admin)
+  if (entry.userId !== userId && !req.user!.isAdmin) {
+    return res.status(403).json({ error: "Keine Berechtigung" });
+  }
+  
+  res.json(entry);
+}));
 
 /**
  * Helper to format date as YYYY-MM-DD without timezone issues
@@ -349,329 +321,212 @@ function isEntryLocked(entry: { entryType: string; entryDate: string }): boolean
  * POST /time-entries
  * Create a new time entry (or multiple for date ranges)
  */
-router.post("/", async (req: Request, res: Response) => {
-  try {
-    const userId = req.user!.id;
-    const { endDate, ...entryData } = req.body;
-    const validatedData = insertTimeEntrySchema.parse(entryData);
+router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  const { endDate, ...entryData } = req.body;
+  const validatedData = insertTimeEntrySchema.parse(entryData);
+  
+  // For urlaub and krankheit with date range, create entries for each day
+  if (endDate && typeof endDate === "string" && endDate.trim() && 
+      (validatedData.entryType === "urlaub" || validatedData.entryType === "krankheit")) {
     
-    // For urlaub and krankheit with date range, create entries for each day
-    if (endDate && typeof endDate === "string" && endDate.trim() && 
-        (validatedData.entryType === "urlaub" || validatedData.entryType === "krankheit")) {
-      
-      // Validate endDate format
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
-        return res.status(400).json({ error: "Ungültiges Datumsformat für Enddatum" });
+    // Validate endDate format
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ error: "Ungültiges Datumsformat für Enddatum" });
+    }
+    
+    const startDate = parseLocalDate(validatedData.entryDate);
+    const end = parseLocalDate(endDate);
+    
+    if (end < startDate) {
+      return res.status(400).json({ error: "Enddatum muss nach Startdatum liegen" });
+    }
+    
+    // Collect weekday dates (skip weekends)
+    const weekdayDates: string[] = [];
+    const collectDate = new Date(startDate);
+    while (collectDate <= end) {
+      const dateStr = formatLocalDate(collectDate);
+      if (!isWeekend(dateStr)) {
+        weekdayDates.push(dateStr);
       }
-      
-      const startDate = parseLocalDate(validatedData.entryDate);
-      const end = parseLocalDate(endDate);
-      
-      if (end < startDate) {
-        return res.status(400).json({ error: "Enddatum muss nach Startdatum liegen" });
-      }
-      
-      // Collect weekday dates (skip weekends)
-      const weekdayDates: string[] = [];
-      const collectDate = new Date(startDate);
-      while (collectDate <= end) {
-        const dateStr = formatLocalDate(collectDate);
-        if (!isWeekend(dateStr)) {
-          weekdayDates.push(dateStr);
-        }
-        collectDate.setDate(collectDate.getDate() + 1);
-      }
-      
-      if (weekdayDates.length === 0) {
-        return res.status(400).json({ error: "Der gewählte Zeitraum enthält nur Wochenendtage. Bitte wählen Sie einen Zeitraum mit Werktagen." });
-      }
-      
-      if (!req.user!.isAdmin) {
-        const checkedMonths = new Map<string, boolean>();
-        for (const dateStr of weekdayDates) {
-          const monthKey = dateStr.substring(0, 7);
-          if (!checkedMonths.has(monthKey)) {
-            checkedMonths.set(monthKey, await timeTrackingStorage.isMonthClosed(userId, dateStr));
-          }
-          if (checkedMonths.get(monthKey)) {
-            return res.status(403).json({ 
-              error: `Der Monat für ${dateStr.split('-').reverse().join('.')} ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen.` 
-            });
-          }
-        }
-      }
-      
-      // Check conflicts for all weekdays first
+      collectDate.setDate(collectDate.getDate() + 1);
+    }
+    
+    if (weekdayDates.length === 0) {
+      return res.status(400).json({ error: "Der gewählte Zeitraum enthält nur Wochenendtage. Bitte wählen Sie einen Zeitraum mit Werktagen." });
+    }
+    
+    if (!req.user!.isAdmin) {
+      const checkedMonths = new Map<string, boolean>();
       for (const dateStr of weekdayDates) {
-        const conflict = await checkTimeConflicts(
-          userId,
-          dateStr,
-          validatedData.startTime,
-          validatedData.endTime,
-          validatedData.isFullDay ?? true
-        );
-        if (conflict) {
-          return res.status(400).json({ 
-            error: `Konflikt am ${dateStr.split('-').reverse().join('.')}: ${conflict}` 
+        const monthKey = dateStr.substring(0, 7);
+        if (!checkedMonths.has(monthKey)) {
+          checkedMonths.set(monthKey, await timeTrackingStorage.isMonthClosed(userId, dateStr));
+        }
+        if (checkedMonths.get(monthKey)) {
+          return res.status(403).json({ 
+            error: `Der Monat für ${dateStr.split('-').reverse().join('.')} ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen.` 
           });
         }
       }
-      
-      const entries = [];
-      for (const dateStr of weekdayDates) {
-        const entry = await timeTrackingStorage.createTimeEntry(userId, {
-          ...validatedData,
-          entryDate: dateStr,
+    }
+    
+    // Check conflicts for all weekdays first
+    for (const dateStr of weekdayDates) {
+      const conflict = await checkTimeConflicts(
+        userId,
+        dateStr,
+        validatedData.startTime,
+        validatedData.endTime,
+        validatedData.isFullDay ?? true
+      );
+      if (conflict) {
+        return res.status(400).json({ 
+          error: `Konflikt am ${dateStr.split('-').reverse().join('.')}: ${conflict}` 
         });
-        entries.push(entry);
       }
-      
-      // Return first entry for consistency, with count in header
-      res.setHeader("X-Entries-Created", entries.length.toString());
-      return res.status(201).json({ 
-        ...entries[0],
-        _multiDay: { count: entries.length, message: `${entries.length} Einträge erstellt` }
+    }
+    
+    const entries = [];
+    for (const dateStr of weekdayDates) {
+      const entry = await timeTrackingStorage.createTimeEntry(userId, {
+        ...validatedData,
+        entryDate: dateStr,
       });
+      entries.push(entry);
     }
     
-    // Check month closing for single day
-    if (!req.user!.isAdmin && await timeTrackingStorage.isMonthClosed(userId, validatedData.entryDate)) {
-      return res.status(403).json({ error: "Dieser Monat ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen." });
-    }
-    
-    // Single day entry - block weekends
-    if (isWeekend(validatedData.entryDate)) {
-      return res.status(400).json({ error: "Zeiteinträge können nicht an Samstagen oder Sonntagen erstellt werden." });
-    }
-    
-    // Single day entry - check for conflicts
-    const conflict = await checkTimeConflicts(
-      userId,
-      validatedData.entryDate,
-      validatedData.startTime,
-      validatedData.endTime,
-      validatedData.isFullDay ?? false
-    );
-    if (conflict) {
-      return res.status(400).json({ error: conflict });
-    }
-    
-    const entry = await timeTrackingStorage.createTimeEntry(userId, validatedData);
-    res.status(201).json(entry);
-  } catch (error) {
-    handleRouteError(res, error, "Zeiteintrag konnte nicht erstellt werden");
+    // Return first entry for consistency, with count in header
+    res.setHeader("X-Entries-Created", entries.length.toString());
+    return res.status(201).json({ 
+      ...entries[0],
+      _multiDay: { count: entries.length, message: `${entries.length} Einträge erstellt` }
+    });
   }
-});
+  
+  // Check month closing for single day
+  if (!req.user!.isAdmin && await timeTrackingStorage.isMonthClosed(userId, validatedData.entryDate)) {
+    return res.status(403).json({ error: "Dieser Monat ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen." });
+  }
+  
+  // Single day entry - block weekends
+  if (isWeekend(validatedData.entryDate)) {
+    return res.status(400).json({ error: "Zeiteinträge können nicht an Samstagen oder Sonntagen erstellt werden." });
+  }
+  
+  // Single day entry - check for conflicts
+  const conflict = await checkTimeConflicts(
+    userId,
+    validatedData.entryDate,
+    validatedData.startTime,
+    validatedData.endTime,
+    validatedData.isFullDay ?? false
+  );
+  if (conflict) {
+    return res.status(400).json({ error: conflict });
+  }
+  
+  const entry = await timeTrackingStorage.createTimeEntry(userId, validatedData);
+  res.status(201).json(entry);
+}));
 
 /**
  * PUT /time-entries/:id
  * Update a time entry
  */
-router.put("/:id", async (req: Request, res: Response) => {
-  try {
-    const userId = req.user!.id;
-    const entryId = parseInt(req.params.id);
-    
-    const existing = await timeTrackingStorage.getTimeEntry(entryId);
-    if (!existing) {
-      return res.status(404).json({ error: "Zeiteintrag nicht gefunden" });
-    }
-    
-    // Users can only update their own entries (unless admin)
-    if (existing.userId !== userId && !req.user!.isAdmin) {
-      return res.status(403).json({ error: "Keine Berechtigung" });
-    }
-    
-    // Past urlaub/krankheit entries are locked for non-admins
-    if (isEntryLocked(existing) && !req.user!.isAdmin) {
-      return res.status(403).json({ 
-        error: "Vergangene Urlaubs- oder Krankheitstage können nicht mehr geändert werden" 
-      });
-    }
-    
-    // Month closing lock
-    if (!req.user!.isAdmin && await timeTrackingStorage.isMonthClosed(existing.userId, existing.entryDate)) {
-      return res.status(403).json({ error: "Dieser Monat ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen." });
-    }
-    
-    const validatedData = updateTimeEntrySchema.parse(req.body);
-    
-    // Block weekend dates on update
-    const dateToCheck = validatedData.entryDate ?? existing.entryDate;
-    if (isWeekend(dateToCheck)) {
-      return res.status(400).json({ error: "Zeiteinträge können nicht auf Samstage oder Sonntage gelegt werden." });
-    }
-    
-    // Check for time conflicts with updated values
-    const newDate = validatedData.entryDate ?? existing.entryDate;
-    const newStartTime = validatedData.startTime !== undefined ? validatedData.startTime : existing.startTime;
-    const newEndTime = validatedData.endTime !== undefined ? validatedData.endTime : existing.endTime;
-    const newIsFullDay = validatedData.isFullDay !== undefined ? validatedData.isFullDay : existing.isFullDay;
-    
-    const conflict = await checkTimeConflicts(
-      existing.userId,
-      newDate,
-      newStartTime,
-      newEndTime,
-      newIsFullDay,
-      entryId // Exclude the entry being updated
-    );
-    if (conflict) {
-      return res.status(400).json({ error: conflict });
-    }
-    
-    const updated = await timeTrackingStorage.updateTimeEntry(entryId, validatedData);
-    
-    res.json(updated);
-  } catch (error) {
-    handleRouteError(res, error, "Zeiteintrag konnte nicht aktualisiert werden");
+router.put("/:id", asyncHandler("Zeiteintrag konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  const entryId = parseInt(req.params.id);
+  
+  const existing = await timeTrackingStorage.getTimeEntry(entryId);
+  if (!existing) {
+    return res.status(404).json({ error: "Zeiteintrag nicht gefunden" });
   }
-});
+  
+  // Users can only update their own entries (unless admin)
+  if (existing.userId !== userId && !req.user!.isAdmin) {
+    return res.status(403).json({ error: "Keine Berechtigung" });
+  }
+  
+  // Past urlaub/krankheit entries are locked for non-admins
+  if (isEntryLocked(existing) && !req.user!.isAdmin) {
+    return res.status(403).json({ 
+      error: "Vergangene Urlaubs- oder Krankheitstage können nicht mehr geändert werden" 
+    });
+  }
+  
+  // Month closing lock
+  if (!req.user!.isAdmin && await timeTrackingStorage.isMonthClosed(existing.userId, existing.entryDate)) {
+    return res.status(403).json({ error: "Dieser Monat ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen." });
+  }
+  
+  const validatedData = updateTimeEntrySchema.parse(req.body);
+  
+  // Block weekend dates on update
+  const dateToCheck = validatedData.entryDate ?? existing.entryDate;
+  if (isWeekend(dateToCheck)) {
+    return res.status(400).json({ error: "Zeiteinträge können nicht auf Samstage oder Sonntage gelegt werden." });
+  }
+  
+  // Check for time conflicts with updated values
+  const newDate = validatedData.entryDate ?? existing.entryDate;
+  const newStartTime = validatedData.startTime !== undefined ? validatedData.startTime : existing.startTime;
+  const newEndTime = validatedData.endTime !== undefined ? validatedData.endTime : existing.endTime;
+  const newIsFullDay = validatedData.isFullDay !== undefined ? validatedData.isFullDay : existing.isFullDay;
+  
+  const conflict = await checkTimeConflicts(
+    existing.userId,
+    newDate,
+    newStartTime,
+    newEndTime,
+    newIsFullDay,
+    entryId // Exclude the entry being updated
+  );
+  if (conflict) {
+    return res.status(400).json({ error: conflict });
+  }
+  
+  const updated = await timeTrackingStorage.updateTimeEntry(entryId, validatedData);
+  
+  res.json(updated);
+}));
 
 /**
  * DELETE /time-entries/:id
  * Delete a time entry
  */
-router.delete("/:id", async (req: Request, res: Response) => {
-  try {
-    const userId = req.user!.id;
-    const entryId = parseInt(req.params.id);
-    
-    const existing = await timeTrackingStorage.getTimeEntry(entryId);
-    if (!existing) {
-      return res.status(404).json({ error: "Zeiteintrag nicht gefunden" });
-    }
-    
-    // Users can only delete their own entries (unless admin)
-    if (existing.userId !== userId && !req.user!.isAdmin) {
-      return res.status(403).json({ error: "Keine Berechtigung" });
-    }
-    
-    // Past urlaub/krankheit entries are locked for non-admins
-    if (isEntryLocked(existing) && !req.user!.isAdmin) {
-      return res.status(403).json({ 
-        error: "Vergangene Urlaubs- oder Krankheitstage können nicht mehr gelöscht werden" 
-      });
-    }
-    
-    // Month closing lock
-    if (!req.user!.isAdmin && await timeTrackingStorage.isMonthClosed(existing.userId, existing.entryDate)) {
-      return res.status(403).json({ error: "Dieser Monat ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen." });
-    }
-    
-    await timeTrackingStorage.deleteTimeEntry(entryId);
-    res.status(204).send();
-  } catch (error) {
-    handleRouteError(res, error, "Zeiteintrag konnte nicht gelöscht werden");
+router.delete("/:id", asyncHandler("Zeiteintrag konnte nicht gelöscht werden", async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  const entryId = parseInt(req.params.id);
+  
+  const existing = await timeTrackingStorage.getTimeEntry(entryId);
+  if (!existing) {
+    return res.status(404).json({ error: "Zeiteintrag nicht gefunden" });
   }
-});
-
-// ============================================
-// MONTH CLOSING ENDPOINTS
-// ============================================
-
-router.get("/month-closings/admin/:year/:month", requireAdmin, async (req: Request, res: Response) => {
-  try {
-    const year = parseInt(req.params.year);
-    const month = parseInt(req.params.month);
-
-    if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
-      return res.status(400).json({ error: "Ungültiges Jahr oder Monat" });
-    }
-
-    const closings = await timeTrackingStorage.getAdminMonthClosings(year, month);
-
-    res.json({ closings });
-  } catch (error) {
-    handleRouteError(res, error, "Monatsabschlüsse konnten nicht geladen werden");
+  
+  // Users can only delete their own entries (unless admin)
+  if (existing.userId !== userId && !req.user!.isAdmin) {
+    return res.status(403).json({ error: "Keine Berechtigung" });
   }
-});
-
-router.get("/month-closing/:year/:month", async (req: Request, res: Response) => {
-  try {
-    const userId = req.user!.id;
-    const year = parseInt(req.params.year);
-    const month = parseInt(req.params.month);
-
-    if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
-      return res.status(400).json({ error: "Ungültiges Jahr oder Monat" });
-    }
-
-    const closing = await timeTrackingStorage.getMonthClosing(userId, year, month);
-    res.json({ closing: closing || null });
-  } catch (error) {
-    handleRouteError(res, error, "Monatsabschluss konnte nicht geladen werden");
-  }
-});
-
-router.get("/month-closing/:year/:month/preview", async (req: Request, res: Response) => {
-  try {
-    const userId = req.user!.id;
-    const year = parseInt(req.params.year);
-    const month = parseInt(req.params.month);
-
-    if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
-      return res.status(400).json({ error: "Ungültiges Jahr oder Monat" });
-    }
-
-    const autoBreaks = await previewAutoBreaksForMonth(userId, year, month);
-    res.json({ autoBreaks });
-  } catch (error) {
-    handleRouteError(res, error, "Vorschau konnte nicht erstellt werden");
-  }
-});
-
-router.post("/close-month", async (req: Request, res: Response) => {
-  try {
-    const userId = req.user!.id;
-    const parsed = closeMonthSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: "Ungültige Eingabe" });
-    }
-
-    const { year, month } = parsed.data;
-
-    const existing = await timeTrackingStorage.getMonthClosing(userId, year, month);
-    if (existing && !existing.reopenedAt) {
-      return res.status(400).json({ error: "Dieser Monat ist bereits abgeschlossen." });
-    }
-
-    const autoBreaks = await generateAutoBreaksForMonth(userId, year, month);
-    const insertedCount = await insertAutoBreaks(userId, autoBreaks);
-
-    await timeTrackingStorage.closeMonth(userId, year, month, userId, existing?.id);
-
-    res.json({
-      message: `Monat ${month}/${year} abgeschlossen`,
-      autoBreaksInserted: insertedCount,
+  
+  // Past urlaub/krankheit entries are locked for non-admins
+  if (isEntryLocked(existing) && !req.user!.isAdmin) {
+    return res.status(403).json({ 
+      error: "Vergangene Urlaubs- oder Krankheitstage können nicht mehr gelöscht werden" 
     });
-  } catch (error) {
-    handleRouteError(res, error, "Monatsabschluss fehlgeschlagen");
   }
-});
-
-router.post("/reopen-month", requireAdmin, async (req: Request, res: Response) => {
-  try {
-    const parsed = reopenMonthSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: "Ungültige Eingabe: year, month und userId erforderlich" });
-    }
-
-    const { year, month, userId: targetUserId } = parsed.data;
-
-    const existing = await timeTrackingStorage.getMonthClosing(targetUserId, year, month);
-    if (!existing || existing.reopenedAt) {
-      return res.status(400).json({ error: "Dieser Monat ist nicht abgeschlossen." });
-    }
-
-    await timeTrackingStorage.reopenMonth(existing.id, req.user!.id);
-
-    await removeAutoBreaksForMonth(targetUserId, year, month);
-
-    res.json({ message: `Monat ${month}/${year} wieder geöffnet` });
-  } catch (error) {
-    handleRouteError(res, error, "Monat konnte nicht wieder geöffnet werden");
+  
+  // Month closing lock
+  if (!req.user!.isAdmin && await timeTrackingStorage.isMonthClosed(existing.userId, existing.entryDate)) {
+    return res.status(403).json({ error: "Dieser Monat ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen." });
   }
-});
+  
+  await timeTrackingStorage.deleteTimeEntry(entryId);
+  res.status(204).send();
+}));
+
+// ============================================
+router.use(monthClosingRouter);
 
 export default router;
