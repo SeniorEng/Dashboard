@@ -93,95 +93,97 @@ export function ServiceSelector({ services, onChange, error }: ServiceSelectorPr
     <div className="space-y-3">
       <Label>Services (mindestens einer)</Label>
 
-      {defaultServices.map((service) => {
-        const entry = selectedMap.get(service.id);
-        const isActive = !!entry;
+      <div className="space-y-2 max-h-72 overflow-y-auto rounded-lg">
+        {defaultServices.map((service) => {
+          const entry = selectedMap.get(service.id);
+          const isActive = !!entry;
 
-        return (
-          <div
-            key={service.id}
-            className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${isActive ? "border-primary/30 bg-primary/5" : ""}`}
-            data-testid={`service-row-${service.id}`}
-          >
-            <Switch
-              checked={isActive}
-              onCheckedChange={(checked) => handleToggle(service, !!checked)}
-              data-testid={`toggle-service-${service.id}`}
-            />
-            <div className="flex-1 min-w-0">
-              <span className={`text-sm font-medium ${isActive ? "text-foreground" : "text-muted-foreground"}`}>
-                {service.name}
-              </span>
-              {service.description && (
-                <p className="text-xs text-muted-foreground truncate">{service.description}</p>
-              )}
-            </div>
-            {isActive && (
-              <Select
-                value={String(entry!.durationMinutes)}
-                onValueChange={(v) => handleDurationChange(service.id, parseInt(v))}
-              >
-                <SelectTrigger className="w-auto min-w-[110px]" data-testid={`duration-select-${service.id}`}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {DURATION_OPTIONS.map((d) => (
-                    <SelectItem key={d} value={String(d)}>
-                      {formatDuration(d)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-        );
-      })}
-
-      {services
-        .filter(s => additionalServices.some(a => a.id === s.serviceId))
-        .map((entry) => {
-          const service = additionalServices.find(a => a.id === entry.serviceId);
-          if (!service) return null;
           return (
             <div
               key={service.id}
-              className="flex items-center gap-3 p-3 rounded-lg border border-primary/30 bg-primary/5"
+              className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${isActive ? "border-primary/30 bg-primary/5" : ""}`}
               data-testid={`service-row-${service.id}`}
             >
+              <Switch
+                checked={isActive}
+                onCheckedChange={(checked) => handleToggle(service, !!checked)}
+                data-testid={`toggle-service-${service.id}`}
+              />
               <div className="flex-1 min-w-0">
-                <span className="text-sm font-medium text-foreground">
+                <span className={`text-sm font-medium ${isActive ? "text-foreground" : "text-muted-foreground"}`}>
                   {service.name}
                 </span>
                 {service.description && (
                   <p className="text-xs text-muted-foreground truncate">{service.description}</p>
                 )}
               </div>
-              <Select
-                value={String(entry.durationMinutes)}
-                onValueChange={(v) => handleDurationChange(service.id, parseInt(v))}
-              >
-                <SelectTrigger className="w-auto min-w-[110px]" data-testid={`duration-select-${service.id}`}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {DURATION_OPTIONS.map((d) => (
-                    <SelectItem key={d} value={String(d)}>
-                      {formatDuration(d)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <button
-                type="button"
-                onClick={() => handleRemoveAdditional(service.id)}
-                className="text-muted-foreground hover:text-destructive transition-colors p-1"
-                data-testid={`remove-service-${service.id}`}
-              >
-                <X className={iconSize.sm} />
-              </button>
+              {isActive && (
+                <Select
+                  value={String(entry!.durationMinutes)}
+                  onValueChange={(v) => handleDurationChange(service.id, parseInt(v))}
+                >
+                  <SelectTrigger className="w-auto min-w-[110px]" data-testid={`duration-select-${service.id}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DURATION_OPTIONS.map((d) => (
+                      <SelectItem key={d} value={String(d)}>
+                        {formatDuration(d)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
           );
         })}
+
+        {services
+          .filter(s => additionalServices.some(a => a.id === s.serviceId))
+          .map((entry) => {
+            const service = additionalServices.find(a => a.id === entry.serviceId);
+            if (!service) return null;
+            return (
+              <div
+                key={service.id}
+                className="flex items-center gap-3 p-3 rounded-lg border border-primary/30 bg-primary/5"
+                data-testid={`service-row-${service.id}`}
+              >
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-medium text-foreground">
+                    {service.name}
+                  </span>
+                  {service.description && (
+                    <p className="text-xs text-muted-foreground truncate">{service.description}</p>
+                  )}
+                </div>
+                <Select
+                  value={String(entry.durationMinutes)}
+                  onValueChange={(v) => handleDurationChange(service.id, parseInt(v))}
+                >
+                  <SelectTrigger className="w-auto min-w-[110px]" data-testid={`duration-select-${service.id}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DURATION_OPTIONS.map((d) => (
+                      <SelectItem key={d} value={String(d)}>
+                        {formatDuration(d)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveAdditional(service.id)}
+                  className="text-muted-foreground hover:text-destructive transition-colors p-1"
+                  data-testid={`remove-service-${service.id}`}
+                >
+                  <X className={iconSize.sm} />
+                </button>
+              </div>
+            );
+          })}
+      </div>
 
       {availableAdditional.length > 0 && (
         <>
@@ -191,7 +193,7 @@ export function ServiceSelector({ services, onChange, error }: ServiceSelectorPr
                 <SelectTrigger className="text-base flex-1" data-testid="select-additional-service">
                   <SelectValue placeholder="Leistung auswählen..." />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper" className="max-h-60">
                   {availableAdditional.map((service) => (
                     <SelectItem key={service.id} value={String(service.id)} data-testid={`option-additional-service-${service.id}`}>
                       {service.name}
