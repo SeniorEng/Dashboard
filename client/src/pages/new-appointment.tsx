@@ -71,8 +71,14 @@ export default function NewAppointment() {
     const params = new URLSearchParams();
     for (const s of ktServices) {
       const catalog = catalogServices.find(c => c.id === s.serviceId);
-      if (catalog?.code === 'hauswirtschaft') params.set("hauswirtschaftMinutes", String(s.durationMinutes));
-      if (catalog?.code === 'alltagsbegleitung') params.set("alltagsbegleitungMinutes", String(s.durationMinutes));
+      if (catalog?.billingCategory === 'hauswirtschaft') {
+        const current = parseInt(params.get("hauswirtschaftMinutes") || "0");
+        params.set("hauswirtschaftMinutes", String(current + s.durationMinutes));
+      }
+      if (catalog?.billingCategory === 'alltagsbegleitung') {
+        const current = parseInt(params.get("alltagsbegleitungMinutes") || "0");
+        params.set("alltagsbegleitungMinutes", String(current + s.durationMinutes));
+      }
     }
     if (params.toString() === '') return null;
     params.set("date", ktDate);

@@ -557,8 +557,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
   }> {
     const resolvedPrices = await serviceCatalogStorage.resolveAllPrices(params.customerId, params.date);
 
-    const hwService = resolvedPrices.find(p => p.service.code === "hauswirtschaft");
-    const abService = resolvedPrices.find(p => p.service.code === "alltagsbegleitung");
+    const hwService = resolvedPrices.find(p => p.service.billingCategory === "hauswirtschaft");
+    const abService = resolvedPrices.find(p => p.service.billingCategory === "alltagsbegleitung");
     const kmService = resolvedPrices.find(p => p.service.code === "kilometer");
 
     if (!hwService && !abService && !kmService) {

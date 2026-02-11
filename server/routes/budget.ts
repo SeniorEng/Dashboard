@@ -92,8 +92,8 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, async (req: Reques
     const acceptsPrivatePayment = customer?.acceptsPrivatePayment ?? false;
 
     const usedServices = resolvedPrices.filter(p => {
-      if (p.service.code === "hauswirtschaft" && hauswirtschaftMinutes > 0) return true;
-      if (p.service.code === "alltagsbegleitung" && alltagsbegleitungMinutes > 0) return true;
+      if (p.service.billingCategory === "hauswirtschaft" && hauswirtschaftMinutes > 0) return true;
+      if (p.service.billingCategory === "alltagsbegleitung" && alltagsbegleitungMinutes > 0) return true;
       if (p.service.code === "kilometer" && (travelKilometers > 0 || customerKilometers > 0)) return true;
       return false;
     });
@@ -101,8 +101,8 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, async (req: Reques
     const weightedVatRate = usedServices.length > 0
       ? (() => {
           const serviceCosts: { vatRate: number; cost: number }[] = usedServices.map(p => {
-            if (p.service.code === "hauswirtschaft") return { vatRate: p.service.vatRate, cost: costs.hauswirtschaftCents };
-            if (p.service.code === "alltagsbegleitung") return { vatRate: p.service.vatRate, cost: costs.alltagsbegleitungCents };
+            if (p.service.billingCategory === "hauswirtschaft") return { vatRate: p.service.vatRate, cost: costs.hauswirtschaftCents };
+            if (p.service.billingCategory === "alltagsbegleitung") return { vatRate: p.service.vatRate, cost: costs.alltagsbegleitungCents };
             if (p.service.code === "kilometer") return { vatRate: p.service.vatRate, cost: costs.travelCents + costs.customerKilometersCents };
             return { vatRate: p.service.vatRate, cost: 0 };
           });

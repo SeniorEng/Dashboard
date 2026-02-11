@@ -11,6 +11,9 @@ import { users } from "./users";
 export const SERVICE_UNIT_TYPES = ["hours", "kilometers", "flat"] as const;
 export type ServiceUnitType = typeof SERVICE_UNIT_TYPES[number];
 
+export const SERVICE_BILLING_CATEGORIES = ["hauswirtschaft", "alltagsbegleitung", "none"] as const;
+export type ServiceBillingCategory = typeof SERVICE_BILLING_CATEGORIES[number];
+
 export const services = pgTable("services", {
   id: serial("id").primaryKey(),
   code: text("code").unique(),
@@ -21,6 +24,7 @@ export const services = pgTable("services", {
   vatRate: integer("vat_rate").notNull().default(19),
   minDurationMinutes: integer("min_duration_minutes"),
   isActive: boolean("is_active").notNull().default(true),
+  billingCategory: text("billing_category").notNull().default("none"),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [
@@ -52,6 +56,7 @@ export const insertServiceSchema = z.object({
   vatRate: z.number().int().min(0).max(100).default(19),
   minDurationMinutes: z.number().int().min(1).nullable().optional(),
   isActive: z.boolean().default(true),
+  billingCategory: z.enum(SERVICE_BILLING_CATEGORIES).default("none"),
   sortOrder: z.number().int().default(0),
 });
 

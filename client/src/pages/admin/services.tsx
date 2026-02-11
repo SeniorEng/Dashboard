@@ -25,12 +25,18 @@ import { ArrowLeft, Plus, Pencil, Loader2, ClipboardList } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, componentStyles } from "@/design-system";
 import type { Service, InsertService } from "@shared/schema";
-import { SERVICE_UNIT_TYPES } from "@shared/schema";
+import { SERVICE_UNIT_TYPES, SERVICE_BILLING_CATEGORIES } from "@shared/schema";
 
 const UNIT_TYPE_LABELS: Record<string, string> = {
   hours: "Stunden",
   kilometers: "Kilometer",
   flat: "Pauschale",
+};
+
+const BILLING_CATEGORY_LABELS: Record<string, string> = {
+  hauswirtschaft: "Hauswirtschaft",
+  alltagsbegleitung: "Alltagsbegleitung",
+  none: "Nicht budgetrelevant",
 };
 
 function formatPrice(cents: number): string {
@@ -44,6 +50,7 @@ interface ServiceFormData {
   defaultPriceCents: string;
   vatRate: string;
   minDurationMinutes: string;
+  billingCategory: string;
   isActive: boolean;
 }
 
@@ -54,6 +61,7 @@ const EMPTY_FORM: ServiceFormData = {
   defaultPriceCents: "",
   vatRate: "19",
   minDurationMinutes: "",
+  billingCategory: "none",
   isActive: true,
 };
 
@@ -108,6 +116,7 @@ export default function AdminServices() {
       defaultPriceCents: formatPrice(service.defaultPriceCents),
       vatRate: String(service.vatRate),
       minDurationMinutes: service.minDurationMinutes ? String(service.minDurationMinutes) : "",
+      billingCategory: service.billingCategory || "none",
       isActive: service.isActive,
     });
     setDialogOpen(true);
@@ -145,6 +154,7 @@ export default function AdminServices() {
       defaultPriceCents: priceCents,
       vatRate: vatValue,
       minDurationMinutes: form.unitType === "hours" && minDuration && minDuration > 0 ? minDuration : null,
+      billingCategory: form.billingCategory as any,
       isActive: form.isActive,
       sortOrder: editingService?.sortOrder ?? 0,
     };
@@ -237,6 +247,7 @@ export default function AdminServices() {
                         <span data-testid={`text-unit-type-${service.id}`}>{UNIT_TYPE_LABELS[service.unitType] || service.unitType}</span>
                         <span data-testid={`text-price-${service.id}`}>· {formatPrice(service.defaultPriceCents)} €</span>
                         <span data-testid={`text-vat-${service.id}`}>· {service.vatRate}% MwSt</span>
+                        <span data-testid={`text-billing-category-${service.id}`}>· {BILLING_CATEGORY_LABELS[service.billingCategory] || service.billingCategory}</span>
                       </div>
                       {service.description && (
                         <p className="text-xs text-gray-400 mt-1 truncate" data-testid={`text-description-${service.id}`}>{service.description}</p>
@@ -329,6 +340,26 @@ export default function AdminServices() {
                 placeholder="19"
                 data-testid="input-service-vat"
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="billingCategory">Abrechnungskategorie</Label>
+              <Select
+                value={form.billingCategory}
+                onValueChange={(value) => handleChange("billingCategory", value)}
+              >
+                <SelectTrigger className="text-base" data-testid="select-billing-category">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SERVICE_BILLING_CATEGORIES.map((cat) => (
+                    <SelectItem key={cat} value={cat} data-testid={`select-billing-category-option-${cat}`}>
+                      {BILLING_CATEGORY_LABELS[cat]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500">Bestimmt, über welchen Budget-Topf die Leistung abgerechnet wird</p>
             </div>
 
             {form.unitType === "hours" && (
