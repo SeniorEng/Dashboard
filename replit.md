@@ -30,11 +30,11 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Access Model**: Two-tiered access for employees (full vs. legacy based on customer assignment).
 
 ### Data Storage
-- **Database**: PostgreSQL via Neon serverless, managed with Drizzle ORM.
-- **Schema**: Includes tables for `customers`, `appointments`, `insurance_providers`, `employee_time_entries`, utilizing a historization pattern (`valid_from`/`valid_to`).
-- **Data Layer**: `IStorage` interface abstraction with `DatabaseStorage` for optimized queries, pagination, and application-level rollback.
-- **Caching**: In-memory cache for assigned customer IDs (TTL, invalidation), session cache (2min TTL), and birthday cache (1h TTL). Cache invalidation is defined for each cache type upon relevant CRUD or assignment changes.
-- **Performance**: Combined API endpoints for pages needing multiple independent data sources, reducing HTTP round-trips.
+- **Database**: PostgreSQL via Neon serverless with WebSocket connection pooling (max 10 connections, 30s idle timeout), managed with Drizzle ORM.
+- **Schema**: Includes tables for `customers`, `appointments`, `insurance_providers`, `employee_time_entries`, utilizing a historization pattern (`valid_from`/`valid_to`). Database indexes defined in schema for `sessions` (user_id, expires_at), `user_roles` (user_id), and `users` (is_active).
+- **Data Layer**: `IStorage` interface abstraction with `DatabaseStorage` for optimized queries, pagination, and application-level rollback. Reusable select-field helpers for appointments/customers to reduce code duplication.
+- **Caching**: In-memory cache for assigned customer IDs (TTL, invalidation), session cache (2min TTL), and birthday cache (1h TTL). Cache invalidation is defined for each cache type upon relevant CRUD or assignment changes. Periodic garbage collection (60s interval) prevents memory leaks.
+- **Performance**: Combined API endpoints for pages needing multiple independent data sources, reducing HTTP round-trips. Auth middleware scoped to /api routes only. Session validation uses single JOIN query. Batch cleanup for expired sessions/tokens.
 - **Frontend staleTime-Strategie**: Stable data uses 60s `staleTime`, volatile data uses shorter values, `Infinity` for session data.
 
 ### Business Rules & Patterns
