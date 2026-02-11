@@ -1,6 +1,3 @@
-import { useState, useMemo, useEffect, useRef } from "react";
-import { useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,248 +9,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DatePicker } from "@/components/ui/date-picker";
 import { ChevronLeft, Loader2, Calendar, Clock, User, Home, Plus, Users, AlertTriangle } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
-import { useCustomerList, useAdminEmployees, useCreateKundentermin, useCreateErstberatung, ServiceSelector, AppointmentSummary } from "@/features/appointments";
+import { useNewAppointmentForm, ServiceSelector, AppointmentSummary } from "@/features/appointments";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS, formatDuration } from "@shared/types";
-import type { Service } from "@shared/schema";
-import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
-import { timeToMinutes, minutesToTimeDisplay, formatDurationDisplay, todayISO } from "@shared/utils/datetime";
+import { useLocation } from "wouter";
 
 export default function NewAppointment() {
   const [, setLocation] = useLocation();
-  const { toast } = useToast();
-  const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<string>("kundentermin");
-
-  const isAdmin = user?.isAdmin ?? false;
-
-  const { data: customers = [], isLoading: customersLoading } = useCustomerList();
-  const { data: employees = [] } = useAdminEmployees({ enabled: isAdmin });
-
-  const createKundenterminMutation = useCreateKundentermin();
-  const createErstberatungMutation = useCreateErstberatung();
-
-  const { data: catalogServices = [] } = useQuery<Service[]>({
-    queryKey: ["/api/services"],
-    staleTime: 60_000,
-  });
-
-  // Kundentermin state
-  const [ktCustomerId, setKtCustomerId] = useState<string>("");
-  const [ktDate, setKtDate] = useState<string>(todayISO());
-  const [ktTime, setKtTime] = useState<string>("09:00");
-  const [ktServices, setKtServices] = useState<Array<{ serviceId: number; durationMinutes: number }>>([]);
-  const [ktNotes, setKtNotes] = useState<string>("");
-  const [ktAssignedEmployeeId, setKtAssignedEmployeeId] = useState<string>("");
-
-  // Erstberatung state
-  const [ebVorname, setEbVorname] = useState<string>("");
-  const [ebNachname, setEbNachname] = useState<string>("");
-  const [ebTelefon, setEbTelefon] = useState<string>("");
-  const [ebStrasse, setEbStrasse] = useState<string>("");
-  const [ebNr, setEbNr] = useState<string>("");
-  const [ebPlz, setEbPlz] = useState<string>("");
-  const [ebStadt, setEbStadt] = useState<string>("");
-  const [ebPflegegrad, setEbPflegegrad] = useState<string>("1");
-  const [ebDate, setEbDate] = useState<string>(todayISO());
-  const [ebStartTime, setEbStartTime] = useState<string>("09:00");
-  const [ebErstberatungDauer, setEbErstberatungDauer] = useState<number>(60);
-  const [ebNotes, setEbNotes] = useState<string>("");
-  const [ebAssignedEmployeeId, setEbAssignedEmployeeId] = useState<string>("");
-
-  const defaultsInitialized = useRef(false);
-  useEffect(() => {
-    if (catalogServices.length > 0 && !defaultsInitialized.current) {
-      defaultsInitialized.current = true;
-      const defaults = catalogServices
-        .filter(s => s.isDefault && s.isActive && s.unitType === "hours" && (!s.code || !["erstberatung", "kilometer"].includes(s.code)))
-        .map(s => ({ serviceId: s.id, durationMinutes: s.minDurationMinutes || 60 }));
-      if (defaults.length > 0) {
-        setKtServices(defaults);
-      }
-    }
-  }, [catalogServices]);
-
-  // Validation errors
-  const [errors, setErrors] = useState<Record<string, string>>({});
-
-  const budgetEstimateParams = useMemo(() => {
-    if (!ktCustomerId || ktServices.length === 0) return null;
-    const serviceIds = ktServices.map(s => s.serviceId).join(",");
-    const serviceDurations = ktServices.map(s => s.durationMinutes).join(",");
-    if (!serviceIds) return null;
-    const params = new URLSearchParams();
-    params.set("serviceIds", serviceIds);
-    params.set("serviceDurations", serviceDurations);
-    params.set("date", ktDate);
-    return params.toString();
-  }, [ktCustomerId, ktServices, ktDate]);
-
-  const { data: costEstimate } = useQuery<{
-    totalCents: number;
-    warning: string | null;
-    noPricing?: boolean;
-    availableCents?: number;
-    currentMonthUsedCents?: number;
-    monthlyLimitCents?: number | null;
-    projectedMonthUsedCents?: number;
-    isHardBlock?: boolean;
-    acceptsPrivatePayment?: boolean;
-  }>({
-    queryKey: ["/api/budget", ktCustomerId, "cost-estimate", budgetEstimateParams],
-    queryFn: async () => {
-      const res = await fetch(`/api/budget/${ktCustomerId}/cost-estimate?${budgetEstimateParams}`);
-      if (!res.ok) return { totalCents: 0, warning: null };
-      return res.json();
-    },
-    enabled: !!ktCustomerId && !!budgetEstimateParams,
-    staleTime: 30_000,
-  });
-
-  // Computed summary for Kundentermin
-  const ktSummary = useMemo(() => {
-    const servicesList = ktServices.map(s => {
-      const catalog = catalogServices.find(c => c.id === s.serviceId);
-      return { name: catalog?.name || "Service", duration: s.durationMinutes };
-    });
-    const totalMinutes = servicesList.reduce((sum, s) => sum + s.duration, 0);
-    let endTime = "";
-    if (ktTime && totalMinutes > 0) {
-      const startMinutes = timeToMinutes(ktTime);
-      endTime = minutesToTimeDisplay((startMinutes + totalMinutes) % (24 * 60));
-    }
-    return {
-      services: servicesList,
-      totalMinutes,
-      totalFormatted: formatDurationDisplay(totalMinutes, "verbose"),
-      startTime: ktTime,
-      endTime,
-      hasServices: servicesList.length > 0
-    };
-  }, [ktTime, ktServices, catalogServices]);
-
-  const validateKundentermin = (): boolean => {
-    const newErrors: Record<string, string> = {};
-    if (!ktCustomerId) newErrors.ktCustomerId = "Bitte wählen Sie einen Kunden";
-    if (ktServices.length === 0) newErrors.ktServices = "Bitte wählen Sie mindestens einen Service";
-    if (isAdmin && !ktAssignedEmployeeId) newErrors.ktAssignedEmployeeId = "Bitte wählen Sie einen Mitarbeiter";
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const validateErstberatung = (): boolean => {
-    const newErrors: Record<string, string> = {};
-    if (!ebVorname.trim()) newErrors.ebVorname = "Vorname ist erforderlich";
-    if (!ebNachname.trim()) newErrors.ebNachname = "Nachname ist erforderlich";
-    const phoneValidation = validateGermanPhone(ebTelefon);
-    if (!phoneValidation.valid) newErrors.ebTelefon = phoneValidation.error;
-    if (!ebStrasse.trim()) newErrors.ebStrasse = "Straße ist erforderlich";
-    if (!ebNr.trim()) newErrors.ebNr = "Hausnummer ist erforderlich";
-    if (!/^\d{5}$/.test(ebPlz)) newErrors.ebPlz = "PLZ muss 5 Ziffern haben";
-    if (!ebStadt.trim()) newErrors.ebStadt = "Stadt ist erforderlich";
-    if (isAdmin && !ebAssignedEmployeeId) newErrors.ebAssignedEmployeeId = "Bitte wählen Sie einen Mitarbeiter";
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleKundenterminSubmit = () => {
-    if (!validateKundentermin()) return;
-    
-    createKundenterminMutation.mutate({
-      customerId: parseInt(ktCustomerId),
-      date: ktDate,
-      scheduledStart: ktTime,
-      services: ktServices,
-      notes: ktNotes || undefined,
-      assignedEmployeeId: isAdmin && ktAssignedEmployeeId ? parseInt(ktAssignedEmployeeId) : undefined,
-    }, {
-      onSuccess: () => {
-        toast({ title: "Termin erstellt", description: "Der Kundentermin wurde erfolgreich angelegt." });
-        setLocation(ktDate ? `/?date=${ktDate}` : "/");
-      },
-      onError: (error: Error) => {
-        toast({ variant: "destructive", title: "Fehler", description: error.message });
-      },
-    });
-  };
-
-  const handleErstberatungSubmit = () => {
-    if (!validateErstberatung()) return;
-    
-    const normalizedPhone = normalizePhone(ebTelefon);
-    if (!normalizedPhone) {
-      setErrors({ ebTelefon: "Ungültige Telefonnummer" });
-      return;
-    }
-    
-    createErstberatungMutation.mutate({
-      customer: {
-        vorname: ebVorname,
-        nachname: ebNachname,
-        telefon: normalizedPhone,
-        strasse: ebStrasse,
-        nr: ebNr,
-        plz: ebPlz,
-        stadt: ebStadt,
-        pflegegrad: parseInt(ebPflegegrad),
-      },
-      date: ebDate,
-      scheduledStart: ebStartTime,
-      erstberatungDauer: ebErstberatungDauer,
-      notes: ebNotes || undefined,
-      assignedEmployeeId: isAdmin && ebAssignedEmployeeId ? parseInt(ebAssignedEmployeeId) : undefined,
-    }, {
-      onSuccess: () => {
-        toast({ title: "Erstberatung erstellt", description: "Die Erstberatung und der neue Kunde wurden erfolgreich angelegt." });
-        setLocation(ebDate ? `/?date=${ebDate}` : "/");
-      },
-      onError: (error: Error) => {
-        toast({ variant: "destructive", title: "Fehler", description: error.message });
-      },
-    });
-  };
-  
-  // Computed summary for Erstberatung
-  const ebSummary = useMemo(() => {
-    // Calculate end time using central utilities
-    let endTime = "";
-    if (ebStartTime && ebErstberatungDauer > 0) {
-      const startMinutes = timeToMinutes(ebStartTime);
-      endTime = minutesToTimeDisplay((startMinutes + ebErstberatungDauer) % (24 * 60));
-    }
-    
-    return {
-      totalMinutes: ebErstberatungDauer,
-      totalFormatted: formatDurationDisplay(ebErstberatungDauer, "verbose"),
-      startTime: ebStartTime,
-      endTime,
-    };
-  }, [ebStartTime, ebErstberatungDauer]);
-
-  const customerOptions = useMemo(() => {
-    const eligible = isAdmin
-      ? customers
-      : customers.filter((c) => c.isCurrentlyAssigned !== false);
-    return eligible.map((c) => ({
-      value: c.id.toString(),
-      label: c.name,
-      sublabel: c.address,
-    }));
-  }, [customers, isAdmin]);
-
-  const employeeOptions = useMemo(() =>
-    employees
-      .filter(e => e.isActive)
-      .map((e) => ({
-        value: e.id.toString(),
-        label: e.displayName,
-      })),
-    [employees]
-  );
-
-  const isPending = createKundenterminMutation.isPending || createErstberatungMutation.isPending;
+  const form = useNewAppointmentForm();
 
   return (
     <Layout>
@@ -270,7 +33,7 @@ export default function NewAppointment() {
         <h1 className="text-2xl font-bold">Neuer Termin</h1>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+      <Tabs value={form.activeTab} onValueChange={form.setActiveTab} className="w-full">
         <TabsList className="grid w-full grid-cols-2 mb-6">
           <TabsTrigger value="kundentermin" data-testid="tab-kundentermin">
             <User className={`${iconSize.sm} mr-2`} /> Kundentermin
@@ -291,35 +54,35 @@ export default function NewAppointment() {
               <div className="space-y-2">
                 <Label>Kunde auswählen</Label>
                 <SearchableSelect
-                  options={customerOptions}
-                  value={ktCustomerId}
-                  onValueChange={setKtCustomerId}
+                  options={form.customerOptions}
+                  value={form.ktCustomerId}
+                  onValueChange={form.setKtCustomerId}
                   placeholder="Kunde auswählen..."
                   searchPlaceholder="Kunde suchen..."
                   emptyText="Kein Kunde gefunden."
-                  isLoading={customersLoading}
+                  isLoading={form.customersLoading}
                   data-testid="select-customer"
                 />
-                {errors.ktCustomerId && <p className="text-destructive text-sm">{errors.ktCustomerId}</p>}
+                {form.errors.ktCustomerId && <p className="text-destructive text-sm">{form.errors.ktCustomerId}</p>}
               </div>
 
               {/* Employee Assignment (Admin only - required) */}
-              {isAdmin && (
+              {form.isAdmin && (
                 <div className="space-y-2">
                   <Label>
                     <Users className={`${iconSize.sm} inline mr-1`} /> Mitarbeiter zuweisen *
                   </Label>
                   <SearchableSelect
-                    options={employeeOptions}
-                    value={ktAssignedEmployeeId}
-                    onValueChange={setKtAssignedEmployeeId}
+                    options={form.employeeOptions}
+                    value={form.ktAssignedEmployeeId}
+                    onValueChange={form.setKtAssignedEmployeeId}
                     placeholder="Mitarbeiter auswählen..."
                     searchPlaceholder="Mitarbeiter suchen..."
                     emptyText="Kein Mitarbeiter gefunden."
-                    className={errors.ktAssignedEmployeeId ? "border-destructive" : ""}
+                    className={form.errors.ktAssignedEmployeeId ? "border-destructive" : ""}
                     data-testid="select-kt-employee"
                   />
-                  {errors.ktAssignedEmployeeId && <p className="text-destructive text-sm">{errors.ktAssignedEmployeeId}</p>}
+                  {form.errors.ktAssignedEmployeeId && <p className="text-destructive text-sm">{form.errors.ktAssignedEmployeeId}</p>}
                   <p className="text-xs text-muted-foreground">
                     Der Mitarbeiter muss dem Kunden zugeordnet sein (Haupt- oder Vertretungsmitarbeiter)
                   </p>
@@ -333,8 +96,8 @@ export default function NewAppointment() {
                     <Calendar className={`${iconSize.sm} inline mr-1`} /> Datum
                   </Label>
                   <DatePicker
-                    value={ktDate || null}
-                    onChange={(val) => setKtDate(val || "")}
+                    value={form.ktDate || null}
+                    onChange={(val) => form.setKtDate(val || "")}
                     disableWeekends
                     data-testid="input-kt-date"
                   />
@@ -346,8 +109,8 @@ export default function NewAppointment() {
                   <Input
                     id="kt-time"
                     type="time"
-                    value={ktTime}
-                    onChange={(e) => setKtTime(e.target.value)}
+                    value={form.ktTime}
+                    onChange={(e) => form.setKtTime(e.target.value)}
                     className="text-base"
                     data-testid="input-kt-time"
                   />
@@ -355,44 +118,44 @@ export default function NewAppointment() {
               </div>
 
               <ServiceSelector
-                services={ktServices}
-                onChange={setKtServices}
-                error={errors.ktServices}
+                services={form.ktServices}
+                onChange={form.setKtServices}
+                error={form.errors.ktServices}
               />
 
-              {ktSummary.hasServices && (
+              {form.ktSummary.hasServices && (
                 <AppointmentSummary
-                  startTime={ktSummary.startTime}
-                  endTime={ktSummary.endTime}
-                  services={ktSummary.services}
-                  totalFormatted={ktSummary.totalFormatted}
+                  startTime={form.ktSummary.startTime}
+                  endTime={form.ktSummary.endTime}
+                  services={form.ktSummary.services}
+                  totalFormatted={form.ktSummary.totalFormatted}
                 />
               )}
 
-              {costEstimate && !costEstimate.noPricing && costEstimate.totalCents > 0 && (
+              {form.costEstimate && !form.costEstimate.noPricing && form.costEstimate.totalCents > 0 && (
                 <div className="rounded-lg border bg-blue-50 border-blue-200 p-3 text-sm" data-testid="budget-cost-estimate">
                   <p className="font-medium text-blue-800">
-                    Geschätzte Kosten: {(costEstimate.totalCents / 100).toFixed(2)} €
+                    Geschätzte Kosten: {(form.costEstimate.totalCents / 100).toFixed(2)} €
                   </p>
-                  {costEstimate.availableCents !== undefined && (
+                  {form.costEstimate.availableCents !== undefined && (
                     <p className="text-blue-600 text-xs mt-1">
-                      Verfügbares Budget: {(costEstimate.availableCents / 100).toFixed(2)} €
+                      Verfügbares Budget: {(form.costEstimate.availableCents / 100).toFixed(2)} €
                     </p>
                   )}
                 </div>
               )}
 
-              {costEstimate?.isHardBlock && (
+              {form.costEstimate?.isHardBlock && (
                 <div className="rounded-lg border bg-red-50 border-red-300 p-3 text-sm flex items-start gap-2" data-testid="budget-hard-block">
                   <AlertTriangle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
                   <p className="text-red-800 font-medium">Budget reicht nicht aus. Termin kann nicht erstellt werden.</p>
                 </div>
               )}
 
-              {costEstimate?.warning && !costEstimate?.isHardBlock && (
+              {form.costEstimate?.warning && !form.costEstimate?.isHardBlock && (
                 <div className="rounded-lg border bg-amber-50 border-amber-200 p-3 text-sm flex items-start gap-2" data-testid="budget-warning">
                   <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
-                  <p className="text-amber-800">{costEstimate.warning}</p>
+                  <p className="text-amber-800">{form.costEstimate.warning}</p>
                 </div>
               )}
 
@@ -402,22 +165,22 @@ export default function NewAppointment() {
                 <Textarea
                   id="kt-notes"
                   placeholder="Besondere Hinweise..."
-                  value={ktNotes}
-                  onChange={(e) => setKtNotes(e.target.value.slice(0, 255))}
+                  value={form.ktNotes}
+                  onChange={(e) => form.setKtNotes(e.target.value.slice(0, 255))}
                   maxLength={255}
                   data-testid="textarea-kt-notes"
                 />
-                <p className="text-xs text-muted-foreground">{ktNotes.length}/255</p>
+                <p className="text-xs text-muted-foreground">{form.ktNotes.length}/255</p>
               </div>
 
               <Button
                 className={`w-full ${componentStyles.btnPrimary}`}
                 size="lg"
-                onClick={handleKundenterminSubmit}
-                disabled={isPending || costEstimate?.isHardBlock === true}
+                onClick={form.handleKundenterminSubmit}
+                disabled={form.isPending || form.costEstimate?.isHardBlock === true}
                 data-testid="button-create-kundentermin"
               >
-                {isPending ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : null}
+                {form.isPending ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : null}
                 Kundentermin erstellen
               </Button>
             </CardContent>
@@ -437,23 +200,23 @@ export default function NewAppointment() {
                   <Label htmlFor="eb-vorname">Vorname *</Label>
                   <Input
                     id="eb-vorname"
-                    value={ebVorname}
-                    onChange={(e) => setEbVorname(e.target.value)}
+                    value={form.ebVorname}
+                    onChange={(e) => form.setEbVorname(e.target.value)}
                     placeholder="Max"
                     data-testid="input-eb-vorname"
                   />
-                  {errors.ebVorname && <p className="text-destructive text-sm">{errors.ebVorname}</p>}
+                  {form.errors.ebVorname && <p className="text-destructive text-sm">{form.errors.ebVorname}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="eb-nachname">Nachname *</Label>
                   <Input
                     id="eb-nachname"
-                    value={ebNachname}
-                    onChange={(e) => setEbNachname(e.target.value)}
+                    value={form.ebNachname}
+                    onChange={(e) => form.setEbNachname(e.target.value)}
                     placeholder="Mustermann"
                     data-testid="input-eb-nachname"
                   />
-                  {errors.ebNachname && <p className="text-destructive text-sm">{errors.ebNachname}</p>}
+                  {form.errors.ebNachname && <p className="text-destructive text-sm">{form.errors.ebNachname}</p>}
                 </div>
               </div>
 
@@ -462,13 +225,13 @@ export default function NewAppointment() {
                 <Input
                   id="eb-telefon"
                   type="tel"
-                  value={ebTelefon}
-                  onChange={(e) => setEbTelefon(formatPhoneAsYouType(e.target.value))}
+                  value={form.ebTelefon}
+                  onChange={(e) => form.setEbTelefon(form.formatPhoneAsYouType(e.target.value))}
                   placeholder="0171 1234567"
                   data-testid="input-eb-telefon"
                 />
                 <p className="text-xs text-muted-foreground">Mobil (0171...) oder Festnetz (030...)</p>
-                {errors.ebTelefon && <p className="text-destructive text-sm">{errors.ebTelefon}</p>}
+                {form.errors.ebTelefon && <p className="text-destructive text-sm">{form.errors.ebTelefon}</p>}
               </div>
 
               {/* Address */}
@@ -481,23 +244,23 @@ export default function NewAppointment() {
                     <Label htmlFor="eb-strasse">Straße *</Label>
                     <Input
                       id="eb-strasse"
-                      value={ebStrasse}
-                      onChange={(e) => setEbStrasse(e.target.value)}
+                      value={form.ebStrasse}
+                      onChange={(e) => form.setEbStrasse(e.target.value)}
                       placeholder="Musterstraße"
                       data-testid="input-eb-strasse"
                     />
-                    {errors.ebStrasse && <p className="text-destructive text-sm">{errors.ebStrasse}</p>}
+                    {form.errors.ebStrasse && <p className="text-destructive text-sm">{form.errors.ebStrasse}</p>}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="eb-nr">Nr. *</Label>
                     <Input
                       id="eb-nr"
-                      value={ebNr}
-                      onChange={(e) => setEbNr(e.target.value)}
+                      value={form.ebNr}
+                      onChange={(e) => form.setEbNr(e.target.value)}
                       placeholder="42"
                       data-testid="input-eb-nr"
                     />
-                    {errors.ebNr && <p className="text-destructive text-sm">{errors.ebNr}</p>}
+                    {form.errors.ebNr && <p className="text-destructive text-sm">{form.errors.ebNr}</p>}
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-4">
@@ -505,24 +268,24 @@ export default function NewAppointment() {
                     <Label htmlFor="eb-plz">PLZ *</Label>
                     <Input
                       id="eb-plz"
-                      value={ebPlz}
-                      onChange={(e) => setEbPlz(e.target.value)}
+                      value={form.ebPlz}
+                      onChange={(e) => form.setEbPlz(e.target.value)}
                       placeholder="10969"
                       maxLength={5}
                       data-testid="input-eb-plz"
                     />
-                    {errors.ebPlz && <p className="text-destructive text-sm">{errors.ebPlz}</p>}
+                    {form.errors.ebPlz && <p className="text-destructive text-sm">{form.errors.ebPlz}</p>}
                   </div>
                   <div className="col-span-2 space-y-2">
                     <Label htmlFor="eb-stadt">Stadt *</Label>
                     <Input
                       id="eb-stadt"
-                      value={ebStadt}
-                      onChange={(e) => setEbStadt(e.target.value)}
+                      value={form.ebStadt}
+                      onChange={(e) => form.setEbStadt(e.target.value)}
                       placeholder="Berlin"
                       data-testid="input-eb-stadt"
                     />
-                    {errors.ebStadt && <p className="text-destructive text-sm">{errors.ebStadt}</p>}
+                    {form.errors.ebStadt && <p className="text-destructive text-sm">{form.errors.ebStadt}</p>}
                   </div>
                 </div>
               </div>
@@ -530,7 +293,7 @@ export default function NewAppointment() {
               {/* Pflegegrad */}
               <div className="space-y-2">
                 <Label>Pflegegrad *</Label>
-                <Select value={ebPflegegrad} onValueChange={setEbPflegegrad}>
+                <Select value={form.ebPflegegrad} onValueChange={form.setEbPflegegrad}>
                   <SelectTrigger data-testid="select-pflegegrad">
                     <SelectValue />
                   </SelectTrigger>
@@ -545,22 +308,22 @@ export default function NewAppointment() {
               </div>
 
               {/* Employee Assignment (Admin only - required) */}
-              {isAdmin && (
+              {form.isAdmin && (
                 <div className="space-y-2">
                   <Label>
                     <Users className={`${iconSize.sm} inline mr-1`} /> Mitarbeiter zuweisen *
                   </Label>
                   <SearchableSelect
-                    options={employeeOptions}
-                    value={ebAssignedEmployeeId}
-                    onValueChange={setEbAssignedEmployeeId}
+                    options={form.employeeOptions}
+                    value={form.ebAssignedEmployeeId}
+                    onValueChange={form.setEbAssignedEmployeeId}
                     placeholder="Mitarbeiter auswählen..."
                     searchPlaceholder="Mitarbeiter suchen..."
                     emptyText="Kein Mitarbeiter gefunden."
-                    className={errors.ebAssignedEmployeeId ? "border-destructive" : ""}
+                    className={form.errors.ebAssignedEmployeeId ? "border-destructive" : ""}
                     data-testid="select-eb-employee"
                   />
-                  {errors.ebAssignedEmployeeId && <p className="text-destructive text-sm">{errors.ebAssignedEmployeeId}</p>}
+                  {form.errors.ebAssignedEmployeeId && <p className="text-destructive text-sm">{form.errors.ebAssignedEmployeeId}</p>}
                   <p className="text-xs text-muted-foreground">
                     Der ausgewählte Mitarbeiter wird automatisch Hauptmitarbeiter für diesen neuen Kunden
                   </p>
@@ -574,8 +337,8 @@ export default function NewAppointment() {
                     <Calendar className={`${iconSize.sm} inline mr-1`} /> Datum *
                   </Label>
                   <DatePicker
-                    value={ebDate || null}
-                    onChange={(val) => setEbDate(val || "")}
+                    value={form.ebDate || null}
+                    onChange={(val) => form.setEbDate(val || "")}
                     disableWeekends
                     data-testid="input-eb-date"
                   />
@@ -587,8 +350,8 @@ export default function NewAppointment() {
                   <Input
                     id="eb-start"
                     type="time"
-                    value={ebStartTime}
-                    onChange={(e) => setEbStartTime(e.target.value)}
+                    value={form.ebStartTime}
+                    onChange={(e) => form.setEbStartTime(e.target.value)}
                     className="text-base"
                     data-testid="input-eb-start"
                   />
@@ -603,8 +366,8 @@ export default function NewAppointment() {
                     <span className="font-medium text-purple-800">Erstberatung</span>
                   </div>
                   <Select
-                    value={ebErstberatungDauer.toString()}
-                    onValueChange={(v) => setEbErstberatungDauer(parseInt(v))}
+                    value={form.ebErstberatungDauer.toString()}
+                    onValueChange={(v) => form.setEbErstberatungDauer(parseInt(v))}
                   >
                     <SelectTrigger className="w-auto min-w-[120px]" data-testid="select-erstberatung-dauer">
                       <SelectValue />
@@ -630,18 +393,18 @@ export default function NewAppointment() {
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <span className="text-purple-600">Von</span>
-                    <p className="font-medium text-lg text-purple-800">{ebSummary.startTime} Uhr</p>
+                    <p className="font-medium text-lg text-purple-800">{form.ebSummary.startTime} Uhr</p>
                   </div>
                   <div>
                     <span className="text-purple-600">Bis</span>
-                    <p className="font-medium text-lg text-purple-800">{ebSummary.endTime} Uhr</p>
+                    <p className="font-medium text-lg text-purple-800">{form.ebSummary.endTime} Uhr</p>
                   </div>
                 </div>
 
                 <div className="border-t border-purple-200 pt-3">
                   <div className="flex justify-between text-sm">
                     <span className="text-purple-700">Erstberatung</span>
-                    <span className="font-medium text-purple-800">{ebSummary.totalFormatted}</span>
+                    <span className="font-medium text-purple-800">{form.ebSummary.totalFormatted}</span>
                   </div>
                 </div>
               </div>
@@ -652,22 +415,22 @@ export default function NewAppointment() {
                 <Textarea
                   id="eb-notes"
                   placeholder="Besondere Hinweise zur Erstberatung..."
-                  value={ebNotes}
-                  onChange={(e) => setEbNotes(e.target.value.slice(0, 255))}
+                  value={form.ebNotes}
+                  onChange={(e) => form.setEbNotes(e.target.value.slice(0, 255))}
                   maxLength={255}
                   data-testid="textarea-eb-notes"
                 />
-                <p className="text-xs text-muted-foreground">{ebNotes.length}/255</p>
+                <p className="text-xs text-muted-foreground">{form.ebNotes.length}/255</p>
               </div>
 
               <Button
                 className={`w-full ${componentStyles.btnPrimary}`}
                 size="lg"
-                onClick={handleErstberatungSubmit}
-                disabled={isPending}
+                onClick={form.handleErstberatungSubmit}
+                disabled={form.isPending}
                 data-testid="button-create-erstberatung"
               >
-                {isPending ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : null}
+                {form.isPending ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : null}
                 Erstberatung erstellen
               </Button>
             </CardContent>

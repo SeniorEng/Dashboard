@@ -5,61 +5,8 @@ import { timeTrackingStorage } from "../storage/time-tracking";
 import { insertTimeEntrySchema, updateTimeEntrySchema } from "@shared/schema";
 import { storage } from "../storage";
 import { timeToMinutes, isWeekend, parseLocalDate, isPast } from "@shared/utils/datetime";
+import { getEntryTypeLabel, formatTimeShort, timeRangesOverlap, getAppointmentEndMinutes } from "@shared/domain/time-entries";
 import monthClosingRouter from "./month-closing";
-
-const entryTypeLabels: Record<string, string> = {
-  urlaub: "Urlaub",
-  krankheit: "Krankheit",
-  pause: "Pause",
-  bueroarbeit: "Büroarbeit",
-  vertrieb: "Vertrieb",
-  schulung: "Schulung",
-  besprechung: "Besprechung",
-  sonstiges: "Sonstiges",
-};
-
-function getEntryTypeLabel(entryType: string): string {
-  return entryTypeLabels[entryType] || entryType;
-}
-
-function formatTimeShort(time: string): string {
-  return time.slice(0, 5);
-}
-
-/**
- * Check if two time ranges overlap
- */
-function timeRangesOverlap(
-  start1: number, end1: number,
-  start2: number, end2: number
-): boolean {
-  return start1 < end2 && start2 < end1;
-}
-
-function getAppointmentEndMinutes(appt: {
-  scheduledStart: string;
-  scheduledEnd: string | null;
-  actualEnd: string | null;
-  durationPromised: number;
-  travelMinutes: number | null;
-}): number {
-  const apptStart = timeToMinutes(appt.scheduledStart);
-  
-  if (appt.actualEnd) {
-    return timeToMinutes(appt.actualEnd);
-  }
-  
-  if (appt.scheduledEnd) {
-    return timeToMinutes(appt.scheduledEnd);
-  }
-  
-  const duration = appt.durationPromised + (appt.travelMinutes || 0);
-  if (duration > 0) {
-    return apptStart + duration;
-  }
-  
-  return -1;
-}
 
 /**
  * Check for time conflicts with existing appointments and time entries
