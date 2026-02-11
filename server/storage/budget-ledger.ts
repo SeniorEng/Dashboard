@@ -111,7 +111,8 @@ export interface BudgetLedgerStorage {
   
   getBudgetTypeSettings(customerId: number): Promise<CustomerBudgetTypeSetting[]>;
   upsertBudgetTypeSettings(customerId: number, settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null; initialBalanceCents?: number | null; initialBalanceMonth?: string | null }>): Promise<CustomerBudgetTypeSetting[]>;
-  upsertInitialBalanceAllocation(params: { customerId: number; budgetType: string; year: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string }, userId?: number): Promise<void>;
+  upsertInitialBalanceAllocation(params: { customerId: number; budgetType: string; year: number; month: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string }, userId?: number): Promise<void>;
+  getInitialBalanceAllocations(customerId: number, budgetType: string): Promise<BudgetAllocation[]>;
   deleteInitialBalanceAllocations(customerId: number, budgetType: string): Promise<void>;
   
   processExpiredCarryover(customerId: number): Promise<BudgetTransaction[]>;
@@ -473,7 +474,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
   }
 
   async upsertInitialBalanceAllocation(
-    params: { customerId: number; budgetType: string; year: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string },
+    params: { customerId: number; budgetType: string; year: number; month: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string },
     userId?: number
   ): Promise<void> {
     const existing = await db.select({ id: budgetAllocations.id })
@@ -482,14 +483,14 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         eq(budgetAllocations.customerId, params.customerId),
         eq(budgetAllocations.budgetType, params.budgetType),
         eq(budgetAllocations.source, "initial_balance"),
-        isNull(budgetAllocations.month),
+        eq(budgetAllocations.year, params.year),
+        eq(budgetAllocations.month, params.month),
       ))
       .limit(1);
 
     if (existing.length > 0) {
       await db.update(budgetAllocations)
         .set({
-          year: params.year,
           amountCents: params.amountCents,
           validFrom: params.validFrom,
           expiresAt: params.expiresAt,
@@ -502,7 +503,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           customerId: params.customerId,
           budgetType: params.budgetType,
           year: params.year,
-          month: null,
+          month: params.month,
           amountCents: params.amountCents,
           source: "initial_balance",
           validFrom: params.validFrom,
@@ -511,6 +512,17 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           createdByUserId: userId,
         });
     }
+  }
+
+  async getInitialBalanceAllocations(customerId: number, budgetType: string): Promise<BudgetAllocation[]> {
+    return db.select()
+      .from(budgetAllocations)
+      .where(and(
+        eq(budgetAllocations.customerId, customerId),
+        eq(budgetAllocations.budgetType, budgetType),
+        eq(budgetAllocations.source, "initial_balance"),
+      ))
+      .orderBy(desc(budgetAllocations.validFrom));
   }
 
   async deleteInitialBalanceAllocations(customerId: number, budgetType: string): Promise<void> {

@@ -161,12 +161,6 @@ export function CustomerOverviewTab({ customer }: CustomerOverviewTabProps) {
               <p className="text-sm text-gray-500">Vertragsbeginn</p>
               <p className="font-medium">{formatDateForDisplay(customer.currentContract.contractStart)}</p>
             </div>
-            {customer.currentContract.vereinbarteLeistungen && (
-              <div>
-                <p className="text-sm text-gray-500">Vereinbarte Leistungen</p>
-                <p className="text-gray-700 whitespace-pre-wrap">{customer.currentContract.vereinbarteLeistungen}</p>
-              </div>
-            )}
             <div>
               <p className="text-sm text-gray-500">Status</p>
               <Badge className={customer.currentContract.status === "active" ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-50 text-gray-700 border-gray-200"}>

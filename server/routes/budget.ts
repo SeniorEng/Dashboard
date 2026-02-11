@@ -273,6 +273,21 @@ router.get("/:customerId/type-settings", async (req: Request, res: Response) => 
   }
 });
 
+router.get("/:customerId/initial-balances/:budgetType", async (req: Request, res: Response) => {
+  try {
+    const customerId = parseInt(req.params.customerId);
+    const budgetType = req.params.budgetType;
+    if (isNaN(customerId)) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
+      return;
+    }
+    const allocations = await budgetLedgerStorage.getInitialBalanceAllocations(customerId, budgetType);
+    res.json(allocations);
+  } catch (error) {
+    handleRouteError(res, error, "Startwert-Historie konnte nicht geladen werden");
+  }
+});
+
 const bulkBudgetTypeSettingsSchema = z.object({
   settings: z.array(z.object({
     budgetType: z.enum(["entlastungsbetrag_45b", "umwandlung_45a", "ersatzpflege_39_42a"]),
@@ -312,6 +327,7 @@ router.put("/:customerId/type-settings", async (req: Request, res: Response) => 
       if (s.initialBalanceCents != null && s.initialBalanceCents > 0 && s.initialBalanceMonth) {
         const [yearStr, monthStr] = s.initialBalanceMonth.split("-");
         const year = parseInt(yearStr);
+        const month = parseInt(monthStr);
         const validFrom = `${s.initialBalanceMonth}-01`;
         const expiresAt = s.budgetType === "ersatzpflege_39_42a" ? `${year}-12-31` : null;
 
@@ -319,13 +335,12 @@ router.put("/:customerId/type-settings", async (req: Request, res: Response) => 
           customerId,
           budgetType: s.budgetType,
           year,
+          month,
           amountCents: s.initialBalanceCents,
           validFrom,
           expiresAt,
           notes: `Startwert ab ${monthStr}/${yearStr}`,
         }, userId);
-      } else {
-        await budgetLedgerStorage.deleteInitialBalanceAllocations(customerId, s.budgetType);
       }
     }
 

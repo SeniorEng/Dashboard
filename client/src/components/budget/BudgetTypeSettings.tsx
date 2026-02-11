@@ -4,10 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { ArrowUp, ArrowDown, Save } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { ArrowUp, ArrowDown, Save, Plus, History, ChevronDown, ChevronUp } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { BUDGET_TYPE_LABELS, type BudgetType, BUDGET_45B_MAX_MONTHLY_CENTS, BUDGET_39_42A_MAX_YEARLY_CENTS, BUDGET_45A_MAX_BY_PFLEGEGRAD } from "@shared/domain/budgets";
 import { api, unwrapResult } from "@/lib/api/client";
+import { formatCurrency } from "@shared/utils/format";
 
 interface BudgetTypeSetting {
   id: number | null;
@@ -19,6 +21,14 @@ interface BudgetTypeSetting {
   yearlyLimitCents: number | null;
   initialBalanceCents: number | null;
   initialBalanceMonth: string | null;
+}
+
+interface InitialBalanceAllocation {
+  id: number;
+  amountCents: number;
+  validFrom: string;
+  notes: string | null;
+  createdAt: string;
 }
 
 interface BudgetTypeSettingsProps {
@@ -48,11 +58,20 @@ function getCurrentYearMonth(): string {
   return `${year}-${month}`;
 }
 
+function formatMonthYear(dateStr: string): string {
+  const parts = dateStr.split("-");
+  if (parts.length < 2) return dateStr;
+  const monthLabel = MONTH_OPTIONS.find(m => m.value === parts[1])?.label || parts[1];
+  return `${monthLabel} ${parts[0]}`;
+}
+
 export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSettingsProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [settings, setSettings] = useState<BudgetTypeSetting[]>([]);
   const [hasChanges, setHasChanges] = useState(false);
+  const [expandedHistory, setExpandedHistory] = useState<Record<string, boolean>>({});
+  const [newBalances, setNewBalances] = useState<Record<string, { amount: string; month: string }>>({});
 
   const { data, isLoading } = useQuery<BudgetTypeSetting[]>({
     queryKey: ["budget-type-settings", customerId],
@@ -75,22 +94,30 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
 
   const saveMutation = useMutation({
     mutationFn: async (newSettings: BudgetTypeSetting[]) => {
-      return unwrapResult(await api.put(`/budget/${customerId}/type-settings`, {
-        settings: newSettings.map(s => ({
+      const settingsPayload = newSettings.map(s => {
+        const newBal = newBalances[s.budgetType];
+        const hasNewBalance = newBal && newBal.amount && parseFloat(newBal.amount) > 0;
+        return {
           budgetType: s.budgetType,
           enabled: s.enabled,
           priority: s.priority,
           monthlyLimitCents: s.monthlyLimitCents,
           yearlyLimitCents: s.yearlyLimitCents,
-          initialBalanceCents: s.initialBalanceCents,
-          initialBalanceMonth: s.initialBalanceMonth,
-        })),
+          initialBalanceCents: hasNewBalance ? Math.round(parseFloat(newBal.amount) * 100) : null,
+          initialBalanceMonth: hasNewBalance ? newBal.month : null,
+        };
+      });
+      return unwrapResult(await api.put(`/budget/${customerId}/type-settings`, {
+        settings: settingsPayload,
       }));
     },
     onSuccess: () => {
       toast({ title: "Budget-Einstellungen gespeichert" });
       queryClient.invalidateQueries({ queryKey: ["budget-type-settings", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["initial-balances", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["budget-summary", customerId] });
       setHasChanges(false);
+      setNewBalances({});
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
@@ -118,27 +145,23 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
     setHasChanges(true);
   };
 
-  const updateField = (index: number, field: keyof BudgetTypeSetting, value: any) => {
-    const newSettings = [...settings];
-    newSettings[index] = { ...newSettings[index], [field]: value };
-    setSettings(newSettings);
-    setHasChanges(true);
-  };
-
-  const updateCentsField = (index: number, field: "monthlyLimitCents" | "yearlyLimitCents" | "initialBalanceCents", value: string) => {
+  const updateCentsField = (index: number, field: "monthlyLimitCents" | "yearlyLimitCents", value: string) => {
     const parsed = parseFloat(value);
     const cents = value === "" ? null : (isNaN(parsed) ? null : Math.round(parsed * 100));
     const newSettings = [...settings];
     newSettings[index] = { ...newSettings[index], [field]: cents };
-    if (field === "initialBalanceCents") {
-      if (cents !== null && cents > 0 && !newSettings[index].initialBalanceMonth) {
-        newSettings[index] = { ...newSettings[index], initialBalanceMonth: getCurrentYearMonth() };
-      }
-      if (cents === null || cents === 0) {
-        newSettings[index] = { ...newSettings[index], initialBalanceMonth: null };
-      }
-    }
     setSettings(newSettings);
+    setHasChanges(true);
+  };
+
+  const updateNewBalance = (budgetType: string, field: "amount" | "month", value: string) => {
+    setNewBalances(prev => ({
+      ...prev,
+      [budgetType]: {
+        amount: field === "amount" ? value : (prev[budgetType]?.amount || ""),
+        month: field === "month" ? value : (prev[budgetType]?.month || getCurrentYearMonth()),
+      },
+    }));
     setHasChanges(true);
   };
 
@@ -165,6 +188,10 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
     return "Voller Betrag";
   };
 
+  const toggleHistory = (budgetType: string) => {
+    setExpandedHistory(prev => ({ ...prev, [budgetType]: !prev[budgetType] }));
+  };
+
   if (isLoading) {
     return <div className="text-sm text-gray-500">Laden...</div>;
   }
@@ -178,6 +205,8 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
       <div className="space-y-3">
         {settings.map((setting, index) => {
           const label = BUDGET_TYPE_LABELS[setting.budgetType as BudgetType] || setting.budgetType;
+          const newBal = newBalances[setting.budgetType];
+          const hasNewBalanceInput = newBal && newBal.amount && parseFloat(newBal.amount) > 0;
 
           return (
             <div
@@ -255,50 +284,15 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
                       )}
 
                       <div className="border-t border-gray-100 pt-3">
-                        <Label className="text-xs text-gray-500">Verfügbarer Startwert (€)</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="Kein Startwert"
-                          value={centsToEuro(setting.initialBalanceCents)}
-                          onChange={(e) => updateCentsField(index, "initialBalanceCents", e.target.value)}
-                          className="h-8 mt-1 text-base"
-                          data-testid={`input-initial-balance-${setting.budgetType}`}
+                        <InitialBalanceSection
+                          customerId={customerId}
+                          budgetType={setting.budgetType}
+                          newBal={newBal}
+                          hasNewBalanceInput={!!hasNewBalanceInput}
+                          onUpdateBalance={updateNewBalance}
+                          expanded={!!expandedHistory[setting.budgetType]}
+                          onToggleHistory={() => toggleHistory(setting.budgetType)}
                         />
-                        {setting.initialBalanceCents !== null && setting.initialBalanceCents > 0 && (
-                          <div className="mt-2">
-                            <Label className="text-xs text-gray-500">Gültig ab</Label>
-                            <div className="flex gap-2 mt-1">
-                              <select
-                                value={setting.initialBalanceMonth?.split("-")[1] || String(new Date().getMonth() + 1).padStart(2, "0")}
-                                onChange={(e) => {
-                                  const year = setting.initialBalanceMonth?.split("-")[0] || String(new Date().getFullYear());
-                                  updateField(index, "initialBalanceMonth", `${year}-${e.target.value}`);
-                                }}
-                                className="h-8 text-sm border border-gray-200 rounded-md px-2 flex-1"
-                                data-testid={`select-balance-month-${setting.budgetType}`}
-                              >
-                                {MONTH_OPTIONS.map(m => (
-                                  <option key={m.value} value={m.value}>{m.label}</option>
-                                ))}
-                              </select>
-                              <select
-                                value={setting.initialBalanceMonth?.split("-")[0] || String(new Date().getFullYear())}
-                                onChange={(e) => {
-                                  const month = setting.initialBalanceMonth?.split("-")[1] || String(new Date().getMonth() + 1).padStart(2, "0");
-                                  updateField(index, "initialBalanceMonth", `${e.target.value}-${month}`);
-                                }}
-                                className="h-8 text-sm border border-gray-200 rounded-md px-2 w-20"
-                                data-testid={`select-balance-year-${setting.budgetType}`}
-                              >
-                                {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map(y => (
-                                  <option key={y} value={String(y)}>{y}</option>
-                                ))}
-                              </select>
-                            </div>
-                          </div>
-                        )}
                       </div>
                     </div>
                   )}
@@ -320,6 +314,131 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
           {saveMutation.isPending ? "Wird gespeichert..." : "Einstellungen speichern"}
         </Button>
       )}
+    </div>
+  );
+}
+
+interface InitialBalanceSectionProps {
+  customerId: number;
+  budgetType: string;
+  newBal: { amount: string; month: string } | undefined;
+  hasNewBalanceInput: boolean;
+  onUpdateBalance: (budgetType: string, field: "amount" | "month", value: string) => void;
+  expanded: boolean;
+  onToggleHistory: () => void;
+}
+
+function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceInput, onUpdateBalance, expanded, onToggleHistory }: InitialBalanceSectionProps) {
+  const { data: allocations, isLoading } = useQuery<InitialBalanceAllocation[]>({
+    queryKey: ["initial-balances", customerId, budgetType],
+    queryFn: async () => {
+      const response = await fetch(`/api/budget/${customerId}/initial-balances/${budgetType}`, {
+        credentials: "include",
+      });
+      if (!response.ok) throw new Error("Laden fehlgeschlagen");
+      return response.json();
+    },
+    staleTime: 30000,
+  });
+
+  const latestAllocation = allocations?.[0];
+  const hasHistory = allocations && allocations.length > 0;
+
+  return (
+    <div>
+      {latestAllocation && (
+        <div className="flex items-center justify-between mb-3 py-1.5 px-2 rounded bg-teal-50 text-sm" data-testid={`text-current-balance-${budgetType}`}>
+          <span className="text-gray-600">
+            Aktueller Startwert (ab {formatMonthYear(latestAllocation.validFrom)})
+          </span>
+          <span className="font-semibold text-teal-700">{formatCurrency(latestAllocation.amountCents)}</span>
+        </div>
+      )}
+
+      <Label className="text-xs text-gray-500">
+        {hasHistory ? "Neuen Startwert hinzufügen" : "Startwert festlegen"}
+      </Label>
+      <div className="flex gap-2 items-end mt-1">
+        <div className="flex-1">
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            placeholder="Betrag in €"
+            value={newBal?.amount || ""}
+            onChange={(e) => onUpdateBalance(budgetType, "amount", e.target.value)}
+            className="h-8 text-base"
+            data-testid={`input-initial-balance-${budgetType}`}
+          />
+        </div>
+        <div>
+          <select
+            value={(newBal?.month || getCurrentYearMonth()).split("-")[1]}
+            onChange={(e) => {
+              const year = (newBal?.month || getCurrentYearMonth()).split("-")[0];
+              onUpdateBalance(budgetType, "month", `${year}-${e.target.value}`);
+            }}
+            className="h-8 text-sm border border-gray-200 rounded-md px-2"
+            data-testid={`select-balance-month-${budgetType}`}
+          >
+            {MONTH_OPTIONS.map(m => (
+              <option key={m.value} value={m.value}>{m.label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <select
+            value={(newBal?.month || getCurrentYearMonth()).split("-")[0]}
+            onChange={(e) => {
+              const month = (newBal?.month || getCurrentYearMonth()).split("-")[1];
+              onUpdateBalance(budgetType, "month", `${e.target.value}-${month}`);
+            }}
+            className="h-8 text-sm border border-gray-200 rounded-md px-2 w-20"
+            data-testid={`select-balance-year-${budgetType}`}
+          >
+            {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map(y => (
+              <option key={y} value={String(y)}>{y}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {hasNewBalanceInput && (
+        <p className="text-xs text-teal-600 mt-1">
+          <Plus className="h-3 w-3 inline" /> {formatCurrency(Math.round(parseFloat(newBal!.amount) * 100))} wird als neuer Startwert ab {formatMonthYear(newBal!.month || getCurrentYearMonth())} gespeichert
+        </p>
+      )}
+
+      {hasHistory && allocations.length > 1 && (
+        <button
+          type="button"
+          onClick={onToggleHistory}
+          className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 mt-2"
+          data-testid={`btn-toggle-history-${budgetType}`}
+        >
+          <History className="h-3 w-3" />
+          {allocations.length - 1} weitere Einträge
+          {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        </button>
+      )}
+
+      {expanded && hasHistory && allocations.length > 1 && (
+        <div className="mt-2 space-y-1" data-testid={`initial-balance-history-${budgetType}`}>
+          {allocations.slice(1).map((alloc) => (
+            <div key={alloc.id} className="flex items-center justify-between py-1.5 px-2 rounded bg-gray-50 text-xs">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                  ab {formatMonthYear(alloc.validFrom)}
+                </Badge>
+                {alloc.notes && <span className="text-gray-400">{alloc.notes}</span>}
+              </div>
+              <span className="font-medium text-gray-700">{formatCurrency(alloc.amountCents)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {isLoading && <p className="text-xs text-gray-400 mt-2">Laden...</p>}
     </div>
   );
 }
