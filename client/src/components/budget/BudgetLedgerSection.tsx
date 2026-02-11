@@ -6,7 +6,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Plus, Wallet, History, AlertTriangle, Calendar, Settings, Euro } from "lucide-react";
@@ -169,7 +168,9 @@ export function BudgetLedgerSection({ customerId, customerName, initialSummary, 
                 <p className="text-2xl font-bold text-green-700 mt-1" data-testid="text-budget-available">
                   {formatCurrency(summary!.availableCents)}
                 </p>
-                <Progress value={100 - usagePercent} className="mt-2 h-2" />
+                <div className="mt-2 h-2 w-full rounded-full bg-gray-200 overflow-hidden" role="progressbar" aria-valuenow={100 - usagePercent} aria-valuemin={0} aria-valuemax={100} data-testid="progress-budget-available">
+                  <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.max(0, Math.min(100, 100 - usagePercent))}%` }} />
+                </div>
                 <p className="text-xs text-gray-500 mt-1">
                   {usagePercent.toFixed(0)}% verbraucht
                 </p>
@@ -250,7 +251,9 @@ export function BudgetLedgerSection({ customerId, customerName, initialSummary, 
                       </Dialog>
                     </div>
                   </div>
-                  <Progress value={monthlyUsagePercent} className="h-2" />
+                  <div className="h-2 w-full rounded-full bg-gray-200 overflow-hidden" role="progressbar" aria-valuenow={monthlyUsagePercent} aria-valuemin={0} aria-valuemax={100} data-testid="progress-budget-monthly">
+                    <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.max(0, Math.min(100, monthlyUsagePercent))}%` }} />
+                  </div>
                   <div className="flex justify-between text-xs text-gray-500 mt-1">
                     <span>{formatCurrency(summary!.currentMonthUsedCents)} diesen Monat</span>
                     <span>Limit: {formatCurrency(summary!.monthlyLimitCents)}</span>

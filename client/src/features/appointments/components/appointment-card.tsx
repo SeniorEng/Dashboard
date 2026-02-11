@@ -36,7 +36,7 @@ function getStatusIcon(status: string) {
     case "completed":
       return <CheckCircle2 className="w-5 h-5 text-green-500" />;
     case "in-progress":
-      return <Clock className="w-5 h-5 text-blue-500 animate-pulse" />;
+      return <Clock className="w-5 h-5 text-blue-500" />;
     case "documenting":
       return <FileText className="w-5 h-5 text-orange-500" />;
     default:

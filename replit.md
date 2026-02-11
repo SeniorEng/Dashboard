@@ -18,7 +18,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Date/Time Handling**: All times are implicitly "German local time" with no UTC conversion or timezone logic. Strict conventions and central utilities (`@shared/utils/datetime`) must be used for all date/time operations.
 - **Components**: `DatePicker` for all date fields, `SearchableSelect` for long selection lists.
 - **API Calls**: All state-changing API requests use a central API client for CSRF protection.
-- **Phone Number Handling**: Uses `libphonenumber-js` for validating, formatting, and storing German phone numbers in E.164 format via `@shared/utils/phone.ts`.
+- **Phone Number Handling**: Uses `libphonenumber-js/min` for validating, formatting, and storing German phone numbers in E.164 format via `@shared/utils/phone.ts`.
 - **Type Organization**: Hierarchical type structure with `@shared/schema.ts`, `@shared/domain/*`, `@shared/utils/*`, and `@shared/types.ts`.
 
 ### Backend
@@ -56,11 +56,12 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 
 ## Performance
 - **Performance-Guide:** Detaillierte Analyse und Optimierungsempfehlungen in `PERFORMANCE_GUIDE.md`
-- **Offene Haupt-Themen:** Bundle-Splitting (559 kB Haupt-Chunk), ungenutzte UI-Komponenten (recharts etc.), libphonenumber-js Optimierung, HTTP Cache-Headers, Prefetching
-- **Bereits optimiert:** DB Connection Pool (WebSocket), Auth-Scope, N+1 Fixes, Session-JOIN, Indexes, Cache-GC, Route-Level Code Splitting, staleTime-Strategie
+- **Offene Haupt-Themen:** Bundle-Splitting (559 kB Haupt-Chunk, vite.config.ts geschützt), Navigation-Prefetching, SELECT-Feld-Optimierung
+- **Bereits optimiert:** DB Connection Pool (WebSocket), Auth-Scope, N+1 Fixes, Session-JOIN, Indexes, Cache-GC, Route-Level Code Splitting, staleTime-Strategie, HTTP Cache-Control Headers, libphonenumber-js/min, 14 ungenutzte UI-Komponenten + 109 npm-Pakete entfernt
+- **HTTP Cache-Headers**: Middleware in `server/middleware/cache-headers.ts` (stable: 5min, semi-stable: 60s, volatile: must-revalidate)
 
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)
 - **Frontend Libraries**: React, TypeScript, Vite, Wouter, `shadcn/ui`, Radix UI, Tailwind CSS v4, TanStack Query, Zod.
 - **Backend Libraries**: Express.js, TypeScript, Zod, Drizzle ORM.
-- **Utilities**: `libphonenumber-js`.
+- **Utilities**: `libphonenumber-js/min`.

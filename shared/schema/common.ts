@@ -1,6 +1,6 @@
 import { timestamp as pgTimestamp } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import { isValidPhoneNumber, parsePhoneNumber } from "libphonenumber-js";
+import { isValidPhoneNumber, parsePhoneNumber } from "libphonenumber-js/min";
 
 export const timestamp = (name: string) => pgTimestamp(name, { withTimezone: true });
 

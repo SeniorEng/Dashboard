@@ -38,15 +38,6 @@
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
   
-  --color-sidebar: hsl(var(--sidebar));
-  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
-  --color-sidebar-primary: hsl(var(--sidebar-primary));
-  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
-  --color-sidebar-accent: hsl(var(--sidebar-accent));
-  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
-  --color-sidebar-border: hsl(var(--sidebar-border));
-  --color-sidebar-ring: hsl(var(--sidebar-ring));
-  
   --radius: 0.5rem;
   --font-sans: 'Outfit', sans-serif;
 }
@@ -89,15 +80,6 @@
 
   --radius: 0.75rem;
 
-  /* Sidebar */
-  --sidebar: 0 0% 100%;
-  --sidebar-foreground: 215 25% 27%;
-  --sidebar-primary: 170 40% 40%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 35 30% 90%;
-  --sidebar-accent-foreground: 35 40% 30%;
-  --sidebar-border: 214 10% 90%;
-  --sidebar-ring: 170 40% 40%;
 }
 
 .dark {
@@ -130,14 +112,6 @@
   --input: 215 25% 30%;
   --ring: 170 40% 50%;
   
-  --sidebar: 215 25% 18%;
-  --sidebar-foreground: 210 20% 98%;
-  --sidebar-primary: 170 40% 50%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 215 25% 30%;
-  --sidebar-accent-foreground: 210 20% 98%;
-  --sidebar-border: 215 25% 30%;
-  --sidebar-ring: 170 40% 50%;
 }
 
 @layer base {

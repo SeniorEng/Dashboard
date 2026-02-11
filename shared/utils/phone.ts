@@ -4,7 +4,7 @@ import {
   formatIncompletePhoneNumber,
   CountryCode,
   PhoneNumber,
-} from "libphonenumber-js";
+} from "libphonenumber-js/min";
 
 export type PhoneValidationResult =
   | { valid: true; normalized: string; formatted: string; type: "mobile" | "landline" | "unknown" }

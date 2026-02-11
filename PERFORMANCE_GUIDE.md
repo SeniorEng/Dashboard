@@ -1,6 +1,6 @@
 # SeniorenEngel / CareConnect – Performance-Analyse & Optimierungsguide
 
-**Zuletzt aktualisiert:** 2026-02-11
+**Zuletzt aktualisiert:** 2026-02-11 (Phase 1 Implementierung)
 **Zweck:** Dokumentation für den Performance-Agenten – alle Findings, bereits umgesetzte Optimierungen, offene Maßnahmen und Best Practices.
 
 ---
@@ -41,6 +41,16 @@
 | React.memo auf AppointmentCard | ✅ | Teuerste Listendarstellung memoisiert |
 | useMemo/useCallback | ✅ | ~100 Nutzungen in Pages + Components |
 | Debounce auf Admin-Kundensuche | ✅ | Verhindert Overload bei Tippen |
+
+### 1.5 Cleanup-Maßnahmen (ERLEDIGT - 2026-02-11)
+| Maßnahme | Details | Impact |
+|----------|---------|--------|
+| 14 ungenutzte UI-Komponenten gelöscht | chart, carousel, sidebar, navigation-menu, menubar, context-menu, hover-card, resizable, input-otp, avatar, aspect-ratio, scroll-area, progress, sonner | Bundle-Reduktion, sauberere Codebasis |
+| 109 ungenutzte npm-Pakete entfernt | recharts, embla-carousel-react, framer-motion, passport, passport-local, connect-pg-simple, memorystore, express-session, next-themes, supertest, + Radix-Pakete + @types | Schnellerer Install, kleineres node_modules |
+| libphonenumber-js → /min | Alle Imports auf `libphonenumber-js/min` umgestellt | Weniger Metadata im Bundle |
+| HTTP Cache-Control Headers | Middleware für GET-Requests: stable 5min, semi-stable 60s, volatile must-revalidate | Schnellere Navigation, weniger Server-Load |
+| Sidebar CSS-Variablen entfernt | 16 ungenutzte CSS-Custom-Properties aus index.css | Sauberere CSS |
+| animate-pulse entfernt | In-progress Appointment-Icon: statisch statt dauerhaft animiert | Akku-Schoner auf Mobilgeräten |
 
 ---
 
@@ -313,27 +323,28 @@ const prefetchCustomers = () => {
 ## 4. EMPFOHLENE REIHENFOLGE DER UMSETZUNG
 
 ### Phase 1: Quick Wins (Niedrig-Aufwand, Hoher Impact)
-1. **Manual Chunks in vite.config.ts** → Bundle-Split, 559 kB → ~200 kB
-2. **Ungenutzte UI-Komponenten löschen** (13 Dateien) → recharts etc. entfernen
-3. **Ungenutzte npm-Pakete entfernen** (passport, framer-motion, memorystore, etc.)
-4. **libphonenumber-js/min verwenden** → 60-120 kB Ersparnis
+1. ⚠️ **Manual Chunks in vite.config.ts** → BLOCKIERT (geschützte Config-Datei, muss manuell umgesetzt werden)
+2. ✅ **Ungenutzte UI-Komponenten gelöscht** (14 Dateien inkl. sonner.tsx) → recharts, embla-carousel, etc. entfernt
+3. ✅ **Ungenutzte npm-Pakete entfernt** (109 Pakete: passport, framer-motion, memorystore, express-session, recharts, etc.)
+4. ✅ **libphonenumber-js/min** statt libphonenumber-js in allen Imports
+5. ✅ **HTTP Cache-Control Headers** auf allen GET-Responses (stable: 5min, semi-stable: 60s, volatile: must-revalidate)
+6. ✅ **animate-pulse** von dauerhaft laufenden in-progress Icons entfernt (Akku-Schoner)
 
-### Phase 2: Mittlerer Aufwand, Guter Impact
-5. **HTTP Cache-Control Headers** auf API-Responses
-6. **Navigation-Prefetching** für häufige Seitenwechsel
-7. **Fehlende DB-Indexes** prüfen: `appointments(date)`, `appointments(customer_id, date)`
+### Phase 2: Mittlerer Aufwand, Guter Impact (OFFEN)
+7. **Navigation-Prefetching** für häufige Seitenwechsel
+8. **Fehlende DB-Indexes** prüfen: `appointments(date)`, `appointments(customer_id, date)`
 
-### Phase 3: Architektur-Verbesserungen
-8. **SELECT * durch explizite Felder ersetzen** in Listen-Queries
-9. **Direkte DB-Zugriffe in Routes** in Storage Layer verschieben
-10. **Skeleton Loaders** statt Spinner für bessere UX
-11. **Service Worker** für Offline-Unterstützung (Pfleger im Feld)
+### Phase 3: Architektur-Verbesserungen (OFFEN)
+9. **SELECT * durch explizite Felder ersetzen** in Listen-Queries
+10. **Direkte DB-Zugriffe in Routes** in Storage Layer verschieben
+11. **Skeleton Loaders** statt Spinner für bessere UX
+12. **Service Worker** für Offline-Unterstützung (Pfleger im Feld)
 
-### Phase 4: Monitoring & Langfrist
-12. **Bundle Visualizer** einrichten für regelmäßige Analyse
-13. **Rate Limiting** für API-Schutz
-14. **Structured Logging** (Pino) für Prod
-15. **List Virtualization** wenn Datenmengen wachsen
+### Phase 4: Monitoring & Langfrist (OFFEN)
+13. **Bundle Visualizer** einrichten für regelmäßige Analyse
+14. **Rate Limiting** für API-Schutz
+15. **Structured Logging** (Pino) für Prod
+16. **List Virtualization** wenn Datenmengen wachsen
 
 ---
 
