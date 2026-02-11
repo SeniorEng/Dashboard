@@ -126,15 +126,6 @@ export function doTimesOverlap(
   return s1 < e2 && s2 < e1;
 }
 
-/** @deprecated Use appointment.durationPromised or calculateTotalDurationFromServices() instead */
-export function calculateTotalDuration(
-  hauswirtschaftDauer: number | null | undefined,
-  alltagsbegleitungDauer: number | null | undefined,
-  erstberatungDauer: number | null | undefined = 0
-): number {
-  return (hauswirtschaftDauer || 0) + (alltagsbegleitungDauer || 0) + (erstberatungDauer || 0);
-}
-
 export function calculateTotalDurationFromServices(
   services: Array<{ plannedDurationMinutes: number; actualDurationMinutes?: number | null }>
 ): number {
@@ -166,55 +157,6 @@ export interface ServiceInfo {
 
 export interface CardServiceInfo extends ServiceInfo {
   borderClass: string;
-}
-
-/** @deprecated Use getServiceInfoFromServices() with junction table data instead */
-export function getServiceInfo(
-  appointmentType: string,
-  hauswirtschaftDauer: number | null | undefined,
-  alltagsbegleitungDauer: number | null | undefined,
-  erstberatungDauer?: number | null | undefined,
-  legacyServiceType?: string | null
-): ServiceInfo {
-  if (appointmentType === "Erstberatung") {
-    return {
-      hasHauswirtschaft: false,
-      hasAlltagsbegleitung: false,
-      hasErstberatung: !!erstberatungDauer,
-      hasBoth: false,
-      label: "Erstberatung",
-      primaryType: "Erstberatung",
-    };
-  }
-
-  const hasHauswirtschaft = !!hauswirtschaftDauer;
-  const hasAlltagsbegleitung = !!alltagsbegleitungDauer;
-  const hasBoth = hasHauswirtschaft && hasAlltagsbegleitung;
-
-  let label: string;
-  let primaryType: ServiceType | null = null;
-
-  if (hasBoth) {
-    label = "Hauswirtschaft & Alltagsbegleitung";
-    primaryType = "Hauswirtschaft";
-  } else if (hasHauswirtschaft) {
-    label = "Hauswirtschaft";
-    primaryType = "Hauswirtschaft";
-  } else if (hasAlltagsbegleitung) {
-    label = "Alltagsbegleitung";
-    primaryType = "Alltagsbegleitung";
-  } else if (legacyServiceType === "Hauswirtschaft") {
-    label = "Hauswirtschaft";
-    primaryType = "Hauswirtschaft";
-  } else if (legacyServiceType === "Alltagsbegleitung") {
-    label = "Alltagsbegleitung";
-    primaryType = "Alltagsbegleitung";
-  } else {
-    label = "Kundentermin";
-    primaryType = null;
-  }
-
-  return { hasHauswirtschaft, hasAlltagsbegleitung, hasErstberatung: false, hasBoth, label, primaryType };
 }
 
 export function isValidStatusTransition(
@@ -334,32 +276,6 @@ export function getServiceInfoFromServices(
   }
 
   return { hasHauswirtschaft, hasAlltagsbegleitung, hasErstberatung: false, hasBoth, label, primaryType };
-}
-
-/** @deprecated Use getServiceInfoFromServices() with junction table data instead */
-export function getCardServiceInfo(
-  appointmentType: string,
-  hauswirtschaftDauer: number | null | undefined,
-  alltagsbegleitungDauer: number | null | undefined,
-  erstberatungDauer?: number | null | undefined,
-  legacyServiceType?: string | null
-): CardServiceInfo {
-  const info = getServiceInfo(appointmentType, hauswirtschaftDauer, alltagsbegleitungDauer, erstberatungDauer, legacyServiceType);
-  
-  let borderClass: string;
-  if (appointmentType === "Erstberatung") {
-    borderClass = "bg-purple-500";
-  } else if (info.hasBoth) {
-    borderClass = "";
-  } else if (info.primaryType === "Hauswirtschaft") {
-    borderClass = "bg-amber-500";
-  } else if (info.primaryType === "Alltagsbegleitung") {
-    borderClass = "bg-sky-500";
-  } else {
-    borderClass = "bg-teal-500";
-  }
-  
-  return { ...info, borderClass };
 }
 
 export function getCardServiceInfoFromAppointment(appointment: {
@@ -482,89 +398,6 @@ export function suggestTravelOrigin(
     suggestedOrigin: "home",
     previousAppointment: null,
   };
-}
-
-export interface ServiceDocumentation {
-  serviceType: ServiceType;
-  plannedDuration: number;
-  actualDuration: number | null;
-  details: string | null;
-}
-
-/** @deprecated Use junction table data from GET /appointments/:id/services instead */
-export function getServicesToDocument(appointment: Appointment): ServiceDocumentation[] {
-  const services: ServiceDocumentation[] = [];
-  
-  if (appointment.hauswirtschaftDauer) {
-    services.push({
-      serviceType: "Hauswirtschaft",
-      plannedDuration: appointment.hauswirtschaftDauer,
-      actualDuration: appointment.hauswirtschaftActualDauer,
-      details: appointment.hauswirtschaftDetails,
-    });
-  }
-  
-  if (appointment.alltagsbegleitungDauer) {
-    services.push({
-      serviceType: "Alltagsbegleitung",
-      plannedDuration: appointment.alltagsbegleitungDauer,
-      actualDuration: appointment.alltagsbegleitungActualDauer,
-      details: appointment.alltagsbegleitungDetails,
-    });
-  }
-  
-  if (appointment.erstberatungDauer) {
-    services.push({
-      serviceType: "Erstberatung",
-      plannedDuration: appointment.erstberatungDauer,
-      actualDuration: appointment.erstberatungActualDauer,
-      details: appointment.erstberatungDetails,
-    });
-  }
-  
-  return services;
-}
-
-/** @deprecated Use validateServiceDocumentationFromServices() with junction table data instead */
-export function validateServiceDocumentation(
-  _appointment: Appointment,
-  hauswirtschaftActualDauer: number | null | undefined,
-  hauswirtschaftDetails: string | null | undefined,
-  alltagsbegleitungActualDauer: number | null | undefined,
-  alltagsbegleitungDetails: string | null | undefined,
-  erstberatungActualDauer?: number | null | undefined,
-  erstberatungDetails?: string | null | undefined
-): { valid: boolean; errors: string[] } {
-  const errors: string[] = [];
-  
-  const hasHauswirtschaft = hauswirtschaftActualDauer && hauswirtschaftActualDauer > 0;
-  const hasAlltagsbegleitung = alltagsbegleitungActualDauer && alltagsbegleitungActualDauer > 0;
-  const hasErstberatung = erstberatungActualDauer && erstberatungActualDauer > 0;
-  
-  if (!hasHauswirtschaft && !hasAlltagsbegleitung && !hasErstberatung) {
-    errors.push("Mindestens ein Service muss dokumentiert werden");
-    return { valid: false, errors };
-  }
-  
-  if (hasHauswirtschaft) {
-    if (hauswirtschaftDetails && hauswirtschaftDetails.length > 55) {
-      errors.push("Hauswirtschaft Details dürfen maximal 55 Zeichen haben");
-    }
-  }
-  
-  if (hasAlltagsbegleitung) {
-    if (alltagsbegleitungDetails && alltagsbegleitungDetails.length > 55) {
-      errors.push("Alltagsbegleitung Details dürfen maximal 55 Zeichen haben");
-    }
-  }
-  
-  if (hasErstberatung) {
-    if (erstberatungDetails && erstberatungDetails.length > 55) {
-      errors.push("Erstberatung Details dürfen maximal 55 Zeichen haben");
-    }
-  }
-  
-  return { valid: errors.length === 0, errors };
 }
 
 export function validateServiceDocumentationFromServices(

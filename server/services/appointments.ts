@@ -1,14 +1,12 @@
 import { storage, type IStorage } from "../storage";
 import type { Appointment, InsertAppointment, UpdateAppointment, InsertErstberatungCustomer } from "@shared/schema";
 import { timeToMinutes, addMinutesToTime, addMinutesToTimeHHMMSS, formatTimeHHMMSS } from "@shared/utils/datetime";
-import { validateServiceDocumentation, validateServiceDocumentationFromServices } from "@shared/domain/appointments";
+import { validateServiceDocumentationFromServices } from "@shared/domain/appointments";
 import { 
   doTimesOverlap, 
-  calculateTotalDuration,
   isValidStatusTransition,
   canModifyAppointment,
   canEditNotes,
-  getServiceTypeFromDurations,
   type AppointmentStatus
 } from "@shared/types";
 
@@ -41,19 +39,13 @@ export interface DocumentationServiceEntry {
 export interface DocumentationInput {
   performedByEmployeeId?: number | null;
   actualStart: string;
-  hauswirtschaftActualDauer?: number | null;
-  hauswirtschaftDetails?: string | null;
-  alltagsbegleitungActualDauer?: number | null;
-  alltagsbegleitungDetails?: string | null;
-  erstberatungActualDauer?: number | null;
-  erstberatungDetails?: string | null;
   travelOriginType: "home" | "appointment";
   travelFromAppointmentId?: number | null;
   travelKilometers: number;
   travelMinutes?: number | null;
   customerKilometers?: number | null;
   notes?: string | null;
-  services?: DocumentationServiceEntry[];
+  services: DocumentationServiceEntry[];
 }
 
 export interface DocumentationResult {
@@ -188,8 +180,6 @@ export class AppointmentService {
       updates.date !== undefined || 
       updates.scheduledStart !== undefined || 
       updates.scheduledEnd !== undefined || 
-      updates.hauswirtschaftDauer !== undefined || 
-      updates.alltagsbegleitungDauer !== undefined || 
       updates.durationPromised !== undefined || 
       updates.serviceType !== undefined;
     
@@ -297,22 +287,9 @@ export class AppointmentService {
     
     const scheduledEnd = addMinutesToTimeHHMMSS(input.scheduledStart, totalDuration);
     
-    const hauswirtschaftService = input.services.find(s => s.serviceCode === 'hauswirtschaft');
-    const alltagsbegleitungService = input.services.find(s => s.serviceCode === 'alltagsbegleitung');
-    const hauswirtschaftDauer = hauswirtschaftService?.durationMinutes ?? null;
-    const alltagsbegleitungDauer = alltagsbegleitungService?.durationMinutes ?? null;
-    
-    const serviceType = getServiceTypeFromDurations(
-      hauswirtschaftDauer,
-      alltagsbegleitungDauer
-    );
-    
     const appointmentData: InsertAppointment = {
       customerId: input.customerId,
       appointmentType: "Kundentermin",
-      serviceType,
-      hauswirtschaftDauer,
-      alltagsbegleitungDauer,
       date: input.date,
       scheduledStart: input.scheduledStart,
       scheduledEnd,
@@ -368,10 +345,6 @@ export class AppointmentService {
     
     const appointmentData: Omit<InsertAppointment, 'customerId'> = {
       appointmentType: "Erstberatung",
-      serviceType: null,
-      hauswirtschaftDauer: null,
-      alltagsbegleitungDauer: null,
-      erstberatungDauer: input.erstberatungDauer,
       date: input.date,
       scheduledStart: input.scheduledStart,
       scheduledEnd,
@@ -392,29 +365,14 @@ export class AppointmentService {
       return { valid: false, error: "ALREADY_COMPLETED", message: "Dieser Termin wurde bereits dokumentiert" };
     }
 
-    if (input.services && input.services.length > 0) {
-      const serviceValidation = validateServiceDocumentationFromServices(
-        input.services.map(s => ({
-          actualDurationMinutes: s.actualDurationMinutes,
-          details: s.details,
-        }))
-      );
-      if (!serviceValidation.valid) {
-        return { valid: false, error: "VALIDATION_ERROR", message: serviceValidation.errors.join(", ") };
-      }
-    } else {
-      const serviceValidation = validateServiceDocumentation(
-        appointment,
-        input.hauswirtschaftActualDauer,
-        input.hauswirtschaftDetails,
-        input.alltagsbegleitungActualDauer,
-        input.alltagsbegleitungDetails,
-        input.erstberatungActualDauer,
-        input.erstberatungDetails
-      );
-      if (!serviceValidation.valid) {
-        return { valid: false, error: "VALIDATION_ERROR", message: serviceValidation.errors.join(", ") };
-      }
+    const serviceValidation = validateServiceDocumentationFromServices(
+      input.services.map(s => ({
+        actualDurationMinutes: s.actualDurationMinutes,
+        details: s.details,
+      }))
+    );
+    if (!serviceValidation.valid) {
+      return { valid: false, error: "VALIDATION_ERROR", message: serviceValidation.errors.join(", ") };
     }
 
     return { valid: true };

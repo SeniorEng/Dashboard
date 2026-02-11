@@ -84,16 +84,10 @@ export default function ServiceRecordDetailPage() {
   }>>>({
     queryKey: ["/api/service-records", recordId, "appointment-services"],
     queryFn: async () => {
-      const result: Record<number, Array<any>> = {};
-      await Promise.all(
-        appointments.map(async (apt) => {
-          const res = await fetch(`/api/appointments/${apt.id}/services`);
-          if (res.ok) {
-            result[apt.id] = await res.json();
-          }
-        })
-      );
-      return result;
+      const ids = appointments.map(a => a.id).join(",");
+      const res = await fetch(`/api/appointments/batch-services?ids=${ids}`);
+      if (!res.ok) return {};
+      return res.json();
     },
     enabled: appointments.length > 0,
   });

@@ -14,20 +14,9 @@ export const appointments = pgTable("appointments", {
   id: serial("id").primaryKey(),
   customerId: integer("customer_id").notNull().references(() => customers.id),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
-  assignedEmployeeId: integer("assigned_employee_id").references(() => users.id), // Employee assigned to this appointment
-  performedByEmployeeId: integer("performed_by_employee_id").references(() => users.id), // Employee who actually performed the appointment (set during documentation)
-  appointmentType: text("appointment_type").notNull(), // "Erstberatung" | "Kundentermin"
-  // @deprecated — Use appointment_services junction table instead. Kept for backward compatibility.
-  hauswirtschaftDauer: integer("hauswirtschaft_dauer"),
-  alltagsbegleitungDauer: integer("alltagsbegleitung_dauer"),
-  erstberatungDauer: integer("erstberatung_dauer"),
-  hauswirtschaftActualDauer: integer("hauswirtschaft_actual_dauer"),
-  hauswirtschaftDetails: text("hauswirtschaft_details"),
-  alltagsbegleitungActualDauer: integer("alltagsbegleitung_actual_dauer"),
-  alltagsbegleitungDetails: text("alltagsbegleitung_details"),
-  erstberatungActualDauer: integer("erstberatung_actual_dauer"),
-  erstberatungDetails: text("erstberatung_details"),
-  // @deprecated — Derived from appointment_services. Kept for backward compatibility.
+  assignedEmployeeId: integer("assigned_employee_id").references(() => users.id),
+  performedByEmployeeId: integer("performed_by_employee_id").references(() => users.id),
+  appointmentType: text("appointment_type").notNull(),
   serviceType: text("service_type"),
   date: date("date").notNull(),
   // Scheduled times (planned appointment slot)
@@ -112,19 +101,6 @@ export const insertErstberatungSchema = z.object({
   assignedEmployeeId: z.number().nullable().optional(), // Admin can assign employee
 });
 
-/** @deprecated Use insertKundenterminSchema (with services array) or insertErstberatungSchema instead */
-export const insertAppointmentSchema = baseAppointmentSchema.superRefine((data, ctx) => {
-  if (data.appointmentType === "Kundentermin") {
-    if (!data.hauswirtschaftDauer && !data.alltagsbegleitungDauer) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Mindestens ein Service muss ausgewählt werden",
-        path: ["serviceType"],
-      });
-    }
-  }
-});
-
 export const updateAppointmentSchema = baseAppointmentSchema.partial();
 
 export const documentServiceEntrySchema = z.object({
@@ -137,27 +113,15 @@ export type DocumentServiceEntry = z.infer<typeof documentServiceEntrySchema>;
 
 // Schema for documenting any appointment (Kundentermin or Erstberatung)
 export const documentAppointmentSchema = z.object({
-  // Employee who actually performed this appointment (defaults to assignedEmployeeId if not provided)
   performedByEmployeeId: z.number().nullable().optional(),
-  // Actual start time (confirmed or adjusted by user during documentation)
   actualStart: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Ungültiges Zeitformat (HH:MM erwartet)"),
-  // Service documentation (at least one required based on what was scheduled)
-  hauswirtschaftActualDauer: z.number().min(1).nullable().optional(),
-  hauswirtschaftDetails: z.string().max(55, "Maximal 55 Zeichen").nullable().optional(),
-  alltagsbegleitungActualDauer: z.number().min(1).nullable().optional(),
-  alltagsbegleitungDetails: z.string().max(55, "Maximal 55 Zeichen").nullable().optional(),
-  erstberatungActualDauer: z.number().min(1).nullable().optional(),
-  erstberatungDetails: z.string().max(55, "Maximal 55 Zeichen").nullable().optional(),
-  // Travel documentation
   travelOriginType: z.enum(["home", "appointment"]),
   travelFromAppointmentId: z.number().nullable().optional(),
   travelKilometers: z.number().min(0, "Kilometer müssen positiv sein"),
-  travelMinutes: z.number().min(0).nullable().optional(), // Only required if origin is appointment
-  // Customer kilometers (for Alltagsbegleitung - trips with/for customer)
+  travelMinutes: z.number().min(0).nullable().optional(),
   customerKilometers: z.number().min(0).nullable().optional(),
-  // Optional notes
   notes: z.string().max(255).nullable().optional(),
-  services: z.array(documentServiceEntrySchema).optional(),
+  services: z.array(documentServiceEntrySchema).min(1, "Mindestens ein Service muss dokumentiert werden"),
 }).refine(
   (data) => {
     // If origin is "appointment", travelMinutes is required

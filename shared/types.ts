@@ -29,7 +29,6 @@ export {
   type ServiceInfo,
   type CardServiceInfo,
   type TravelOriginSuggestion,
-  type ServiceDocumentation,
   // Constants
   APPOINTMENT_TYPES,
   APPOINTMENT_STATUSES,
@@ -50,17 +49,12 @@ export {
   formatDuration,
   // Time comparison
   doTimesOverlap,
-  calculateTotalDuration,
   calculateTotalDurationFromServices,
   getEndTime,
   // Service helpers
-  getServiceInfo,
   getServiceInfoFromServices,
-  getCardServiceInfo,
   getCardServiceInfoFromAppointment,
   getCardServiceInfoFromServices,
-  getServicesToDocument,
-  validateServiceDocumentation,
   validateServiceDocumentationFromServices,
   // Status helpers
   isValidStatusTransition,

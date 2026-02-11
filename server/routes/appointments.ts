@@ -127,6 +127,44 @@ router.get("/undocumented", async (req, res) => {
   }
 });
 
+router.get("/batch-services", async (req, res) => {
+  try {
+    const user = req.user!;
+    const idsParam = req.query.ids as string | undefined;
+    if (!idsParam) return sendBadRequest(res, "Termin-IDs fehlen");
+
+    const ids = idsParam.split(",").map(Number).filter(n => !isNaN(n) && n > 0);
+    if (ids.length === 0 || ids.length > 100) {
+      return sendBadRequest(res, "Ungültige Termin-IDs (max. 100)");
+    }
+
+    const result = await db.select({
+      appointmentId: appointmentServices.appointmentId,
+      id: appointmentServices.id,
+      serviceId: appointmentServices.serviceId,
+      plannedDurationMinutes: appointmentServices.plannedDurationMinutes,
+      actualDurationMinutes: appointmentServices.actualDurationMinutes,
+      details: appointmentServices.details,
+      serviceName: servicesTable.name,
+      serviceCode: servicesTable.code,
+      serviceUnitType: servicesTable.unitType,
+    })
+    .from(appointmentServices)
+    .innerJoin(servicesTable, eq(appointmentServices.serviceId, servicesTable.id))
+    .where(inArray(appointmentServices.appointmentId, ids));
+
+    const grouped: Record<number, typeof result> = {};
+    for (const row of result) {
+      if (!grouped[row.appointmentId]) grouped[row.appointmentId] = [];
+      grouped[row.appointmentId].push(row);
+    }
+
+    res.json(grouped);
+  } catch (error) {
+    handleRouteError(res, error, "Fehler beim Laden der Batch-Services", "Failed to fetch batch appointment services");
+  }
+});
+
 router.get("/:id/services", async (req, res) => {
   try {
     const user = req.user!;
