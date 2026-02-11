@@ -34,6 +34,7 @@ export interface DocumentationServiceEntry {
   serviceId: number;
   actualDurationMinutes: number;
   details?: string | null;
+  serviceCode?: string | null;
 }
 
 export interface DocumentationInput {
@@ -404,14 +405,21 @@ export class AppointmentService {
       status: "completed" as const,
     };
 
+    const hauswirtschaftMinutes = input.services
+      .filter(s => s.serviceCode === 'hauswirtschaft')
+      .reduce((sum, s) => sum + (s.actualDurationMinutes || 0), 0);
+    const alltagsbegleitungMinutes = input.services
+      .filter(s => s.serviceCode === 'alltagsbegleitung')
+      .reduce((sum, s) => sum + (s.actualDurationMinutes || 0), 0);
+
     return {
       updateData,
       totalDurationMinutes,
-      hauswirtschaftMinutes: 0,
-      alltagsbegleitungMinutes: 0,
+      hauswirtschaftMinutes,
+      alltagsbegleitungMinutes,
       travelKilometers: travelKm,
       customerKilometers: customerKm,
-      hasUsage: totalDurationMinutes > 0 || travelKm > 0 || customerKm > 0,
+      hasUsage: hauswirtschaftMinutes > 0 || alltagsbegleitungMinutes > 0 || travelKm > 0 || customerKm > 0,
       serviceUpdates: input.services,
     };
   }
