@@ -1,5 +1,14 @@
 import { User2, Heart, Users, Wallet, FileText } from "lucide-react";
 
+export interface ContactFormData {
+  vorname: string;
+  nachname: string;
+  contactType: string;
+  telefon: string;
+  email: string;
+  isPrimary: boolean;
+}
+
 export interface CustomerFormData {
   vorname: string;
   nachname: string;
@@ -16,12 +25,7 @@ export interface CustomerFormData {
   backupEmployeeId: string;
   insuranceProviderId: string;
   versichertennummer: string;
-  contactVorname: string;
-  contactNachname: string;
-  contactType: string;
-  contactTelefon: string;
-  contactEmail: string;
-  contactIsPrimary: boolean;
+  contacts: ContactFormData[];
   entlastungsbetrag45b: string;
   verhinderungspflege39: string;
   pflegesachleistungen36: string;
@@ -75,3 +79,13 @@ export const DEFAULT_BUDGETS = {
   pflegesachleistungen36: 0,
 } as const;
 
+export const EMPTY_CONTACT: ContactFormData = {
+  vorname: "",
+  nachname: "",
+  contactType: "familie",
+  telefon: "",
+  email: "",
+  isPrimary: true,
+};
+
+export const MAX_CONTACTS = 3;

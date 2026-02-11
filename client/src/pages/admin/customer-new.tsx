@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { Link, useLocation } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import {
   Check,
 } from "lucide-react";
 import { iconSize } from "@/design-system";
-import { CustomerFormData, STEPS, DEFAULT_BUDGETS } from "./components/customer-types";
+import { CustomerFormData, ContactFormData, STEPS, DEFAULT_BUDGETS, EMPTY_CONTACT, MAX_CONTACTS } from "./components/customer-types";
 import { BUDGET_45A_MAX_BY_PFLEGEGRAD } from "@shared/domain/budgets";
 import { PersonalDataStep } from "./components/personal-data-step";
 import { InsuranceStep } from "./components/insurance-step";
@@ -43,12 +43,7 @@ export default function AdminCustomerNew() {
     backupEmployeeId: "",
     insuranceProviderId: "",
     versichertennummer: "",
-    contactVorname: "",
-    contactNachname: "",
-    contactType: "familie",
-    contactTelefon: "",
-    contactEmail: "",
-    contactIsPrimary: true,
+    contacts: [{ ...EMPTY_CONTACT }],
     entlastungsbetrag45b: DEFAULT_BUDGETS.entlastungsbetrag45b.toString(),
     verhinderungspflege39: DEFAULT_BUDGETS.verhinderungspflege39.toString(),
     pflegesachleistungen36: DEFAULT_BUDGETS.pflegesachleistungen36.toString(),
@@ -83,6 +78,57 @@ export default function AdminCustomerNew() {
 
   const [phoneErrors, setPhoneErrors] = useState<Record<string, string | null>>({});
 
+  const handleContactChange = useCallback((index: number, field: keyof ContactFormData, value: string | boolean) => {
+    if (field === "telefon" && typeof value === "string") {
+      const formatted = formatPhoneAsYouType(value);
+      setFormData((prev) => {
+        const newContacts = [...prev.contacts];
+        newContacts[index] = { ...newContacts[index], telefon: formatted };
+        return { ...prev, contacts: newContacts };
+      });
+      if (value.trim()) {
+        const validation = validateGermanPhone(value);
+        setPhoneErrors((prev) => ({ ...prev, [`contact_${index}`]: validation.valid ? null : validation.error || "Ungültige Telefonnummer" }));
+      } else {
+        setPhoneErrors((prev) => ({ ...prev, [`contact_${index}`]: null }));
+      }
+      return;
+    }
+
+    setFormData((prev) => {
+      const newContacts = [...prev.contacts];
+      newContacts[index] = { ...newContacts[index], [field]: value };
+      if (field === "isPrimary" && value === true) {
+        newContacts.forEach((c, i) => {
+          if (i !== index) newContacts[i] = { ...c, isPrimary: false };
+        });
+      }
+      return { ...prev, contacts: newContacts };
+    });
+  }, []);
+
+  const handleAddContact = useCallback(() => {
+    setFormData((prev) => {
+      if (prev.contacts.length >= MAX_CONTACTS) return prev;
+      return { ...prev, contacts: [...prev.contacts, { ...EMPTY_CONTACT, isPrimary: false }] };
+    });
+  }, []);
+
+  const handleRemoveContact = useCallback((index: number) => {
+    setFormData((prev) => {
+      const newContacts = prev.contacts.filter((_, i) => i !== index);
+      if (newContacts.length > 0 && !newContacts.some(c => c.isPrimary)) {
+        newContacts[0] = { ...newContacts[0], isPrimary: true };
+      }
+      return { ...prev, contacts: newContacts };
+    });
+    setPhoneErrors((prev) => {
+      const next = { ...prev };
+      delete next[`contact_${index}`];
+      return next;
+    });
+  }, []);
+
   const handleCreate = () => {
     const today = todayISO();
     
@@ -95,10 +141,12 @@ export default function AdminCustomerNew() {
       const result = validateGermanPhone(formData.festnetz);
       if (!result.valid) phoneValidationErrors.push(`Festnetz: ${result.error}`);
     }
-    if (formData.contactTelefon.trim()) {
-      const result = validateGermanPhone(formData.contactTelefon);
-      if (!result.valid) phoneValidationErrors.push(`Kontakt-Telefon: ${result.error}`);
-    }
+    formData.contacts.forEach((contact, index) => {
+      if (contact.telefon.trim()) {
+        const result = validateGermanPhone(contact.telefon);
+        if (!result.valid) phoneValidationErrors.push(`Kontakt ${index + 1} Telefon: ${result.error}`);
+      }
+    });
     
     if (phoneValidationErrors.length > 0) {
       toast({
@@ -117,17 +165,16 @@ export default function AdminCustomerNew() {
         } 
       : undefined;
 
-    const contactPhone = formData.contactTelefon.trim() ? (normalizePhone(formData.contactTelefon) || "") : "";
-    const contacts = formData.contactVorname.trim() && formData.contactNachname.trim() && contactPhone
-      ? [{
-          contactType: formData.contactType,
-          isPrimary: formData.contactIsPrimary,
-          vorname: formData.contactVorname.trim(),
-          nachname: formData.contactNachname.trim(),
-          telefon: contactPhone,
-          email: formData.contactEmail.trim() || undefined,
-        }]
-      : undefined;
+    const contacts = formData.contacts
+      .filter(c => c.vorname.trim() && c.nachname.trim())
+      .map(c => ({
+        contactType: c.contactType,
+        isPrimary: c.isPrimary,
+        vorname: c.vorname.trim(),
+        nachname: c.nachname.trim(),
+        telefon: c.telefon.trim() ? (normalizePhone(c.telefon) || c.telefon.trim()) : "",
+        email: c.email.trim() || undefined,
+      }));
 
     const budgetValues = {
       entlastungsbetrag45b: Math.round(parseFloat(formData.entlastungsbetrag45b) * 100) || 0,
@@ -167,7 +214,7 @@ export default function AdminCustomerNew() {
       telefon: formData.telefon.trim() ? (normalizePhone(formData.telefon) || undefined) : undefined,
       festnetz: formData.festnetz.trim() ? (normalizePhone(formData.festnetz) || undefined) : undefined,
       insurance,
-      contacts,
+      contacts: contacts.length > 0 ? contacts : undefined,
       budgets,
       contract,
     };
@@ -195,10 +242,10 @@ export default function AdminCustomerNew() {
     });
   };
 
-  const phoneFields = ["telefon", "festnetz", "contactTelefon"] as const;
+  const personalPhoneFields = ["telefon", "festnetz"] as const;
   
   const handleChange = (field: string, value: string | boolean) => {
-    if ((phoneFields as readonly string[]).includes(field) && typeof value === "string") {
+    if ((personalPhoneFields as readonly string[]).includes(field) && typeof value === "string") {
       const formatted = formatPhoneAsYouType(value);
       setFormData((prev) => ({ ...prev, [field]: formatted }));
       if (value.trim()) {
@@ -294,9 +341,11 @@ export default function AdminCustomerNew() {
       case 2:
         return (
           <ContactsStep
-            formData={formData}
+            contacts={formData.contacts}
             phoneErrors={phoneErrors}
-            onChange={handleChange}
+            onContactChange={handleContactChange}
+            onAddContact={handleAddContact}
+            onRemoveContact={handleRemoveContact}
           />
         );
       case 3:
