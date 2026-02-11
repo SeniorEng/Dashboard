@@ -18,6 +18,83 @@ import { eq, count, sql as sqlBuilder, lt, ne, and, or, ilike, inArray, isNull, 
 import { customerIdsCache } from "./services/cache";
 import { db } from "./lib/db";
 
+const appointmentWithCustomerSelectFields = {
+  id: appointments.id,
+  customerId: appointments.customerId,
+  createdByUserId: appointments.createdByUserId,
+  assignedEmployeeId: appointments.assignedEmployeeId,
+  appointmentType: appointments.appointmentType,
+  serviceType: appointments.serviceType,
+  date: appointments.date,
+  scheduledStart: appointments.scheduledStart,
+  scheduledEnd: appointments.scheduledEnd,
+  durationPromised: appointments.durationPromised,
+  status: appointments.status,
+  actualStart: appointments.actualStart,
+  actualEnd: appointments.actualEnd,
+  travelOriginType: appointments.travelOriginType,
+  travelFromAppointmentId: appointments.travelFromAppointmentId,
+  travelKilometers: appointments.travelKilometers,
+  travelMinutes: appointments.travelMinutes,
+  customerKilometers: appointments.customerKilometers,
+  notes: appointments.notes,
+  servicesDone: appointments.servicesDone,
+  signatureData: appointments.signatureData,
+  createdAt: appointments.createdAt,
+  performedByEmployeeId: appointments.performedByEmployeeId,
+  customer: {
+    id: customers.id,
+    name: customers.name,
+    vorname: customers.vorname,
+    nachname: customers.nachname,
+    email: customers.email,
+    festnetz: customers.festnetz,
+    telefon: customers.telefon,
+    geburtsdatum: customers.geburtsdatum,
+    address: customers.address,
+    strasse: customers.strasse,
+    nr: customers.nr,
+    plz: customers.plz,
+    stadt: customers.stadt,
+    pflegegrad: customers.pflegegrad,
+    primaryEmployeeId: customers.primaryEmployeeId,
+    backupEmployeeId: customers.backupEmployeeId,
+    needs: customers.needs,
+    createdAt: customers.createdAt,
+    updatedAt: customers.updatedAt,
+    createdByUserId: customers.createdByUserId,
+  }
+};
+
+function mapAppointmentRow(row: any): AppointmentWithCustomer {
+  return {
+    id: row.id,
+    customerId: row.customerId,
+    createdByUserId: row.createdByUserId,
+    assignedEmployeeId: row.assignedEmployeeId,
+    appointmentType: row.appointmentType,
+    serviceType: row.serviceType,
+    date: row.date,
+    scheduledStart: row.scheduledStart,
+    scheduledEnd: row.scheduledEnd,
+    durationPromised: row.durationPromised,
+    status: row.status,
+    actualStart: row.actualStart,
+    actualEnd: row.actualEnd,
+    travelOriginType: row.travelOriginType,
+    travelFromAppointmentId: row.travelFromAppointmentId,
+    travelKilometers: row.travelKilometers,
+    travelMinutes: row.travelMinutes,
+    customerKilometers: row.customerKilometers,
+    notes: row.notes,
+    servicesDone: row.servicesDone,
+    signatureData: row.signatureData,
+    createdAt: row.createdAt,
+    performedByEmployeeId: row.performedByEmployeeId,
+    customer: row.customer?.id ? row.customer : null,
+  };
+}
+
 export interface PaginationOptions {
   limit?: number;
   offset?: number;
@@ -278,87 +355,13 @@ export class DatabaseStorage implements IStorage {
     }
     
     const results = await db
-      .select({
-        id: appointments.id,
-        customerId: appointments.customerId,
-        createdByUserId: appointments.createdByUserId,
-        assignedEmployeeId: appointments.assignedEmployeeId,
-        appointmentType: appointments.appointmentType,
-        serviceType: appointments.serviceType,
-        date: appointments.date,
-        scheduledStart: appointments.scheduledStart,
-        scheduledEnd: appointments.scheduledEnd,
-        durationPromised: appointments.durationPromised,
-        status: appointments.status,
-        actualStart: appointments.actualStart,
-        actualEnd: appointments.actualEnd,
-        travelOriginType: appointments.travelOriginType,
-        travelFromAppointmentId: appointments.travelFromAppointmentId,
-        travelKilometers: appointments.travelKilometers,
-        travelMinutes: appointments.travelMinutes,
-        customerKilometers: appointments.customerKilometers,
-
-        notes: appointments.notes,
-        servicesDone: appointments.servicesDone,
-        signatureData: appointments.signatureData,
-        createdAt: appointments.createdAt,
-        performedByEmployeeId: appointments.performedByEmployeeId,
-        customer: {
-          id: customers.id,
-          name: customers.name,
-          vorname: customers.vorname,
-          nachname: customers.nachname,
-          email: customers.email,
-          festnetz: customers.festnetz,
-          telefon: customers.telefon,
-          geburtsdatum: customers.geburtsdatum,
-          address: customers.address,
-          strasse: customers.strasse,
-          nr: customers.nr,
-          plz: customers.plz,
-          stadt: customers.stadt,
-          pflegegrad: customers.pflegegrad,
-          primaryEmployeeId: customers.primaryEmployeeId,
-          backupEmployeeId: customers.backupEmployeeId,
-  
-          needs: customers.needs,
-          createdAt: customers.createdAt,
-          updatedAt: customers.updatedAt,
-          createdByUserId: customers.createdByUserId,
-        }
-      })
+      .select(appointmentWithCustomerSelectFields)
       .from(appointments)
       .leftJoin(customers, eq(appointments.customerId, customers.id))
       .where(and(...conditions))
       .limit(limit);
     
-    return results.map(row => ({
-      id: row.id,
-      customerId: row.customerId,
-      createdByUserId: row.createdByUserId,
-      assignedEmployeeId: row.assignedEmployeeId,
-      appointmentType: row.appointmentType,
-      serviceType: row.serviceType,
-      date: row.date,
-      scheduledStart: row.scheduledStart,
-      scheduledEnd: row.scheduledEnd,
-      durationPromised: row.durationPromised,
-      status: row.status,
-      actualStart: row.actualStart,
-      actualEnd: row.actualEnd,
-      travelOriginType: row.travelOriginType,
-      travelFromAppointmentId: row.travelFromAppointmentId,
-      travelKilometers: row.travelKilometers,
-      travelMinutes: row.travelMinutes,
-      customerKilometers: row.customerKilometers,
-
-      notes: row.notes,
-      servicesDone: row.servicesDone,
-      signatureData: row.signatureData,
-      createdAt: row.createdAt,
-      performedByEmployeeId: row.performedByEmployeeId,
-      customer: row.customer?.id ? row.customer : null
-    }));
+    return results.map(mapAppointmentRow);
   }
 
   // Appointments - Basic
@@ -425,56 +428,6 @@ export class DatabaseStorage implements IStorage {
 
   // Appointments - With Customer (single query with LEFT JOIN for performance)
   async getAppointmentsWithCustomers(date?: string, customerIds?: number[]): Promise<AppointmentWithCustomer[]> {
-    const selectFields = {
-      id: appointments.id,
-      customerId: appointments.customerId,
-      createdByUserId: appointments.createdByUserId,
-      assignedEmployeeId: appointments.assignedEmployeeId,
-      appointmentType: appointments.appointmentType,
-      serviceType: appointments.serviceType,
-      date: appointments.date,
-      scheduledStart: appointments.scheduledStart,
-      scheduledEnd: appointments.scheduledEnd,
-      durationPromised: appointments.durationPromised,
-      status: appointments.status,
-      actualStart: appointments.actualStart,
-      actualEnd: appointments.actualEnd,
-      travelOriginType: appointments.travelOriginType,
-      travelFromAppointmentId: appointments.travelFromAppointmentId,
-      travelKilometers: appointments.travelKilometers,
-      travelMinutes: appointments.travelMinutes,
-      customerKilometers: appointments.customerKilometers,
-
-      notes: appointments.notes,
-      servicesDone: appointments.servicesDone,
-      signatureData: appointments.signatureData,
-      createdAt: appointments.createdAt,
-      performedByEmployeeId: appointments.performedByEmployeeId,
-      customer: {
-        id: customers.id,
-        name: customers.name,
-        vorname: customers.vorname,
-        nachname: customers.nachname,
-        email: customers.email,
-        festnetz: customers.festnetz,
-        telefon: customers.telefon,
-        geburtsdatum: customers.geburtsdatum,
-        address: customers.address,
-        strasse: customers.strasse,
-        nr: customers.nr,
-        plz: customers.plz,
-        stadt: customers.stadt,
-        pflegegrad: customers.pflegegrad,
-        primaryEmployeeId: customers.primaryEmployeeId,
-        backupEmployeeId: customers.backupEmployeeId,
-
-        needs: customers.needs,
-        createdAt: customers.createdAt,
-        updatedAt: customers.updatedAt,
-        createdByUserId: customers.createdByUserId,
-      }
-    };
-    
     const conditions = [];
     if (date) {
       conditions.push(eq(appointments.date, date));
@@ -484,7 +437,7 @@ export class DatabaseStorage implements IStorage {
     }
     
     const query = db
-      .select(selectFields)
+      .select(appointmentWithCustomerSelectFields)
       .from(appointments)
       .leftJoin(customers, eq(appointments.customerId, customers.id));
     
@@ -492,33 +445,7 @@ export class DatabaseStorage implements IStorage {
       ? await query.where(and(...conditions))
       : await query;
     
-    return results.map(row => ({
-      id: row.id,
-      customerId: row.customerId,
-      createdByUserId: row.createdByUserId,
-      assignedEmployeeId: row.assignedEmployeeId,
-      appointmentType: row.appointmentType,
-      serviceType: row.serviceType,
-      date: row.date,
-      scheduledStart: row.scheduledStart,
-      scheduledEnd: row.scheduledEnd,
-      durationPromised: row.durationPromised,
-      status: row.status,
-      actualStart: row.actualStart,
-      actualEnd: row.actualEnd,
-      travelOriginType: row.travelOriginType,
-      travelFromAppointmentId: row.travelFromAppointmentId,
-      travelKilometers: row.travelKilometers,
-      travelMinutes: row.travelMinutes,
-      customerKilometers: row.customerKilometers,
-
-      notes: row.notes,
-      servicesDone: row.servicesDone,
-      signatureData: row.signatureData,
-      createdAt: row.createdAt,
-      performedByEmployeeId: row.performedByEmployeeId,
-      customer: row.customer?.id ? row.customer : null
-    }));
+    return results.map(mapAppointmentRow);
   }
 
   async getAppointmentsWithCustomersPaginated(
@@ -534,58 +461,8 @@ export class DatabaseStorage implements IStorage {
     
     const total = Number(countResult[0]?.count ?? 0);
 
-    const selectFields = {
-      id: appointments.id,
-      customerId: appointments.customerId,
-      createdByUserId: appointments.createdByUserId,
-      assignedEmployeeId: appointments.assignedEmployeeId,
-      appointmentType: appointments.appointmentType,
-      serviceType: appointments.serviceType,
-      date: appointments.date,
-      scheduledStart: appointments.scheduledStart,
-      scheduledEnd: appointments.scheduledEnd,
-      durationPromised: appointments.durationPromised,
-      status: appointments.status,
-      actualStart: appointments.actualStart,
-      actualEnd: appointments.actualEnd,
-      travelOriginType: appointments.travelOriginType,
-      travelFromAppointmentId: appointments.travelFromAppointmentId,
-      travelKilometers: appointments.travelKilometers,
-      travelMinutes: appointments.travelMinutes,
-      customerKilometers: appointments.customerKilometers,
-
-      notes: appointments.notes,
-      servicesDone: appointments.servicesDone,
-      signatureData: appointments.signatureData,
-      createdAt: appointments.createdAt,
-      performedByEmployeeId: appointments.performedByEmployeeId,
-      customer: {
-        id: customers.id,
-        name: customers.name,
-        vorname: customers.vorname,
-        nachname: customers.nachname,
-        email: customers.email,
-        festnetz: customers.festnetz,
-        telefon: customers.telefon,
-        geburtsdatum: customers.geburtsdatum,
-        address: customers.address,
-        strasse: customers.strasse,
-        nr: customers.nr,
-        plz: customers.plz,
-        stadt: customers.stadt,
-        pflegegrad: customers.pflegegrad,
-        primaryEmployeeId: customers.primaryEmployeeId,
-        backupEmployeeId: customers.backupEmployeeId,
-
-        needs: customers.needs,
-        createdAt: customers.createdAt,
-        updatedAt: customers.updatedAt,
-        createdByUserId: customers.createdByUserId,
-      }
-    };
-
     let query = db
-      .select(selectFields)
+      .select(appointmentWithCustomerSelectFields)
       .from(appointments)
       .leftJoin(customers, eq(appointments.customerId, customers.id))
       .limit(limit)
@@ -595,122 +472,21 @@ export class DatabaseStorage implements IStorage {
       ? await query.where(eq(appointments.date, date))
       : await query;
 
-    const data = results.map(row => ({
-      id: row.id,
-      customerId: row.customerId,
-      createdByUserId: row.createdByUserId,
-      assignedEmployeeId: row.assignedEmployeeId,
-      appointmentType: row.appointmentType,
-      serviceType: row.serviceType,
-      date: row.date,
-      scheduledStart: row.scheduledStart,
-      scheduledEnd: row.scheduledEnd,
-      durationPromised: row.durationPromised,
-      status: row.status,
-      actualStart: row.actualStart,
-      actualEnd: row.actualEnd,
-      travelOriginType: row.travelOriginType,
-      travelFromAppointmentId: row.travelFromAppointmentId,
-      travelKilometers: row.travelKilometers,
-      travelMinutes: row.travelMinutes,
-      customerKilometers: row.customerKilometers,
-
-      notes: row.notes,
-      servicesDone: row.servicesDone,
-      signatureData: row.signatureData,
-      createdAt: row.createdAt,
-      performedByEmployeeId: row.performedByEmployeeId,
-      customer: row.customer?.id ? row.customer : null
-    }));
+    const data = results.map(mapAppointmentRow);
 
     return { data, total, limit, offset };
   }
 
   async getAppointmentWithCustomer(id: number): Promise<AppointmentWithCustomer | undefined> {
     const results = await db
-      .select({
-        id: appointments.id,
-        customerId: appointments.customerId,
-        createdByUserId: appointments.createdByUserId,
-        assignedEmployeeId: appointments.assignedEmployeeId,
-        appointmentType: appointments.appointmentType,
-        serviceType: appointments.serviceType,
-        date: appointments.date,
-        scheduledStart: appointments.scheduledStart,
-        scheduledEnd: appointments.scheduledEnd,
-        durationPromised: appointments.durationPromised,
-        status: appointments.status,
-        actualStart: appointments.actualStart,
-        actualEnd: appointments.actualEnd,
-        travelOriginType: appointments.travelOriginType,
-        travelFromAppointmentId: appointments.travelFromAppointmentId,
-        travelKilometers: appointments.travelKilometers,
-        travelMinutes: appointments.travelMinutes,
-        customerKilometers: appointments.customerKilometers,
-
-        notes: appointments.notes,
-        servicesDone: appointments.servicesDone,
-        signatureData: appointments.signatureData,
-        createdAt: appointments.createdAt,
-        performedByEmployeeId: appointments.performedByEmployeeId,
-        customer: {
-          id: customers.id,
-          name: customers.name,
-          vorname: customers.vorname,
-          nachname: customers.nachname,
-          email: customers.email,
-          festnetz: customers.festnetz,
-          telefon: customers.telefon,
-          geburtsdatum: customers.geburtsdatum,
-          address: customers.address,
-          strasse: customers.strasse,
-          nr: customers.nr,
-          plz: customers.plz,
-          stadt: customers.stadt,
-          pflegegrad: customers.pflegegrad,
-          primaryEmployeeId: customers.primaryEmployeeId,
-          backupEmployeeId: customers.backupEmployeeId,
-  
-          needs: customers.needs,
-          createdAt: customers.createdAt,
-          updatedAt: customers.updatedAt,
-          createdByUserId: customers.createdByUserId,
-        }
-      })
+      .select(appointmentWithCustomerSelectFields)
       .from(appointments)
       .leftJoin(customers, eq(appointments.customerId, customers.id))
       .where(eq(appointments.id, id));
     
     if (results.length === 0) return undefined;
     
-    const row = results[0];
-    return {
-      id: row.id,
-      customerId: row.customerId,
-      createdByUserId: row.createdByUserId,
-      assignedEmployeeId: row.assignedEmployeeId,
-      appointmentType: row.appointmentType,
-      serviceType: row.serviceType,
-      date: row.date,
-      scheduledStart: row.scheduledStart,
-      scheduledEnd: row.scheduledEnd,
-      durationPromised: row.durationPromised,
-      status: row.status,
-      actualStart: row.actualStart,
-      actualEnd: row.actualEnd,
-      travelOriginType: row.travelOriginType,
-      travelFromAppointmentId: row.travelFromAppointmentId,
-      travelKilometers: row.travelKilometers,
-      travelMinutes: row.travelMinutes,
-      customerKilometers: row.customerKilometers,
-
-      notes: row.notes,
-      servicesDone: row.servicesDone,
-      signatureData: row.signatureData,
-      createdAt: row.createdAt,
-      performedByEmployeeId: row.performedByEmployeeId,
-      customer: row.customer?.id ? row.customer : null
-    };
+    return mapAppointmentRow(results[0]);
   }
 
   async getUndocumentedAppointments(beforeDate: string, customerIds?: number[]): Promise<AppointmentWithCustomer[]> {
@@ -724,86 +500,12 @@ export class DatabaseStorage implements IStorage {
     }
     
     const results = await db
-      .select({
-        id: appointments.id,
-        customerId: appointments.customerId,
-        createdByUserId: appointments.createdByUserId,
-        assignedEmployeeId: appointments.assignedEmployeeId,
-        appointmentType: appointments.appointmentType,
-        serviceType: appointments.serviceType,
-        date: appointments.date,
-        scheduledStart: appointments.scheduledStart,
-        scheduledEnd: appointments.scheduledEnd,
-        durationPromised: appointments.durationPromised,
-        status: appointments.status,
-        actualStart: appointments.actualStart,
-        actualEnd: appointments.actualEnd,
-        travelOriginType: appointments.travelOriginType,
-        travelFromAppointmentId: appointments.travelFromAppointmentId,
-        travelKilometers: appointments.travelKilometers,
-        travelMinutes: appointments.travelMinutes,
-        customerKilometers: appointments.customerKilometers,
-
-        notes: appointments.notes,
-        servicesDone: appointments.servicesDone,
-        signatureData: appointments.signatureData,
-        createdAt: appointments.createdAt,
-        performedByEmployeeId: appointments.performedByEmployeeId,
-        customer: {
-          id: customers.id,
-          name: customers.name,
-          vorname: customers.vorname,
-          nachname: customers.nachname,
-          email: customers.email,
-          festnetz: customers.festnetz,
-          telefon: customers.telefon,
-          geburtsdatum: customers.geburtsdatum,
-          address: customers.address,
-          strasse: customers.strasse,
-          nr: customers.nr,
-          plz: customers.plz,
-          stadt: customers.stadt,
-          pflegegrad: customers.pflegegrad,
-          primaryEmployeeId: customers.primaryEmployeeId,
-          backupEmployeeId: customers.backupEmployeeId,
-  
-          needs: customers.needs,
-          createdAt: customers.createdAt,
-          updatedAt: customers.updatedAt,
-          createdByUserId: customers.createdByUserId,
-        }
-      })
+      .select(appointmentWithCustomerSelectFields)
       .from(appointments)
       .leftJoin(customers, eq(appointments.customerId, customers.id))
       .where(and(...conditions));
     
-    return results.map(row => ({
-      id: row.id,
-      customerId: row.customerId,
-      createdByUserId: row.createdByUserId,
-      assignedEmployeeId: row.assignedEmployeeId,
-      appointmentType: row.appointmentType,
-      serviceType: row.serviceType,
-      date: row.date,
-      scheduledStart: row.scheduledStart,
-      scheduledEnd: row.scheduledEnd,
-      durationPromised: row.durationPromised,
-      status: row.status,
-      actualStart: row.actualStart,
-      actualEnd: row.actualEnd,
-      travelOriginType: row.travelOriginType,
-      travelFromAppointmentId: row.travelFromAppointmentId,
-      travelKilometers: row.travelKilometers,
-      travelMinutes: row.travelMinutes,
-      customerKilometers: row.customerKilometers,
-
-      notes: row.notes,
-      servicesDone: row.servicesDone,
-      signatureData: row.signatureData,
-      createdAt: row.createdAt,
-      performedByEmployeeId: row.performedByEmployeeId,
-      customer: row.customer?.id ? row.customer : null
-    }));
+    return results.map(mapAppointmentRow);
   }
 
   async createErstberatungWithCustomer(
@@ -830,59 +532,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAppointmentsForDay(employeeId: number, date: string): Promise<AppointmentWithCustomer[]> {
-    const selectFields = {
-      id: appointments.id,
-      customerId: appointments.customerId,
-      createdByUserId: appointments.createdByUserId,
-      assignedEmployeeId: appointments.assignedEmployeeId,
-      appointmentType: appointments.appointmentType,
-      serviceType: appointments.serviceType,
-      date: appointments.date,
-      scheduledStart: appointments.scheduledStart,
-      scheduledEnd: appointments.scheduledEnd,
-      durationPromised: appointments.durationPromised,
-      status: appointments.status,
-      actualStart: appointments.actualStart,
-      actualEnd: appointments.actualEnd,
-      travelOriginType: appointments.travelOriginType,
-      travelFromAppointmentId: appointments.travelFromAppointmentId,
-      travelKilometers: appointments.travelKilometers,
-      travelMinutes: appointments.travelMinutes,
-      customerKilometers: appointments.customerKilometers,
-
-      notes: appointments.notes,
-      servicesDone: appointments.servicesDone,
-      signatureData: appointments.signatureData,
-      createdAt: appointments.createdAt,
-      performedByEmployeeId: appointments.performedByEmployeeId,
-      customer: {
-        id: customers.id,
-        name: customers.name,
-        vorname: customers.vorname,
-        nachname: customers.nachname,
-        email: customers.email,
-        festnetz: customers.festnetz,
-        telefon: customers.telefon,
-        geburtsdatum: customers.geburtsdatum,
-        address: customers.address,
-        strasse: customers.strasse,
-        nr: customers.nr,
-        plz: customers.plz,
-        stadt: customers.stadt,
-        pflegegrad: customers.pflegegrad,
-        primaryEmployeeId: customers.primaryEmployeeId,
-        backupEmployeeId: customers.backupEmployeeId,
-
-        needs: customers.needs,
-        createdAt: customers.createdAt,
-        updatedAt: customers.updatedAt,
-        createdByUserId: customers.createdByUserId,
-      }
-    };
-    
     // Get appointments where the employee is assigned OR created the appointment OR appointment is unassigned
     // This ensures overlap checking catches all relevant appointments for a user
-    const rows = await db.select(selectFields)
+    const rows = await db.select(appointmentWithCustomerSelectFields)
       .from(appointments)
       .leftJoin(customers, eq(appointments.customerId, customers.id))
       .where(and(
@@ -895,35 +547,7 @@ export class DatabaseStorage implements IStorage {
       ))
       .orderBy(appointments.scheduledStart);
     
-    return rows.map(row => ({
-      id: row.id,
-      customerId: row.customerId,
-      createdByUserId: row.createdByUserId,
-      assignedEmployeeId: row.assignedEmployeeId,
-      appointmentType: row.appointmentType,
-      serviceType: row.serviceType,
-      date: row.date,
-      scheduledStart: row.scheduledStart,
-      scheduledEnd: row.scheduledEnd,
-      durationPromised: row.durationPromised,
-      status: row.status,
-      actualStart: row.actualStart,
-      actualEnd: row.actualEnd,
-      travelOriginType: row.travelOriginType,
-      travelFromAppointmentId: row.travelFromAppointmentId,
-      travelKilometers: row.travelKilometers,
-      travelMinutes: row.travelMinutes,
-      customerKilometers: row.customerKilometers,
-
-      notes: row.notes,
-      servicesDone: row.servicesDone,
-      signatureData: row.signatureData,
-      createdAt: row.createdAt,
-      performedByEmployeeId: row.performedByEmployeeId,
-      customer: row.customer?.id ? row.customer : null,
-      customerFirstName: row.customer?.vorname || null,
-      customerLastName: row.customer?.nachname || null,
-    }));
+    return rows.map(mapAppointmentRow);
   }
 
   // Monthly Service Records (Leistungsnachweise)
@@ -1028,69 +652,13 @@ export class DatabaseStorage implements IStorage {
     
     const appointmentIds = linkedAppointments.map(la => la.appointmentId);
     
-    const selectFields = {
-      id: appointments.id,
-      customerId: appointments.customerId,
-      createdByUserId: appointments.createdByUserId,
-      assignedEmployeeId: appointments.assignedEmployeeId,
-      appointmentType: appointments.appointmentType,
-      serviceType: appointments.serviceType,
-      date: appointments.date,
-      scheduledStart: appointments.scheduledStart,
-      scheduledEnd: appointments.scheduledEnd,
-      durationPromised: appointments.durationPromised,
-      status: appointments.status,
-      actualStart: appointments.actualStart,
-      actualEnd: appointments.actualEnd,
-      travelOriginType: appointments.travelOriginType,
-      travelFromAppointmentId: appointments.travelFromAppointmentId,
-      travelKilometers: appointments.travelKilometers,
-      travelMinutes: appointments.travelMinutes,
-      customerKilometers: appointments.customerKilometers,
-
-      notes: appointments.notes,
-      servicesDone: appointments.servicesDone,
-      signatureData: appointments.signatureData,
-      createdAt: appointments.createdAt,
-      performedByEmployeeId: appointments.performedByEmployeeId,
-      customer: customers,
-    };
-
-    const rows = await db.select(selectFields)
+    const rows = await db.select(appointmentWithCustomerSelectFields)
       .from(appointments)
       .leftJoin(customers, eq(appointments.customerId, customers.id))
       .where(inArray(appointments.id, appointmentIds))
       .orderBy(appointments.date, appointments.scheduledStart);
     
-    return rows.map(row => ({
-      id: row.id,
-      customerId: row.customerId,
-      createdByUserId: row.createdByUserId,
-      assignedEmployeeId: row.assignedEmployeeId,
-      appointmentType: row.appointmentType,
-      serviceType: row.serviceType,
-      date: row.date,
-      scheduledStart: row.scheduledStart,
-      scheduledEnd: row.scheduledEnd,
-      durationPromised: row.durationPromised,
-      status: row.status,
-      actualStart: row.actualStart,
-      actualEnd: row.actualEnd,
-      travelOriginType: row.travelOriginType,
-      travelFromAppointmentId: row.travelFromAppointmentId,
-      travelKilometers: row.travelKilometers,
-      travelMinutes: row.travelMinutes,
-      customerKilometers: row.customerKilometers,
-
-      notes: row.notes,
-      servicesDone: row.servicesDone,
-      signatureData: row.signatureData,
-      createdAt: row.createdAt,
-      performedByEmployeeId: row.performedByEmployeeId,
-      customer: row.customer?.id ? row.customer : null,
-      customerFirstName: row.customer?.vorname || null,
-      customerLastName: row.customer?.nachname || null,
-    }));
+    return rows.map(mapAppointmentRow);
   }
 
   async addAppointmentsToServiceRecord(serviceRecordId: number, appointmentIds: number[]): Promise<void> {
@@ -1112,35 +680,7 @@ export class DatabaseStorage implements IStorage {
     const endYear = month === 12 ? year + 1 : year;
     const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
     
-    const selectFields = {
-      id: appointments.id,
-      customerId: appointments.customerId,
-      createdByUserId: appointments.createdByUserId,
-      assignedEmployeeId: appointments.assignedEmployeeId,
-      appointmentType: appointments.appointmentType,
-      serviceType: appointments.serviceType,
-      date: appointments.date,
-      scheduledStart: appointments.scheduledStart,
-      scheduledEnd: appointments.scheduledEnd,
-      durationPromised: appointments.durationPromised,
-      status: appointments.status,
-      actualStart: appointments.actualStart,
-      actualEnd: appointments.actualEnd,
-      travelOriginType: appointments.travelOriginType,
-      travelFromAppointmentId: appointments.travelFromAppointmentId,
-      travelKilometers: appointments.travelKilometers,
-      travelMinutes: appointments.travelMinutes,
-      customerKilometers: appointments.customerKilometers,
-
-      notes: appointments.notes,
-      servicesDone: appointments.servicesDone,
-      signatureData: appointments.signatureData,
-      createdAt: appointments.createdAt,
-      performedByEmployeeId: appointments.performedByEmployeeId,
-      customer: customers,
-    };
-
-    const rows = await db.select(selectFields)
+    const rows = await db.select(appointmentWithCustomerSelectFields)
       .from(appointments)
       .leftJoin(customers, eq(appointments.customerId, customers.id))
       .where(and(
@@ -1155,35 +695,7 @@ export class DatabaseStorage implements IStorage {
       ))
       .orderBy(appointments.date, appointments.scheduledStart);
     
-    return rows.map(row => ({
-      id: row.id,
-      customerId: row.customerId,
-      createdByUserId: row.createdByUserId,
-      assignedEmployeeId: row.assignedEmployeeId,
-      appointmentType: row.appointmentType,
-      serviceType: row.serviceType,
-      date: row.date,
-      scheduledStart: row.scheduledStart,
-      scheduledEnd: row.scheduledEnd,
-      durationPromised: row.durationPromised,
-      status: row.status,
-      actualStart: row.actualStart,
-      actualEnd: row.actualEnd,
-      travelOriginType: row.travelOriginType,
-      travelFromAppointmentId: row.travelFromAppointmentId,
-      travelKilometers: row.travelKilometers,
-      travelMinutes: row.travelMinutes,
-      customerKilometers: row.customerKilometers,
-
-      notes: row.notes,
-      servicesDone: row.servicesDone,
-      signatureData: row.signatureData,
-      createdAt: row.createdAt,
-      performedByEmployeeId: row.performedByEmployeeId,
-      customer: row.customer?.id ? row.customer : null,
-      customerFirstName: row.customer?.vorname || null,
-      customerLastName: row.customer?.nachname || null,
-    }));
+    return rows.map(mapAppointmentRow);
   }
 
   async getUndocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<AppointmentWithCustomer[]> {
@@ -1192,35 +704,7 @@ export class DatabaseStorage implements IStorage {
     const endYear = month === 12 ? year + 1 : year;
     const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
     
-    const selectFields = {
-      id: appointments.id,
-      customerId: appointments.customerId,
-      createdByUserId: appointments.createdByUserId,
-      assignedEmployeeId: appointments.assignedEmployeeId,
-      appointmentType: appointments.appointmentType,
-      serviceType: appointments.serviceType,
-      date: appointments.date,
-      scheduledStart: appointments.scheduledStart,
-      scheduledEnd: appointments.scheduledEnd,
-      durationPromised: appointments.durationPromised,
-      status: appointments.status,
-      actualStart: appointments.actualStart,
-      actualEnd: appointments.actualEnd,
-      travelOriginType: appointments.travelOriginType,
-      travelFromAppointmentId: appointments.travelFromAppointmentId,
-      travelKilometers: appointments.travelKilometers,
-      travelMinutes: appointments.travelMinutes,
-      customerKilometers: appointments.customerKilometers,
-
-      notes: appointments.notes,
-      servicesDone: appointments.servicesDone,
-      signatureData: appointments.signatureData,
-      createdAt: appointments.createdAt,
-      performedByEmployeeId: appointments.performedByEmployeeId,
-      customer: customers,
-    };
-
-    const rows = await db.select(selectFields)
+    const rows = await db.select(appointmentWithCustomerSelectFields)
       .from(appointments)
       .leftJoin(customers, eq(appointments.customerId, customers.id))
       .where(and(
@@ -1236,35 +720,7 @@ export class DatabaseStorage implements IStorage {
       ))
       .orderBy(appointments.date, appointments.scheduledStart);
     
-    return rows.map(row => ({
-      id: row.id,
-      customerId: row.customerId,
-      createdByUserId: row.createdByUserId,
-      assignedEmployeeId: row.assignedEmployeeId,
-      appointmentType: row.appointmentType,
-      serviceType: row.serviceType,
-      date: row.date,
-      scheduledStart: row.scheduledStart,
-      scheduledEnd: row.scheduledEnd,
-      durationPromised: row.durationPromised,
-      status: row.status,
-      actualStart: row.actualStart,
-      actualEnd: row.actualEnd,
-      travelOriginType: row.travelOriginType,
-      travelFromAppointmentId: row.travelFromAppointmentId,
-      travelKilometers: row.travelKilometers,
-      travelMinutes: row.travelMinutes,
-      customerKilometers: row.customerKilometers,
-
-      notes: row.notes,
-      servicesDone: row.servicesDone,
-      signatureData: row.signatureData,
-      createdAt: row.createdAt,
-      performedByEmployeeId: row.performedByEmployeeId,
-      customer: row.customer?.id ? row.customer : null,
-      customerFirstName: row.customer?.vorname || null,
-      customerLastName: row.customer?.nachname || null,
-    }));
+    return rows.map(mapAppointmentRow);
   }
 
   async getPendingServiceRecords(employeeId: number): Promise<MonthlyServiceRecord[]> {

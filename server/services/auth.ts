@@ -162,9 +162,13 @@ export class AuthService {
       return cached;
     }
 
-    const [session] = await db
-      .select()
+    const results = await db
+      .select({
+        session: sessions,
+        user: users,
+      })
       .from(sessions)
+      .innerJoin(users, and(eq(sessions.userId, users.id), eq(users.isActive, true)))
       .where(
         and(
           eq(sessions.tokenHash, tokenHash),
@@ -172,20 +176,18 @@ export class AuthService {
         )
       );
 
-    if (!session) {
+    if (results.length === 0) {
       return null;
     }
 
-    const [user] = await db
+    const { user } = results[0];
+
+    const roleRows = await db
       .select()
-      .from(users)
-      .where(and(eq(users.id, session.userId), eq(users.isActive, true)));
+      .from(userRoles)
+      .where(eq(userRoles.userId, user.id));
 
-    if (!user) {
-      return null;
-    }
-
-    const roles = await this.getUserRoles(user.id);
+    const roles = roleRows.map((r) => r.role as EmployeeRole);
     const userWithRoles = { ...user, roles };
     sessionCache.set(tokenHash, userWithRoles);
     return userWithRoles;
@@ -240,30 +242,36 @@ export class AuthService {
   }
 
   async getAllUsers(): Promise<UserWithRoles[]> {
-    const allUsers = await db.select().from(users);
-    const allRoles = await db.select().from(userRoles);
-
-    return allUsers.map((user) => ({
-      ...user,
-      roles: allRoles
-        .filter((r) => r.userId === user.id)
-        .map((r) => r.role as EmployeeRole),
-    }));
+    return this.getUsersWithRoles();
   }
 
   async getActiveEmployees(): Promise<UserWithRoles[]> {
-    const allUsers = await db
-      .select()
-      .from(users)
-      .where(eq(users.isActive, true));
-    const allRoles = await db.select().from(userRoles);
+    return this.getUsersWithRoles(true);
+  }
 
-    return allUsers.map((user) => ({
-      ...user,
-      roles: allRoles
-        .filter((r) => r.userId === user.id)
-        .map((r) => r.role as EmployeeRole),
-    }));
+  private async getUsersWithRoles(activeOnly?: boolean): Promise<UserWithRoles[]> {
+    const baseQuery = db
+      .select({
+        user: users,
+        roleEntry: userRoles,
+      })
+      .from(users)
+      .leftJoin(userRoles, eq(users.id, userRoles.userId));
+    
+    const results = activeOnly
+      ? await baseQuery.where(eq(users.isActive, true))
+      : await baseQuery;
+
+    const userMap = new Map<number, UserWithRoles>();
+    for (const row of results) {
+      if (!userMap.has(row.user.id)) {
+        userMap.set(row.user.id, { ...row.user, roles: [] });
+      }
+      if (row.roleEntry?.role) {
+        userMap.get(row.user.id)!.roles.push(row.roleEntry.role as EmployeeRole);
+      }
+    }
+    return Array.from(userMap.values());
   }
 
   async updateUser(
@@ -443,32 +451,20 @@ export class AuthService {
 
   async cleanupExpiredSessions(): Promise<number> {
     const now = new Date();
-    const expired = await db
-      .select()
-      .from(sessions)
-      .where(lt(sessions.expiresAt, now));
-    
-    if (expired.length === 0) return 0;
-    
-    for (const session of expired) {
-      await db.delete(sessions).where(eq(sessions.id, session.id));
-    }
-    return expired.length;
+    const result = await db
+      .delete(sessions)
+      .where(lt(sessions.expiresAt, now))
+      .returning({ id: sessions.id });
+    return result.length;
   }
 
   async cleanupExpiredResetTokens(): Promise<number> {
     const now = new Date();
-    const expired = await db
-      .select()
-      .from(passwordResetTokens)
-      .where(lt(passwordResetTokens.expiresAt, now));
-    
-    if (expired.length === 0) return 0;
-    
-    for (const token of expired) {
-      await db.delete(passwordResetTokens).where(eq(passwordResetTokens.id, token.id));
-    }
-    return expired.length;
+    const result = await db
+      .delete(passwordResetTokens)
+      .where(lt(passwordResetTokens.expiresAt, now))
+      .returning({ id: passwordResetTokens.id });
+    return result.length;
   }
 }
 

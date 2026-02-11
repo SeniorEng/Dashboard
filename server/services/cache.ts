@@ -8,9 +8,20 @@ interface CacheEntry<T> {
 class SimpleCache<T> {
   private cache = new Map<string, CacheEntry<T>>();
   private defaultTtlMs: number;
+  private gcInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(defaultTtlMs: number = 5 * 60 * 1000) {
     this.defaultTtlMs = defaultTtlMs;
+    this.gcInterval = setInterval(() => this.evictExpired(), Math.max(defaultTtlMs, 60000));
+  }
+
+  private evictExpired(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.cache) {
+      if (now > entry.expiresAt) {
+        this.cache.delete(key);
+      }
+    }
   }
 
   get(key: string): T | undefined {
@@ -174,6 +185,19 @@ interface CachedSession {
 
 class SessionCacheService {
   private cache = new Map<string, CachedSession>();
+
+  constructor() {
+    setInterval(() => this.evictExpired(), 60000);
+  }
+
+  private evictExpired(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.cache) {
+      if (now - entry.cachedAt > SESSION_CACHE_TTL) {
+        this.cache.delete(key);
+      }
+    }
+  }
 
   get(tokenHash: string): import("@shared/schema").UserWithRoles | undefined {
     const entry = this.cache.get(tokenHash);

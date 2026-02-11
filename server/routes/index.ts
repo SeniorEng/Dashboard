@@ -12,8 +12,11 @@ import servicesRouter from "./services";
 import { searchRouter } from "./search";
 import settingsRouter from "./settings";
 import { csrfProtection, csrfTokenHandler } from "../middleware/csrf";
+import { authMiddleware } from "../middleware/auth";
 
 const router = Router();
+
+router.use(authMiddleware);
 
 router.get("/csrf-token", csrfTokenHandler);
 

@@ -34,6 +34,7 @@ export const userRoles = pgTable("user_roles", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [
   unique("user_role_unique").on(table.userId, table.role),
+  index("user_roles_user_id_idx").on(table.userId),
 ]);
 
 // Sessions for authentication
@@ -43,7 +44,10 @@ export const sessions = pgTable("sessions", {
   tokenHash: text("token_hash").notNull().unique(),
   expiresAt: timestamp("expires_at").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (table) => [
+  index("sessions_user_id_idx").on(table.userId),
+  index("sessions_expires_at_idx").on(table.expiresAt),
+]);
 
 // Password reset tokens
 export const passwordResetTokens = pgTable("password_reset_tokens", {
