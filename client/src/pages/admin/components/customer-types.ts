@@ -23,12 +23,18 @@ export interface CustomerFormData {
   pflegegradSeit: string;
   primaryEmployeeId: string;
   backupEmployeeId: string;
+  vorerkrankungen: string;
+  haustierVorhanden: boolean;
+  haustierDetails: string;
   insuranceProviderId: string;
   versichertennummer: string;
   contacts: ContactFormData[];
   entlastungsbetrag45b: string;
   verhinderungspflege39: string;
   pflegesachleistungen36: string;
+  contractDate: string;
+  contractStart: string;
+  vereinbarteLeistungen: string;
   contractHours: string;
   contractPeriod: "weekly" | "monthly";
   hauswirtschaftRate: string;

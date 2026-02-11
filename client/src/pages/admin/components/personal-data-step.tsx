@@ -1,5 +1,7 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -186,6 +188,47 @@ export function PersonalDataStep({ formData, phoneErrors, employeeOptions, onCha
             emptyText="Kein Mitarbeiter gefunden."
             data-testid="select-backup-employee"
           />
+        </div>
+      </div>
+
+      <div className="border-t pt-4 space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="vorerkrankungen">Vorerkrankungen</Label>
+          <Textarea
+            id="vorerkrankungen"
+            value={formData.vorerkrankungen}
+            onChange={(e) => onChange("vorerkrankungen", e.target.value)}
+            placeholder="z.B. Diabetes Typ 2, Bluthochdruck, Demenz..."
+            rows={3}
+            data-testid="input-vorerkrankungen"
+          />
+          <p className="text-xs text-gray-500">
+            Wichtige gesundheitliche Informationen für die Betreuungskräfte
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="haustierVorhanden"
+              checked={formData.haustierVorhanden}
+              onCheckedChange={(checked) => onChange("haustierVorhanden", !!checked)}
+              data-testid="checkbox-haustier"
+            />
+            <Label htmlFor="haustierVorhanden">Haustier vorhanden?</Label>
+          </div>
+          {formData.haustierVorhanden && (
+            <div className="space-y-2 ml-6">
+              <Label htmlFor="haustierDetails">Beschreibung</Label>
+              <Input
+                id="haustierDetails"
+                value={formData.haustierDetails}
+                onChange={(e) => onChange("haustierDetails", e.target.value)}
+                placeholder="z.B. Hund, 10kg schwer, freundlich"
+                data-testid="input-haustier-details"
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>

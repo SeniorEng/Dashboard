@@ -12,11 +12,14 @@ import { users } from "./users";
 export const customerContracts = pgTable("customer_contracts", {
   id: serial("id").primaryKey(),
   customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  contractDate: date("contract_date"), // Date contract was signed
   contractStart: date("contract_start").notNull(),
   contractEnd: date("contract_end"), // null = ongoing
-  // Service scope
-  hoursPerPeriod: integer("hours_per_period").notNull(), // Total hours
-  periodType: text("period_type").notNull(), // "week" | "month" | "year"
+  // Agreed services (free text description)
+  vereinbarteLeistungen: text("vereinbarte_leistungen"),
+  // Service scope (legacy, kept for backwards compatibility)
+  hoursPerPeriod: integer("hours_per_period").notNull().default(0), // Total hours
+  periodType: text("period_type").notNull().default("month"), // "week" | "month" | "year"
   // Pricing (in cents) - required for all contracts
   hauswirtschaftRateCents: integer("hauswirtschaft_rate_cents").notNull().default(0), // €/Stunde in Cent
   alltagsbegleitungRateCents: integer("alltagsbegleitung_rate_cents").notNull().default(0), // €/Stunde in Cent
@@ -70,14 +73,15 @@ export const CONTRACT_STATUS = ["active", "paused", "terminated"] as const;
 
 export const insertCustomerContractSchema = z.object({
   customerId: z.number(),
+  contractDate: z.string().optional().nullable(),
   contractStart: z.string(),
   contractEnd: z.string().optional().nullable(),
-  hoursPerPeriod: z.number().min(1),
-  periodType: z.enum(CONTRACT_PERIOD_TYPES),
-  // Pricing (in cents) - required for all contracts
-  hauswirtschaftRateCents: z.number().min(0, "Hauswirtschaft-Preis ist erforderlich"),
-  alltagsbegleitungRateCents: z.number().min(0, "Alltagsbegleitung-Preis ist erforderlich"),
-  kilometerRateCents: z.number().min(0, "Kilometer-Preis ist erforderlich"),
+  vereinbarteLeistungen: z.string().max(2000).optional().nullable(),
+  hoursPerPeriod: z.number().min(0).optional().default(0),
+  periodType: z.enum(CONTRACT_PERIOD_TYPES).optional().default("month"),
+  hauswirtschaftRateCents: z.number().min(0).optional().default(0),
+  alltagsbegleitungRateCents: z.number().min(0).optional().default(0),
+  kilometerRateCents: z.number().min(0).optional().default(0),
   status: z.enum(CONTRACT_STATUS).optional().default("active"),
   notes: z.string().max(500).optional().nullable(),
 });

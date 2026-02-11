@@ -170,8 +170,10 @@ export interface CustomerNeedsAssessmentInfo {
 
 export interface CustomerContractInfo {
   id: number;
+  contractDate: string | null;
   contractStart: string;
   contractEnd: string | null;
+  vereinbarteLeistungen: string | null;
   hoursPerPeriod: number;
   periodType: string;
   status: string;
@@ -218,6 +220,9 @@ export interface CreateCustomerRequest {
   stadt: string;
   pflegegrad?: number;
   pflegegradSeit?: string;
+  vorerkrankungen?: string;
+  haustierVorhanden?: boolean;
+  haustierDetails?: string;
   insurance?: {
     providerId: number;
     versichertennummer: string;
@@ -240,6 +245,8 @@ export interface CreateCustomerRequest {
   };
   contract?: {
     contractStart: string;
+    contractDate?: string;
+    vereinbarteLeistungen?: string;
     hoursPerPeriod: number;
     periodType: string;
     rates?: Array<{

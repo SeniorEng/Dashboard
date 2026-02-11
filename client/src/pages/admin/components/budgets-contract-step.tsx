@@ -1,7 +1,10 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CustomerFormData, PERIOD_TYPES } from "./customer-types";
+import { Textarea } from "@/components/ui/textarea";
+import { DatePicker } from "@/components/ui/date-picker";
+import { useQuery } from "@tanstack/react-query";
+import { api, unwrapResult } from "@/lib/api";
+import { CustomerFormData } from "./customer-types";
 import { 
   BUDGET_45B_MAX_MONTHLY_CENTS, 
   BUDGET_45A_MAX_BY_PFLEGEGRAD, 
@@ -95,94 +98,89 @@ export function BudgetsStep({ formData, onChange, pflegegrad }: BudgetsStepProps
   );
 }
 
+interface ServiceInfo {
+  id: number;
+  name: string;
+  defaultPriceCents: number;
+  unitType: string;
+  billingCategory?: string;
+}
+
 interface ContractStepProps {
   formData: CustomerFormData;
   onChange: (field: string, value: string | boolean) => void;
 }
 
 export function ContractStep({ formData, onChange }: ContractStepProps) {
+  const { data: services } = useQuery({
+    queryKey: ["/api/services"],
+    queryFn: async () => {
+      const result = await api.get<ServiceInfo[]>("/services");
+      return unwrapResult(result);
+    },
+    staleTime: 60000,
+  });
+
+  const activeServices = services?.filter(s => s.defaultPriceCents > 0) || [];
+
   return (
     <div className="space-y-6">
-      <p className="text-sm text-gray-600">
-        Legen Sie die Vertragsbedingungen und Stundensätze fest.
-      </p>
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <Label>Vertragsabschluss</Label>
+          <DatePicker
+            value={formData.contractDate || null}
+            onChange={(val) => onChange("contractDate", val || "")}
+            data-testid="input-contract-date"
+          />
+          <p className="text-xs text-gray-500">Datum, an dem der Vertrag unterschrieben wurde</p>
+        </div>
 
-      <div className="border-b pb-4">
-        <h3 className="font-medium mb-4">Vereinbarte Leistungen</h3>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="contractHours">Stunden pro Zeitraum</Label>
-            <Input
-              id="contractHours"
-              type="number"
-              step="0.5"
-              value={formData.contractHours}
-              onChange={(e) => onChange("contractHours", e.target.value)}
-              data-testid="input-contract-hours"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="contractPeriod">Zeitraum</Label>
-            <Select
-              value={formData.contractPeriod}
-              onValueChange={(value) => onChange("contractPeriod", value)}
-            >
-              <SelectTrigger data-testid="select-contract-period">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PERIOD_TYPES.map((type) => (
-                  <SelectItem key={type.value} value={type.value}>
-                    {type.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        <div className="space-y-2">
+          <Label>Vertragsbeginn</Label>
+          <DatePicker
+            value={formData.contractStart || null}
+            onChange={(val) => onChange("contractStart", val || "")}
+            data-testid="input-contract-start"
+          />
         </div>
       </div>
 
-      <div>
-        <h3 className="font-medium mb-4">Stundensätze</h3>
-        <div className="grid grid-cols-3 gap-4">
+      <div className="border-t pt-4">
+        <div className="space-y-2">
+          <Label htmlFor="vereinbarteLeistungen">Vereinbarte Leistungen</Label>
+          <Textarea
+            id="vereinbarteLeistungen"
+            value={formData.vereinbarteLeistungen}
+            onChange={(e) => onChange("vereinbarteLeistungen", e.target.value)}
+            placeholder="z.B. Fenster putzen alle 2 Wochen, Einkauf 1x wöchentlich, Spaziergang 2x pro Woche..."
+            rows={4}
+            data-testid="input-vereinbarte-leistungen"
+          />
+          <p className="text-xs text-gray-500">
+            Beschreiben Sie die vereinbarten Leistungen im Freitext
+          </p>
+        </div>
+      </div>
+
+      {activeServices.length > 0 && (
+        <div className="border-t pt-4">
+          <h3 className="font-medium mb-3">Aktuelle Stundensätze (Dienstleistungskatalog)</h3>
+          <p className="text-xs text-gray-500 mb-3">
+            Diese Sätze stammen aus dem Dienstleistungskatalog und können dort oder kundenindividuell angepasst werden.
+          </p>
           <div className="space-y-2">
-            <Label htmlFor="hauswirtschaftRate">Hauswirtschaft (€/Std)</Label>
-            <Input
-              id="hauswirtschaftRate"
-              type="number"
-              step="0.01"
-              value={formData.hauswirtschaftRate}
-              onChange={(e) => onChange("hauswirtschaftRate", e.target.value)}
-              data-testid="input-rate-hauswirtschaft"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="alltagsbegleitungRate">Alltagsbegleitung (€/Std)</Label>
-            <Input
-              id="alltagsbegleitungRate"
-              type="number"
-              step="0.01"
-              value={formData.alltagsbegleitungRate}
-              onChange={(e) => onChange("alltagsbegleitungRate", e.target.value)}
-              data-testid="input-rate-alltagsbegleitung"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="erstberatungRate">Erstberatung (€/Std)</Label>
-            <Input
-              id="erstberatungRate"
-              type="number"
-              step="0.01"
-              value={formData.erstberatungRate}
-              onChange={(e) => onChange("erstberatungRate", e.target.value)}
-              data-testid="input-rate-erstberatung"
-            />
+            {activeServices.map(service => (
+              <div key={service.id} className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded" data-testid={`service-rate-${service.id}`}>
+                <span className="text-sm text-gray-700">{service.name}</span>
+                <span className="text-sm font-medium text-gray-900">
+                  {(service.defaultPriceCents / 100).toFixed(2)} €/{service.unitType === "hour" ? "Std" : service.unitType === "flat" ? "Pauschale" : service.unitType}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
-        <p className="text-xs text-gray-500 mt-2">
-          Standardsätze: Hauswirtschaft 38€/Std, Alltagsbegleitung 42€/Std
-        </p>
-      </div>
+      )}
     </div>
   );
 }

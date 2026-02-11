@@ -41,13 +41,19 @@ export default function AdminCustomerNew() {
     pflegegradSeit: "",
     primaryEmployeeId: "",
     backupEmployeeId: "",
+    vorerkrankungen: "",
+    haustierVorhanden: false,
+    haustierDetails: "",
     insuranceProviderId: "",
     versichertennummer: "",
     contacts: [{ ...EMPTY_CONTACT }],
     entlastungsbetrag45b: DEFAULT_BUDGETS.entlastungsbetrag45b.toString(),
     verhinderungspflege39: DEFAULT_BUDGETS.verhinderungspflege39.toString(),
     pflegesachleistungen36: DEFAULT_BUDGETS.pflegesachleistungen36.toString(),
-    contractHours: "10",
+    contractDate: "",
+    contractStart: "",
+    vereinbarteLeistungen: "",
+    contractHours: "0",
     contractPeriod: "weekly",
     hauswirtschaftRate: "38",
     alltagsbegleitungRate: "42",
@@ -192,11 +198,13 @@ export default function AdminCustomerNew() {
       { serviceCategory: "alltagsbegleitung", hourlyRateCents: Math.round(parseFloat(formData.alltagsbegleitungRate) * 100) || 0 },
       { serviceCategory: "erstberatung", hourlyRateCents: Math.round(parseFloat(formData.erstberatungRate) * 100) || 0 },
     ].filter(r => r.hourlyRateCents > 0);
-    const contract = contractHours > 0 && rates.length > 0
+    const contract = contractHours > 0 || formData.vereinbarteLeistungen.trim() || formData.contractDate
       ? {
-          contractStart: today,
-          hoursPerPeriod: contractHours,
-          periodType: formData.contractPeriod,
+          contractStart: formData.contractStart || today,
+          contractDate: formData.contractDate || undefined,
+          vereinbarteLeistungen: formData.vereinbarteLeistungen.trim() || undefined,
+          hoursPerPeriod: contractHours || 0,
+          periodType: formData.contractPeriod === "weekly" ? "week" : "month",
           rates,
         }
       : undefined;
@@ -213,6 +221,9 @@ export default function AdminCustomerNew() {
       email: formData.email.trim() || undefined,
       telefon: formData.telefon.trim() ? (normalizePhone(formData.telefon) || undefined) : undefined,
       festnetz: formData.festnetz.trim() ? (normalizePhone(formData.festnetz) || undefined) : undefined,
+      vorerkrankungen: formData.vorerkrankungen.trim() || undefined,
+      haustierVorhanden: formData.haustierVorhanden,
+      haustierDetails: formData.haustierVorhanden ? (formData.haustierDetails.trim() || undefined) : undefined,
       insurance,
       contacts: contacts.length > 0 ? contacts : undefined,
       budgets,

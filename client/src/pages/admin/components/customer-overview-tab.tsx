@@ -15,6 +15,9 @@ import {
   Users,
   Calendar,
   CreditCard,
+  FileText,
+  PawPrint,
+  Stethoscope,
 } from "lucide-react";
 import type { CustomerDetail } from "@/lib/api/types";
 
@@ -116,6 +119,63 @@ export function CustomerOverviewTab({ customer }: CustomerOverviewTabProps) {
           </p>
         )}
       </SectionCard>
+
+      {customer.vorerkrankungen && (
+        <SectionCard
+          title="Vorerkrankungen"
+          icon={<Stethoscope className={iconSize.sm} />}
+        >
+          <p className="text-gray-700 whitespace-pre-wrap" data-testid="text-vorerkrankungen">
+            {customer.vorerkrankungen}
+          </p>
+        </SectionCard>
+      )}
+
+      {customer.haustierVorhanden && (
+        <SectionCard
+          title="Haustier"
+          icon={<PawPrint className={iconSize.sm} />}
+        >
+          <div className="space-y-1" data-testid="text-haustier">
+            <Badge className="bg-amber-50 text-amber-700 border-amber-200">Haustier vorhanden</Badge>
+            {customer.haustierDetails && (
+              <p className="text-gray-700 mt-2">{customer.haustierDetails}</p>
+            )}
+          </div>
+        </SectionCard>
+      )}
+
+      {customer.currentContract && (
+        <SectionCard
+          title="Vertrag"
+          icon={<FileText className={iconSize.sm} />}
+        >
+          <div className="space-y-2" data-testid="text-contract">
+            {customer.currentContract.contractDate && (
+              <div>
+                <p className="text-sm text-gray-500">Vertragsabschluss</p>
+                <p className="font-medium">{formatDateForDisplay(customer.currentContract.contractDate)}</p>
+              </div>
+            )}
+            <div>
+              <p className="text-sm text-gray-500">Vertragsbeginn</p>
+              <p className="font-medium">{formatDateForDisplay(customer.currentContract.contractStart)}</p>
+            </div>
+            {customer.currentContract.vereinbarteLeistungen && (
+              <div>
+                <p className="text-sm text-gray-500">Vereinbarte Leistungen</p>
+                <p className="text-gray-700 whitespace-pre-wrap">{customer.currentContract.vereinbarteLeistungen}</p>
+              </div>
+            )}
+            <div>
+              <p className="text-sm text-gray-500">Status</p>
+              <Badge className={customer.currentContract.status === "active" ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-50 text-gray-700 border-gray-200"}>
+                {customer.currentContract.status === "active" ? "Aktiv" : customer.currentContract.status === "paused" ? "Pausiert" : "Beendet"}
+              </Badge>
+            </div>
+          </div>
+        </SectionCard>
+      )}
 
       {customer.needsAssessment?.anamnese && (
         <SectionCard

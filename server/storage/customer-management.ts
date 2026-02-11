@@ -782,6 +782,9 @@ export class CustomerManagementStorage {
     stadt: string;
     primaryEmployeeId: number | null;
     backupEmployeeId: number | null;
+    vorerkrankungen: string | null;
+    haustierVorhanden: boolean;
+    haustierDetails: string | null;
   }>): Promise<Customer | undefined> {
     const updateData: any = { ...data, updatedAt: new Date() };
     

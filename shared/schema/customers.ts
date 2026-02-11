@@ -30,6 +30,11 @@ export const customers = pgTable("customers", {
   // Employee assignments
   primaryEmployeeId: integer("primary_employee_id").references(() => users.id),
   backupEmployeeId: integer("backup_employee_id").references(() => users.id),
+  // Health
+  vorerkrankungen: text("vorerkrankungen"),
+  // Pet info (for employee-customer matching)
+  haustierVorhanden: boolean("haustier_vorhanden").notNull().default(false),
+  haustierDetails: text("haustier_details"),
   // Billing
   acceptsPrivatePayment: boolean("accepts_private_payment").notNull().default(false),
   // Legacy fields

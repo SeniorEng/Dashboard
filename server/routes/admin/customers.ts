@@ -4,7 +4,6 @@ import { customerManagementStorage } from "../../storage/customer-management";
 import { authService } from "../../services/auth";
 import { birthdaysCache } from "../../services/cache";
 import { 
-  createFullCustomerSchema,
   insertCustomerInsuranceSchema,
   insertCustomerContactSchema,
   insertCareLevelHistorySchema,
@@ -233,8 +232,10 @@ router.get("/customers/:id/details", async (req: Request, res: Response) => {
       needsAssessment: customer.needsAssessment || null,
       currentContract: customer.contract ? {
         id: customer.contract.id,
+        contractDate: customer.contract.contractDate,
         contractStart: customer.contract.contractStart,
         contractEnd: customer.contract.contractEnd,
+        vereinbarteLeistungen: customer.contract.vereinbarteLeistungen,
         hoursPerPeriod: customer.contract.hoursPerPeriod,
         periodType: customer.contract.periodType,
         status: customer.contract.status,
@@ -255,12 +256,158 @@ router.get("/customers/:id/details", async (req: Request, res: Response) => {
   }
 });
 
+const simpleCreateCustomerSchema = z.object({
+  vorname: z.string().min(1),
+  nachname: z.string().min(1),
+  email: z.string().email().optional().nullable(),
+  telefon: z.string().optional().nullable(),
+  festnetz: z.string().optional().nullable(),
+  strasse: z.string().min(1),
+  nr: z.string().min(1),
+  plz: z.string().regex(/^\d{5}$/),
+  stadt: z.string().min(1),
+  pflegegrad: z.number().min(0).max(5).optional(),
+  pflegegradSeit: z.string().optional(),
+  vorerkrankungen: z.string().max(2000).optional().nullable(),
+  haustierVorhanden: z.boolean().optional(),
+  haustierDetails: z.string().max(500).optional().nullable(),
+  insurance: z.object({
+    providerId: z.number(),
+    versichertennummer: z.string(),
+    validFrom: z.string(),
+  }).optional(),
+  contacts: z.array(z.object({
+    contactType: z.string(),
+    isPrimary: z.boolean(),
+    vorname: z.string(),
+    nachname: z.string(),
+    telefon: z.string(),
+    email: z.string().optional(),
+  })).optional(),
+  budgets: z.object({
+    entlastungsbetrag45b: z.number(),
+    verhinderungspflege39: z.number(),
+    pflegesachleistungen36: z.number(),
+    validFrom: z.string(),
+  }).optional(),
+  contract: z.object({
+    contractStart: z.string(),
+    contractDate: z.string().optional(),
+    vereinbarteLeistungen: z.string().optional(),
+    hoursPerPeriod: z.number(),
+    periodType: z.string(),
+    rates: z.array(z.object({
+      serviceCategory: z.string(),
+      hourlyRateCents: z.number(),
+    })).optional(),
+  }).optional(),
+});
+
 router.post("/customers", async (req: Request, res: Response) => {
   try {
-    const validatedData = createFullCustomerSchema.parse(req.body);
-    const customer = await customerManagementStorage.createFullCustomer(validatedData, req.user!.id);
-    
-    // Invalidate birthday cache (new customer may have birthday)
+    const data = simpleCreateCustomerSchema.parse(req.body);
+    const userId = req.user!.id;
+
+    const customerData: any = {
+      name: `${data.nachname}, ${data.vorname}`,
+      vorname: data.vorname,
+      nachname: data.nachname,
+      email: data.email || null,
+      telefon: data.telefon || null,
+      festnetz: data.festnetz || null,
+      address: `${data.strasse} ${data.nr}, ${data.plz} ${data.stadt}`,
+      strasse: data.strasse,
+      nr: data.nr,
+      plz: data.plz,
+      stadt: data.stadt,
+      pflegegrad: data.pflegegrad || 0,
+      vorerkrankungen: data.vorerkrankungen || null,
+      haustierVorhanden: data.haustierVorhanden || false,
+      haustierDetails: data.haustierVorhanden ? (data.haustierDetails || null) : null,
+      createdByUserId: userId,
+    };
+
+    const { db } = await import("../../lib/db");
+    const { customers: customersTable } = await import("@shared/schema");
+
+    const [customer] = await db.insert(customersTable).values(customerData).returning();
+
+    if (data.pflegegrad && data.pflegegradSeit) {
+      try {
+        await customerManagementStorage.addCareLevelHistory({
+          customerId: customer.id,
+          pflegegrad: data.pflegegrad,
+          validFrom: data.pflegegradSeit,
+        }, userId);
+      } catch {}
+    }
+
+    if (data.insurance) {
+      try {
+        await customerManagementStorage.addCustomerInsurance({
+          customerId: customer.id,
+          insuranceProviderId: data.insurance.providerId,
+          versichertennummer: data.insurance.versichertennummer,
+          validFrom: data.insurance.validFrom,
+        }, userId);
+      } catch {}
+    }
+
+    if (data.contacts) {
+      for (let i = 0; i < data.contacts.length; i++) {
+        const c = data.contacts[i];
+        try {
+          await customerManagementStorage.addCustomerContact({
+            customerId: customer.id,
+            contactType: c.contactType,
+            isPrimary: c.isPrimary,
+            vorname: c.vorname,
+            nachname: c.nachname,
+            telefon: c.telefon,
+            email: c.email || null,
+            sortOrder: i,
+          });
+        } catch {}
+      }
+    }
+
+    if (data.budgets) {
+      try {
+        await customerManagementStorage.addCustomerBudget({
+          customerId: customer.id,
+          entlastungsbetrag45b: data.budgets.entlastungsbetrag45b,
+          verhinderungspflege39: data.budgets.verhinderungspflege39,
+          pflegesachleistungen36: data.budgets.pflegesachleistungen36,
+          validFrom: data.budgets.validFrom,
+        }, userId);
+      } catch {}
+    }
+
+    if (data.contract) {
+      try {
+        const contract = await customerManagementStorage.createCustomerContract({
+          customerId: customer.id,
+          contractStart: data.contract.contractStart,
+          contractDate: data.contract.contractDate || null,
+          vereinbarteLeistungen: data.contract.vereinbarteLeistungen || null,
+          hoursPerPeriod: data.contract.hoursPerPeriod,
+          periodType: data.contract.periodType,
+          status: "active",
+        }, userId);
+
+        if (data.contract.rates) {
+          for (const rate of data.contract.rates) {
+            await customerManagementStorage.addContractRate({
+              contractId: contract.id,
+              serviceCategory: rate.serviceCategory,
+              hourlyRateCents: rate.hourlyRateCents,
+              validFrom: data.contract.contractStart,
+            }, userId);
+          }
+        }
+      } catch {}
+    }
+
     birthdaysCache.invalidateAll();
     
     res.status(201).json(customer);
@@ -285,6 +432,9 @@ const updateCustomerSchema = z.object({
   stadt: z.string().min(1).optional(),
   primaryEmployeeId: z.number().nullable().optional(),
   backupEmployeeId: z.number().nullable().optional(),
+  vorerkrankungen: z.string().max(2000).nullable().optional(),
+  haustierVorhanden: z.boolean().optional(),
+  haustierDetails: z.string().max(500).nullable().optional(),
 });
 
 router.patch("/customers/:id", async (req: Request, res: Response) => {
