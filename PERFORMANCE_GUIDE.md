@@ -36,7 +36,7 @@
 ### 1.4 Frontend-Ebene (BEREITS GUT)
 | Maßnahme | Status | Details |
 |----------|--------|---------|
-| Route-Level Code Splitting | ✅ | Alle Seiten via `React.lazy()` geladen |
+| Route-Level Code Splitting | ✅ | Fast alle Seiten via `React.lazy()` geladen (Ausnahme: Dashboard, Login, NotFound sind eager-imported für schnellsten Initial Load) |
 | staleTime pro Query-Typ | ✅ | Volatile: 30s, Stabil: 60s, Statisch: 5min, Session: Infinity |
 | React.memo auf AppointmentCard | ✅ | Teuerste Listendarstellung memoisiert |
 | useMemo/useCallback | ✅ | ~100 Nutzungen in Pages + Components |
@@ -49,6 +49,7 @@
 ### 2.1 KRITISCH: Bundle-Größe – 559 kB Haupt-Chunk
 
 **Problem:** Der `index-*.js` Haupt-Chunk ist 559 kB (172 kB gzip). Vite warnt über >500 kB.
+*(Gemessen via `npx vite build --mode production` am 2026-02-11)*
 
 **Ursache:** Alle Vendor-Libraries (React, Radix UI, TanStack Query, date-fns, Zod, etc.) werden in einem einzigen Chunk gebündelt.
 
@@ -88,38 +89,64 @@ build: {
 
 **Problem:** Folgende `shadcn/ui`-Komponenten sind installiert, werden aber **nirgends** in der App verwendet:
 
-| Komponente | Dateigröße | Externe Dependency |
-|------------|-----------|-------------------|
-| `sidebar.tsx` | 727 Zeilen | – (nur intern von button.tsx importiert, prüfen!) |
-| `chart.tsx` | 367 Zeilen | `recharts` (sehr groß!) |
-| `carousel.tsx` | 260 Zeilen | `embla-carousel-react` |
-| `menubar.tsx` | 254 Zeilen | `@radix-ui/react-menubar` |
-| `navigation-menu.tsx` | 128 Zeilen | `@radix-ui/react-navigation-menu` |
-| `context-menu.tsx` | 198 Zeilen | `@radix-ui/react-context-menu` |
-| `hover-card.tsx` | ? | `@radix-ui/react-hover-card` |
-| `resizable.tsx` | ? | `react-resizable-panels` |
-| `input-otp.tsx` | ? | `input-otp` |
-| `avatar.tsx` | ? | `@radix-ui/react-avatar` |
-| `aspect-ratio.tsx` | ? | `@radix-ui/react-aspect-ratio` |
-| `radio-group.tsx` | ? | `@radix-ui/react-radio-group` |
-| `scroll-area.tsx` | ? | `@radix-ui/react-scroll-area` |
-| `toggle.tsx` / `toggle-group.tsx` | ? | `@radix-ui/react-toggle` / `toggle-group` |
-| `slider` | ? | `@radix-ui/react-slider` (nur in admin/customers.tsx) |
+**Verifiziert ungenutzt** (nur von sich selbst importiert, keine App-Nutzung):
+
+| Komponente | Dateigröße | Externe Dependency | Verifiziert |
+|------------|-----------|-------------------|-------------|
+| `chart.tsx` | 367 Zeilen | `recharts` (sehr groß!) | ✅ Nur chart.tsx importiert recharts, nirgends in Pages/Features genutzt |
+| `carousel.tsx` | 260 Zeilen | `embla-carousel-react` | ✅ Nur self-referencing |
+| `sidebar.tsx` | 727 Zeilen | – | ✅ Nur CSS-Variablen in index.css + Kommentar in button.tsx, Komponente nie verwendet |
+| `navigation-menu.tsx` | 128 Zeilen | `@radix-ui/react-navigation-menu` | ✅ Nur self-referencing |
+| `menubar.tsx` | 254 Zeilen | `@radix-ui/react-menubar` | ✅ Nur self-referencing (RadioGroup import ist intern) |
+| `context-menu.tsx` | 198 Zeilen | `@radix-ui/react-context-menu` | ✅ Nur self-referencing (RadioGroup import ist intern) |
+| `hover-card.tsx` | ~50 Zeilen | `@radix-ui/react-hover-card` | ✅ Nur self-referencing |
+| `resizable.tsx` | ~30 Zeilen | `react-resizable-panels` | ✅ Nur self-referencing |
+| `input-otp.tsx` | ~50 Zeilen | `input-otp` | ✅ Nur self-referencing |
+| `avatar.tsx` | ~50 Zeilen | `@radix-ui/react-avatar` | ✅ Nur in design-system/tokens.ts referenziert (nicht in UI) |
+| `aspect-ratio.tsx` | ~15 Zeilen | `@radix-ui/react-aspect-ratio` | ✅ Nur self-referencing |
+| `scroll-area.tsx` | ~50 Zeilen | `@radix-ui/react-scroll-area` | ✅ Nur self-referencing |
+| `progress.tsx` | ~30 Zeilen | `@radix-ui/react-progress` | ✅ Nicht in Pages genutzt |
+
+**Aktiv genutzte Komponenten** (NICHT löschen):
+- `slider` → genutzt in `admin/customers.tsx`
+- `radio-group.tsx` → genutzt in `travel-documentation.tsx`
+- `toggle.tsx` / `toggle-group.tsx` → genutzt in `BudgetTypeSettings`, `tasks`, `services`, `users`, `settings`
 
 **Wichtig:** `chart.tsx` importiert `recharts` (122 kB+ Minified). Recharts wird sonst nirgends genutzt.
 
 **Lösung:**
-1. Ungenutzte Komponenten-Dateien löschen
+1. Ungenutzte Komponenten-Dateien löschen (13 Dateien)
 2. Entsprechende npm-Pakete aus `package.json` entfernen:
    - `recharts`, `embla-carousel-react`, `react-resizable-panels`, `input-otp`
-   - Radix-Pakete die nur von ungenutzten Komponenten importiert werden
+   - Radix-Pakete die nur von ungenutzten Komponenten importiert werden: `@radix-ui/react-menubar`, `@radix-ui/react-navigation-menu`, `@radix-ui/react-context-menu`, `@radix-ui/react-hover-card`, `@radix-ui/react-avatar`, `@radix-ui/react-aspect-ratio`, `@radix-ui/react-scroll-area`, `@radix-ui/react-progress`
 3. Tree-Shaking kann Radix-Pakete nicht eliminieren wenn die Komponenten-Dateien existieren
 
 **Erwarteter Effekt:** ~100-200 kB weniger im Bundle (besonders durch `recharts`)
 **Aufwand:** Niedrig-Mittel (Dateien löschen, Dependencies aufräumen)
 **Impact:** Hoch
 
-### 2.3 HOCH: `libphonenumber-js` – 155 kB für Telefonnummern
+### 2.3 HOCH: Ungenutzte npm-Pakete in package.json
+
+**Problem:** Folgende npm-Pakete sind in `package.json` aber werden im Code nicht importiert:
+
+| Paket | Typ | Anmerkung |
+|-------|-----|-----------|
+| `framer-motion` | Frontend | Nur in ungenutztem `navigation-menu.tsx` importiert |
+| `next-themes` | Frontend | Nur in `sonner.tsx` importiert (Theme-Provider) – prüfen ob nötig |
+| `passport` | Backend | Nicht im Server-Code importiert |
+| `passport-local` | Backend | Nicht im Server-Code importiert |
+| `connect-pg-simple` | Backend | Nicht im Server-Code importiert |
+| `memorystore` | Backend | Nicht im Server-Code importiert |
+| `express-session` | Backend | Nicht im Server-Code importiert |
+| `@types/bcrypt` | Dev | Typ-Definition, aber prüfen ob bcrypt tatsächlich genutzt |
+| `@types/compression` | Dev | OK, compression wird genutzt |
+| `supertest` | Dev | Test-Utility |
+
+**Lösung:** Ungenutzte Pakete deinstallieren → kleinerer `node_modules`, schnellerer Install
+**Aufwand:** Niedrig
+**Impact:** Mittel (Install-Zeit, potenziell Bundle bei Frontend-Paketen)
+
+### 2.4 HOCH: `libphonenumber-js` – 155 kB für Telefonnummern
 
 **Problem:** Zwei Chunks für Phone-Nummern:
 - `isValidPhoneNumber-*.js`: 122 kB
@@ -137,7 +164,7 @@ build: {
 **Aufwand:** Niedrig (Option 1) bis Mittel (Option 3)
 **Impact:** Mittel-Hoch
 
-### 2.4 MITTEL: Keine HTTP-Cache-Header auf API-Responses
+### 2.5 MITTEL: Keine HTTP-Cache-Header auf API-Responses
 
 **Problem:** Keine `Cache-Control`, `ETag` oder `Last-Modified` Header auf API-Responses. Der Browser-Cache wird nicht genutzt. Jede Navigation löst neue Requests aus (auch wenn TanStack Query staleTime hat, muss bei neuen Tab-Öffnungen alles neu geladen werden).
 
@@ -157,7 +184,7 @@ res.set('Cache-Control', 'private, max-age=60');
 **Aufwand:** Niedrig
 **Impact:** Mittel
 
-### 2.5 MITTEL: Keine Prefetching-Strategie
+### 2.6 MITTEL: Keine Prefetching-Strategie
 
 **Problem:** Kein Prefetching von Daten oder Routes. Wenn User auf Dashboard ist, könnten wahrscheinliche nächste Seiten (Kunden, Aufgaben) bereits im Hintergrund geladen werden.
 
@@ -180,7 +207,7 @@ const prefetchCustomers = () => {
 **Aufwand:** Mittel
 **Impact:** Mittel (User Experience)
 
-### 2.6 MITTEL: SELECT * Pattern in Storage Layer
+### 2.7 MITTEL: SELECT * Pattern in Storage Layer
 
 **Problem:** Viele Queries nutzen `db.select().from(table)` ohne explizite Feldauswahl. Das überträgt alle Spalten, auch wenn der Client nur wenige braucht.
 
@@ -195,7 +222,7 @@ const prefetchCustomers = () => {
 **Aufwand:** Mittel (pro Query anpassen)
 **Impact:** Mittel
 
-### 2.7 NIEDRIG: Keine List-Virtualisierung
+### 2.8 NIEDRIG: Keine List-Virtualisierung
 
 **Problem:** Wenn ein Mitarbeiter viele Termine hat (z.B. 20+ pro Tag), werden alle DOM-Nodes gleichzeitig gerendert. Aktuell unkritisch bei den typischen Datenmengen (<20 pro Seite), aber sollte bei Wachstum beobachtet werden.
 
@@ -205,7 +232,7 @@ const prefetchCustomers = () => {
 **Aufwand:** Mittel
 **Impact:** Niedrig (aktuell)
 
-### 2.8 NIEDRIG: CSS-Animationen
+### 2.9 NIEDRIG: CSS-Animationen
 
 **Problem:** 28 CSS-Animationen (`animate-in`, `slide-in`, `transition`) in Pages. Einzeln harmlos, aber `animate-pulse` auf in-progress-Icons läuft dauerhaft und kann bei vielen sichtbaren Cards CPU verbrauchen.
 
@@ -217,7 +244,7 @@ const prefetchCustomers = () => {
 **Aufwand:** Niedrig
 **Impact:** Niedrig
 
-### 2.9 NIEDRIG: Direkte DB-Zugriffe in Routes
+### 2.10 NIEDRIG: Direkte DB-Zugriffe in Routes
 
 **Problem:** 9 Route-Handler greifen direkt auf die Datenbank zu statt über den Storage Layer. Das umgeht die Abstraktion und macht Caching/Optimierung schwieriger.
 
@@ -287,13 +314,13 @@ const prefetchCustomers = () => {
 
 ### Phase 1: Quick Wins (Niedrig-Aufwand, Hoher Impact)
 1. **Manual Chunks in vite.config.ts** → Bundle-Split, 559 kB → ~200 kB
-2. **Ungenutzte UI-Komponenten löschen** → recharts etc. entfernen
-3. **libphonenumber-js/min verwenden** → 60-120 kB Ersparnis
+2. **Ungenutzte UI-Komponenten löschen** (13 Dateien) → recharts etc. entfernen
+3. **Ungenutzte npm-Pakete entfernen** (passport, framer-motion, memorystore, etc.)
+4. **libphonenumber-js/min verwenden** → 60-120 kB Ersparnis
 
 ### Phase 2: Mittlerer Aufwand, Guter Impact
-4. **HTTP Cache-Control Headers** auf API-Responses
-5. **Navigation-Prefetching** für häufige Seitenwechsel
-6. **Ungenutzte npm-Pakete entfernen** (recharts, embla-carousel-react, etc.)
+5. **HTTP Cache-Control Headers** auf API-Responses
+6. **Navigation-Prefetching** für häufige Seitenwechsel
 7. **Fehlende DB-Indexes** prüfen: `appointments(date)`, `appointments(customer_id, date)`
 
 ### Phase 3: Architektur-Verbesserungen
