@@ -371,19 +371,6 @@ export default function AdminServices() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="code">Code</Label>
-              <Input
-                id="code"
-                className="text-base"
-                value={form.code}
-                onChange={(e) => handleChange("code", e.target.value)}
-                placeholder="z. B. hw"
-                disabled={editingService?.isSystem}
-                data-testid="input-service-code"
-              />
-            </div>
-
-            <div className="space-y-2">
               <Label htmlFor="unitType">Einheit</Label>
               <Select
                 value={form.unitType}

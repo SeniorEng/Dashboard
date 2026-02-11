@@ -5,7 +5,7 @@ import { timestamp } from "./common";
 export const SERVICE_UNIT_TYPES = ["hours", "kilometers", "flat"] as const;
 export type ServiceUnitType = typeof SERVICE_UNIT_TYPES[number];
 
-export const SYSTEM_SERVICE_CODES = ["hauswirtschaft", "alltagsbegleitung", "travel_km", "customer_km"] as const;
+export const SYSTEM_SERVICE_CODES = ["travel_km", "customer_km"] as const;
 export type SystemServiceCode = typeof SYSTEM_SERVICE_CODES[number];
 
 export const services = pgTable("services", {

@@ -24,30 +24,6 @@ interface SystemServiceDefinition {
 
 const SYSTEM_SERVICE_DEFINITIONS: SystemServiceDefinition[] = [
   {
-    code: "hauswirtschaft",
-    name: "Hauswirtschaft",
-    description: "Hauswirtschaftliche Unterstützung",
-    unitType: "hours",
-    defaultPriceCents: 3800,
-    vatRate: 19,
-    isBillable: true,
-    employeeRateCents: 0,
-    sortOrder: 10,
-    budgetPots: ["entlastungsbetrag_45b", "umwandlung_45a"],
-  },
-  {
-    code: "alltagsbegleitung",
-    name: "Alltagsbegleitung",
-    description: "Betreuung und Begleitung im Alltag",
-    unitType: "hours",
-    defaultPriceCents: 4200,
-    vatRate: 19,
-    isBillable: true,
-    employeeRateCents: 0,
-    sortOrder: 20,
-    budgetPots: ["entlastungsbetrag_45b", "umwandlung_45a"],
-  },
-  {
     code: "travel_km",
     name: "Anfahrtskilometer",
     description: "Kilometer für die Anfahrt zum Kunden",
