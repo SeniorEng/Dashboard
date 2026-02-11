@@ -56,10 +56,6 @@ export default function AdminCustomerNew() {
     vereinbarteLeistungen: "",
     contractHours: "0",
     contractPeriod: "weekly",
-    hauswirtschaftRate: "38",
-    alltagsbegleitungRate: "42",
-    erstberatungRate: "",
-    kilometerRate: "0.35",
   });
 
   const { data: insuranceProviders } = useInsuranceProviders();
@@ -194,12 +190,6 @@ export default function AdminCustomerNew() {
       : undefined;
 
     const contractHours = parseFloat(formData.contractHours);
-    const rates = [
-      { serviceCategory: "hauswirtschaft", hourlyRateCents: Math.round(parseFloat(formData.hauswirtschaftRate) * 100) || 0 },
-      { serviceCategory: "alltagsbegleitung", hourlyRateCents: Math.round(parseFloat(formData.alltagsbegleitungRate) * 100) || 0 },
-      { serviceCategory: "erstberatung", hourlyRateCents: Math.round(parseFloat(formData.erstberatungRate) * 100) || 0 },
-      { serviceCategory: "kilometer", hourlyRateCents: Math.round(parseFloat(formData.kilometerRate) * 100) || 0 },
-    ].filter(r => r.hourlyRateCents > 0);
     const contract = contractHours > 0 || formData.vereinbarteLeistungen.trim() || formData.contractDate
       ? {
           contractStart: formData.contractStart || today,
@@ -207,7 +197,6 @@ export default function AdminCustomerNew() {
           vereinbarteLeistungen: formData.vereinbarteLeistungen.trim() || undefined,
           hoursPerPeriod: contractHours || 0,
           periodType: formData.contractPeriod === "weekly" ? "week" : "month",
-          rates,
         }
       : undefined;
 

@@ -2,10 +2,13 @@ import { eq, and, isNull, desc, lte, or, gte, asc } from "drizzle-orm";
 import {
   services,
   customerServicePrices,
+  employeeServiceRates,
   type Service,
   type InsertService,
   type CustomerServicePrice,
   type InsertCustomerServicePrice,
+  type EmployeeServiceRate,
+  type InsertEmployeeServiceRate,
 } from "@shared/schema";
 import { todayISO, formatDateISO, parseLocalDate } from "@shared/utils/datetime";
 import { db } from "../lib/db";
@@ -204,6 +207,120 @@ export class ServiceCatalogStorage implements IServiceCatalogStorage {
       }
     }
 
+    return results;
+  }
+
+  async getEmployeeServiceRates(): Promise<(EmployeeServiceRate & { service: Service })[]> {
+    const targetDate = todayISO();
+    const results = await db
+      .select({
+        rate: employeeServiceRates,
+        service: services,
+      })
+      .from(employeeServiceRates)
+      .innerJoin(services, eq(employeeServiceRates.serviceId, services.id))
+      .where(
+        and(
+          lte(employeeServiceRates.validFrom, targetDate),
+          or(
+            isNull(employeeServiceRates.validTo),
+            gte(employeeServiceRates.validTo, targetDate)
+          )
+        )
+      )
+      .orderBy(asc(services.sortOrder));
+
+    return results.map(r => ({ ...r.rate, service: r.service }));
+  }
+
+  async getAllEmployeeServiceRates(): Promise<(EmployeeServiceRate & { service: Service })[]> {
+    const results = await db
+      .select({
+        rate: employeeServiceRates,
+        service: services,
+      })
+      .from(employeeServiceRates)
+      .innerJoin(services, eq(employeeServiceRates.serviceId, services.id))
+      .orderBy(asc(services.sortOrder), desc(employeeServiceRates.validFrom));
+
+    return results.map(r => ({ ...r.rate, service: r.service }));
+  }
+
+  async upsertEmployeeServiceRate(data: InsertEmployeeServiceRate, createdByUserId: number): Promise<EmployeeServiceRate> {
+    const { serviceId, validFrom, ...rest } = data;
+    const dayBefore = parseLocalDate(validFrom);
+    dayBefore.setDate(dayBefore.getDate() - 1);
+    const validToForOld = formatDateISO(dayBefore);
+
+    const currentRecord = await db
+      .select()
+      .from(employeeServiceRates)
+      .where(
+        and(
+          eq(employeeServiceRates.serviceId, serviceId),
+          lte(employeeServiceRates.validFrom, validFrom),
+          or(
+            isNull(employeeServiceRates.validTo),
+            gte(employeeServiceRates.validTo, validFrom)
+          )
+        )
+      )
+      .orderBy(desc(employeeServiceRates.validFrom))
+      .limit(1);
+
+    if (currentRecord.length > 0) {
+      await db
+        .update(employeeServiceRates)
+        .set({ validTo: validToForOld })
+        .where(eq(employeeServiceRates.id, currentRecord[0].id));
+    }
+
+    const [newRecord] = await db
+      .insert(employeeServiceRates)
+      .values({
+        serviceId,
+        rateCents: rest.rateCents,
+        validFrom,
+        validTo: rest.validTo ?? null,
+        createdByUserId,
+      })
+      .returning();
+
+    return newRecord;
+  }
+
+  async resolveEmployeeRate(serviceId: number, date?: string): Promise<{ rateCents: number } | null> {
+    const targetDate = date || todayISO();
+    const result = await db
+      .select()
+      .from(employeeServiceRates)
+      .where(
+        and(
+          eq(employeeServiceRates.serviceId, serviceId),
+          lte(employeeServiceRates.validFrom, targetDate),
+          or(
+            isNull(employeeServiceRates.validTo),
+            gte(employeeServiceRates.validTo, targetDate)
+          )
+        )
+      )
+      .orderBy(desc(employeeServiceRates.validFrom))
+      .limit(1);
+
+    return result.length > 0 ? { rateCents: result[0].rateCents } : null;
+  }
+
+  async resolveAllEmployeeRates(date?: string): Promise<Array<{ service: Service; rateCents: number }>> {
+    const targetDate = date || todayISO();
+    const activeServices = await this.getAllServices(false);
+    const results: Array<{ service: Service; rateCents: number }> = [];
+
+    for (const service of activeServices) {
+      const rate = await this.resolveEmployeeRate(service.id, targetDate);
+      if (rate) {
+        results.push({ service, rateCents: rate.rateCents });
+      }
+    }
     return results;
   }
 }

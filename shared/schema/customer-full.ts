@@ -86,10 +86,10 @@ export const createFullCustomerSchema = z.object({
   contractPeriod: z.enum(CONTRACT_PERIOD_TYPES),
   contractStart: z.string().optional().nullable(),
   
-  // Prices (in euros, will convert to cents) - all required
-  hauswirtschaftRate: z.number().min(0, "Hauswirtschaft-Preis ist erforderlich"),
-  alltagsbegleitungRate: z.number().min(0, "Alltagsbegleitung-Preis ist erforderlich"),
-  kilometerRate: z.number().min(0, "Kilometer-Preis ist erforderlich"),
+  // Prices (in euros, will convert to cents) - optional, catalog-based pricing preferred
+  hauswirtschaftRate: z.number().min(0).optional().default(0),
+  alltagsbegleitungRate: z.number().min(0).optional().default(0),
+  kilometerRate: z.number().min(0).optional().default(0),
 });
 
 export type CreateFullCustomer = z.infer<typeof createFullCustomerSchema>;

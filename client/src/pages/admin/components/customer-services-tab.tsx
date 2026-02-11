@@ -5,7 +5,9 @@ import { formatCurrency } from "@shared/utils/format";
 import { SectionCard } from "@/components/patterns/section-card";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { iconSize, componentStyles } from "@/design-system";
-import { FileText, ClipboardList, Car } from "lucide-react";
+import { FileText, ClipboardList, Car, Loader2 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { api, unwrapResult } from "@/lib/api";
 import type { CustomerDetail } from "@/lib/api/types";
 
 const SERVICE_LABELS: Record<string, string> = {
@@ -50,6 +52,29 @@ interface CustomerServicesTabProps {
 export function CustomerServicesTab({ customer }: CustomerServicesTabProps) {
   const selectedServices = getSelectedServices(customer.needsAssessment);
 
+  interface ResolvedPrice {
+    service: { id: number; name: string; unitType: string; billingCategory: string | null };
+    priceCents: number;
+    isOverride: boolean;
+  }
+
+  const { data: resolvedPrices, isLoading: pricesLoading } = useQuery<ResolvedPrice[]>({
+    queryKey: ["customer-service-prices", customer.id],
+    queryFn: async () => {
+      const result = await api.get<ResolvedPrice[]>(`/services/customer/${customer.id}/prices`);
+      return unwrapResult(result);
+    },
+    staleTime: 60000,
+  });
+
+  const unitLabel = (unitType: string) => {
+    switch (unitType) {
+      case "hours": return "/Std.";
+      case "kilometers": return "/km";
+      default: return " pauschal";
+    }
+  };
+
   return (
     <div className="space-y-4">
       <SectionCard
@@ -74,30 +99,30 @@ export function CustomerServicesTab({ customer }: CustomerServicesTabProps) {
             </div>
             
             <div className="border-t pt-4">
-              <p className="text-sm font-medium text-gray-700 mb-3">Vereinbarte Stundensätze</p>
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-100">
-                  <p className="text-sm text-gray-600">Hauswirtschaft</p>
-                  <p className="text-xl font-semibold text-gray-900">
-                    {formatCurrency(customer.currentContract.hauswirtschaftRateCents)}/Std.
-                  </p>
+              <p className="text-sm font-medium text-gray-700 mb-3">Aktuelle Preise</p>
+              {pricesLoading ? (
+                <div className="flex justify-center py-4">
+                  <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
                 </div>
-                <div className="p-3 rounded-lg bg-sky-50 border border-sky-100">
-                  <p className="text-sm text-gray-600">Alltagsbegleitung</p>
-                  <p className="text-xl font-semibold text-gray-900">
-                    {formatCurrency(customer.currentContract.alltagsbegleitungRateCents)}/Std.
-                  </p>
+              ) : resolvedPrices && resolvedPrices.length > 0 ? (
+                <div className="space-y-2">
+                  {resolvedPrices.map(rp => (
+                    <div key={rp.service.id} className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded" data-testid={`text-service-price-${rp.service.id}`}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-gray-700">{rp.service.name}</span>
+                        {rp.isOverride && (
+                          <Badge variant="outline" className="text-xs bg-teal-50 text-teal-700 border-teal-200">Individuell</Badge>
+                        )}
+                      </div>
+                      <span className="text-sm font-semibold text-gray-900">
+                        {formatCurrency(rp.priceCents)}{unitLabel(rp.service.unitType)}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-                <div className="p-3 rounded-lg bg-amber-50 border border-amber-100">
-                  <div className="flex items-center gap-1">
-                    <Car className={`${iconSize.xs} text-gray-400`} />
-                    <p className="text-sm text-gray-600">Kilometer</p>
-                  </div>
-                  <p className="text-xl font-semibold text-gray-900">
-                    {formatCurrency(customer.currentContract.kilometerRateCents)}/km
-                  </p>
-                </div>
-              </div>
+              ) : (
+                <p className="text-sm text-gray-500">Keine Preise hinterlegt</p>
+              )}
             </div>
           </div>
         ) : (

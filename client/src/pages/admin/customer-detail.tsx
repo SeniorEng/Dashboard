@@ -217,8 +217,6 @@ export default function AdminCustomerDetail() {
                 <PricingSection 
                   customerId={customerId} 
                   customerName={customerDisplayName}
-                  pricingHistory={customer.pricingHistory || []}
-                  currentPricing={customer.currentPricing || null}
                   onRefresh={refetch}
                 />
               </SectionCard>

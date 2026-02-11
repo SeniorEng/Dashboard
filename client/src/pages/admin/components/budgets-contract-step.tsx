@@ -165,19 +165,24 @@ export function ContractStep({ formData, onChange }: ContractStepProps) {
 
       {activeServices.length > 0 && (
         <div className="border-t pt-4">
-          <h3 className="font-medium mb-3">Aktuelle Stundensätze (Dienstleistungskatalog)</h3>
-          <p className="text-xs text-gray-500 mb-3">
-            Diese Sätze stammen aus dem Dienstleistungskatalog und können dort oder kundenindividuell angepasst werden.
-          </p>
+          <h3 className="font-medium mb-3">Preise aus dem Dienstleistungskatalog</h3>
+          <div className="p-3 bg-teal-50 border border-teal-100 rounded-lg mb-3">
+            <p className="text-xs text-teal-800">
+              Diese Standardpreise werden automatisch für den neuen Kunden übernommen. Individuelle Anpassungen sind danach in der Kundenansicht unter "Preisvereinbarung" möglich.
+            </p>
+          </div>
           <div className="space-y-2">
-            {activeServices.map(service => (
-              <div key={service.id} className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded" data-testid={`service-rate-${service.id}`}>
-                <span className="text-sm text-gray-700">{service.name}</span>
-                <span className="text-sm font-medium text-gray-900">
-                  {(service.defaultPriceCents / 100).toFixed(2)} €/{service.unitType === "hour" ? "Std" : service.unitType === "flat" ? "Pauschale" : service.unitType}
-                </span>
-              </div>
-            ))}
+            {activeServices.map(service => {
+              const unitLabel = service.unitType === "hours" ? "€/Std." : service.unitType === "kilometers" ? "€/km" : "€ pauschal";
+              return (
+                <div key={service.id} className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded" data-testid={`service-rate-${service.id}`}>
+                  <span className="text-sm text-gray-700">{service.name}</span>
+                  <span className="text-sm font-medium text-gray-900">
+                    {(service.defaultPriceCents / 100).toFixed(2)} {unitLabel}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

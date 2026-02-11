@@ -20,10 +20,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+import { DatePicker } from "@/components/ui/date-picker";
 import { api, unwrapResult } from "@/lib/api";
-import { ArrowLeft, Plus, Pencil, Loader2, ClipboardList } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Loader2, ClipboardList, Users, Check, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, componentStyles } from "@/design-system";
+import { formatCurrency } from "@shared/utils/format";
+import { todayISO } from "@shared/utils/datetime";
 import type { Service, InsertService } from "@shared/schema";
 import { SERVICE_UNIT_TYPES, SERVICE_BILLING_CATEGORIES } from "@shared/schema";
 
@@ -269,6 +273,8 @@ export default function AdminServices() {
         )}
       </div>
 
+      <EmployeeRatesSection services={services || []} />
+
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -441,5 +447,181 @@ export default function AdminServices() {
         </DialogContent>
       </Dialog>
     </Layout>
+  );
+}
+
+interface EmployeeRate {
+  id: number;
+  serviceId: number;
+  rateCents: number;
+  validFrom: string;
+  validTo: string | null;
+  service: Service;
+}
+
+const UNIT_SUFFIX: Record<string, string> = {
+  hours: "/Std.",
+  kilometers: "/km",
+  flat: " pauschal",
+};
+
+function EmployeeRatesSection({ services }: { services: Service[] }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [editingServiceId, setEditingServiceId] = useState<number | null>(null);
+  const [editRate, setEditRate] = useState("");
+  const [editValidFrom, setEditValidFrom] = useState(todayISO());
+
+  const { data: currentRates, isLoading } = useQuery<EmployeeRate[]>({
+    queryKey: ["employee-service-rates"],
+    queryFn: async () => {
+      const result = await api.get<EmployeeRate[]>("/services/employee-rates");
+      return unwrapResult(result);
+    },
+    staleTime: 60000,
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: async (data: { serviceId: number; rateCents: number; validFrom: string }) => {
+      return unwrapResult(await api.post("/services/employee-rates", data));
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["employee-service-rates"] });
+      setEditingServiceId(null);
+      setEditRate("");
+      setEditValidFrom(todayISO());
+      toast({ title: "Vergütungssatz gespeichert" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleSave = (serviceId: number) => {
+    const cents = Math.round(parseFloat(editRate.replace(",", ".")) * 100);
+    if (isNaN(cents) || cents < 0) {
+      toast({ title: "Bitte gültigen Betrag eingeben", variant: "destructive" });
+      return;
+    }
+    saveMutation.mutate({ serviceId, rateCents: cents, validFrom: editValidFrom });
+  };
+
+  const startEdit = (serviceId: number, currentCents?: number) => {
+    setEditingServiceId(serviceId);
+    setEditRate(currentCents !== undefined ? (currentCents / 100).toFixed(2) : "");
+    setEditValidFrom(todayISO());
+  };
+
+  const rateMap = new Map<number, EmployeeRate>();
+  currentRates?.forEach(r => rateMap.set(r.serviceId, r));
+
+  const activeServices = services.filter(s => s.isActive);
+
+  return (
+    <div className="mt-8" data-testid="employee-rates-section">
+      <div className="flex items-center gap-2 mb-3">
+        <Users className={iconSize.sm} />
+        <h2 className="text-lg font-bold text-gray-900">Mitarbeiter-Vergütungssätze</h2>
+      </div>
+      <p className="text-sm text-gray-600 mb-4">
+        Interne Vergütung pro Dienstleistung (was Mitarbeiter erhalten)
+      </p>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin text-teal-600" />
+        </div>
+      ) : activeServices.length === 0 ? (
+        <p className="text-sm text-gray-500 text-center py-4">Keine aktiven Dienstleistungen</p>
+      ) : (
+        <Card>
+          <CardContent className="py-2 px-0">
+            <div className="divide-y">
+              {activeServices.map((service) => {
+                const rate = rateMap.get(service.id);
+                const isEditing = editingServiceId === service.id;
+                const suffix = UNIT_SUFFIX[service.unitType] || "";
+
+                return (
+                  <div key={service.id} className="px-4" data-testid={`employee-rate-row-${service.id}`}>
+                    <div className="flex items-center justify-between py-3">
+                      <div className="min-w-0">
+                        <span className="text-sm font-medium">{service.name}</span>
+                        <div className="text-xs text-gray-500">
+                          Kundenpreis: {formatCurrency(service.defaultPriceCents)}{suffix}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {rate ? (
+                          <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold" data-testid={`text-employee-rate-${service.id}`}>
+                            {formatCurrency(rate.rateCents)}{suffix}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="bg-gray-50 text-gray-400 border-gray-200" data-testid={`text-employee-rate-${service.id}`}>
+                            Nicht festgelegt
+                          </Badge>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => startEdit(service.id, rate?.rateCents)}
+                          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded text-gray-400 hover:text-gray-700"
+                          data-testid={`btn-edit-employee-rate-${service.id}`}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {isEditing && (
+                      <div className="pb-3">
+                        <div className="p-3 bg-gray-50 rounded-lg space-y-3">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Vergütung (€{suffix})</Label>
+                            <Input
+                              type="text"
+                              inputMode="decimal"
+                              value={editRate}
+                              onChange={(e) => setEditRate(e.target.value)}
+                              className="h-8 text-base"
+                              autoFocus
+                              data-testid={`input-employee-rate-${service.id}`}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Gültig ab</Label>
+                            <DatePicker
+                              value={editValidFrom || null}
+                              onChange={(val) => setEditValidFrom(val || "")}
+                              data-testid={`input-employee-rate-valid-from-${service.id}`}
+                            />
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => handleSave(service.id)}
+                              disabled={saveMutation.isPending}
+                              data-testid={`btn-save-employee-rate-${service.id}`}
+                            >
+                              {saveMutation.isPending ? (
+                                <Loader2 className={`${iconSize.sm} animate-spin`} />
+                              ) : (
+                                <><Check className={`${iconSize.sm} mr-1`} />Speichern</>
+                              )}
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => setEditingServiceId(null)}>
+                              <X className={`${iconSize.sm} mr-1`} />Abbrechen
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }

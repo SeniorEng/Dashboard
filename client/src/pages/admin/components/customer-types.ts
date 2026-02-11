@@ -38,10 +38,6 @@ export interface CustomerFormData {
   vereinbarteLeistungen: string;
   contractHours: string;
   contractPeriod: "weekly" | "monthly";
-  hauswirtschaftRate: string;
-  alltagsbegleitungRate: string;
-  erstberatungRate: string;
-  kilometerRate: string;
 }
 
 export interface SelectOption {

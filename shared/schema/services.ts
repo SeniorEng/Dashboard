@@ -77,3 +77,26 @@ export const insertCustomerServicePriceSchema = z.object({
 
 export type CustomerServicePrice = typeof customerServicePrices.$inferSelect;
 export type InsertCustomerServicePrice = z.infer<typeof insertCustomerServicePriceSchema>;
+
+export const employeeServiceRates = pgTable("employee_service_rates", {
+  id: serial("id").primaryKey(),
+  serviceId: integer("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
+  rateCents: integer("rate_cents").notNull(),
+  validFrom: date("valid_from").notNull(),
+  validTo: date("valid_to"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdByUserId: integer("created_by_user_id").references(() => users.id),
+}, (table) => [
+  index("employee_service_rates_service_idx").on(table.serviceId),
+  index("employee_service_rates_valid_idx").on(table.serviceId, table.validFrom, table.validTo),
+]);
+
+export const insertEmployeeServiceRateSchema = z.object({
+  serviceId: z.number(),
+  rateCents: z.number().int().min(0, "Vergütungssatz muss positiv sein"),
+  validFrom: z.string(),
+  validTo: z.string().nullable().optional(),
+});
+
+export type EmployeeServiceRate = typeof employeeServiceRates.$inferSelect;
+export type InsertEmployeeServiceRate = z.infer<typeof insertEmployeeServiceRateSchema>;

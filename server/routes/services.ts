@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { serviceCatalogStorage } from "../storage/service-catalog";
-import { insertServiceSchema, updateServiceSchema, insertCustomerServicePriceSchema } from "@shared/schema";
+import { insertServiceSchema, updateServiceSchema, insertCustomerServicePriceSchema, insertEmployeeServiceRateSchema } from "@shared/schema";
 import { requireAdmin } from "../middleware/auth";
 import { requireAuth } from "../middleware/auth";
 import { handleRouteError } from "../lib/errors";
@@ -114,6 +114,41 @@ router.delete("/customer/:customerId/overrides/:id", requireAdmin, async (req: R
     res.json({ success: true });
   } catch (error) {
     handleRouteError(res, error, "Sonderpreis konnte nicht gelöscht werden");
+  }
+});
+
+router.get("/employee-rates", requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const rates = await serviceCatalogStorage.getEmployeeServiceRates();
+    res.json(rates);
+  } catch (error) {
+    handleRouteError(res, error, "Mitarbeiter-Vergütungssätze konnten nicht geladen werden");
+  }
+});
+
+router.get("/employee-rates/all", requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const rates = await serviceCatalogStorage.getAllEmployeeServiceRates();
+    res.json(rates);
+  } catch (error) {
+    handleRouteError(res, error, "Mitarbeiter-Vergütungssätze konnten nicht geladen werden");
+  }
+});
+
+router.post("/employee-rates", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const result = insertEmployeeServiceRateSchema.safeParse(req.body);
+    if (!result.success) {
+      return res.status(400).json({ error: "VALIDATION_ERROR", message: fromError(result.error).message });
+    }
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: "UNAUTHORIZED", message: "Nicht autorisiert" });
+    }
+    const rate = await serviceCatalogStorage.upsertEmployeeServiceRate(result.data, userId);
+    res.status(201).json(rate);
+  } catch (error) {
+    handleRouteError(res, error, "Vergütungssatz konnte nicht gespeichert werden");
   }
 });
 
