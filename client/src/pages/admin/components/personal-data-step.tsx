@@ -136,64 +136,56 @@ export function PersonalDataStep({ formData, phoneErrors, employeeOptions, onCha
         </div>
       </div>
 
-      <div className="border-t pt-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="pflegegrad">Pflegegrad</Label>
-            <Select
-              value={formData.pflegegrad}
-              onValueChange={(value) => onChange("pflegegrad", value)}
-            >
-              <SelectTrigger data-testid="select-pflegegrad">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PFLEGEGRAD_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label>Pflegegrad seit</Label>
-            <DatePicker
-              value={formData.pflegegradSeit || null}
-              onChange={(val) => onChange("pflegegradSeit", val || "")}
-              data-testid="input-pflegegrad-seit"
-            />
-          </div>
+      <div className="border-t pt-4 space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="pflegegrad">Pflegegrad</Label>
+          <Select
+            value={formData.pflegegrad}
+            onValueChange={(value) => onChange("pflegegrad", value)}
+          >
+            <SelectTrigger data-testid="select-pflegegrad">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PFLEGEGRAD_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-      </div>
-
-      <div className="border-t pt-4">
-        <h3 className="font-medium mb-4">Zuständige Mitarbeiter</h3>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="primaryEmployeeId">Hauptansprechpartner</Label>
-            <SearchableSelect
-              options={employeeOptions}
-              value={formData.primaryEmployeeId}
-              onValueChange={(value) => onChange("primaryEmployeeId", value)}
-              placeholder="Auswählen..."
-              searchPlaceholder="Mitarbeiter suchen..."
-              emptyText="Kein Mitarbeiter gefunden."
-              data-testid="select-primary-employee"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="backupEmployeeId">Vertretung</Label>
-            <SearchableSelect
-              options={employeeOptions}
-              value={formData.backupEmployeeId}
-              onValueChange={(value) => onChange("backupEmployeeId", value)}
-              placeholder="Auswählen..."
-              searchPlaceholder="Mitarbeiter suchen..."
-              emptyText="Kein Mitarbeiter gefunden."
-              data-testid="select-backup-employee"
-            />
-          </div>
+        <div className="space-y-2">
+          <Label>Pflegegrad seit</Label>
+          <DatePicker
+            value={formData.pflegegradSeit || null}
+            onChange={(val) => onChange("pflegegradSeit", val || "")}
+            data-testid="input-pflegegrad-seit"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="primaryEmployeeId">Hauptansprechpartner</Label>
+          <SearchableSelect
+            options={employeeOptions}
+            value={formData.primaryEmployeeId}
+            onValueChange={(value) => onChange("primaryEmployeeId", value)}
+            placeholder="Auswählen..."
+            searchPlaceholder="Mitarbeiter suchen..."
+            emptyText="Kein Mitarbeiter gefunden."
+            data-testid="select-primary-employee"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="backupEmployeeId">Vertretung</Label>
+          <SearchableSelect
+            options={employeeOptions}
+            value={formData.backupEmployeeId}
+            onValueChange={(value) => onChange("backupEmployeeId", value)}
+            placeholder="Auswählen..."
+            searchPlaceholder="Mitarbeiter suchen..."
+            emptyText="Kein Mitarbeiter gefunden."
+            data-testid="select-backup-employee"
+          />
         </div>
       </div>
     </div>

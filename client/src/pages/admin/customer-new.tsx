@@ -173,7 +173,19 @@ export default function AdminCustomerNew() {
     };
 
     createMutation.mutate(payload, {
-      onSuccess: (customer) => {
+      onSuccess: async (customer) => {
+        const primaryId = formData.primaryEmployeeId ? parseInt(formData.primaryEmployeeId) : null;
+        const backupId = formData.backupEmployeeId ? parseInt(formData.backupEmployeeId) : null;
+        if (primaryId || backupId) {
+          try {
+            const { apiRequest } = await import("@/lib/queryClient");
+            await apiRequest("PATCH", `/api/admin/customers/${customer.id}/assign`, {
+              primaryEmployeeId: primaryId,
+              backupEmployeeId: backupId,
+            });
+          } catch {
+          }
+        }
         toast({ title: "Kunde erfolgreich erstellt" });
         setLocation(`/admin/customers/${customer.id}`);
       },
