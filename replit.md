@@ -23,9 +23,9 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 
 ### Backend
 - **Framework**: Express.js with TypeScript.
-- **API Design**: RESTful endpoints, Zod validation, structured error responses, modular routing. Admin routes are split into sub-modules.
-- **Business Logic**: Separated into a dedicated service layer with dependency injection.
-- **Error Handling**: Centralized error codes, German messages, and consistent error formatting.
+- **API Design**: RESTful endpoints, Zod validation, structured error responses, modular routing. Admin routes are split into sub-modules. Large route files are further split into sub-routers (e.g., `month-closing.ts`, `appointment-documentation.ts`) mounted via `router.use()`.
+- **Business Logic**: Separated into a dedicated service layer with dependency injection. No direct DB access in route handlers — all data operations go through the storage layer.
+- **Error Handling**: Centralized `asyncHandler` wrapper in `server/lib/errors.ts` eliminates try-catch boilerplate. `AppError` class hierarchy with factory functions (`notFound`, `badRequest`, `forbidden`, `conflict`, `serverError`). `errorMiddleware` provides consistent JSON error responses. Remaining ~20 inner try-catch blocks are intentional for specific business logic.
 - **Security**: Role-based access control with SQL-level data filtering, CSRF protection, and database indexing.
 - **Access Model**: Two-tiered access for employees (full vs. legacy based on customer assignment).
 

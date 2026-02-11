@@ -1,7 +1,25 @@
 # SeniorenEngel / CareConnect – Refactoring-Plan
 
 **Erstellt:** 2026-02-11
+**Zuletzt aktualisiert:** 2026-02-11
 **Codebase-Größe:** ~37.400 Zeilen (Server: 11.142, Client: 23.450, Shared: 2.845)
+
+---
+
+## Status-Übersicht
+
+| # | Priorität | Thema | Status |
+|---|-----------|-------|--------|
+| 1 | KRITISCH | Direkte DB-Zugriffe → Storage | ERLEDIGT |
+| 2 | HOCH | Route-Dateien aufteilen | ERLEDIGT (time-entries, appointments) |
+| 3 | HOCH | Fehlerbehandlung standardisieren | ERLEDIGT |
+| 4 | HOCH | Storage-Layer aufteilen | ÜBERSPRUNGEN (bereits gut modularisiert) |
+| 5 | HOCH | Page-Komponenten aufteilen | ERLEDIGT (new-appointment, document-appointment) |
+| 6 | MITTEL | Shared Domain-Logik erweitern | ERLEDIGT (time-entries.ts) |
+| 7 | MITTEL | TypeScript-Fehler beheben | ERLEDIGT |
+| 8 | MITTEL | Test-Abdeckung | OFFEN |
+| 9 | MITTEL | Design-System-Tokens | ERLEDIGT |
+| 10 | NIEDRIG | Fehler-Codes konsolidieren | ERLEDIGT (via asyncHandler) |
 
 ---
 
