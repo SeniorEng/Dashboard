@@ -576,6 +576,14 @@ router.post("/:id/document", async (req, res) => {
     
     const validatedData = documentKundenterminSchema.parse(req.body);
 
+    const docServiceIds = validatedData.services.map(s => s.serviceId);
+    const validServices = await db.select({ id: servicesTable.id }).from(servicesTable).where(inArray(servicesTable.id, docServiceIds));
+    if (validServices.length !== docServiceIds.length) {
+      const validIds = new Set(validServices.map(s => s.id));
+      const invalidIds = docServiceIds.filter(id => !validIds.has(id));
+      return sendBadRequest(res, `Ungültige Service-IDs: ${invalidIds.join(', ')}`);
+    }
+
     const validation = appointmentService.validateDocumentationInput(appointment, validatedData);
     if (!validation.valid) {
       if (validation.error === "ALREADY_COMPLETED") {
