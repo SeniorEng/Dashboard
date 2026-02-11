@@ -12,6 +12,7 @@ export interface ContactFormData {
 export interface CustomerFormData {
   vorname: string;
   nachname: string;
+  geburtsdatum: string;
   email: string;
   telefon: string;
   festnetz: string;

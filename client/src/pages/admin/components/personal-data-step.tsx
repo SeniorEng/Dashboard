@@ -43,6 +43,15 @@ export function PersonalDataStep({ formData, phoneErrors, employeeOptions, onCha
       </div>
 
       <div className="space-y-2">
+        <Label>Geburtsdatum</Label>
+        <DatePicker
+          value={formData.geburtsdatum || null}
+          onChange={(val) => onChange("geburtsdatum", val || "")}
+          data-testid="input-geburtsdatum"
+        />
+      </div>
+
+      <div className="space-y-2">
         <Label htmlFor="email">E-Mail</Label>
         <Input
           id="email"

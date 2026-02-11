@@ -30,6 +30,7 @@ export default function AdminCustomerNew() {
   const [formData, setFormData] = useState<CustomerFormData>({
     vorname: "",
     nachname: "",
+    geburtsdatum: "",
     email: "",
     telefon: "",
     festnetz: "",
@@ -197,6 +198,7 @@ export default function AdminCustomerNew() {
       { serviceCategory: "hauswirtschaft", hourlyRateCents: Math.round(parseFloat(formData.hauswirtschaftRate) * 100) || 0 },
       { serviceCategory: "alltagsbegleitung", hourlyRateCents: Math.round(parseFloat(formData.alltagsbegleitungRate) * 100) || 0 },
       { serviceCategory: "erstberatung", hourlyRateCents: Math.round(parseFloat(formData.erstberatungRate) * 100) || 0 },
+      { serviceCategory: "kilometer", hourlyRateCents: Math.round(parseFloat(formData.kilometerRate) * 100) || 0 },
     ].filter(r => r.hourlyRateCents > 0);
     const contract = contractHours > 0 || formData.vereinbarteLeistungen.trim() || formData.contractDate
       ? {
@@ -218,6 +220,7 @@ export default function AdminCustomerNew() {
       stadt: formData.stadt.trim(),
       pflegegrad: parseInt(formData.pflegegrad),
       pflegegradSeit: formData.pflegegradSeit || today,
+      geburtsdatum: formData.geburtsdatum || undefined,
       email: formData.email.trim() || undefined,
       telefon: formData.telefon.trim() ? (normalizePhone(formData.telefon) || undefined) : undefined,
       festnetz: formData.festnetz.trim() ? (normalizePhone(formData.festnetz) || undefined) : undefined,

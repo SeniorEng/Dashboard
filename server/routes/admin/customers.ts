@@ -259,6 +259,7 @@ router.get("/customers/:id/details", async (req: Request, res: Response) => {
 const simpleCreateCustomerSchema = z.object({
   vorname: z.string().min(1),
   nachname: z.string().min(1),
+  geburtsdatum: z.string().optional().nullable(),
   email: z.string().email().optional().nullable(),
   telefon: z.string().optional().nullable(),
   festnetz: z.string().optional().nullable(),
@@ -321,6 +322,7 @@ router.post("/customers", async (req: Request, res: Response) => {
       plz: data.plz,
       stadt: data.stadt,
       pflegegrad: data.pflegegrad || 0,
+      geburtsdatum: data.geburtsdatum || null,
       vorerkrankungen: data.vorerkrankungen || null,
       haustierVorhanden: data.haustierVorhanden || false,
       haustierDetails: data.haustierVorhanden ? (data.haustierDetails || null) : null,
@@ -385,6 +387,9 @@ router.post("/customers", async (req: Request, res: Response) => {
 
     if (data.contract) {
       try {
+        const hauswirtschaftRate = data.contract.rates?.find(r => r.serviceCategory === "hauswirtschaft");
+        const alltagsbegleitungRate = data.contract.rates?.find(r => r.serviceCategory === "alltagsbegleitung");
+        const kilometerRate = data.contract.rates?.find(r => r.serviceCategory === "kilometer");
         const contract = await customerManagementStorage.createCustomerContract({
           customerId: customer.id,
           contractStart: data.contract.contractStart,
@@ -392,6 +397,9 @@ router.post("/customers", async (req: Request, res: Response) => {
           vereinbarteLeistungen: data.contract.vereinbarteLeistungen || null,
           hoursPerPeriod: data.contract.hoursPerPeriod,
           periodType: data.contract.periodType,
+          hauswirtschaftRateCents: hauswirtschaftRate?.hourlyRateCents || 0,
+          alltagsbegleitungRateCents: alltagsbegleitungRate?.hourlyRateCents || 0,
+          kilometerRateCents: kilometerRate?.hourlyRateCents || 0,
           status: "active",
         }, userId);
 

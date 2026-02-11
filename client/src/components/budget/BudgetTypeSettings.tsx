@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { ArrowUp, ArrowDown, Save } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { BUDGET_TYPE_LABELS, type BudgetType } from "@shared/domain/budgets";
+import { BUDGET_TYPE_LABELS, type BudgetType, BUDGET_45B_MAX_MONTHLY_CENTS, BUDGET_39_42A_MAX_YEARLY_CENTS, BUDGET_45A_MAX_BY_PFLEGEGRAD } from "@shared/domain/budgets";
 import { api, unwrapResult } from "@/lib/api/client";
 
 interface BudgetTypeSetting {
@@ -23,6 +23,7 @@ interface BudgetTypeSetting {
 
 interface BudgetTypeSettingsProps {
   customerId: number;
+  pflegegrad?: number;
 }
 
 const MONTH_OPTIONS = [
@@ -47,7 +48,7 @@ function getCurrentYearMonth(): string {
   return `${year}-${month}`;
 }
 
-export function BudgetTypeSettings({ customerId }: BudgetTypeSettingsProps) {
+export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSettingsProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [settings, setSettings] = useState<BudgetTypeSetting[]>([]);
@@ -150,6 +151,20 @@ export function BudgetTypeSettings({ customerId }: BudgetTypeSettingsProps) {
   const centsToEuro = (cents: number | null) =>
     cents !== null ? (cents / 100).toFixed(2) : "";
 
+  const getMaxPlaceholder = (budgetType: string) => {
+    if (budgetType === "entlastungsbetrag_45b") {
+      return `Max. ${(BUDGET_45B_MAX_MONTHLY_CENTS / 100).toFixed(0)} €/Monat`;
+    }
+    if (budgetType === "umwandlung_45a" && pflegegrad) {
+      const maxCents = BUDGET_45A_MAX_BY_PFLEGEGRAD[pflegegrad] ?? 0;
+      return maxCents > 0 ? `Max. ${(maxCents / 100).toFixed(0)} €/Monat (PG ${pflegegrad})` : "Voller Betrag";
+    }
+    if (budgetType === "ersatzpflege_39_42a") {
+      return `Max. ${(BUDGET_39_42A_MAX_YEARLY_CENTS / 100).toFixed(0)} €/Jahr`;
+    }
+    return "Voller Betrag";
+  };
+
   if (isLoading) {
     return <div className="text-sm text-gray-500">Laden...</div>;
   }
@@ -214,7 +229,7 @@ export function BudgetTypeSettings({ customerId }: BudgetTypeSettingsProps) {
                             type="number"
                             step="0.01"
                             min="0"
-                            placeholder="Voller Betrag"
+                            placeholder={getMaxPlaceholder(setting.budgetType)}
                             value={centsToEuro(setting.monthlyLimitCents)}
                             onChange={(e) => updateCentsField(index, "monthlyLimitCents", e.target.value)}
                             className="h-8 mt-1 text-base"
@@ -230,7 +245,7 @@ export function BudgetTypeSettings({ customerId }: BudgetTypeSettingsProps) {
                             type="number"
                             step="0.01"
                             min="0"
-                            placeholder="Voller Betrag"
+                            placeholder={getMaxPlaceholder(setting.budgetType)}
                             value={centsToEuro(setting.yearlyLimitCents)}
                             onChange={(e) => updateCentsField(index, "yearlyLimitCents", e.target.value)}
                             className="h-8 mt-1 text-base"

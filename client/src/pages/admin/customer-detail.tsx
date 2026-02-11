@@ -195,7 +195,7 @@ export default function AdminCustomerDetail() {
                 title="Budget-Einstellungen"
                 icon={<Settings className={iconSize.sm} />}
               >
-                <BudgetTypeSettings customerId={customerId} />
+                <BudgetTypeSettings customerId={customerId} pflegegrad={customer.pflegegrad ?? undefined} />
               </SectionCard>
 
               <SectionCard
