@@ -314,18 +314,22 @@ export default function AdminServices() {
                             <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-inactive-${service.id}`}>Inaktiv</span>
                           ))}
                         </div>
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
-                          <span data-testid={`text-unit-type-${service.id}`}>{UNIT_TYPE_LABELS[service.unitType] || service.unitType}</span>
-                          {service.isBillable && (
-                            <span data-testid={`text-price-${service.id}`}>· {formatPrice(service.defaultPriceCents)} €{suffix}</span>
-                          )}
-                          {service.isBillable && (
-                            <span data-testid={`text-vat-${service.id}`}>· {service.vatRate}% MwSt</span>
-                          )}
+                        <div className="text-sm text-gray-500 space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span data-testid={`text-unit-type-${service.id}`}>{UNIT_TYPE_LABELS[service.unitType] || service.unitType}</span>
+                            {service.isBillable && (
+                              <>
+                                <span className="text-gray-300">·</span>
+                                <span data-testid={`text-price-${service.id}`}>{formatPrice(service.defaultPriceCents)} €{suffix}</span>
+                                <span className="text-gray-300">·</span>
+                                <span data-testid={`text-vat-${service.id}`}>{service.vatRate}% MwSt</span>
+                              </>
+                            )}
+                          </div>
                           {service.employeeRateCents > 0 && (
-                            <span data-testid={`text-employee-rate-${service.id}`}>
-                              · Vergütung: {formatCurrency(service.employeeRateCents)}{suffix}
-                            </span>
+                            <div data-testid={`text-employee-rate-${service.id}`}>
+                              Vergütung: {formatCurrency(service.employeeRateCents)}{suffix}
+                            </div>
                           )}
                         </div>
                         {service.description && (
