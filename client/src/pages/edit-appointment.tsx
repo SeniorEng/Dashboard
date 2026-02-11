@@ -66,17 +66,6 @@ export default function EditAppointment() {
             serviceId: e.serviceId,
             durationMinutes: e.plannedDurationMinutes,
           })));
-        } else {
-          const legacyServices: Array<{ serviceId: number; durationMinutes: number }> = [];
-          if (appointment.hauswirtschaftDauer) {
-            const hwService = catalogServices.find(s => s.code === 'hauswirtschaft');
-            if (hwService) legacyServices.push({ serviceId: hwService.id, durationMinutes: appointment.hauswirtschaftDauer });
-          }
-          if (appointment.alltagsbegleitungDauer) {
-            const abService = catalogServices.find(s => s.code === 'alltagsbegleitung');
-            if (abService) legacyServices.push({ serviceId: abService.id, durationMinutes: appointment.alltagsbegleitungDauer });
-          }
-          if (legacyServices.length > 0) setServices(legacyServices);
         }
       } else if (appointment.scheduledEnd) {
         setEndTime(appointment.scheduledEnd.slice(0, 5));
@@ -154,31 +143,14 @@ export default function EditAppointment() {
     if (!validate() || !appointment) return;
     
     if (appointment.appointmentType === "Kundentermin") {
-      let hauswirtschaftDauerVal: number | null = null;
-      let alltagsbegleitungDauerVal: number | null = null;
-      
-      for (const s of services) {
-        const catalog = catalogServices.find(c => c.id === s.serviceId);
-        if (catalog?.code === 'hauswirtschaft') hauswirtschaftDauerVal = s.durationMinutes;
-        if (catalog?.code === 'alltagsbegleitung') alltagsbegleitungDauerVal = s.durationMinutes;
-      }
-      
       const totalDuration = services.reduce((sum, s) => sum + s.durationMinutes, 0);
       const calculatedEndTime = addMinutesToTime(time, totalDuration);
-      
-      let serviceType: string | null = null;
-      if (hauswirtschaftDauerVal && alltagsbegleitungDauerVal) serviceType = "Hauswirtschaft & Alltagsbegleitung";
-      else if (hauswirtschaftDauerVal) serviceType = "Hauswirtschaft";
-      else if (alltagsbegleitungDauerVal) serviceType = "Alltagsbegleitung";
       
       updateMutation.mutate({
         date,
         scheduledStart: time,
         scheduledEnd: calculatedEndTime,
         durationPromised: totalDuration,
-        hauswirtschaftDauer: hauswirtschaftDauerVal,
-        alltagsbegleitungDauer: alltagsbegleitungDauerVal,
-        serviceType,
         notes: notes || null,
         services: services.map(s => ({
           serviceId: s.serviceId,

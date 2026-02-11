@@ -256,15 +256,6 @@ export interface CreateCustomerRequest {
 // Re-export from shared for consistency
 export type { AppointmentWithCustomer } from "@shared/types";
 
-/** @deprecated Use insertKundenterminSchema with services array instead */
-export interface CreateAppointmentRequest {
-  customerId: number;
-  date: string;
-  scheduledStart: string;
-  hauswirtschaftDauer?: number;
-  alltagsbegleitungDauer?: number;
-  notes?: string;
-}
 
 export interface CreateErstberatungRequest {
   customer: {
@@ -290,22 +281,13 @@ export interface UpdateAppointmentRequest {
   date?: string;
   scheduledStart?: string;
   scheduledEnd?: string;
-  hauswirtschaftDauer?: number;
-  alltagsbegleitungDauer?: number;
   notes?: string;
   servicesDone?: string[];
   signatureData?: string;
 }
 
-/** @deprecated Legacy fields retained for backward compatibility. New code should use services array. */
 export interface DocumentAppointmentRequest {
-  hauswirtschaftActualDauer?: number | null;
-  hauswirtschaftDetails?: string | null;
-  alltagsbegleitungActualDauer?: number | null;
-  alltagsbegleitungDetails?: string | null;
-  erstberatungActualDauer?: number | null;
-  erstberatungDetails?: string | null;
-  services?: Array<{ serviceId: number; actualDurationMinutes: number; details?: string | null }>;
+  services: Array<{ serviceId: number; actualDurationMinutes: number; details?: string | null }>;
   travelOriginType: 'home' | 'appointment';
   travelFromAppointmentId?: number | null;
   travelKilometers: number;
@@ -399,15 +381,6 @@ export interface AppointmentWithCustomerName {
   createdByUserId: number | null;
   appointmentType: string;
   serviceType: string | null;
-  hauswirtschaftDauer: number | null;
-  alltagsbegleitungDauer: number | null;
-  erstberatungDauer: number | null;
-  hauswirtschaftActualDauer: number | null;
-  hauswirtschaftDetails: string | null;
-  alltagsbegleitungActualDauer: number | null;
-  alltagsbegleitungDetails: string | null;
-  erstberatungActualDauer: number | null;
-  erstberatungDetails: string | null;
   date: string;
   scheduledStart: string;
   scheduledEnd: string | null;

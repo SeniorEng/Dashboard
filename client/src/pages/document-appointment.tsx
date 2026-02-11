@@ -238,32 +238,13 @@ export default function DocumentAppointment() {
       payload.travelMinutes = formData.travelMinutes;
     }
 
-    const hwService = formData.services.find(s => s.serviceType === "Hauswirtschaft");
-    const abService = formData.services.find(s => s.serviceType === "Alltagsbegleitung");
-    const ebService = formData.services.find(s => s.serviceType === "Erstberatung");
-
-    if (hwService) {
-      payload.hauswirtschaftActualDauer = hwService.actualDuration;
-      payload.hauswirtschaftDetails = hwService.details || null;
-    }
-    if (abService) {
-      payload.alltagsbegleitungActualDauer = abService.actualDuration;
-      payload.alltagsbegleitungDetails = abService.details || null;
-    }
-    if (ebService) {
-      payload.erstberatungActualDauer = ebService.actualDuration;
-      payload.erstberatungDetails = ebService.details || null;
-    }
-
-    if (formData.services && formData.services.length > 0) {
-      payload.services = formData.services
-        .filter(s => s.serviceId && s.actualDuration && s.actualDuration > 0)
-        .map(s => ({
-          serviceId: s.serviceId,
-          actualDurationMinutes: s.actualDuration,
-          details: s.details || null,
-        }));
-    }
+    payload.services = formData.services
+      .filter(s => s.serviceId && s.actualDuration && s.actualDuration > 0)
+      .map(s => ({
+        serviceId: s.serviceId,
+        actualDurationMinutes: s.actualDuration,
+        details: s.details || null,
+      }));
 
     if (formData.customerKilometers > 0) {
       payload.customerKilometers = formData.customerKilometers;
