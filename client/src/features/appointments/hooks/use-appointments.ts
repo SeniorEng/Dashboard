@@ -94,8 +94,9 @@ export function useUpdateAppointment() {
         queryClient.setQueryData([QUERY_KEY, id], context.previousAppointment);
       }
     },
-    onSettled: () => {
+    onSettled: (_, __, { id }) => {
       queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}/services`] });
     },
   });
 }

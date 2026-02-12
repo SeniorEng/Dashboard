@@ -47,6 +47,7 @@ export function useDocumentAppointment(id: number) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
       queryClient.invalidateQueries({ queryKey: [QUERY_KEY, id] });
+      queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}/services`] });
       queryClient.invalidateQueries({ queryKey: ["time-entries"] });
     },
   });
