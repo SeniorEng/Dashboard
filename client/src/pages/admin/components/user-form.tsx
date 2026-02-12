@@ -11,15 +11,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Loader2, Euro } from "lucide-react";
-import { todayISO } from "@shared/utils/datetime";
+import { Loader2 } from "lucide-react";
 import {
   UserData,
   UserFormData,
@@ -57,20 +49,6 @@ export function UserForm({
   );
   const [isAdmin, setIsAdmin] = useState(user?.isAdmin ?? false);
   const [roles, setRoles] = useState<string[]>(user?.roles ?? []);
-  
-  const [hourlyRateHauswirtschaft, setHourlyRateHauswirtschaft] = useState("");
-  const [hourlyRateAlltagsbegleitung, setHourlyRateAlltagsbegleitung] = useState("");
-  const [travelCostType, setTravelCostType] = useState<"kilometergeld" | "pauschale" | "">("");
-  const [kilometerRate, setKilometerRate] = useState("");
-  const [monthlyTravelAllowance, setMonthlyTravelAllowance] = useState("");
-  const [compensationValidFrom, setCompensationValidFrom] = useState(
-    todayISO()
-  );
-
-  const hasCompensationData = 
-    hourlyRateHauswirtschaft || 
-    hourlyRateAlltagsbegleitung || 
-    travelCostType;
 
   const handleTelefonBlur = () => {
     if (!telefon.trim()) {
@@ -117,17 +95,6 @@ export function UserForm({
     
     if (mode === "create") {
       data.password = password;
-    }
-    
-    if (mode === "create" && hasCompensationData) {
-      data.compensation = {
-        hourlyRateHauswirtschaftCents: hourlyRateHauswirtschaft ? Math.round(parseFloat(hourlyRateHauswirtschaft) * 100) : undefined,
-        hourlyRateAlltagsbegleitungCents: hourlyRateAlltagsbegleitung ? Math.round(parseFloat(hourlyRateAlltagsbegleitung) * 100) : undefined,
-        travelCostType: travelCostType || undefined,
-        kilometerRateCents: travelCostType === "kilometergeld" && kilometerRate ? Math.round(parseFloat(kilometerRate) * 100) : undefined,
-        monthlyTravelAllowanceCents: travelCostType === "pauschale" && monthlyTravelAllowance ? Math.round(parseFloat(monthlyTravelAllowance) * 100) : undefined,
-        validFrom: compensationValidFrom,
-      };
     }
     
     onSubmit(data);
@@ -343,125 +310,6 @@ export function UserForm({
           </div>
         </div>
 
-        {isCreate && (
-          <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-gray-700 border-b pb-2 flex items-center gap-2">
-              <Euro className={iconSize.sm} />
-              Vergütung (optional)
-            </h3>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="hourlyRateHauswirtschaft">Stundenlohn Hauswirtschaft</Label>
-                <div className="relative">
-                  <Input
-                    id="hourlyRateHauswirtschaft"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={hourlyRateHauswirtschaft}
-                    onChange={(e) => setHourlyRateHauswirtschaft(e.target.value)}
-                    placeholder="z.B. 15.50"
-                    className="pr-8"
-                    data-testid="input-hourly-rate-hauswirtschaft"
-                  />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€/h</span>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="hourlyRateAlltagsbegleitung">Stundenlohn Alltagsbegleitung</Label>
-                <div className="relative">
-                  <Input
-                    id="hourlyRateAlltagsbegleitung"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={hourlyRateAlltagsbegleitung}
-                    onChange={(e) => setHourlyRateAlltagsbegleitung(e.target.value)}
-                    placeholder="z.B. 16.00"
-                    className="pr-8"
-                    data-testid="input-hourly-rate-alltagsbegleitung"
-                  />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€/h</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="travelCostType">Fahrtkostenmodell</Label>
-              <Select
-                value={travelCostType}
-                onValueChange={(value: "kilometergeld" | "pauschale" | "") => {
-                  setTravelCostType(value);
-                  if (value === "kilometergeld") {
-                    setMonthlyTravelAllowance("");
-                  } else if (value === "pauschale") {
-                    setKilometerRate("");
-                  }
-                }}
-              >
-                <SelectTrigger data-testid="select-travel-cost-type">
-                  <SelectValue placeholder="Bitte wählen..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="kilometergeld">Kilometergeld</SelectItem>
-                  <SelectItem value="pauschale">Monatliche Pauschale</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {travelCostType === "kilometergeld" && (
-              <div className="space-y-2">
-                <Label htmlFor="kilometerRate">Kilometergeld</Label>
-                <div className="relative">
-                  <Input
-                    id="kilometerRate"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={kilometerRate}
-                    onChange={(e) => setKilometerRate(e.target.value)}
-                    placeholder="z.B. 0.30"
-                    className="pr-12"
-                    data-testid="input-kilometer-rate"
-                  />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€/km</span>
-                </div>
-              </div>
-            )}
-
-            {travelCostType === "pauschale" && (
-              <div className="space-y-2">
-                <Label htmlFor="monthlyTravelAllowance">Monatliche Pauschale</Label>
-                <div className="relative">
-                  <Input
-                    id="monthlyTravelAllowance"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={monthlyTravelAllowance}
-                    onChange={(e) => setMonthlyTravelAllowance(e.target.value)}
-                    placeholder="z.B. 150.00"
-                    className="pr-14"
-                    data-testid="input-monthly-travel-allowance"
-                  />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€/Monat</span>
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Label>Gültig ab</Label>
-              <DatePicker
-                value={compensationValidFrom || null}
-                onChange={(val) => setCompensationValidFrom(val || "")}
-                minDate={new Date()}
-                data-testid="input-compensation-valid-from"
-              />
-              <p className="text-xs text-gray-500">Nur ab heute oder in der Zukunft möglich</p>
-            </div>
-          </div>
-        )}
       </div>
       
       <DialogFooter>

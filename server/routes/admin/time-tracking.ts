@@ -1,12 +1,9 @@
 import { Router, Request, Response } from "express";
 import { timeTrackingStorage } from "../../storage/time-tracking";
-import { compensationStorage } from "../../storage/compensation";
 import { 
   insertVacationAllowanceSchema,
-  insertEmployeeCompensationSchema,
 } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
-import { todayISO } from "@shared/utils/datetime";
 
 const router = Router();
 
@@ -44,55 +41,6 @@ router.put("/time-entries/vacation-allowance", asyncHandler("Urlaubskontingent k
   const validatedData = insertVacationAllowanceSchema.parse(req.body);
   const allowance = await timeTrackingStorage.setVacationAllowance(validatedData);
   res.json(allowance);
-}));
-
-// ============================================
-// EMPLOYEE COMPENSATION
-// ============================================
-
-router.get("/users/:userId/compensation", asyncHandler("Vergütungshistorie konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const userId = parseInt(req.params.userId);
-  if (isNaN(userId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Benutzer-ID" });
-    return;
-  }
-
-  const history = await compensationStorage.getCompensationHistory(userId);
-  res.json(history);
-}));
-
-router.get("/users/:userId/compensation/current", asyncHandler("Aktuelle Vergütung konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const userId = parseInt(req.params.userId);
-  if (isNaN(userId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Benutzer-ID" });
-    return;
-  }
-
-  const current = await compensationStorage.getCurrentCompensation(userId);
-  res.json(current);
-}));
-
-router.post("/users/:userId/compensation", asyncHandler("Vergütung konnte nicht hinzugefügt werden", async (req: Request, res: Response) => {
-  const userId = parseInt(req.params.userId);
-  if (isNaN(userId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Benutzer-ID" });
-    return;
-  }
-
-  const data = { ...req.body, userId };
-  const validatedData = insertEmployeeCompensationSchema.parse(data);
-  
-  const today = todayISO();
-  if (validatedData.validFrom < today) {
-    res.status(400).json({ 
-      error: "VALIDATION_ERROR", 
-      message: "Vergütung kann nicht rückwirkend angelegt werden. Bitte wählen Sie ein Datum ab heute." 
-    });
-    return;
-  }
-  
-  const compensation = await compensationStorage.addCompensation(validatedData, req.user!.id);
-  res.status(201).json(compensation);
 }));
 
 export default router;

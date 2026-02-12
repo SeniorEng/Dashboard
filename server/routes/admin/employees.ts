@@ -1,16 +1,13 @@
 import { Router, Request, Response } from "express";
 import { authService } from "../../services/auth";
 import { storage } from "../../storage";
-import { compensationStorage } from "../../storage/compensation";
 import { usersCache, birthdaysCache } from "../../services/cache";
 import { 
   insertUserSchema, 
   EMPLOYEE_ROLES, 
-  insertEmployeeCompensationSchema,
 } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
 import { z } from "zod";
-import { todayISO } from "@shared/utils/datetime";
 
 const router = Router();
 
@@ -91,19 +88,6 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
       return;
     }
     throw error;
-  }
-
-  // Create initial compensation record if provided
-  if (req.body.compensation) {
-    const compensationData = { ...req.body.compensation, userId: user.id };
-    const validatedCompensation = insertEmployeeCompensationSchema.safeParse(compensationData);
-    if (validatedCompensation.success) {
-      // Prevent backdated compensation entries
-      const today = todayISO();
-      if (validatedCompensation.data.validFrom >= today) {
-        await compensationStorage.addCompensation(validatedCompensation.data, req.user!.id);
-      }
-    }
   }
 
   // Invalidate caches after creating user (affects users list and birthdays)

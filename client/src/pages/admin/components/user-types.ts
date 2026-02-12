@@ -33,27 +33,6 @@ export interface UserFormData {
   vacationDaysPerYear?: number;
   isAdmin: boolean;
   roles: string[];
-  compensation?: {
-    hourlyRateHauswirtschaftCents?: number;
-    hourlyRateAlltagsbegleitungCents?: number;
-    travelCostType?: "kilometergeld" | "pauschale";
-    kilometerRateCents?: number;
-    monthlyTravelAllowanceCents?: number;
-    validFrom: string;
-  };
-}
-
-export interface CompensationData {
-  id: number;
-  userId: number;
-  hourlyRateHauswirtschaftCents: number | null;
-  hourlyRateAlltagsbegleitungCents: number | null;
-  travelCostType: string | null;
-  kilometerRateCents: number | null;
-  monthlyTravelAllowanceCents: number | null;
-  validFrom: string;
-  validTo: string | null;
-  createdAt: string;
 }
 
 export const ROLE_LABELS: Record<string, string> = {
