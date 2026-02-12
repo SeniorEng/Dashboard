@@ -7,6 +7,7 @@ import {
 } from "@shared/schema";
 import { appointmentService } from "../services/appointments";
 import { authService } from "../services/auth";
+import { serviceCatalogStorage } from "../storage/service-catalog";
 import { suggestTravelOrigin } from "@shared/domain/appointments";
 import { isWeekend, currentTimeHHMMSS, todayISO } from "@shared/utils/datetime";
 import { 
@@ -292,6 +293,14 @@ router.post("/erstberatung", asyncHandler(ErrorMessages.createErstberatungFailed
     customerDataWithEmployee,
     appointmentData
   );
+  
+  const erstberatungService = await serviceCatalogStorage.getServiceByCode("erstberatung");
+  if (erstberatungService) {
+    await storage.createAppointmentServices(appointment.id, [{
+      serviceId: erstberatungService.id,
+      plannedDurationMinutes: validatedData.erstberatungDauer,
+    }]);
+  }
   
   res.status(201).json({ appointment, customer });
 }));

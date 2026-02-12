@@ -47,6 +47,18 @@ const SYSTEM_SERVICE_DEFINITIONS: SystemServiceDefinition[] = [
     sortOrder: 91,
     budgetPots: ["entlastungsbetrag_45b", "umwandlung_45a"],
   },
+  {
+    code: "erstberatung",
+    name: "Erstberatung",
+    description: "Erstberatung für neue Kunden",
+    unitType: "hours",
+    defaultPriceCents: 0,
+    vatRate: 19,
+    isBillable: false,
+    employeeRateCents: 2000,
+    sortOrder: 0,
+    budgetPots: [],
+  },
 ];
 
 export interface IServiceCatalogStorage {
