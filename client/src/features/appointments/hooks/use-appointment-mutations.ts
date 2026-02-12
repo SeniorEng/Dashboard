@@ -19,6 +19,7 @@ export function useCreateKundentermin() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
       queryClient.invalidateQueries({ queryKey: ["customers"] });
+      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
     },
   });
 }
@@ -33,6 +34,7 @@ export function useCreateErstberatung() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
       queryClient.invalidateQueries({ queryKey: ["customers"] });
+      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
     },
   });
 }
