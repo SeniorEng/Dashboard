@@ -118,19 +118,19 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
         <CardContent className="pt-0">
           {vacationSummary ? (
             <div className="space-y-2">
-              <SummaryRow label="Anspruch" value={`${vacationSummary.totalDays} Tage`} color="text-gray-700" testId="text-total-vacation" />
+              <SummaryRow label="Anspruch" value={`${vacationSummary.totalDays} ${vacationSummary.totalDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-700" testId="text-total-vacation" />
               {vacationSummary.carryOverDays > 0 && (
-                <SummaryRow label="Übertrag (bis 01.04.)" value={`${vacationSummary.carryOverDays} Tage`} color="text-amber-700" testId="text-carry-over" />
+                <SummaryRow label="Übertrag (bis 01.04.)" value={`${vacationSummary.carryOverDays} ${vacationSummary.carryOverDays === 1 ? 'Tag' : 'Tage'}`} color="text-amber-700" testId="text-carry-over" />
               )}
-              <SummaryRow label="Genommen" value={`${vacationSummary.usedDays} Tage`} color="text-green-700" testId="text-used-days" />
-              <SummaryRow label="Geplant" value={`${vacationSummary.plannedDays} Tage`} color="text-blue-700" testId="text-planned-days" />
+              <SummaryRow label="Genommen" value={`${vacationSummary.usedDays} ${vacationSummary.usedDays === 1 ? 'Tag' : 'Tage'}`} color="text-green-700" testId="text-used-days" />
+              <SummaryRow label="Geplant" value={`${vacationSummary.plannedDays} ${vacationSummary.plannedDays === 1 ? 'Tag' : 'Tage'}`} color="text-blue-700" testId="text-planned-days" />
               <div className="border-t pt-2 mt-2">
-                <SummaryRow label="Verfügbar" value={`${vacationSummary.remainingDays} Tage`} color="text-teal-700" testId="text-remaining-days" bold />
+                <SummaryRow label="Verfügbar" value={`${vacationSummary.remainingDays} ${vacationSummary.remainingDays === 1 ? 'Tag' : 'Tage'}`} color="text-teal-700" testId="text-remaining-days" bold />
               </div>
               <div className="border-t pt-2 mt-2 flex justify-between items-center">
                 <span className="text-sm text-gray-600">Krankheit</span>
                 <span className="font-semibold text-red-700" data-testid="text-sick-days">
-                  {vacationSummary.sickDays} Tage
+                  {vacationSummary.sickDays} {vacationSummary.sickDays === 1 ? 'Tag' : 'Tage'}
                 </span>
               </div>
             </div>

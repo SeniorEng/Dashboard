@@ -128,8 +128,8 @@ export default function CustomersPage() {
   const subtitle = activeTab === "kunden"
     ? `${customers.length} ${customers.length === 1 ? "Kunde" : "Kunden"} insgesamt`
     : user?.isAdmin 
-      ? `Alle Geburtstage der nächsten ${BIRTHDAY_HORIZON_DAYS} Tage`
-      : `Geburtstage in den nächsten ${BIRTHDAY_HORIZON_DAYS} Tagen`;
+      ? `Alle Geburtstage der nächsten ${BIRTHDAY_HORIZON_DAYS} ${BIRTHDAY_HORIZON_DAYS === 1 ? 'Tag' : 'Tage'}`
+      : `Geburtstage in den nächsten ${BIRTHDAY_HORIZON_DAYS} ${BIRTHDAY_HORIZON_DAYS === 1 ? 'Tag' : 'Tagen'}`;
 
   return (
     <Layout>
@@ -218,7 +218,7 @@ export default function CustomersPage() {
               <CardContent className="py-10">
                 <EmptyState
                   icon={<Gift className={`${iconSize["2xl"]} text-muted-foreground/40`} />}
-                  title={`Keine Geburtstage in den nächsten ${BIRTHDAY_HORIZON_DAYS} Tagen`}
+                  title={`Keine Geburtstage in den nächsten ${BIRTHDAY_HORIZON_DAYS} ${BIRTHDAY_HORIZON_DAYS === 1 ? 'Tag' : 'Tagen'}`}
                 />
               </CardContent>
             </Card>

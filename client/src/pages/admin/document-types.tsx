@@ -348,7 +348,7 @@ export default function AdminDocumentTypes() {
                           {dt.reviewIntervalMonths && dt.reminderLeadTimeDays && (
                             <span className="text-xs text-gray-500 flex items-center gap-1">
                               <Bell className="h-3 w-3" />
-                              {dt.reminderLeadTimeDays} Tage Vorlauf
+                              {dt.reminderLeadTimeDays} {dt.reminderLeadTimeDays === 1 ? 'Tag' : 'Tage'} Vorlauf
                             </span>
                           )}
                         </div>

@@ -540,19 +540,19 @@ export default function AdminTimeEntries() {
                     <div className="p-4 rounded-lg bg-gray-50 space-y-2">
                       <div className="flex justify-between text-sm">
                         <span>Genommen:</span>
-                        <span className="font-medium text-green-700">{selectedUserVacation.usedDays} Tage</span>
+                        <span className="font-medium text-green-700">{selectedUserVacation.usedDays} {selectedUserVacation.usedDays === 1 ? 'Tag' : 'Tage'}</span>
                       </div>
                       <div className="flex justify-between text-sm">
                         <span>Geplant:</span>
-                        <span className="font-medium text-blue-700">{selectedUserVacation.plannedDays} Tage</span>
+                        <span className="font-medium text-blue-700">{selectedUserVacation.plannedDays} {selectedUserVacation.plannedDays === 1 ? 'Tag' : 'Tage'}</span>
                       </div>
                       <div className="flex justify-between text-sm">
                         <span>Verfügbar:</span>
-                        <span className="font-medium text-teal-700">{selectedUserVacation.remainingDays} Tage</span>
+                        <span className="font-medium text-teal-700">{selectedUserVacation.remainingDays} {selectedUserVacation.remainingDays === 1 ? 'Tag' : 'Tage'}</span>
                       </div>
                       <div className="flex justify-between text-sm border-t pt-2">
                         <span>Krankheitstage:</span>
-                        <span className="font-medium text-red-700">{selectedUserVacation.sickDays} Tage</span>
+                        <span className="font-medium text-red-700">{selectedUserVacation.sickDays} {selectedUserVacation.sickDays === 1 ? 'Tag' : 'Tage'}</span>
                       </div>
                     </div>
                   )}
