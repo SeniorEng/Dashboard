@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useAppointment } from "./use-appointments";
 import { useDocumentAppointment, useTravelSuggestion } from "./use-appointment-mutations";
 import type { TravelOriginType, ServiceType } from "@shared/types";
+import type { Service } from "@shared/schema";
 import { formatTimeHHMM, addMinutesToTime } from "@shared/utils/datetime";
 
 export interface ServiceFormData {
@@ -52,13 +53,18 @@ export function useDocumentationForm(id: number) {
   const documentMutation = useDocumentAppointment(id);
 
   const { data: appointmentServicesData } = useQuery<Array<{ serviceId: number; serviceCode: string; plannedDurationMinutes: number; actualDurationMinutes: number | null; details: string | null }>>({
-    queryKey: ["appointments", id, "services"],
+    queryKey: [`/api/appointments/${id}/services`],
     queryFn: async () => {
       const res = await fetch(`/api/appointments/${id}/services`);
       if (!res.ok) throw new Error("Failed to fetch appointment services");
       return res.json();
     },
     enabled: id > 0,
+  });
+
+  const { data: catalogServices } = useQuery<Service[]>({
+    queryKey: ["/api/services"],
+    staleTime: 60_000,
   });
 
   const servicesInitialized = useRef(false);
@@ -119,12 +125,20 @@ export function useDocumentationForm(id: number) {
   }, []);
 
   const addService = useCallback((serviceType: ServiceType) => {
-    const defaultDuration = 60;
+    const codeMap: Record<string, string> = {
+      "Hauswirtschaft": "hauswirtschaft",
+      "Alltagsbegleitung": "alltagsbegleitung",
+      "Erstberatung": "erstberatung",
+    };
+    const code = codeMap[serviceType] ?? serviceType.toLowerCase();
+    const catalogEntry = catalogServices?.find(s => s.code === code);
+    const defaultDuration = catalogEntry?.minDurationMinutes || 60;
     setFormData(prev => ({
       ...prev,
       services: [
         ...prev.services,
         {
+          serviceId: catalogEntry?.id,
           serviceType,
           plannedDuration: 0,
           actualDuration: defaultDuration,
@@ -132,7 +146,7 @@ export function useDocumentationForm(id: number) {
         },
       ],
     }));
-  }, []);
+  }, [catalogServices]);
 
   const calculatedEnd = useMemo(() => {
     if (!formData.actualStart) return null;
@@ -219,6 +233,16 @@ export function useDocumentationForm(id: number) {
     if (formData.travelOriginType === "appointment") {
       payload.travelFromAppointmentId = formData.travelFromAppointmentId;
       payload.travelMinutes = formData.travelMinutes;
+    }
+
+    const servicesWithoutId = formData.services.filter(s => !s.serviceId && s.actualDuration > 0);
+    if (servicesWithoutId.length > 0) {
+      toast({
+        title: "Service-Fehler",
+        description: `${servicesWithoutId.map(s => s.serviceType).join(", ")} konnte nicht zugeordnet werden. Bitte entfernen und neu hinzufügen.`,
+        variant: "destructive",
+      });
+      return;
     }
 
     payload.services = formData.services
