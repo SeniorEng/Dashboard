@@ -8,6 +8,7 @@
 
 import { Link, useParams } from "wouter";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SectionCard } from "@/components/patterns/section-card";
