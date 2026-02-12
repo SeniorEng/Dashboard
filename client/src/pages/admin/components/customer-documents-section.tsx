@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -22,6 +22,8 @@ import {
   ChevronUp,
   FileText,
   Download,
+  Camera,
+  X,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -95,6 +97,8 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
   const [notes, setNotes] = useState("");
   const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const [filePreviews, setFilePreviews] = useState<{ file: File; preview?: string }[]>([]);
 
   const { data: documents, isLoading: docsLoading } = useQuery<CustomerDocumentData[]>({
     queryKey: ["admin", "customers", customerId, "documents"],
@@ -123,6 +127,43 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
     },
     enabled: !!expandedHistory,
   });
+
+  const addFiles = useCallback((newFiles: File[]) => {
+    setSelectedFiles(prev => [...prev, ...newFiles]);
+    const newPreviews = newFiles.map(file => {
+      const isImage = file.type.startsWith("image/");
+      return {
+        file,
+        preview: isImage ? URL.createObjectURL(file) : undefined,
+      };
+    });
+    setFilePreviews(prev => [...prev, ...newPreviews]);
+  }, []);
+
+  const removeFile = useCallback((index: number) => {
+    setFilePreviews(prev => {
+      const removed = prev[index];
+      if (removed?.preview) URL.revokeObjectURL(removed.preview);
+      return prev.filter((_, i) => i !== index);
+    });
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const clearAllFiles = useCallback(() => {
+    filePreviews.forEach(p => { if (p.preview) URL.revokeObjectURL(p.preview); });
+    setFilePreviews([]);
+    setSelectedFiles([]);
+  }, [filePreviews]);
+
+  const handleCameraCapture = useCallback(() => {
+    cameraInputRef.current?.click();
+  }, []);
+
+  const onCameraFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) addFiles(files);
+    e.target.value = "";
+  }, [addFiles]);
 
   const { uploadFile, isUploading } = useUpload({
     onError: (error) => {
@@ -156,12 +197,13 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
     }
 
     queryClient.invalidateQueries({ queryKey: ["admin", "customers", customerId, "documents"] });
+    const count = selectedFiles.length;
     setIsUploadOpen(false);
     setSelectedDocTypeId("");
     setNotes("");
-    setSelectedFiles([]);
-    toast({ title: selectedFiles.length > 1 ? `${selectedFiles.length} Dokumente hinzugefügt` : "Dokument hinzugefügt" });
-  }, [selectedFiles, selectedDocTypeId, notes, uploadFile, saveMutation, queryClient, customerId, toast]);
+    clearAllFiles();
+    toast({ title: count > 1 ? `${count} Dokumente hinzugefügt` : "Dokument hinzugefügt" });
+  }, [selectedFiles, selectedDocTypeId, notes, uploadFile, saveMutation, queryClient, customerId, toast, clearAllFiles]);
 
   const uploadedDocTypeIds = new Set(documents?.map(d => d.documentTypeId) || []);
   const availableDocTypes = docTypes?.filter(dt => dt.isActive) || [];
@@ -207,18 +249,87 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
           </div>
 
           <div className="space-y-2">
-            <Label>Dateien auswählen *</Label>
-            <Input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-              multiple
-              onChange={(e) => setSelectedFiles(Array.from(e.target.files || []))}
-              className="text-base"
-              data-testid="input-customer-document-file"
-            />
-            <p className="text-[11px] text-gray-400">PDF, Bild oder Word-Dokument (max. 10 MB je Datei). Mehrere Dateien möglich.</p>
-            {selectedFiles.length > 1 && (
-              <p className="text-xs text-teal-600">{selectedFiles.length} Dateien ausgewählt</p>
+            <Label>Dateien auswählen oder Foto aufnehmen *</Label>
+            <div className="flex gap-2">
+              <label className="flex-1 cursor-pointer">
+                <input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                  multiple
+                  onChange={(e) => { addFiles(Array.from(e.target.files || [])); e.target.value = ""; }}
+                  className="hidden"
+                  data-testid="input-customer-document-file"
+                />
+                <div className="flex items-center justify-center gap-2 h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100 transition-colors">
+                  <Upload className="h-4 w-4" />
+                  Dateien wählen
+                </div>
+              </label>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleCameraCapture}
+                className="flex items-center gap-2"
+                data-testid="button-camera-capture"
+              >
+                <Camera className="h-4 w-4" />
+                Foto
+              </Button>
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={onCameraFileChange}
+                className="hidden"
+                data-testid="input-camera-capture"
+              />
+            </div>
+            <p className="text-[11px] text-gray-400">PDF, Bild oder Word-Dokument (max. 10 MB je Datei). Mehrere Fotos/Dateien möglich.</p>
+
+            {filePreviews.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-teal-600 font-medium">
+                    {filePreviews.length} {filePreviews.length === 1 ? "Datei" : "Dateien"} ausgewählt
+                  </p>
+                  <button
+                    type="button"
+                    onClick={clearAllFiles}
+                    className="text-xs text-gray-400 hover:text-red-500 transition-colors"
+                    data-testid="button-clear-all-files"
+                  >
+                    Alle entfernen
+                  </button>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {filePreviews.map((item, idx) => (
+                    <div key={idx} className="relative group rounded-lg border border-gray-200 overflow-hidden bg-gray-50">
+                      {item.preview ? (
+                        <img
+                          src={item.preview}
+                          alt={item.file.name}
+                          className="w-full h-20 object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-20 flex flex-col items-center justify-center gap-1">
+                          <FileText className="h-5 w-5 text-gray-400" />
+                          <span className="text-[10px] text-gray-500 px-1 truncate max-w-full">{item.file.name.split('.').pop()?.toUpperCase()}</span>
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeFile(idx)}
+                        className="absolute top-1 right-1 h-5 w-5 rounded-full bg-black/50 flex items-center justify-center sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                        data-testid={`button-remove-file-${idx}`}
+                      >
+                        <X className="h-3 w-3 text-white" />
+                      </button>
+                      <p className="text-[10px] text-gray-500 p-1 truncate">{item.file.name}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
 
@@ -243,7 +354,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                 <><Loader2 className={`mr-2 ${iconSize.sm} animate-spin`} />Wird hinzugefügt...</>
               ) : selectedFiles.length > 1 ? `${selectedFiles.length} Dateien hinzufügen` : "Hinzufügen"}
             </Button>
-            <Button variant="outline" onClick={() => { setIsUploadOpen(false); setSelectedFiles([]); }}>
+            <Button variant="outline" onClick={() => { setIsUploadOpen(false); clearAllFiles(); }}>
               Abbrechen
             </Button>
           </div>
