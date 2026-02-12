@@ -24,6 +24,7 @@ import { api, unwrapResult } from "@/lib/api";
 import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
 import { todayISO } from "@shared/utils/datetime";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Loader2,
   User2,
@@ -33,6 +34,7 @@ import {
   Save,
   CreditCard,
   Heart,
+  Stethoscope,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -498,6 +500,58 @@ export default function AdminCustomerEdit() {
                     data-testid="select-backup-employee"
                   />
                 </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <Stethoscope className={iconSize.sm} />
+                  Gesundheit & Haustier
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="vorerkrankungen">Vorerkrankungen</Label>
+                  <Textarea
+                    id="vorerkrankungen"
+                    value={formData.vorerkrankungen}
+                    onChange={(e) => handleChange("vorerkrankungen", e.target.value)}
+                    placeholder="Bekannte Vorerkrankungen, Allergien, Medikamente..."
+                    rows={3}
+                    maxLength={2000}
+                    data-testid="input-vorerkrankungen"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="haustierVorhanden">Haustier vorhanden</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Relevant für die Einsatzplanung der Mitarbeiter
+                    </p>
+                  </div>
+                  <Switch
+                    id="haustierVorhanden"
+                    checked={formData.haustierVorhanden}
+                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, haustierVorhanden: checked }))}
+                    data-testid="switch-haustier-vorhanden"
+                  />
+                </div>
+
+                {formData.haustierVorhanden && (
+                  <div className="space-y-2">
+                    <Label htmlFor="haustierDetails">Haustier-Details</Label>
+                    <Input
+                      id="haustierDetails"
+                      value={formData.haustierDetails}
+                      onChange={(e) => handleChange("haustierDetails", e.target.value)}
+                      placeholder="z.B. Hund (Golden Retriever), Katze..."
+                      maxLength={500}
+                      data-testid="input-haustier-details"
+                    />
+                  </div>
+                )}
               </CardContent>
             </Card>
 
