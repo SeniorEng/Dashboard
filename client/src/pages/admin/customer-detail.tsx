@@ -25,6 +25,7 @@ import {
   Euro,
   AlertCircle,
   Settings,
+  FileCheck2,
 } from "lucide-react";
 import { BudgetLedgerSection } from "@/components/budget/BudgetLedgerSection";
 import { BudgetTypeSettings } from "@/components/budget/BudgetTypeSettings";
@@ -33,6 +34,7 @@ import { CustomerServicesTab } from "./components/customer-services-tab";
 import { CustomerHistoryTab } from "./components/customer-history-tab";
 import { CustomerInsuranceTab } from "./components/customer-insurance-tab";
 import { PricingSection } from "./components/customer-pricing-section";
+import { CustomerDocumentsSection } from "./components/customer-documents-section";
 
 export default function AdminCustomerDetail() {
   const { id } = useParams<{ id: string }>();
@@ -113,6 +115,7 @@ export default function AdminCustomerDetail() {
             tabs={[
               { value: "overview", label: "Übersicht", testId: "tab-overview" },
               { value: "services", label: "Leistungen", testId: "tab-services" },
+              { value: "documents", label: "Dokumente", testId: "tab-documents" },
               { value: "contacts", label: "Kontakte", testId: "tab-contacts" },
               { value: "budgets", label: "Budgets", testId: "tab-budgets" },
               { value: "insurance", label: "Versicherung", testId: "tab-insurance" },
@@ -128,6 +131,18 @@ export default function AdminCustomerDetail() {
 
             <TabsContent value="services" className="space-y-4">
               <CustomerServicesTab customer={customer} />
+            </TabsContent>
+
+            <TabsContent value="documents" className="space-y-4">
+              <SectionCard
+                title="Kundendokumente"
+                icon={<FileCheck2 className={iconSize.sm} />}
+              >
+                <CustomerDocumentsSection
+                  customerId={customerId}
+                  customerName={customerDisplayName}
+                />
+              </SectionCard>
             </TabsContent>
 
             <TabsContent value="contacts" className="space-y-4">

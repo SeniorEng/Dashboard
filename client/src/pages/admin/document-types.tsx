@@ -9,6 +9,13 @@ import { Switch } from "@/components/ui/switch";
 import { Layout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -23,6 +30,8 @@ import {
   FileCheck2,
   CalendarClock,
   Bell,
+  Users,
+  User,
 } from "lucide-react";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
@@ -31,6 +40,7 @@ interface DocumentTypeData {
   id: number;
   name: string;
   description: string | null;
+  targetType: string;
   reviewIntervalMonths: number | null;
   reminderLeadTimeDays: number | null;
   isActive: boolean;
@@ -39,6 +49,7 @@ interface DocumentTypeData {
 interface DocTypeFormData {
   name: string;
   description: string;
+  targetType: string;
   reviewIntervalMonths: string;
   reminderLeadTimeDays: string;
   isActive: boolean;
@@ -47,6 +58,7 @@ interface DocTypeFormData {
 const emptyForm: DocTypeFormData = {
   name: "",
   description: "",
+  targetType: "employee",
   reviewIntervalMonths: "",
   reminderLeadTimeDays: "14",
   isActive: true,
@@ -56,6 +68,7 @@ function toFormData(dt: DocumentTypeData): DocTypeFormData {
   return {
     name: dt.name,
     description: dt.description || "",
+    targetType: dt.targetType || "employee",
     reviewIntervalMonths: dt.reviewIntervalMonths?.toString() || "",
     reminderLeadTimeDays: dt.reminderLeadTimeDays?.toString() || "14",
     isActive: dt.isActive,
@@ -66,6 +79,7 @@ function toPayload(form: DocTypeFormData) {
   return {
     name: form.name,
     description: form.description || null,
+    targetType: form.targetType,
     reviewIntervalMonths: form.reviewIntervalMonths ? parseInt(form.reviewIntervalMonths) : null,
     reminderLeadTimeDays: form.reminderLeadTimeDays ? parseInt(form.reminderLeadTimeDays) : 14,
     isActive: form.isActive,
@@ -78,6 +92,7 @@ export default function AdminDocumentTypes() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingType, setEditingType] = useState<DocumentTypeData | null>(null);
   const [formData, setFormData] = useState<DocTypeFormData>(emptyForm);
+  const [filterTarget, setFilterTarget] = useState<string>("all");
 
   const { data: docTypes, isLoading } = useQuery<DocumentTypeData[]>({
     queryKey: ["admin", "document-types"],
@@ -141,6 +156,10 @@ export default function AdminDocumentTypes() {
 
   const isPending = createMutation.isPending || updateMutation.isPending;
 
+  const filteredDocTypes = docTypes?.filter(dt => 
+    filterTarget === "all" || dt.targetType === filterTarget
+  );
+
   const formContent = (
     <div className="space-y-4 pt-2">
       <div className="space-y-2">
@@ -162,6 +181,18 @@ export default function AdminDocumentTypes() {
           className="text-base"
           data-testid="input-doctype-description"
         />
+      </div>
+      <div className="space-y-2">
+        <Label>Zielgruppe *</Label>
+        <Select value={formData.targetType} onValueChange={(v) => setFormData(p => ({ ...p, targetType: v }))}>
+          <SelectTrigger data-testid="select-doctype-target">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="employee">Mitarbeiter</SelectItem>
+            <SelectItem value="customer">Kunde</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
@@ -248,20 +279,38 @@ export default function AdminDocumentTypes() {
             </Dialog>
           </div>
 
+          <div className="flex gap-2 mb-4">
+            {["all", "employee", "customer"].map((t) => (
+              <Button
+                key={t}
+                variant={filterTarget === t ? "default" : "outline"}
+                size="sm"
+                className={filterTarget === t ? "bg-teal-600 hover:bg-teal-700" : "bg-white"}
+                onClick={() => setFilterTarget(t)}
+                data-testid={`filter-target-${t}`}
+              >
+                {t === "all" ? "Alle" : t === "employee" ? "Mitarbeiter" : "Kunden"}
+              </Button>
+            ))}
+          </div>
+
           {isLoading ? (
             <div className="flex justify-center py-12">
               <Loader2 className={`${iconSize.xl} animate-spin text-teal-600`} />
             </div>
           ) : (
             <div className="flex flex-col gap-3">
-              {docTypes?.length === 0 && (
+              {filteredDocTypes?.length === 0 && (
                 <Card>
                   <CardContent className="p-6 text-center text-gray-500">
-                    Noch keine Dokumententypen definiert. Erstellen Sie den ersten Typ.
+                    {filterTarget === "all" 
+                      ? "Noch keine Dokumententypen definiert. Erstellen Sie den ersten Typ."
+                      : `Keine Dokumententypen für ${filterTarget === "employee" ? "Mitarbeiter" : "Kunden"} gefunden.`
+                    }
                   </CardContent>
                 </Card>
               )}
-              {docTypes?.map((dt) => (
+              {filteredDocTypes?.map((dt) => (
                 <Card key={dt.id} className={!dt.isActive ? "opacity-60" : ""} data-testid={`card-doctype-${dt.id}`}>
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between gap-3">
@@ -269,6 +318,17 @@ export default function AdminDocumentTypes() {
                         <div className="flex items-center gap-2 mb-1">
                           <FileCheck2 className={`${iconSize.sm} text-amber-600 shrink-0`} />
                           <span className="font-semibold text-gray-900">{dt.name}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded inline-flex items-center gap-1 ${
+                            dt.targetType === "customer" 
+                              ? "bg-blue-100 text-blue-700" 
+                              : "bg-purple-100 text-purple-700"
+                          }`}>
+                            {dt.targetType === "customer" ? (
+                              <><User className="h-3 w-3" /> Kunde</>
+                            ) : (
+                              <><Users className="h-3 w-3" /> Mitarbeiter</>
+                            )}
+                          </span>
                           {!dt.isActive && (
                             <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600">Inaktiv</span>
                           )}

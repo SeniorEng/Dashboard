@@ -1,18 +1,21 @@
-import { eq, and, desc, asc, lte, gte, isNull, or, inArray, sql } from "drizzle-orm";
+import { eq, and, desc, asc, lte, sql } from "drizzle-orm";
 import {
   documentTypes,
   employeeDocuments,
+  customerDocuments,
+  customers,
   type DocumentType,
   type InsertDocumentType,
   type UpdateDocumentType,
   type EmployeeDocument,
   type InsertEmployeeDocument,
+  type CustomerDocument,
+  type InsertCustomerDocument,
 } from "@shared/schema";
 import { db } from "../lib/db";
-import { todayISO } from "@shared/utils/datetime";
 
 export interface IDocumentStorage {
-  getDocumentTypes(activeOnly?: boolean): Promise<DocumentType[]>;
+  getDocumentTypes(activeOnly?: boolean, targetType?: string): Promise<DocumentType[]>;
   getDocumentType(id: number): Promise<DocumentType | null>;
   createDocumentType(data: InsertDocumentType): Promise<DocumentType>;
   updateDocumentType(id: number, data: UpdateDocumentType): Promise<DocumentType | null>;
@@ -20,13 +23,22 @@ export interface IDocumentStorage {
   uploadDocument(data: InsertEmployeeDocument, uploadedByUserId: number): Promise<EmployeeDocument>;
   getCurrentDocuments(employeeId: number): Promise<(EmployeeDocument & { documentType: DocumentType })[]>;
   getDocumentHistory(employeeId: number, documentTypeId: number): Promise<EmployeeDocument[]>;
-  getDocumentsDueSoon(leadTimeDays?: number): Promise<(EmployeeDocument & { documentType: DocumentType; employee: { id: number; displayName: string } })[]>;
+  getEmployeeDocumentsDueSoon(leadTimeDays?: number): Promise<(EmployeeDocument & { documentType: DocumentType; employee: { id: number; displayName: string } })[]>;
+
+  uploadCustomerDocument(data: InsertCustomerDocument, uploadedByUserId: number): Promise<CustomerDocument>;
+  getCurrentCustomerDocuments(customerId: number): Promise<(CustomerDocument & { documentType: DocumentType })[]>;
+  getCustomerDocumentHistory(customerId: number, documentTypeId: number): Promise<CustomerDocument[]>;
+  getCustomerDocumentsDueSoon(leadTimeDays?: number): Promise<(CustomerDocument & { documentType: DocumentType; customer: { id: number; name: string } })[]>;
 }
 
 export class DocumentStorage implements IDocumentStorage {
-  async getDocumentTypes(activeOnly = true): Promise<DocumentType[]> {
-    if (activeOnly) {
-      return db.select().from(documentTypes).where(eq(documentTypes.isActive, true)).orderBy(asc(documentTypes.name));
+  async getDocumentTypes(activeOnly = true, targetType?: string): Promise<DocumentType[]> {
+    const conditions = [];
+    if (activeOnly) conditions.push(eq(documentTypes.isActive, true));
+    if (targetType) conditions.push(eq(documentTypes.targetType, targetType));
+
+    if (conditions.length > 0) {
+      return db.select().from(documentTypes).where(and(...conditions)).orderBy(asc(documentTypes.name));
     }
     return db.select().from(documentTypes).orderBy(asc(documentTypes.name));
   }
@@ -40,6 +52,7 @@ export class DocumentStorage implements IDocumentStorage {
     const [result] = await db.insert(documentTypes).values({
       name: data.name,
       description: data.description || null,
+      targetType: data.targetType ?? "employee",
       reviewIntervalMonths: data.reviewIntervalMonths || null,
       reminderLeadTimeDays: data.reminderLeadTimeDays ?? 14,
       isActive: data.isActive ?? true,
@@ -56,6 +69,14 @@ export class DocumentStorage implements IDocumentStorage {
     return result || null;
   }
 
+  private async calculateReviewDueDate(documentTypeId: number): Promise<string | null> {
+    const docType = await this.getDocumentType(documentTypeId);
+    if (!docType?.reviewIntervalMonths) return null;
+    const dueDate = new Date();
+    dueDate.setMonth(dueDate.getMonth() + docType.reviewIntervalMonths);
+    return dueDate.toISOString().split("T")[0];
+  }
+
   async uploadDocument(data: InsertEmployeeDocument, uploadedByUserId: number): Promise<EmployeeDocument> {
     await db
       .update(employeeDocuments)
@@ -68,13 +89,7 @@ export class DocumentStorage implements IDocumentStorage {
         )
       );
 
-    const docType = await this.getDocumentType(data.documentTypeId);
-    let reviewDueDate: string | null = null;
-    if (docType?.reviewIntervalMonths) {
-      const dueDate = new Date();
-      dueDate.setMonth(dueDate.getMonth() + docType.reviewIntervalMonths);
-      reviewDueDate = dueDate.toISOString().split("T")[0];
-    }
+    const reviewDueDate = await this.calculateReviewDueDate(data.documentTypeId);
 
     const [result] = await db.insert(employeeDocuments).values({
       employeeId: data.employeeId,
@@ -122,8 +137,7 @@ export class DocumentStorage implements IDocumentStorage {
       .orderBy(desc(employeeDocuments.uploadedAt));
   }
 
-  async getDocumentsDueSoon(leadTimeDays: number = 30): Promise<(EmployeeDocument & { documentType: DocumentType; employee: { id: number; displayName: string } })[]> {
-    const today = todayISO();
+  async getEmployeeDocumentsDueSoon(leadTimeDays: number = 30): Promise<(EmployeeDocument & { documentType: DocumentType; employee: { id: number; displayName: string } })[]> {
     const futureDate = new Date();
     futureDate.setDate(futureDate.getDate() + leadTimeDays);
     const futureDateStr = futureDate.toISOString().split("T")[0];
@@ -152,6 +166,95 @@ export class DocumentStorage implements IDocumentStorage {
       .orderBy(asc(employeeDocuments.reviewDueDate));
 
     return docs.map(d => ({ ...d.doc, documentType: d.docType, employee: d.employee }));
+  }
+
+  async uploadCustomerDocument(data: InsertCustomerDocument, uploadedByUserId: number): Promise<CustomerDocument> {
+    await db
+      .update(customerDocuments)
+      .set({ isCurrent: false })
+      .where(
+        and(
+          eq(customerDocuments.customerId, data.customerId),
+          eq(customerDocuments.documentTypeId, data.documentTypeId),
+          eq(customerDocuments.isCurrent, true)
+        )
+      );
+
+    const reviewDueDate = await this.calculateReviewDueDate(data.documentTypeId);
+
+    const [result] = await db.insert(customerDocuments).values({
+      customerId: data.customerId,
+      documentTypeId: data.documentTypeId,
+      fileName: data.fileName,
+      objectPath: data.objectPath,
+      uploadedByUserId,
+      reviewDueDate,
+      isCurrent: true,
+      notes: data.notes || null,
+    }).returning();
+
+    return result;
+  }
+
+  async getCurrentCustomerDocuments(customerId: number): Promise<(CustomerDocument & { documentType: DocumentType })[]> {
+    const docs = await db
+      .select({
+        doc: customerDocuments,
+        docType: documentTypes,
+      })
+      .from(customerDocuments)
+      .innerJoin(documentTypes, eq(customerDocuments.documentTypeId, documentTypes.id))
+      .where(
+        and(
+          eq(customerDocuments.customerId, customerId),
+          eq(customerDocuments.isCurrent, true)
+        )
+      )
+      .orderBy(asc(documentTypes.name));
+
+    return docs.map(d => ({ ...d.doc, documentType: d.docType }));
+  }
+
+  async getCustomerDocumentHistory(customerId: number, documentTypeId: number): Promise<CustomerDocument[]> {
+    return db
+      .select()
+      .from(customerDocuments)
+      .where(
+        and(
+          eq(customerDocuments.customerId, customerId),
+          eq(customerDocuments.documentTypeId, documentTypeId)
+        )
+      )
+      .orderBy(desc(customerDocuments.uploadedAt));
+  }
+
+  async getCustomerDocumentsDueSoon(leadTimeDays: number = 30): Promise<(CustomerDocument & { documentType: DocumentType; customer: { id: number; name: string } })[]> {
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + leadTimeDays);
+    const futureDateStr = futureDate.toISOString().split("T")[0];
+
+    const docs = await db
+      .select({
+        doc: customerDocuments,
+        docType: documentTypes,
+        customer: {
+          id: customers.id,
+          name: customers.name,
+        },
+      })
+      .from(customerDocuments)
+      .innerJoin(documentTypes, eq(customerDocuments.documentTypeId, documentTypes.id))
+      .innerJoin(customers, eq(customerDocuments.customerId, customers.id))
+      .where(
+        and(
+          eq(customerDocuments.isCurrent, true),
+          lte(customerDocuments.reviewDueDate, futureDateStr),
+          sql`${customerDocuments.reviewDueDate} IS NOT NULL`
+        )
+      )
+      .orderBy(asc(customerDocuments.reviewDueDate));
+
+    return docs.map(d => ({ ...d.doc, documentType: d.docType, customer: d.customer }));
   }
 }
 

@@ -32,14 +32,15 @@ interface DocumentTypeData {
   id: number;
   name: string;
   description: string | null;
+  targetType: string;
   reviewIntervalMonths: number | null;
   reminderLeadTimeDays: number | null;
   isActive: boolean;
 }
 
-interface EmployeeDocumentData {
+interface CustomerDocumentData {
   id: number;
-  employeeId: number;
+  customerId: number;
   documentTypeId: number;
   fileName: string;
   objectPath: string;
@@ -86,7 +87,7 @@ function ReviewBadge({ reviewDueDate }: { reviewDueDate: string | null }) {
   );
 }
 
-export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false }: { employeeId: number; userName: string; isAdmin?: boolean }) {
+export function CustomerDocumentsSection({ customerId, customerName }: { customerId: number; customerName: string }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -95,32 +96,32 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
   const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
-  const { data: documents, isLoading: docsLoading } = useQuery<EmployeeDocumentData[]>({
-    queryKey: ["admin", "employees", employeeId, "documents"],
+  const { data: documents, isLoading: docsLoading } = useQuery<CustomerDocumentData[]>({
+    queryKey: ["admin", "customers", customerId, "documents"],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/employees/${employeeId}/documents`, { credentials: "include" });
+      const res = await fetch(`/api/admin/customers/${customerId}/documents`, { credentials: "include" });
       if (!res.ok) throw new Error("Dokumente konnten nicht geladen werden");
       return res.json();
     },
   });
 
   const { data: docTypes } = useQuery<DocumentTypeData[]>({
-    queryKey: ["admin", "document-types", "employee"],
+    queryKey: ["admin", "document-types", "customer"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/document-types?targetType=employee", { credentials: "include" });
+      const res = await fetch("/api/admin/document-types?targetType=customer", { credentials: "include" });
       if (!res.ok) throw new Error("Dokumententypen konnten nicht geladen werden");
       return res.json();
     },
   });
 
-  const { data: history, isLoading: historyLoading } = useQuery<EmployeeDocumentData[]>({
-    queryKey: ["admin", "employees", employeeId, "documents", expandedHistory, "history"],
+  const { data: history, isLoading: historyLoading } = useQuery<CustomerDocumentData[]>({
+    queryKey: ["admin", "customers", customerId, "documents", expandedHistory, "history"],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/employees/${employeeId}/documents/${expandedHistory}/history`, { credentials: "include" });
+      const res = await fetch(`/api/admin/customers/${customerId}/documents/${expandedHistory}/history`, { credentials: "include" });
       if (!res.ok) throw new Error("Dokumentenhistorie konnte nicht geladen werden");
       return res.json();
     },
-    enabled: !!expandedHistory && isAdmin,
+    enabled: !!expandedHistory,
   });
 
   const { uploadFile, isUploading } = useUpload({
@@ -131,11 +132,11 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
 
   const saveMutation = useMutation({
     mutationFn: async (data: { documentTypeId: number; fileName: string; objectPath: string; notes?: string | null }) => {
-      const result = await api.post(`/admin/employees/${employeeId}/documents`, data);
+      const result = await api.post(`/admin/customers/${customerId}/documents`, data);
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "employees", employeeId, "documents"] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "customers", customerId, "documents"] });
       setIsUploadOpen(false);
       setSelectedDocTypeId("");
       setNotes("");
@@ -168,7 +169,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
   const isSubmitting = isUploading || saveMutation.isPending;
 
   return (
-    <div className="mt-6 pt-6 border-t">
+    <div>
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
           <FileCheck2 className={iconSize.sm} />
@@ -178,7 +179,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
           variant="outline"
           size="sm"
           onClick={() => setIsUploadOpen(!isUploadOpen)}
-          data-testid="button-upload-document"
+          data-testid="button-upload-customer-document"
         >
           <Upload className={`${iconSize.sm} mr-1`} />
           Hochladen
@@ -190,7 +191,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
           <div className="space-y-2">
             <Label>Dokumententyp *</Label>
             <Select value={selectedDocTypeId} onValueChange={setSelectedDocTypeId}>
-              <SelectTrigger data-testid="select-doc-type">
+              <SelectTrigger data-testid="select-customer-doc-type">
                 <SelectValue placeholder="Typ auswählen..." />
               </SelectTrigger>
               <SelectContent>
@@ -211,7 +212,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
               accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
               onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
               className="text-base"
-              data-testid="input-document-file"
+              data-testid="input-customer-document-file"
             />
             <p className="text-[11px] text-gray-400">PDF, Bild oder Word-Dokument (max. 10 MB)</p>
           </div>
@@ -223,7 +224,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
               onChange={(e) => setNotes(e.target.value)}
               placeholder="z.B. Gültig bis 2026"
               className="text-base"
-              data-testid="input-document-notes"
+              data-testid="input-customer-document-notes"
             />
           </div>
 
@@ -231,7 +232,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
             <Button
               onClick={handleUpload}
               disabled={isSubmitting || !selectedFile || !selectedDocTypeId}
-              data-testid="button-submit-document"
+              data-testid="button-submit-customer-document"
             >
               {isSubmitting ? (
                 <><Loader2 className={`mr-2 ${iconSize.sm} animate-spin`} />Hochladen...</>
@@ -255,7 +256,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
             const borderClass = status === "overdue" ? "border-red-200" : status === "warning" ? "border-amber-200" : "border-gray-100";
 
             return (
-              <div key={doc.id} className={`p-3 bg-white border rounded-lg ${borderClass}`} data-testid={`doc-${doc.id}`}>
+              <div key={doc.id} className={`p-3 bg-white border rounded-lg ${borderClass}`} data-testid={`customer-doc-${doc.id}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
@@ -279,17 +280,17 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-gray-100"
-                      data-testid={`button-download-doc-${doc.id}`}
+                      data-testid={`button-download-customer-doc-${doc.id}`}
                     >
                       <Download className={`${iconSize.sm} text-gray-600`} />
                     </a>
-                    {isAdmin && doc.documentType.reviewIntervalMonths && (
+                    {doc.documentType.reviewIntervalMonths && (
                       <Button
                         variant="ghost"
                         size="sm"
                         className="h-8 w-8 p-0"
                         onClick={() => setExpandedHistory(expandedHistory === doc.documentTypeId ? null : doc.documentTypeId)}
-                        data-testid={`button-history-${doc.documentTypeId}`}
+                        data-testid={`button-customer-history-${doc.documentTypeId}`}
                       >
                         {expandedHistory === doc.documentTypeId ? (
                           <ChevronUp className={`${iconSize.sm} text-gray-600`} />
@@ -301,7 +302,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
                   </div>
                 </div>
 
-                {isAdmin && expandedHistory === doc.documentTypeId && (
+                {expandedHistory === doc.documentTypeId && (
                   <div className="mt-3 ml-6 pt-3 border-t border-gray-100">
                     <p className="text-xs font-medium text-gray-500 mb-2">Dokumentenhistorie</p>
                     {historyLoading ? (

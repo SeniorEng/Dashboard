@@ -1,14 +1,14 @@
 import { Router, Request, Response } from "express";
 import { documentStorage } from "../../storage/documents";
-import { insertDocumentTypeSchema, updateDocumentTypeSchema, insertEmployeeDocumentSchema } from "@shared/schema";
+import { insertDocumentTypeSchema, updateDocumentTypeSchema, insertEmployeeDocumentSchema, insertCustomerDocumentSchema } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
-import { z } from "zod";
 
 const router = Router();
 
 router.get("/document-types", asyncHandler("Dokumententypen konnten nicht geladen werden", async (_req: Request, res: Response) => {
   const includeInactive = _req.query.includeInactive === "true";
-  const types = await documentStorage.getDocumentTypes(!includeInactive);
+  const targetType = _req.query.targetType as string | undefined;
+  const types = await documentStorage.getDocumentTypes(!includeInactive, targetType);
   res.json(types);
 }));
 
@@ -62,15 +62,49 @@ router.post("/employees/:employeeId/documents", asyncHandler("Dokument konnte ni
     return;
   }
 
-  const userId = (req as any).userId;
+  const userId = req.user!.id;
   const doc = await documentStorage.uploadDocument(result.data, userId);
+  res.status(201).json(doc);
+}));
+
+router.get("/customers/:customerId/documents", asyncHandler("Kundendokumente konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const customerId = parseInt(req.params.customerId);
+  if (isNaN(customerId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" }); return; }
+  const docs = await documentStorage.getCurrentCustomerDocuments(customerId);
+  res.json(docs);
+}));
+
+router.get("/customers/:customerId/documents/:documentTypeId/history", asyncHandler("Dokumentenhistorie konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const customerId = parseInt(req.params.customerId);
+  const documentTypeId = parseInt(req.params.documentTypeId);
+  if (isNaN(customerId) || isNaN(documentTypeId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" }); return; }
+  const docs = await documentStorage.getCustomerDocumentHistory(customerId, documentTypeId);
+  res.json(docs);
+}));
+
+router.post("/customers/:customerId/documents", asyncHandler("Kundendokument konnte nicht hochgeladen werden", async (req: Request, res: Response) => {
+  const customerId = parseInt(req.params.customerId);
+  if (isNaN(customerId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" }); return; }
+
+  const data = { ...req.body, customerId };
+  const result = insertCustomerDocumentSchema.safeParse(data);
+  if (!result.success) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Daten", details: result.error.issues });
+    return;
+  }
+
+  const userId = req.user!.id;
+  const doc = await documentStorage.uploadCustomerDocument(result.data, userId);
   res.status(201).json(doc);
 }));
 
 router.get("/documents/due-soon", asyncHandler("Fällige Dokumente konnten nicht geladen werden", async (req: Request, res: Response) => {
   const days = parseInt(req.query.days as string) || 60;
-  const docs = await documentStorage.getDocumentsDueSoon(days);
-  res.json(docs);
+  const [employeeDocs, customerDocs] = await Promise.all([
+    documentStorage.getEmployeeDocumentsDueSoon(days),
+    documentStorage.getCustomerDocumentsDueSoon(days),
+  ]);
+  res.json({ employee: employeeDocs, customer: customerDocs });
 }));
 
 export default router;

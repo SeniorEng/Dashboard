@@ -18,16 +18,18 @@ async function getFirstAdminId(): Promise<number | null> {
 export async function generateDocumentReviewTasks(): Promise<number> {
   let tasksCreated = 0;
 
-  const dueDocs = await documentStorage.getDocumentsDueSoon(90);
-  if (dueDocs.length === 0) return 0;
-
   const adminId = await getFirstAdminId();
   if (!adminId) {
     console.warn("Document review: No active admin user found, skipping task generation");
     return 0;
   }
 
-  for (const doc of dueDocs) {
+  const [employeeDocs, customerDocs] = await Promise.all([
+    documentStorage.getEmployeeDocumentsDueSoon(90),
+    documentStorage.getCustomerDocumentsDueSoon(90),
+  ]);
+
+  for (const doc of employeeDocs) {
     const adminTitle = `${TASK_PREFIX} ${doc.documentType.name} von ${doc.employee.displayName} prüfen`;
     const employeeTitle = `${TASK_PREFIX} ${doc.documentType.name} erneut einreichen`;
 
@@ -73,6 +75,33 @@ export async function generateDocumentReviewTasks(): Promise<number> {
         dueDate: doc.reviewDueDate,
         priority: "medium",
         assignedToUserId: doc.employeeId,
+      }, adminId);
+      tasksCreated++;
+    }
+  }
+
+  for (const doc of customerDocs) {
+    const adminTitle = `${TASK_PREFIX} ${doc.documentType.name} für ${doc.customer.name} prüfen`;
+
+    const existingAdmin = await db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(
+        and(
+          like(tasks.title, `${TASK_PREFIX} ${doc.documentType.name} für ${doc.customer.name}%`),
+          eq(tasks.status, "open"),
+          eq(tasks.assignedToUserId, adminId)
+        )
+      )
+      .limit(1);
+
+    if (existingAdmin.length === 0) {
+      await createTask({
+        title: adminTitle,
+        description: `Das Kundendokument "${doc.documentType.name}" für ${doc.customer.name} muss bis zum ${doc.reviewDueDate} geprüft werden. Datei: ${doc.fileName}`,
+        dueDate: doc.reviewDueDate,
+        priority: "medium",
+        assignedToUserId: adminId,
       }, adminId);
       tasksCreated++;
     }
