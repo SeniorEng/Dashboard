@@ -3,13 +3,13 @@ import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/patterns/status-badge";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Layout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Loader2, User, Users, Save } from "lucide-react";
 import { api, unwrapResult } from "@/lib/api/client";
-import { iconSize, getPflegegradColors, componentStyles } from "@/design-system";
+import { iconSize, componentStyles } from "@/design-system";
 
 interface Customer {
   id: number;
@@ -158,9 +158,7 @@ export default function AdminCustomerAssignments() {
                           </p>
                           <p className="text-sm text-gray-500">{customer.address}</p>
                           {customer.pflegegrad && (
-                            <Badge variant="outline" className="mt-1">
-                              Pflegegrad {customer.pflegegrad}
-                            </Badge>
+                            <StatusBadge type="pflegegrad" value={customer.pflegegrad} className="mt-1" />
                           )}
                         </div>
                         {!isEditing ? (

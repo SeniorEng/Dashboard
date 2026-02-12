@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/patterns/status-badge";
 import { formatCurrency } from "@shared/utils/format";
 import { Loader2 } from "lucide-react";
 
@@ -60,13 +60,9 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium truncate">{service.name}</span>
                 {service.isBillable ? (
-                  <Badge variant="outline" className="text-[10px] px-1 py-0 shrink-0 bg-green-50 text-green-700 border-green-200">
-                    Abrechenbar
-                  </Badge>
+                  <StatusBadge type="billable" value="billable" size="sm" />
                 ) : (
-                  <Badge variant="outline" className="text-[10px] px-1 py-0 shrink-0 bg-gray-50 text-gray-500 border-gray-200">
-                    Nicht abrechenbar
-                  </Badge>
+                  <StatusBadge type="billable" value="not-billable" size="sm" />
                 )}
               </div>
             </div>

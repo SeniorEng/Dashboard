@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/patterns/status-badge";
 import { Lock, Unlock, Clock, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useMonthClosingStatus, useMonthClosingPreview, useCloseMonth } from "../hooks/use-month-closing";
@@ -80,15 +80,9 @@ export function MonthClosingSection({ year, month }: MonthClosingSectionProps) {
               </CardTitle>
             </div>
             {isClosed ? (
-              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200" data-testid="badge-month-closed">
-                <CheckCircle2 className="h-3 w-3 mr-1" />
-                Abgeschlossen
-              </Badge>
+              <StatusBadge type="month" value="closed" data-testid="badge-month-closed" />
             ) : (
-              <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200" data-testid="badge-month-open">
-                <Clock className="h-3 w-3 mr-1" />
-                Offen
-              </Badge>
+              <StatusBadge type="month" value="open" data-testid="badge-month-open" />
             )}
           </div>
           {!isClosed && (

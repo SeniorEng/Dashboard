@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/patterns/status-badge";
 import { DatePicker } from "@/components/ui/date-picker";
 import { iconSize } from "@/design-system";
 import {
@@ -245,7 +245,7 @@ export function CompensationSection({ userId, userName }: { userId: number; user
           {currentCompensation && (
             <div className="p-3 bg-teal-50 border border-teal-200 rounded-lg">
               <div className="flex items-center gap-2 mb-3">
-                <Badge variant="secondary" className="bg-teal-100 text-teal-800">Aktuell</Badge>
+                <StatusBadge type="info" value="Aktuell" />
                 <span className="text-sm text-gray-500">seit {formatDateDisplay(currentCompensation.validFrom)}</span>
               </div>
               <div className="grid grid-cols-3 gap-3 text-sm">

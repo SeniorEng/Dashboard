@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/patterns/status-badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SectionCard } from "@/components/patterns/section-card";
 import { EmptyState } from "@/components/patterns/empty-state";
@@ -351,9 +351,7 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
                     <div className="flex items-center gap-2 mb-0.5">
                       <p className="font-medium text-sm">{contact.vorname} {contact.nachname}</p>
                       {contact.isPrimary && (
-                        <Badge variant="secondary" className="text-xs">
-                          Hauptkontakt
-                        </Badge>
+                        <StatusBadge type="info" value="Hauptkontakt" size="sm" />
                       )}
                     </div>
                     <p className="text-xs text-gray-500">{getContactTypeLabel(contact.contactType)}</p>

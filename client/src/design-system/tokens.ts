@@ -168,6 +168,19 @@ export const colors = {
     5: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200' },
   },
   
+  badge: {
+    green: { bg: 'bg-green-50', text: 'text-green-700', border: 'border-green-200' },
+    amber: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200' },
+    blue: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200' },
+    red: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200' },
+    gray: { bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200' },
+    teal: { bg: 'bg-teal-50', text: 'text-teal-700', border: 'border-teal-200' },
+    purple: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200' },
+    orange: { bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200' },
+    emerald: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' },
+    rose: { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200' },
+  },
+
   // Feedback colors
   feedback: {
     success: { bg: 'bg-green-50', text: 'text-green-800', border: 'border-green-200' },

@@ -4,7 +4,6 @@ import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { SectionCard } from "@/components/patterns/section-card";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { iconSize } from "@/design-system";
-import { Badge } from "@/components/ui/badge";
 import {
   User2,
   MapPin,
@@ -161,9 +160,7 @@ export function CustomerOverviewTab({ customer }: CustomerOverviewTabProps) {
               )}
               <div>
                 <p className="text-sm text-gray-500">Status</p>
-                <Badge className={customer.currentContract.status === "active" ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-50 text-gray-700 border-gray-200"}>
-                  {customer.currentContract.status === "active" ? "Aktiv" : customer.currentContract.status === "paused" ? "Pausiert" : "Beendet"}
-                </Badge>
+                <StatusBadge type="contract" value={customer.currentContract.status} />
               </div>
             </div>
           </div>
@@ -190,9 +187,7 @@ export function CustomerOverviewTab({ customer }: CustomerOverviewTabProps) {
             {selectedServices.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {selectedServices.map((service, index) => (
-                  <Badge key={index} variant="secondary" className="bg-teal-50 text-teal-700 border-teal-200">
-                    {service}
-                  </Badge>
+                  <StatusBadge key={index} type="info" value={service} />
                 ))}
               </div>
             )}
@@ -229,7 +224,7 @@ export function CustomerOverviewTab({ customer }: CustomerOverviewTabProps) {
           icon={<PawPrint className={iconSize.sm} />}
         >
           <div className="space-y-1" data-testid="text-haustier">
-            <Badge className="bg-amber-50 text-amber-700 border-amber-200">Haustier vorhanden</Badge>
+            <StatusBadge type="warning" value="Haustier vorhanden" />
             {customer.haustierDetails && (
               <p className="text-gray-700 mt-2">{customer.haustierDetails}</p>
             )}

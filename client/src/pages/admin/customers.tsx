@@ -276,10 +276,7 @@ export default function AdminCustomers() {
                         <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
                       )}
                       {customer.hasActiveContract && (
-                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-                          <FileText className={`${iconSize.xs} mr-1`} />
-                          Vertrag
-                        </Badge>
+                        <StatusBadge type="info" value="Vertrag" data-testid={`badge-contract-${customer.id}`} />
                       )}
                     </div>
                   </div>

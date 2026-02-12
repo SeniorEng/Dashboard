@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/patterns/status-badge";
 import { iconSize } from "@/design-system";
 import {
   Select,
@@ -458,9 +458,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
           <p className="text-xs font-medium text-amber-700 mb-1">Fehlende Dokumente:</p>
           <div className="flex flex-wrap gap-1">
             {missingDocTypes.map(dt => (
-              <Badge key={dt.id} variant="outline" className="text-xs border-amber-200 text-amber-600">
-                {dt.name}
-              </Badge>
+              <StatusBadge key={dt.id} type="warning" value={dt.name} size="sm" />
             ))}
           </div>
         </div>

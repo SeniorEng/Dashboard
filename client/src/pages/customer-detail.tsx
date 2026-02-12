@@ -2,8 +2,8 @@ import { useRoute, Link, useSearch } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/patterns/status-badge";
 import { AppointmentCard } from "@/features/appointments/components/appointment-card";
 import { 
   ArrowLeft, MapPin, Phone, Mail, User, Heart, 
@@ -20,17 +20,6 @@ import { UNDOCUMENTED_STATUSES } from "@shared/domain/appointments";
 
 import { formatAddress } from "@shared/utils/format";
 
-function getPflegegradLabel(pflegegrad: number | null): string | null {
-  if (!pflegegrad) return null;
-  return `Pflegegrad ${pflegegrad}`;
-}
-
-function getPflegegradColor(pflegegrad: number | null): string {
-  if (!pflegegrad) return "bg-gray-100 text-gray-600";
-  if (pflegegrad <= 2) return "bg-green-100 text-green-700";
-  if (pflegegrad <= 3) return "bg-amber-100 text-amber-700";
-  return "bg-red-100 text-red-700";
-}
 
 export default function CustomerDetailPage() {
   const [, params] = useRoute("/customer/:id");
@@ -134,7 +123,7 @@ export default function CustomerDetailPage() {
 
   const address = formatAddress(customer);
   const phone = customer.telefon ? formatPhoneForDisplay(customer.telefon) : null;
-  const pflegegradLabel = getPflegegradLabel(customer.pflegegrad);
+  const hasPflegegrad = customer.pflegegrad && customer.pflegegrad > 0;
 
   return (
     <Layout>
@@ -178,13 +167,8 @@ export default function CustomerDetailPage() {
                 <User className={`${iconSize.lg} text-primary`} />
               </div>
               <div className="flex-1 min-w-0 space-y-3">
-                {pflegegradLabel && (
-                  <Badge 
-                    variant="secondary" 
-                    className={`${getPflegegradColor(customer.pflegegrad)}`}
-                  >
-                    {pflegegradLabel}
-                  </Badge>
+                {hasPflegegrad && (
+                  <StatusBadge type="pflegegrad" value={customer.pflegegrad!} />
                 )}
 
                 {address && (
@@ -219,13 +203,7 @@ export default function CustomerDetailPage() {
                     <Heart className={`${iconSize.sm} mt-0.5 flex-shrink-0 text-rose-400`} />
                     <div className="flex flex-wrap gap-1">
                       {customer.needs.map((need, index) => (
-                        <Badge 
-                          key={index} 
-                          variant="outline" 
-                          className="text-xs bg-rose-50 text-rose-700 border-rose-200"
-                        >
-                          {need}
-                        </Badge>
+                        <StatusBadge key={index} type="need" value={need} size="sm" />
                       ))}
                     </div>
                   </div>

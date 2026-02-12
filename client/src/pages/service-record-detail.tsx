@@ -4,9 +4,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { SignaturePad, SignatureDisplay } from "@/components/ui/signature-pad";
 import { ErrorState } from "@/components/patterns/error-state";
+import { StatusBadge } from "@/components/patterns/status-badge";
 import { 
   ArrowLeft, Loader2, Calendar, Clock, MapPin, User,
   FileText, Check, AlertTriangle, Car
@@ -23,18 +23,6 @@ const MONTH_NAMES = [
   "Juli", "August", "September", "Oktober", "November", "Dezember"
 ];
 
-function getStatusBadge(status: string) {
-  switch (status) {
-    case "pending":
-      return <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">Warte auf Mitarbeiter-Unterschrift</Badge>;
-    case "employee_signed":
-      return <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Warte auf Kundenunterschrift</Badge>;
-    case "completed":
-      return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">Abgeschlossen</Badge>;
-    default:
-      return <Badge variant="outline">{status}</Badge>;
-  }
-}
 
 export default function ServiceRecordDetailPage() {
   const { toast } = useToast();
@@ -190,7 +178,7 @@ export default function ServiceRecordDetailPage() {
         </div>
 
         <div className="flex items-center gap-2 mb-6">
-          {getStatusBadge(record.status)}
+          <StatusBadge type="record" value={record.status} />
         </div>
 
         <Card className="mb-6">

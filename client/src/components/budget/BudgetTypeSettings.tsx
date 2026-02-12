@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/patterns/status-badge";
 import { ArrowUp, ArrowDown, Save, Plus, History, ChevronDown, ChevronUp } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { BUDGET_TYPE_LABELS, type BudgetType, BUDGET_45B_MAX_MONTHLY_CENTS, BUDGET_39_42A_MAX_YEARLY_CENTS, BUDGET_45A_MAX_BY_PFLEGEGRAD } from "@shared/domain/budgets";
@@ -437,9 +437,7 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
           {allocations.slice(1).map((alloc) => (
             <div key={alloc.id} className="flex items-center justify-between py-1.5 px-2 rounded bg-gray-50 text-xs">
               <div className="flex items-center gap-2">
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                  ab {formatMonthYear(alloc.validFrom)}
-                </Badge>
+                <StatusBadge type="info" value={`ab ${formatMonthYear(alloc.validFrom)}`} size="sm" />
                 {alloc.notes && <span className="text-gray-400">{alloc.notes}</span>}
               </div>
               <span className="font-medium text-gray-700">{formatCurrency(alloc.amountCents)}</span>

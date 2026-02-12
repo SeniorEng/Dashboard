@@ -14,7 +14,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
 import { useEmployees } from "@/features/customers";
 import { iconSize } from "@/design-system";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/patterns/status-badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,9 +38,7 @@ import {
   FileText,
   Users,
   Settings,
-  Lock,
   Unlock,
-  CheckCircle2,
 } from "lucide-react";
 import type { TimeEntryType, TimeEntryWithUser, VacationSummary } from "@/lib/api/types";
 
@@ -352,10 +350,7 @@ export default function AdminTimeEntries() {
                           <Users className={iconSize.md} />
                           {employeeName}
                           {employee && closedUserIds.has(employee.id) && (
-                            <Badge variant="secondary" className="bg-green-100 text-green-700 text-xs gap-1">
-                              <Lock className="h-3 w-3" />
-                              Abgeschlossen
-                            </Badge>
+                            <StatusBadge type="month" value="closed" size="sm" />
                           )}
                         </CardTitle>
                         <div className="flex items-center gap-1">
@@ -459,10 +454,7 @@ export default function AdminTimeEntries() {
                           <CardTitle className="text-lg flex items-center gap-2">
                             <Users className={iconSize.md} />
                             {emp.displayName}
-                            <Badge variant="secondary" className="bg-green-100 text-green-700 text-xs gap-1">
-                              <Lock className="h-3 w-3" />
-                              Abgeschlossen
-                            </Badge>
+                            <StatusBadge type="month" value="closed" size="sm" />
                           </CardTitle>
                           <Button
                             variant="ghost"

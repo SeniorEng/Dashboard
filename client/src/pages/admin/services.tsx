@@ -21,7 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/patterns/status-badge";
 import { api, unwrapResult } from "@/lib/api";
 import { ArrowLeft, Plus, Pencil, Loader2, ClipboardList } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -298,21 +298,15 @@ export default function AdminServices() {
                         <div className="flex items-center gap-2 mb-1">
                           <span className="font-medium text-gray-900 truncate" data-testid={`text-service-name-${service.id}`}>{service.name}</span>
                           {service.isSystem && (
-                            <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-system-${service.id}`}>System</span>
+                            <StatusBadge type="system" value="system" size="sm" data-testid={`badge-system-${service.id}`} />
                           )}
                           {service.isDefault && (
-                            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-default-${service.id}`}>Standard</span>
+                            <StatusBadge type="system" value="default" size="sm" data-testid={`badge-default-${service.id}`} />
                           )}
-                          {service.isBillable ? (
-                            <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-billable-${service.id}`}>Abrechenbar</span>
-                          ) : (
-                            <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-not-billable-${service.id}`}>Nicht abrechenbar</span>
+                          <StatusBadge type="billable" value={service.isBillable ? "billable" : "not-billable"} size="sm" data-testid={`badge-billable-${service.id}`} />
+                          {!service.isSystem && (
+                            <StatusBadge type="activity" value={service.isActive ? "active" : "inactive"} size="sm" data-testid={`badge-active-${service.id}`} />
                           )}
-                          {!service.isSystem && (service.isActive ? (
-                            <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-active-${service.id}`}>Aktiv</span>
-                          ) : (
-                            <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full shrink-0" data-testid={`badge-inactive-${service.id}`}>Inaktiv</span>
-                          ))}
                         </div>
                         <div className="text-sm text-gray-500 space-y-0.5">
                           <div className="flex items-center gap-2">

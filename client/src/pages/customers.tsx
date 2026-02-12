@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/patterns/status-badge";
 import { 
   MapPin, Phone, User, Search, 
   Heart, Loader2, Users, Cake, Gift
@@ -15,7 +16,6 @@ import { EmptyState } from "@/components/patterns/empty-state";
 import { ErrorState } from "@/components/patterns/error-state";
 import { 
   iconSize, 
-  getPflegegradColors,
   componentStyles
 } from "@/design-system";
 import { formatAddress } from "@shared/utils/format";
@@ -56,10 +56,6 @@ function groupBirthdays(birthdays: BirthdayEntry[]): Record<string, BirthdayEntr
   return groups;
 }
 
-function getPflegegradLabel(pflegegrad: number | null): string | null {
-  if (!pflegegrad) return null;
-  return `Pflegegrad ${pflegegrad}`;
-}
 
 export default function CustomersPage() {
   const [activeTab, setActiveTab] = useState<CustomerTab>("kunden");
@@ -278,12 +274,7 @@ function BirthdayCard({ birthday }: { birthday: BirthdayEntry }) {
               </h3>
             </div>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Badge 
-                variant="outline" 
-                className={`text-xs ${birthday.type === "employee" ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-primary/10 text-primary border-primary/20"}`}
-              >
-                {birthday.type === "employee" ? "Mitarbeiter" : "Kunde"}
-              </Badge>
+              <StatusBadge type="info" value={birthday.type === "employee" ? "Mitarbeiter" : "Kunde"} size="sm" />
               <span className="text-muted-foreground/50">·</span>
               <span data-testid={`text-birthday-date-${birthday.type}-${birthday.id}`}>
                 {formatDateForDisplay(birthday.geburtsdatum, { day: "numeric", month: "long" })}
@@ -319,8 +310,6 @@ function BirthdayCard({ birthday }: { birthday: BirthdayEntry }) {
 const CustomerCard = memo(function CustomerCard({ customer }: { customer: CustomerWithAccess }) {
   const address = formatAddress(customer);
   const phone = customer.telefon ? formatPhoneForDisplay(customer.telefon) : null;
-  const pflegegradLabel = getPflegegradLabel(customer.pflegegrad);
-  const pflegegradColors = customer.pflegegrad ? getPflegegradColors(customer.pflegegrad) : null;
   const isLegacy = customer.isCurrentlyAssigned === false;
 
   return (
@@ -338,22 +327,10 @@ const CustomerCard = memo(function CustomerCard({ customer }: { customer: Custom
               </h3>
               <div className="flex items-center gap-1.5 shrink-0">
                 {isLegacy && (
-                  <Badge 
-                    variant="outline" 
-                    className="text-xs bg-amber-50 text-amber-700 border-amber-200"
-                    data-testid={`badge-customer-legacy-${customer.id}`}
-                  >
-                    Frühere Zuordnung
-                  </Badge>
+                  <StatusBadge type="warning" value="Frühere Zuordnung" size="sm" data-testid={`badge-customer-legacy-${customer.id}`} />
                 )}
-                {pflegegradLabel && pflegegradColors && (
-                  <Badge 
-                    variant="secondary" 
-                    className={`text-xs ${pflegegradColors.bg} ${pflegegradColors.text} ${pflegegradColors.border}`}
-                    data-testid={`badge-customer-pflegegrad-${customer.id}`}
-                  >
-                    {pflegegradLabel}
-                  </Badge>
+                {customer.pflegegrad && customer.pflegegrad > 0 && (
+                  <StatusBadge type="pflegegrad" value={customer.pflegegrad} size="sm" data-testid={`badge-customer-pflegegrad-${customer.id}`} />
                 )}
               </div>
             </div>
@@ -393,14 +370,7 @@ const CustomerCard = memo(function CustomerCard({ customer }: { customer: Custom
                   <Heart className={`${iconSize.sm} mt-0.5 flex-shrink-0 text-rose-400`} />
                   <div className="flex flex-wrap gap-1">
                     {customer.needs.map((need, index) => (
-                      <Badge 
-                        key={index} 
-                        variant="outline" 
-                        className="text-xs bg-rose-50 text-rose-700 border-rose-200"
-                        data-testid={`badge-customer-need-${customer.id}-${index}`}
-                      >
-                        {need}
-                      </Badge>
+                      <StatusBadge key={index} type="need" value={need} size="sm" data-testid={`badge-customer-need-${customer.id}-${index}`} />
                     ))}
                   </div>
                 </div>
