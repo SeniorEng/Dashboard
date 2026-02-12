@@ -77,6 +77,8 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
       plz: result.data.plz,
       stadt: result.data.stadt,
       geburtsdatum: result.data.geburtsdatum,
+      eintrittsdatum: result.data.eintrittsdatum,
+      vacationDaysPerYear: result.data.vacationDaysPerYear,
       isAdmin: result.data.isAdmin,
       roles: result.data.roles,
     });
@@ -122,6 +124,8 @@ const updateUserSchema = z.object({
   plz: z.string().optional(),
   stadt: z.string().optional(),
   geburtsdatum: z.string().optional(),
+  eintrittsdatum: z.string().optional(),
+  vacationDaysPerYear: z.number().int().min(0).max(365).optional(),
   isActive: z.boolean().optional(),
   isAdmin: z.boolean().optional(),
   roles: z.array(z.enum(EMPLOYEE_ROLES)).optional(),

@@ -120,6 +120,7 @@ interface SafeUser {
   createdAt: Date;
   updatedAt: Date;
   roles: string[];
+  eintrittsdatum?: string | null;
   vacationDaysPerYear?: number | null;
 }
 

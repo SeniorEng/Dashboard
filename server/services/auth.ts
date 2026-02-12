@@ -54,6 +54,8 @@ export interface CreateUserData {
   plz?: string;
   stadt?: string;
   geburtsdatum?: string;
+  eintrittsdatum?: string;
+  vacationDaysPerYear?: number;
   isAdmin?: boolean;
   roles?: EmployeeRole[];
 }
@@ -86,6 +88,8 @@ export class AuthService {
         plz: data.plz || null,
         stadt: data.stadt || null,
         geburtsdatum: data.geburtsdatum || null,
+        eintrittsdatum: data.eintrittsdatum || null,
+        vacationDaysPerYear: data.vacationDaysPerYear ?? 30,
         isAdmin: data.isAdmin ?? false,
         isActive: true,
       })
@@ -286,6 +290,8 @@ export class AuthService {
       plz?: string;
       stadt?: string;
       geburtsdatum?: string;
+      eintrittsdatum?: string;
+      vacationDaysPerYear?: number;
       isActive?: boolean;
       isAdmin?: boolean;
     }
@@ -311,6 +317,8 @@ export class AuthService {
     if (updates.plz !== undefined) dbUpdates.plz = updates.plz || null;
     if (updates.stadt !== undefined) dbUpdates.stadt = updates.stadt || null;
     if (updates.geburtsdatum !== undefined) dbUpdates.geburtsdatum = updates.geburtsdatum || null;
+    if (updates.eintrittsdatum !== undefined) dbUpdates.eintrittsdatum = updates.eintrittsdatum || null;
+    if (updates.vacationDaysPerYear !== undefined) dbUpdates.vacationDaysPerYear = updates.vacationDaysPerYear;
     if (updates.isActive !== undefined) dbUpdates.isActive = updates.isActive;
     if (updates.isAdmin !== undefined) dbUpdates.isAdmin = updates.isAdmin;
 

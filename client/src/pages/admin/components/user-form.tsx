@@ -51,6 +51,10 @@ export function UserForm({
   const [plz, setPlz] = useState(user?.plz ?? "");
   const [stadt, setStadt] = useState(user?.stadt ?? "");
   const [geburtsdatum, setGeburtsdatum] = useState(user?.geburtsdatum ?? "");
+  const [eintrittsdatum, setEintrittsdatum] = useState(user?.eintrittsdatum ?? "");
+  const [vacationDaysPerYear, setVacationDaysPerYear] = useState(
+    user?.vacationDaysPerYear?.toString() ?? "30"
+  );
   const [isAdmin, setIsAdmin] = useState(user?.isAdmin ?? false);
   const [roles, setRoles] = useState<string[]>(user?.roles ?? []);
   
@@ -105,6 +109,8 @@ export function UserForm({
       plz: plz || undefined,
       stadt: stadt || undefined,
       geburtsdatum: geburtsdatum || undefined,
+      eintrittsdatum: eintrittsdatum || undefined,
+      vacationDaysPerYear: vacationDaysPerYear ? parseInt(vacationDaysPerYear) : undefined,
       isAdmin,
       roles,
     };
@@ -193,6 +199,31 @@ export function UserForm({
               {telefonError && (
                 <p className="text-xs text-red-500">{telefonError}</p>
               )}
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Eintrittsdatum</Label>
+              <DatePicker
+                value={eintrittsdatum || null}
+                onChange={(val) => setEintrittsdatum(val || "")}
+                data-testid="input-user-eintrittsdatum"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="vacationDaysPerYear">Jahresurlaub (Tage)</Label>
+              <Input
+                id="vacationDaysPerYear"
+                type="number"
+                min="0"
+                max="365"
+                value={vacationDaysPerYear}
+                onChange={(e) => setVacationDaysPerYear(e.target.value)}
+                placeholder="30"
+                data-testid="input-user-vacation-days"
+              />
+              <p className="text-xs text-gray-500">Urlaubsanspruch auf 12 Monate</p>
             </div>
           </div>
         </div>

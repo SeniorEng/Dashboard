@@ -5,6 +5,7 @@ import {
   employeeMonthClosings,
   appointments,
   customers,
+  users,
   type EmployeeTimeEntry,
   type InsertTimeEntry,
   type UpdateTimeEntry,
@@ -12,6 +13,7 @@ import {
   type InsertVacationAllowance,
   type Appointment,
 } from "@shared/schema";
+import { getVacationEntitlement, calculateCarryOverDays } from "@shared/domain/vacation";
 import { appointmentServices as appointmentServicesTable } from "@shared/schema/appointments";
 import { services as servicesTable } from "@shared/schema/services";
 import { todayISO, formatDateISO } from "@shared/utils/datetime";
@@ -271,8 +273,13 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     const endDate = `${year}-12-31`;
     const today = todayISO();
 
-    const [allowanceResult, absenceEntries] = await Promise.all([
+    const [userResult, allowanceResult, prevAllowanceResult, absenceEntries, prevYearAbsence] = await Promise.all([
+      db.select({
+        eintrittsdatum: users.eintrittsdatum,
+        vacationDaysPerYear: users.vacationDaysPerYear,
+      }).from(users).where(eq(users.id, userId)).then(r => r[0]),
       this.getVacationAllowance(userId, year),
+      this.getVacationAllowance(userId, year - 1),
       db.select({
         entryType: employeeTimeEntries.entryType,
         entryDate: employeeTimeEntries.entryDate,
@@ -286,17 +293,41 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
             lte(employeeTimeEntries.entryDate, endDate)
           )
         ),
+      db.select({
+        entryType: employeeTimeEntries.entryType,
+        entryDate: employeeTimeEntries.entryDate,
+      })
+        .from(employeeTimeEntries)
+        .where(
+          and(
+            eq(employeeTimeEntries.userId, userId),
+            eq(employeeTimeEntries.entryType, 'urlaub'),
+            gte(employeeTimeEntries.entryDate, `${year - 1}-01-01`),
+            lte(employeeTimeEntries.entryDate, `${year - 1}-12-31`)
+          )
+        ),
     ]);
 
-    let allowance = allowanceResult;
-    if (!allowance) {
-      allowance = await this.setVacationAllowance({
-        userId,
-        year,
-        totalDays: 30,
-        carryOverDays: 0,
-      });
+    const vacationDaysPerYear = userResult?.vacationDaysPerYear ?? 30;
+    const eintrittsdatum = userResult?.eintrittsdatum ?? null;
+
+    const entitlement = allowanceResult
+      ? allowanceResult.totalDays
+      : getVacationEntitlement(vacationDaysPerYear, eintrittsdatum, year);
+
+    let prevYearUsed = 0;
+    for (const entry of prevYearAbsence) {
+      if (entry.entryType === 'urlaub') prevYearUsed++;
     }
+
+    const prevEntitlement = prevAllowanceResult
+      ? prevAllowanceResult.totalDays + prevAllowanceResult.carryOverDays
+      : getVacationEntitlement(vacationDaysPerYear, eintrittsdatum, year - 1);
+
+    const unusedFromPrevYear = Math.max(0, prevEntitlement - prevYearUsed);
+    const carryOverDays = allowanceResult
+      ? allowanceResult.carryOverDays
+      : calculateCarryOverDays(unusedFromPrevYear, year, today);
 
     let usedDays = 0;
     let plannedDays = 0;
@@ -314,13 +345,13 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       }
     }
 
-    const totalAvailable = allowance.totalDays + allowance.carryOverDays;
+    const totalAvailable = entitlement + carryOverDays;
     const remainingDays = totalAvailable - usedDays - plannedDays;
 
     return {
       year,
-      totalDays: allowance.totalDays,
-      carryOverDays: allowance.carryOverDays,
+      totalDays: entitlement,
+      carryOverDays,
       usedDays,
       plannedDays,
       remainingDays,

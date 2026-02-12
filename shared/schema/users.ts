@@ -19,6 +19,8 @@ export const users = pgTable("users", {
   plz: text("plz"),
   stadt: text("stadt"),
   geburtsdatum: date("geburtsdatum"),
+  eintrittsdatum: date("eintrittsdatum"),
+  vacationDaysPerYear: integer("vacation_days_per_year").notNull().default(30),
   isActive: boolean("is_active").notNull().default(true),
   deactivatedAt: timestamp("deactivated_at"),
   isAdmin: boolean("is_admin").notNull().default(false),
@@ -103,6 +105,8 @@ export const insertUserSchema = z.object({
   plz: z.string().optional(),
   stadt: z.string().optional(),
   geburtsdatum: z.string().optional(),
+  eintrittsdatum: z.string().optional(),
+  vacationDaysPerYear: z.number().int().min(0).max(365).optional().default(30),
   isAdmin: z.boolean().optional().default(false),
   roles: z.array(z.enum(EMPLOYEE_ROLES)).optional().default([]),
 });

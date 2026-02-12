@@ -10,6 +10,8 @@ export interface UserData {
   plz: string | null;
   stadt: string | null;
   geburtsdatum: string | null;
+  eintrittsdatum: string | null;
+  vacationDaysPerYear: number;
   isActive: boolean;
   isAdmin: boolean;
   roles: string[];
@@ -27,6 +29,8 @@ export interface UserFormData {
   plz?: string;
   stadt?: string;
   geburtsdatum?: string;
+  eintrittsdatum?: string;
+  vacationDaysPerYear?: number;
   isAdmin: boolean;
   roles: string[];
   compensation?: {
