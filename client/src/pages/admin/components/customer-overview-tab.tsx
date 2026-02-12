@@ -221,7 +221,7 @@ export function CustomerOverviewTab({ customer }: CustomerOverviewTabProps) {
 
       {customer.currentContract && (
         <SectionCard
-          title="Vertrag & Leistungen"
+          title="Vertrag"
           icon={<FileText className={iconSize.sm} />}
         >
           <div className="space-y-3" data-testid="text-contract">
@@ -251,15 +251,18 @@ export function CustomerOverviewTab({ customer }: CustomerOverviewTabProps) {
                 </Badge>
               </div>
             </div>
-            {customer.currentContract.vereinbarteLeistungen && (
-              <div className="border-t pt-3">
-                <p className="text-sm text-gray-500 mb-1">Vereinbarte Leistungen</p>
-                <p className="text-gray-700 whitespace-pre-wrap text-sm" data-testid="text-vereinbarte-leistungen">
-                  {customer.currentContract.vereinbarteLeistungen}
-                </p>
-              </div>
-            )}
           </div>
+        </SectionCard>
+      )}
+
+      {customer.currentContract?.vereinbarteLeistungen && (
+        <SectionCard
+          title="Vereinbarte Leistungen"
+          icon={<ClipboardList className={iconSize.sm} />}
+        >
+          <p className="text-gray-700 whitespace-pre-wrap" data-testid="text-vereinbarte-leistungen">
+            {customer.currentContract.vereinbarteLeistungen}
+          </p>
         </SectionCard>
       )}
 
