@@ -12,13 +12,20 @@ router.use(requireAuth);
 router.get("/", async (req, res) => {
   try {
     const user = req.user!;
+    const statusFilter = req.query.status as string | undefined;
     
     if (user.isAdmin) {
-      const customers = await storage.getCustomers();
-      return res.json(customers);
+      let allCustomers = await storage.getCustomers();
+      if (statusFilter) {
+        allCustomers = allCustomers.filter(c => c.status === statusFilter);
+      }
+      return res.json(allCustomers);
     }
     
-    const customersWithAccess = await storage.getCustomersForEmployee(user.id);
+    let customersWithAccess = await storage.getCustomersForEmployee(user.id);
+    if (statusFilter) {
+      customersWithAccess = customersWithAccess.filter(c => c.status === statusFilter);
+    }
     res.json(customersWithAccess);
   } catch (error) {
     console.error("Failed to fetch customers:", error);

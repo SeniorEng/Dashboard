@@ -5,11 +5,13 @@ export type CustomerWithAccess = Customer & {
   isCurrentlyAssigned?: boolean;
 };
 
-export function useCustomerList() {
+export function useCustomerList(status?: string) {
+  const queryStatus = status ?? "aktiv";
   return useQuery<CustomerWithAccess[]>({
-    queryKey: ["customers"],
+    queryKey: ["customers", { status: queryStatus }],
     queryFn: async () => {
-      const res = await fetch("/api/customers");
+      const url = queryStatus ? `/api/customers?status=${queryStatus}` : "/api/customers";
+      const res = await fetch(url);
       if (!res.ok) throw new Error("Failed to fetch customers");
       return res.json();
     },

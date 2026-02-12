@@ -41,6 +41,7 @@ export default function AdminCustomers() {
   const [, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("aktiv");
   const [pflegegradFilter, setPflegegradFilter] = useState<string>("");
   const [employeeFilter, setEmployeeFilter] = useState<string>("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -65,11 +66,12 @@ export default function AdminCustomers() {
 
   const queryParams = useMemo(() => ({
     search: debouncedSearch || undefined,
+    status: statusFilter || undefined,
     pflegegrad: pflegegradFilter || undefined,
     primaryEmployeeId: employeeFilter || undefined,
     page: currentPage,
     limit: 15,
-  }), [debouncedSearch, pflegegradFilter, employeeFilter, currentPage]);
+  }), [debouncedSearch, statusFilter, pflegegradFilter, employeeFilter, currentPage]);
 
   const { data, isLoading, error, refetch } = useCustomers(queryParams);
 
@@ -82,16 +84,19 @@ export default function AdminCustomers() {
     setCurrentPage(1);
   }, []);
 
-  const handleFilterChange = useCallback((type: "pflegegrad" | "employee", value: string) => {
+  const handleFilterChange = useCallback((type: "pflegegrad" | "employee" | "status", value: string) => {
     if (type === "pflegegrad") {
       setPflegegradFilter(value === "all" ? "" : value);
-    } else {
+    } else if (type === "employee") {
       setEmployeeFilter(value === "all" ? "" : value);
+    } else if (type === "status") {
+      setStatusFilter(value === "all" ? "" : value);
     }
     setCurrentPage(1);
   }, []);
 
   const clearFilters = useCallback(() => {
+    setStatusFilter("aktiv");
     setPflegegradFilter("");
     setEmployeeFilter("");
     setSearchQuery("");
@@ -101,10 +106,11 @@ export default function AdminCustomers() {
 
   const activeFilterCount = useMemo(() => {
     let count = 0;
+    if (statusFilter && statusFilter !== "aktiv") count++;
     if (pflegegradFilter) count++;
     if (employeeFilter) count++;
     return count;
-  }, [pflegegradFilter, employeeFilter]);
+  }, [statusFilter, pflegegradFilter, employeeFilter]);
 
   const customers = data?.data || [];
   const totalPages = data?.totalPages || 1;
@@ -127,6 +133,28 @@ export default function AdminCustomers() {
               </Link>
             }
           />
+
+          <div className="flex gap-1 mb-4 bg-white rounded-lg p-1 border" data-testid="status-filter">
+            {[
+              { value: "aktiv", label: "Aktiv" },
+              { value: "erstberatung", label: "Erstberatung" },
+              { value: "inaktiv", label: "Inaktiv" },
+              { value: "all", label: "Alle" },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => handleFilterChange("status", opt.value)}
+                className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+                  (statusFilter || "all") === opt.value
+                    ? "bg-teal-600 text-white"
+                    : "text-gray-600 hover:bg-gray-100"
+                }`}
+                data-testid={`status-filter-${opt.value}`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
 
           <div className="flex gap-3 mb-6">
             <div className="flex-1 relative">
@@ -272,6 +300,12 @@ export default function AdminCustomers() {
                         )}
                     </div>
                     <div className="flex flex-col items-end gap-2">
+                      {customer.status === "erstberatung" && (
+                        <StatusBadge type="status" value="Erstberatung" data-testid={`badge-status-${customer.id}`} />
+                      )}
+                      {customer.status === "inaktiv" && (
+                        <StatusBadge type="warning" value="Inaktiv" data-testid={`badge-status-${customer.id}`} />
+                      )}
                       {customer.pflegegrad !== null && customer.pflegegrad > 0 && (
                         <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
                       )}

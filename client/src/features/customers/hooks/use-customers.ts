@@ -34,6 +34,7 @@ function buildQueryString(params: CustomerListParams): string {
   if (params.search) searchParams.set("search", params.search);
   if (params.pflegegrad) searchParams.set("pflegegrad", params.pflegegrad);
   if (params.primaryEmployeeId) searchParams.set("primaryEmployeeId", params.primaryEmployeeId);
+  if (params.status) searchParams.set("status", params.status);
   const qs = searchParams.toString();
   return qs ? `?${qs}` : "";
 }

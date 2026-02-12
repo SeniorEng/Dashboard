@@ -90,6 +90,7 @@ export interface CustomerListItem {
   address: string | null;
   stadt: string | null;
   pflegegrad: number | null;
+  status: string;
   primaryEmployee: { displayName: string } | null;
   hasActiveContract: boolean;
   createdAt: string;
@@ -98,6 +99,7 @@ export interface CustomerListItem {
 export interface CustomerListParams extends PaginationParams {
   pflegegrad?: string;
   primaryEmployeeId?: string;
+  status?: string;
 }
 
 export interface CustomerPricingInfo {

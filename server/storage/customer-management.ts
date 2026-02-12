@@ -44,6 +44,7 @@ export interface CustomerListFilters {
   pflegegrad?: number;
   primaryEmployeeId?: number;
   hasActiveContract?: boolean;
+  status?: string;
 }
 
 export interface PaginationOptions {
@@ -68,6 +69,7 @@ export interface CustomerListItem {
   pflegegrad: number | null;
   address: string;
   stadt: string | null;
+  status: string;
   primaryEmployee: { id: number; displayName: string } | null;
   hasActiveContract: boolean;
   createdAt: Date;
@@ -137,6 +139,10 @@ export class CustomerManagementStorage {
       baseConditions.push(eq(customers.primaryEmployeeId, filters.primaryEmployeeId));
     }
 
+    if (filters?.status) {
+      baseConditions.push(eq(customers.status, filters.status));
+    }
+
     const activeContractSubquery = db
       .select({ 
         customerId: customerContracts.customerId,
@@ -175,6 +181,7 @@ export class CustomerManagementStorage {
         pflegegrad: customers.pflegegrad,
         address: customers.address,
         stadt: customers.stadt,
+        status: customers.status,
         createdAt: customers.createdAt,
         primaryEmployeeId: customers.primaryEmployeeId,
         primaryEmployeeName: users.displayName,
@@ -198,6 +205,7 @@ export class CustomerManagementStorage {
       pflegegrad: r.pflegegrad,
       address: r.address,
       stadt: r.stadt,
+      status: r.status,
       primaryEmployee: r.primaryEmployeeId && r.primaryEmployeeName 
         ? { id: r.primaryEmployeeId, displayName: r.primaryEmployeeName }
         : null,
@@ -379,6 +387,7 @@ export class CustomerManagementStorage {
     nr: string;
     plz: string;
     stadt: string;
+    status: string;
     primaryEmployeeId: number | null;
     backupEmployeeId: number | null;
     vorerkrankungen: string | null;

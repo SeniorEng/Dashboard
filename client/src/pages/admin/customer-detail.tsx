@@ -29,6 +29,8 @@ import {
   Settings,
   FileCheck2,
   CreditCard,
+  UserCheck,
+  UserX,
 } from "lucide-react";
 import { BudgetLedgerSection } from "@/components/budget/BudgetLedgerSection";
 import { BudgetTypeSettings } from "@/components/budget/BudgetTypeSettings";
@@ -189,6 +191,22 @@ export default function AdminCustomerDetail() {
   const queryClient = useQueryClient();
   const [isToggling, setIsToggling] = useState(false);
 
+  const updateStatus = useMutation({
+    mutationFn: async (status: string) => {
+      const result = await api.patch(`/admin/customers/${customerId}`, { status });
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: customerKeys.detail(customerId) });
+      queryClient.invalidateQueries({ queryKey: customerKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      toast({ title: "Kundenstatus aktualisiert" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Fehler", description: err.message, variant: "destructive" });
+    },
+  });
+
   const togglePrivatePayment = useMutation({
     mutationFn: async (accepts: boolean) => {
       setIsToggling(true);
@@ -262,6 +280,12 @@ export default function AdminCustomerDetail() {
             backHref="/admin/customers"
             badge={
               <>
+                {customer.status === "erstberatung" && (
+                  <StatusBadge type="status" value="Erstberatung" />
+                )}
+                {customer.status === "inaktiv" && (
+                  <StatusBadge type="warning" value="Inaktiv" />
+                )}
                 {customer.pflegegrad !== null && customer.pflegegrad > 0 && (
                   <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
                 )}
@@ -276,6 +300,58 @@ export default function AdminCustomerDetail() {
               </Link>
             }
           />
+
+          {customer.status === "erstberatung" && (
+            <SectionCard className="mb-4 border-teal-200 bg-teal-50">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="font-medium text-teal-900">Erstberatungskunde</p>
+                  <p className="text-sm text-teal-700 mt-0.5">
+                    Diesen Kunden aktivieren, um reguläre Kundentermine erstellen zu können.
+                  </p>
+                </div>
+                <Button
+                  onClick={() => updateStatus.mutate("aktiv")}
+                  disabled={updateStatus.isPending}
+                  className={componentStyles.btnPrimary}
+                  data-testid="button-activate-customer"
+                >
+                  {updateStatus.isPending ? (
+                    <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                  ) : (
+                    <UserCheck className={`${iconSize.sm} mr-2`} />
+                  )}
+                  Kunde aktivieren
+                </Button>
+              </div>
+            </SectionCard>
+          )}
+
+          {customer.status === "inaktiv" && (
+            <SectionCard className="mb-4 border-amber-200 bg-amber-50">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="font-medium text-amber-900">Inaktiver Kunde</p>
+                  <p className="text-sm text-amber-700 mt-0.5">
+                    Dieser Kunde ist deaktiviert und kann keine neuen Termine erhalten.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => updateStatus.mutate("aktiv")}
+                  disabled={updateStatus.isPending}
+                  data-testid="button-reactivate-customer"
+                >
+                  {updateStatus.isPending ? (
+                    <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                  ) : (
+                    <UserCheck className={`${iconSize.sm} mr-2`} />
+                  )}
+                  Reaktivieren
+                </Button>
+              </div>
+            </SectionCard>
+          )}
 
           <ResponsiveTabs
             tabs={[

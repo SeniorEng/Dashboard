@@ -335,6 +335,7 @@ export class AppointmentService {
       vorname: input.customer.vorname,
       nachname: input.customer.nachname,
       telefon: input.customer.telefon,
+      status: "erstberatung" as const,
       address: fullAddress,
       strasse: input.customer.strasse,
       nr: input.customer.nr,

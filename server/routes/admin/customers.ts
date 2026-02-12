@@ -94,12 +94,13 @@ router.patch("/customers/:id/assign", asyncHandler("Zuordnung konnte nicht aktua
 // ============================================
 
 router.get("/customers", asyncHandler("Kunden konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const { search, pflegegrad, primaryEmployeeId, page, limit } = req.query;
+  const { search, pflegegrad, primaryEmployeeId, status, page, limit } = req.query;
   
   const filters = {
     search: search as string | undefined,
     pflegegrad: pflegegrad ? parseInt(pflegegrad as string) : undefined,
     primaryEmployeeId: primaryEmployeeId ? parseInt(primaryEmployeeId as string) : undefined,
+    status: status as string | undefined,
   };
   
   const pageNum = page ? parseInt(page as string) : 1;
@@ -343,6 +344,8 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
   res.status(201).json({ ...customer, warnings: warnings.length > 0 ? warnings : undefined });
 }));
 
+const VALID_CUSTOMER_STATUSES = ["erstberatung", "aktiv", "inaktiv"] as const;
+
 const updateCustomerSchema = z.object({
   vorname: z.string().min(1).optional(),
   nachname: z.string().min(1).optional(),
@@ -354,6 +357,7 @@ const updateCustomerSchema = z.object({
   nr: z.string().min(1).optional(),
   plz: z.string().regex(/^\d{5}$/).optional(),
   stadt: z.string().min(1).optional(),
+  status: z.enum(VALID_CUSTOMER_STATUSES).optional(),
   primaryEmployeeId: z.number().nullable().optional(),
   backupEmployeeId: z.number().nullable().optional(),
   vorerkrankungen: z.string().max(2000).nullable().optional(),

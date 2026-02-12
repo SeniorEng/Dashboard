@@ -35,6 +35,8 @@ export const customers = pgTable("customers", {
   // Pet info (for employee-customer matching)
   haustierVorhanden: boolean("haustier_vorhanden").notNull().default(false),
   haustierDetails: text("haustier_details"),
+  // Customer status: erstberatung (initial consultation), aktiv (active customer), inaktiv (deactivated)
+  status: text("status").notNull().default("aktiv"),
   // Billing
   acceptsPrivatePayment: boolean("accepts_private_payment").notNull().default(false),
   // Legacy fields
