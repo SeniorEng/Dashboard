@@ -15,7 +15,6 @@ import { Switch } from "@/components/ui/switch";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SectionCard } from "@/components/patterns/section-card";
-import { EmptyState } from "@/components/patterns/empty-state";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { ResponsiveTabs, TabsContent } from "@/components/patterns/responsive-tabs";
 import { useCustomer, customerKeys } from "@/features/customers";
@@ -24,7 +23,6 @@ import { api, unwrapResult } from "@/lib/api";
 import { iconSize, componentStyles } from "@/design-system";
 import {
   Loader2,
-  Users,
   Wallet,
   Edit,
   Euro,
@@ -39,6 +37,7 @@ import { CustomerOverviewTab } from "./components/customer-overview-tab";
 import { CustomerInsuranceTab } from "./components/customer-insurance-tab";
 import { PricingSection } from "./components/customer-pricing-section";
 import { CustomerDocumentsSection } from "./components/customer-documents-section";
+import { CustomerContactsTab } from "./components/customer-contacts-tab";
 
 function formatCents(cents: number): string {
   return (cents / 100).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
@@ -172,57 +171,10 @@ export default function AdminCustomerDetail() {
             </TabsContent>
 
             <TabsContent value="contacts" className="space-y-4">
-              <SectionCard
-                title="Ansprechpartner & Notfallkontakte"
-                icon={<Users className={iconSize.sm} />}
-                actions={
-                  <Button size="sm" variant="outline" data-testid="button-add-contact">
-                    Hinzufügen
-                  </Button>
-                }
-              >
-                {customer.contacts && customer.contacts.length > 0 ? (
-                  <div className="space-y-3">
-                    {customer.contacts.map((contact) => (
-                      <div
-                        key={contact.id}
-                        className="flex items-center justify-between p-3 rounded-lg bg-gray-50"
-                      >
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <p className="font-medium">{contact.vorname} {contact.nachname}</p>
-                            {contact.isPrimary && (
-                              <Badge variant="secondary" className="text-xs">
-                                Hauptkontakt
-                              </Badge>
-                            )}
-                          </div>
-                          <p className="text-sm text-gray-500">{contact.contactType}</p>
-                          <p className="text-sm text-gray-600">{contact.telefon}</p>
-                          {contact.email && (
-                            <p className="text-sm text-gray-600">{contact.email}</p>
-                          )}
-                        </div>
-                        <Button variant="ghost" size="sm">
-                          <Edit className={iconSize.sm} />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <EmptyState
-                    icon={<Users className={iconSize.xl} />}
-                    title="Keine Kontakte"
-                    description="Noch keine Kontakte hinterlegt"
-                    action={
-                      <Button size="sm" className={componentStyles.btnPrimary}>
-                        Kontakt hinzufügen
-                      </Button>
-                    }
-                    className="py-6"
-                  />
-                )}
-              </SectionCard>
+              <CustomerContactsTab
+                customerId={customerId}
+                initialContacts={customer.contacts}
+              />
             </TabsContent>
 
             <TabsContent value="budgets" className="space-y-4">
