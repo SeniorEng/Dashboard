@@ -135,6 +135,7 @@ router.get("/customers/:id/details", asyncHandler("Kunde konnte nicht geladen we
     currentInsurance: customer.insurance ? {
       id: customer.insurance.id,
       providerName: customer.insurance.provider?.name || "Unbekannt",
+      ikNummer: customer.insurance.provider?.ikNummer || undefined,
       versichertennummer: customer.insurance.versichertennummer,
       validFrom: customer.insurance.validFrom,
     } : null,

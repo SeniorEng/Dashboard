@@ -94,7 +94,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
   const [selectedDocTypeId, setSelectedDocTypeId] = useState("");
   const [notes, setNotes] = useState("");
   const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
 
   const { data: documents, isLoading: docsLoading } = useQuery<CustomerDocumentData[]>({
     queryKey: ["admin", "customers", customerId, "documents"],
@@ -135,32 +135,33 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
       const result = await api.post(`/admin/customers/${customerId}/documents`, data);
       return unwrapResult(result);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "customers", customerId, "documents"] });
-      setIsUploadOpen(false);
-      setSelectedDocTypeId("");
-      setNotes("");
-      setSelectedFile(null);
-      toast({ title: "Dokument hochgeladen" });
-    },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 
   const handleUpload = useCallback(async () => {
-    if (!selectedFile || !selectedDocTypeId) return;
+    if (selectedFiles.length === 0 || !selectedDocTypeId) return;
 
-    const uploadResult = await uploadFile(selectedFile);
-    if (!uploadResult) return;
+    for (const file of selectedFiles) {
+      const uploadResult = await uploadFile(file);
+      if (!uploadResult) return;
 
-    saveMutation.mutate({
-      documentTypeId: parseInt(selectedDocTypeId),
-      fileName: selectedFile.name,
-      objectPath: uploadResult.objectPath,
-      notes: notes || null,
-    });
-  }, [selectedFile, selectedDocTypeId, notes, uploadFile, saveMutation]);
+      await saveMutation.mutateAsync({
+        documentTypeId: parseInt(selectedDocTypeId),
+        fileName: file.name,
+        objectPath: uploadResult.objectPath,
+        notes: notes || null,
+      });
+    }
+
+    queryClient.invalidateQueries({ queryKey: ["admin", "customers", customerId, "documents"] });
+    setIsUploadOpen(false);
+    setSelectedDocTypeId("");
+    setNotes("");
+    setSelectedFiles([]);
+    toast({ title: selectedFiles.length > 1 ? `${selectedFiles.length} Dokumente hinzugefügt` : "Dokument hinzugefügt" });
+  }, [selectedFiles, selectedDocTypeId, notes, uploadFile, saveMutation, queryClient, customerId, toast]);
 
   const uploadedDocTypeIds = new Set(documents?.map(d => d.documentTypeId) || []);
   const availableDocTypes = docTypes?.filter(dt => dt.isActive) || [];
@@ -182,7 +183,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
           data-testid="button-upload-customer-document"
         >
           <Upload className={`${iconSize.sm} mr-1`} />
-          Hochladen
+          Hinzufügen
         </Button>
       </div>
 
@@ -206,15 +207,19 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
           </div>
 
           <div className="space-y-2">
-            <Label>Datei auswählen *</Label>
+            <Label>Dateien auswählen *</Label>
             <Input
               type="file"
               accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-              onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+              multiple
+              onChange={(e) => setSelectedFiles(Array.from(e.target.files || []))}
               className="text-base"
               data-testid="input-customer-document-file"
             />
-            <p className="text-[11px] text-gray-400">PDF, Bild oder Word-Dokument (max. 10 MB)</p>
+            <p className="text-[11px] text-gray-400">PDF, Bild oder Word-Dokument (max. 10 MB je Datei). Mehrere Dateien möglich.</p>
+            {selectedFiles.length > 1 && (
+              <p className="text-xs text-teal-600">{selectedFiles.length} Dateien ausgewählt</p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -231,14 +236,14 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
           <div className="flex gap-2">
             <Button
               onClick={handleUpload}
-              disabled={isSubmitting || !selectedFile || !selectedDocTypeId}
+              disabled={isSubmitting || selectedFiles.length === 0 || !selectedDocTypeId}
               data-testid="button-submit-customer-document"
             >
               {isSubmitting ? (
-                <><Loader2 className={`mr-2 ${iconSize.sm} animate-spin`} />Hochladen...</>
-              ) : "Hochladen"}
+                <><Loader2 className={`mr-2 ${iconSize.sm} animate-spin`} />Wird hinzugefügt...</>
+              ) : selectedFiles.length > 1 ? `${selectedFiles.length} Dateien hinzufügen` : "Hinzufügen"}
             </Button>
-            <Button variant="outline" onClick={() => { setIsUploadOpen(false); setSelectedFile(null); }}>
+            <Button variant="outline" onClick={() => { setIsUploadOpen(false); setSelectedFiles([]); }}>
               Abbrechen
             </Button>
           </div>

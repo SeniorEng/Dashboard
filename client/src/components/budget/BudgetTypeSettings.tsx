@@ -362,7 +362,7 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
         <p className="text-[11px] text-gray-400 leading-tight">
           Restguthaben aus Vormonaten, z.B. von einem früheren Anbieter. Wird als einmalige Gutschrift zusätzlich zum laufenden Monatsbetrag verbucht.
         </p>
-        <div className="grid grid-cols-[1fr_auto_auto] gap-2 items-end">
+        <div className="space-y-2">
           <div>
             <Label className="text-[11px] text-gray-400">Betrag (€)</Label>
             <Input
@@ -376,37 +376,39 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
               data-testid={`input-initial-balance-${budgetType}`}
             />
           </div>
-          <div>
-            <Label className="text-[11px] text-gray-400">Ab Monat</Label>
-            <select
-              value={(newBal?.month || getCurrentYearMonth()).split("-")[1]}
-              onChange={(e) => {
-                const year = (newBal?.month || getCurrentYearMonth()).split("-")[0];
-                onUpdateBalance(budgetType, "month", `${year}-${e.target.value}`);
-              }}
-              className="h-9 text-sm border border-gray-200 rounded-md px-2"
-              data-testid={`select-balance-month-${budgetType}`}
-            >
-              {MONTH_OPTIONS.map(m => (
-                <option key={m.value} value={m.value}>{m.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <Label className="text-[11px] text-gray-400">Jahr</Label>
-            <select
-              value={(newBal?.month || getCurrentYearMonth()).split("-")[0]}
-              onChange={(e) => {
-                const month = (newBal?.month || getCurrentYearMonth()).split("-")[1];
-                onUpdateBalance(budgetType, "month", `${e.target.value}-${month}`);
-              }}
-              className="h-9 text-sm border border-gray-200 rounded-md px-2 w-20"
-              data-testid={`select-balance-year-${budgetType}`}
-            >
-              {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map(y => (
-                <option key={y} value={String(y)}>{y}</option>
-              ))}
-            </select>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label className="text-[11px] text-gray-400">Ab Monat</Label>
+              <select
+                value={(newBal?.month || getCurrentYearMonth()).split("-")[1]}
+                onChange={(e) => {
+                  const year = (newBal?.month || getCurrentYearMonth()).split("-")[0];
+                  onUpdateBalance(budgetType, "month", `${year}-${e.target.value}`);
+                }}
+                className="h-9 w-full text-sm border border-gray-200 rounded-md px-2"
+                data-testid={`select-balance-month-${budgetType}`}
+              >
+                {MONTH_OPTIONS.map(m => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label className="text-[11px] text-gray-400">Jahr</Label>
+              <select
+                value={(newBal?.month || getCurrentYearMonth()).split("-")[0]}
+                onChange={(e) => {
+                  const month = (newBal?.month || getCurrentYearMonth()).split("-")[1];
+                  onUpdateBalance(budgetType, "month", `${e.target.value}-${month}`);
+                }}
+                className="h-9 w-full text-sm border border-gray-200 rounded-md px-2"
+                data-testid={`select-balance-year-${budgetType}`}
+              >
+                {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map(y => (
+                  <option key={y} value={String(y)}>{y}</option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
 

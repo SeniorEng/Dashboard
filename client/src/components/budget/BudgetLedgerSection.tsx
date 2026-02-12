@@ -68,7 +68,7 @@ export function BudgetLedgerSection({ customerId, customerName, initialSummary, 
   const queryClient = useQueryClient();
   const [showInitialBudgetDialog, setShowInitialBudgetDialog] = useState(false);
   const [showAdjustmentDialog, setShowAdjustmentDialog] = useState(false);
-  const [showPreferencesDialog, setShowPreferencesDialog] = useState(false);
+
 
   const hasInitialSummary = initialSummary !== undefined;
   
@@ -219,74 +219,25 @@ export function BudgetLedgerSection({ customerId, customerName, initialSummary, 
             )}
           </div>
 
-          <Card className={summary!.monthlyLimitCents ? "bg-purple-50 border-purple-100" : "border-dashed"}>
-            <CardContent className="pt-4">
-              {summary!.monthlyLimitCents ? (
-                <>
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-sm font-medium text-gray-700">Monatliches Wunschlimit</p>
-                    <div className="flex items-center gap-2">
-                      <Badge variant={monthlyUsagePercent > 80 ? "destructive" : "secondary"}>
-                        {monthlyUsagePercent.toFixed(0)}%
-                      </Badge>
-                      <Dialog open={showPreferencesDialog} onOpenChange={setShowPreferencesDialog}>
-                        <DialogTrigger asChild>
-                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" data-testid="button-edit-preferences">
-                            <Settings className="w-3.5 h-3.5" />
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent>
-                          <DialogHeader>
-                            <DialogTitle>Wunschlimit bearbeiten</DialogTitle>
-                          </DialogHeader>
-                          <PreferencesForm
-                            customerId={customerId}
-                            currentLimit={summary!.monthlyLimitCents}
-                            onSuccess={() => {
-                              setShowPreferencesDialog(false);
-                              handleRefresh();
-                            }}
-                          />
-                        </DialogContent>
-                      </Dialog>
-                    </div>
-                  </div>
-                  <div className="h-2 w-full rounded-full bg-gray-200 overflow-hidden" role="progressbar" aria-valuenow={monthlyUsagePercent} aria-valuemin={0} aria-valuemax={100} data-testid="progress-budget-monthly">
-                    <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.max(0, Math.min(100, monthlyUsagePercent))}%` }} />
-                  </div>
-                  <div className="flex justify-between text-xs text-gray-500 mt-1">
-                    <span>{formatCurrency(summary!.currentMonthUsedCents)} diesen Monat</span>
-                    <span>Limit: {formatCurrency(summary!.monthlyLimitCents)}</span>
-                  </div>
-                </>
-              ) : (
-                <div className="text-center py-2">
-                  <p className="text-sm text-gray-500 mb-2">Kein monatliches Limit festgelegt</p>
-                  <Dialog open={showPreferencesDialog} onOpenChange={setShowPreferencesDialog}>
-                    <DialogTrigger asChild>
-                      <Button variant="outline" size="sm" data-testid="button-set-monthly-limit">
-                        <Settings className={iconSize.sm} />
-                        Limit festlegen
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Monatliches Wunschlimit</DialogTitle>
-                      </DialogHeader>
-                      <PreferencesForm
-                        customerId={customerId}
-                        currentLimit={null}
-                        onSuccess={() => {
-                          setShowPreferencesDialog(false);
-                          handleRefresh();
-                        }}
-                      />
-                    </DialogContent>
-                  </Dialog>
+          {summary!.monthlyLimitCents ? (
+            <Card className="bg-purple-50 border-purple-100">
+              <CardContent className="pt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-medium text-gray-700">Monatslimit</p>
+                  <Badge variant={monthlyUsagePercent > 80 ? "destructive" : "secondary"}>
+                    {monthlyUsagePercent.toFixed(0)}%
+                  </Badge>
                 </div>
-              )}
-            </CardContent>
-          </Card>
+                <div className="h-2 w-full rounded-full bg-gray-200 overflow-hidden" role="progressbar" aria-valuenow={monthlyUsagePercent} aria-valuemin={0} aria-valuemax={100} data-testid="progress-budget-monthly">
+                  <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.max(0, Math.min(100, monthlyUsagePercent))}%` }} />
+                </div>
+                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                  <span>{formatCurrency(summary!.currentMonthUsedCents)} diesen Monat</span>
+                  <span>Limit: {formatCurrency(summary!.monthlyLimitCents)}</span>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader className="pb-2">

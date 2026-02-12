@@ -10,7 +10,6 @@ import {
   MapPin,
   Phone,
   Mail,
-  Heart,
   Shield,
   Users,
   Calendar,
@@ -79,27 +78,6 @@ export function CustomerOverviewTab({ customer }: CustomerOverviewTabProps) {
           </div>
         </SectionCard>
       </div>
-
-      <SectionCard
-        title="Pflegekasse"
-        icon={<Heart className={iconSize.sm} />}
-      >
-        {customer.currentInsurance ? (
-          <div className="space-y-2">
-            <p className="font-medium text-gray-900">
-              {customer.currentInsurance.providerName}
-            </p>
-            <p className="text-sm text-gray-600">
-              Vers.-Nr.: {customer.currentInsurance.versichertennummer}
-            </p>
-            <p className="text-xs text-gray-500">
-              Seit {formatDateForDisplay(customer.currentInsurance.validFrom)}
-            </p>
-          </div>
-        ) : (
-          <p className="text-gray-500">Keine Pflegekasse hinterlegt</p>
-        )}
-      </SectionCard>
 
       <SectionCard
         title="Abrechnung"

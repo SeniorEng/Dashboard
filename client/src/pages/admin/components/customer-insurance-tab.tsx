@@ -38,6 +38,7 @@ interface CustomerInsuranceTabProps {
   currentInsurance?: {
     id: number;
     providerName: string;
+    ikNummer?: string;
     versichertennummer: string;
     validFrom: string;
   } | null;
@@ -164,6 +165,11 @@ export function CustomerInsuranceTab({ customerId, currentInsurance }: CustomerI
             <p className="font-medium text-gray-900" data-testid="text-current-provider">
               {currentInsurance.providerName}
             </p>
+            {currentInsurance.ikNummer && (
+              <p className="text-sm text-gray-600 mt-1" data-testid="text-ik-nummer">
+                IK-Nr.: {currentInsurance.ikNummer}
+              </p>
+            )}
             <p className="text-sm text-gray-600 mt-1" data-testid="text-versichertennummer">
               Versichertennummer: {currentInsurance.versichertennummer}
             </p>

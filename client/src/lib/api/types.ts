@@ -127,6 +127,7 @@ export interface CustomerDetail extends Customer {
   currentInsurance: {
     id: number;
     providerName: string;
+    ikNummer?: string;
     versichertennummer: string;
     validFrom: string;
   } | null;
