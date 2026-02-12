@@ -80,6 +80,7 @@ export const customerContacts = pgTable("customer_contacts", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [
   index("customer_contacts_customer_id_idx").on(table.customerId),
+  index("customer_contacts_active_idx").on(table.customerId, table.isActive),
 ]);
 
 // ============================================
@@ -98,6 +99,7 @@ export const customerCareLevelHistory = pgTable("customer_care_level_history", {
   createdByUserId: integer("created_by_user_id").references(() => users.id),
 }, (table) => [
   index("customer_care_level_history_customer_id_idx").on(table.customerId),
+  index("customer_care_level_history_valid_idx").on(table.customerId, table.validTo),
 ]);
 
 // ============================================

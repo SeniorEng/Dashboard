@@ -25,6 +25,7 @@ export const customerBudgets = pgTable("customer_budgets", {
   createdByUserId: integer("created_by_user_id").references(() => users.id),
 }, (table) => [
   index("customer_budgets_customer_id_idx").on(table.customerId),
+  index("customer_budgets_valid_idx").on(table.customerId, table.validTo),
 ]);
 
 // ============================================

@@ -37,14 +37,8 @@ import {
   Stethoscope,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
-
-const PFLEGEGRAD_OPTIONS = [
-  { value: "1", label: "Pflegegrad 1" },
-  { value: "2", label: "Pflegegrad 2" },
-  { value: "3", label: "Pflegegrad 3" },
-  { value: "4", label: "Pflegegrad 4" },
-  { value: "5", label: "Pflegegrad 5" },
-];
+import { PFLEGEGRAD_SELECT_OPTIONS } from "@shared/domain/customers";
+import { AddressFields } from "./components/address-fields";
 
 export default function AdminCustomerEdit() {
   const { id } = useParams<{ id: string }>();
@@ -331,7 +325,7 @@ export default function AdminCustomerEdit() {
                           <SelectValue placeholder="Auswählen" />
                         </SelectTrigger>
                         <SelectContent>
-                          {PFLEGEGRAD_OPTIONS.map((opt) => (
+                          {PFLEGEGRAD_SELECT_OPTIONS.map((opt) => (
                             <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
                           ))}
                         </SelectContent>
@@ -418,52 +412,13 @@ export default function AdminCustomerEdit() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-4 gap-4">
-                  <div className="col-span-3 space-y-2">
-                    <Label htmlFor="strasse">Straße</Label>
-                    <Input
-                      id="strasse"
-                      value={formData.strasse}
-                      onChange={(e) => handleChange("strasse", e.target.value)}
-                      placeholder="Musterstraße"
-                      data-testid="input-strasse"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="nr">Nr.</Label>
-                    <Input
-                      id="nr"
-                      value={formData.nr}
-                      onChange={(e) => handleChange("nr", e.target.value)}
-                      placeholder="12a"
-                      data-testid="input-nr"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="plz">PLZ</Label>
-                    <Input
-                      id="plz"
-                      value={formData.plz}
-                      onChange={(e) => handleChange("plz", e.target.value)}
-                      placeholder="12345"
-                      maxLength={5}
-                      data-testid="input-plz"
-                    />
-                  </div>
-                  <div className="col-span-2 space-y-2">
-                    <Label htmlFor="stadt">Stadt</Label>
-                    <Input
-                      id="stadt"
-                      value={formData.stadt}
-                      onChange={(e) => handleChange("stadt", e.target.value)}
-                      placeholder="Berlin"
-                      data-testid="input-stadt"
-                    />
-                  </div>
-                </div>
+                <AddressFields
+                  strasse={formData.strasse}
+                  nr={formData.nr}
+                  plz={formData.plz}
+                  stadt={formData.stadt}
+                  onChange={handleChange}
+                />
               </CardContent>
             </Card>
 

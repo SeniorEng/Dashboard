@@ -21,24 +21,23 @@ import {
   type CustomerWithDetails,
   type CreateFullCustomer,
   customers,
-  insuranceProviders,
   customerInsuranceHistory,
-  customerContacts,
-  customerCareLevelHistory,
-  customerNeedsAssessments,
-  customerBudgets,
   customerContracts,
   customerContractRates,
-  serviceRates,
   users,
   customerAssignmentHistory,
+  customerCareLevelHistory,
 } from "@shared/schema";
 import { eq, and, isNull, isNotNull, desc, count, or, ilike, sql as sqlBuilder } from "drizzle-orm";
 import { customerIdsCache } from "../services/cache";
-import { customerPricingStorage } from "./customer-pricing";
-import { budgetLedgerStorage } from "./budget-ledger";
 import { todayISO } from "@shared/utils/datetime";
 import { db } from "../lib/db";
+
+import * as insuranceModule from "./customer-mgmt/insurance";
+import * as contactsModule from "./customer-mgmt/contacts";
+import * as careLevelModule from "./customer-mgmt/care-level";
+import * as budgetsModule from "./customer-mgmt/budgets";
+import * as contractsModule from "./customer-mgmt/contracts";
 
 export interface CustomerListFilters {
   search?: string;
@@ -75,418 +74,36 @@ export interface CustomerListItem {
 }
 
 export class CustomerManagementStorage {
-  // ============================================
-  // INSURANCE PROVIDERS
-  // ============================================
+  getInsuranceProviders = insuranceModule.getInsuranceProviders;
+  getInsuranceProvider = insuranceModule.getInsuranceProvider;
+  getInsuranceProviderByIK = insuranceModule.getInsuranceProviderByIK;
+  createInsuranceProvider = insuranceModule.createInsuranceProvider;
+  updateInsuranceProvider = insuranceModule.updateInsuranceProvider;
+  getActiveCustomerCountForProvider = insuranceModule.getActiveCustomerCountForProvider;
+  getCustomerCurrentInsurance = insuranceModule.getCustomerCurrentInsurance;
+  getCustomerInsuranceHistory = insuranceModule.getCustomerInsuranceHistory;
+  addCustomerInsurance = insuranceModule.addCustomerInsurance;
 
-  async getInsuranceProviders(activeOnly = true): Promise<InsuranceProvider[]> {
-    if (activeOnly) {
-      return await db.select().from(insuranceProviders).where(eq(insuranceProviders.isActive, true));
-    }
-    return await db.select().from(insuranceProviders);
-  }
+  getCustomerContacts = contactsModule.getCustomerContacts;
+  addCustomerContact = contactsModule.addCustomerContact;
+  updateCustomerContact = contactsModule.updateCustomerContact;
+  deleteCustomerContact = contactsModule.deleteCustomerContact;
 
-  async getInsuranceProvider(id: number): Promise<InsuranceProvider | undefined> {
-    const result = await db.select().from(insuranceProviders).where(eq(insuranceProviders.id, id));
-    return result[0];
-  }
+  getCustomerCareLevelHistory = careLevelModule.getCustomerCareLevelHistory;
+  getCustomerCurrentCareLevel = careLevelModule.getCustomerCurrentCareLevel;
+  addCareLevelHistory = careLevelModule.addCareLevelHistory;
+  getCustomerNeedsAssessment = careLevelModule.getCustomerNeedsAssessment;
+  createNeedsAssessment = careLevelModule.createNeedsAssessment;
 
-  async getInsuranceProviderByIK(ikNummer: string): Promise<InsuranceProvider | undefined> {
-    const result = await db.select().from(insuranceProviders).where(eq(insuranceProviders.ikNummer, ikNummer));
-    return result[0];
-  }
+  getCustomerCurrentBudget = budgetsModule.getCustomerCurrentBudget;
+  getCustomerBudgetHistory = budgetsModule.getCustomerBudgetHistory;
+  addCustomerBudget = budgetsModule.addCustomerBudget;
 
-  async createInsuranceProvider(data: InsertInsuranceProvider): Promise<InsuranceProvider> {
-    const result = await db.insert(insuranceProviders).values(data).returning();
-    return result[0];
-  }
-
-  async updateInsuranceProvider(id: number, data: Partial<InsertInsuranceProvider>): Promise<InsuranceProvider | undefined> {
-    const result = await db.update(insuranceProviders).set(data).where(eq(insuranceProviders.id, id)).returning();
-    return result[0];
-  }
-
-  async getActiveCustomerCountForProvider(providerId: number): Promise<number> {
-    const result = await db
-      .select({ count: count() })
-      .from(customerInsuranceHistory)
-      .where(and(
-        eq(customerInsuranceHistory.insuranceProviderId, providerId),
-        isNull(customerInsuranceHistory.validTo)
-      ));
-    return Number(result[0]?.count ?? 0);
-  }
-
-  // ============================================
-  // CUSTOMER INSURANCE HISTORY
-  // ============================================
-
-  async getCustomerCurrentInsurance(customerId: number): Promise<(CustomerInsuranceHistory & { provider: InsuranceProvider }) | undefined> {
-    const result = await db
-      .select({
-        id: customerInsuranceHistory.id,
-        customerId: customerInsuranceHistory.customerId,
-        insuranceProviderId: customerInsuranceHistory.insuranceProviderId,
-        versichertennummer: customerInsuranceHistory.versichertennummer,
-        validFrom: customerInsuranceHistory.validFrom,
-        validTo: customerInsuranceHistory.validTo,
-        notes: customerInsuranceHistory.notes,
-        createdAt: customerInsuranceHistory.createdAt,
-        createdByUserId: customerInsuranceHistory.createdByUserId,
-        provider: {
-          id: insuranceProviders.id,
-          name: insuranceProviders.name,
-          ikNummer: insuranceProviders.ikNummer,
-          strasse: insuranceProviders.strasse,
-          hausnummer: insuranceProviders.hausnummer,
-          plz: insuranceProviders.plz,
-          stadt: insuranceProviders.stadt,
-          telefon: insuranceProviders.telefon,
-          email: insuranceProviders.email,
-          empfaenger: insuranceProviders.empfaenger,
-          empfaengerZeile2: insuranceProviders.empfaengerZeile2,
-          emailInvoiceEnabled: insuranceProviders.emailInvoiceEnabled,
-          zahlungsbedingungen: insuranceProviders.zahlungsbedingungen,
-          zahlungsart: insuranceProviders.zahlungsart,
-          isActive: insuranceProviders.isActive,
-          anschrift: insuranceProviders.anschrift,
-          plzOrt: insuranceProviders.plzOrt,
-          createdAt: insuranceProviders.createdAt,
-        },
-      })
-      .from(customerInsuranceHistory)
-      .innerJoin(insuranceProviders, eq(customerInsuranceHistory.insuranceProviderId, insuranceProviders.id))
-      .where(and(
-        eq(customerInsuranceHistory.customerId, customerId),
-        isNull(customerInsuranceHistory.validTo)
-      ))
-      .limit(1);
-    
-    if (result.length === 0) return undefined;
-    return { ...result[0], provider: result[0].provider };
-  }
-
-  async getCustomerInsuranceHistory(customerId: number): Promise<(CustomerInsuranceHistory & { provider: InsuranceProvider })[]> {
-    const result = await db
-      .select({
-        id: customerInsuranceHistory.id,
-        customerId: customerInsuranceHistory.customerId,
-        insuranceProviderId: customerInsuranceHistory.insuranceProviderId,
-        versichertennummer: customerInsuranceHistory.versichertennummer,
-        validFrom: customerInsuranceHistory.validFrom,
-        validTo: customerInsuranceHistory.validTo,
-        notes: customerInsuranceHistory.notes,
-        createdAt: customerInsuranceHistory.createdAt,
-        createdByUserId: customerInsuranceHistory.createdByUserId,
-        provider: {
-          id: insuranceProviders.id,
-          name: insuranceProviders.name,
-          ikNummer: insuranceProviders.ikNummer,
-          strasse: insuranceProviders.strasse,
-          hausnummer: insuranceProviders.hausnummer,
-          plz: insuranceProviders.plz,
-          stadt: insuranceProviders.stadt,
-          telefon: insuranceProviders.telefon,
-          email: insuranceProviders.email,
-          empfaenger: insuranceProviders.empfaenger,
-          empfaengerZeile2: insuranceProviders.empfaengerZeile2,
-          emailInvoiceEnabled: insuranceProviders.emailInvoiceEnabled,
-          zahlungsbedingungen: insuranceProviders.zahlungsbedingungen,
-          zahlungsart: insuranceProviders.zahlungsart,
-          isActive: insuranceProviders.isActive,
-          anschrift: insuranceProviders.anschrift,
-          plzOrt: insuranceProviders.plzOrt,
-          createdAt: insuranceProviders.createdAt,
-        },
-      })
-      .from(customerInsuranceHistory)
-      .innerJoin(insuranceProviders, eq(customerInsuranceHistory.insuranceProviderId, insuranceProviders.id))
-      .where(eq(customerInsuranceHistory.customerId, customerId))
-      .orderBy(desc(customerInsuranceHistory.validFrom));
-    
-    return result.map(r => ({ ...r, provider: r.provider }));
-  }
-
-  async addCustomerInsurance(data: InsertCustomerInsurance, userId?: number): Promise<CustomerInsuranceHistory> {
-    const today = todayISO();
-    
-    await db
-      .update(customerInsuranceHistory)
-      .set({ validTo: today })
-      .where(and(
-        eq(customerInsuranceHistory.customerId, data.customerId),
-        isNull(customerInsuranceHistory.validTo)
-      ));
-    
-    const result = await db.insert(customerInsuranceHistory).values({
-      ...data,
-      createdByUserId: userId,
-    }).returning();
-    
-    return result[0];
-  }
-
-  // ============================================
-  // CUSTOMER CONTACTS (Emergency Contacts)
-  // ============================================
-
-  async getCustomerContacts(customerId: number, activeOnly = true): Promise<CustomerContact[]> {
-    const conditions = [eq(customerContacts.customerId, customerId)];
-    if (activeOnly) {
-      conditions.push(eq(customerContacts.isActive, true));
-    }
-    
-    return await db
-      .select()
-      .from(customerContacts)
-      .where(and(...conditions))
-      .orderBy(desc(customerContacts.isPrimary), customerContacts.sortOrder);
-  }
-
-  async addCustomerContact(data: InsertCustomerContact): Promise<CustomerContact> {
-    if (data.isPrimary) {
-      await db
-        .update(customerContacts)
-        .set({ isPrimary: false })
-        .where(eq(customerContacts.customerId, data.customerId));
-    }
-    
-    const result = await db.insert(customerContacts).values(data).returning();
-    return result[0];
-  }
-
-  async updateCustomerContact(id: number, data: Partial<InsertCustomerContact>): Promise<CustomerContact | undefined> {
-    if (data.isPrimary) {
-      const existing = await db.select().from(customerContacts).where(eq(customerContacts.id, id));
-      if (existing.length > 0) {
-        await db
-          .update(customerContacts)
-          .set({ isPrimary: false })
-          .where(eq(customerContacts.customerId, existing[0].customerId));
-      }
-    }
-    
-    const result = await db
-      .update(customerContacts)
-      .set({ ...data, updatedAt: new Date() })
-      .where(eq(customerContacts.id, id))
-      .returning();
-    return result[0];
-  }
-
-  async deleteCustomerContact(id: number): Promise<boolean> {
-    const result = await db
-      .update(customerContacts)
-      .set({ isActive: false, updatedAt: new Date() })
-      .where(eq(customerContacts.id, id))
-      .returning();
-    return result.length > 0;
-  }
-
-  // ============================================
-  // CARE LEVEL HISTORY
-  // ============================================
-
-  async getCustomerCareLevelHistory(customerId: number): Promise<CustomerCareLevelHistory[]> {
-    return await db
-      .select()
-      .from(customerCareLevelHistory)
-      .where(eq(customerCareLevelHistory.customerId, customerId))
-      .orderBy(desc(customerCareLevelHistory.validFrom));
-  }
-
-  async getCustomerCurrentCareLevel(customerId: number): Promise<CustomerCareLevelHistory | undefined> {
-    const result = await db
-      .select()
-      .from(customerCareLevelHistory)
-      .where(and(
-        eq(customerCareLevelHistory.customerId, customerId),
-        isNull(customerCareLevelHistory.validTo)
-      ))
-      .limit(1);
-    return result[0];
-  }
-
-  async addCareLevelHistory(data: InsertCareLevelHistory, userId?: number): Promise<CustomerCareLevelHistory> {
-    const validFromDate = new Date(data.validFrom);
-    validFromDate.setDate(validFromDate.getDate() - 1);
-    const dayBeforeValidFrom = validFromDate.toISOString().split("T")[0];
-    
-    await db
-      .update(customerCareLevelHistory)
-      .set({ validTo: dayBeforeValidFrom })
-      .where(and(
-        eq(customerCareLevelHistory.customerId, data.customerId),
-        isNull(customerCareLevelHistory.validTo)
-      ));
-    
-    const result = await db.insert(customerCareLevelHistory).values({
-      ...data,
-      createdByUserId: userId,
-    }).returning();
-    
-    await db
-      .update(customers)
-      .set({ pflegegrad: data.pflegegrad, updatedAt: new Date() })
-      .where(eq(customers.id, data.customerId));
-    
-    return result[0];
-  }
-
-  // ============================================
-  // NEEDS ASSESSMENTS
-  // ============================================
-
-  async getCustomerNeedsAssessment(customerId: number): Promise<CustomerNeedsAssessment | undefined> {
-    const result = await db
-      .select()
-      .from(customerNeedsAssessments)
-      .where(eq(customerNeedsAssessments.customerId, customerId))
-      .orderBy(desc(customerNeedsAssessments.assessmentDate))
-      .limit(1);
-    return result[0];
-  }
-
-  async createNeedsAssessment(data: InsertNeedsAssessment, userId?: number): Promise<CustomerNeedsAssessment> {
-    const result = await db.insert(customerNeedsAssessments).values({
-      ...data,
-      createdByUserId: userId,
-    }).returning();
-    return result[0];
-  }
-
-  // ============================================
-  // BUDGETS
-  // ============================================
-
-  async getCustomerCurrentBudget(customerId: number): Promise<CustomerBudget | undefined> {
-    const result = await db
-      .select()
-      .from(customerBudgets)
-      .where(and(
-        eq(customerBudgets.customerId, customerId),
-        isNull(customerBudgets.validTo)
-      ))
-      .limit(1);
-    return result[0];
-  }
-
-  async getCustomerBudgetHistory(customerId: number): Promise<CustomerBudget[]> {
-    return await db
-      .select()
-      .from(customerBudgets)
-      .where(eq(customerBudgets.customerId, customerId))
-      .orderBy(desc(customerBudgets.validFrom));
-  }
-
-  async addCustomerBudget(data: InsertCustomerBudget, userId?: number): Promise<CustomerBudget> {
-    const today = todayISO();
-    
-    await db
-      .update(customerBudgets)
-      .set({ validTo: today })
-      .where(and(
-        eq(customerBudgets.customerId, data.customerId),
-        isNull(customerBudgets.validTo)
-      ));
-    
-    const result = await db.insert(customerBudgets).values({
-      ...data,
-      createdByUserId: userId,
-    }).returning();
-    
-    return result[0];
-  }
-
-  // ============================================
-  // CONTRACTS
-  // ============================================
-
-  async getCustomerCurrentContract(customerId: number): Promise<(CustomerContract & { rates: CustomerContractRate[] }) | undefined> {
-    const contractResult = await db
-      .select()
-      .from(customerContracts)
-      .where(and(
-        eq(customerContracts.customerId, customerId),
-        eq(customerContracts.status, "active")
-      ))
-      .limit(1);
-    
-    if (contractResult.length === 0) return undefined;
-    
-    const contract = contractResult[0];
-    const rates = await db
-      .select()
-      .from(customerContractRates)
-      .where(and(
-        eq(customerContractRates.contractId, contract.id),
-        isNull(customerContractRates.validTo)
-      ));
-    
-    return { ...contract, rates };
-  }
-
-  async createCustomerContract(data: InsertCustomerContract, userId?: number): Promise<CustomerContract> {
-    const result = await db.insert(customerContracts).values({
-      ...data,
-      createdByUserId: userId,
-    }).returning();
-    return result[0];
-  }
-
-  async addContractRate(data: InsertContractRate, userId?: number): Promise<CustomerContractRate> {
-    const today = todayISO();
-    
-    await db
-      .update(customerContractRates)
-      .set({ validTo: today })
-      .where(and(
-        eq(customerContractRates.contractId, data.contractId),
-        eq(customerContractRates.serviceCategory, data.serviceCategory),
-        isNull(customerContractRates.validTo)
-      ));
-    
-    const result = await db.insert(customerContractRates).values({
-      ...data,
-      createdByUserId: userId,
-    }).returning();
-    
-    return result[0];
-  }
-
-  // ============================================
-  // SERVICE RATES (Company-wide defaults)
-  // ============================================
-
-  async getCurrentServiceRates(): Promise<ServiceRate[]> {
-    return await db
-      .select()
-      .from(serviceRates)
-      .where(isNull(serviceRates.validTo));
-  }
-
-  async addServiceRate(data: InsertServiceRate, userId?: number): Promise<ServiceRate> {
-    const today = todayISO();
-    
-    await db
-      .update(serviceRates)
-      .set({ validTo: today })
-      .where(and(
-        eq(serviceRates.serviceCategory, data.serviceCategory),
-        isNull(serviceRates.validTo)
-      ));
-    
-    const result = await db.insert(serviceRates).values({
-      ...data,
-      createdByUserId: userId,
-    }).returning();
-    
-    return result[0];
-  }
-
-  // ============================================
-  // CUSTOMER LIST WITH FILTERS
-  // ============================================
+  getCustomerCurrentContract = contractsModule.getCustomerCurrentContract;
+  createCustomerContract = contractsModule.createCustomerContract;
+  addContractRate = contractsModule.addContractRate;
+  getCurrentServiceRates = contractsModule.getCurrentServiceRates;
+  addServiceRate = contractsModule.addServiceRate;
 
   async getCustomersPaginated(
     filters?: CustomerListFilters,
@@ -495,7 +112,6 @@ export class CustomerManagementStorage {
     const limit = options?.limit ?? 20;
     const offset = options?.offset ?? 0;
 
-    // Base where conditions (without hasActiveContract filter)
     let baseConditions: any[] = [];
     
     if (filters?.search) {
@@ -521,7 +137,6 @@ export class CustomerManagementStorage {
       baseConditions.push(eq(customers.primaryEmployeeId, filters.primaryEmployeeId));
     }
 
-    // Subquery to check for active contracts - avoids N+1 queries
     const activeContractSubquery = db
       .select({ 
         customerId: customerContracts.customerId,
@@ -532,7 +147,6 @@ export class CustomerManagementStorage {
       .groupBy(customerContracts.customerId)
       .as('active_contracts');
 
-    // Build full where clause including hasActiveContract filter (applied after join)
     let fullConditions = [...baseConditions];
     if (filters?.hasActiveContract === true) {
       fullConditions.push(isNotNull(activeContractSubquery.customerId));
@@ -541,7 +155,6 @@ export class CustomerManagementStorage {
     }
     const fullWhereClause = fullConditions.length > 0 ? and(...fullConditions) : undefined;
 
-    // Count query needs to join with subquery for accurate hasActiveContract filtering
     const countQuery = db
       .select({ count: count() })
       .from(customers)
@@ -595,10 +208,6 @@ export class CustomerManagementStorage {
     return { data, total, limit, offset };
   }
 
-  // ============================================
-  // CUSTOMER DETAILS (Full View)
-  // ============================================
-
   async getCustomerWithDetails(customerId: number): Promise<CustomerWithDetails | undefined> {
     const customerResult = await db.select().from(customers).where(eq(customers.id, customerId));
     if (customerResult.length === 0) return undefined;
@@ -614,9 +223,6 @@ export class CustomerManagementStorage {
       contract,
       primaryEmployee,
       backupEmployee,
-      pricingHistory,
-      currentPricing,
-      budgetSummary,
     ] = await Promise.all([
       this.getCustomerCurrentInsurance(customerId),
       this.getCustomerContacts(customerId),
@@ -630,9 +236,6 @@ export class CustomerManagementStorage {
       customer.backupEmployeeId
         ? db.select({ id: users.id, displayName: users.displayName }).from(users).where(eq(users.id, customer.backupEmployeeId)).then(r => r[0])
         : Promise.resolve(undefined),
-      customerPricingStorage.getPricingHistory(customerId),
-      customerPricingStorage.getCurrentPricing(customerId),
-      budgetLedgerStorage.getBudgetSummary(customerId),
     ]);
 
     return {
@@ -645,15 +248,8 @@ export class CustomerManagementStorage {
       contract: contract ?? undefined,
       primaryEmployee,
       backupEmployee,
-      pricingHistory,
-      currentPricing: currentPricing ?? undefined,
-      budgetSummary,
     };
   }
-
-  // ============================================
-  // FULL CUSTOMER CREATION (Admin Form)
-  // ============================================
 
   async createFullCustomer(data: CreateFullCustomer, userId: number): Promise<Customer> {
     let customerId: number | null = null;
@@ -771,10 +367,6 @@ export class CustomerManagementStorage {
       throw error;
     }
   }
-
-  // ============================================
-  // CUSTOMER UPDATE (Basic fields)
-  // ============================================
 
   async updateCustomer(id: number, data: Partial<{
     vorname: string;

@@ -29,19 +29,11 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api";
 import { formatPhoneForDisplay, formatPhoneAsYouType, validateGermanPhone, normalizePhone } from "@shared/utils/phone";
+import { CONTACT_TYPE_SELECT_OPTIONS, CONTACT_TYPE_LABELS } from "@shared/domain/customers";
 import type { CustomerContactItem } from "@/lib/api/types";
 
-const CONTACT_TYPE_OPTIONS = [
-  { value: "familie", label: "Familienmitglied" },
-  { value: "angehoerige", label: "Angehörige" },
-  { value: "nachbar", label: "Nachbar/in" },
-  { value: "hausarzt", label: "Hausarzt" },
-  { value: "betreuer", label: "Betreuer/in" },
-  { value: "sonstige", label: "Sonstige" },
-];
-
 function getContactTypeLabel(value: string): string {
-  return CONTACT_TYPE_OPTIONS.find(o => o.value === value)?.label ?? value;
+  return CONTACT_TYPE_LABELS[value] ?? value;
 }
 
 interface ContactFormState {
@@ -258,7 +250,7 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {CONTACT_TYPE_OPTIONS.map(t => (
+              {CONTACT_TYPE_SELECT_OPTIONS.map(t => (
                 <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
               ))}
             </SelectContent>

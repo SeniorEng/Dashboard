@@ -8,7 +8,7 @@
 
 import { useState } from "react";
 import { Link, useParams } from "wouter";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -41,6 +41,144 @@ import { CustomerContactsTab } from "./components/customer-contacts-tab";
 
 function formatCents(cents: number): string {
   return (cents / 100).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+}
+
+interface BudgetSummary {
+  availableCents: number;
+  totalUsedCents: number;
+  monthlyLimitCents: number | null;
+  currentMonthUsedCents: number;
+}
+
+function BudgetsTabContent({
+  customerId,
+  customerDisplayName,
+  acceptsPrivatePayment,
+  pflegegrad,
+  isToggling,
+  onTogglePrivatePayment,
+  onRefresh,
+}: {
+  customerId: number;
+  customerDisplayName: string;
+  acceptsPrivatePayment: boolean;
+  pflegegrad?: number;
+  isToggling: boolean;
+  onTogglePrivatePayment: (checked: boolean) => void;
+  onRefresh: () => void;
+}) {
+  const { data: budget } = useQuery<BudgetSummary>({
+    queryKey: ["budget-summary", customerId],
+    queryFn: async () => {
+      const response = await fetch(`/api/budget/${customerId}/summary`, {
+        credentials: "include",
+      });
+      if (!response.ok) throw new Error("Budget-Zusammenfassung konnte nicht geladen werden");
+      return response.json();
+    },
+    staleTime: 30000,
+  });
+
+  return (
+    <>
+      <SectionCard
+        title="Abrechnung"
+        icon={<CreditCard className={iconSize.sm} />}
+      >
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <p className="text-sm font-medium text-gray-700">Private Zuzahlung</p>
+              <p className="text-xs text-gray-500">
+                Restbeträge über das Budget hinaus werden privat mit MwSt. berechnet
+              </p>
+            </div>
+            <Switch
+              checked={acceptsPrivatePayment}
+              onCheckedChange={onTogglePrivatePayment}
+              disabled={isToggling}
+              data-testid="switch-accepts-private-payment"
+            />
+          </div>
+
+          {budget && (
+            <div className="border-t pt-3">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-gray-500">Budget verfügbar</p>
+                  <p className={`font-semibold ${budget.availableCents > 0 ? "text-green-700" : "text-red-600"}`} data-testid="text-budget-available">
+                    {formatCents(budget.availableCents)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Verbraucht (gesamt)</p>
+                  <p className="font-semibold text-gray-800" data-testid="text-budget-used">
+                    {formatCents(budget.totalUsedCents)}
+                  </p>
+                </div>
+                {budget.monthlyLimitCents !== null && (
+                  <>
+                    <div>
+                      <p className="text-gray-500">Monatslimit</p>
+                      <p className="font-medium text-gray-700">{formatCents(budget.monthlyLimitCents)}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Diesen Monat verbraucht</p>
+                      <p className="font-medium text-gray-700">{formatCents(budget.currentMonthUsedCents)}</p>
+                    </div>
+                  </>
+                )}
+              </div>
+              {budget.availableCents <= 0 && acceptsPrivatePayment && (
+                <div className="mt-2 p-2 rounded bg-amber-50 border border-amber-200">
+                  <p className="text-xs text-amber-800 font-medium">
+                    <Wallet className="inline h-3 w-3 mr-1" />
+                    Budget aufgebraucht — weitere Leistungen werden privat berechnet
+                  </p>
+                </div>
+              )}
+              {budget.availableCents <= 0 && !acceptsPrivatePayment && (
+                <div className="mt-2 p-2 rounded bg-red-50 border border-red-200">
+                  <p className="text-xs text-red-800 font-medium">
+                    Budget aufgebraucht — private Zuzahlung ist nicht aktiviert
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Budget-Einstellungen"
+        icon={<Settings className={iconSize.sm} />}
+      >
+        <BudgetTypeSettings customerId={customerId} pflegegrad={pflegegrad} />
+      </SectionCard>
+
+      <SectionCard
+        title="§45b Entlastungsbetrag"
+        icon={<Wallet className={iconSize.sm} />}
+      >
+        <BudgetLedgerSection
+          customerId={customerId}
+          customerName={customerDisplayName}
+          onRefresh={onRefresh}
+        />
+      </SectionCard>
+
+      <SectionCard
+        title="Preisvereinbarung"
+        icon={<Euro className={iconSize.sm} />}
+      >
+        <PricingSection
+          customerId={customerId}
+          customerName={customerDisplayName}
+          onRefresh={onRefresh}
+        />
+      </SectionCard>
+    </>
+  );
 }
 
 export default function AdminCustomerDetail() {
@@ -116,8 +254,6 @@ export default function AdminCustomerDetail() {
     ? `${customer.vorname} ${customer.nachname}` 
     : customer.name;
 
-  const budget = customer.budgetSummary;
-
   return (
     <Layout>
       <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
@@ -178,103 +314,15 @@ export default function AdminCustomerDetail() {
             </TabsContent>
 
             <TabsContent value="budgets" className="space-y-4">
-              <SectionCard
-                title="Abrechnung"
-                icon={<CreditCard className={iconSize.sm} />}
-              >
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <p className="text-sm font-medium text-gray-700">Private Zuzahlung</p>
-                      <p className="text-xs text-gray-500">
-                        Restbeträge über das Budget hinaus werden privat mit MwSt. berechnet
-                      </p>
-                    </div>
-                    <Switch
-                      checked={customer.acceptsPrivatePayment ?? false}
-                      onCheckedChange={(checked) => togglePrivatePayment.mutate(checked)}
-                      disabled={isToggling}
-                      data-testid="switch-accepts-private-payment"
-                    />
-                  </div>
-
-                  {budget && (
-                    <div className="border-t pt-3">
-                      <div className="grid grid-cols-2 gap-3 text-sm">
-                        <div>
-                          <p className="text-gray-500">Budget verfügbar</p>
-                          <p className={`font-semibold ${budget.availableCents > 0 ? "text-green-700" : "text-red-600"}`} data-testid="text-budget-available">
-                            {formatCents(budget.availableCents)}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500">Verbraucht (gesamt)</p>
-                          <p className="font-semibold text-gray-800" data-testid="text-budget-used">
-                            {formatCents(budget.totalUsedCents)}
-                          </p>
-                        </div>
-                        {budget.monthlyLimitCents !== null && (
-                          <>
-                            <div>
-                              <p className="text-gray-500">Monatslimit</p>
-                              <p className="font-medium text-gray-700">{formatCents(budget.monthlyLimitCents)}</p>
-                            </div>
-                            <div>
-                              <p className="text-gray-500">Diesen Monat verbraucht</p>
-                              <p className="font-medium text-gray-700">{formatCents(budget.currentMonthUsedCents)}</p>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                      {budget.availableCents <= 0 && customer.acceptsPrivatePayment && (
-                        <div className="mt-2 p-2 rounded bg-amber-50 border border-amber-200">
-                          <p className="text-xs text-amber-800 font-medium">
-                            <Wallet className="inline h-3 w-3 mr-1" />
-                            Budget aufgebraucht — weitere Leistungen werden privat berechnet
-                          </p>
-                        </div>
-                      )}
-                      {budget.availableCents <= 0 && !customer.acceptsPrivatePayment && (
-                        <div className="mt-2 p-2 rounded bg-red-50 border border-red-200">
-                          <p className="text-xs text-red-800 font-medium">
-                            Budget aufgebraucht — private Zuzahlung ist nicht aktiviert
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </SectionCard>
-
-              <SectionCard
-                title="Budget-Einstellungen"
-                icon={<Settings className={iconSize.sm} />}
-              >
-                <BudgetTypeSettings customerId={customerId} pflegegrad={customer.pflegegrad ?? undefined} />
-              </SectionCard>
-
-              <SectionCard
-                title="§45b Entlastungsbetrag"
-                icon={<Wallet className={iconSize.sm} />}
-              >
-                <BudgetLedgerSection 
-                  customerId={customerId} 
-                  customerName={customerDisplayName}
-                  initialSummary={customer.budgetSummary}
-                  onRefresh={refetch}
-                />
-              </SectionCard>
-
-              <SectionCard
-                title="Preisvereinbarung"
-                icon={<Euro className={iconSize.sm} />}
-              >
-                <PricingSection 
-                  customerId={customerId} 
-                  customerName={customerDisplayName}
-                  onRefresh={refetch}
-                />
-              </SectionCard>
+              <BudgetsTabContent
+                customerId={customerId}
+                customerDisplayName={customerDisplayName}
+                acceptsPrivatePayment={customer.acceptsPrivatePayment ?? false}
+                pflegegrad={customer.pflegegrad ?? undefined}
+                isToggling={isToggling}
+                onTogglePrivatePayment={(checked) => togglePrivatePayment.mutate(checked)}
+                onRefresh={refetch}
+              />
             </TabsContent>
 
             <TabsContent value="insurance" className="space-y-4">

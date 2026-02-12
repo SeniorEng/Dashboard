@@ -160,9 +160,6 @@ router.get("/customers/:id/details", asyncHandler("Kunde konnte nicht geladen we
       notes: customer.contract.notes,
     } : null,
     activeContractCount: customer.contract ? 1 : 0,
-    pricingHistory: customer.pricingHistory || [],
-    currentPricing: customer.currentPricing || null,
-    budgetSummary: customer.budgetSummary || null,
   };
   
   res.json(response);
@@ -242,6 +239,8 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
 
   const customer = await customerManagementStorage.createCustomerDirect(customerData);
 
+  const warnings: string[] = [];
+
   if (data.pflegegrad && data.pflegegradSeit) {
     try {
       await customerManagementStorage.addCareLevelHistory({
@@ -249,7 +248,10 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
         pflegegrad: data.pflegegrad,
         validFrom: data.pflegegradSeit,
       }, userId);
-    } catch {}
+    } catch (err) {
+      console.error(`[POST /customers] Pflegegrad-Historie fehlgeschlagen für Kunde ${customer.id}:`, err);
+      warnings.push("Pflegegrad-Historie konnte nicht gespeichert werden");
+    }
   }
 
   if (data.insurance) {
@@ -260,7 +262,10 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
         versichertennummer: data.insurance.versichertennummer,
         validFrom: data.insurance.validFrom,
       }, userId);
-    } catch {}
+    } catch (err) {
+      console.error(`[POST /customers] Versicherung fehlgeschlagen für Kunde ${customer.id}:`, err);
+      warnings.push("Versicherung konnte nicht gespeichert werden");
+    }
   }
 
   if (data.contacts) {
@@ -277,7 +282,10 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
           email: c.email || null,
           sortOrder: i,
         });
-      } catch {}
+      } catch (err) {
+        console.error(`[POST /customers] Kontakt ${i} fehlgeschlagen für Kunde ${customer.id}:`, err);
+        warnings.push(`Kontakt "${c.vorname} ${c.nachname}" konnte nicht gespeichert werden`);
+      }
     }
   }
 
@@ -290,7 +298,10 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
         pflegesachleistungen36: data.budgets.pflegesachleistungen36,
         validFrom: data.budgets.validFrom,
       }, userId);
-    } catch {}
+    } catch (err) {
+      console.error(`[POST /customers] Budgets fehlgeschlagen für Kunde ${customer.id}:`, err);
+      warnings.push("Budgets konnten nicht gespeichert werden");
+    }
   }
 
   if (data.contract) {
@@ -321,12 +332,15 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
           }, userId);
         }
       }
-    } catch {}
+    } catch (err) {
+      console.error(`[POST /customers] Vertrag fehlgeschlagen für Kunde ${customer.id}:`, err);
+      warnings.push("Vertrag konnte nicht erstellt werden");
+    }
   }
 
   birthdaysCache.invalidateAll();
   
-  res.status(201).json(customer);
+  res.status(201).json({ ...customer, warnings: warnings.length > 0 ? warnings : undefined });
 }));
 
 const updateCustomerSchema = z.object({
@@ -417,6 +431,10 @@ router.post("/customers/:id/contacts", asyncHandler("Kontakt konnte nicht hinzug
   res.status(201).json(contact);
 }));
 
+const updateCustomerContactSchema = insertCustomerContactSchema
+  .omit({ customerId: true })
+  .partial();
+
 router.patch("/customers/:customerId/contacts/:contactId", asyncHandler("Kontakt konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
   const contactId = parseInt(req.params.contactId);
   if (isNaN(contactId)) {
@@ -424,7 +442,17 @@ router.patch("/customers/:customerId/contacts/:contactId", asyncHandler("Kontakt
     return;
   }
   
-  const contact = await customerManagementStorage.updateCustomerContact(contactId, req.body);
+  const result = updateCustomerContactSchema.safeParse(req.body);
+  if (!result.success) {
+    res.status(400).json({
+      error: "VALIDATION_ERROR",
+      message: "Ungültige Kontaktdaten",
+      details: result.error.issues,
+    });
+    return;
+  }
+  
+  const contact = await customerManagementStorage.updateCustomerContact(contactId, result.data);
   if (!contact) {
     res.status(404).json({ error: "NOT_FOUND", message: "Kontakt nicht gefunden" });
     return;

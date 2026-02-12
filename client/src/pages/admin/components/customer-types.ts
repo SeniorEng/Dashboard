@@ -1,4 +1,5 @@
 import { User2, Heart, Users, Wallet, FileText } from "lucide-react";
+import { PFLEGEGRAD_SELECT_OPTIONS, CONTACT_TYPE_SELECT_OPTIONS } from "@shared/domain/customers";
 
 export interface ContactFormData {
   vorname: string;
@@ -54,22 +55,9 @@ export const STEPS = [
   { id: "contract", title: "Vertrag", icon: FileText },
 ];
 
-export const PFLEGEGRAD_OPTIONS = [
-  { value: "1", label: "Pflegegrad 1" },
-  { value: "2", label: "Pflegegrad 2" },
-  { value: "3", label: "Pflegegrad 3" },
-  { value: "4", label: "Pflegegrad 4" },
-  { value: "5", label: "Pflegegrad 5" },
-];
+export const PFLEGEGRAD_OPTIONS = PFLEGEGRAD_SELECT_OPTIONS;
 
-export const CONTACT_TYPES = [
-  { value: "familie", label: "Familienmitglied" },
-  { value: "angehoerige", label: "Angehörige" },
-  { value: "nachbar", label: "Nachbar/in" },
-  { value: "hausarzt", label: "Hausarzt" },
-  { value: "betreuer", label: "Betreuer/in" },
-  { value: "sonstige", label: "Sonstige" },
-];
+export const CONTACT_TYPES = CONTACT_TYPE_SELECT_OPTIONS;
 
 export const PERIOD_TYPES = [
   { value: "weekly", label: "Pro Woche" },

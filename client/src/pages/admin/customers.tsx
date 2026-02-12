@@ -35,14 +35,7 @@ import {
   FileText,
   AlertCircle,
 } from "lucide-react";
-
-const PFLEGEGRAD_OPTIONS = [
-  { value: "1", label: "Pflegegrad 1" },
-  { value: "2", label: "Pflegegrad 2" },
-  { value: "3", label: "Pflegegrad 3" },
-  { value: "4", label: "Pflegegrad 4" },
-  { value: "5", label: "Pflegegrad 5" },
-];
+import { PFLEGEGRAD_SELECT_OPTIONS } from "@shared/domain/customers";
 
 export default function AdminCustomers() {
   const [, setLocation] = useLocation();
@@ -174,7 +167,7 @@ export default function AdminCustomers() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Alle Pflegegrade</SelectItem>
-                        {PFLEGEGRAD_OPTIONS.map((option) => (
+                        {PFLEGEGRAD_SELECT_OPTIONS.map((option) => (
                           <SelectItem key={option.value} value={option.value}>
                             {option.label}
                           </SelectItem>

@@ -63,6 +63,7 @@ export const customerInsuranceHistory = pgTable("customer_insurance_history", {
 }, (table) => [
   index("customer_insurance_history_customer_id_idx").on(table.customerId),
   index("customer_insurance_history_provider_id_idx").on(table.insuranceProviderId),
+  index("customer_insurance_history_valid_idx").on(table.customerId, table.validTo),
 ]);
 
 // Insurance Provider schemas

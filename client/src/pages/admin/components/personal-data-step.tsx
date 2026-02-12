@@ -8,6 +8,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { MapPin } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { CustomerFormData, SelectOption, PFLEGEGRAD_OPTIONS } from "./customer-types";
+import { AddressFields } from "./address-fields";
 
 interface PersonalDataStepProps {
   formData: CustomerFormData;
@@ -99,51 +100,14 @@ export function PersonalDataStep({ formData, phoneErrors, employeeOptions, onCha
           Adresse
         </h3>
         <div className="space-y-4">
-          <div className="grid grid-cols-4 gap-4">
-            <div className="col-span-3 space-y-2">
-              <Label htmlFor="strasse">Straße *</Label>
-              <Input
-                id="strasse"
-                value={formData.strasse}
-                onChange={(e) => onChange("strasse", e.target.value)}
-                required
-                data-testid="input-strasse"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="nr">Nr. *</Label>
-              <Input
-                id="nr"
-                value={formData.nr}
-                onChange={(e) => onChange("nr", e.target.value)}
-                required
-                data-testid="input-nr"
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="plz">PLZ *</Label>
-              <Input
-                id="plz"
-                value={formData.plz}
-                onChange={(e) => onChange("plz", e.target.value)}
-                maxLength={5}
-                required
-                data-testid="input-plz"
-              />
-            </div>
-            <div className="col-span-2 space-y-2">
-              <Label htmlFor="stadt">Stadt *</Label>
-              <Input
-                id="stadt"
-                value={formData.stadt}
-                onChange={(e) => onChange("stadt", e.target.value)}
-                required
-                data-testid="input-stadt"
-              />
-            </div>
-          </div>
+          <AddressFields
+            strasse={formData.strasse}
+            nr={formData.nr}
+            plz={formData.plz}
+            stadt={formData.stadt}
+            onChange={onChange}
+            required
+          />
         </div>
       </div>
 
