@@ -308,11 +308,13 @@ export class CustomerManagementStorage {
   }
 
   async addCareLevelHistory(data: InsertCareLevelHistory, userId?: number): Promise<CustomerCareLevelHistory> {
-    const today = todayISO();
+    const validFromDate = new Date(data.validFrom);
+    validFromDate.setDate(validFromDate.getDate() - 1);
+    const dayBeforeValidFrom = validFromDate.toISOString().split("T")[0];
     
     await db
       .update(customerCareLevelHistory)
-      .set({ validTo: today })
+      .set({ validTo: dayBeforeValidFrom })
       .where(and(
         eq(customerCareLevelHistory.customerId, data.customerId),
         isNull(customerCareLevelHistory.validTo)

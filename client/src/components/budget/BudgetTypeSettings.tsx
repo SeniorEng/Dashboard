@@ -355,59 +355,67 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
         </div>
       )}
 
-      <Label className="text-xs text-gray-500">
-        {hasHistory ? "Neuen Startwert hinzufügen" : "Startwert festlegen"}
-      </Label>
-      <div className="flex gap-2 items-end mt-1">
-        <div className="flex-1">
-          <Input
-            type="number"
-            step="0.01"
-            min="0"
-            placeholder="Betrag in €"
-            value={newBal?.amount || ""}
-            onChange={(e) => onUpdateBalance(budgetType, "amount", e.target.value)}
-            className="h-8 text-base"
-            data-testid={`input-initial-balance-${budgetType}`}
-          />
-        </div>
-        <div>
-          <select
-            value={(newBal?.month || getCurrentYearMonth()).split("-")[1]}
-            onChange={(e) => {
-              const year = (newBal?.month || getCurrentYearMonth()).split("-")[0];
-              onUpdateBalance(budgetType, "month", `${year}-${e.target.value}`);
-            }}
-            className="h-8 text-sm border border-gray-200 rounded-md px-2"
-            data-testid={`select-balance-month-${budgetType}`}
-          >
-            {MONTH_OPTIONS.map(m => (
-              <option key={m.value} value={m.value}>{m.label}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <select
-            value={(newBal?.month || getCurrentYearMonth()).split("-")[0]}
-            onChange={(e) => {
-              const month = (newBal?.month || getCurrentYearMonth()).split("-")[1];
-              onUpdateBalance(budgetType, "month", `${e.target.value}-${month}`);
-            }}
-            className="h-8 text-sm border border-gray-200 rounded-md px-2 w-20"
-            data-testid={`select-balance-year-${budgetType}`}
-          >
-            {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map(y => (
-              <option key={y} value={String(y)}>{y}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {hasNewBalanceInput && (
-        <p className="text-xs text-teal-600 mt-1">
-          <Plus className="h-3 w-3 inline" /> {formatCurrency(Math.round(parseFloat(newBal!.amount) * 100))} wird als neuer Startwert ab {formatMonthYear(newBal!.month || getCurrentYearMonth())} gespeichert
+      <div className="space-y-2">
+        <Label className="text-xs text-gray-500">
+          {hasHistory ? "Neuen Startwert hinzufügen" : "Startwert festlegen"}
+        </Label>
+        <p className="text-[11px] text-gray-400 leading-tight">
+          Restguthaben aus Vormonaten, z.B. von einem früheren Anbieter. Wird als einmalige Gutschrift zusätzlich zum laufenden Monatsbetrag verbucht.
         </p>
-      )}
+        <div className="grid grid-cols-[1fr_auto_auto] gap-2 items-end">
+          <div>
+            <Label className="text-[11px] text-gray-400">Betrag (€)</Label>
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="0,00"
+              value={newBal?.amount || ""}
+              onChange={(e) => onUpdateBalance(budgetType, "amount", e.target.value)}
+              className="h-9 text-base"
+              data-testid={`input-initial-balance-${budgetType}`}
+            />
+          </div>
+          <div>
+            <Label className="text-[11px] text-gray-400">Ab Monat</Label>
+            <select
+              value={(newBal?.month || getCurrentYearMonth()).split("-")[1]}
+              onChange={(e) => {
+                const year = (newBal?.month || getCurrentYearMonth()).split("-")[0];
+                onUpdateBalance(budgetType, "month", `${year}-${e.target.value}`);
+              }}
+              className="h-9 text-sm border border-gray-200 rounded-md px-2"
+              data-testid={`select-balance-month-${budgetType}`}
+            >
+              {MONTH_OPTIONS.map(m => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <Label className="text-[11px] text-gray-400">Jahr</Label>
+            <select
+              value={(newBal?.month || getCurrentYearMonth()).split("-")[0]}
+              onChange={(e) => {
+                const month = (newBal?.month || getCurrentYearMonth()).split("-")[1];
+                onUpdateBalance(budgetType, "month", `${e.target.value}-${month}`);
+              }}
+              className="h-9 text-sm border border-gray-200 rounded-md px-2 w-20"
+              data-testid={`select-balance-year-${budgetType}`}
+            >
+              {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map(y => (
+                <option key={y} value={String(y)}>{y}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {hasNewBalanceInput && (
+          <p className="text-xs text-teal-600 mt-1">
+            <Plus className="h-3 w-3 inline" /> {formatCurrency(Math.round(parseFloat(newBal!.amount) * 100))} wird als Restguthaben ab {formatMonthYear(newBal!.month || getCurrentYearMonth())} gespeichert
+          </p>
+        )}
+      </div>
 
       {hasHistory && allocations.length > 1 && (
         <button

@@ -7,17 +7,22 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useLocation } from "wouter";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/patterns/page-header";
+import { StatusBadge } from "@/components/patterns/status-badge";
 import { useToast } from "@/hooks/use-toast";
-import { useCustomer, useUpdateCustomer, useEmployees } from "@/features/customers";
+import { useCustomer, useUpdateCustomer, useEmployees, customerKeys } from "@/features/customers";
+import { api, unwrapResult } from "@/lib/api";
 import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
+import { todayISO } from "@shared/utils/datetime";
 import { Switch } from "@/components/ui/switch";
 import {
   Loader2,
@@ -27,6 +32,7 @@ import {
   Users,
   Save,
   CreditCard,
+  Heart,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -43,10 +49,30 @@ export default function AdminCustomerEdit() {
   const customerId = parseInt(id || "0");
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const { data: customer, isLoading } = useCustomer(customerId);
   const { data: employees } = useEmployees();
   const updateMutation = useUpdateCustomer();
+
+  const [newPflegegrad, setNewPflegegrad] = useState<string>("");
+  const [pflegegradSeit, setPflegegradSeit] = useState<string>(todayISO());
+
+  const changeCareLevelMutation = useMutation({
+    mutationFn: async (data: { pflegegrad: number; validFrom: string }) => {
+      const result = await api.post(`/admin/customers/${customerId}/care-level`, data);
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      toast({ title: "Pflegegrad aktualisiert", description: "Der Pflegegrad wurde mit Historisierung gespeichert." });
+      queryClient.invalidateQueries({ queryKey: customerKeys.detail(customerId) });
+      queryClient.invalidateQueries({ queryKey: customerKeys.lists() });
+      setNewPflegegrad("");
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+    },
+  });
 
   const employeeOptions = useMemo(() => [
     { value: "", label: "Nicht zugewiesen" },
@@ -67,7 +93,6 @@ export default function AdminCustomerEdit() {
     plz: "",
     stadt: "",
     geburtsdatum: "",
-    pflegegrad: "0",
     primaryEmployeeId: "",
     backupEmployeeId: "",
     acceptsPrivatePayment: false,
@@ -88,7 +113,6 @@ export default function AdminCustomerEdit() {
         plz: customer.plz || "",
         stadt: customer.stadt || "",
         geburtsdatum: customer.geburtsdatum || "",
-        pflegegrad: (customer.pflegegrad ?? 0).toString(),
         primaryEmployeeId: customer.primaryEmployee?.id?.toString() || "",
         backupEmployeeId: customer.backupEmployee?.id?.toString() || "",
         acceptsPrivatePayment: customer.acceptsPrivatePayment ?? false,
@@ -261,6 +285,75 @@ export default function AdminCustomerEdit() {
                     placeholder="email@beispiel.de"
                     data-testid="input-email"
                   />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <Heart className={iconSize.sm} />
+                  Pflegegrad
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-50">
+                  <span className="text-sm text-gray-600">Aktueller Pflegegrad:</span>
+                  {customer && customer.pflegegrad && customer.pflegegrad > 0 ? (
+                    <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
+                  ) : (
+                    <span className="text-sm text-gray-400">Nicht festgelegt</span>
+                  )}
+                </div>
+
+                <div className="border-t pt-4">
+                  <p className="text-sm font-medium mb-3">Pflegegrad ändern</p>
+                  <p className="text-xs text-gray-500 mb-3">
+                    Der bisherige Pflegegrad wird mit Enddatum gespeichert und bleibt für Budgets und Rechnungen nachvollziehbar.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label>Neuer Pflegegrad</Label>
+                      <Select value={newPflegegrad} onValueChange={setNewPflegegrad}>
+                        <SelectTrigger data-testid="select-new-pflegegrad">
+                          <SelectValue placeholder="Auswählen" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PFLEGEGRAD_OPTIONS.map((opt) => (
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Gültig ab</Label>
+                      <DatePicker
+                        value={pflegegradSeit}
+                        onChange={(val) => setPflegegradSeit(val || todayISO())}
+                        data-testid="input-pflegegrad-seit"
+                      />
+                    </div>
+                  </div>
+                  {newPflegegrad && (
+                    <Button
+                      className={`mt-3 w-full ${componentStyles.btnPrimary}`}
+                      onClick={() => {
+                        changeCareLevelMutation.mutate({
+                          pflegegrad: parseInt(newPflegegrad),
+                          validFrom: pflegegradSeit,
+                        });
+                      }}
+                      disabled={changeCareLevelMutation.isPending}
+                      data-testid="button-save-pflegegrad"
+                    >
+                      {changeCareLevelMutation.isPending ? (
+                        <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                      ) : (
+                        <Save className={`${iconSize.sm} mr-2`} />
+                      )}
+                      Pflegegrad ändern
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>

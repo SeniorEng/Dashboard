@@ -8,7 +8,6 @@
 
 import { Link, useParams } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SectionCard } from "@/components/patterns/section-card";
@@ -96,12 +95,6 @@ export default function AdminCustomerDetail() {
               <>
                 {customer.pflegegrad !== null && customer.pflegegrad > 0 && (
                   <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
-                )}
-                {customer.activeContractCount > 0 && (
-                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-                    {customer.activeContractCount} aktive{" "}
-                    {customer.activeContractCount === 1 ? "Vertrag" : "Verträge"}
-                  </Badge>
                 )}
               </>
             }
