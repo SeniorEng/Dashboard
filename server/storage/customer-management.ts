@@ -791,6 +791,7 @@ export class CustomerManagementStorage {
     vorerkrankungen: string | null;
     haustierVorhanden: boolean;
     haustierDetails: string | null;
+    acceptsPrivatePayment: boolean;
   }>): Promise<Customer | undefined> {
     const updateData: any = { ...data, updatedAt: new Date() };
     

@@ -30,8 +30,6 @@ import {
 import { BudgetLedgerSection } from "@/components/budget/BudgetLedgerSection";
 import { BudgetTypeSettings } from "@/components/budget/BudgetTypeSettings";
 import { CustomerOverviewTab } from "./components/customer-overview-tab";
-import { CustomerServicesTab } from "./components/customer-services-tab";
-import { CustomerHistoryTab } from "./components/customer-history-tab";
 import { CustomerInsuranceTab } from "./components/customer-insurance-tab";
 import { PricingSection } from "./components/customer-pricing-section";
 import { CustomerDocumentsSection } from "./components/customer-documents-section";
@@ -114,23 +112,17 @@ export default function AdminCustomerDetail() {
           <ResponsiveTabs
             tabs={[
               { value: "overview", label: "Übersicht", testId: "tab-overview" },
-              { value: "services", label: "Leistungen", testId: "tab-services" },
               { value: "documents", label: "Dokumente", testId: "tab-documents" },
               { value: "contacts", label: "Kontakte", testId: "tab-contacts" },
               { value: "budgets", label: "Budgets", testId: "tab-budgets" },
               { value: "insurance", label: "Versicherung", testId: "tab-insurance" },
-              { value: "history", label: "Historie", testId: "tab-history" },
             ]}
             defaultValue="overview"
-            mobileVisibleCount={3}
+            mobileVisibleCount={5}
           >
 
             <TabsContent value="overview" className="space-y-4">
               <CustomerOverviewTab customer={customer} />
-            </TabsContent>
-
-            <TabsContent value="services" className="space-y-4">
-              <CustomerServicesTab customer={customer} />
             </TabsContent>
 
             <TabsContent value="documents" className="space-y-4">
@@ -236,10 +228,6 @@ export default function AdminCustomerDetail() {
                 customerId={customerId}
                 currentInsurance={customer.currentInsurance}
               />
-            </TabsContent>
-
-            <TabsContent value="history" className="space-y-4">
-              <CustomerHistoryTab customer={customer} />
             </TabsContent>
           </ResponsiveTabs>
         </div>

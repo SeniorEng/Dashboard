@@ -344,6 +344,7 @@ const updateCustomerSchema = z.object({
   vorerkrankungen: z.string().max(2000).nullable().optional(),
   haustierVorhanden: z.boolean().optional(),
   haustierDetails: z.string().max(500).nullable().optional(),
+  acceptsPrivatePayment: z.boolean().optional(),
 });
 
 router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
