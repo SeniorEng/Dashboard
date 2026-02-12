@@ -48,6 +48,28 @@ export default function AdminCustomerDetail() {
   const customerId = parseInt(id || "0");
 
   const { data: customer, isLoading, error, refetch } = useCustomer(customerId);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [isToggling, setIsToggling] = useState(false);
+
+  const togglePrivatePayment = useMutation({
+    mutationFn: async (accepts: boolean) => {
+      setIsToggling(true);
+      const result = await api.patch(`/admin/customers/${customerId}`, {
+        acceptsPrivatePayment: accepts,
+      });
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: customerKeys.detail(customerId) });
+      toast({ title: "Abrechnungseinstellung aktualisiert" });
+      setIsToggling(false);
+    },
+    onError: (err: Error) => {
+      toast({ title: "Fehler", description: err.message, variant: "destructive" });
+      setIsToggling(false);
+    },
+  });
 
   if (isLoading) {
     return (
@@ -94,29 +116,7 @@ export default function AdminCustomerDetail() {
     ? `${customer.vorname} ${customer.nachname}` 
     : customer.name;
 
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const [isToggling, setIsToggling] = useState(false);
   const budget = customer.budgetSummary;
-
-  const togglePrivatePayment = useMutation({
-    mutationFn: async (accepts: boolean) => {
-      setIsToggling(true);
-      const result = await api.patch(`/admin/customers/${customer.id}`, {
-        acceptsPrivatePayment: accepts,
-      });
-      return unwrapResult(result);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: customerKeys.detail(customer.id) });
-      toast({ title: "Abrechnungseinstellung aktualisiert" });
-      setIsToggling(false);
-    },
-    onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message, variant: "destructive" });
-      setIsToggling(false);
-    },
-  });
 
   return (
     <Layout>
