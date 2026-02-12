@@ -33,7 +33,7 @@ export default function EditAppointment() {
     serviceName: string;
     serviceCode: string | null;
   }>>({
-    queryKey: ["appointments", id, "services"],
+    queryKey: [`/api/appointments/${id}/services`],
     queryFn: async () => {
       const res = await fetch(`/api/appointments/${id}/services`);
       if (!res.ok) return [];
@@ -114,6 +114,7 @@ export default function EditAppointment() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}/services`] });
       toast({ title: "Termin aktualisiert", description: "Die Änderungen wurden gespeichert." });
       setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");
     },
