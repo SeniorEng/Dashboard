@@ -95,6 +95,9 @@ export default function AdminCustomerEdit() {
     geburtsdatum: "",
     primaryEmployeeId: "",
     backupEmployeeId: "",
+    vorerkrankungen: "",
+    haustierVorhanden: false,
+    haustierDetails: "",
     acceptsPrivatePayment: false,
   });
 
@@ -115,6 +118,9 @@ export default function AdminCustomerEdit() {
         geburtsdatum: customer.geburtsdatum || "",
         primaryEmployeeId: customer.primaryEmployee?.id?.toString() || "",
         backupEmployeeId: customer.backupEmployee?.id?.toString() || "",
+        vorerkrankungen: customer.vorerkrankungen || "",
+        haustierVorhanden: customer.haustierVorhanden ?? false,
+        haustierDetails: customer.haustierDetails || "",
         acceptsPrivatePayment: customer.acceptsPrivatePayment ?? false,
       });
     }
@@ -173,6 +179,7 @@ export default function AdminCustomerEdit() {
     const data: Record<string, unknown> = {
       vorname: formData.vorname.trim(),
       nachname: formData.nachname.trim(),
+      geburtsdatum: formData.geburtsdatum?.trim() || null,
       email: formData.email.trim() || null,
       telefon: formData.telefon.trim() ? normalizePhone(formData.telefon) : null,
       festnetz: formData.festnetz.trim() ? normalizePhone(formData.festnetz) : null,
@@ -182,6 +189,9 @@ export default function AdminCustomerEdit() {
       stadt: formData.stadt.trim() || null,
       primaryEmployeeId: primaryId,
       backupEmployeeId: backupId,
+      vorerkrankungen: formData.vorerkrankungen?.trim() || null,
+      haustierVorhanden: formData.haustierVorhanden ?? false,
+      haustierDetails: formData.haustierVorhanden ? (formData.haustierDetails?.trim() || null) : null,
       acceptsPrivatePayment: formData.acceptsPrivatePayment,
     };
 

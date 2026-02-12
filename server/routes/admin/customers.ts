@@ -332,6 +332,7 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
 const updateCustomerSchema = z.object({
   vorname: z.string().min(1).optional(),
   nachname: z.string().min(1).optional(),
+  geburtsdatum: z.string().nullable().optional(),
   email: z.string().email().nullable().optional(),
   festnetz: z.string().nullable().optional(),
   telefon: z.string().nullable().optional(),

@@ -779,6 +779,7 @@ export class CustomerManagementStorage {
   async updateCustomer(id: number, data: Partial<{
     vorname: string;
     nachname: string;
+    geburtsdatum: string | null;
     email: string | null;
     festnetz: string | null;
     telefon: string | null;
