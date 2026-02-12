@@ -1,0 +1,324 @@
+import { useState } from "react";
+import { Link } from "wouter";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Layout } from "@/components/layout";
+import { useToast } from "@/hooks/use-toast";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  ArrowLeft,
+  Plus,
+  Loader2,
+  Pencil,
+  FileCheck2,
+  CalendarClock,
+  Bell,
+} from "lucide-react";
+import { api, unwrapResult } from "@/lib/api/client";
+import { iconSize, componentStyles } from "@/design-system";
+
+interface DocumentTypeData {
+  id: number;
+  name: string;
+  description: string | null;
+  reviewIntervalMonths: number | null;
+  reminderLeadTimeDays: number | null;
+  isActive: boolean;
+}
+
+interface DocTypeFormData {
+  name: string;
+  description: string;
+  reviewIntervalMonths: string;
+  reminderLeadTimeDays: string;
+  isActive: boolean;
+}
+
+const emptyForm: DocTypeFormData = {
+  name: "",
+  description: "",
+  reviewIntervalMonths: "",
+  reminderLeadTimeDays: "14",
+  isActive: true,
+};
+
+function toFormData(dt: DocumentTypeData): DocTypeFormData {
+  return {
+    name: dt.name,
+    description: dt.description || "",
+    reviewIntervalMonths: dt.reviewIntervalMonths?.toString() || "",
+    reminderLeadTimeDays: dt.reminderLeadTimeDays?.toString() || "14",
+    isActive: dt.isActive,
+  };
+}
+
+function toPayload(form: DocTypeFormData) {
+  return {
+    name: form.name,
+    description: form.description || null,
+    reviewIntervalMonths: form.reviewIntervalMonths ? parseInt(form.reviewIntervalMonths) : null,
+    reminderLeadTimeDays: form.reminderLeadTimeDays ? parseInt(form.reminderLeadTimeDays) : 14,
+    isActive: form.isActive,
+  };
+}
+
+export default function AdminDocumentTypes() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [editingType, setEditingType] = useState<DocumentTypeData | null>(null);
+  const [formData, setFormData] = useState<DocTypeFormData>(emptyForm);
+
+  const { data: docTypes, isLoading } = useQuery<DocumentTypeData[]>({
+    queryKey: ["admin", "document-types"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/document-types?includeInactive=true", { credentials: "include" });
+      if (!res.ok) throw new Error("Dokumententypen konnten nicht geladen werden");
+      return res.json();
+    },
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (data: ReturnType<typeof toPayload>) => {
+      const result = await api.post("/admin/document-types", data);
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "document-types"] });
+      setIsCreateOpen(false);
+      setFormData(emptyForm);
+      toast({ title: "Dokumententyp erstellt" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, ...data }: ReturnType<typeof toPayload> & { id: number }) => {
+      const result = await api.patch(`/admin/document-types/${id}`, data);
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "document-types"] });
+      setEditingType(null);
+      setFormData(emptyForm);
+      toast({ title: "Dokumententyp aktualisiert" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleOpenCreate = () => {
+    setFormData(emptyForm);
+    setIsCreateOpen(true);
+  };
+
+  const handleOpenEdit = (dt: DocumentTypeData) => {
+    setFormData(toFormData(dt));
+    setEditingType(dt);
+  };
+
+  const handleSubmit = () => {
+    const payload = toPayload(formData);
+    if (editingType) {
+      updateMutation.mutate({ ...payload, id: editingType.id });
+    } else {
+      createMutation.mutate(payload);
+    }
+  };
+
+  const isPending = createMutation.isPending || updateMutation.isPending;
+
+  const formContent = (
+    <div className="space-y-4 pt-2">
+      <div className="space-y-2">
+        <Label>Name *</Label>
+        <Input
+          value={formData.name}
+          onChange={(e) => setFormData(p => ({ ...p, name: e.target.value }))}
+          placeholder="z.B. Führerschein"
+          className="text-base"
+          data-testid="input-doctype-name"
+        />
+      </div>
+      <div className="space-y-2">
+        <Label>Beschreibung</Label>
+        <Input
+          value={formData.description}
+          onChange={(e) => setFormData(p => ({ ...p, description: e.target.value }))}
+          placeholder="Optionale Beschreibung"
+          className="text-base"
+          data-testid="input-doctype-description"
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label className="flex items-center gap-1">
+            <CalendarClock className="h-3.5 w-3.5" />
+            Prüffrist (Monate)
+          </Label>
+          <Input
+            type="number"
+            min="1"
+            value={formData.reviewIntervalMonths}
+            onChange={(e) => setFormData(p => ({ ...p, reviewIntervalMonths: e.target.value }))}
+            placeholder="Leer = keine Prüfung"
+            className="text-base"
+            data-testid="input-doctype-interval"
+          />
+          <p className="text-[11px] text-gray-400">Leer lassen wenn keine regelmäßige Prüfung nötig</p>
+        </div>
+        <div className="space-y-2">
+          <Label className="flex items-center gap-1">
+            <Bell className="h-3.5 w-3.5" />
+            Vorlaufzeit (Tage)
+          </Label>
+          <Input
+            type="number"
+            min="1"
+            max="365"
+            value={formData.reminderLeadTimeDays}
+            onChange={(e) => setFormData(p => ({ ...p, reminderLeadTimeDays: e.target.value }))}
+            placeholder="14"
+            className="text-base"
+            data-testid="input-doctype-leadtime"
+          />
+          <p className="text-[11px] text-gray-400">Tage vorher erinnern</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 pt-2">
+        <Switch
+          checked={formData.isActive}
+          onCheckedChange={(v) => setFormData(p => ({ ...p, isActive: v }))}
+          data-testid="switch-doctype-active"
+        />
+        <Label>Aktiv</Label>
+      </div>
+      <Button
+        className={`w-full mt-2 ${componentStyles.btnPrimary}`}
+        onClick={handleSubmit}
+        disabled={isPending || !formData.name.trim()}
+        data-testid="button-save-doctype"
+      >
+        {isPending && <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />}
+        {editingType ? "Aktualisieren" : "Erstellen"}
+      </Button>
+    </div>
+  );
+
+  return (
+    <Layout>
+      <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
+        <div className="container mx-auto px-4 py-6 max-w-4xl">
+          <div className="flex items-center justify-between gap-2 mb-6">
+            <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+              <Link href="/admin">
+                <Button variant="ghost" size="icon" data-testid="button-back">
+                  <ArrowLeft className={iconSize.md} />
+                </Button>
+              </Link>
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">Dokumententypen</h1>
+            </div>
+            <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+              <DialogTrigger asChild>
+                <Button className="bg-teal-600 hover:bg-teal-700 shrink-0" onClick={handleOpenCreate} data-testid="button-create-doctype">
+                  <Plus className={`${iconSize.sm} sm:mr-2`} />
+                  <span className="hidden sm:inline">Neuer Typ</span>
+                  <span className="sm:hidden">Neu</span>
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Neuer Dokumententyp</DialogTitle>
+                </DialogHeader>
+                {formContent}
+              </DialogContent>
+            </Dialog>
+          </div>
+
+          {isLoading ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className={`${iconSize.xl} animate-spin text-teal-600`} />
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {docTypes?.length === 0 && (
+                <Card>
+                  <CardContent className="p-6 text-center text-gray-500">
+                    Noch keine Dokumententypen definiert. Erstellen Sie den ersten Typ.
+                  </CardContent>
+                </Card>
+              )}
+              {docTypes?.map((dt) => (
+                <Card key={dt.id} className={!dt.isActive ? "opacity-60" : ""} data-testid={`card-doctype-${dt.id}`}>
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <FileCheck2 className={`${iconSize.sm} text-amber-600 shrink-0`} />
+                          <span className="font-semibold text-gray-900">{dt.name}</span>
+                          {!dt.isActive && (
+                            <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600">Inaktiv</span>
+                          )}
+                        </div>
+                        {dt.description && (
+                          <p className="text-sm text-gray-500 mb-2 ml-6">{dt.description}</p>
+                        )}
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 ml-6">
+                          {dt.reviewIntervalMonths ? (
+                            <span className="text-xs text-gray-500 flex items-center gap-1">
+                              <CalendarClock className="h-3 w-3" />
+                              Prüfung alle {dt.reviewIntervalMonths} Monate
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400">Keine Prüffrist</span>
+                          )}
+                          {dt.reviewIntervalMonths && dt.reminderLeadTimeDays && (
+                            <span className="text-xs text-gray-500 flex items-center gap-1">
+                              <Bell className="h-3 w-3" />
+                              {dt.reminderLeadTimeDays} Tage Vorlauf
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0 shrink-0"
+                        onClick={() => handleOpenEdit(dt)}
+                        data-testid={`button-edit-doctype-${dt.id}`}
+                      >
+                        <Pencil className={`${iconSize.sm} text-gray-600`} />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <Dialog open={!!editingType} onOpenChange={() => { setEditingType(null); setFormData(emptyForm); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Dokumententyp bearbeiten</DialogTitle>
+          </DialogHeader>
+          {formContent}
+        </DialogContent>
+      </Dialog>
+    </Layout>
+  );
+}

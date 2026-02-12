@@ -11,3 +11,4 @@ export * from "./service-records";
 export * from "./tasks";
 export * from "./system";
 export * from "./customer-full";
+export * from "./documents";

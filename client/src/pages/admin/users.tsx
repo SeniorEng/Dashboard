@@ -41,6 +41,8 @@ import {
 } from "./components/user-types";
 import { UserForm } from "./components/user-form";
 import { CompensationSection } from "./components/compensation-section";
+import { EmployeeDocumentsSection } from "./components/employee-documents-section";
+import { EmployeeServiceRates } from "./components/employee-service-rates";
 import { ResetPasswordForm } from "./components/reset-password-form";
 
 export default function AdminUsers() {
@@ -313,6 +315,8 @@ export default function AdminUsers() {
                 isLoading={updateMutation.isPending}
               />
               <CompensationSection userId={editingUser.id} userName={editingUser.displayName} />
+              <EmployeeServiceRates />
+              <EmployeeDocumentsSection employeeId={editingUser.id} userName={editingUser.displayName} isAdmin={true} />
             </>
           )}
         </DialogContent>

@@ -46,6 +46,17 @@ app.use((req, res, next) => {
 
   await registerRoutes(httpServer, app);
 
+  const { generateDocumentReviewTasks } = await import("./services/document-review");
+  setInterval(async () => {
+    try {
+      const created = await generateDocumentReviewTasks();
+      if (created > 0) log(`${created} Dokumenten-Aufgaben erstellt`);
+    } catch (e) {
+      console.error("Fehler bei Dokumenten-Prüfung:", e);
+    }
+  }, 6 * 60 * 60 * 1000); // every 6 hours
+  generateDocumentReviewTasks().catch(e => console.error("Initial document check:", e));
+
   app.use(errorMiddleware);
 
   // importantly only setup vite in development and after
