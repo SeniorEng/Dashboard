@@ -1,27 +1,51 @@
 import { documentStorage } from "../storage/documents";
 import { storage } from "../storage";
-import { formatDateISO } from "@shared/utils/datetime";
+import { formatDateISO, formatDateForDisplay } from "@shared/utils/datetime";
+import { BILLING_TYPE_LABELS, type BillingType } from "@shared/domain/customers";
 
 export interface TemplatePlaceholders {
   [key: string]: string;
 }
 
 const PLACEHOLDER_CATALOG: Record<string, { label: string; source: string }> = {
-  customer_name: { label: "Kundenname", source: "customer" },
-  customer_address: { label: "Kundenadresse", source: "customer" },
+  customer_name: { label: "Kundenname (Vor- und Nachname)", source: "customer" },
+  customer_vorname: { label: "Vorname", source: "customer" },
+  customer_nachname: { label: "Nachname", source: "customer" },
+  customer_address: { label: "Vollständige Adresse", source: "customer" },
+  customer_strasse: { label: "Straße", source: "customer" },
+  customer_hausnummer: { label: "Hausnummer", source: "customer" },
+  customer_plz: { label: "Postleitzahl", source: "customer" },
+  customer_stadt: { label: "Stadt", source: "customer" },
   customer_birthdate: { label: "Geburtsdatum", source: "customer" },
-  customer_phone: { label: "Telefonnummer", source: "customer" },
+  customer_phone: { label: "Mobilnummer", source: "customer" },
+  customer_festnetz: { label: "Festnetznummer", source: "customer" },
   customer_email: { label: "E-Mail", source: "customer" },
-  pflegegrad: { label: "Pflegegrad", source: "customer" },
+  pflegegrad: { label: "Pflegegrad (z.B. 'Pflegegrad 3')", source: "customer" },
+  pflegegrad_nummer: { label: "Pflegegrad (nur Zahl)", source: "customer" },
+  pflegegrad_seit: { label: "Pflegegrad seit (Datum)", source: "customer" },
+  abrechnungsart: { label: "Abrechnungsart (z.B. 'Selbstzahler')", source: "customer" },
   versichertennummer: { label: "Versichertennummer", source: "insurance" },
   insurance_name: { label: "Pflegekasse Name", source: "insurance" },
   ik_nummer: { label: "IK-Nummer", source: "insurance" },
-  vertragsbeginn: { label: "Vertragsbeginn", source: "system" },
-  mandatsreferenz: { label: "Mandatsreferenz", source: "system" },
+  vorerkrankungen: { label: "Vorerkrankungen", source: "customer" },
+  haustier: { label: "Haustier vorhanden (Ja/Nein)", source: "customer" },
+  haustier_details: { label: "Haustier Details", source: "customer" },
+  personenbefoerderung: { label: "Personenbeförderung gewünscht (Ja/Nein)", source: "customer" },
+  vertragsdatum: { label: "Vertragsdatum (Abschlussdatum)", source: "contract" },
+  vertragsbeginn: { label: "Vertragsbeginn", source: "contract" },
+  vereinbarte_leistungen: { label: "Vereinbarte Leistungen", source: "contract" },
+  vertragsstunden: { label: "Vereinbarte Stunden", source: "contract" },
+  vertragsperiode: { label: "Vertragsperiode (pro Woche/Monat)", source: "contract" },
+  kontaktperson_name: { label: "Kontaktperson Name", source: "contact" },
+  kontaktperson_telefon: { label: "Kontaktperson Telefon", source: "contact" },
+  kontaktperson_email: { label: "Kontaktperson E-Mail", source: "contact" },
+  kontaktperson_typ: { label: "Kontaktperson Typ", source: "contact" },
+  mandatsreferenz: { label: "SEPA-Mandatsreferenz", source: "system" },
+  current_date: { label: "Aktuelles Datum", source: "system" },
+  heute: { label: "Heutiges Datum", source: "system" },
+  company_name: { label: "Firmenname", source: "system" },
   customer_signature: { label: "Kundenunterschrift", source: "signature" },
   employee_signature: { label: "Mitarbeiterunterschrift", source: "signature" },
-  current_date: { label: "Aktuelles Datum", source: "system" },
-  company_name: { label: "Firmenname", source: "system" },
 };
 
 export function getPlaceholderCatalog() {
@@ -29,6 +53,15 @@ export function getPlaceholderCatalog() {
     key: `{{${key}}}`,
     ...value,
   }));
+}
+
+function formatDE(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  try {
+    return formatDateForDisplay(dateStr);
+  } catch {
+    return dateStr;
+  }
 }
 
 export async function buildPlaceholders(
@@ -39,19 +72,44 @@ export async function buildPlaceholders(
   if (!customer) throw new Error("Kunde nicht gefunden");
 
   const today = new Date();
+  const todayDE = formatDateForDisplay(formatDateISO(today));
+
   const placeholders: TemplatePlaceholders = {
     customer_name: customer.name || "",
+    customer_vorname: customer.vorname || "",
+    customer_nachname: customer.nachname || "",
     customer_address: [customer.strasse, `${customer.plz || ""} ${customer.stadt || ""}`].filter(Boolean).join(", "),
-    customer_birthdate: customer.geburtsdatum || "",
+    customer_strasse: customer.strasse || "",
+    customer_hausnummer: customer.nr || "",
+    customer_plz: customer.plz || "",
+    customer_stadt: customer.stadt || "",
+    customer_birthdate: formatDE(customer.geburtsdatum),
     customer_phone: customer.telefon || "",
+    customer_festnetz: customer.festnetz || "",
     customer_email: customer.email || "",
-    pflegegrad: customer.pflegegrad ? `Pflegegrad ${customer.pflegegrad}` : "Nicht angegeben",
+    pflegegrad: customer.pflegegrad ? `Pflegegrad ${customer.pflegegrad}` : "",
+    pflegegrad_nummer: customer.pflegegrad ? String(customer.pflegegrad) : "",
+    pflegegrad_seit: "",
+    abrechnungsart: BILLING_TYPE_LABELS[customer.billingType as BillingType] || customer.billingType || "",
     versichertennummer: "",
     insurance_name: "",
     ik_nummer: "",
-    vertragsbeginn: formatDateISO(today),
+    vorerkrankungen: customer.vorerkrankungen || "",
+    haustier: customer.haustierVorhanden ? "Ja" : "Nein",
+    haustier_details: customer.haustierDetails || "",
+    personenbefoerderung: customer.personenbefoerderungGewuenscht ? "Ja" : "Nein",
+    vertragsdatum: todayDE,
+    vertragsbeginn: todayDE,
+    vereinbarte_leistungen: "",
+    vertragsstunden: "",
+    vertragsperiode: "",
+    kontaktperson_name: "",
+    kontaktperson_telefon: "",
+    kontaktperson_email: "",
+    kontaktperson_typ: "",
     mandatsreferenz: `SE-${customerId}-${today.getFullYear()}`,
-    current_date: formatDateISO(today),
+    current_date: todayDE,
+    heute: todayDE,
     company_name: "SeniorenEngel GmbH",
     customer_signature: "",
     employee_signature: "",

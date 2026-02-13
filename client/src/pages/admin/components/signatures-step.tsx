@@ -7,7 +7,8 @@ import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
 import { FileText, Check, AlertCircle, Loader2, AlertTriangle, X } from "lucide-react";
 import { iconSize } from "@/design-system";
-import type { BillingType } from "@shared/domain/customers";
+import { BILLING_TYPE_LABELS, type BillingType } from "@shared/domain/customers";
+import type { CustomerFormData, ContactFormData } from "./customer-types";
 
 interface TemplateWithRequirement {
   id: number;
@@ -19,18 +20,7 @@ interface TemplateWithRequirement {
   sortOrder: number;
 }
 
-interface CustomerFormDataForPreview {
-  vorname: string;
-  nachname: string;
-  geburtsdatum: string;
-  strasse: string;
-  nr: string;
-  plz: string;
-  stadt: string;
-  telefon: string;
-  email: string;
-  pflegegrad: string;
-}
+type CustomerFormDataForPreview = CustomerFormData;
 
 interface SignaturesStepProps {
   billingType: BillingType;
@@ -39,20 +29,60 @@ interface SignaturesStepProps {
   formData?: CustomerFormDataForPreview;
 }
 
+function formatDateDE(dateStr: string): string {
+  if (!dateStr) return "";
+  const parts = dateStr.split("-");
+  if (parts.length !== 3) return dateStr;
+  return `${parts[2]}.${parts[1]}.${parts[0]}`;
+}
+
+function getPrimaryContact(contacts: ContactFormData[]): ContactFormData | undefined {
+  return contacts.find(c => c.isPrimary) || contacts[0];
+}
+
 function renderClientSide(htmlContent: string, formData: CustomerFormDataForPreview, signatureData?: string): string {
   const today = new Date();
-  const dateStr = `${today.getDate().toString().padStart(2, "0")}.${(today.getMonth() + 1).toString().padStart(2, "0")}.${today.getFullYear()}`;
+  const todayDE = `${today.getDate().toString().padStart(2, "0")}.${(today.getMonth() + 1).toString().padStart(2, "0")}.${today.getFullYear()}`;
+  const primaryContact = getPrimaryContact(formData.contacts || []);
+  const periodLabel = formData.contractPeriod === "monthly" ? "pro Monat" : "pro Woche";
+
   const placeholders: Record<string, string> = {
     customer_name: `${formData.vorname} ${formData.nachname}`.trim(),
+    customer_vorname: formData.vorname || "",
+    customer_nachname: formData.nachname || "",
     customer_address: [`${formData.strasse} ${formData.nr}`.trim(), `${formData.plz} ${formData.stadt}`.trim()].filter(Boolean).join(", "),
-    customer_birthdate: formData.geburtsdatum || "",
+    customer_strasse: formData.strasse || "",
+    customer_hausnummer: formData.nr || "",
+    customer_plz: formData.plz || "",
+    customer_stadt: formData.stadt || "",
+    customer_birthdate: formatDateDE(formData.geburtsdatum),
     customer_phone: formData.telefon || "",
+    customer_festnetz: formData.festnetz || "",
     customer_email: formData.email || "",
     pflegegrad: formData.pflegegrad && formData.pflegegrad !== "0" ? `Pflegegrad ${formData.pflegegrad}` : "",
-    current_date: dateStr,
+    pflegegrad_nummer: formData.pflegegrad && formData.pflegegrad !== "0" ? formData.pflegegrad : "",
+    pflegegrad_seit: formatDateDE(formData.pflegegradSeit),
+    abrechnungsart: BILLING_TYPE_LABELS[formData.billingType] || formData.billingType,
+    versichertennummer: formData.versichertennummer || "",
+    vorerkrankungen: formData.vorerkrankungen || "",
+    haustier: formData.haustierVorhanden ? "Ja" : "Nein",
+    haustier_details: formData.haustierDetails || "",
+    personenbefoerderung: formData.personenbefoerderungGewuenscht ? "Ja" : "Nein",
+    vertragsdatum: formatDateDE(formData.contractDate),
+    vertragsbeginn: formatDateDE(formData.contractStart),
+    vereinbarte_leistungen: formData.vereinbarteLeistungen || "",
+    vertragsstunden: formData.contractHours || "",
+    vertragsperiode: periodLabel,
+    kontaktperson_name: primaryContact ? `${primaryContact.vorname} ${primaryContact.nachname}`.trim() : "",
+    kontaktperson_telefon: primaryContact?.telefon || "",
+    kontaktperson_email: primaryContact?.email || "",
+    kontaktperson_typ: primaryContact?.contactType || "",
+    mandatsreferenz: `SE-NEU-${today.getFullYear()}`,
+    current_date: todayDE,
+    heute: todayDE,
     company_name: "SeniorenEngel GmbH",
-    vertragsbeginn: dateStr,
     customer_signature: signatureData ? `<img src="${signatureData}" style="max-height:60px;" />` : "",
+    employee_signature: "",
   };
 
   let rendered = htmlContent;
