@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { StatusBadge } from "@/components/patterns/status-badge";
-import { ArrowUp, ArrowDown, Save, Plus, History, ChevronDown, ChevronUp } from "lucide-react";
+import { ArrowUp, ArrowDown, Save, Plus, History, ChevronDown, ChevronUp, ChevronRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { BUDGET_TYPE_LABELS, type BudgetType, BUDGET_45B_MAX_MONTHLY_CENTS, BUDGET_39_42A_MAX_YEARLY_CENTS, BUDGET_45A_MAX_BY_PFLEGEGRAD } from "@shared/domain/budgets";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -71,6 +71,7 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
   const [settings, setSettings] = useState<BudgetTypeSetting[]>([]);
   const [hasChanges, setHasChanges] = useState(false);
   const [expandedHistory, setExpandedHistory] = useState<Record<string, boolean>>({});
+  const [expandedInitialBalance, setExpandedInitialBalance] = useState<Record<string, boolean>>({});
   const [newBalances, setNewBalances] = useState<Record<string, { amount: string; month: string }>>({});
 
   const { data, isLoading } = useQuery<BudgetTypeSetting[]>({
@@ -129,11 +130,12 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
     const swapIndex = direction === "up" ? index - 1 : index + 1;
     if (swapIndex < 0 || swapIndex >= newSettings.length) return;
 
-    const tempPriority = newSettings[index].priority;
-    newSettings[index] = { ...newSettings[index], priority: newSettings[swapIndex].priority };
-    newSettings[swapIndex] = { ...newSettings[swapIndex], priority: tempPriority };
+    [newSettings[index], newSettings[swapIndex]] = [newSettings[swapIndex], newSettings[index]];
 
-    newSettings.sort((a, b) => a.priority - b.priority);
+    newSettings.forEach((s, i) => {
+      newSettings[i] = { ...s, priority: i + 1 };
+    });
+
     setSettings(newSettings);
     setHasChanges(true);
   };
@@ -192,17 +194,17 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
     setExpandedHistory(prev => ({ ...prev, [budgetType]: !prev[budgetType] }));
   };
 
+  const toggleInitialBalance = (budgetType: string) => {
+    setExpandedInitialBalance(prev => ({ ...prev, [budgetType]: !prev[budgetType] }));
+  };
+
   if (isLoading) {
     return <div className="text-sm text-gray-500">Laden...</div>;
   }
 
   return (
-    <div className="space-y-4" data-testid="budget-type-settings">
-      <p className="text-sm text-gray-600">
-        Legen Sie fest, welche Budget-Töpfe für diesen Kunden genutzt werden und in welcher Reihenfolge abgerechnet wird.
-      </p>
-
-      <div className="space-y-3">
+    <div className="space-y-2" data-testid="budget-type-settings">
+      <div className="space-y-2">
         {settings.map((setting, index) => {
           const label = BUDGET_TYPE_LABELS[setting.budgetType as BudgetType] || setting.budgetType;
           const newBal = newBalances[setting.budgetType];
@@ -211,93 +213,106 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
           return (
             <div
               key={setting.budgetType}
-              className={`p-3 rounded-lg border ${setting.enabled ? "bg-white border-gray-200" : "bg-gray-50 border-gray-100 opacity-60"}`}
+              className={`p-2 rounded-lg border ${setting.enabled ? "bg-white border-gray-200" : "bg-gray-50 border-gray-100 opacity-60"}`}
               data-testid={`budget-type-setting-${setting.budgetType}`}
             >
-              <div className="flex items-center gap-2">
-                <div className="flex flex-col">
+              <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-0.5">
                   <button
                     type="button"
                     onClick={() => movePriority(index, "up")}
                     disabled={index === 0}
-                    className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="p-1 flex items-center justify-center rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
                     data-testid={`btn-priority-up-${setting.budgetType}`}
                   >
-                    <ArrowUp className="h-4 w-4" />
+                    <ArrowUp className="h-3.5 w-3.5" />
                   </button>
                   <button
                     type="button"
                     onClick={() => movePriority(index, "down")}
                     disabled={index === settings.length - 1}
-                    className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="p-1 flex items-center justify-center rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
                     data-testid={`btn-priority-down-${setting.budgetType}`}
                   >
-                    <ArrowDown className="h-4 w-4" />
+                    <ArrowDown className="h-3.5 w-3.5" />
                   </button>
                 </div>
 
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="text-sm font-medium leading-snug">
-                      <span className="text-gray-500">{index + 1}.</span> {label}
-                    </span>
-                    <Switch
-                      checked={setting.enabled}
-                      onCheckedChange={() => toggleEnabled(index)}
-                      className="shrink-0 mt-0.5"
-                      data-testid={`switch-enabled-${setting.budgetType}`}
-                    />
-                  </div>
+                <span className="text-sm font-medium leading-snug flex-1 min-w-0">
+                  <span className="text-gray-500">{index + 1}.</span> {label}
+                </span>
 
-                  {setting.enabled && (
-                    <div className="mt-3 space-y-3">
-                      {isMonthlyBudget(setting.budgetType) && (
-                        <div>
-                          <Label className="text-xs text-gray-500">Unser Anteil (€/Monat)</Label>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            placeholder={getMaxPlaceholder(setting.budgetType)}
-                            value={centsToEuro(setting.monthlyLimitCents)}
-                            onChange={(e) => updateCentsField(index, "monthlyLimitCents", e.target.value)}
-                            className="h-8 mt-1 text-base"
-                            data-testid={`input-monthly-limit-${setting.budgetType}`}
-                          />
-                        </div>
-                      )}
+                <Switch
+                  checked={setting.enabled}
+                  onCheckedChange={() => toggleEnabled(index)}
+                  className="shrink-0"
+                  data-testid={`switch-enabled-${setting.budgetType}`}
+                />
+              </div>
 
-                      {isYearlyBudget(setting.budgetType) && (
-                        <div>
-                          <Label className="text-xs text-gray-500">Unser Anteil (€/Jahr)</Label>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            placeholder={getMaxPlaceholder(setting.budgetType)}
-                            value={centsToEuro(setting.yearlyLimitCents)}
-                            onChange={(e) => updateCentsField(index, "yearlyLimitCents", e.target.value)}
-                            className="h-8 mt-1 text-base"
-                            data-testid={`input-yearly-limit-${setting.budgetType}`}
-                          />
-                        </div>
-                      )}
+              {setting.enabled && (
+                <div className="mt-2 ml-[52px] space-y-2">
+                  {isMonthlyBudget(setting.budgetType) && (
+                    <div>
+                      <Label className="text-xs text-gray-500">Unser Anteil (€/Monat)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder={getMaxPlaceholder(setting.budgetType)}
+                        value={centsToEuro(setting.monthlyLimitCents)}
+                        onChange={(e) => updateCentsField(index, "monthlyLimitCents", e.target.value)}
+                        className="h-8 mt-1 text-base"
+                        data-testid={`input-monthly-limit-${setting.budgetType}`}
+                      />
+                    </div>
+                  )}
 
-                      <div className="border-t border-gray-100 pt-3">
-                        <InitialBalanceSection
-                          customerId={customerId}
-                          budgetType={setting.budgetType}
-                          newBal={newBal}
-                          hasNewBalanceInput={!!hasNewBalanceInput}
-                          onUpdateBalance={updateNewBalance}
-                          expanded={!!expandedHistory[setting.budgetType]}
-                          onToggleHistory={() => toggleHistory(setting.budgetType)}
-                        />
-                      </div>
+                  {isYearlyBudget(setting.budgetType) && (
+                    <div>
+                      <Label className="text-xs text-gray-500">Unser Anteil (€/Jahr)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder={getMaxPlaceholder(setting.budgetType)}
+                        value={centsToEuro(setting.yearlyLimitCents)}
+                        onChange={(e) => updateCentsField(index, "yearlyLimitCents", e.target.value)}
+                        className="h-8 mt-1 text-base"
+                        data-testid={`input-yearly-limit-${setting.budgetType}`}
+                      />
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => toggleInitialBalance(setting.budgetType)}
+                    className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700"
+                    data-testid={`btn-toggle-initial-balance-${setting.budgetType}`}
+                  >
+                    {expandedInitialBalance[setting.budgetType] ? (
+                      <ChevronDown className="h-3 w-3" />
+                    ) : (
+                      <ChevronRight className="h-3 w-3" />
+                    )}
+                    Startwert festlegen
+                  </button>
+
+                  {expandedInitialBalance[setting.budgetType] && (
+                    <div className="border-t border-gray-100 pt-2">
+                      <InitialBalanceSection
+                        customerId={customerId}
+                        budgetType={setting.budgetType}
+                        newBal={newBal}
+                        hasNewBalanceInput={!!hasNewBalanceInput}
+                        onUpdateBalance={updateNewBalance}
+                        expanded={!!expandedHistory[setting.budgetType]}
+                        onToggleHistory={() => toggleHistory(setting.budgetType)}
+                      />
                     </div>
                   )}
                 </div>
-              </div>
+              )}
             </div>
           );
         })}
@@ -347,9 +362,9 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
   return (
     <div>
       {latestAllocation && (
-        <div className="flex items-center justify-between mb-3 py-1.5 px-2 rounded bg-teal-50 text-sm" data-testid={`text-current-balance-${budgetType}`}>
+        <div className="flex items-center justify-between mb-2 py-1 px-2 rounded bg-teal-50 text-sm" data-testid={`text-current-balance-${budgetType}`}>
           <span className="text-gray-600">
-            Aktueller Startwert (ab {formatMonthYear(latestAllocation.validFrom)})
+            Startwert (ab {formatMonthYear(latestAllocation.validFrom)})
           </span>
           <span className="font-semibold text-teal-700">{formatCurrency(latestAllocation.amountCents)}</span>
         </div>
@@ -359,9 +374,6 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
         <Label className="text-xs text-gray-500">
           {hasHistory ? "Neuen Startwert hinzufügen" : "Startwert festlegen"}
         </Label>
-        <p className="text-[11px] text-gray-400 leading-tight">
-          Restguthaben aus Vormonaten, z.B. von einem früheren Anbieter. Wird als einmalige Gutschrift zusätzlich zum laufenden Monatsbetrag verbucht.
-        </p>
         <div className="space-y-2">
           <div>
             <Label className="text-[11px] text-gray-400">Betrag (€)</Label>
@@ -372,7 +384,7 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
               placeholder="0,00"
               value={newBal?.amount || ""}
               onChange={(e) => onUpdateBalance(budgetType, "amount", e.target.value)}
-              className="h-9 text-base"
+              className="h-8 text-base"
               data-testid={`input-initial-balance-${budgetType}`}
             />
           </div>
@@ -385,7 +397,7 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
                   const year = (newBal?.month || getCurrentYearMonth()).split("-")[0];
                   onUpdateBalance(budgetType, "month", `${year}-${e.target.value}`);
                 }}
-                className="h-9 w-full text-sm border border-gray-200 rounded-md px-2"
+                className="h-8 w-full text-sm border border-gray-200 rounded-md px-2"
                 data-testid={`select-balance-month-${budgetType}`}
               >
                 {MONTH_OPTIONS.map(m => (
@@ -401,7 +413,7 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
                   const month = (newBal?.month || getCurrentYearMonth()).split("-")[1];
                   onUpdateBalance(budgetType, "month", `${e.target.value}-${month}`);
                 }}
-                className="h-9 w-full text-sm border border-gray-200 rounded-md px-2"
+                className="h-8 w-full text-sm border border-gray-200 rounded-md px-2"
                 data-testid={`select-balance-year-${budgetType}`}
               >
                 {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map(y => (
