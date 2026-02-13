@@ -1,9 +1,8 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import SignatureCanvas from "react-signature-canvas";
 import { Button } from "./button";
 import { Card, CardContent } from "./card";
-import { Eraser, Check, X } from "lucide-react";
-import { iconSize } from "@/design-system";
+import { Eraser, Check, X, Pen } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface SignaturePadProps {
@@ -23,23 +22,50 @@ export function SignaturePad({
   disabled = false,
   className,
 }: SignaturePadProps) {
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const signatureRef = useRef<SignatureCanvas>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
   const [isEmpty, setIsEmpty] = useState(true);
-  const [canvasSize, setCanvasSize] = useState({ width: 300, height: 150 });
+  const [canvasSize, setCanvasSize] = useState({ width: 300, height: 300 });
+
+  const updateCanvasSize = useCallback(() => {
+    if (!isFullscreen || !canvasContainerRef.current) return;
+    const container = canvasContainerRef.current;
+    const width = container.offsetWidth;
+    const height = container.offsetHeight;
+    setCanvasSize({ width: Math.max(width, 280), height: Math.max(height, 200) });
+  }, [isFullscreen]);
 
   useEffect(() => {
-    const updateSize = () => {
-      if (containerRef.current) {
-        const width = containerRef.current.offsetWidth - 2;
-        setCanvasSize({ width: Math.max(width, 280), height: 150 });
-      }
-    };
+    if (!isFullscreen) return;
 
-    updateSize();
-    window.addEventListener("resize", updateSize);
-    return () => window.removeEventListener("resize", updateSize);
-  }, []);
+    const raf = requestAnimationFrame(() => {
+      updateCanvasSize();
+    });
+
+    window.addEventListener("resize", updateCanvasSize);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", updateCanvasSize);
+    };
+  }, [isFullscreen, updateCanvasSize]);
+
+  useEffect(() => {
+    if (!isFullscreen) return;
+    document.body.style.overflow = "hidden";
+    document.body.style.position = "fixed";
+    document.body.style.width = "100%";
+    document.body.style.top = `-${window.scrollY}px`;
+    const scrollY = window.scrollY;
+
+    return () => {
+      document.body.style.overflow = "";
+      document.body.style.position = "";
+      document.body.style.width = "";
+      document.body.style.top = "";
+      window.scrollTo(0, scrollY);
+    };
+  }, [isFullscreen]);
 
   const handleClear = () => {
     signatureRef.current?.clear();
@@ -50,13 +76,115 @@ export function SignaturePad({
     if (signatureRef.current && !isEmpty) {
       const canvas = signatureRef.current.getCanvas();
       const dataUrl = canvas.toDataURL("image/png");
+      setIsFullscreen(false);
       onSave(dataUrl);
     }
+  };
+
+  const handleClose = () => {
+    setIsFullscreen(false);
+    setIsEmpty(true);
+    signatureRef.current?.clear();
+    onCancel?.();
   };
 
   const handleBegin = () => {
     setIsEmpty(false);
   };
+
+  const openFullscreen = () => {
+    if (!disabled) {
+      setIsEmpty(true);
+      setIsFullscreen(true);
+    }
+  };
+
+  if (isFullscreen) {
+    return (
+      <div
+        className="fixed inset-0 z-[100] bg-white flex flex-col"
+        style={{ touchAction: "none" }}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50 shrink-0">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg font-semibold text-foreground truncate">{title}</h2>
+            {description && (
+              <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">{description}</p>
+            )}
+          </div>
+          <button
+            onClick={handleClose}
+            className="ml-3 shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full hover:bg-gray-200 transition-colors"
+            aria-label="Schließen"
+            data-testid="button-close-signature-fullscreen"
+          >
+            <X className="h-6 w-6" />
+          </button>
+        </div>
+
+        <div
+          ref={canvasContainerRef}
+          className="flex-1 relative bg-white"
+          style={{ touchAction: "none" }}
+        >
+          <SignatureCanvas
+            ref={signatureRef}
+            penColor="black"
+            minWidth={2}
+            maxWidth={4}
+            velocityFilterWeight={0.7}
+            canvasProps={{
+              width: canvasSize.width,
+              height: canvasSize.height,
+              className: "absolute inset-0",
+              style: { touchAction: "none" },
+            }}
+            onBegin={handleBegin}
+          />
+
+          <div className="absolute left-6 right-6 bottom-[30%] border-b-2 border-gray-300 pointer-events-none" />
+          <div className="absolute left-6 bottom-[30%] -translate-y-2 pointer-events-none">
+            <span className="text-xs text-gray-400 select-none">✕</span>
+          </div>
+
+          {isEmpty && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+              <Pen className="h-10 w-10 text-muted-foreground/30 mb-3" />
+              <span className="text-muted-foreground/50 text-lg font-medium">
+                Hier unterschreiben
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div className="shrink-0 border-t border-gray-200 bg-gray-50 px-4 py-4 pb-safe">
+          <div className="flex gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleClear}
+              disabled={isEmpty}
+              className="min-h-[52px] text-base px-5"
+              data-testid="button-clear-signature"
+            >
+              <Eraser className="h-5 w-5 mr-2" />
+              Löschen
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSave}
+              disabled={isEmpty}
+              className="flex-1 min-h-[52px] text-base font-semibold px-5"
+              data-testid="button-save-signature"
+            >
+              <Check className="h-5 w-5 mr-2" />
+              Unterschrift bestätigen
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <Card className={cn("overflow-hidden", className)}>
@@ -72,72 +200,42 @@ export function SignaturePad({
           </div>
         )}
 
-        <div
-          ref={containerRef}
+        <button
+          type="button"
+          onClick={openFullscreen}
+          disabled={disabled}
           className={cn(
-            "border-2 border-dashed border-muted-foreground/30 rounded-lg bg-white relative",
-            disabled && "opacity-50 pointer-events-none"
+            "w-full border-2 border-dashed border-muted-foreground/30 rounded-lg bg-white",
+            "flex flex-col items-center justify-center gap-2 py-8 cursor-pointer",
+            "hover:border-primary/50 hover:bg-primary/5 transition-colors",
+            "active:bg-primary/10",
+            "focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary",
+            disabled && "opacity-50 pointer-events-none cursor-not-allowed"
           )}
-          style={{ minHeight: "150px", touchAction: "none" }}
+          style={{ minHeight: "120px" }}
+          data-testid="button-open-signature"
         >
-          <SignatureCanvas
-            ref={signatureRef}
-            penColor="black"
-            canvasProps={{
-              width: canvasSize.width,
-              height: canvasSize.height,
-              className: "rounded-lg",
-              style: { touchAction: "none" },
-            }}
-            onBegin={handleBegin}
-          />
-          {isEmpty && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <span className="text-muted-foreground/50 text-sm">
-                Hier unterschreiben
-              </span>
-            </div>
-          )}
-        </div>
+          <Pen className="h-8 w-8 text-muted-foreground/50" />
+          <span className="text-base text-muted-foreground font-medium">
+            Tippen zum Unterschreiben
+          </span>
+        </button>
 
-        <div className="flex flex-wrap gap-2 justify-between">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleClear}
-            disabled={disabled || isEmpty}
-            data-testid="button-clear-signature"
-          >
-            <Eraser className={iconSize.sm} />
-            <span className="ml-1">Löschen</span>
-          </Button>
-          <div className="flex gap-2">
-            {onCancel && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={onCancel}
-                disabled={disabled}
-                data-testid="button-cancel-signature"
-              >
-                <X className={iconSize.sm} />
-                <span className="ml-1 hidden sm:inline">Abbrechen</span>
-              </Button>
-            )}
+        {onCancel && (
+          <div className="flex justify-end">
             <Button
               type="button"
+              variant="ghost"
               size="sm"
-              onClick={handleSave}
-              disabled={disabled || isEmpty}
-              data-testid="button-save-signature"
+              onClick={onCancel}
+              disabled={disabled}
+              data-testid="button-cancel-signature"
             >
-              <Check className={iconSize.sm} />
-              <span className="ml-1">Bestätigen</span>
+              <X className="h-4 w-4 mr-1" />
+              Abbrechen
             </Button>
           </div>
-        </div>
+        )}
       </CardContent>
     </Card>
   );
