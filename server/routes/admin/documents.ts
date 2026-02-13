@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { z } from "zod";
 import { documentStorage } from "../../storage/documents";
 import { insertDocumentTypeSchema, updateDocumentTypeSchema, insertEmployeeDocumentSchema, insertCustomerDocumentSchema, insertDocumentTemplateSchema, updateDocumentTemplateSchema } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
@@ -119,18 +120,30 @@ router.get("/document-templates/placeholders/catalog", asyncHandler("Platzhalter
 }));
 
 router.get("/document-templates/billing-type/:billingType", asyncHandler("Vorlagen für Kundentyp konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const validTypes = ["pflegekasse_gesetzlich", "pflegekasse_privat", "selbstzahler"];
+  if (!validTypes.includes(req.params.billingType)) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültiger Kundentyp" });
+    return;
+  }
   const templates = await documentStorage.getTemplatesForBillingType(req.params.billingType);
   res.json(templates);
 }));
 
+const renderTemplateSchema = z.object({
+  templateSlug: z.string().min(1),
+  customerId: z.number().int(),
+  overrides: z.record(z.string()).optional(),
+});
+
 router.post("/document-templates/render", asyncHandler("Vorlage konnte nicht gerendert werden", async (req: Request, res: Response) => {
-  const { templateSlug, customerId, overrides } = req.body;
-  if (!templateSlug || !customerId) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "templateSlug und customerId sind erforderlich" });
+  const parsed = renderTemplateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "templateSlug und customerId sind erforderlich", details: parsed.error.issues });
     return;
   }
 
-  const result = await renderTemplateForCustomer(templateSlug, parseInt(customerId), overrides || {});
+  const { templateSlug, customerId, overrides } = parsed.data;
+  const result = await renderTemplateForCustomer(templateSlug, customerId, overrides || {});
   const printableHtml = wrapInPrintableHtml(result.html, templateSlug);
 
   res.json({

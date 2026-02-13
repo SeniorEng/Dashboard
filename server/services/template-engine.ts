@@ -41,11 +41,11 @@ export async function buildPlaceholders(
   const today = new Date();
   const placeholders: TemplatePlaceholders = {
     customer_name: customer.name || "",
-    customer_address: [customer.street, `${customer.zipCode || ""} ${customer.city || ""}`].filter(Boolean).join(", "),
-    customer_birthdate: customer.birthDate || "",
-    customer_phone: customer.phone || "",
+    customer_address: [customer.strasse, `${customer.plz || ""} ${customer.stadt || ""}`].filter(Boolean).join(", "),
+    customer_birthdate: customer.geburtsdatum || "",
+    customer_phone: customer.telefon || "",
     customer_email: customer.email || "",
-    pflegegrad: customer.careLevel ? `Pflegegrad ${customer.careLevel}` : "Nicht angegeben",
+    pflegegrad: customer.pflegegrad ? `Pflegegrad ${customer.pflegegrad}` : "Nicht angegeben",
     versichertennummer: "",
     insurance_name: "",
     ik_nummer: "",
@@ -89,12 +89,16 @@ export async function renderTemplateForCustomer(
   };
 }
 
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 export function wrapInPrintableHtml(bodyHtml: string, title: string): string {
   return `<!DOCTYPE html>
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<title>${title}</title>
+<title>${escapeHtml(title)}</title>
 <style>
   @page { margin: 2cm; size: A4; }
   body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; font-size: 12pt; line-height: 1.6; color: #1a1a1a; }

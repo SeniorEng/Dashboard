@@ -53,6 +53,9 @@ process.on("uncaughtException", (error) => {
   const { serviceCatalogStorage } = await import("./storage/service-catalog");
   await serviceCatalogStorage.ensureSystemServices();
 
+  const { documentStorage } = await import("./storage/documents");
+  await documentStorage.ensureTemplateBillingTypes();
+
   await registerRoutes(httpServer, app);
 
   const { generateDocumentReviewTasks } = await import("./services/document-review");

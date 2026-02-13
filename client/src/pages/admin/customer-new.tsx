@@ -252,6 +252,21 @@ export default function AdminCustomerNew() {
           } catch {
           }
         }
+
+        const signedSlugs = Object.entries(customerSignatures).filter(([, data]) => data && data.startsWith("data:image/"));
+        if (signedSlugs.length > 0) {
+          try {
+            const { apiRequest } = await import("@/lib/queryClient");
+            await apiRequest("POST", `/api/customers/${customer.id}/signatures`, {
+              signatures: signedSlugs.map(([slug, signatureData]) => ({
+                templateSlug: slug,
+                customerSignatureData: signatureData,
+              })),
+            });
+          } catch {
+          }
+        }
+
         toast({ title: "Kunde erfolgreich erstellt" });
         setLocation(`/admin/customers/${customer.id}`);
       },

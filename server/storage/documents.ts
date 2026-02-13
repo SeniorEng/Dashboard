@@ -88,31 +88,33 @@ export class DocumentStorage implements IDocumentStorage {
   }
 
   async uploadDocument(data: InsertEmployeeDocument, uploadedByUserId: number): Promise<EmployeeDocument> {
-    await db
-      .update(employeeDocuments)
-      .set({ isCurrent: false })
-      .where(
-        and(
-          eq(employeeDocuments.employeeId, data.employeeId),
-          eq(employeeDocuments.documentTypeId, data.documentTypeId),
-          eq(employeeDocuments.isCurrent, true)
-        )
-      );
-
     const reviewDueDate = await this.calculateReviewDueDate(data.documentTypeId);
 
-    const [result] = await db.insert(employeeDocuments).values({
-      employeeId: data.employeeId,
-      documentTypeId: data.documentTypeId,
-      fileName: data.fileName,
-      objectPath: data.objectPath,
-      uploadedByUserId,
-      reviewDueDate,
-      isCurrent: true,
-      notes: data.notes || null,
-    }).returning();
+    return db.transaction(async (tx) => {
+      await tx
+        .update(employeeDocuments)
+        .set({ isCurrent: false })
+        .where(
+          and(
+            eq(employeeDocuments.employeeId, data.employeeId),
+            eq(employeeDocuments.documentTypeId, data.documentTypeId),
+            eq(employeeDocuments.isCurrent, true)
+          )
+        );
 
-    return result;
+      const [result] = await tx.insert(employeeDocuments).values({
+        employeeId: data.employeeId,
+        documentTypeId: data.documentTypeId,
+        fileName: data.fileName,
+        objectPath: data.objectPath,
+        uploadedByUserId,
+        reviewDueDate,
+        isCurrent: true,
+        notes: data.notes || null,
+      }).returning();
+
+      return result;
+    });
   }
 
   async getCurrentDocuments(employeeId: number): Promise<(EmployeeDocument & { documentType: DocumentType })[]> {
@@ -179,31 +181,33 @@ export class DocumentStorage implements IDocumentStorage {
   }
 
   async uploadCustomerDocument(data: InsertCustomerDocument, uploadedByUserId: number): Promise<CustomerDocument> {
-    await db
-      .update(customerDocuments)
-      .set({ isCurrent: false })
-      .where(
-        and(
-          eq(customerDocuments.customerId, data.customerId),
-          eq(customerDocuments.documentTypeId, data.documentTypeId),
-          eq(customerDocuments.isCurrent, true)
-        )
-      );
-
     const reviewDueDate = await this.calculateReviewDueDate(data.documentTypeId);
 
-    const [result] = await db.insert(customerDocuments).values({
-      customerId: data.customerId,
-      documentTypeId: data.documentTypeId,
-      fileName: data.fileName,
-      objectPath: data.objectPath,
-      uploadedByUserId,
-      reviewDueDate,
-      isCurrent: true,
-      notes: data.notes || null,
-    }).returning();
+    return db.transaction(async (tx) => {
+      await tx
+        .update(customerDocuments)
+        .set({ isCurrent: false })
+        .where(
+          and(
+            eq(customerDocuments.customerId, data.customerId),
+            eq(customerDocuments.documentTypeId, data.documentTypeId),
+            eq(customerDocuments.isCurrent, true)
+          )
+        );
 
-    return result;
+      const [result] = await tx.insert(customerDocuments).values({
+        customerId: data.customerId,
+        documentTypeId: data.documentTypeId,
+        fileName: data.fileName,
+        objectPath: data.objectPath,
+        uploadedByUserId,
+        reviewDueDate,
+        isCurrent: true,
+        notes: data.notes || null,
+      }).returning();
+
+      return result;
+    });
   }
 
   async getCurrentCustomerDocuments(customerId: number): Promise<(CustomerDocument & { documentType: DocumentType })[]> {
@@ -386,6 +390,41 @@ export class DocumentStorage implements IDocumentStorage {
       .where(eq(generatedDocuments.id, id))
       .returning();
     return result || null;
+  }
+
+  async ensureTemplateBillingTypes(): Promise<void> {
+    const existing = await db.select().from(documentTemplateBillingTypes);
+    if (existing.length > 0) return;
+
+    const templates = await this.getDocumentTemplates(false);
+    const slugToId: Record<string, number> = {};
+    for (const t of templates) {
+      slugToId[t.slug] = t.id;
+    }
+
+    const mappings: { templateId: number; billingType: string; requirement: string; sortOrder: number }[] = [];
+
+    const addMapping = (slug: string, billingType: string, requirement: string, sortOrder: number) => {
+      if (slugToId[slug]) {
+        mappings.push({ templateId: slugToId[slug], billingType, requirement, sortOrder });
+      }
+    };
+
+    addMapping("betreuungsvertrag_pflegekasse", "pflegekasse_gesetzlich", "pflicht", 1);
+    addMapping("datenschutzvereinbarung", "pflegekasse_gesetzlich", "pflicht", 2);
+    addMapping("forderungsabtretung", "pflegekasse_gesetzlich", "pflicht", 3);
+
+    addMapping("betreuungsvertrag_pflegekasse", "pflegekasse_privat", "pflicht", 1);
+    addMapping("datenschutzvereinbarung", "pflegekasse_privat", "pflicht", 2);
+    addMapping("sepa_lastschriftmandat", "pflegekasse_privat", "optional", 3);
+
+    addMapping("dienstleistungsvertrag_selbstzahler", "selbstzahler", "pflicht", 1);
+    addMapping("datenschutzvereinbarung", "selbstzahler", "pflicht", 2);
+    addMapping("sepa_lastschriftmandat", "selbstzahler", "optional", 3);
+
+    if (mappings.length > 0) {
+      await db.insert(documentTemplateBillingTypes).values(mappings);
+    }
   }
 }
 

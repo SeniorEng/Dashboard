@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, boolean, date, index } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, boolean, date, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp } from "./common";
 import { users } from "./users";
@@ -74,6 +74,7 @@ export const documentTemplateBillingTypes = pgTable("document_template_billing_t
 }, (table) => [
   index("dtbt_template_idx").on(table.templateId),
   index("dtbt_billing_type_idx").on(table.billingType),
+  uniqueIndex("dtbt_template_billing_unique").on(table.templateId, table.billingType),
 ]);
 
 export const generatedDocuments = pgTable("generated_documents", {
@@ -99,7 +100,7 @@ export const insertDocumentTemplateSchema = z.object({
   slug: z.string().min(1).max(100),
   name: z.string().min(1).max(200),
   description: z.string().max(1000).nullable().optional(),
-  htmlContent: z.string().min(1),
+  htmlContent: z.string().min(1).max(500000),
   isSystem: z.boolean().default(false),
   isActive: z.boolean().default(true),
 });
@@ -107,7 +108,7 @@ export const insertDocumentTemplateSchema = z.object({
 export const updateDocumentTemplateSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   description: z.string().max(1000).nullable().optional(),
-  htmlContent: z.string().min(1).optional(),
+  htmlContent: z.string().min(1).max(500000).optional(),
   isActive: z.boolean().optional(),
 });
 

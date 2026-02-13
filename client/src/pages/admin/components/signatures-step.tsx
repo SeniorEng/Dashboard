@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
-import { FileText, Check, AlertCircle, Loader2 } from "lucide-react";
+import { FileText, Check, AlertCircle, Loader2, AlertTriangle } from "lucide-react";
 import { iconSize } from "@/design-system";
 import type { BillingType } from "@shared/domain/customers";
 
@@ -122,6 +122,9 @@ function SignatureCanvas({
           ref={canvasRef}
           className="w-full touch-none cursor-crosshair"
           style={{ height: "120px" }}
+          role="img"
+          aria-label={`Unterschriftsfeld für ${slug}`}
+          tabIndex={0}
           onMouseDown={startDrawing}
           onMouseMove={draw}
           onMouseUp={stopDrawing}
@@ -133,7 +136,7 @@ function SignatureCanvas({
         />
         {!hasContent && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <p className="text-sm text-gray-400">Hier unterschreiben</p>
+            <p className="text-sm text-gray-500">Hier unterschreiben</p>
           </div>
         )}
       </div>
@@ -141,9 +144,9 @@ function SignatureCanvas({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
           onClick={clearCanvas}
-          className="text-xs text-gray-500"
+          className="text-sm text-gray-500 min-h-[44px] min-w-[44px]"
+          aria-label="Unterschrift löschen"
           data-testid={`button-clear-signature-${slug}`}
         >
           Löschen
@@ -154,7 +157,7 @@ function SignatureCanvas({
 }
 
 export function SignaturesStep({ billingType, customerSignatures, onSignatureChange }: SignaturesStepProps) {
-  const { data: templates, isLoading } = useQuery({
+  const { data: templates, isLoading, isError, refetch } = useQuery({
     queryKey: ["/api/customers/document-templates/billing-type", billingType],
     queryFn: async () => {
       const result = await api.get<TemplateWithRequirement[]>(
@@ -169,6 +172,20 @@ export function SignaturesStep({ billingType, customerSignatures, onSignatureCha
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="w-6 h-6 animate-spin text-teal-600" />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 gap-4">
+        <AlertTriangle className="w-8 h-8 text-amber-500" />
+        <p className="text-sm text-gray-600 text-center">
+          Dokumentvorlagen konnten nicht geladen werden.
+        </p>
+        <Button variant="outline" onClick={() => refetch()} className="min-h-[44px]" data-testid="button-retry-templates">
+          Erneut versuchen
+        </Button>
       </div>
     );
   }
@@ -244,9 +261,12 @@ function DocumentSignatureCard({
     >
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
-          <div className={`flex items-center justify-center w-10 h-10 rounded-full shrink-0 ${
-            isSigned ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"
-          }`}>
+          <div
+            className={`flex items-center justify-center w-10 h-10 rounded-full shrink-0 ${
+              isSigned ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"
+            }`}
+            aria-label={isSigned ? "Unterschrieben" : "Noch nicht unterschrieben"}
+          >
             {isSigned ? <Check className={iconSize.md} /> : <FileText className={iconSize.md} />}
           </div>
           <div className="flex-1 min-w-0">
@@ -272,9 +292,8 @@ function DocumentSignatureCard({
               <Button
                 type="button"
                 variant="outline"
-                size="sm"
                 onClick={() => setIsExpanded(!isExpanded)}
-                className="text-xs"
+                className="text-sm min-h-[44px]"
                 data-testid={`button-sign-${doc.slug}`}
               >
                 {isExpanded ? "Ausblenden" : isSigned ? "Unterschrift ändern" : "Unterschreiben"}
