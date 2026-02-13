@@ -392,6 +392,41 @@ export class DocumentStorage implements IDocumentStorage {
     return result || null;
   }
 
+  async getTemplateBillingTypes(templateId: number): Promise<DocumentTemplateBillingType[]> {
+    return db
+      .select()
+      .from(documentTemplateBillingTypes)
+      .where(eq(documentTemplateBillingTypes.templateId, templateId))
+      .orderBy(asc(documentTemplateBillingTypes.sortOrder));
+  }
+
+  async getAllTemplateBillingTypes(): Promise<DocumentTemplateBillingType[]> {
+    return db
+      .select()
+      .from(documentTemplateBillingTypes)
+      .orderBy(asc(documentTemplateBillingTypes.templateId), asc(documentTemplateBillingTypes.sortOrder));
+  }
+
+  async setTemplateBillingTypes(
+    templateId: number,
+    assignments: { billingType: string; requirement: string; sortOrder: number }[]
+  ): Promise<DocumentTemplateBillingType[]> {
+    return db.transaction(async (tx) => {
+      await tx
+        .delete(documentTemplateBillingTypes)
+        .where(eq(documentTemplateBillingTypes.templateId, templateId));
+
+      if (assignments.length === 0) return [];
+
+      const rows = await tx
+        .insert(documentTemplateBillingTypes)
+        .values(assignments.map(a => ({ templateId, ...a })))
+        .returning();
+
+      return rows;
+    });
+  }
+
   async ensureTemplateBillingTypes(): Promise<void> {
     const existing = await db.select().from(documentTemplateBillingTypes);
     if (existing.length > 0) return;

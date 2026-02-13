@@ -186,6 +186,43 @@ router.patch("/document-templates/:id", asyncHandler("Dokumentenvorlage konnte n
   res.json(template);
 }));
 
+router.get("/document-templates/:id/billing-types", asyncHandler("Abrechnungsarten konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" }); return; }
+  const billingTypes = await documentStorage.getTemplateBillingTypes(id);
+  res.json(billingTypes);
+}));
+
+const billingTypeAssignmentSchema = z.object({
+  assignments: z.array(z.object({
+    billingType: z.enum(["pflegekasse_gesetzlich", "pflegekasse_privat", "selbstzahler"]),
+    requirement: z.enum(["pflicht", "optional"]),
+    sortOrder: z.number().int().min(0),
+  })),
+});
+
+router.put("/document-templates/:id/billing-types", asyncHandler("Abrechnungsarten konnten nicht gespeichert werden", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" }); return; }
+
+  const template = await documentStorage.getDocumentTemplate(id);
+  if (!template) { res.status(404).json({ error: "NOT_FOUND", message: "Vorlage nicht gefunden" }); return; }
+
+  const parsed = billingTypeAssignmentSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Daten", details: parsed.error.issues });
+    return;
+  }
+
+  const result = await documentStorage.setTemplateBillingTypes(id, parsed.data.assignments);
+  res.json(result);
+}));
+
+router.get("/document-templates-billing-types/all", asyncHandler("Alle Abrechnungsarten-Zuordnungen konnten nicht geladen werden", async (_req: Request, res: Response) => {
+  const all = await documentStorage.getAllTemplateBillingTypes();
+  res.json(all);
+}));
+
 router.get("/customers/:customerId/generated-documents", asyncHandler("Generierte Dokumente konnten nicht geladen werden", async (req: Request, res: Response) => {
   const customerId = parseInt(req.params.customerId);
   if (isNaN(customerId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" }); return; }
