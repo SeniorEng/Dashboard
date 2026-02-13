@@ -250,7 +250,7 @@ export function useDocumentationForm(id: number) {
       .map(s => ({
         serviceId: s.serviceId,
         actualDurationMinutes: s.actualDuration,
-        details: s.details || null,
+        details: s.details.trim(),
       }));
 
     if (formData.customerKilometers > 0) {
