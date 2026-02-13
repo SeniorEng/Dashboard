@@ -1,7 +1,8 @@
 import { Router, Request, Response } from "express";
 import { documentStorage } from "../../storage/documents";
-import { insertDocumentTypeSchema, updateDocumentTypeSchema, insertEmployeeDocumentSchema, insertCustomerDocumentSchema } from "@shared/schema";
+import { insertDocumentTypeSchema, updateDocumentTypeSchema, insertEmployeeDocumentSchema, insertCustomerDocumentSchema, insertDocumentTemplateSchema, updateDocumentTemplateSchema } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
+import { renderTemplateForCustomer, wrapInPrintableHtml, getPlaceholderCatalog } from "../../services/template-engine";
 
 const router = Router();
 
@@ -105,6 +106,78 @@ router.get("/documents/due-soon", asyncHandler("Fällige Dokumente konnten nicht
     documentStorage.getCustomerDocumentsDueSoon(days),
   ]);
   res.json({ employee: employeeDocs, customer: customerDocs });
+}));
+
+router.get("/document-templates", asyncHandler("Dokumentenvorlagen konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const includeInactive = req.query.includeInactive === "true";
+  const templates = await documentStorage.getDocumentTemplates(!includeInactive);
+  res.json(templates);
+}));
+
+router.get("/document-templates/placeholders/catalog", asyncHandler("Platzhalter-Katalog konnte nicht geladen werden", async (_req: Request, res: Response) => {
+  res.json(getPlaceholderCatalog());
+}));
+
+router.get("/document-templates/billing-type/:billingType", asyncHandler("Vorlagen für Kundentyp konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const templates = await documentStorage.getTemplatesForBillingType(req.params.billingType);
+  res.json(templates);
+}));
+
+router.post("/document-templates/render", asyncHandler("Vorlage konnte nicht gerendert werden", async (req: Request, res: Response) => {
+  const { templateSlug, customerId, overrides } = req.body;
+  if (!templateSlug || !customerId) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "templateSlug und customerId sind erforderlich" });
+    return;
+  }
+
+  const result = await renderTemplateForCustomer(templateSlug, parseInt(customerId), overrides || {});
+  const printableHtml = wrapInPrintableHtml(result.html, templateSlug);
+
+  res.json({
+    html: result.html,
+    printableHtml,
+    templateId: result.templateId,
+    templateVersion: result.templateVersion,
+  });
+}));
+
+router.get("/document-templates/:id", asyncHandler("Dokumentenvorlage konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" }); return; }
+  const template = await documentStorage.getDocumentTemplate(id);
+  if (!template) { res.status(404).json({ error: "NOT_FOUND", message: "Vorlage nicht gefunden" }); return; }
+  res.json(template);
+}));
+
+router.post("/document-templates", asyncHandler("Dokumentenvorlage konnte nicht erstellt werden", async (req: Request, res: Response) => {
+  const result = insertDocumentTemplateSchema.safeParse(req.body);
+  if (!result.success) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Daten", details: result.error.issues });
+    return;
+  }
+  const template = await documentStorage.createDocumentTemplate(result.data);
+  res.status(201).json(template);
+}));
+
+router.patch("/document-templates/:id", asyncHandler("Dokumentenvorlage konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" }); return; }
+
+  const result = updateDocumentTemplateSchema.safeParse(req.body);
+  if (!result.success) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Daten", details: result.error.issues });
+    return;
+  }
+  const template = await documentStorage.updateDocumentTemplate(id, result.data);
+  if (!template) { res.status(404).json({ error: "NOT_FOUND", message: "Vorlage nicht gefunden" }); return; }
+  res.json(template);
+}));
+
+router.get("/customers/:customerId/generated-documents", asyncHandler("Generierte Dokumente konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const customerId = parseInt(req.params.customerId);
+  if (isNaN(customerId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" }); return; }
+  const docs = await documentStorage.getGeneratedDocuments(customerId);
+  res.json(docs);
 }));
 
 export default router;

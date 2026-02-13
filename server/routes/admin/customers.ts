@@ -101,13 +101,14 @@ router.patch("/customers/:id/assign", asyncHandler("Zuordnung konnte nicht aktua
 // ============================================
 
 router.get("/customers", asyncHandler("Kunden konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const { search, pflegegrad, primaryEmployeeId, status, page, limit } = req.query;
+  const { search, pflegegrad, primaryEmployeeId, status, billingType, page, limit } = req.query;
   
   const filters = {
     search: search as string | undefined,
     pflegegrad: pflegegrad ? parseInt(pflegegrad as string) : undefined,
     primaryEmployeeId: primaryEmployeeId ? parseInt(primaryEmployeeId as string) : undefined,
     status: status as string | undefined,
+    billingType: billingType as string | undefined,
   };
   
   const pageNum = page ? parseInt(page as string) : 1;
@@ -174,6 +175,7 @@ router.get("/customers/:id/details", asyncHandler("Kunde konnte nicht geladen we
 }));
 
 const simpleCreateCustomerSchema = z.object({
+  billingType: z.enum(["pflegekasse_gesetzlich", "pflegekasse_privat", "selbstzahler"]).default("pflegekasse_gesetzlich"),
   vorname: z.string().min(1),
   nachname: z.string().min(1),
   geburtsdatum: z.string().optional().nullable(),
@@ -238,12 +240,13 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
     nr: data.nr,
     plz: data.plz,
     stadt: data.stadt,
-    pflegegrad: data.pflegegrad || 0,
+    pflegegrad: data.pflegegrad || null,
     geburtsdatum: data.geburtsdatum || null,
     vorerkrankungen: data.vorerkrankungen || null,
     haustierVorhanden: data.haustierVorhanden || false,
     haustierDetails: data.haustierVorhanden ? (data.haustierDetails || null) : null,
     personenbefoerderungGewuenscht: data.personenbefoerderungGewuenscht || false,
+    billingType: data.billingType,
     createdByUserId: userId,
   };
 
@@ -358,6 +361,7 @@ const VALID_CUSTOMER_STATUSES = ["erstberatung", "aktiv", "inaktiv"] as const;
 const updateCustomerSchema = z.object({
   vorname: z.string().min(1).optional(),
   nachname: z.string().min(1).optional(),
+  billingType: z.enum(["pflegekasse_gesetzlich", "pflegekasse_privat", "selbstzahler"]).optional(),
   geburtsdatum: z.string().nullable().optional(),
   email: z.string().email().nullable().optional(),
   festnetz: z.string().nullable().optional(),

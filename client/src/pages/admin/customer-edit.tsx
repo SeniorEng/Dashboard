@@ -37,7 +37,7 @@ import {
   Stethoscope,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
-import { PFLEGEGRAD_SELECT_OPTIONS } from "@shared/domain/customers";
+import { PFLEGEGRAD_SELECT_OPTIONS, BILLING_TYPE_SELECT_OPTIONS, BILLING_TYPE_LABELS, type BillingType } from "@shared/domain/customers";
 import { AddressFields } from "./components/address-fields";
 import { EmployeeMatching } from "./components/employee-matching";
 
@@ -82,6 +82,7 @@ export default function AdminCustomerEdit() {
   const [formData, setFormData] = useState({
     vorname: "",
     nachname: "",
+    billingType: "pflegekasse_gesetzlich" as string,
     email: "",
     telefon: "",
     festnetz: "",
@@ -106,6 +107,7 @@ export default function AdminCustomerEdit() {
       setFormData({
         vorname: customer.vorname || "",
         nachname: customer.nachname || "",
+        billingType: customer.billingType || "pflegekasse_gesetzlich",
         email: customer.email || "",
         telefon: customer.telefon || "",
         festnetz: customer.festnetz || "",
@@ -178,6 +180,7 @@ export default function AdminCustomerEdit() {
     const data: Record<string, unknown> = {
       vorname: formData.vorname.trim(),
       nachname: formData.nachname.trim(),
+      billingType: formData.billingType,
       geburtsdatum: formData.geburtsdatum?.trim() || null,
       email: formData.email.trim() || null,
       telefon: formData.telefon.trim() ? normalizePhone(formData.telefon) : null,
@@ -274,6 +277,25 @@ export default function AdminCustomerEdit() {
                       data-testid="input-nachname"
                     />
                   </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Kundentyp</Label>
+                  <Select
+                    value={formData.billingType}
+                    onValueChange={(value) => handleChange("billingType", value)}
+                  >
+                    <SelectTrigger data-testid="select-billingtype">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {BILLING_TYPE_SELECT_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="space-y-2">

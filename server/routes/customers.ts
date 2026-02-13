@@ -4,6 +4,7 @@ import { insertCustomerSchema } from "@shared/schema";
 import { fromError } from "zod-validation-error";
 import { requireAuth } from "../middleware/auth";
 import { birthdaysCache } from "../services/cache";
+import { documentStorage } from "../storage/documents";
 
 const router = Router();
 
@@ -74,6 +75,16 @@ router.post("/", async (req, res) => {
     }
     console.error("Failed to create customer:", error);
     res.status(500).json({ error: "Kunde konnte nicht erstellt werden" });
+  }
+});
+
+router.get("/document-templates/billing-type/:billingType", async (req, res) => {
+  try {
+    const templates = await documentStorage.getTemplatesForBillingType(req.params.billingType);
+    res.json(templates);
+  } catch (error) {
+    console.error("Failed to load templates:", error);
+    res.status(500).json({ error: "Vorlagen konnten nicht geladen werden" });
   }
 });
 

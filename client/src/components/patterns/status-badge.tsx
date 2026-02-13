@@ -18,6 +18,7 @@ type StatusBadgeType =
   | "status"
   | "service"
   | "pflegegrad"
+  | "billingType"
   | "record"
   | "contract"
   | "activity"
@@ -118,6 +119,18 @@ const systemColors: Record<string, BadgeColor> = {
   default: "blue",
 };
 
+const billingTypeLabels: Record<string, string> = {
+  pflegekasse_gesetzlich: "Gesetzlich",
+  pflegekasse_privat: "Privat",
+  selbstzahler: "Selbstzahler",
+};
+
+const billingTypeColors: Record<string, BadgeColor> = {
+  pflegekasse_gesetzlich: "blue",
+  pflegekasse_privat: "purple",
+  selbstzahler: "amber",
+};
+
 const monthLabels: Record<string, string> = {
   open: "Offen",
   closed: "Abgeschlossen",
@@ -214,6 +227,10 @@ export function StatusBadge({
         PG {pg}
       </Badge>
     );
+  }
+
+  if (type === "billingType") {
+    return renderColoredBadge(billingTypeLabels[v] || v, billingTypeColors[v] || "gray", null, false, size, className, testId);
   }
 
   if (type === "record") {

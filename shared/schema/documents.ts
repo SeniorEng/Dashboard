@@ -52,6 +52,83 @@ export const customerDocuments = pgTable("customer_documents", {
   index("customer_documents_review_due_idx").on(table.reviewDueDate, table.isCurrent),
 ]);
 
+export const documentTemplates = pgTable("document_templates", {
+  id: serial("id").primaryKey(),
+  slug: text("slug").notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description"),
+  htmlContent: text("html_content").notNull(),
+  version: integer("version").notNull().default(1),
+  isSystem: boolean("is_system").notNull().default(false),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const documentTemplateBillingTypes = pgTable("document_template_billing_types", {
+  id: serial("id").primaryKey(),
+  templateId: integer("template_id").notNull().references(() => documentTemplates.id, { onDelete: "cascade" }),
+  billingType: text("billing_type").notNull(),
+  requirement: text("requirement").notNull().default("pflicht"),
+  sortOrder: integer("sort_order").notNull().default(0),
+}, (table) => [
+  index("dtbt_template_idx").on(table.templateId),
+  index("dtbt_billing_type_idx").on(table.billingType),
+]);
+
+export const generatedDocuments = pgTable("generated_documents", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  templateId: integer("template_id").notNull().references(() => documentTemplates.id),
+  templateVersion: integer("template_version").notNull(),
+  fileName: text("file_name").notNull(),
+  objectPath: text("object_path").notNull(),
+  customerSignatureData: text("customer_signature_data"),
+  employeeSignatureData: text("employee_signature_data"),
+  signedAt: timestamp("signed_at"),
+  signedByEmployeeId: integer("signed_by_employee_id").references(() => users.id),
+  integrityHash: text("integrity_hash"),
+  generatedAt: timestamp("generated_at").notNull().defaultNow(),
+  generatedByUserId: integer("generated_by_user_id").references(() => users.id),
+}, (table) => [
+  index("generated_docs_customer_idx").on(table.customerId),
+  index("generated_docs_template_idx").on(table.templateId),
+]);
+
+export const insertDocumentTemplateSchema = z.object({
+  slug: z.string().min(1).max(100),
+  name: z.string().min(1).max(200),
+  description: z.string().max(1000).nullable().optional(),
+  htmlContent: z.string().min(1),
+  isSystem: z.boolean().default(false),
+  isActive: z.boolean().default(true),
+});
+
+export const updateDocumentTemplateSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  description: z.string().max(1000).nullable().optional(),
+  htmlContent: z.string().min(1).optional(),
+  isActive: z.boolean().optional(),
+});
+
+export const insertGeneratedDocumentSchema = z.object({
+  customerId: z.number().int(),
+  templateId: z.number().int(),
+  templateVersion: z.number().int(),
+  fileName: z.string().min(1),
+  objectPath: z.string().min(1),
+  customerSignatureData: z.string().nullable().optional(),
+  employeeSignatureData: z.string().nullable().optional(),
+  integrityHash: z.string().nullable().optional(),
+});
+
+export type DocumentTemplate = typeof documentTemplates.$inferSelect;
+export type InsertDocumentTemplate = z.infer<typeof insertDocumentTemplateSchema>;
+export type UpdateDocumentTemplate = z.infer<typeof updateDocumentTemplateSchema>;
+export type DocumentTemplateBillingType = typeof documentTemplateBillingTypes.$inferSelect;
+export type GeneratedDocument = typeof generatedDocuments.$inferSelect;
+export type InsertGeneratedDocument = z.infer<typeof insertGeneratedDocumentSchema>;
+
 export const insertDocumentTypeSchema = z.object({
   name: z.string().min(1, "Name ist erforderlich").max(100),
   description: z.string().max(500).nullable().optional(),

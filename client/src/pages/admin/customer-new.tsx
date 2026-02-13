@@ -15,8 +15,10 @@ import {
   Check,
 } from "lucide-react";
 import { iconSize } from "@/design-system";
-import { CustomerFormData, ContactFormData, BudgetTypeSettingForm, STEPS, DEFAULT_BUDGETS, EMPTY_CONTACT, MAX_CONTACTS } from "./components/customer-types";
+import { CustomerFormData, ContactFormData, BudgetTypeSettingForm, getStepsForBillingType, DEFAULT_BUDGETS, EMPTY_CONTACT, MAX_CONTACTS } from "./components/customer-types";
 import { BUDGET_45A_MAX_BY_PFLEGEGRAD, BUDGET_TYPES, type BudgetType } from "@shared/domain/budgets";
+import { isPflegekasseCustomer, type BillingType } from "@shared/domain/customers";
+import { CustomerTypeStep } from "./components/customer-type-step";
 import { PersonalDataStep } from "./components/personal-data-step";
 import { InsuranceStep } from "./components/insurance-step";
 import { ContactsStep } from "./components/contacts-step";
@@ -30,6 +32,7 @@ export default function AdminCustomerNew() {
   const [currentStep, setCurrentStep] = useState(0);
 
   const [formData, setFormData] = useState<CustomerFormData>({
+    billingType: "pflegekasse_gesetzlich",
     vorname: "",
     nachname: "",
     geburtsdatum: "",
@@ -66,6 +69,15 @@ export default function AdminCustomerNew() {
     contractHours: "0",
     contractPeriod: "weekly",
   });
+
+  const [customerSignatures, setCustomerSignatures] = useState<Record<string, string>>({});
+
+  const handleSignatureChange = useCallback((slug: string, signatureData: string) => {
+    setCustomerSignatures((prev) => ({ ...prev, [slug]: signatureData }));
+  }, []);
+
+  const steps = useMemo(() => getStepsForBillingType(formData.billingType), [formData.billingType]);
+  const currentStepId = steps[currentStep]?.id || "customerType";
 
   const { data: insuranceProviders } = useInsuranceProviders();
   const createMutation = useCreateCustomer();
@@ -200,26 +212,29 @@ export default function AdminCustomerNew() {
         }
       : undefined;
 
+    const isPflegekasse = isPflegekasseCustomer(formData.billingType);
+
     const payload = {
+      billingType: formData.billingType,
       vorname: formData.vorname.trim(),
       nachname: formData.nachname.trim(),
       strasse: formData.strasse.trim(),
       nr: formData.nr.trim(),
       plz: formData.plz.trim(),
       stadt: formData.stadt.trim(),
-      pflegegrad: parseInt(formData.pflegegrad),
-      pflegegradSeit: formData.pflegegradSeit || today,
+      pflegegrad: isPflegekasse ? parseInt(formData.pflegegrad) : undefined,
+      pflegegradSeit: isPflegekasse && formData.pflegegradSeit ? formData.pflegegradSeit : isPflegekasse ? today : undefined,
       geburtsdatum: formData.geburtsdatum || undefined,
       email: formData.email.trim() || undefined,
       telefon: formData.telefon.trim() ? (normalizePhone(formData.telefon) || undefined) : undefined,
       festnetz: formData.festnetz.trim() ? (normalizePhone(formData.festnetz) || undefined) : undefined,
-      vorerkrankungen: formData.vorerkrankungen.trim() || undefined,
+      vorerkrankungen: isPflegekasse ? (formData.vorerkrankungen.trim() || undefined) : undefined,
       haustierVorhanden: formData.haustierVorhanden,
       haustierDetails: formData.haustierVorhanden ? (formData.haustierDetails.trim() || undefined) : undefined,
       personenbefoerderungGewuenscht: formData.personenbefoerderungGewuenscht,
-      insurance,
+      insurance: isPflegekasse ? insurance : undefined,
       contacts: contacts.length > 0 ? contacts : undefined,
-      budgets,
+      budgets: isPflegekasse ? budgets : undefined,
       contract,
     };
 
@@ -290,31 +305,37 @@ export default function AdminCustomerNew() {
     });
   };
 
-  const validateStep = (step: number): boolean => {
-    switch (step) {
-      case 0:
-        return !!(
+  const validateStepById = (stepId: string): boolean => {
+    switch (stepId) {
+      case "customerType":
+        return !!formData.billingType;
+      case "personal": {
+        const base = !!(
           formData.vorname &&
           formData.nachname &&
           formData.geburtsdatum &&
-          formData.pflegegrad && formData.pflegegrad !== "0" &&
           formData.strasse &&
           formData.nr &&
           formData.plz &&
           formData.stadt
         );
-      case 1:
+        if (isPflegekasseCustomer(formData.billingType)) {
+          return base && !!formData.pflegegrad && formData.pflegegrad !== "0";
+        }
+        return base;
+      }
+      case "insurance":
         if (formData.insuranceProviderId) {
           return !!formData.versichertennummer;
         }
         return true;
-      case 4:
+      case "contract":
         return !!(
           formData.contractDate &&
           formData.contractStart &&
           formData.vereinbarteLeistungen.trim()
         );
-      case 6:
+      case "matching":
         return !!formData.primaryEmployeeId;
       default:
         return true;
@@ -322,8 +343,8 @@ export default function AdminCustomerNew() {
   };
 
   const handleNext = () => {
-    if (validateStep(currentStep)) {
-      if (currentStep < STEPS.length - 1) {
+    if (validateStepById(currentStepId)) {
+      if (currentStep < steps.length - 1) {
         setCurrentStep(currentStep + 1);
       }
     } else {
@@ -341,9 +362,12 @@ export default function AdminCustomerNew() {
     }
   };
 
+  const findStepIndex = (stepId: string) => steps.findIndex((s) => s.id === stepId);
+
   const handleSubmit = () => {
-    if (!validateStep(0)) {
-      setCurrentStep(0);
+    const personalIdx = findStepIndex("personal");
+    if (personalIdx >= 0 && !validateStepById("personal")) {
+      setCurrentStep(personalIdx);
       toast({
         title: "Pflichtfelder ausfüllen",
         description: "Bitte füllen Sie die persönlichen Daten vollständig aus.",
@@ -351,8 +375,9 @@ export default function AdminCustomerNew() {
       });
       return;
     }
-    if (!validateStep(4)) {
-      setCurrentStep(4);
+    const contractIdx = findStepIndex("contract");
+    if (contractIdx >= 0 && !validateStepById("contract")) {
+      setCurrentStep(contractIdx);
       toast({
         title: "Pflichtfelder ausfüllen",
         description: "Bitte füllen Sie die Vertragsdaten vollständig aus.",
@@ -360,7 +385,7 @@ export default function AdminCustomerNew() {
       });
       return;
     }
-    if (!validateStep(6)) {
+    if (!validateStepById("matching")) {
       toast({
         title: "Hauptansprechpartner fehlt",
         description: "Bitte wählen Sie einen Hauptansprechpartner aus.",
@@ -372,8 +397,17 @@ export default function AdminCustomerNew() {
   };
 
   const renderStepContent = () => {
-    switch (currentStep) {
-      case 0:
+    switch (currentStepId) {
+      case "customerType":
+        return (
+          <CustomerTypeStep
+            selectedType={formData.billingType}
+            onChange={(type) => {
+              setFormData((prev) => ({ ...prev, billingType: type }));
+            }}
+          />
+        );
+      case "personal":
         return (
           <PersonalDataStep
             formData={formData}
@@ -381,7 +415,7 @@ export default function AdminCustomerNew() {
             onChange={handleChange}
           />
         );
-      case 1:
+      case "insurance":
         return (
           <InsuranceStep
             formData={formData}
@@ -393,7 +427,7 @@ export default function AdminCustomerNew() {
             }
           />
         );
-      case 2:
+      case "contacts":
         return (
           <ContactsStep
             contacts={formData.contacts}
@@ -403,7 +437,7 @@ export default function AdminCustomerNew() {
             onRemoveContact={handleRemoveContact}
           />
         );
-      case 3:
+      case "budgets":
         return (
           <BudgetsStep
             formData={formData}
@@ -413,16 +447,22 @@ export default function AdminCustomerNew() {
             pflegegrad={formData.pflegegrad ? parseInt(formData.pflegegrad) : null}
           />
         );
-      case 4:
+      case "contract":
         return (
           <ContractStep
             formData={formData}
             onChange={handleChange}
           />
         );
-      case 5:
-        return <SignaturesStep />;
-      case 6:
+      case "signatures":
+        return (
+          <SignaturesStep
+            billingType={formData.billingType}
+            customerSignatures={customerSignatures}
+            onSignatureChange={handleSignatureChange}
+          />
+        );
+      case "matching":
         return (
           <MatchingStep
             formData={formData}
@@ -450,14 +490,14 @@ export default function AdminCustomerNew() {
           <div className="mb-6">
             <div className="flex items-center gap-2 mb-3 justify-center">
               <span className="text-sm font-semibold text-teal-700">
-                {STEPS[currentStep].title}
+                {steps[currentStep].title}
               </span>
               <span className="text-xs text-gray-400">
-                ({currentStep + 1}/{STEPS.length})
+                ({currentStep + 1}/{steps.length})
               </span>
             </div>
             <div className="flex items-center justify-center gap-2">
-              {STEPS.map((step, index) => {
+              {steps.map((step, index) => {
                 const isActive = index === currentStep;
                 const isCompleted = index < currentStep;
 
@@ -493,7 +533,7 @@ export default function AdminCustomerNew() {
                   Zurück
                 </Button>
 
-                {currentStep === STEPS.length - 1 ? (
+                {currentStep === steps.length - 1 ? (
                   <Button
                     className="bg-teal-600 hover:bg-teal-700"
                     onClick={handleSubmit}

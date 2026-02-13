@@ -85,6 +85,7 @@ export interface CustomerListItem {
   name: string;
   vorname: string | null;
   nachname: string | null;
+  billingType: string | null;
   email: string | null;
   telefon: string | null;
   address: string | null;
@@ -98,6 +99,7 @@ export interface CustomerListItem {
 
 export interface CustomerListParams extends PaginationParams {
   pflegegrad?: string;
+  billingType?: string;
   primaryEmployeeId?: string;
   status?: string;
 }

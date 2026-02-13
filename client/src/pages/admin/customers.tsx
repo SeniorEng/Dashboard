@@ -35,7 +35,7 @@ import {
   FileText,
   AlertCircle,
 } from "lucide-react";
-import { PFLEGEGRAD_SELECT_OPTIONS } from "@shared/domain/customers";
+import { PFLEGEGRAD_SELECT_OPTIONS, BILLING_TYPE_SELECT_OPTIONS } from "@shared/domain/customers";
 
 export default function AdminCustomers() {
   const [, setLocation] = useLocation();
@@ -43,6 +43,7 @@ export default function AdminCustomers() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("aktiv");
   const [pflegegradFilter, setPflegegradFilter] = useState<string>("");
+  const [billingTypeFilter, setBillingTypeFilter] = useState<string>("");
   const [employeeFilter, setEmployeeFilter] = useState<string>("");
   const [currentPage, setCurrentPage] = useState(1);
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
@@ -68,10 +69,11 @@ export default function AdminCustomers() {
     search: debouncedSearch || undefined,
     status: statusFilter || undefined,
     pflegegrad: pflegegradFilter || undefined,
+    billingType: billingTypeFilter || undefined,
     primaryEmployeeId: employeeFilter || undefined,
     page: currentPage,
     limit: 15,
-  }), [debouncedSearch, statusFilter, pflegegradFilter, employeeFilter, currentPage]);
+  }), [debouncedSearch, statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter, currentPage]);
 
   const { data, isLoading, error, refetch } = useCustomers(queryParams);
 
@@ -84,9 +86,11 @@ export default function AdminCustomers() {
     setCurrentPage(1);
   }, []);
 
-  const handleFilterChange = useCallback((type: "pflegegrad" | "employee" | "status", value: string) => {
+  const handleFilterChange = useCallback((type: "pflegegrad" | "employee" | "status" | "billingType", value: string) => {
     if (type === "pflegegrad") {
       setPflegegradFilter(value === "all" ? "" : value);
+    } else if (type === "billingType") {
+      setBillingTypeFilter(value === "all" ? "" : value);
     } else if (type === "employee") {
       setEmployeeFilter(value === "all" ? "" : value);
     } else if (type === "status") {
@@ -98,6 +102,7 @@ export default function AdminCustomers() {
   const clearFilters = useCallback(() => {
     setStatusFilter("aktiv");
     setPflegegradFilter("");
+    setBillingTypeFilter("");
     setEmployeeFilter("");
     setSearchQuery("");
     setCurrentPage(1);
@@ -108,9 +113,10 @@ export default function AdminCustomers() {
     let count = 0;
     if (statusFilter && statusFilter !== "aktiv") count++;
     if (pflegegradFilter) count++;
+    if (billingTypeFilter) count++;
     if (employeeFilter) count++;
     return count;
-  }, [statusFilter, pflegegradFilter, employeeFilter]);
+  }, [statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter]);
 
   const customers = data?.data || [];
   const totalPages = data?.totalPages || 1;
@@ -196,6 +202,26 @@ export default function AdminCustomers() {
                       <SelectContent>
                         <SelectItem value="all">Alle Pflegegrade</SelectItem>
                         {PFLEGEGRAD_SELECT_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Kundentyp</Label>
+                    <Select
+                      value={billingTypeFilter || "all"}
+                      onValueChange={(value) => handleFilterChange("billingType", value)}
+                    >
+                      <SelectTrigger data-testid="select-billingtype">
+                        <SelectValue placeholder="Alle Kundentypen" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Alle Kundentypen</SelectItem>
+                        {BILLING_TYPE_SELECT_OPTIONS.map((option) => (
                           <SelectItem key={option.value} value={option.value}>
                             {option.label}
                           </SelectItem>
@@ -305,6 +331,9 @@ export default function AdminCustomers() {
                       )}
                       {customer.status === "inaktiv" && (
                         <StatusBadge type="warning" value="Inaktiv" data-testid={`badge-status-${customer.id}`} />
+                      )}
+                      {customer.billingType && (
+                        <StatusBadge type="billingType" value={customer.billingType} data-testid={`badge-billingtype-${customer.id}`} />
                       )}
                       {customer.pflegegrad !== null && customer.pflegegrad > 0 && (
                         <StatusBadge type="pflegegrad" value={customer.pflegegrad} />

@@ -5,6 +5,9 @@ import {
   employeeDocuments,
   customerDocuments,
   customers,
+  documentTemplates,
+  documentTemplateBillingTypes,
+  generatedDocuments,
   type DocumentType,
   type InsertDocumentType,
   type UpdateDocumentType,
@@ -12,6 +15,12 @@ import {
   type InsertEmployeeDocument,
   type CustomerDocument,
   type InsertCustomerDocument,
+  type DocumentTemplate,
+  type InsertDocumentTemplate,
+  type UpdateDocumentTemplate,
+  type DocumentTemplateBillingType,
+  type GeneratedDocument,
+  type InsertGeneratedDocument,
 } from "@shared/schema";
 import { db } from "../lib/db";
 
@@ -256,6 +265,127 @@ export class DocumentStorage implements IDocumentStorage {
       .orderBy(asc(customerDocuments.reviewDueDate));
 
     return docs.map(d => ({ ...d.doc, documentType: d.docType, customer: d.customer }));
+  }
+  async getDocumentTemplates(activeOnly = true): Promise<DocumentTemplate[]> {
+    const conditions = [];
+    if (activeOnly) conditions.push(eq(documentTemplates.isActive, true));
+
+    if (conditions.length > 0) {
+      return db.select().from(documentTemplates).where(and(...conditions)).orderBy(asc(documentTemplates.name));
+    }
+    return db.select().from(documentTemplates).orderBy(asc(documentTemplates.name));
+  }
+
+  async getDocumentTemplate(id: number): Promise<DocumentTemplate | null> {
+    const result = await db.select().from(documentTemplates).where(eq(documentTemplates.id, id)).limit(1);
+    return result[0] || null;
+  }
+
+  async getDocumentTemplateBySlug(slug: string): Promise<DocumentTemplate | null> {
+    const result = await db.select().from(documentTemplates).where(eq(documentTemplates.slug, slug)).limit(1);
+    return result[0] || null;
+  }
+
+  async getTemplatesForBillingType(billingType: string): Promise<(DocumentTemplate & { requirement: string; sortOrder: number })[]> {
+    const rows = await db
+      .select({
+        template: documentTemplates,
+        requirement: documentTemplateBillingTypes.requirement,
+        sortOrder: documentTemplateBillingTypes.sortOrder,
+      })
+      .from(documentTemplateBillingTypes)
+      .innerJoin(documentTemplates, eq(documentTemplateBillingTypes.templateId, documentTemplates.id))
+      .where(
+        and(
+          eq(documentTemplateBillingTypes.billingType, billingType),
+          eq(documentTemplates.isActive, true)
+        )
+      )
+      .orderBy(asc(documentTemplateBillingTypes.sortOrder));
+
+    return rows.map(r => ({
+      ...r.template,
+      requirement: r.requirement,
+      sortOrder: r.sortOrder,
+    }));
+  }
+
+  async createDocumentTemplate(data: InsertDocumentTemplate): Promise<DocumentTemplate> {
+    const [result] = await db.insert(documentTemplates).values({
+      slug: data.slug,
+      name: data.name,
+      description: data.description || null,
+      htmlContent: data.htmlContent,
+      isSystem: data.isSystem ?? false,
+      isActive: data.isActive ?? true,
+    }).returning();
+    return result;
+  }
+
+  async updateDocumentTemplate(id: number, data: UpdateDocumentTemplate): Promise<DocumentTemplate | null> {
+    const existing = await this.getDocumentTemplate(id);
+    if (!existing) return null;
+
+    const newVersion = data.htmlContent && data.htmlContent !== existing.htmlContent
+      ? existing.version + 1
+      : existing.version;
+
+    const [result] = await db
+      .update(documentTemplates)
+      .set({ ...data, version: newVersion, updatedAt: new Date() })
+      .where(eq(documentTemplates.id, id))
+      .returning();
+    return result || null;
+  }
+
+  async getGeneratedDocuments(customerId: number): Promise<(GeneratedDocument & { template: DocumentTemplate })[]> {
+    const rows = await db
+      .select({
+        doc: generatedDocuments,
+        template: documentTemplates,
+      })
+      .from(generatedDocuments)
+      .innerJoin(documentTemplates, eq(generatedDocuments.templateId, documentTemplates.id))
+      .where(eq(generatedDocuments.customerId, customerId))
+      .orderBy(desc(generatedDocuments.generatedAt));
+
+    return rows.map(r => ({ ...r.doc, template: r.template }));
+  }
+
+  async createGeneratedDocument(data: InsertGeneratedDocument, generatedByUserId: number): Promise<GeneratedDocument> {
+    const [result] = await db.insert(generatedDocuments).values({
+      customerId: data.customerId,
+      templateId: data.templateId,
+      templateVersion: data.templateVersion,
+      fileName: data.fileName,
+      objectPath: data.objectPath,
+      customerSignatureData: data.customerSignatureData || null,
+      employeeSignatureData: data.employeeSignatureData || null,
+      integrityHash: data.integrityHash || null,
+      generatedByUserId,
+    }).returning();
+    return result;
+  }
+
+  async updateGeneratedDocumentSignature(
+    id: number,
+    customerSignatureData: string | null,
+    employeeSignatureData: string | null,
+    signedByEmployeeId: number,
+    integrityHash: string
+  ): Promise<GeneratedDocument | null> {
+    const [result] = await db
+      .update(generatedDocuments)
+      .set({
+        customerSignatureData,
+        employeeSignatureData,
+        signedAt: new Date(),
+        signedByEmployeeId,
+        integrityHash,
+      })
+      .where(eq(generatedDocuments.id, id))
+      .returning();
+    return result || null;
   }
 }
 

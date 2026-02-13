@@ -286,6 +286,9 @@ export default function AdminCustomerDetail() {
                 {customer.status === "inaktiv" && (
                   <StatusBadge type="warning" value="Inaktiv" />
                 )}
+                {customer.billingType && (
+                  <StatusBadge type="billingType" value={customer.billingType} data-testid="badge-billingtype" />
+                )}
                 {customer.pflegegrad !== null && customer.pflegegrad > 0 && (
                   <>
                     <StatusBadge type="pflegegrad" value={customer.pflegegrad} />

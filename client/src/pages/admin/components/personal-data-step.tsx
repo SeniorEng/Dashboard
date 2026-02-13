@@ -7,6 +7,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { MapPin } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { CustomerFormData, PFLEGEGRAD_OPTIONS } from "./customer-types";
+import { needsPflegegradData, needsVorerkrankungenData } from "@shared/domain/customers";
 import { AddressFields } from "./address-fields";
 
 interface PersonalDataStepProps {
@@ -16,6 +17,8 @@ interface PersonalDataStepProps {
 }
 
 export function PersonalDataStep({ formData, phoneErrors, onChange }: PersonalDataStepProps) {
+  const showPflegegrad = needsPflegegradData(formData.billingType);
+  const showVorerkrankungen = needsVorerkrankungenData(formData.billingType);
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4">
@@ -109,50 +112,54 @@ export function PersonalDataStep({ formData, phoneErrors, onChange }: PersonalDa
         </div>
       </div>
 
-      <div className="border-t pt-4 space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="pflegegrad">Pflegegrad *</Label>
-          <Select
-            value={formData.pflegegrad}
-            onValueChange={(value) => onChange("pflegegrad", value)}
-          >
-            <SelectTrigger data-testid="select-pflegegrad">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PFLEGEGRAD_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      {showPflegegrad && (
+        <div className="border-t pt-4 space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="pflegegrad">Pflegegrad *</Label>
+            <Select
+              value={formData.pflegegrad}
+              onValueChange={(value) => onChange("pflegegrad", value)}
+            >
+              <SelectTrigger data-testid="select-pflegegrad">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PFLEGEGRAD_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Pflegegrad seit</Label>
+            <DatePicker
+              value={formData.pflegegradSeit || null}
+              onChange={(val) => onChange("pflegegradSeit", val || "")}
+              data-testid="input-pflegegrad-seit"
+            />
+          </div>
         </div>
-        <div className="space-y-2">
-          <Label>Pflegegrad seit</Label>
-          <DatePicker
-            value={formData.pflegegradSeit || null}
-            onChange={(val) => onChange("pflegegradSeit", val || "")}
-            data-testid="input-pflegegrad-seit"
-          />
-        </div>
-      </div>
+      )}
 
       <div className="border-t pt-4 space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="vorerkrankungen">Vorerkrankungen</Label>
-          <Textarea
-            id="vorerkrankungen"
-            value={formData.vorerkrankungen}
-            onChange={(e) => onChange("vorerkrankungen", e.target.value)}
-            placeholder="z.B. Diabetes Typ 2, Bluthochdruck, Demenz..."
-            rows={3}
-            data-testid="input-vorerkrankungen"
-          />
-          <p className="text-xs text-gray-500">
-            Wichtige gesundheitliche Informationen für die Betreuungskräfte
-          </p>
-        </div>
+        {showVorerkrankungen && (
+          <div className="space-y-2">
+            <Label htmlFor="vorerkrankungen">Vorerkrankungen</Label>
+            <Textarea
+              id="vorerkrankungen"
+              value={formData.vorerkrankungen}
+              onChange={(e) => onChange("vorerkrankungen", e.target.value)}
+              placeholder="z.B. Diabetes Typ 2, Bluthochdruck, Demenz..."
+              rows={3}
+              data-testid="input-vorerkrankungen"
+            />
+            <p className="text-xs text-gray-500">
+              Wichtige gesundheitliche Informationen für die Betreuungskräfte
+            </p>
+          </div>
+        )}
 
         <div className="space-y-3">
           <div className="flex items-center space-x-2">

@@ -33,6 +33,7 @@ function buildQueryString(params: CustomerListParams): string {
   if (params.limit) searchParams.set("limit", params.limit.toString());
   if (params.search) searchParams.set("search", params.search);
   if (params.pflegegrad) searchParams.set("pflegegrad", params.pflegegrad);
+  if (params.billingType) searchParams.set("billingType", params.billingType);
   if (params.primaryEmployeeId) searchParams.set("primaryEmployeeId", params.primaryEmployeeId);
   if (params.status) searchParams.set("status", params.status);
   const qs = searchParams.toString();

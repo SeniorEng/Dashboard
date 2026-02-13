@@ -45,6 +45,7 @@ export interface CustomerListFilters {
   primaryEmployeeId?: number;
   hasActiveContract?: boolean;
   status?: string;
+  billingType?: string;
 }
 
 export interface PaginationOptions {
@@ -70,6 +71,7 @@ export interface CustomerListItem {
   address: string;
   stadt: string | null;
   status: string;
+  billingType: string;
   primaryEmployee: { id: number; displayName: string } | null;
   hasActiveContract: boolean;
   createdAt: Date;
@@ -143,6 +145,10 @@ export class CustomerManagementStorage {
       baseConditions.push(eq(customers.status, filters.status));
     }
 
+    if (filters?.billingType) {
+      baseConditions.push(eq(customers.billingType, filters.billingType));
+    }
+
     const activeContractSubquery = db
       .select({ 
         customerId: customerContracts.customerId,
@@ -182,6 +188,7 @@ export class CustomerManagementStorage {
         address: customers.address,
         stadt: customers.stadt,
         status: customers.status,
+        billingType: customers.billingType,
         createdAt: customers.createdAt,
         primaryEmployeeId: customers.primaryEmployeeId,
         primaryEmployeeName: users.displayName,
@@ -206,6 +213,7 @@ export class CustomerManagementStorage {
       address: r.address,
       stadt: r.stadt,
       status: r.status,
+      billingType: r.billingType,
       primaryEmployee: r.primaryEmployeeId && r.primaryEmployeeName 
         ? { id: r.primaryEmployeeId, displayName: r.primaryEmployeeName }
         : null,

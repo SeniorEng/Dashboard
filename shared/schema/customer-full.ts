@@ -13,6 +13,9 @@ import type { CustomerBudget, BudgetSummary } from "./budget";
 
 // This is the comprehensive schema for creating a customer via the admin form
 export const createFullCustomerSchema = z.object({
+  // Billing type
+  billingType: z.enum(["pflegekasse_gesetzlich", "pflegekasse_privat", "selbstzahler"]).default("pflegekasse_gesetzlich"),
+  
   // Personal data
   vorname: z.string().min(1, "Vorname ist erforderlich"),
   nachname: z.string().min(1, "Nachname ist erforderlich"),
@@ -27,9 +30,9 @@ export const createFullCustomerSchema = z.object({
   plz: plzSchema,
   stadt: z.string().min(1, "Stadt ist erforderlich"),
   
-  // Insurance
-  insuranceProviderId: z.number().min(1, "Pflegekasse ist erforderlich"),
-  versichertennummer: versichertennummerSchema,
+  // Insurance (optional for Selbstzahler)
+  insuranceProviderId: z.number().min(1).optional().nullable(),
+  versichertennummer: versichertennummerSchema.optional().nullable(),
   
   // Primary emergency contact (required)
   primaryContact: z.object({
@@ -47,10 +50,10 @@ export const createFullCustomerSchema = z.object({
     telefon: germanPhoneTransformSchema,
   })).optional().default([]),
   
-  // Needs assessment
+  // Needs assessment (pflegegrad optional for Selbstzahler)
   householdSize: z.number().min(1).default(1),
-  pflegegrad: z.number().min(1).max(5),
-  pflegegradSeit: z.string().min(1, "Pflegegrad seit ist erforderlich"),
+  pflegegrad: z.number().min(1).max(5).optional().nullable(),
+  pflegegradSeit: z.string().optional().nullable(),
   pflegegradBeantragt: z.number().min(1).max(5).optional().nullable(),
   pflegedienstBeauftragt: z.boolean().default(false),
   anamnese: z.string().max(2000).optional().nullable(),

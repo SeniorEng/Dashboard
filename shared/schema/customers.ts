@@ -39,6 +39,7 @@ export const customers = pgTable("customers", {
   status: text("status").notNull().default("aktiv"),
   personenbefoerderungGewuenscht: boolean("personenbefoerderung_gewuenscht").notNull().default(false),
   // Billing
+  billingType: text("billing_type").notNull().default("pflegekasse_gesetzlich"), // pflegekasse_gesetzlich, pflegekasse_privat, selbstzahler
   acceptsPrivatePayment: boolean("accepts_private_payment").notNull().default(false),
   // Legacy fields
   needs: text("needs").array().notNull().default([]),
@@ -208,7 +209,8 @@ export const insertErstberatungCustomerSchema = z.object({
   nr: z.string().min(1, "Hausnummer ist erforderlich"),
   plz: z.string().regex(/^\d{5}$/, "PLZ muss 5 Ziffern haben"),
   stadt: z.string().min(1, "Stadt ist erforderlich"),
-  pflegegrad: z.number().min(1).max(5),
+  pflegegrad: z.number().min(1).max(5).optional().nullable(),
+  billingType: z.enum(["pflegekasse_gesetzlich", "pflegekasse_privat", "selbstzahler"]).default("pflegekasse_gesetzlich"),
 });
 
 export type Customer = typeof customers.$inferSelect;
