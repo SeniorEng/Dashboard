@@ -14,6 +14,7 @@ export interface UserData {
   vacationDaysPerYear: number;
   isActive: boolean;
   isAdmin: boolean;
+  haustierAkzeptiert: boolean;
   roles: string[];
   createdAt: string;
 }
@@ -32,6 +33,7 @@ export interface UserFormData {
   eintrittsdatum?: string;
   vacationDaysPerYear?: number;
   isAdmin: boolean;
+  haustierAkzeptiert: boolean;
   roles: string[];
 }
 

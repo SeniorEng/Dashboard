@@ -57,6 +57,7 @@ export interface CreateUserData {
   eintrittsdatum?: string;
   vacationDaysPerYear?: number;
   isAdmin?: boolean;
+  haustierAkzeptiert?: boolean;
   roles?: EmployeeRole[];
 }
 
@@ -91,6 +92,7 @@ export class AuthService {
         eintrittsdatum: data.eintrittsdatum || null,
         vacationDaysPerYear: data.vacationDaysPerYear ?? 30,
         isAdmin: data.isAdmin ?? false,
+        haustierAkzeptiert: data.haustierAkzeptiert ?? true,
         isActive: true,
       })
       .returning();

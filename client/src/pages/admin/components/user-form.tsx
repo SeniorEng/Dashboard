@@ -48,6 +48,7 @@ export function UserForm({
     user?.vacationDaysPerYear?.toString() ?? "30"
   );
   const [isAdmin, setIsAdmin] = useState(user?.isAdmin ?? false);
+  const [haustierAkzeptiert, setHaustierAkzeptiert] = useState(user?.haustierAkzeptiert ?? true);
   const [roles, setRoles] = useState<string[]>(user?.roles ?? []);
 
   const handleTelefonBlur = () => {
@@ -90,6 +91,7 @@ export function UserForm({
       eintrittsdatum: eintrittsdatum || undefined,
       vacationDaysPerYear: vacationDaysPerYear ? parseInt(vacationDaysPerYear) : undefined,
       isAdmin,
+      haustierAkzeptiert,
       roles,
     };
     
@@ -286,6 +288,16 @@ export function UserForm({
             <Label htmlFor="isAdmin">Administrator-Rechte</Label>
           </div>
           
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="haustierAkzeptiert"
+              checked={haustierAkzeptiert}
+              onCheckedChange={(checked) => setHaustierAkzeptiert(!!checked)}
+              data-testid="checkbox-haustier-akzeptiert"
+            />
+            <Label htmlFor="haustierAkzeptiert">Akzeptiert Haustiere im Haushalt</Label>
+          </div>
+
           <div className="space-y-2">
             <Label>Tätigkeitsbereiche</Label>
             <div className="grid grid-cols-2 gap-2">

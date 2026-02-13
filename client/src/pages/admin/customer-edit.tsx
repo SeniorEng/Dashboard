@@ -39,6 +39,7 @@ import {
 import { iconSize, componentStyles } from "@/design-system";
 import { PFLEGEGRAD_SELECT_OPTIONS } from "@shared/domain/customers";
 import { AddressFields } from "./components/address-fields";
+import { EmployeeMatching } from "./components/employee-matching";
 
 export default function AdminCustomerEdit() {
   const { id } = useParams<{ id: string }>();
@@ -94,6 +95,7 @@ export default function AdminCustomerEdit() {
     vorerkrankungen: "",
     haustierVorhanden: false,
     haustierDetails: "",
+    personenbefoerderungGewuenscht: false,
     acceptsPrivatePayment: false,
   });
 
@@ -117,6 +119,7 @@ export default function AdminCustomerEdit() {
         vorerkrankungen: customer.vorerkrankungen || "",
         haustierVorhanden: customer.haustierVorhanden ?? false,
         haustierDetails: customer.haustierDetails || "",
+        personenbefoerderungGewuenscht: customer.personenbefoerderungGewuenscht ?? false,
         acceptsPrivatePayment: customer.acceptsPrivatePayment ?? false,
       });
     }
@@ -188,6 +191,7 @@ export default function AdminCustomerEdit() {
       vorerkrankungen: formData.vorerkrankungen?.trim() || null,
       haustierVorhanden: formData.haustierVorhanden ?? false,
       haustierDetails: formData.haustierVorhanden ? (formData.haustierDetails?.trim() || null) : null,
+      personenbefoerderungGewuenscht: formData.personenbefoerderungGewuenscht,
       acceptsPrivatePayment: formData.acceptsPrivatePayment,
     };
 
@@ -455,6 +459,19 @@ export default function AdminCustomerEdit() {
                     data-testid="select-backup-employee"
                   />
                 </div>
+
+                <div className="border-t pt-3 mt-3">
+                  <EmployeeMatching
+                    customerId={customerId}
+                    onSelect={(employeeId) => {
+                      if (!formData.primaryEmployeeId) {
+                        handleChange("primaryEmployeeId", employeeId.toString());
+                      } else if (!formData.backupEmployeeId && formData.primaryEmployeeId !== employeeId.toString()) {
+                        handleChange("backupEmployeeId", employeeId.toString());
+                      }
+                    }}
+                  />
+                </div>
               </CardContent>
             </Card>
 
@@ -507,6 +524,21 @@ export default function AdminCustomerEdit() {
                     />
                   </div>
                 )}
+
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="personenbefoerderungGewuenscht">Personenbeförderung gewünscht</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Kunde wünscht Fahrten zu Terminen, Einkäufen etc.
+                    </p>
+                  </div>
+                  <Switch
+                    id="personenbefoerderungGewuenscht"
+                    checked={formData.personenbefoerderungGewuenscht}
+                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, personenbefoerderungGewuenscht: checked }))}
+                    data-testid="switch-personenbefoerderung"
+                  />
+                </div>
               </CardContent>
             </Card>
 

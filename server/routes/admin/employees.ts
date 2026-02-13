@@ -77,6 +77,7 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
       eintrittsdatum: result.data.eintrittsdatum,
       vacationDaysPerYear: result.data.vacationDaysPerYear,
       isAdmin: result.data.isAdmin,
+      haustierAkzeptiert: result.data.haustierAkzeptiert,
       roles: result.data.roles,
     });
   } catch (error) {
@@ -112,6 +113,7 @@ const updateUserSchema = z.object({
   vacationDaysPerYear: z.number().int().min(0).max(365).optional(),
   isActive: z.boolean().optional(),
   isAdmin: z.boolean().optional(),
+  haustierAkzeptiert: z.boolean().optional(),
   roles: z.array(z.enum(EMPLOYEE_ROLES)).optional(),
 });
 

@@ -24,6 +24,7 @@ export const users = pgTable("users", {
   isActive: boolean("is_active").notNull().default(true),
   deactivatedAt: timestamp("deactivated_at"),
   isAdmin: boolean("is_admin").notNull().default(false),
+  haustierAkzeptiert: boolean("haustier_akzeptiert").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -108,6 +109,7 @@ export const insertUserSchema = z.object({
   eintrittsdatum: z.string().optional(),
   vacationDaysPerYear: z.number().int().min(0).max(365).optional().default(30),
   isAdmin: z.boolean().optional().default(false),
+  haustierAkzeptiert: z.boolean().optional().default(true),
   roles: z.array(z.enum(EMPLOYEE_ROLES)).optional().default([]),
 });
 

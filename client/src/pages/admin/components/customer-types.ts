@@ -28,6 +28,7 @@ export interface CustomerFormData {
   vorerkrankungen: string;
   haustierVorhanden: boolean;
   haustierDetails: string;
+  personenbefoerderungGewuenscht: boolean;
   insuranceProviderId: string;
   versichertennummer: string;
   contacts: ContactFormData[];

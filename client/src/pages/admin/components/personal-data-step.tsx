@@ -9,6 +9,7 @@ import { MapPin } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { CustomerFormData, SelectOption, PFLEGEGRAD_OPTIONS } from "./customer-types";
 import { AddressFields } from "./address-fields";
+import { EmployeeMatching } from "./employee-matching";
 
 interface PersonalDataStepProps {
   formData: CustomerFormData;
@@ -162,6 +163,28 @@ export function PersonalDataStep({ formData, phoneErrors, employeeOptions, onCha
             data-testid="select-backup-employee"
           />
         </div>
+
+        <div className="border-t pt-3 mt-3">
+          <EmployeeMatching
+            inlineCriteria={{
+              plz: formData.plz || null,
+              haustierVorhanden: formData.haustierVorhanden,
+              personenbefoerderungGewuenscht: formData.personenbefoerderungGewuenscht,
+              geburtsdatum: formData.geburtsdatum || null,
+              needsHauswirtschaft: false,
+              needsAlltagsbegleitung: false,
+              excludeEmployeeIds: [],
+            }}
+            onSelect={(employeeId, _displayName) => {
+              if (!formData.primaryEmployeeId) {
+                onChange("primaryEmployeeId", employeeId.toString());
+              } else if (!formData.backupEmployeeId && formData.primaryEmployeeId !== employeeId.toString()) {
+                onChange("backupEmployeeId", employeeId.toString());
+              }
+            }}
+            selectedLabel="Mitarbeiter-Vorschläge"
+          />
+        </div>
       </div>
 
       <div className="border-t pt-4 space-y-4">
@@ -202,6 +225,16 @@ export function PersonalDataStep({ formData, phoneErrors, employeeOptions, onCha
               />
             </div>
           )}
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <Checkbox
+            id="personenbefoerderungGewuenscht"
+            checked={formData.personenbefoerderungGewuenscht}
+            onCheckedChange={(checked) => onChange("personenbefoerderungGewuenscht", !!checked)}
+            data-testid="checkbox-personenbefoerderung"
+          />
+          <Label htmlFor="personenbefoerderungGewuenscht">Personenbeförderung gewünscht?</Label>
         </div>
       </div>
     </div>
