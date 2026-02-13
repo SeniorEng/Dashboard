@@ -202,18 +202,18 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
   const isYearlyBudget = (budgetType: string) =>
     budgetType === "ersatzpflege_39_42a";
 
-  const getMaxPlaceholder = (budgetType: string) => {
+  const getMaxHint = (budgetType: string): string | null => {
     if (budgetType === "entlastungsbetrag_45b") {
-      return `Max. ${(BUDGET_45B_MAX_MONTHLY_CENTS / 100).toFixed(0)} €/Monat`;
+      return `Gesetzl. Max: ${(BUDGET_45B_MAX_MONTHLY_CENTS / 100).toFixed(0)} €/Monat`;
     }
     if (budgetType === "umwandlung_45a" && pflegegrad) {
       const maxCents = BUDGET_45A_MAX_BY_PFLEGEGRAD[pflegegrad] ?? 0;
-      return maxCents > 0 ? `Max. ${(maxCents / 100).toFixed(0)} €/Monat (PG ${pflegegrad})` : "Voller Betrag";
+      return maxCents > 0 ? `Gesetzl. Max: ${(maxCents / 100).toFixed(0)} €/Monat (PG ${pflegegrad})` : null;
     }
     if (budgetType === "ersatzpflege_39_42a") {
-      return `Max. ${(BUDGET_39_42A_MAX_YEARLY_CENTS / 100).toFixed(0)} €/Jahr`;
+      return `Gesetzl. Max: ${(BUDGET_39_42A_MAX_YEARLY_CENTS / 100).toFixed(0)} €/Jahr`;
     }
-    return "Voller Betrag";
+    return null;
   };
 
   const toggleHistory = (budgetType: string) => {
@@ -284,12 +284,15 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
                       <Input
                         type="text"
                         inputMode="decimal"
-                        placeholder={getMaxPlaceholder(setting.budgetType)}
+                        placeholder="0,00"
                         value={euroValues[setting.budgetType]?.monthly || ""}
                         onChange={(e) => updateEuroValue(setting.budgetType, "monthly", e.target.value)}
                         className="h-8 mt-1 text-base"
                         data-testid={`input-monthly-limit-${setting.budgetType}`}
                       />
+                      {getMaxHint(setting.budgetType) && (
+                        <p className="text-[11px] text-gray-400 mt-0.5">{getMaxHint(setting.budgetType)}</p>
+                      )}
                     </div>
                   )}
 
@@ -299,12 +302,15 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
                       <Input
                         type="text"
                         inputMode="decimal"
-                        placeholder={getMaxPlaceholder(setting.budgetType)}
+                        placeholder="0,00"
                         value={euroValues[setting.budgetType]?.yearly || ""}
                         onChange={(e) => updateEuroValue(setting.budgetType, "yearly", e.target.value)}
                         className="h-8 mt-1 text-base"
                         data-testid={`input-yearly-limit-${setting.budgetType}`}
                       />
+                      {getMaxHint(setting.budgetType) && (
+                        <p className="text-[11px] text-gray-400 mt-0.5">{getMaxHint(setting.budgetType)}</p>
+                      )}
                     </div>
                   )}
 
