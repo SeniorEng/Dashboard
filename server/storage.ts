@@ -831,7 +831,10 @@ export class DatabaseStorage implements IStorage {
         ne(appointments.status, 'cancelled'),
         isNull(appointments.deletedAt)
       ))
-      .where(inArray(customers.id, assignedCustomerIds))
+      .where(and(
+        inArray(customers.id, assignedCustomerIds),
+        ne(customers.status, 'erstberatung')
+      ))
       .groupBy(customers.id, customers.vorname, customers.nachname);
 
     const existingRecords = await db.select({

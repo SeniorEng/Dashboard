@@ -93,16 +93,20 @@ router.get("/check-period", requireAuth, asyncHandler("Periodendaten konnten nic
     });
   }
   
-  const [existingRecord, counts] = await Promise.all([
+  const [existingRecord, counts, customerData] = await Promise.all([
     storage.getServiceRecordByPeriod(customerId, userId, year, month),
     storage.getAppointmentCountsForPeriod(customerId, userId, year, month),
+    storage.getCustomer(customerId),
   ]);
+
+  const isErstberatung = customerData?.status === "erstberatung";
   
   res.json({
     existingRecord,
     documentedCount: counts.documentedCount,
     undocumentedCount: counts.undocumentedCount,
-    canCreateRecord: counts.undocumentedCount === 0 && counts.documentedCount > 0,
+    canCreateRecord: !isErstberatung && counts.undocumentedCount === 0 && counts.documentedCount > 0,
+    isErstberatung,
   });
 }));
 
@@ -210,6 +214,13 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
     });
   }
   
+  const customer = await storage.getCustomer(customerId);
+  if (customer?.status === "erstberatung") {
+    return res.status(400).json({
+      message: "Für Erstberatungskunden können keine Leistungsnachweise erstellt werden. Erst nach Vertragsabschluss ist eine Abrechnung möglich."
+    });
+  }
+
   const existingRecord = await storage.getServiceRecordByPeriod(customerId, userId, year, month);
   if (existingRecord) {
     return res.status(409).json({ 
