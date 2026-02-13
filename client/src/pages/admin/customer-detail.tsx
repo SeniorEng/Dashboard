@@ -287,7 +287,21 @@ export default function AdminCustomerDetail() {
                   <StatusBadge type="warning" value="Inaktiv" />
                 )}
                 {customer.pflegegrad !== null && customer.pflegegrad > 0 && (
-                  <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
+                  <>
+                    <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
+                    {(() => {
+                      const current = customer.careLevelHistory?.find((h: { validTo: string | null }) => !h.validTo);
+                      if (current?.validFrom) {
+                        const d = new Date(current.validFrom);
+                        return (
+                          <span className="text-xs text-gray-500" data-testid="text-pflegegrad-seit">
+                            seit {d.toLocaleDateString("de-DE", { month: "2-digit", year: "numeric" })}
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </>
                 )}
               </>
             }
