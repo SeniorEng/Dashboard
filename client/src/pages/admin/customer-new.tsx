@@ -447,52 +447,35 @@ export default function AdminCustomerNew() {
             <h1 className="text-2xl font-bold text-gray-900">Neuen Kunden anlegen</h1>
           </div>
 
-          <div className="mb-8">
-            <div className="flex items-center justify-center gap-1">
+          <div className="mb-6">
+            <div className="flex items-center gap-2 mb-3 justify-center">
+              <span className="text-sm font-semibold text-teal-700">
+                {STEPS[currentStep].title}
+              </span>
+              <span className="text-xs text-gray-400">
+                ({currentStep + 1}/{STEPS.length})
+              </span>
+            </div>
+            <div className="flex items-center justify-center gap-2">
               {STEPS.map((step, index) => {
                 const isActive = index === currentStep;
                 const isCompleted = index < currentStep;
 
                 return (
-                  <div key={step.id} className="flex items-center gap-1">
-                    {isActive ? (
-                      <div className="flex items-center gap-2 bg-teal-600 text-white px-3 py-1.5 rounded-full" data-testid={`step-active-${step.id}`}>
-                        <step.icon className="w-4 h-4" />
-                        <span className="text-sm font-medium whitespace-nowrap">
-                          {step.title}
-                        </span>
-                      </div>
-                    ) : (
-                      <div
-                        className={`flex items-center justify-center w-7 h-7 rounded-full border-2 transition-colors ${
-                          isCompleted
-                            ? "bg-teal-600 border-teal-600 text-white"
-                            : "border-gray-300 text-gray-400 bg-white"
-                        }`}
-                        title={step.title}
-                      >
-                        {isCompleted ? (
-                          <Check className="w-3.5 h-3.5" />
-                        ) : (
-                          <step.icon className="w-3.5 h-3.5" />
-                        )}
-                      </div>
-                    )}
-
-                    {index < STEPS.length - 1 && (
-                      <div
-                        className={`w-4 h-0.5 ${
-                          isCompleted ? "bg-teal-600" : "bg-gray-300"
-                        }`}
-                      />
-                    )}
-                  </div>
+                  <div
+                    key={step.id}
+                    className={`rounded-full transition-all ${
+                      isActive
+                        ? "w-8 h-2 bg-teal-600"
+                        : isCompleted
+                        ? "w-2 h-2 bg-teal-600"
+                        : "w-2 h-2 bg-gray-300"
+                    }`}
+                    title={step.title}
+                  />
                 );
               })}
             </div>
-            <p className="text-center text-xs text-gray-500 mt-2">
-              Schritt {currentStep + 1} von {STEPS.length}
-            </p>
           </div>
 
           <Card className="bg-white">
