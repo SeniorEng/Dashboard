@@ -172,40 +172,43 @@ export default function AdminAuditLog() {
             </Card>
           ) : (
             <>
-              <div className="space-y-2">
-                {data.entries.map((entry) => (
-                  <Card key={entry.id} data-testid={`audit-entry-${entry.id}`}>
-                    <CardContent className="p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap mb-1">
-                            <StatusBadge
-                              type={actionColor(entry.action)}
-                              label={ACTION_LABELS[entry.action] || entry.action}
-                            />
-                            <span className="text-xs text-gray-500">
-                              {ENTITY_TYPE_LABELS[entry.entityType] || entry.entityType} #{entry.entityId}
-                            </span>
-                          </div>
-                          <div className="text-sm text-gray-700">
-                            <span className="font-medium">{entry.userName}</span>
-                            {entry.ipAddress && (
-                              <span className="text-xs text-gray-400 ml-2">({entry.ipAddress})</span>
+              <div className="flex flex-col gap-2">
+                {data.entries.map((entry) => {
+                  const metaDisplay = getMetadataDisplay(entry);
+                  return (
+                    <Card key={entry.id} data-testid={`audit-entry-${entry.id}`}>
+                      <CardContent className="p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                              <StatusBadge
+                                type={actionColor(entry.action)}
+                                label={ACTION_LABELS[entry.action] || entry.action}
+                              />
+                              <span className="text-xs text-gray-500">
+                                {ENTITY_TYPE_LABELS[entry.entityType] || entry.entityType} #{entry.entityId}
+                              </span>
+                            </div>
+                            <div className="text-sm text-gray-700">
+                              <span className="font-medium">{entry.userName}</span>
+                              {entry.ipAddress && (
+                                <span className="text-xs text-gray-400 ml-2">({entry.ipAddress})</span>
+                              )}
+                            </div>
+                            {metaDisplay && (
+                              <div className="text-xs text-gray-500 mt-1">
+                                {metaDisplay}
+                              </div>
                             )}
                           </div>
-                          {getMetadataDisplay(entry) && (
-                            <div className="text-xs text-gray-500 mt-1">
-                              {getMetadataDisplay(entry)}
-                            </div>
-                          )}
+                          <div className="text-xs text-gray-400 whitespace-nowrap">
+                            {formatDate(entry.createdAt)}
+                          </div>
                         </div>
-                        <div className="text-xs text-gray-400 whitespace-nowrap">
-                          {formatDate(entry.createdAt)}
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
 
               {totalPages > 1 && (

@@ -122,6 +122,9 @@ router.post("/revoke-signature/:entityType/:entityId", asyncHandler("Stornierung
   if (!reason || typeof reason !== "string" || reason.trim().length < 3) {
     throw badRequest("Ein Stornierungsgrund mit mindestens 3 Zeichen ist erforderlich.");
   }
+  if (reason.trim().length > 500) {
+    throw badRequest("Der Stornierungsgrund darf maximal 500 Zeichen lang sein.");
+  }
 
   const ip = req.ip || req.socket.remoteAddress;
   const userId = (req as any).user!.id;
