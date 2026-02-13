@@ -310,7 +310,17 @@ export default function AdminCustomerEdit() {
                 <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-50">
                   <span className="text-sm text-gray-600">Aktueller Pflegegrad:</span>
                   {customer && customer.pflegegrad && customer.pflegegrad > 0 ? (
-                    <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
+                    <>
+                      <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
+                      {(() => {
+                        const current = customer.careLevelHistory?.find(h => !h.validTo);
+                        return current ? (
+                          <span className="text-xs text-gray-500">
+                            seit {new Date(current.validFrom).toLocaleDateString("de-DE")}
+                          </span>
+                        ) : null;
+                      })()}
+                    </>
                   ) : (
                     <span className="text-sm text-gray-400">Nicht festgelegt</span>
                   )}
