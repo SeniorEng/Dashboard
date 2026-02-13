@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Layout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
-import { useEmployees, useInsuranceProviders, useCreateCustomer } from "@/features/customers";
+import { useInsuranceProviders, useCreateCustomer } from "@/features/customers";
 import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
 import { todayISO } from "@shared/utils/datetime";
 import {
@@ -15,12 +15,14 @@ import {
   Check,
 } from "lucide-react";
 import { iconSize } from "@/design-system";
-import { CustomerFormData, ContactFormData, STEPS, DEFAULT_BUDGETS, EMPTY_CONTACT, MAX_CONTACTS } from "./components/customer-types";
-import { BUDGET_45A_MAX_BY_PFLEGEGRAD } from "@shared/domain/budgets";
+import { CustomerFormData, ContactFormData, BudgetTypeSettingForm, STEPS, DEFAULT_BUDGETS, EMPTY_CONTACT, MAX_CONTACTS } from "./components/customer-types";
+import { BUDGET_45A_MAX_BY_PFLEGEGRAD, BUDGET_TYPES, type BudgetType } from "@shared/domain/budgets";
 import { PersonalDataStep } from "./components/personal-data-step";
 import { InsuranceStep } from "./components/insurance-step";
 import { ContactsStep } from "./components/contacts-step";
 import { BudgetsStep, ContractStep } from "./components/budgets-contract-step";
+import { SignaturesStep } from "./components/signatures-step";
+import { MatchingStep } from "./components/matching-step";
 
 export default function AdminCustomerNew() {
   const [, setLocation] = useLocation();
@@ -49,6 +51,12 @@ export default function AdminCustomerNew() {
     insuranceProviderId: "",
     versichertennummer: "",
     contacts: [{ ...EMPTY_CONTACT }],
+    budgetTypeSettings: BUDGET_TYPES.map((bt) => ({
+      budgetType: bt,
+      enabled: true,
+      monthlyLimitCents: "",
+      yearlyLimitCents: "",
+    })),
     entlastungsbetrag45b: DEFAULT_BUDGETS.entlastungsbetrag45b.toString(),
     verhinderungspflege39: DEFAULT_BUDGETS.verhinderungspflege39.toString(),
     pflegesachleistungen36: DEFAULT_BUDGETS.pflegesachleistungen36.toString(),
@@ -60,16 +68,7 @@ export default function AdminCustomerNew() {
   });
 
   const { data: insuranceProviders } = useInsuranceProviders();
-  const { data: employees } = useEmployees();
   const createMutation = useCreateCustomer();
-
-  const employeeOptions = useMemo(() =>
-    employees?.map((emp) => ({
-      value: emp.id.toString(),
-      label: emp.displayName,
-    })) || [],
-    [employees]
-  );
 
   const insuranceOptions = useMemo(() =>
     insuranceProviders?.map((p) => ({
@@ -247,6 +246,24 @@ export default function AdminCustomerNew() {
     });
   };
 
+  const handleBudgetTypeToggle = useCallback((budgetType: BudgetType, enabled: boolean) => {
+    setFormData((prev) => ({
+      ...prev,
+      budgetTypeSettings: prev.budgetTypeSettings.map((s) =>
+        s.budgetType === budgetType ? { ...s, enabled } : s
+      ),
+    }));
+  }, []);
+
+  const handleBudgetTypeLimitChange = useCallback((budgetType: BudgetType, field: "monthlyLimitCents" | "yearlyLimitCents", value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      budgetTypeSettings: prev.budgetTypeSettings.map((s) =>
+        s.budgetType === budgetType ? { ...s, [field]: value } : s
+      ),
+    }));
+  }, []);
+
   const personalPhoneFields = ["telefon", "festnetz"] as const;
   
   const handleChange = (field: string, value: string | boolean) => {
@@ -276,12 +293,29 @@ export default function AdminCustomerNew() {
   const validateStep = (step: number): boolean => {
     switch (step) {
       case 0:
-        return !!(formData.vorname && formData.nachname && formData.strasse && formData.nr && formData.plz && formData.stadt);
+        return !!(
+          formData.vorname &&
+          formData.nachname &&
+          formData.geburtsdatum &&
+          formData.pflegegrad && formData.pflegegrad !== "0" &&
+          formData.strasse &&
+          formData.nr &&
+          formData.plz &&
+          formData.stadt
+        );
       case 1:
         if (formData.insuranceProviderId) {
           return !!formData.versichertennummer;
         }
         return true;
+      case 4:
+        return !!(
+          formData.contractDate &&
+          formData.contractStart &&
+          formData.vereinbarteLeistungen.trim()
+        );
+      case 6:
+        return !!formData.primaryEmployeeId;
       default:
         return true;
     }
@@ -317,6 +351,23 @@ export default function AdminCustomerNew() {
       });
       return;
     }
+    if (!validateStep(4)) {
+      setCurrentStep(4);
+      toast({
+        title: "Pflichtfelder ausfüllen",
+        description: "Bitte füllen Sie die Vertragsdaten vollständig aus.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!validateStep(6)) {
+      toast({
+        title: "Hauptansprechpartner fehlt",
+        description: "Bitte wählen Sie einen Hauptansprechpartner aus.",
+        variant: "destructive",
+      });
+      return;
+    }
     handleCreate();
   };
 
@@ -327,7 +378,6 @@ export default function AdminCustomerNew() {
           <PersonalDataStep
             formData={formData}
             phoneErrors={phoneErrors}
-            employeeOptions={employeeOptions}
             onChange={handleChange}
           />
         );
@@ -358,12 +408,23 @@ export default function AdminCustomerNew() {
           <BudgetsStep
             formData={formData}
             onChange={handleChange}
+            onBudgetTypeToggle={handleBudgetTypeToggle}
+            onBudgetTypeLimitChange={handleBudgetTypeLimitChange}
             pflegegrad={formData.pflegegrad ? parseInt(formData.pflegegrad) : null}
           />
         );
       case 4:
         return (
           <ContractStep
+            formData={formData}
+            onChange={handleChange}
+          />
+        );
+      case 5:
+        return <SignaturesStep />;
+      case 6:
+        return (
+          <MatchingStep
             formData={formData}
             onChange={handleChange}
           />
@@ -394,7 +455,7 @@ export default function AdminCustomerNew() {
                   className={`flex items-center ${index < STEPS.length - 1 ? "flex-1" : ""}`}
                 >
                   <div
-                    className={`flex items-center justify-center w-10 h-10 rounded-full border-2 transition-colors ${
+                    className={`flex items-center justify-center w-8 h-8 rounded-full border-2 transition-colors shrink-0 ${
                       index < currentStep
                         ? "bg-teal-600 border-teal-600 text-white"
                         : index === currentStep
@@ -403,14 +464,14 @@ export default function AdminCustomerNew() {
                     }`}
                   >
                     {index < currentStep ? (
-                      <Check className={iconSize.md} />
+                      <Check className={iconSize.sm} />
                     ) : (
-                      <step.icon className={iconSize.md} />
+                      <step.icon className={iconSize.sm} />
                     )}
                   </div>
                   {index < STEPS.length - 1 && (
                     <div
-                      className={`flex-1 h-0.5 mx-2 ${
+                      className={`flex-1 h-0.5 mx-1 ${
                         index < currentStep ? "bg-teal-600" : "bg-gray-300"
                       }`}
                     />
@@ -422,7 +483,7 @@ export default function AdminCustomerNew() {
               {STEPS.map((step, index) => (
                 <span
                   key={step.id}
-                  className={`text-xs ${
+                  className={`text-[10px] leading-tight ${
                     index === currentStep ? "text-teal-700 font-medium" : "text-gray-500"
                   }`}
                   style={{ width: `${100 / STEPS.length}%`, textAlign: "center" }}

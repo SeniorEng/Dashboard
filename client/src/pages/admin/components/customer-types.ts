@@ -1,5 +1,6 @@
-import { User2, Heart, Users, Wallet, FileText } from "lucide-react";
+import { User2, Heart, Users, Wallet, FileText, PenTool, UserCheck } from "lucide-react";
 import { PFLEGEGRAD_SELECT_OPTIONS, CONTACT_TYPE_SELECT_OPTIONS } from "@shared/domain/customers";
+import type { BudgetType } from "@shared/domain/budgets";
 
 export interface ContactFormData {
   vorname: string;
@@ -8,6 +9,13 @@ export interface ContactFormData {
   telefon: string;
   email: string;
   isPrimary: boolean;
+}
+
+export interface BudgetTypeSettingForm {
+  budgetType: BudgetType;
+  enabled: boolean;
+  monthlyLimitCents: string;
+  yearlyLimitCents: string;
 }
 
 export interface CustomerFormData {
@@ -32,6 +40,7 @@ export interface CustomerFormData {
   insuranceProviderId: string;
   versichertennummer: string;
   contacts: ContactFormData[];
+  budgetTypeSettings: BudgetTypeSettingForm[];
   entlastungsbetrag45b: string;
   verhinderungspflege39: string;
   pflegesachleistungen36: string;
@@ -54,6 +63,8 @@ export const STEPS = [
   { id: "contacts", title: "Kontakte", icon: Users },
   { id: "budgets", title: "Budgets", icon: Wallet },
   { id: "contract", title: "Vertrag", icon: FileText },
+  { id: "signatures", title: "Unterschriften", icon: PenTool },
+  { id: "matching", title: "Mitarbeiter", icon: UserCheck },
 ];
 
 export const PFLEGEGRAD_OPTIONS = PFLEGEGRAD_SELECT_OPTIONS;

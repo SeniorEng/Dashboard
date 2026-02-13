@@ -3,22 +3,19 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DatePicker } from "@/components/ui/date-picker";
 import { MapPin } from "lucide-react";
 import { iconSize } from "@/design-system";
-import { CustomerFormData, SelectOption, PFLEGEGRAD_OPTIONS } from "./customer-types";
+import { CustomerFormData, PFLEGEGRAD_OPTIONS } from "./customer-types";
 import { AddressFields } from "./address-fields";
-import { EmployeeMatching } from "./employee-matching";
 
 interface PersonalDataStepProps {
   formData: CustomerFormData;
   phoneErrors: Record<string, string | null>;
-  employeeOptions: SelectOption[];
   onChange: (field: string, value: string | boolean) => void;
 }
 
-export function PersonalDataStep({ formData, phoneErrors, employeeOptions, onChange }: PersonalDataStepProps) {
+export function PersonalDataStep({ formData, phoneErrors, onChange }: PersonalDataStepProps) {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4">
@@ -45,7 +42,7 @@ export function PersonalDataStep({ formData, phoneErrors, employeeOptions, onCha
       </div>
 
       <div className="space-y-2">
-        <Label>Geburtsdatum</Label>
+        <Label>Geburtsdatum *</Label>
         <DatePicker
           value={formData.geburtsdatum || null}
           onChange={(val) => onChange("geburtsdatum", val || "")}
@@ -114,7 +111,7 @@ export function PersonalDataStep({ formData, phoneErrors, employeeOptions, onCha
 
       <div className="border-t pt-4 space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="pflegegrad">Pflegegrad</Label>
+          <Label htmlFor="pflegegrad">Pflegegrad *</Label>
           <Select
             value={formData.pflegegrad}
             onValueChange={(value) => onChange("pflegegrad", value)}
@@ -137,52 +134,6 @@ export function PersonalDataStep({ formData, phoneErrors, employeeOptions, onCha
             value={formData.pflegegradSeit || null}
             onChange={(val) => onChange("pflegegradSeit", val || "")}
             data-testid="input-pflegegrad-seit"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="primaryEmployeeId">Hauptansprechpartner</Label>
-          <SearchableSelect
-            options={employeeOptions}
-            value={formData.primaryEmployeeId}
-            onValueChange={(value) => onChange("primaryEmployeeId", value)}
-            placeholder="Auswählen..."
-            searchPlaceholder="Mitarbeiter suchen..."
-            emptyText="Kein Mitarbeiter gefunden."
-            data-testid="select-primary-employee"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="backupEmployeeId">Vertretung</Label>
-          <SearchableSelect
-            options={employeeOptions}
-            value={formData.backupEmployeeId}
-            onValueChange={(value) => onChange("backupEmployeeId", value)}
-            placeholder="Auswählen..."
-            searchPlaceholder="Mitarbeiter suchen..."
-            emptyText="Kein Mitarbeiter gefunden."
-            data-testid="select-backup-employee"
-          />
-        </div>
-
-        <div className="border-t pt-3 mt-3">
-          <EmployeeMatching
-            inlineCriteria={{
-              plz: formData.plz || null,
-              haustierVorhanden: formData.haustierVorhanden,
-              personenbefoerderungGewuenscht: formData.personenbefoerderungGewuenscht,
-              geburtsdatum: formData.geburtsdatum || null,
-              needsHauswirtschaft: false,
-              needsAlltagsbegleitung: false,
-              excludeEmployeeIds: [],
-            }}
-            onSelect={(employeeId, _displayName) => {
-              if (!formData.primaryEmployeeId) {
-                onChange("primaryEmployeeId", employeeId.toString());
-              } else if (!formData.backupEmployeeId && formData.primaryEmployeeId !== employeeId.toString()) {
-                onChange("backupEmployeeId", employeeId.toString());
-              }
-            }}
-            selectedLabel="Mitarbeiter-Vorschläge"
           />
         </div>
       </div>

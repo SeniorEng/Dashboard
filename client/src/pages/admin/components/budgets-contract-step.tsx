@@ -2,23 +2,41 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { DatePicker } from "@/components/ui/date-picker";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
-import { CustomerFormData } from "./customer-types";
+import { CustomerFormData, BudgetTypeSettingForm } from "./customer-types";
 import { 
   BUDGET_45B_MAX_MONTHLY_CENTS, 
   BUDGET_45A_MAX_BY_PFLEGEGRAD, 
   BUDGET_39_42A_MAX_YEARLY_CENTS,
-  get45aMaxForPflegegrad 
+  get45aMaxForPflegegrad,
+  BUDGET_TYPES,
+  BUDGET_TYPE_LABELS,
+  type BudgetType,
 } from "@shared/domain/budgets";
+
+const BUDGET_COLORS: Record<BudgetType, { bg: string; border: string }> = {
+  entlastungsbetrag_45b: { bg: "bg-green-50", border: "border-green-100" },
+  umwandlung_45a: { bg: "bg-purple-50", border: "border-purple-100" },
+  ersatzpflege_39_42a: { bg: "bg-blue-50", border: "border-blue-100" },
+};
+
+const BUDGET_HINTS: Record<BudgetType, string> = {
+  entlastungsbetrag_45b: "Standard: 131 €/Monat",
+  umwandlung_45a: "Max. 40% der ungenutzten Sachleistungen (PG2: 318€, PG3: 599€, PG4: 744€, PG5: 920€)",
+  ersatzpflege_39_42a: "Standard: 3.539 €/Jahr (Ersatzpflege + Kurzzeitpflege, ab 01.07.2025)",
+};
 
 interface BudgetsStepProps {
   formData: CustomerFormData;
   onChange: (field: string, value: string | boolean) => void;
+  onBudgetTypeToggle: (budgetType: BudgetType, enabled: boolean) => void;
+  onBudgetTypeLimitChange: (budgetType: BudgetType, field: "monthlyLimitCents" | "yearlyLimitCents", value: string) => void;
   pflegegrad: number | null;
 }
 
-export function BudgetsStep({ formData, onChange, pflegegrad }: BudgetsStepProps) {
+export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTypeLimitChange, pflegegrad }: BudgetsStepProps) {
   const entlastungsbetrag = parseFloat(formData.entlastungsbetrag45b) || 0;
   const pflegesachleistungen = parseFloat(formData.pflegesachleistungen36) || 0;
   const verhinderungspflege = parseFloat(formData.verhinderungspflege39) || 0;
@@ -34,65 +52,88 @@ export function BudgetsStep({ formData, onChange, pflegegrad }: BudgetsStepProps
   const max39 = BUDGET_39_42A_MAX_YEARLY_CENTS / 100;
   const error39 = verhinderungspflege > max39 ? `Maximal ${max39.toFixed(2)} €/Jahr erlaubt` : null;
 
+  const errorMap: Record<BudgetType, string | null> = {
+    entlastungsbetrag_45b: error45b,
+    umwandlung_45a: error45a,
+    ersatzpflege_39_42a: error39,
+  };
+
+  const fieldMap: Record<BudgetType, string> = {
+    entlastungsbetrag_45b: "entlastungsbetrag45b",
+    umwandlung_45a: "pflegesachleistungen36",
+    ersatzpflege_39_42a: "verhinderungspflege39",
+  };
+
+  const valueMap: Record<BudgetType, string> = {
+    entlastungsbetrag_45b: formData.entlastungsbetrag45b,
+    umwandlung_45a: formData.pflegesachleistungen36,
+    ersatzpflege_39_42a: formData.verhinderungspflege39,
+  };
+
+  const unitMap: Record<BudgetType, string> = {
+    entlastungsbetrag_45b: "€/Monat",
+    umwandlung_45a: "€/Monat",
+    ersatzpflege_39_42a: "€/Jahr",
+  };
+
   return (
     <div className="space-y-6">
       <p className="text-sm text-gray-600">
-        Erfassen Sie die monatlichen Leistungsansprüche des Kunden.
+        Wählen Sie die Budget-Töpfe für den Kunden aus und erfassen Sie die Beträge.
       </p>
 
       <div className="space-y-4">
-        <div className="p-4 rounded-lg bg-green-50 border border-green-100">
-          <div className="space-y-2">
-            <Label htmlFor="entlastungsbetrag45b">§45b Entlastungsbetrag (€/Monat)</Label>
-            <Input
-              id="entlastungsbetrag45b"
-              type="number"
-              step="0.01"
-              value={formData.entlastungsbetrag45b}
-              onChange={(e) => onChange("entlastungsbetrag45b", e.target.value)}
-              data-testid="input-budget-45b"
-            />
-            <p className="text-xs text-gray-500">Standard: 131 €/Monat</p>
-            {error45b && <p className="text-xs text-red-600 font-medium">{error45b}</p>}
-          </div>
-        </div>
+        {BUDGET_TYPES.map((budgetType) => {
+          const setting = formData.budgetTypeSettings.find(s => s.budgetType === budgetType);
+          const isEnabled = setting?.enabled ?? true;
+          const colors = BUDGET_COLORS[budgetType];
+          const error = errorMap[budgetType];
+          const is45aDisabled = budgetType === "umwandlung_45a" && (!pflegegrad || pflegegrad < 2);
 
-        <div className="p-4 rounded-lg bg-purple-50 border border-purple-100">
-          <div className="space-y-2">
-            <Label htmlFor="pflegesachleistungen36">§45a Umwandlungsanspruch (€/Monat)</Label>
-            <Input
-              id="pflegesachleistungen36"
-              type="number"
-              step="0.01"
-              value={formData.pflegesachleistungen36}
-              onChange={(e) => onChange("pflegesachleistungen36", e.target.value)}
-              data-testid="input-budget-36"
-            />
-            <p className="text-xs text-gray-500">
-              Max. 40% der ungenutzten Sachleistungen (PG2: 318€, PG3: 599€, PG4: 744€, PG5: 920€)
-            </p>
-            {error45a && <p className="text-xs text-red-600 font-medium">{error45a}</p>}
-            {(!pflegegrad || pflegegrad < 2) && (
-              <p className="text-xs text-amber-600">Erst ab Pflegegrad 2 verfügbar</p>
-            )}
-          </div>
-        </div>
+          return (
+            <div
+              key={budgetType}
+              className={`p-4 rounded-lg ${isEnabled ? colors.bg : "bg-gray-50"} border ${isEnabled ? colors.border : "border-gray-200"} transition-colors`}
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <Checkbox
+                  id={`budget-enable-${budgetType}`}
+                  checked={isEnabled}
+                  onCheckedChange={(checked) => onBudgetTypeToggle(budgetType, !!checked)}
+                  data-testid={`checkbox-budget-${budgetType}`}
+                />
+                <Label
+                  htmlFor={`budget-enable-${budgetType}`}
+                  className={`font-medium ${isEnabled ? "text-gray-900" : "text-gray-400"}`}
+                >
+                  {BUDGET_TYPE_LABELS[budgetType]}
+                </Label>
+              </div>
 
-        <div className="p-4 rounded-lg bg-blue-50 border border-blue-100">
-          <div className="space-y-2">
-            <Label htmlFor="verhinderungspflege39">§39/§42a Gemeinsamer Jahresbetrag (€/Jahr)</Label>
-            <Input
-              id="verhinderungspflege39"
-              type="number"
-              step="0.01"
-              value={formData.verhinderungspflege39}
-              onChange={(e) => onChange("verhinderungspflege39", e.target.value)}
-              data-testid="input-budget-39"
-            />
-            <p className="text-xs text-gray-500">Standard: 3.539 €/Jahr (Ersatzpflege + Kurzzeitpflege, ab 01.07.2025)</p>
-            {error39 && <p className="text-xs text-red-600 font-medium">{error39}</p>}
-          </div>
-        </div>
+              {isEnabled && (
+                <div className="space-y-2 ml-7">
+                  <Label htmlFor={fieldMap[budgetType]}>
+                    Betrag ({unitMap[budgetType]})
+                  </Label>
+                  <Input
+                    id={fieldMap[budgetType]}
+                    type="number"
+                    step="0.01"
+                    value={valueMap[budgetType]}
+                    onChange={(e) => onChange(fieldMap[budgetType], e.target.value)}
+                    disabled={is45aDisabled}
+                    data-testid={`input-budget-${budgetType}`}
+                  />
+                  <p className="text-xs text-gray-500">{BUDGET_HINTS[budgetType]}</p>
+                  {error && <p className="text-xs text-red-600 font-medium">{error}</p>}
+                  {is45aDisabled && (
+                    <p className="text-xs text-amber-600">Erst ab Pflegegrad 2 verfügbar</p>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -122,32 +163,41 @@ export function ContractStep({ formData, onChange }: ContractStepProps) {
 
   const activeServices = services?.filter(s => s.defaultPriceCents > 0) || [];
 
+  const handleContractDateChange = (val: string | null) => {
+    const dateVal = val || "";
+    onChange("contractDate", dateVal);
+    if (dateVal && !formData.contractStart) {
+      onChange("contractStart", dateVal);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="space-y-4">
         <div className="space-y-2">
-          <Label>Vertragsabschluss</Label>
+          <Label>Vertragsabschluss *</Label>
           <DatePicker
             value={formData.contractDate || null}
-            onChange={(val) => onChange("contractDate", val || "")}
+            onChange={handleContractDateChange}
             data-testid="input-contract-date"
           />
           <p className="text-xs text-gray-500">Datum, an dem der Vertrag unterschrieben wurde</p>
         </div>
 
         <div className="space-y-2">
-          <Label>Vertragsbeginn</Label>
+          <Label>Vertragsbeginn *</Label>
           <DatePicker
             value={formData.contractStart || null}
             onChange={(val) => onChange("contractStart", val || "")}
             data-testid="input-contract-start"
           />
+          <p className="text-xs text-gray-500">Wird automatisch auf das Vertragsabschluss-Datum gesetzt, kann aber geändert werden</p>
         </div>
       </div>
 
       <div className="border-t pt-4">
         <div className="space-y-2">
-          <Label htmlFor="vereinbarteLeistungen">Vereinbarte Leistungen</Label>
+          <Label htmlFor="vereinbarteLeistungen">Vereinbarte Leistungen *</Label>
           <Textarea
             id="vereinbarteLeistungen"
             value={formData.vereinbarteLeistungen}
