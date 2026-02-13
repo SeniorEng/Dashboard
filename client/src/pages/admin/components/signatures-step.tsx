@@ -430,27 +430,31 @@ function DocumentSignatureCard({
                 <p className="text-sm text-gray-500 mt-1.5">{doc.description}</p>
               )}
 
-              <div className="flex flex-wrap gap-2 mt-3">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setShowSignatureDialog(true)}
-                  className="text-sm min-h-[44px]"
-                  data-testid={`button-sign-${doc.slug}`}
-                >
-                  {isSigned ? "Unterschrift ändern" : "Unterschreiben"}
-                </Button>
-                {isSigned && formData && doc.htmlContent && (
+              <div className="space-y-2 mt-3">
+                <div>
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={handlePreview}
-                    className="text-sm min-h-[44px] text-teal-700 border-teal-200 hover:bg-teal-50"
-                    data-testid={`button-preview-${doc.slug}`}
+                    onClick={() => setShowSignatureDialog(true)}
+                    className="text-sm min-h-[44px]"
+                    data-testid={`button-sign-${doc.slug}`}
                   >
-                    <FileText className={`${iconSize.sm} mr-1.5`} />
-                    Vorschau & Drucken
+                    {isSigned ? "Unterschrift ändern" : "Unterschreiben"}
                   </Button>
+                </div>
+                {isSigned && formData && doc.htmlContent && (
+                  <div className="pt-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handlePreview}
+                      className="text-sm min-h-[44px] w-full justify-center text-teal-700 border-teal-300 bg-teal-50 hover:bg-teal-100"
+                      data-testid={`button-preview-${doc.slug}`}
+                    >
+                      <FileText className={`${iconSize.sm} mr-1.5`} />
+                      Vorschau & Drucken
+                    </Button>
+                  </div>
                 )}
               </div>
             </div>
