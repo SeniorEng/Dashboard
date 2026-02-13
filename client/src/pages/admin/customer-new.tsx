@@ -448,50 +448,51 @@ export default function AdminCustomerNew() {
           </div>
 
           <div className="mb-8">
-            <div className="flex items-center justify-between">
-              {STEPS.map((step, index) => (
-                <div
-                  key={step.id}
-                  className={`flex items-center ${index < STEPS.length - 1 ? "flex-1" : ""}`}
-                >
-                  <div
-                    className={`flex items-center justify-center w-8 h-8 rounded-full border-2 transition-colors shrink-0 ${
-                      index < currentStep
-                        ? "bg-teal-600 border-teal-600 text-white"
-                        : index === currentStep
-                        ? "border-teal-600 text-teal-600 bg-white"
-                        : "border-gray-300 text-gray-400 bg-white"
-                    }`}
-                  >
-                    {index < currentStep ? (
-                      <Check className={iconSize.sm} />
+            <div className="flex items-center justify-center gap-1">
+              {STEPS.map((step, index) => {
+                const isActive = index === currentStep;
+                const isCompleted = index < currentStep;
+
+                return (
+                  <div key={step.id} className="flex items-center gap-1">
+                    {isActive ? (
+                      <div className="flex items-center gap-2 bg-teal-600 text-white px-3 py-1.5 rounded-full" data-testid={`step-active-${step.id}`}>
+                        <step.icon className="w-4 h-4" />
+                        <span className="text-sm font-medium whitespace-nowrap">
+                          {step.title}
+                        </span>
+                      </div>
                     ) : (
-                      <step.icon className={iconSize.sm} />
+                      <div
+                        className={`flex items-center justify-center w-7 h-7 rounded-full border-2 transition-colors ${
+                          isCompleted
+                            ? "bg-teal-600 border-teal-600 text-white"
+                            : "border-gray-300 text-gray-400 bg-white"
+                        }`}
+                        title={step.title}
+                      >
+                        {isCompleted ? (
+                          <Check className="w-3.5 h-3.5" />
+                        ) : (
+                          <step.icon className="w-3.5 h-3.5" />
+                        )}
+                      </div>
+                    )}
+
+                    {index < STEPS.length - 1 && (
+                      <div
+                        className={`w-4 h-0.5 ${
+                          isCompleted ? "bg-teal-600" : "bg-gray-300"
+                        }`}
+                      />
                     )}
                   </div>
-                  {index < STEPS.length - 1 && (
-                    <div
-                      className={`flex-1 h-0.5 mx-1 ${
-                        index < currentStep ? "bg-teal-600" : "bg-gray-300"
-                      }`}
-                    />
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
-            <div className="flex justify-between mt-2">
-              {STEPS.map((step, index) => (
-                <span
-                  key={step.id}
-                  className={`text-[10px] leading-tight ${
-                    index === currentStep ? "text-teal-700 font-medium" : "text-gray-500"
-                  }`}
-                  style={{ width: `${100 / STEPS.length}%`, textAlign: "center" }}
-                >
-                  {step.title}
-                </span>
-              ))}
-            </div>
+            <p className="text-center text-xs text-gray-500 mt-2">
+              Schritt {currentStep + 1} von {STEPS.length}
+            </p>
           </div>
 
           <Card className="bg-white">
