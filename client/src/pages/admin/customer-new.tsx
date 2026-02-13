@@ -328,14 +328,13 @@ export default function AdminCustomerNew() {
         const base = !!(
           formData.vorname &&
           formData.nachname &&
-          formData.geburtsdatum &&
           formData.strasse &&
           formData.nr &&
           formData.plz &&
           formData.stadt
         );
         if (isPflegekasseCustomer(formData.billingType)) {
-          return base && !!formData.pflegegrad && formData.pflegegrad !== "0";
+          return base && !!formData.geburtsdatum && !!formData.pflegegrad && formData.pflegegrad !== "0";
         }
         return base;
       }
@@ -467,6 +466,7 @@ export default function AdminCustomerNew() {
           <ContractStep
             formData={formData}
             onChange={handleChange}
+            showGrossPrices={!isPflegekasseCustomer(formData.billingType)}
           />
         );
       case "signatures":
@@ -475,6 +475,7 @@ export default function AdminCustomerNew() {
             billingType={formData.billingType}
             customerSignatures={customerSignatures}
             onSignatureChange={handleSignatureChange}
+            formData={formData}
           />
         );
       case "matching":

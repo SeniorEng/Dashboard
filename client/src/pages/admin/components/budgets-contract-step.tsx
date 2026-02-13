@@ -144,14 +144,16 @@ interface ServiceInfo {
   name: string;
   defaultPriceCents: number;
   unitType: string;
+  vatRate: number;
 }
 
 interface ContractStepProps {
   formData: CustomerFormData;
   onChange: (field: string, value: string | boolean) => void;
+  showGrossPrices?: boolean;
 }
 
-export function ContractStep({ formData, onChange }: ContractStepProps) {
+export function ContractStep({ formData, onChange, showGrossPrices = false }: ContractStepProps) {
   const { data: services } = useQuery({
     queryKey: ["/api/services"],
     queryFn: async () => {
@@ -223,16 +225,23 @@ export function ContractStep({ formData, onChange }: ContractStepProps) {
           <div className="space-y-2">
             {activeServices.map(service => {
               const unitLabel = service.unitType === "hours" ? "€/Std." : service.unitType === "kilometers" ? "€/km" : "€ pauschal";
+              const netPrice = service.defaultPriceCents / 100;
+              const displayPrice = showGrossPrices
+                ? netPrice * (1 + (service.vatRate || 0) / 100)
+                : netPrice;
               return (
                 <div key={service.id} className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded" data-testid={`service-rate-${service.id}`}>
                   <span className="text-sm text-gray-700">{service.name}</span>
                   <span className="text-sm font-medium text-gray-900">
-                    {(service.defaultPriceCents / 100).toFixed(2)} {unitLabel}
+                    {displayPrice.toFixed(2)} {unitLabel}
                   </span>
                 </div>
               );
             })}
           </div>
+          {showGrossPrices && (
+            <p className="text-xs text-gray-500 mt-2">Alle Preise inkl. MwSt.</p>
+          )}
         </div>
       )}
     </div>

@@ -7,7 +7,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { MapPin } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { CustomerFormData, PFLEGEGRAD_OPTIONS } from "./customer-types";
-import { needsPflegegradData, needsVorerkrankungenData } from "@shared/domain/customers";
+import { needsPflegegradData, needsVorerkrankungenData, isPflegekasseCustomer } from "@shared/domain/customers";
 import { AddressFields } from "./address-fields";
 
 interface PersonalDataStepProps {
@@ -19,6 +19,7 @@ interface PersonalDataStepProps {
 export function PersonalDataStep({ formData, phoneErrors, onChange }: PersonalDataStepProps) {
   const showPflegegrad = needsPflegegradData(formData.billingType);
   const showVorerkrankungen = needsVorerkrankungenData(formData.billingType);
+  const showGeburtsdatum = isPflegekasseCustomer(formData.billingType);
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4">
@@ -44,14 +45,16 @@ export function PersonalDataStep({ formData, phoneErrors, onChange }: PersonalDa
         </div>
       </div>
 
-      <div className="space-y-2">
-        <Label>Geburtsdatum *</Label>
-        <DatePicker
-          value={formData.geburtsdatum || null}
-          onChange={(val) => onChange("geburtsdatum", val || "")}
-          data-testid="input-geburtsdatum"
-        />
-      </div>
+      {showGeburtsdatum && (
+        <div className="space-y-2">
+          <Label>Geburtsdatum *</Label>
+          <DatePicker
+            value={formData.geburtsdatum || null}
+            onChange={(val) => onChange("geburtsdatum", val || "")}
+            data-testid="input-geburtsdatum"
+          />
+        </div>
+      )}
 
       <div className="space-y-2">
         <Label htmlFor="email">E-Mail</Label>
