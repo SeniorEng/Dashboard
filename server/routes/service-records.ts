@@ -4,6 +4,7 @@ import { requireAuth, canAccessCustomer } from "../middleware/auth";
 import { insertServiceRecordSchema, signServiceRecordSchema } from "@shared/schema";
 import { asyncHandler } from "../lib/errors";
 import { authService } from "../services/auth";
+import { auditService } from "../services/audit";
 
 const router = Router();
 
@@ -240,7 +241,15 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
   
   const appointmentIds = documentedAppointments.map(apt => apt.id);
   await storage.addAppointmentsToServiceRecord(record.id, appointmentIds);
-  
+
+  const ip = req.ip || req.socket.remoteAddress;
+  await auditService.serviceRecordCreated(
+    userId,
+    record.id,
+    { customerId, year, month, appointmentCount: appointmentIds.length },
+    ip
+  );
+
   res.status(201).json(record);
 }));
 
@@ -279,11 +288,20 @@ router.post("/:id/sign", requireAuth, asyncHandler("Unterschrift konnte nicht ge
   const { signatureData, signerType } = parsed.data;
   
   try {
-    const record = await storage.signServiceRecord(id, signatureData, signerType);
+    const record = await storage.signServiceRecord(id, signatureData, signerType, req.user!.id);
     if (!record) {
       return res.status(404).json({ message: "Leistungsnachweis nicht gefunden" });
     }
-    
+
+    const ip = req.ip || req.socket.remoteAddress;
+    await auditService.serviceRecordSigned(
+      req.user!.id,
+      id,
+      signerType,
+      { customerId: existingRecord.customerId },
+      ip
+    );
+
     res.json(record);
   } catch (error) {
     if (error instanceof Error && error.message.includes("kann nur")) {

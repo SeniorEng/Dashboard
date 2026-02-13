@@ -37,6 +37,9 @@ export const appointments = pgTable("appointments", {
   notes: text("notes"),
   servicesDone: text("services_done").array().default([]),
   signatureData: text("signature_data"),
+  signatureHash: text("signature_hash"),
+  signedAt: timestamp("signed_at"),
+  signedByUserId: integer("signed_by_user_id").references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [
   index("appointments_customer_id_idx").on(table.customerId),

@@ -6,6 +6,7 @@ import insuranceProvidersRouter from "./admin/insurance-providers";
 import timeTrackingRouter from "./admin/time-tracking";
 import pricingRouter from "./admin/pricing";
 import documentsRouter from "./admin/documents";
+import auditRouter from "./admin/audit";
 
 const router = Router();
 
@@ -17,5 +18,6 @@ router.use("/", insuranceProvidersRouter);
 router.use("/", timeTrackingRouter);
 router.use("/", pricingRouter);
 router.use("/", documentsRouter);
+router.use("/", auditRouter);
 
 export default router;

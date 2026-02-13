@@ -13,6 +13,7 @@ import {
   serviceRecordAppointments,
   users,
 } from "@shared/schema";
+import { computeDataHash } from "./services/signature-integrity";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { eq, count, sql as sqlBuilder, lt, ne, and, or, ilike, inArray, isNull, isNotNull } from "drizzle-orm";
 import { customerIdsCache } from "./services/cache";
@@ -167,7 +168,7 @@ export interface IStorage {
   getServiceRecord(id: number): Promise<MonthlyServiceRecord | undefined>;
   getServiceRecordByPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<MonthlyServiceRecord | undefined>;
   createServiceRecord(record: InsertServiceRecord): Promise<MonthlyServiceRecord>;
-  signServiceRecord(id: number, signatureData: string, signerType: 'employee' | 'customer'): Promise<MonthlyServiceRecord | undefined>;
+  signServiceRecord(id: number, signatureData: string, signerType: 'employee' | 'customer', userId?: number): Promise<MonthlyServiceRecord | undefined>;
   getAppointmentsForServiceRecord(serviceRecordId: number): Promise<AppointmentWithCustomer[]>;
   addAppointmentsToServiceRecord(serviceRecordId: number, appointmentIds: number[]): Promise<void>;
   getDocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<AppointmentWithCustomer[]>;
@@ -619,11 +620,12 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async signServiceRecord(id: number, signatureData: string, signerType: 'employee' | 'customer'): Promise<MonthlyServiceRecord | undefined> {
+  async signServiceRecord(id: number, signatureData: string, signerType: 'employee' | 'customer', userId?: number): Promise<MonthlyServiceRecord | undefined> {
     const existing = await this.getServiceRecord(id);
     if (!existing) return undefined;
 
     const now = new Date();
+    const hash = computeDataHash(signatureData);
     let updateData: Partial<MonthlyServiceRecord> = { updatedAt: now };
 
     if (signerType === 'employee') {
@@ -633,7 +635,9 @@ export class DatabaseStorage implements IStorage {
       updateData = {
         ...updateData,
         employeeSignatureData: signatureData,
+        employeeSignatureHash: hash,
         employeeSignedAt: now,
+        employeeSignedByUserId: userId ?? null,
         status: 'employee_signed' as ServiceRecordStatus,
       };
     } else if (signerType === 'customer') {
@@ -643,7 +647,9 @@ export class DatabaseStorage implements IStorage {
       updateData = {
         ...updateData,
         customerSignatureData: signatureData,
+        customerSignatureHash: hash,
         customerSignedAt: now,
+        customerSignedByUserId: userId ?? null,
         status: 'completed' as ServiceRecordStatus,
       };
     }

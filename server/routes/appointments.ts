@@ -7,6 +7,7 @@ import {
 } from "@shared/schema";
 import { appointmentService } from "../services/appointments";
 import { authService } from "../services/auth";
+import { auditService } from "../services/audit";
 import { serviceCatalogStorage } from "../storage/service-catalog";
 import { suggestTravelOrigin } from "@shared/domain/appointments";
 import { isWeekend, currentTimeHHMMSS, todayISO } from "@shared/utils/datetime";
@@ -342,7 +343,18 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
   if (req.body.services && Array.isArray(req.body.services)) {
     await storage.replaceAppointmentServices(id, req.body.services);
   }
-  
+
+  const changedFields = Object.keys(validatedData).filter(k => (validatedData as Record<string, unknown>)[k] !== undefined);
+  if (changedFields.length > 0) {
+    const ip = req.ip || req.socket.remoteAddress;
+    await auditService.appointmentUpdated(
+      req.user!.id,
+      id,
+      { customerId: existingAppointment.customerId, changedFields },
+      ip
+    );
+  }
+
   res.json(updated);
 }));
 
@@ -458,6 +470,14 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
     return sendForbidden(res, canDelete.error!, canDelete.message!);
   }
   
+  const ip = req.ip || req.socket.remoteAddress;
+  await auditService.appointmentDeleted(
+    req.user!.id,
+    id,
+    { customerId: appointment.customerId, date: appointment.date, status: appointment.status },
+    ip
+  );
+
   const deleted = await storage.deleteAppointment(id);
   if (!deleted) {
     return sendServerError(res, ErrorMessages.deleteAppointmentFailed);

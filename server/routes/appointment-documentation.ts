@@ -3,6 +3,8 @@ import { storage } from "../storage";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
 import { documentKundenterminSchema } from "@shared/schema";
 import { appointmentService } from "../services/appointments";
+import { auditService } from "../services/audit";
+import { computeDataHash } from "../services/signature-integrity";
 import { asyncHandler, badRequest, notFound, forbidden, AppError, ErrorMessages } from "../lib/errors";
 import { requireAuth } from "../middleware/auth";
 import { checkCustomerAccess } from "./appointments";
@@ -93,6 +95,14 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
     }
   }
 
+  const hasSignature = !!(updateData as Record<string, unknown>).signatureData;
+  if (hasSignature) {
+    const sigData = (updateData as Record<string, unknown>).signatureData as string;
+    (updateData as Record<string, unknown>).signatureHash = computeDataHash(sigData);
+    (updateData as Record<string, unknown>).signedAt = new Date();
+    (updateData as Record<string, unknown>).signedByUserId = req.user!.id;
+  }
+
   const updatedAppointment = await storage.updateAppointment(id, updateData);
 
   if (!updatedAppointment) {
@@ -101,6 +111,23 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
 
   if (docResult.serviceUpdates && docResult.serviceUpdates.length > 0) {
     await storage.updateAppointmentServiceDocumentation(id, docResult.serviceUpdates);
+  }
+
+  const ip = req.ip || req.socket.remoteAddress;
+  await auditService.documentationSubmitted(
+    req.user!.id,
+    id,
+    { customerId: appointment.customerId, hasSignature, performedByEmployeeId: (updateData as Record<string, unknown>).performedByEmployeeId as number | null },
+    ip
+  );
+  if (hasSignature) {
+    const sigHash = (updateData as Record<string, unknown>).signatureHash as string;
+    await auditService.signatureAdded(
+      req.user!.id,
+      id,
+      { customerId: appointment.customerId, signatureHash: sigHash },
+      ip
+    );
   }
 
   res.json({

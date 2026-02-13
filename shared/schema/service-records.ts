@@ -25,11 +25,15 @@ export const monthlyServiceRecords = pgTable("monthly_service_records", {
   month: integer("month").notNull(), // 1-12
   status: text("status").notNull().default("pending"), // ServiceRecordStatus
   // Employee signature
-  employeeSignatureData: text("employee_signature_data"), // Base64 PNG from react-signature-canvas
+  employeeSignatureData: text("employee_signature_data"),
+  employeeSignatureHash: text("employee_signature_hash"),
   employeeSignedAt: timestamp("employee_signed_at"),
+  employeeSignedByUserId: integer("employee_signed_by_user_id").references(() => users.id),
   // Customer signature
-  customerSignatureData: text("customer_signature_data"), // Base64 PNG from react-signature-canvas
+  customerSignatureData: text("customer_signature_data"),
+  customerSignatureHash: text("customer_signature_hash"),
   customerSignedAt: timestamp("customer_signed_at"),
+  customerSignedByUserId: integer("customer_signed_by_user_id").references(() => users.id),
   // Metadata
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
