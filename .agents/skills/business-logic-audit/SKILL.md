@@ -212,6 +212,114 @@ Care Level → Budget Eligibility (Pflegegrad determines §45b eligibility)
 
 ---
 
+## Category 9: GoBD & Compliance (Grundsätze ordnungsmäßiger Buchführung)
+
+**Goal**: All billing-relevant, medical, and audit-critical data meets German regulatory requirements for record-keeping and traceability.
+
+### Steps:
+1. **Unveränderbarkeit (Immutability)**: Billing-relevant records must not be silently changed:
+   ```bash
+   # Check for audit trail on critical tables
+   grep -rn "auditService\|audit_log\|AuditService" server/ --include="*.ts"
+   
+   # Check which operations are audited
+   grep -rn "auditService\." server/ --include="*.ts" | sed 's/.*auditService\.\([a-zA-Z]*\).*/\1/' | sort -u
+   ```
+   - Verify: All signature actions are logged to immutable audit_log
+   - Verify: Documentation changes are tracked
+   - Verify: Budget/billing changes are traceable
+
+2. **Nachvollziehbarkeit (Traceability)**: Every change must be attributable to a person:
+   ```bash
+   # Check if user ID is tracked on modifications
+   grep -rn "userId\|user\.id\|req\.user\|signedByUserId\|createdBy" server/ --include="*.ts" | grep -i "update\|insert\|create\|sign\|revoke"
+   ```
+   - Verify: Every write operation records WHO made the change
+   - Verify: Timestamps are recorded for all state changes
+
+3. **Aufbewahrungspflicht (Retention)**: Records must be retained for legally required periods:
+   - Abrechnungsrelevante Daten: 10 Jahre
+   - Pflegedokumentation: 5 Jahre (nach Ende der Pflege)
+   - Verify: Soft-delete is used, not hard-delete, for billing/care records
+   ```bash
+   grep -rn "\.delete(\|DELETE FROM" server/ --include="*.ts" | grep -v "session\|token\|cache"
+   ```
+
+4. **Datensparsamkeit (Data Minimization)**:
+   - Verify: Only necessary personal data is collected in forms
+   - Verify: API responses don't include unnecessary personal fields
+   - Verify: Audit logs contain references (IDs) not personal data copies
+   ```bash
+   grep -rn "firstName\|lastName\|address\|phone\|email" server/routes/ --include="*.ts" | grep "res\.json\|return" | head -10
+   ```
+
+5. **Fachbegriffe (German Care Terminology)**:
+   - Verify correct terms are used consistently:
+     - "Pflegegrad" (not "Pflegestufe" — changed in 2017)
+     - "Leistungsnachweis" (not "Service Record")
+     - "Entlastungsbetrag" (§45b SGB XI)
+     - "Umwandlungsanspruch" (§45a SGB XI)
+     - "Verhinderungspflege" (§39 SGB XI)
+     - "Hauswirtschaftliche Versorgung" (not just "Hauswirtschaft")
+     - "Alltagsbegleitung" (correct term for daily assistance)
+   ```bash
+   # Search for potentially incorrect terminology
+   grep -rn "Pflegestufe\|Service Record\|care level\|service record" client/src/ --include="*.tsx" -i
+   ```
+
+### Red Flags:
+- Billing data deleted without audit trail → FAIL
+- State change without user attribution → FAIL
+- Personal data in audit log metadata (names, not just IDs) → WARN
+- Outdated terminology visible to user → WARN
+- Hard-delete on billing/care records → FAIL
+
+---
+
+## Category 10: Plausibility Checks (Plausibilitätsprüfungen)
+
+**Goal**: Data entered by users is checked for logical consistency to prevent errors.
+
+### Steps:
+1. **Time plausibility**:
+   ```bash
+   # Check for time validation
+   grep -rn "startTime\|endTime\|actualStart\|actualEnd\|scheduledStart\|scheduledEnd" server/ shared/ --include="*.ts" | grep -i "valid\|check\|before\|after"
+   ```
+   - Verify: Appointment end cannot be before start
+   - Verify: Actual start/end cannot be unreasonably different from scheduled
+   - Verify: Break times are within the work period
+
+2. **Date plausibility**:
+   - Verify: Cannot create appointments in the far past (> 3 months)
+   - Verify: Cannot create appointments too far in the future
+   - Verify: Birth dates are plausible (customer age typically 60-110 years)
+   ```bash
+   grep -rn "birthDate\|dateOfBirth\|geburtsdatum" server/ shared/ --include="*.ts" | grep -i "valid"
+   ```
+
+3. **Numerical plausibility**:
+   - Verify: Kilometers cannot be negative
+   - Verify: Costs/prices are within reasonable bounds
+   - Verify: Pflegegrad is 1-5 (not 0 or 6+)
+   - Verify: Working hours don't exceed legal daily maximum (10h per §3 ArbZG)
+   ```bash
+   grep -rn "min(\|max(\|\.gte\|\.lte\|\.positive" shared/schema/ --include="*.ts"
+   ```
+
+4. **Cross-field plausibility**:
+   - Verify: If appointment type requires customer, customer must be set
+   - Verify: If service requires Pflegegrad, customer must have one assigned
+   - Verify: Budget booking only for customers with active budget
+
+### Red Flags:
+- No time overlap validation for appointments → WARN
+- Negative values accepted for inherently positive fields → FAIL
+- No Pflegegrad range validation → FAIL
+- Missing cross-field dependency validation → WARN
+
+---
+
 ## Output Format
 
 After completing all checks, produce a summary:
@@ -229,6 +337,8 @@ After completing all checks, produce a summary:
 | 6. Cross-Feature Impact | PASS/WARN/FAIL | Details |
 | 7. Edge Cases | PASS/WARN/FAIL | Details |
 | 8. Documentation Sync | PASS/WARN/FAIL | Details |
+| 9. GoBD & Compliance | PASS/WARN/FAIL | Details |
+| 10. Plausibility Checks | PASS/WARN/FAIL | Details |
 
 ### Action Items
 - FAIL items: Must fix before completion

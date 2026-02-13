@@ -62,6 +62,18 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Bereits optimiert:** DB Connection Pool (WebSocket), Auth-Scope, N+1 Fixes, Session-JOIN, Indexes, Cache-GC, Route-Level Code Splitting, staleTime-Strategie, HTTP Cache-Control Headers, libphonenumber-js/min, 14 ungenutzte UI-Komponenten + 109 npm-Pakete entfernt
 - **HTTP Cache-Headers**: Middleware in `server/middleware/cache-headers.ts` (stable: 5min, semi-stable: 60s, volatile: must-revalidate)
 
+## AI Development Team (Audit Skills)
+- **Team-Orchestrierung**: `.agents/skills/team-orchestration/SKILL.md` — Koordination aller Agenten, Konflikt-Hierarchie, Befehle
+- **Business & Compliance** (10 Kategorien): `.agents/skills/business-logic-audit/` — Workflows, Domain-Regeln, Status-Übergänge, GoBD, Plausibilitätsprüfungen
+- **Code Quality** (6 Kategorien): `.agents/skills/code-quality-supervisor/` — Duplikate, Konventionen, Migrations-Vollständigkeit, Dead Code
+- **Database** (10 Kategorien): `.agents/skills/database-audit/` — Schema-Konsistenz, Indexierung, N+1, DSGVO, Historisierung
+- **Performance** (5 Kategorien): `.agents/skills/performance-audit/` — Query-Performance, Rendering, Bundle-Size, Mobile
+- **Security** (7 Kategorien): `.agents/skills/security-audit/` — OWASP, Auth, CSRF, Secrets, DSGVO
+- **UI/UX & Accessibility** (6 Kategorien): `.agents/skills/ui-ux-audit/` — Touch-Targets, Feedback, Mobile, Wording, a11y
+- **QA & Testing** (6 Kategorien): `.agents/skills/qa-testing/` — Happy Path, Edge Cases, Regression, State Management
+- **DevOps & Release** (6 Kategorien): `.agents/skills/devops-release/` — Env-Vars, Dependencies, Build, Logging, Deployment
+- **Audit-Skript**: `audit_team.sh` — Automatisierte Pre-Checks (TypeScript, npm audit, TODOs, Konventionen)
+
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)
 - **Frontend Libraries**: React, TypeScript, Vite, Wouter, `shadcn/ui`, Radix UI, Tailwind CSS v4, TanStack Query, Zod.
