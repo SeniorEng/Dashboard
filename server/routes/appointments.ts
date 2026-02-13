@@ -324,6 +324,15 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
     return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
   }
   
+  if (existingAppointment.signatureData && existingAppointment.signatureHash) {
+    const protectedFields = ['signatureData', 'signatureHash', 'signedAt', 'signedByUserId'];
+    const bodyKeys = Object.keys(req.body);
+    const touchesSignature = protectedFields.some(f => bodyKeys.includes(f));
+    if (touchesSignature && !req.user!.isAdmin) {
+      return sendForbidden(res, "SIGNATURE_LOCKED", "Die Unterschrift dieses Termins ist gesperrt und kann nur durch einen Administrator storniert werden.");
+    }
+  }
+
   const validatedData = updateAppointmentSchema.parse(req.body);
   
   if (validatedData.date && isWeekend(validatedData.date)) {

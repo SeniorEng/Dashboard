@@ -30,6 +30,10 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
     throw forbidden("APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
   }
 
+  if (appointment.signatureData && appointment.signatureHash && req.body.signatureData) {
+    throw forbidden("SIGNATURE_LOCKED", "Dieser Termin hat bereits eine gesperrte Unterschrift. Bitte wenden Sie sich an einen Administrator zur Stornierung.");
+  }
+
   const validatedData = documentKundenterminSchema.parse(req.body);
 
   const docServiceIds = validatedData.services.map(s => s.serviceId);

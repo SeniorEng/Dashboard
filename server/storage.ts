@@ -169,6 +169,7 @@ export interface IStorage {
   getServiceRecordByPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<MonthlyServiceRecord | undefined>;
   createServiceRecord(record: InsertServiceRecord): Promise<MonthlyServiceRecord>;
   signServiceRecord(id: number, signatureData: string, signerType: 'employee' | 'customer', userId?: number): Promise<MonthlyServiceRecord | undefined>;
+  updateServiceRecord(id: number, data: Record<string, unknown>): Promise<MonthlyServiceRecord | undefined>;
   getAppointmentsForServiceRecord(serviceRecordId: number): Promise<AppointmentWithCustomer[]>;
   addAppointmentsToServiceRecord(serviceRecordId: number, appointmentIds: number[]): Promise<void>;
   getDocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<AppointmentWithCustomer[]>;
@@ -656,6 +657,14 @@ export class DatabaseStorage implements IStorage {
 
     const result = await db.update(monthlyServiceRecords)
       .set(updateData)
+      .where(eq(monthlyServiceRecords.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async updateServiceRecord(id: number, data: Record<string, unknown>): Promise<MonthlyServiceRecord | undefined> {
+    const result = await db.update(monthlyServiceRecords)
+      .set(data as any)
       .where(eq(monthlyServiceRecords.id, id))
       .returning();
     return result[0];

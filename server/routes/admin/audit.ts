@@ -113,4 +113,104 @@ router.get("/verify-signature/:entityType/:entityId", asyncHandler("Integritäts
   throw badRequest("Ungültiger Entity-Typ. Erlaubt: appointment, service_record");
 }));
 
+router.post("/revoke-signature/:entityType/:entityId", asyncHandler("Stornierung fehlgeschlagen", async (req, res) => {
+  const { entityType, entityId: entityIdStr } = req.params;
+  const entityId = parseInt(entityIdStr);
+  const { reason, signerType } = req.body;
+
+  if (isNaN(entityId)) throw badRequest("Ungültige Entity-ID");
+  if (!reason || typeof reason !== "string" || reason.trim().length < 3) {
+    throw badRequest("Ein Stornierungsgrund mit mindestens 3 Zeichen ist erforderlich.");
+  }
+
+  const ip = req.ip || req.socket.remoteAddress;
+  const userId = (req as any).user!.id;
+
+  if (entityType === "appointment") {
+    const appointment = await storage.getAppointment(entityId);
+    if (!appointment) throw notFound("Termin nicht gefunden");
+
+    if (!appointment.signatureData) {
+      throw badRequest("Dieser Termin hat keine Unterschrift zum Stornieren.");
+    }
+
+    const isLocked = await storage.isAppointmentLocked(entityId);
+    if (isLocked) {
+      throw badRequest("Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises. Bitte stornieren Sie zuerst den Leistungsnachweis.");
+    }
+
+    await storage.updateAppointment(entityId, {
+      signatureData: null,
+      signatureHash: null,
+      signedAt: null,
+      signedByUserId: null,
+      status: "documenting",
+    } as any);
+
+    await auditService.appointmentRevoked(
+      userId,
+      entityId,
+      { customerId: appointment.customerId, reason, previousStatus: appointment.status },
+      ip
+    );
+
+    return res.json({ success: true, message: "Unterschrift wurde storniert. Der Termin kann neu dokumentiert werden." });
+  }
+
+  if (entityType === "service_record") {
+    const record = await storage.getServiceRecord(entityId);
+    if (!record) throw notFound("Leistungsnachweis nicht gefunden");
+
+    if (!signerType || !["employee", "customer"].includes(signerType)) {
+      throw badRequest("signerType muss 'employee' oder 'customer' sein.");
+    }
+
+    const previousStatus = record.status;
+    let updateData: Record<string, unknown> = { updatedAt: new Date() };
+
+    if (signerType === "customer") {
+      if (!record.customerSignatureData) {
+        throw badRequest("Keine Kunden-Unterschrift zum Stornieren vorhanden.");
+      }
+      updateData = {
+        ...updateData,
+        customerSignatureData: null,
+        customerSignatureHash: null,
+        customerSignedAt: null,
+        customerSignedByUserId: null,
+        status: "employee_signed",
+      };
+    } else {
+      if (!record.employeeSignatureData) {
+        throw badRequest("Keine Mitarbeiter-Unterschrift zum Stornieren vorhanden.");
+      }
+      updateData = {
+        ...updateData,
+        employeeSignatureData: null,
+        employeeSignatureHash: null,
+        employeeSignedAt: null,
+        employeeSignedByUserId: null,
+        customerSignatureData: null,
+        customerSignatureHash: null,
+        customerSignedAt: null,
+        customerSignedByUserId: null,
+        status: "pending",
+      };
+    }
+
+    await storage.updateServiceRecord(entityId, updateData);
+
+    await auditService.serviceRecordRevoked(
+      userId,
+      entityId,
+      { customerId: record.customerId, reason, previousStatus },
+      ip
+    );
+
+    return res.json({ success: true, message: `Unterschrift(en) wurden storniert. Status: ${updateData.status}` });
+  }
+
+  throw badRequest("Ungültiger Entity-Typ. Erlaubt: appointment, service_record");
+}));
+
 export default router;
