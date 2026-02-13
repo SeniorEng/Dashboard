@@ -114,6 +114,9 @@ const updateUserSchema = z.object({
   isActive: z.boolean().optional(),
   isAdmin: z.boolean().optional(),
   haustierAkzeptiert: z.boolean().optional(),
+  notfallkontaktName: z.string().optional(),
+  notfallkontaktTelefon: z.string().optional(),
+  notfallkontaktBeziehung: z.string().optional(),
   roles: z.array(z.enum(EMPLOYEE_ROLES)).optional(),
 });
 

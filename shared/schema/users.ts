@@ -25,6 +25,9 @@ export const users = pgTable("users", {
   deactivatedAt: timestamp("deactivated_at"),
   isAdmin: boolean("is_admin").notNull().default(false),
   haustierAkzeptiert: boolean("haustier_akzeptiert").notNull().default(true),
+  notfallkontaktName: text("notfallkontakt_name"),
+  notfallkontaktTelefon: text("notfallkontakt_telefon"),
+  notfallkontaktBeziehung: text("notfallkontakt_beziehung"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

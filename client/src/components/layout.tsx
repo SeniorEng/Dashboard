@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature } from "lucide-react";
+import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings } from "lucide-react";
 
 interface SearchResult {
   type: "customer" | "appointment";
@@ -178,6 +178,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
                   <p className="text-xs text-muted-foreground">{user.email}</p>
                 </div>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => navigate("/profile")} data-testid="menu-profile">
+                  <Settings className="mr-2 h-4 w-4" />
+                  Mein Profil
+                </DropdownMenuItem>
                 {user.isAdmin && (
                   <>
                     <DropdownMenuItem onClick={() => navigate("/admin")} data-testid="menu-admin">

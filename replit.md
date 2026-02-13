@@ -13,67 +13,47 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 
 ### Frontend
 - **Frameworks**: React 18 with TypeScript, Vite, Wouter for routing.
-- **UI/UX**: Mobile-first responsive design using `shadcn/ui` components on Radix UI primitives, styled with Tailwind CSS v4 and a "Care & Clarity" theme. Centralized `@/design-system` for consistent styling. Touch-optimized UI components and `text-base` for inputs to prevent iOS Safari zoom.
-- **State Management**: TanStack Query for data fetching (optimistic updates, caching), React memoization, ErrorBoundary.
-- **Date/Time Handling**: All times are implicitly "German local time" with no UTC conversion or timezone logic. Strict conventions and central utilities (`@shared/utils/datetime`) must be used for all date/time operations.
-- **Components**: `DatePicker` for all date fields, `SearchableSelect` for long selection lists, `StatusBadge` for all semantic badges (13+ types: status, pflegegrad, service, record, contract, activity, billable, system, month, info, warning, need, counter). Raw `Badge` only for special cases (conditional destructive variants, dynamic color classes, absolute positioning).
-- **API Calls**: All state-changing API requests use a central API client for CSRF protection.
-- **Phone Number Handling**: Uses `libphonenumber-js/min` for validating, formatting, and storing German phone numbers in E.164 format via `@shared/utils/phone.ts`.
-- **Type Organization**: Hierarchical type structure with `@shared/schema.ts`, `@shared/domain/*`, `@shared/utils/*`, and `@shared/types.ts`.
+- **UI/UX**: Mobile-first responsive design using `shadcn/ui` components on Radix UI primitives, styled with Tailwind CSS v4 and a "Care & Clarity" theme. Centralized `@/design-system` for consistent styling. Touch-optimized UI components.
+- **State Management**: TanStack Query for data fetching, React memoization, ErrorBoundary.
+- **Date/Time Handling**: All times are implicitly "German local time" with no UTC conversion or timezone logic, using central utilities (`@shared/utils/datetime`).
+- **Components**: `DatePicker`, `SearchableSelect`, `StatusBadge` (with 13+ types).
+- **API Calls**: Central API client for CSRF protection on state-changing requests.
+- **Phone Number Handling**: Uses `libphonenumber-js/min` for validating, formatting, and storing German phone numbers in E.164 format.
+- **Type Organization**: Hierarchical type structure (`@shared/schema.ts`, `@shared/domain/*`, `@shared/utils/*`, `@shared/types.ts`).
 
 ### Backend
 - **Framework**: Express.js with TypeScript.
-- **API Design**: RESTful endpoints, Zod validation, structured error responses, modular routing. Admin routes are split into sub-modules. Large route files are further split into sub-routers (e.g., `month-closing.ts`, `appointment-documentation.ts`) mounted via `router.use()`.
-- **Business Logic**: Separated into a dedicated service layer with dependency injection. No direct DB access in route handlers — all data operations go through the storage layer.
-- **Error Handling**: Centralized `asyncHandler` wrapper in `server/lib/errors.ts` eliminates try-catch boilerplate. `AppError` class hierarchy with factory functions (`notFound`, `badRequest`, `forbidden`, `conflict`, `serverError`). `errorMiddleware` provides consistent JSON error responses. Remaining ~20 inner try-catch blocks are intentional for specific business logic.
-- **Security**: Role-based access control with SQL-level data filtering, CSRF protection, and database indexing.
+- **API Design**: RESTful endpoints, Zod validation, structured error responses, modular routing.
+- **Business Logic**: Separated into a dedicated service layer with dependency injection; no direct DB access from route handlers.
+- **Error Handling**: Centralized `asyncHandler` wrapper and `AppError` class hierarchy for consistent JSON error responses.
+- **Security**: Role-based access control with SQL-level data filtering, CSRF protection.
 - **Access Model**: Two-tiered access for employees (full vs. legacy based on customer assignment).
 
 ### Data Storage
-- **Database**: PostgreSQL via Neon serverless with WebSocket connection pooling (max 10 connections, 30s idle timeout), managed with Drizzle ORM.
-- **Schema**: Includes tables for `customers`, `appointments`, `insurance_providers`, `employee_time_entries`, utilizing a historization pattern (`valid_from`/`valid_to`). Database indexes defined in schema for `sessions` (user_id, expires_at), `user_roles` (user_id), `users` (is_active), `tasks` (created_by, customer_id), `customer_needs_assessments` (customer_id), `customer_contract_rates` (contract_id), `password_reset_tokens` (user_id). All timestamps use `withTimezone: true`.
-- **Soft-Delete (GoBD)**: Appointments use `deletedAt` column for soft-delete (GoBD-compliant). All appointment queries filter `isNull(deletedAt)`. `getAppointmentIncludeDeleted()` available for admin audit access only.
-- **Data Layer**: `IStorage` interface abstraction with `DatabaseStorage` for optimized queries, pagination, and application-level rollback. Reusable select-field helpers for appointments/customers to reduce code duplication.
-- **Caching**: In-memory cache for assigned customer IDs (TTL, invalidation), session cache (2min TTL), and birthday cache (1h TTL). Cache invalidation is defined for each cache type upon relevant CRUD or assignment changes. Periodic garbage collection (60s interval) prevents memory leaks.
-- **Performance**: Combined API endpoints for pages needing multiple independent data sources, reducing HTTP round-trips. Auth middleware scoped to /api routes only. Session validation uses single JOIN query. Batch cleanup for expired sessions/tokens.
-- **Frontend staleTime-Strategie**: Stable data uses 60s `staleTime`, volatile data uses shorter values, `Infinity` for session data.
+- **Database**: PostgreSQL via Neon serverless with Drizzle ORM.
+- **Schema**: Tables for `customers`, `appointments`, `insurance_providers`, `employee_time_entries`, using historization (`valid_from`/`valid_to`). Database indexes defined. All timestamps use `withTimezone: true`.
+- **Soft-Delete (GoBD)**: Appointments use `deletedAt` for GoBD compliance.
+- **Data Layer**: `IStorage` interface abstraction with `DatabaseStorage` for optimized queries and application-level rollback.
+- **Caching**: In-memory cache for assigned customer IDs, sessions, and birthdays with TTL and invalidation logic.
+- **Performance**: Combined API endpoints for multi-data pages, scoped auth middleware, single JOIN query for session validation, batch cleanup for expired sessions/tokens.
+- **Frontend staleTime-Strategie**: Configurable `staleTime` for data stability (60s for stable, shorter for volatile, `Infinity` for session).
 
 ### Business Rules & Patterns
-- **Shared Domain Logic**: Single source of truth for business rules in `@shared/domain/*`.
-- **Appointment Workflow**: Statuses (`scheduled`, `in-progress`, `documenting`, `completed`). `completed` is required for performance records. Field editing rules based on appointment status. Overlap checking.
-- **Service Model**: "Erstberatung" as a core service type.
-- **Customer Management**: Multi-step customer creation, detailed views with 5-tab structure (Übersicht, Dokumente, Kontakte, Budgets, Versicherung), German-specific validation (e.g., `Pflegegrad` 1-5). Overview tab consolidates contract/services, billing (inline toggle for private payment + budget status), needs assessment, care level history, and medical info. No separate "Leistungen" or "Historie" tabs.
-- **Customer Status**: Customers have a `status` field (`erstberatung`, `aktiv`, `inaktiv`). Default is `aktiv`. Erstberatung customers are created with status `erstberatung` and must be manually activated via a "Kunde aktivieren" button on the detail page. Customer list defaults to showing active customers with segmented status filter. Only `aktiv` customers appear in Kundentermin dropdowns.
-- **Insurance Providers**: Admin management, historized assignment to customers, validation of IK-Nummer and Versichertennummer.
-- **Budgeting & Pricing**: Three-pot budget ledger system based on German care law (§45b Entlastungsbetrag, §45a Umwandlungsanspruch, §39/§42a Gemeinsamer Jahresbetrag). Budget types can be prioritized and deactivated per customer, with monthly limits. Kaskaden-Buchung (cascading allocation) distributes invoice amounts across pots. FIFO consumption for §45b. Carryover budgets have write-off for expired allocations. Cost estimation endpoint provides proactive warnings and calculates private payment amounts with VAT.
-- **Dienstleistungskatalog (Service Catalog)**: Central management of services with code, name, unit type, standard price, VAT rate, **isBillable** flag, and **employeeRateCents** (compensation rate). All pricing comes from the global catalog — no customer-specific price overrides. The `isBillable` flag controls whether a service generates costs for the customer. Budget pot assignment is via junction table `service_budget_pots` (serviceId, budgetType) for flexible multi-pot assignment. Customer-specific budget cascade priority order is stored in `customer_budget_type_settings`. Dynamic service selection for appointments via `appointment_services` junction table. Documentation flow enriches services with `code` from the services table, then `buildDocumentationUpdate` derives hauswirtschaftMinutes/alltagsbegleitungMinutes by summing actualDurationMinutes per service code. Cost estimation uses `isBillable` and `defaultPriceCents` directly from the catalog. Time-conflict and auto-break calculations use `durationPromised`. PATCH and document endpoints use database transactions for atomic junction table updates. Server-side validation ensures serviceIds exist before documentation. Batch endpoint `GET /api/appointments/batch-services?ids=...` reduces N+1 queries.
-- **System-Services**: Services marked with `isSystem: true` cannot be deleted, deactivated, or have their name/code/unit type changed. System services are seeded on startup via `ensureSystemServices()`. Current system services: `travel_km` (Anfahrtskilometer), `customer_km` (Kundenkilometer). Kilometer pricing for budget calculations comes from the catalog via these system services. The employee documentation flow captures km in separate fields (travelKilometers, customerKilometers), but pricing is resolved from the catalog at budget booking time.
-- **Employee Time Tracking**: Comprehensive tracking for client and non-client work, including yearly vacation allowance and multi-day entries. Past entries are locked for non-admin users.
-- **German Labor Law Compliance**: Automatic detection and generation of missing break documentation (`§4 ArbZG`), which can be globally activated.
-- **Month-Closing Workflow**: Employees can close their month, triggering auto-breaks and locking CRUD operations for non-admins. Admins can reopen months.
-- **Aufgaben-System (Task System)**: Centralized task page for system notices (open documentations, missing breaks) and personal tasks.
+- **Shared Domain Logic**: Single source of truth in `@shared/domain/*`.
+- **Appointment Workflow**: Status-driven field editing rules, overlap checking.
+- **Customer Management**: Multi-step creation, detailed views with 5-tab structure (Übersicht, Dokumente, Kontakte, Budgets, Versicherung), German-specific validation (`Pflegegrad`). Customer `status` (`erstberatung`, `aktiv`, `inaktiv`).
+- **Insurance Providers**: Admin management, historized assignment, IK-Nummer and Versichertennummer validation.
+- **Budgeting & Pricing**: Three-pot budget ledger system based on German care law (§45b, §45a, §39/§42a). Kaskaden-Buchung (cascading allocation), FIFO for §45b, carryover budgets with write-off. Cost estimation with VAT.
+- **Dienstleistungskatalog (Service Catalog)**: Central management of services with code, name, unit type, standard price, VAT rate, `isBillable` flag, and `employeeRateCents`. No customer-specific price overrides. `isBillable` controls cost generation. Budget pot assignment via `service_budget_pots`. Customer-specific budget cascade priority in `customer_budget_type_settings`. Dynamic service selection for appointments. System-Services (e.g., `travel_km`, `customer_km`) are non-deletable/editable and seeded on startup.
+- **Employee Time Tracking**: Comprehensive tracking for client and non-client work, vacation allowance, multi-day entries. Past entries locked for non-admins.
+- **German Labor Law Compliance**: Automatic detection and generation of missing break documentation (`§4 ArbZG`).
+- **Month-Closing Workflow**: Employee-initiated month closing locks CRUD operations for non-admins; admins can reopen.
+- **Aufgaben-System (Task System)**: Centralized page for system notices and personal tasks.
 - **Customer Kilometers**: Separate tracking for kilometers driven with/for the customer.
 - **Birthdays**: Integrated tab in Customers page, showing upcoming birthdays for employees and assigned customers, utilizing server-side cache.
-- **Navigation Structure**: Bottom navigation tabs: Termine, Kunden (with Birthdays tab), Aufgaben, Nachweise, Zeiten.
-- **Signature Security (3-Tier)**: (1) Immutable `audit_log` table with AuditService tracking all signature/documentation actions, admin viewer at `/admin/audit-log`. (2) SHA-256 integrity hashing for appointment signatures (`signatureHash`, `signedAt`, `signedByUserId`) and service record signatures (`employeeSignatureHash`, `customerSignatureHash`), with verification endpoint at `/api/admin/verify-signature/:entityType/:entityId`. (3) Signature locking prevents overwriting once signed; admin-only revoke workflow at `/api/admin/revoke-signature/:entityType/:entityId` with mandatory reason tracking and full audit trail.
-
-## Performance
-- **Performance-Guide:** Detaillierte Analyse und Optimierungsempfehlungen in `PERFORMANCE_GUIDE.md`
-- **Offene Haupt-Themen:** Bundle-Splitting (559 kB Haupt-Chunk, vite.config.ts geschützt), Navigation-Prefetching, SELECT-Feld-Optimierung
-- **Bereits optimiert:** DB Connection Pool (WebSocket), Auth-Scope, N+1 Fixes, Session-JOIN, Indexes, Cache-GC, Route-Level Code Splitting, staleTime-Strategie, HTTP Cache-Control Headers, libphonenumber-js/min, 14 ungenutzte UI-Komponenten + 109 npm-Pakete entfernt
-- **HTTP Cache-Headers**: Middleware in `server/middleware/cache-headers.ts` (stable: 5min, semi-stable: 60s, volatile: must-revalidate)
-
-## AI Development Team (Audit Skills)
-- **Team-Orchestrierung**: `.agents/skills/team-orchestration/SKILL.md` — Koordination aller Agenten, Konflikt-Hierarchie, Befehle
-- **Business & Compliance** (10 Kategorien): `.agents/skills/business-logic-audit/` — Workflows, Domain-Regeln, Status-Übergänge, GoBD, Plausibilitätsprüfungen
-- **Code Quality** (6 Kategorien): `.agents/skills/code-quality-supervisor/` — Duplikate, Konventionen, Migrations-Vollständigkeit, Dead Code
-- **Database** (10 Kategorien): `.agents/skills/database-audit/` — Schema-Konsistenz, Indexierung, N+1, DSGVO, Historisierung
-- **Performance** (5 Kategorien): `.agents/skills/performance-audit/` — Query-Performance, Rendering, Bundle-Size, Mobile
-- **Security** (7 Kategorien): `.agents/skills/security-audit/` — OWASP, Auth, CSRF, Secrets, DSGVO
-- **UI/UX & Accessibility** (6 Kategorien): `.agents/skills/ui-ux-audit/` — Touch-Targets, Feedback, Mobile, Wording, a11y
-- **QA & Testing** (6 Kategorien): `.agents/skills/qa-testing/` — Happy Path, Edge Cases, Regression, State Management
-- **DevOps & Release** (6 Kategorien): `.agents/skills/devops-release/` — Env-Vars, Dependencies, Build, Logging, Deployment
-- **Audit-Skript**: `audit_team.sh` — Automatisierte Pre-Checks (TypeScript, npm audit, TODOs, Konventionen)
+- **Employee Self-Service Profile**: Employees can manage contact data, emergency contact, pet acceptance, password, and predefined document uploads.
+- **Navigation Structure**: Bottom navigation tabs: Termine, Kunden (with Birthdays tab), Aufgaben, Nachweise, Zeiten. User dropdown includes "Mein Profil" link.
+- **Signature Security (3-Tier)**: Immutable `audit_log` table, SHA-256 integrity hashing for appointment and service record signatures with verification endpoint, signature locking with admin-only revoke workflow.
 
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)

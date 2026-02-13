@@ -296,6 +296,10 @@ export class AuthService {
       vacationDaysPerYear?: number;
       isActive?: boolean;
       isAdmin?: boolean;
+      haustierAkzeptiert?: boolean;
+      notfallkontaktName?: string;
+      notfallkontaktTelefon?: string;
+      notfallkontaktBeziehung?: string;
     }
   ): Promise<UserWithRoles | null> {
     if (updates.email) {
@@ -323,6 +327,10 @@ export class AuthService {
     if (updates.vacationDaysPerYear !== undefined) dbUpdates.vacationDaysPerYear = updates.vacationDaysPerYear;
     if (updates.isActive !== undefined) dbUpdates.isActive = updates.isActive;
     if (updates.isAdmin !== undefined) dbUpdates.isAdmin = updates.isAdmin;
+    if (updates.haustierAkzeptiert !== undefined) dbUpdates.haustierAkzeptiert = updates.haustierAkzeptiert;
+    if (updates.notfallkontaktName !== undefined) dbUpdates.notfallkontaktName = updates.notfallkontaktName || null;
+    if (updates.notfallkontaktTelefon !== undefined) dbUpdates.notfallkontaktTelefon = updates.notfallkontaktTelefon || null;
+    if (updates.notfallkontaktBeziehung !== undefined) dbUpdates.notfallkontaktBeziehung = updates.notfallkontaktBeziehung || null;
 
     const [updatedUser] = await db
       .update(users)

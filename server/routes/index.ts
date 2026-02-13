@@ -11,6 +11,7 @@ import serviceRecordsRouter from "./service-records";
 import servicesRouter from "./services";
 import { searchRouter } from "./search";
 import settingsRouter from "./settings";
+import profileRouter from "./profile";
 import { csrfProtection, csrfTokenHandler } from "../middleware/csrf";
 import { authMiddleware } from "../middleware/auth";
 import { cacheHeaders } from "../middleware/cache-headers";
@@ -38,5 +39,6 @@ router.use("/service-records", serviceRecordsRouter);
 router.use("/services", servicesRouter);
 router.use("/search", searchRouter);
 router.use("/settings", settingsRouter);
+router.use("/profile", profileRouter);
 
 export default router;

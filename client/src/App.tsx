@@ -39,6 +39,7 @@ const CustomerDetail = lazy(() => import("@/pages/customer-detail"));
 const TasksPage = lazy(() => import("@/pages/tasks"));
 const ServiceRecordsPage = lazy(() => import("@/pages/service-records"));
 const ServiceRecordDetailPage = lazy(() => import("@/pages/service-record-detail"));
+const ProfilePage = lazy(() => import("@/pages/profile"));
 
 function PageLoader() {
   return (
@@ -141,6 +142,9 @@ function Router() {
       </Route>
       <Route path="/document-appointment/:id">
         {(params) => <ProtectedRoute component={() => <DocumentAppointment />} />}
+      </Route>
+      <Route path="/profile">
+        <ProtectedRoute component={ProfilePage} />
       </Route>
       <Route path="/admin">
         <AdminRoute component={AdminDashboard} />
