@@ -1,11 +1,12 @@
 import type { Express } from "express";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { authMiddleware, requireAuth } from "../../middleware/auth";
+import { csrfProtection } from "../../middleware/csrf";
 
 export function registerObjectStorageRoutes(app: Express): void {
   const objectStorageService = new ObjectStorageService();
 
-  app.post("/api/uploads/request-url", authMiddleware, requireAuth, async (req, res) => {
+  app.post("/api/uploads/request-url", authMiddleware, requireAuth, csrfProtection, async (req, res) => {
     try {
       const { name, size, contentType } = req.body;
 

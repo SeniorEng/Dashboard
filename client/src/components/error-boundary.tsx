@@ -41,12 +41,12 @@ export class ErrorBoundary extends Component<Props, State> {
           <div className="w-16 h-16 bg-destructive/10 rounded-full flex items-center justify-center mb-4">
             <AlertTriangle className="w-8 h-8 text-destructive" />
           </div>
-          <h2 className="text-lg font-semibold text-foreground mb-2">Something went wrong</h2>
+          <h2 className="text-lg font-semibold text-foreground mb-2">Etwas ist schiefgelaufen</h2>
           <p className="text-muted-foreground text-sm mb-4 max-w-md">
-            We encountered an unexpected error. Please try again.
+            Es ist ein unerwarteter Fehler aufgetreten. Bitte versuchen Sie es erneut.
           </p>
           <Button onClick={this.handleReset} variant="outline">
-            Try Again
+            Erneut versuchen
           </Button>
         </div>
       );

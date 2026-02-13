@@ -16,8 +16,6 @@ import {
   Loader2,
   Upload,
   FileCheck2,
-  CalendarClock,
-  AlertTriangle,
   ChevronDown,
   ChevronUp,
   FileText,
@@ -27,6 +25,7 @@ import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { formatDateDisplay } from "@shared/utils/format";
 import { useUpload } from "@/hooks/use-upload";
+import { ReviewBadge, getReviewStatus } from "./review-badge";
 
 interface DocumentTypeData {
   id: number;
@@ -48,42 +47,6 @@ interface EmployeeDocumentData {
   isCurrent: boolean;
   notes: string | null;
   documentType: DocumentTypeData;
-}
-
-function getReviewStatus(reviewDueDate: string | null): "ok" | "warning" | "overdue" | "none" {
-  if (!reviewDueDate) return "none";
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const due = new Date(reviewDueDate);
-  const diffDays = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-  if (diffDays < 0) return "overdue";
-  if (diffDays <= 30) return "warning";
-  return "ok";
-}
-
-function ReviewBadge({ reviewDueDate }: { reviewDueDate: string | null }) {
-  const status = getReviewStatus(reviewDueDate);
-  if (status === "none") return null;
-
-  const styles = {
-    ok: "bg-green-100 text-green-700",
-    warning: "bg-amber-100 text-amber-700",
-    overdue: "bg-red-100 text-red-700",
-  };
-
-  const labels = {
-    ok: `Prüfung bis ${formatDateDisplay(reviewDueDate!)}`,
-    warning: `Prüfung fällig: ${formatDateDisplay(reviewDueDate!)}`,
-    overdue: `Überfällig: ${formatDateDisplay(reviewDueDate!)}`,
-  };
-
-  return (
-    <span className={`text-xs px-2 py-0.5 rounded inline-flex items-center gap-1 ${styles[status]}`}>
-      {status === "overdue" && <AlertTriangle className="h-3 w-3" />}
-      {status === "warning" && <CalendarClock className="h-3 w-3" />}
-      {labels[status]}
-    </span>
-  );
 }
 
 export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false }: { employeeId: number; userName: string; isAdmin?: boolean }) {

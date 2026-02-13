@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import type { UppyFile } from "@uppy/core";
+import { api, unwrapResult } from "@/lib/api/client";
 
 interface UploadMetadata {
   name: string;
@@ -62,24 +63,12 @@ export function useUpload(options: UseUploadOptions = {}) {
    */
   const requestUploadUrl = useCallback(
     async (file: File): Promise<UploadResponse> => {
-      const response = await fetch("/api/uploads/request-url", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: file.name,
-          size: file.size,
-          contentType: file.type || "application/octet-stream",
-        }),
+      const result = await api.post("/uploads/request-url", {
+        name: file.name,
+        size: file.size,
+        contentType: file.type || "application/octet-stream",
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || "Failed to get upload URL");
-      }
-
-      return response.json();
+      return unwrapResult(result) as UploadResponse;
     },
     []
   );
@@ -161,24 +150,12 @@ export function useUpload(options: UseUploadOptions = {}) {
       url: string;
       headers?: Record<string, string>;
     }> => {
-      // Use the actual file properties to request a per-file presigned URL
-      const response = await fetch("/api/uploads/request-url", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: file.name,
-          size: file.size,
-          contentType: file.type || "application/octet-stream",
-        }),
+      const result = await api.post("/uploads/request-url", {
+        name: file.name,
+        size: file.size,
+        contentType: file.type || "application/octet-stream",
       });
-
-      if (!response.ok) {
-        throw new Error("Failed to get upload URL");
-      }
-
-      const data = await response.json();
+      const data = unwrapResult(result) as UploadResponse;
       return {
         method: "PUT",
         url: data.uploadURL,

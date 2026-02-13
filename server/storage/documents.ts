@@ -1,4 +1,5 @@
 import { eq, and, desc, asc, lte, sql } from "drizzle-orm";
+import { formatDateISO } from "@shared/utils/datetime";
 import {
   documentTypes,
   employeeDocuments,
@@ -74,7 +75,7 @@ export class DocumentStorage implements IDocumentStorage {
     if (!docType?.reviewIntervalMonths) return null;
     const dueDate = new Date();
     dueDate.setMonth(dueDate.getMonth() + docType.reviewIntervalMonths);
-    return dueDate.toISOString().split("T")[0];
+    return formatDateISO(dueDate);
   }
 
   async uploadDocument(data: InsertEmployeeDocument, uploadedByUserId: number): Promise<EmployeeDocument> {
@@ -140,7 +141,7 @@ export class DocumentStorage implements IDocumentStorage {
   async getEmployeeDocumentsDueSoon(leadTimeDays: number = 30): Promise<(EmployeeDocument & { documentType: DocumentType; employee: { id: number; displayName: string } })[]> {
     const futureDate = new Date();
     futureDate.setDate(futureDate.getDate() + leadTimeDays);
-    const futureDateStr = futureDate.toISOString().split("T")[0];
+    const futureDateStr = formatDateISO(futureDate);
 
     const { users } = await import("@shared/schema");
     
@@ -231,7 +232,7 @@ export class DocumentStorage implements IDocumentStorage {
   async getCustomerDocumentsDueSoon(leadTimeDays: number = 30): Promise<(CustomerDocument & { documentType: DocumentType; customer: { id: number; name: string } })[]> {
     const futureDate = new Date();
     futureDate.setDate(futureDate.getDate() + leadTimeDays);
-    const futureDateStr = futureDate.toISOString().split("T")[0];
+    const futureDateStr = formatDateISO(futureDate);
 
     const docs = await db
       .select({

@@ -40,6 +40,15 @@ app.use((req, res, next) => {
   next();
 });
 
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("[FATAL] Unhandled Promise Rejection:", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("[FATAL] Uncaught Exception:", error);
+  process.exit(1);
+});
+
 (async () => {
   const { serviceCatalogStorage } = await import("./storage/service-catalog");
   await serviceCatalogStorage.ensureSystemServices();

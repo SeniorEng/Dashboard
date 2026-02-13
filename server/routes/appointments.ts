@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { z } from "zod";
 import { storage } from "../storage";
 import { 
   updateAppointmentSchema, 
@@ -350,7 +351,10 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
   }
   
   if (req.body.services && Array.isArray(req.body.services)) {
-    await storage.replaceAppointmentServices(id, req.body.services);
+    const serviceIds = z.array(z.number().int().positive()).safeParse(req.body.services);
+    if (serviceIds.success) {
+      await storage.replaceAppointmentServices(id, serviceIds.data);
+    }
   }
 
   const changedFields = Object.keys(validatedData).filter(k => (validatedData as Record<string, unknown>)[k] !== undefined);

@@ -65,7 +65,9 @@ export const customerContractRates = pgTable("customer_contract_rates", {
   validTo: date("valid_to"), // null = current
   createdAt: timestamp("created_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
-});
+}, (table) => [
+  index("customer_contract_rates_contract_idx").on(table.contractId),
+]);
 
 // Contract schemas
 export const CONTRACT_PERIOD_TYPES = ["week", "month", "year"] as const;

@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, inArray, sql as sqlBuilder, asc } from "drizzle-orm";
+import { eq, and, gte, lte, inArray, sql as sqlBuilder, asc, isNull } from "drizzle-orm";
 import {
   employeeTimeEntries,
   employeeVacationAllowance,
@@ -431,7 +431,8 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
             OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId}))
           )`,
           gte(appointments.date, startDate),
-          lte(appointments.date, endDate)
+          lte(appointments.date, endDate),
+          isNull(appointments.deletedAt)
         )
       )
       .orderBy(asc(appointments.date), asc(appointments.scheduledStart));
@@ -439,6 +440,9 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     return results.map(r => ({
       ...r,
       customerName: String(r.customerName),
+      signatureHash: r.signatureHash ?? null,
+      signedAt: r.signedAt ?? null,
+      signedByUserId: r.signedByUserId ?? null,
     }));
   }
   
@@ -609,7 +613,8 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
             )`,
             gte(appointments.date, startDateStr),
             lte(appointments.date, todayStr),
-            inArray(appointments.status, ['completed', 'documenting'])
+            inArray(appointments.status, ['completed', 'documenting']),
+            isNull(appointments.deletedAt)
           )
         ),
       db.select({

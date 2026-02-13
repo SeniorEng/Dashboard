@@ -53,19 +53,8 @@ async function fetchCurrentUser(): Promise<{ user: User; availableServices: stri
 }
 
 async function loginRequest(email: string, password: string): Promise<{ user: User; availableServices: string[] }> {
-  const res = await fetch("/api/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-    credentials: "include",
-  });
-
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.message || "Anmeldung fehlgeschlagen");
-  }
-
-  return res.json();
+  const result = await api.post("/auth/login", { email, password });
+  return unwrapResult(result) as { user: User; availableServices: string[] };
 }
 
 async function logoutRequest(): Promise<void> {

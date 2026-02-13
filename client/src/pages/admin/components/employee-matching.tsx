@@ -54,7 +54,7 @@ export function EmployeeMatching({ customerId, inlineCriteria, onSelect, selecte
   const inlineMutation = useMutation<MatchResult[], Error, MatchCriteriaInline>({
     mutationFn: async (criteria) => {
       const result = await api.post("/admin/customers/match-employees", criteria);
-      return unwrapResult(result);
+      return unwrapResult(result) as MatchResult[];
     },
   });
 

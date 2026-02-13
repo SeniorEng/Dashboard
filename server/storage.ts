@@ -90,6 +90,9 @@ function mapAppointmentRow(row: any): AppointmentWithCustomer {
     notes: row.notes,
     servicesDone: row.servicesDone,
     signatureData: row.signatureData,
+    signatureHash: row.signatureHash,
+    signedAt: row.signedAt,
+    signedByUserId: row.signedByUserId,
     createdAt: row.createdAt,
     performedByEmployeeId: row.performedByEmployeeId,
     customer: row.customer?.id ? row.customer : null,
@@ -136,6 +139,7 @@ export interface IStorage {
   // Appointments - Basic
   getAppointments(): Promise<Appointment[]>;
   getAppointment(id: number): Promise<Appointment | undefined>;
+  getAppointmentIncludeDeleted(id: number): Promise<Appointment | undefined>;
   createAppointment(appointment: InsertAppointment): Promise<Appointment>;
   updateAppointment(id: number, appointment: UpdateAppointment): Promise<Appointment | undefined>;
   deleteAppointment(id: number): Promise<boolean>;
@@ -260,9 +264,12 @@ export class DatabaseStorage implements IStorage {
       .select({ customerId: appointments.customerId })
       .from(appointments)
       .where(
-        or(
-          eq(appointments.assignedEmployeeId, employeeId),
-          eq(appointments.performedByEmployeeId, employeeId)
+        and(
+          or(
+            eq(appointments.assignedEmployeeId, employeeId),
+            eq(appointments.performedByEmployeeId, employeeId)
+          ),
+          isNull(appointments.deletedAt)
         )
       )
       .groupBy(appointments.customerId);
@@ -368,6 +375,8 @@ export class DatabaseStorage implements IStorage {
       conditions.push(inArray(appointments.customerId, assignedCustomerIds));
     }
     
+    conditions.push(isNull(appointments.deletedAt));
+    
     const results = await db
       .select(appointmentWithCustomerSelectFields)
       .from(appointments)
@@ -380,22 +389,27 @@ export class DatabaseStorage implements IStorage {
 
   // Appointments - Basic
   async getAppointments(): Promise<Appointment[]> {
-    return await db.select().from(appointments);
+    return await db.select().from(appointments).where(isNull(appointments.deletedAt));
   }
 
   async getAppointment(id: number): Promise<Appointment | undefined> {
+    const result = await db.select().from(appointments).where(and(eq(appointments.id, id), isNull(appointments.deletedAt)));
+    return result[0];
+  }
+
+  async getAppointmentIncludeDeleted(id: number): Promise<Appointment | undefined> {
     const result = await db.select().from(appointments).where(eq(appointments.id, id));
     return result[0];
   }
 
   async getAppointmentsByDate(date: string): Promise<Appointment[]> {
-    return await db.select().from(appointments).where(eq(appointments.date, date));
+    return await db.select().from(appointments).where(and(eq(appointments.date, date), isNull(appointments.deletedAt)));
   }
 
   async getAppointmentCountsByDates(dates: string[], customerIds?: number[]): Promise<Record<string, number>> {
     if (dates.length === 0) return {};
     
-    const conditions = [inArray(appointments.date, dates)];
+    const conditions = [inArray(appointments.date, dates), isNull(appointments.deletedAt)];
     if (customerIds && customerIds.length > 0) {
       conditions.push(inArray(appointments.customerId, customerIds));
     }
@@ -436,13 +450,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteAppointment(id: number): Promise<boolean> {
-    const result = await db.delete(appointments).where(eq(appointments.id, id)).returning();
+    const result = await db.update(appointments)
+      .set({ deletedAt: new Date() })
+      .where(and(eq(appointments.id, id), isNull(appointments.deletedAt)))
+      .returning();
     return result.length > 0;
   }
 
   // Appointments - With Customer (single query with LEFT JOIN for performance)
   async getAppointmentsWithCustomers(date?: string, customerIds?: number[]): Promise<AppointmentWithCustomer[]> {
-    const conditions = [];
+    const conditions = [isNull(appointments.deletedAt)];
     if (date) {
       conditions.push(eq(appointments.date, date));
     }
@@ -470,8 +487,8 @@ export class DatabaseStorage implements IStorage {
     const offset = options?.offset ?? 0;
 
     const countResult = date
-      ? await db.select({ count: count() }).from(appointments).where(eq(appointments.date, date))
-      : await db.select({ count: count() }).from(appointments);
+      ? await db.select({ count: count() }).from(appointments).where(and(eq(appointments.date, date), isNull(appointments.deletedAt)))
+      : await db.select({ count: count() }).from(appointments).where(isNull(appointments.deletedAt));
     
     const total = Number(countResult[0]?.count ?? 0);
 
@@ -483,8 +500,8 @@ export class DatabaseStorage implements IStorage {
       .offset(offset);
 
     const results = date 
-      ? await query.where(eq(appointments.date, date))
-      : await query;
+      ? await query.where(and(eq(appointments.date, date), isNull(appointments.deletedAt)))
+      : await query.where(isNull(appointments.deletedAt));
 
     const data = results.map(mapAppointmentRow);
 
@@ -496,7 +513,7 @@ export class DatabaseStorage implements IStorage {
       .select(appointmentWithCustomerSelectFields)
       .from(appointments)
       .leftJoin(customers, eq(appointments.customerId, customers.id))
-      .where(eq(appointments.id, id));
+      .where(and(eq(appointments.id, id), isNull(appointments.deletedAt)));
     
     if (results.length === 0) return undefined;
     
@@ -506,7 +523,8 @@ export class DatabaseStorage implements IStorage {
   async getUndocumentedAppointments(beforeDate: string, customerIds?: number[]): Promise<AppointmentWithCustomer[]> {
     const conditions = [
       lt(appointments.date, beforeDate),
-      ne(appointments.status, "completed")
+      ne(appointments.status, "completed"),
+      isNull(appointments.deletedAt)
     ];
     
     if (customerIds && customerIds.length > 0) {
@@ -557,7 +575,8 @@ export class DatabaseStorage implements IStorage {
           eq(appointments.assignedEmployeeId, employeeId),
           eq(appointments.createdByUserId, employeeId),
           isNull(appointments.assignedEmployeeId)
-        )
+        ),
+        isNull(appointments.deletedAt)
       ))
       .orderBy(appointments.scheduledStart);
     
@@ -682,7 +701,7 @@ export class DatabaseStorage implements IStorage {
     const rows = await db.select(appointmentWithCustomerSelectFields)
       .from(appointments)
       .leftJoin(customers, eq(appointments.customerId, customers.id))
-      .where(inArray(appointments.id, appointmentIds))
+      .where(and(inArray(appointments.id, appointmentIds), isNull(appointments.deletedAt)))
       .orderBy(appointments.date, appointments.scheduledStart);
     
     return rows.map(mapAppointmentRow);
@@ -718,7 +737,8 @@ export class DatabaseStorage implements IStorage {
         ),
         eq(appointments.status, 'completed'),
         sqlBuilder`${appointments.date} >= ${startDate}`,
-        sqlBuilder`${appointments.date} < ${endDate}`
+        sqlBuilder`${appointments.date} < ${endDate}`,
+        isNull(appointments.deletedAt)
       ))
       .orderBy(appointments.date, appointments.scheduledStart);
     
@@ -743,7 +763,8 @@ export class DatabaseStorage implements IStorage {
         ne(appointments.status, 'completed'),
         ne(appointments.status, 'cancelled'),
         sqlBuilder`${appointments.date} >= ${startDate}`,
-        sqlBuilder`${appointments.date} < ${endDate}`
+        sqlBuilder`${appointments.date} < ${endDate}`,
+        isNull(appointments.deletedAt)
       ))
       .orderBy(appointments.date, appointments.scheduledStart);
     
@@ -807,7 +828,8 @@ export class DatabaseStorage implements IStorage {
         ),
         sqlBuilder`${appointments.date} >= ${startDate}`,
         sqlBuilder`${appointments.date} < ${endDate}`,
-        ne(appointments.status, 'cancelled')
+        ne(appointments.status, 'cancelled'),
+        isNull(appointments.deletedAt)
       ))
       .where(inArray(customers.id, assignedCustomerIds))
       .groupBy(customers.id, customers.vorname, customers.nachname);
@@ -862,7 +884,8 @@ export class DatabaseStorage implements IStorage {
         ),
         ne(appointments.status, 'cancelled'),
         sqlBuilder`${appointments.date} >= ${startDate}`,
-        sqlBuilder`${appointments.date} < ${endDate}`
+        sqlBuilder`${appointments.date} < ${endDate}`,
+        isNull(appointments.deletedAt)
       ));
 
     return {

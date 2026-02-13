@@ -31,7 +31,7 @@ router.get("/verify-signature/:entityType/:entityId", asyncHandler("Integritäts
   if (isNaN(entityId)) throw badRequest("Ungültige Entity-ID");
 
   if (entityType === "appointment") {
-    const appointment = await storage.getAppointment(entityId);
+    const appointment = await storage.getAppointmentIncludeDeleted(entityId);
     if (!appointment) throw notFound("Termin nicht gefunden");
 
     if (!appointment.signatureData || !appointment.signatureHash) {
@@ -130,7 +130,7 @@ router.post("/revoke-signature/:entityType/:entityId", asyncHandler("Stornierung
   const userId = (req as any).user!.id;
 
   if (entityType === "appointment") {
-    const appointment = await storage.getAppointment(entityId);
+    const appointment = await storage.getAppointmentIncludeDeleted(entityId);
     if (!appointment) throw notFound("Termin nicht gefunden");
 
     if (!appointment.signatureData) {
@@ -206,7 +206,7 @@ router.post("/revoke-signature/:entityType/:entityId", asyncHandler("Stornierung
     await auditService.serviceRecordRevoked(
       userId,
       entityId,
-      { customerId: record.customerId, reason, previousStatus, signerType },
+      { customerId: record.customerId, reason, previousStatus },
       ip
     );
 

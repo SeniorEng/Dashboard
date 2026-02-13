@@ -142,7 +142,9 @@ export const customerNeedsAssessments = pgTable("customer_needs_assessments", {
   // Audit
   createdAt: timestamp("created_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
-});
+}, (table) => [
+  index("customer_needs_assessments_customer_idx").on(table.customerId),
+]);
 
 // ============================================
 // CUSTOMER PRICING (historized - like employee compensation)

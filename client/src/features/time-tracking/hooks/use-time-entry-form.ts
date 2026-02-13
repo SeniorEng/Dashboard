@@ -9,12 +9,13 @@
 
 import { useState, useCallback } from "react";
 import type { TimeEntryType, CreateTimeEntryRequest } from "@/lib/api/types";
-import { todayISO } from "@shared/utils/datetime";
+import { todayISO, currentTimeHHMM } from "@shared/utils/datetime";
 
 function getCurrentTimeRounded(): string {
-  const now = new Date();
-  const minutes = Math.floor(now.getMinutes() / 5) * 5;
-  return `${String(now.getHours()).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+  const time = currentTimeHHMM();
+  const [h, m] = time.split(":").map(Number);
+  const rounded = Math.floor(m / 5) * 5;
+  return `${String(h).padStart(2, "0")}:${String(rounded).padStart(2, "0")}`;
 }
 
 function addOneHour(time: string): string {

@@ -17,7 +17,7 @@ export const appointments = pgTable("appointments", {
   assignedEmployeeId: integer("assigned_employee_id").references(() => users.id),
   performedByEmployeeId: integer("performed_by_employee_id").references(() => users.id),
   appointmentType: text("appointment_type").notNull(),
-  serviceType: text("service_type"),
+  serviceType: text("service_type"), // Legacy: replaced by appointment_services junction table
   date: date("date").notNull(),
   // Scheduled times (planned appointment slot)
   scheduledStart: time("scheduled_start").notNull(),
@@ -35,12 +35,13 @@ export const appointments = pgTable("appointments", {
   // Customer kilometers (for Alltagsbegleitung - trips with/for customer)
   customerKilometers: integer("customer_kilometers"),
   notes: text("notes"),
-  servicesDone: text("services_done").array().default([]),
+  servicesDone: text("services_done").array().default([]), // Legacy: replaced by appointment_services junction table
   signatureData: text("signature_data"),
   signatureHash: text("signature_hash"),
   signedAt: timestamp("signed_at"),
   signedByUserId: integer("signed_by_user_id").references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at"),
 }, (table) => [
   index("appointments_customer_id_idx").on(table.customerId),
   index("appointments_date_idx").on(table.date),
@@ -87,7 +88,7 @@ export type AppointmentServiceEntry = z.infer<typeof appointmentServiceEntrySche
 // Schema for Kundentermin appointment (supports dynamic services array)
 export const insertKundenterminSchema = z.object({
   customerId: z.number(),
-  date: z.string(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat (YYYY-MM-DD erwartet)"),
   scheduledStart: z.string(),
   services: z.array(appointmentServiceEntrySchema).min(1, "Mindestens ein Service muss ausgewählt werden"),
   notes: z.string().max(255).optional(),
@@ -97,7 +98,7 @@ export const insertKundenterminSchema = z.object({
 // Schema for Erstberatung appointment
 export const insertErstberatungSchema = z.object({
   customer: insertErstberatungCustomerSchema,
-  date: z.string(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat (YYYY-MM-DD erwartet)"),
   scheduledStart: z.string(),
   erstberatungDauer: z.number().min(15).multipleOf(15),
   notes: z.string().max(255).optional(),
@@ -120,9 +121,9 @@ export const documentAppointmentSchema = z.object({
   actualStart: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Ungültiges Zeitformat (HH:MM erwartet)"),
   travelOriginType: z.enum(["home", "appointment"]),
   travelFromAppointmentId: z.number().nullable().optional(),
-  travelKilometers: z.number().min(0, "Kilometer müssen positiv sein"),
-  travelMinutes: z.number().min(0).nullable().optional(),
-  customerKilometers: z.number().min(0).nullable().optional(),
+  travelKilometers: z.number().min(0, "Kilometer müssen positiv sein").max(500, "Maximal 500 km Anfahrt"),
+  travelMinutes: z.number().min(0).max(480, "Maximal 8 Stunden Fahrzeit").nullable().optional(),
+  customerKilometers: z.number().min(0).max(500, "Maximal 500 km Kundenkilometer").nullable().optional(),
   notes: z.string().max(255).nullable().optional(),
   services: z.array(documentServiceEntrySchema).min(1, "Mindestens ein Service muss dokumentiert werden"),
 }).refine(

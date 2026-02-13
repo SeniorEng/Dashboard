@@ -3,6 +3,7 @@ import { storage } from "../../storage";
 import { customerManagementStorage } from "../../storage/customer-management";
 import { authService } from "../../services/auth";
 import { birthdaysCache } from "../../services/cache";
+import { formatDateISO } from "@shared/utils/datetime";
 import { 
   insertCustomerInsuranceSchema,
   insertCustomerContactSchema,
@@ -650,7 +651,7 @@ async function matchEmployees(criteria: MatchCriteria, excludeEmployeeIds: numbe
 
   const threeMonthsAgo = new Date();
   threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-  const threeMonthsAgoStr = threeMonthsAgo.toISOString().split("T")[0];
+  const threeMonthsAgoStr = formatDateISO(threeMonthsAgo);
 
   const appointmentCounts = await db
     .select({

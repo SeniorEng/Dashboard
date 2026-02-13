@@ -183,7 +183,7 @@ export default function AdminAuditLog() {
                             <div className="flex items-center gap-2 flex-wrap mb-1">
                               <StatusBadge
                                 type={actionColor(entry.action)}
-                                label={ACTION_LABELS[entry.action] || entry.action}
+                                value={ACTION_LABELS[entry.action] || entry.action}
                               />
                               <span className="text-xs text-gray-500">
                                 {ENTITY_TYPE_LABELS[entry.entityType] || entry.entityType} #{entry.entityId}

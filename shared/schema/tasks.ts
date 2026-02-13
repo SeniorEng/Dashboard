@@ -29,6 +29,8 @@ export const tasks = pgTable("tasks", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [
   index("tasks_assigned_to_idx").on(table.assignedToUserId),
+  index("tasks_created_by_idx").on(table.createdByUserId),
+  index("tasks_customer_id_idx").on(table.customerId),
   index("tasks_status_idx").on(table.status),
   index("tasks_due_date_idx").on(table.dueDate),
 ]);

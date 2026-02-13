@@ -60,7 +60,9 @@ export const passwordResetTokens = pgTable("password_reset_tokens", {
   expiresAt: timestamp("expires_at").notNull(),
   usedAt: timestamp("used_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (table) => [
+  index("password_reset_tokens_user_idx").on(table.userId),
+]);
 
 // Employee compensation history (historized)
 export const TRAVEL_COST_TYPES = ["kilometergeld", "pauschale"] as const;
