@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { iconSize } from "@/design-system";
 import {
   Dialog,
@@ -31,12 +32,15 @@ import {
   Pencil,
   Key,
   Trash2,
+  Search,
+  ShieldOff,
 } from "lucide-react";
 import { api, unwrapResult } from "@/lib/api/client";
 import {
   UserData,
   UserFormData,
   ROLE_LABELS,
+  AVAILABLE_ROLES,
   formatPhoneForDisplay,
 } from "./components/user-types";
 import { UserForm } from "./components/user-form";
@@ -44,12 +48,19 @@ import { EmployeeDocumentsSection } from "./components/employee-documents-sectio
 import { EmployeeServiceRates } from "./components/employee-service-rates";
 import { ResetPasswordForm } from "./components/reset-password-form";
 
+type StatusFilter = "aktiv" | "inaktiv" | "alle";
+
 export default function AdminUsers() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserData | null>(null);
   const [resetPasswordUser, setResetPasswordUser] = useState<UserData | null>(null);
+  const [anonymizingUser, setAnonymizingUser] = useState<UserData | null>(null);
+
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("aktiv");
+  const [roleFilter, setRoleFilter] = useState<string>("alle");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const { data: users, isLoading } = useQuery<UserData[]>({
     queryKey: ["admin", "users"],
@@ -133,6 +144,37 @@ export default function AdminUsers() {
     },
   });
 
+  const anonymizeMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const result = await api.post(`/admin/users/${id}/anonymize`, {});
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+      setAnonymizingUser(null);
+      toast({ title: "Mitarbeiter anonymisiert", description: "Persönliche Daten wurden DSGVO-konform entfernt." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const filteredUsers = useMemo(() => {
+    if (!users) return [];
+    return users.filter((user) => {
+      if (statusFilter === "aktiv" && !user.isActive) return false;
+      if (statusFilter === "inaktiv" && user.isActive) return false;
+      if (roleFilter !== "alle" && !user.roles.includes(roleFilter)) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const nameMatch = user.displayName.toLowerCase().includes(q);
+        const emailMatch = user.email.toLowerCase().includes(q);
+        if (!nameMatch && !emailMatch) return false;
+      }
+      return true;
+    });
+  }, [users, statusFilter, roleFilter, searchQuery]);
+
   const handleCreateSubmit = (data: UserFormData & { password?: string }) => {
     if (!data.password) return;
     createMutation.mutate(data as UserFormData & { password: string });
@@ -174,31 +216,90 @@ export default function AdminUsers() {
             </Dialog>
           </div>
 
+          <div className="space-y-3 mb-4">
+            <div className="relative">
+              <Search className={`absolute left-3 top-1/2 -translate-y-1/2 ${iconSize.sm} text-gray-400`} />
+              <Input
+                placeholder="Name oder E-Mail suchen..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 bg-white"
+                data-testid="input-search-users"
+              />
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              <div className="flex rounded-lg border border-gray-200 bg-white overflow-hidden">
+                {(["aktiv", "inaktiv", "alle"] as StatusFilter[]).map((status) => (
+                  <button
+                    key={status}
+                    onClick={() => setStatusFilter(status)}
+                    className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                      statusFilter === status
+                        ? "bg-teal-600 text-white"
+                        : "text-gray-600 hover:bg-gray-50"
+                    }`}
+                    data-testid={`filter-status-${status}`}
+                  >
+                    {status === "aktiv" ? "Aktiv" : status === "inaktiv" ? "Inaktiv" : "Alle"}
+                  </button>
+                ))}
+              </div>
+              <select
+                value={roleFilter}
+                onChange={(e) => setRoleFilter(e.target.value)}
+                className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white text-gray-700"
+                data-testid="filter-role"
+              >
+                <option value="alle">Alle Bereiche</option>
+                {AVAILABLE_ROLES.map((role) => (
+                  <option key={role} value={role}>{ROLE_LABELS[role]}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           {isLoading ? (
             <div className="flex justify-center py-12">
               <Loader2 className={`${iconSize.xl} animate-spin text-teal-600`} />
             </div>
+          ) : filteredUsers.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">
+              Keine Mitarbeiter gefunden
+            </div>
           ) : (
             <div className="flex flex-col gap-3">
-              {users?.map((user) => (
-                <Card key={user.id} data-testid={`card-user-${user.id}`}>
+              {filteredUsers.map((user) => (
+                <Card
+                  key={user.id}
+                  data-testid={`card-user-${user.id}`}
+                  className={user.isAnonymized ? "opacity-60" : !user.isActive ? "opacity-80" : ""}
+                >
                   <CardContent className="p-0">
                     <div className="flex">
-                      {/* Left column - 80% */}
                       <div className="flex-1 p-4">
-                        {/* Top: Name, Phone, Badges */}
                         <div className="flex items-center gap-3 mb-3">
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-semibold text-gray-900">{user.displayName}</span>
-                              <span className="text-gray-400">·</span>
-                              <span className="text-sm text-gray-500">
-                                {user.telefon ? formatPhoneForDisplay(user.telefon) : '–'}
+                              <span className={`font-semibold ${user.isAnonymized ? "text-gray-400 italic" : "text-gray-900"}`}>
+                                {user.displayName}
                               </span>
+                              {!user.isAnonymized && (
+                                <>
+                                  <span className="text-gray-400">·</span>
+                                  <span className="text-sm text-gray-500">
+                                    {user.telefon ? formatPhoneForDisplay(user.telefon) : '–'}
+                                  </span>
+                                </>
+                              )}
                             </div>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
-                            {!user.isActive && (
+                            {user.isAnonymized && (
+                              <span className="text-xs px-2 py-0.5 rounded bg-purple-100 text-purple-600">
+                                Anonymisiert
+                              </span>
+                            )}
+                            {!user.isActive && !user.isAnonymized && (
                               <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600">
                                 Inaktiv
                               </span>
@@ -209,91 +310,75 @@ export default function AdminUsers() {
                           </div>
                         </div>
                         
-                        {/* Bottom: Skills */}
-                        <div>
-                          <div className="text-xs text-gray-500 mb-1">Tätigkeitsbereiche</div>
-                          <div className="flex flex-wrap gap-x-3 gap-y-1">
-                            {user.roles.map((role) => (
-                              <span key={role} className="text-sm text-gray-700">
-                                {ROLE_LABELS[role] || role}
-                              </span>
-                            ))}
-                            {user.roles.length === 0 && (
-                              <span className="text-sm text-gray-400 italic">Keine zugewiesen</span>
-                            )}
+                        {!user.isAnonymized && (
+                          <div>
+                            <div className="text-xs text-gray-500 mb-1">Tätigkeitsbereiche</div>
+                            <div className="flex flex-wrap gap-x-3 gap-y-1">
+                              {user.roles.map((role) => (
+                                <span key={role} className="text-sm text-gray-700">
+                                  {ROLE_LABELS[role] || role}
+                                </span>
+                              ))}
+                              {user.roles.length === 0 && (
+                                <span className="text-sm text-gray-400 italic">Keine zugewiesen</span>
+                              )}
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </div>
                       
-                      {/* Right column - Buttons spanning full height */}
-                      <div className="flex flex-col justify-center gap-1 px-3 bg-gray-50 border-l border-gray-100">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={() => setEditingUser(user)}
-                          data-testid={`button-edit-user-${user.id}`}
-                        >
-                          <Pencil className={`${iconSize.sm} text-gray-600`} />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={() => setResetPasswordUser(user)}
-                          data-testid={`button-reset-password-${user.id}`}
-                        >
-                          <Key className={`${iconSize.sm} text-gray-600`} />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={() =>
-                            toggleActiveMutation.mutate({
-                              id: user.id,
-                              activate: !user.isActive,
-                            })
-                          }
-                          data-testid={`button-toggle-active-${user.id}`}
-                        >
-                          {user.isActive ? (
-                            <UserX className={`${iconSize.sm} text-red-500`} />
-                          ) : (
-                            <UserCheck className={`${iconSize.sm} text-green-500`} />
-                          )}
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
+                      {!user.isAnonymized && (
+                        <div className="flex flex-col justify-center gap-1 px-3 bg-gray-50 border-l border-gray-100">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => setEditingUser(user)}
+                            data-testid={`button-edit-user-${user.id}`}
+                          >
+                            <Pencil className={`${iconSize.sm} text-gray-600`} />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => setResetPasswordUser(user)}
+                            data-testid={`button-reset-password-${user.id}`}
+                          >
+                            <Key className={`${iconSize.sm} text-gray-600`} />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() =>
+                              toggleActiveMutation.mutate({
+                                id: user.id,
+                                activate: !user.isActive,
+                              })
+                            }
+                            data-testid={`button-toggle-active-${user.id}`}
+                          >
+                            {user.isActive ? (
+                              <UserX className={`${iconSize.sm} text-red-500`} />
+                            ) : (
+                              <UserCheck className={`${iconSize.sm} text-green-500`} />
+                            )}
+                          </Button>
+                          {!user.isActive && (
                             <Button
                               variant="ghost"
                               size="sm"
                               className="h-8 w-8 p-0"
-                              data-testid={`button-delete-user-${user.id}`}
+                              onClick={() => setAnonymizingUser(user)}
+                              data-testid={`button-anonymize-user-${user.id}`}
+                              title="DSGVO-Anonymisierung"
                             >
-                              <Trash2 className={`${iconSize.sm} text-red-500`} />
+                              <ShieldOff className={`${iconSize.sm} text-purple-500`} />
                             </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Benutzer löschen?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                Möchten Sie den Benutzer "{user.displayName}" wirklich löschen?
-                                Diese Aktion kann nicht rückgängig gemacht werden.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Abbrechen</AlertDialogCancel>
-                              <AlertDialogAction
-                                onClick={() => deleteMutation.mutate(user.id)}
-                                className="bg-red-600 hover:bg-red-700"
-                              >
-                                Löschen
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -333,6 +418,35 @@ export default function AdminUsers() {
           )}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!anonymizingUser} onOpenChange={() => setAnonymizingUser(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Mitarbeiter anonymisieren?</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2">
+              <p>
+                Möchten Sie die persönlichen Daten von <strong>{anonymizingUser?.displayName}</strong> unwiderruflich anonymisieren?
+              </p>
+              <p>
+                Dies entfernt Name, Telefon, Adresse, E-Mail und Notfallkontakt. Historische Leistungsnachweise mit Unterschriften bleiben erhalten.
+              </p>
+              <p className="font-semibold text-red-600">
+                Diese Aktion kann nicht rückgängig gemacht werden.
+              </p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Abbrechen</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => anonymizingUser && anonymizeMutation.mutate(anonymizingUser.id)}
+              className="bg-purple-600 hover:bg-purple-700"
+              disabled={anonymizeMutation.isPending}
+            >
+              {anonymizeMutation.isPending ? "Anonymisiere..." : "Unwiderruflich anonymisieren"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Layout>
   );
 }

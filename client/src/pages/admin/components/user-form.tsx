@@ -44,6 +44,7 @@ export function UserForm({
   const [stadt, setStadt] = useState(user?.stadt ?? "");
   const [geburtsdatum, setGeburtsdatum] = useState(user?.geburtsdatum ?? "");
   const [eintrittsdatum, setEintrittsdatum] = useState(user?.eintrittsdatum ?? "");
+  const [austrittsDatum, setAustrittsDatum] = useState(user?.austrittsDatum ?? "");
   const [vacationDaysPerYear, setVacationDaysPerYear] = useState(
     user?.vacationDaysPerYear?.toString() ?? "30"
   );
@@ -89,6 +90,7 @@ export function UserForm({
       stadt: stadt || undefined,
       geburtsdatum: geburtsdatum || undefined,
       eintrittsdatum: eintrittsdatum || undefined,
+      austrittsDatum: austrittsDatum || null,
       vacationDaysPerYear: vacationDaysPerYear ? parseInt(vacationDaysPerYear) : undefined,
       isAdmin,
       haustierAkzeptiert,
@@ -180,6 +182,16 @@ export function UserForm({
                 data-testid="input-user-eintrittsdatum"
               />
             </div>
+            <div className="space-y-2">
+              <Label>Austrittsdatum</Label>
+              <DatePicker
+                value={austrittsDatum || null}
+                onChange={(val) => setAustrittsDatum(val || "")}
+                data-testid="input-user-austrittsdatum"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="vacationDaysPerYear">Jahresurlaub (Tage)</Label>
               <Input

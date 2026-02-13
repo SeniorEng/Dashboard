@@ -265,7 +265,7 @@ export class AuthService {
       .leftJoin(userRoles, eq(users.id, userRoles.userId));
     
     const results = activeOnly
-      ? await baseQuery.where(eq(users.isActive, true))
+      ? await baseQuery.where(and(eq(users.isActive, true), eq(users.isAnonymized, false)))
       : await baseQuery;
 
     const userMap = new Map<number, UserWithRoles>();
@@ -388,6 +388,10 @@ export class AuthService {
   }
 
   async activateUser(id: number): Promise<boolean> {
+    const user = await this.getUser(id);
+    if (user?.isAnonymized) {
+      throw new Error("Anonymisierte Mitarbeiter können nicht reaktiviert werden");
+    }
     const result = await db
       .update(users)
       .set({ isActive: true, updatedAt: new Date() })

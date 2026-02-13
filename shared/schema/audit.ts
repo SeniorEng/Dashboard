@@ -13,6 +13,7 @@ export const AUDIT_ACTIONS = [
   "appointment_revoked",
   "appointment_updated",
   "appointment_deleted",
+  "employee_anonymized",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];
@@ -20,6 +21,7 @@ export type AuditAction = typeof AUDIT_ACTIONS[number];
 export const AUDIT_ENTITY_TYPES = [
   "appointment",
   "service_record",
+  "user",
 ] as const;
 
 export type AuditEntityType = typeof AUDIT_ENTITY_TYPES[number];

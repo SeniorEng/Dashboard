@@ -11,8 +11,10 @@ export interface UserData {
   stadt: string | null;
   geburtsdatum: string | null;
   eintrittsdatum: string | null;
+  austrittsDatum: string | null;
   vacationDaysPerYear: number;
   isActive: boolean;
+  isAnonymized: boolean;
   isAdmin: boolean;
   haustierAkzeptiert: boolean;
   roles: string[];
@@ -31,6 +33,7 @@ export interface UserFormData {
   stadt?: string;
   geburtsdatum?: string;
   eintrittsdatum?: string;
+  austrittsDatum?: string | null;
   vacationDaysPerYear?: number;
   isAdmin: boolean;
   haustierAkzeptiert: boolean;
