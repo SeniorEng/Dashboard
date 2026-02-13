@@ -54,6 +54,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Customer Kilometers**: Separate tracking for kilometers driven with/for the customer.
 - **Birthdays**: Integrated tab in Customers page, showing upcoming birthdays for employees and assigned customers, utilizing server-side cache.
 - **Navigation Structure**: Bottom navigation tabs: Termine, Kunden (with Birthdays tab), Aufgaben, Nachweise, Zeiten.
+- **Signature Security (3-Tier)**: (1) Immutable `audit_log` table with AuditService tracking all signature/documentation actions, admin viewer at `/admin/audit-log`. (2) SHA-256 integrity hashing for appointment signatures (`signatureHash`, `signedAt`, `signedByUserId`) and service record signatures (`employeeSignatureHash`, `customerSignatureHash`), with verification endpoint at `/api/admin/verify-signature/:entityType/:entityId`. (3) Signature locking prevents overwriting once signed; admin-only revoke workflow at `/api/admin/revoke-signature/:entityType/:entityId` with mandatory reason tracking and full audit trail.
 
 ## Performance
 - **Performance-Guide:** Detaillierte Analyse und Optimierungsempfehlungen in `PERFORMANCE_GUIDE.md`

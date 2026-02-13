@@ -203,7 +203,7 @@ router.post("/revoke-signature/:entityType/:entityId", asyncHandler("Stornierung
     await auditService.serviceRecordRevoked(
       userId,
       entityId,
-      { customerId: record.customerId, reason, previousStatus },
+      { customerId: record.customerId, reason, previousStatus, signerType },
       ip
     );
 
