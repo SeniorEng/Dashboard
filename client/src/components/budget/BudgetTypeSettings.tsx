@@ -65,6 +65,24 @@ function formatMonthYear(dateStr: string): string {
   return `${monthLabel} ${parts[0]}`;
 }
 
+function euroStringToCents(value: string): number | null {
+  if (!value || value.trim() === "") return null;
+  const normalized = value.replace(",", ".");
+  const parsed = parseFloat(normalized);
+  if (isNaN(parsed)) return null;
+  return Math.round(parsed * 100);
+}
+
+function centsToEuroString(cents: number | null): string {
+  if (cents === null) return "";
+  return (cents / 100).toFixed(2).replace(".", ",");
+}
+
+function isValidEuroInput(value: string): boolean {
+  if (value === "") return true;
+  return /^[0-9]+[.,]?[0-9]{0,2}$/.test(value);
+}
+
 export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSettingsProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -73,6 +91,7 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
   const [expandedHistory, setExpandedHistory] = useState<Record<string, boolean>>({});
   const [expandedInitialBalance, setExpandedInitialBalance] = useState<Record<string, boolean>>({});
   const [newBalances, setNewBalances] = useState<Record<string, { amount: string; month: string }>>({});
+  const [euroValues, setEuroValues] = useState<Record<string, { monthly: string; yearly: string }>>({});
 
   const { data, isLoading } = useQuery<BudgetTypeSetting[]>({
     queryKey: ["budget-type-settings", customerId],
@@ -88,8 +107,17 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
 
   useEffect(() => {
     if (data) {
-      setSettings([...data].sort((a, b) => a.priority - b.priority));
+      const sorted = [...data].sort((a, b) => a.priority - b.priority);
+      setSettings(sorted);
       setHasChanges(false);
+      const initEuro: Record<string, { monthly: string; yearly: string }> = {};
+      sorted.forEach(s => {
+        initEuro[s.budgetType] = {
+          monthly: centsToEuroString(s.monthlyLimitCents),
+          yearly: centsToEuroString(s.yearlyLimitCents),
+        };
+      });
+      setEuroValues(initEuro);
     }
   }, [data]);
 
@@ -97,14 +125,15 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
     mutationFn: async (newSettings: BudgetTypeSetting[]) => {
       const settingsPayload = newSettings.map(s => {
         const newBal = newBalances[s.budgetType];
-        const hasNewBalance = newBal && newBal.amount && parseFloat(newBal.amount) > 0;
+        const hasNewBalance = newBal && newBal.amount && parseFloat(newBal.amount.replace(",", ".")) > 0;
+        const ev = euroValues[s.budgetType];
         return {
           budgetType: s.budgetType,
           enabled: s.enabled,
           priority: s.priority,
-          monthlyLimitCents: s.monthlyLimitCents,
-          yearlyLimitCents: s.yearlyLimitCents,
-          initialBalanceCents: hasNewBalance ? Math.round(parseFloat(newBal.amount) * 100) : null,
+          monthlyLimitCents: euroStringToCents(ev?.monthly || ""),
+          yearlyLimitCents: euroStringToCents(ev?.yearly || ""),
+          initialBalanceCents: hasNewBalance ? Math.round(parseFloat(newBal.amount.replace(",", ".")) * 100) : null,
           initialBalanceMonth: hasNewBalance ? newBal.month : null,
         };
       });
@@ -147,12 +176,12 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
     setHasChanges(true);
   };
 
-  const updateCentsField = (index: number, field: "monthlyLimitCents" | "yearlyLimitCents", value: string) => {
-    const parsed = parseFloat(value);
-    const cents = value === "" ? null : (isNaN(parsed) ? null : Math.round(parsed * 100));
-    const newSettings = [...settings];
-    newSettings[index] = { ...newSettings[index], [field]: cents };
-    setSettings(newSettings);
+  const updateEuroValue = (budgetType: string, field: "monthly" | "yearly", value: string) => {
+    if (!isValidEuroInput(value)) return;
+    setEuroValues(prev => ({
+      ...prev,
+      [budgetType]: { ...prev[budgetType], [field]: value },
+    }));
     setHasChanges(true);
   };
 
@@ -172,9 +201,6 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
 
   const isYearlyBudget = (budgetType: string) =>
     budgetType === "ersatzpflege_39_42a";
-
-  const centsToEuro = (cents: number | null) =>
-    cents !== null ? (cents / 100).toFixed(2) : "";
 
   const getMaxPlaceholder = (budgetType: string) => {
     if (budgetType === "entlastungsbetrag_45b") {
@@ -208,7 +234,7 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
         {settings.map((setting, index) => {
           const label = BUDGET_TYPE_LABELS[setting.budgetType as BudgetType] || setting.budgetType;
           const newBal = newBalances[setting.budgetType];
-          const hasNewBalanceInput = newBal && newBal.amount && parseFloat(newBal.amount) > 0;
+          const hasNewBalanceInput = newBal && newBal.amount && (euroStringToCents(newBal.amount) ?? 0) > 0;
 
           return (
             <div
@@ -256,12 +282,11 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
                     <div>
                       <Label className="text-xs text-gray-500">Unser Anteil (€/Monat)</Label>
                       <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
+                        type="text"
+                        inputMode="decimal"
                         placeholder={getMaxPlaceholder(setting.budgetType)}
-                        value={centsToEuro(setting.monthlyLimitCents)}
-                        onChange={(e) => updateCentsField(index, "monthlyLimitCents", e.target.value)}
+                        value={euroValues[setting.budgetType]?.monthly || ""}
+                        onChange={(e) => updateEuroValue(setting.budgetType, "monthly", e.target.value)}
                         className="h-8 mt-1 text-base"
                         data-testid={`input-monthly-limit-${setting.budgetType}`}
                       />
@@ -272,12 +297,11 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
                     <div>
                       <Label className="text-xs text-gray-500">Unser Anteil (€/Jahr)</Label>
                       <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
+                        type="text"
+                        inputMode="decimal"
                         placeholder={getMaxPlaceholder(setting.budgetType)}
-                        value={centsToEuro(setting.yearlyLimitCents)}
-                        onChange={(e) => updateCentsField(index, "yearlyLimitCents", e.target.value)}
+                        value={euroValues[setting.budgetType]?.yearly || ""}
+                        onChange={(e) => updateEuroValue(setting.budgetType, "yearly", e.target.value)}
                         className="h-8 mt-1 text-base"
                         data-testid={`input-yearly-limit-${setting.budgetType}`}
                       />
@@ -378,12 +402,15 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
           <div>
             <Label className="text-[11px] text-gray-400">Betrag (€)</Label>
             <Input
-              type="number"
-              step="0.01"
-              min="0"
+              type="text"
+              inputMode="decimal"
               placeholder="0,00"
               value={newBal?.amount || ""}
-              onChange={(e) => onUpdateBalance(budgetType, "amount", e.target.value)}
+              onChange={(e) => {
+                if (isValidEuroInput(e.target.value)) {
+                  onUpdateBalance(budgetType, "amount", e.target.value);
+                }
+              }}
               className="h-8 text-base"
               data-testid={`input-initial-balance-${budgetType}`}
             />
@@ -426,7 +453,7 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
 
         {hasNewBalanceInput && (
           <p className="text-xs text-teal-600 mt-1">
-            <Plus className="h-3 w-3 inline" /> {formatCurrency(Math.round(parseFloat(newBal!.amount) * 100))} wird als Restguthaben ab {formatMonthYear(newBal!.month || getCurrentYearMonth())} gespeichert
+            <Plus className="h-3 w-3 inline" /> {formatCurrency(euroStringToCents(newBal!.amount) || 0)} wird als Restguthaben ab {formatMonthYear(newBal!.month || getCurrentYearMonth())} gespeichert
           </p>
         )}
       </div>
