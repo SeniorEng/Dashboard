@@ -332,6 +332,9 @@ export function TaskCard({
     <div 
       className="flex items-start gap-3 py-2 border-b border-border last:border-b-0 cursor-pointer hover:bg-muted/50 -mx-2 px-2 rounded transition-colors"
       onClick={onClick}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick?.(); } }}
+      role="button"
+      tabIndex={0}
       data-testid={`task-item-${task.id}`}
     >
       <div onClick={handleCheckboxClick}>

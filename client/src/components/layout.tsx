@@ -78,7 +78,7 @@ function GlobalSearch() {
             setIsOpen(true);
           }}
           onFocus={() => setIsOpen(true)}
-          className="w-full h-9 pl-9 pr-8 rounded-lg border border-border bg-muted/50 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+          className="w-full min-h-[44px] pl-9 pr-8 rounded-lg border border-border bg-muted/50 text-base md:text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
           data-testid="input-global-search"
         />
         {query && (
@@ -87,9 +87,10 @@ function GlobalSearch() {
               setQuery("");
               inputRef.current?.focus();
             }}
-            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-muted"
+            className="absolute right-1 top-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full hover:bg-muted"
+            aria-label="Suche löschen"
           >
-            <X className="w-3.5 h-3.5 text-muted-foreground" />
+            <X className="w-4 h-4 text-muted-foreground" />
           </button>
         )}
       </div>

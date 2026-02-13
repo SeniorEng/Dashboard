@@ -190,7 +190,7 @@ export function DayDetailPanel({
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 text-gray-400 hover:text-teal-600"
+                          className="text-gray-400 hover:text-teal-600"
                           onClick={() => onEditEntry(entry)}
                           data-testid={`button-edit-entry-${entry.id}`}
                         >
@@ -199,7 +199,7 @@ export function DayDetailPanel({
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 text-gray-400 hover:text-red-600"
+                          className="text-gray-400 hover:text-red-600"
                           onClick={() => onDeleteEntry(entry.id)}
                           disabled={isDeleting}
                           data-testid={`button-delete-entry-${entry.id}`}
