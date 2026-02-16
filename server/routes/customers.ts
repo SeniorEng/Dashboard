@@ -9,6 +9,7 @@ import { documentStorage } from "../storage/documents";
 import { BILLING_TYPES } from "@shared/domain/customers";
 import { renderTemplateForCustomer } from "../services/template-engine";
 import { computeDataHash } from "../services/signature-integrity";
+import { customerManagementStorage } from "../storage/customer-management";
 
 const billingTypeEnum = z.enum(BILLING_TYPES as unknown as [string, ...string[]]);
 
@@ -77,6 +78,46 @@ router.get("/:id", async (req, res) => {
   } catch (error) {
     console.error("Failed to fetch customer:", error);
     res.status(500).json({ error: "Kunde konnte nicht geladen werden" });
+  }
+});
+
+router.get("/:id/details", async (req, res) => {
+  try {
+    const user = req.user!;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "Ungültige Kunden-ID" });
+    }
+    
+    if (!user.isAdmin) {
+      const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
+      if (!assignedCustomerIds.includes(id)) {
+        return res.status(403).json({ error: "Zugriff verweigert" });
+      }
+    }
+    
+    const [contacts, insurance, contract] = await Promise.all([
+      customerManagementStorage.getCustomerContacts(id),
+      customerManagementStorage.getCustomerCurrentInsurance(id),
+      customerManagementStorage.getCustomerCurrentContract(id),
+    ]);
+    
+    res.json({
+      contacts,
+      insurance: insurance ? {
+        providerName: insurance.provider?.name || "Unbekannt",
+        ikNummer: insurance.provider?.ikNummer || undefined,
+        versichertennummer: insurance.versichertennummer,
+      } : null,
+      contract: contract ? {
+        vereinbarteLeistungen: contract.vereinbarteLeistungen,
+        contractStart: contract.contractStart,
+        status: contract.status,
+      } : null,
+    });
+  } catch (error) {
+    console.error("Failed to fetch customer details:", error);
+    res.status(500).json({ error: "Kundendetails konnten nicht geladen werden" });
   }
 });
 

@@ -7,19 +7,33 @@ import { StatusBadge } from "@/components/patterns/status-badge";
 import { AppointmentCard } from "@/features/appointments/components/appointment-card";
 import { 
   ArrowLeft, MapPin, Phone, Mail, User, Heart, 
-  Calendar, Loader2, AlertCircle, FileSignature, ChevronRight, X, Wallet
+  Calendar, Loader2, AlertCircle, FileSignature, ChevronRight, X, Wallet,
+  Cake, PhoneCall, Shield, PawPrint, ClipboardList, Stethoscope, Users
 } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { ErrorState } from "@/components/patterns/error-state";
-import type { Customer } from "@shared/schema";
+import type { Customer, CustomerContact } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { format, parseISO, isAfter, isBefore, startOfToday } from "date-fns";
 import { de } from "date-fns/locale";
 import { UNDOCUMENTED_STATUSES } from "@shared/domain/appointments";
-
+import { CONTACT_TYPE_LABELS } from "@shared/domain/customers";
 import { formatAddress } from "@shared/utils/format";
 
+interface CustomerDetails {
+  contacts: CustomerContact[];
+  insurance: {
+    providerName: string;
+    ikNummer?: string;
+    versichertennummer: string;
+  } | null;
+  contract: {
+    vereinbarteLeistungen: string | null;
+    contractStart: string;
+    status: string;
+  } | null;
+}
 
 export default function CustomerDetailPage() {
   const [, params] = useRoute("/customer/:id");
@@ -33,6 +47,16 @@ export default function CustomerDetailPage() {
     queryFn: async () => {
       const res = await fetch(`/api/customers/${customerId}`);
       if (!res.ok) throw new Error("Kunde konnte nicht geladen werden");
+      return res.json();
+    },
+    enabled: !!customerId,
+  });
+
+  const { data: details } = useQuery<CustomerDetails>({
+    queryKey: ["customer-details", customerId],
+    queryFn: async () => {
+      const res = await fetch(`/api/customers/${customerId}/details`);
+      if (!res.ok) throw new Error("Details konnten nicht geladen werden");
       return res.json();
     },
     enabled: !!customerId,
@@ -122,8 +146,12 @@ export default function CustomerDetailPage() {
   }
 
   const address = formatAddress(customer);
-  const phone = customer.telefon ? formatPhoneForDisplay(customer.telefon) : null;
+  const phoneMobil = customer.telefon ? formatPhoneForDisplay(customer.telefon) : null;
+  const phoneFestnetz = customer.festnetz ? formatPhoneForDisplay(customer.festnetz) : null;
   const hasPflegegrad = customer.pflegegrad && customer.pflegegrad > 0;
+  const geburtsdatum = customer.geburtsdatum 
+    ? format(parseISO(customer.geburtsdatum), "dd.MM.yyyy", { locale: de })
+    : null;
 
   return (
     <Layout>
@@ -160,39 +188,58 @@ export default function CustomerDetailPage() {
           </Card>
         )}
 
-        <Card className="mb-6">
+        {/* Persönliche Daten & Kontakt */}
+        <Card className="mb-4" data-testid="card-personal-info">
           <CardContent className="p-4">
             <div className="flex items-start gap-4">
               <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
                 <User className={`${iconSize.lg} text-primary`} />
               </div>
-              <div className="flex-1 min-w-0 space-y-3">
-                {hasPflegegrad && (
-                  <StatusBadge type="pflegegrad" value={customer.pflegegrad!} />
+              <div className="flex-1 min-w-0 space-y-2.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {hasPflegegrad && (
+                    <StatusBadge type="pflegegrad" value={customer.pflegegrad!} data-testid="badge-pflegegrad" />
+                  )}
+                </div>
+
+                {geburtsdatum && (
+                  <div className="flex items-center gap-2 text-sm" data-testid="text-geburtsdatum">
+                    <Cake className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
+                    <span className="text-muted-foreground">{geburtsdatum}</span>
+                  </div>
                 )}
 
                 {address && (
                   <div className="flex items-start gap-2 text-sm">
                     <MapPin className={`${iconSize.sm} mt-0.5 flex-shrink-0 text-primary/60`} />
-                    <span className="text-muted-foreground">{address}</span>
+                    <span className="text-muted-foreground" data-testid="text-address">{address}</span>
                   </div>
                 )}
 
                 <div className="flex items-center gap-2 text-sm">
                   <Phone className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
-                  {phone ? (
-                    <a href={`tel:${customer.telefon}`} className="text-primary hover:underline">
-                      {phone}
+                  {phoneMobil ? (
+                    <a href={`tel:${customer.telefon}`} className="text-primary hover:underline" data-testid="link-phone-mobil">
+                      {phoneMobil}
                     </a>
                   ) : (
-                    <span className="text-muted-foreground/60">Keine Telefonnummer</span>
+                    <span className="text-muted-foreground/60">Kein Mobiltelefon</span>
                   )}
                 </div>
+
+                {phoneFestnetz && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <PhoneCall className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
+                    <a href={`tel:${customer.festnetz}`} className="text-primary hover:underline" data-testid="link-phone-festnetz">
+                      {phoneFestnetz}
+                    </a>
+                  </div>
+                )}
 
                 {customer.email && (
                   <div className="flex items-center gap-2 text-sm">
                     <Mail className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
-                    <a href={`mailto:${customer.email}`} className="text-primary hover:underline">
+                    <a href={`mailto:${customer.email}`} className="text-primary hover:underline" data-testid="link-email">
                       {customer.email}
                     </a>
                   </div>
@@ -213,15 +260,126 @@ export default function CustomerDetailPage() {
           </CardContent>
         </Card>
 
+        {/* Haustier */}
+        {customer.haustierVorhanden && (
+          <Card className="mb-4" data-testid="card-pet">
+            <CardContent className="p-4">
+              <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                <PawPrint className={`${iconSize.sm} text-amber-600`} />
+                Haustier
+              </h2>
+              <p className="text-sm text-muted-foreground" data-testid="text-pet-details">
+                {customer.haustierDetails || "Ja, keine weiteren Details"}
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Notfallkontakte */}
+        {details?.contacts && details.contacts.length > 0 && (
+          <Card className="mb-4" data-testid="card-emergency-contacts">
+            <CardContent className="p-4">
+              <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <Users className={`${iconSize.sm} text-red-500`} />
+                Notfallkontakte
+              </h2>
+              <div className="space-y-3">
+                {details.contacts.map((contact) => (
+                  <div key={contact.id} className="flex items-start justify-between gap-3 text-sm" data-testid={`contact-${contact.id}`}>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{contact.vorname} {contact.nachname}</span>
+                        {contact.isPrimary && (
+                          <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">Primär</span>
+                        )}
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {CONTACT_TYPE_LABELS[contact.contactType] ?? contact.contactType}
+                      </span>
+                    </div>
+                    <a 
+                      href={`tel:${contact.telefon}`} 
+                      className="text-primary hover:underline shrink-0 flex items-center gap-1"
+                      data-testid={`link-contact-phone-${contact.id}`}
+                    >
+                      <Phone className={iconSize.xs} />
+                      {formatPhoneForDisplay(contact.telefon)}
+                    </a>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Versicherung */}
+        {details?.insurance && (
+          <Card className="mb-4" data-testid="card-insurance">
+            <CardContent className="p-4">
+              <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                <Shield className={`${iconSize.sm} text-blue-500`} />
+                Pflegekasse
+              </h2>
+              <div className="space-y-1.5 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Kasse</span>
+                  <span className="font-medium" data-testid="text-insurance-provider">{details.insurance.providerName}</span>
+                </div>
+                {details.insurance.ikNummer && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">IK-Nummer</span>
+                    <span className="font-mono text-xs" data-testid="text-insurance-ik">{details.insurance.ikNummer}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Versichertennr.</span>
+                  <span className="font-mono text-xs" data-testid="text-insurance-vnr">{details.insurance.versichertennummer}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Vorerkrankungen */}
+        {customer.vorerkrankungen && (
+          <Card className="mb-4" data-testid="card-medical-history">
+            <CardContent className="p-4">
+              <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                <Stethoscope className={`${iconSize.sm} text-rose-500`} />
+                Vorerkrankungen
+              </h2>
+              <p className="text-sm text-muted-foreground whitespace-pre-line" data-testid="text-medical-history">
+                {customer.vorerkrankungen}
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Vereinbarte Leistungen */}
+        {details?.contract?.vereinbarteLeistungen && (
+          <Card className="mb-4" data-testid="card-agreed-services">
+            <CardContent className="p-4">
+              <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                <ClipboardList className={`${iconSize.sm} text-green-600`} />
+                Vereinbarte Leistungen
+              </h2>
+              <p className="text-sm text-muted-foreground whitespace-pre-line" data-testid="text-agreed-services">
+                {details.contract.vereinbarteLeistungen}
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Budget Übersicht */}
         {budgetOverview && (
           budgetOverview.entlastungsbetrag45b.totalAllocatedCents > 0 ||
           budgetOverview.umwandlung45a.monthlyBudgetCents > 0 ||
           budgetOverview.ersatzpflege39_42a.yearlyBudgetCents > 0
         ) && (
-          <Card className="mb-6" data-testid="budget-overview">
+          <Card className="mb-4" data-testid="budget-overview">
             <CardContent className="p-4">
-              <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                <Wallet className={`${iconSize.md} text-primary`} />
+              <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <Wallet className={`${iconSize.sm} text-primary`} />
                 Budgets
               </h2>
               <div className="space-y-4">
@@ -304,10 +462,11 @@ export default function CustomerDetailPage() {
           </Card>
         )}
 
+        {/* Termine */}
         {upcomingAppointments.length > 0 && (
-          <div className="mb-6">
-            <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-              <Calendar className={`${iconSize.md} text-primary`} />
+          <div className="mb-4">
+            <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
+              <Calendar className={`${iconSize.sm} text-primary`} />
               Anstehende Termine
             </h2>
             <div className="flex flex-col gap-3">
@@ -320,7 +479,7 @@ export default function CustomerDetailPage() {
 
         {pastAppointments.length > 0 && (
           <div>
-            <h2 className="text-lg font-semibold mb-3 text-muted-foreground">
+            <h2 className="text-sm font-semibold mb-3 text-muted-foreground">
               Letzte Termine
             </h2>
             <div className="flex flex-col gap-3 opacity-75">
@@ -341,7 +500,7 @@ export default function CustomerDetailPage() {
         )}
 
         {/* Leistungsnachweise Link */}
-        <div className="mt-6">
+        <div className="mt-4">
           <Link href={`/service-records?customerId=${customerId}`}>
             <Card>
               <CardContent className="p-4 flex items-center justify-between">
