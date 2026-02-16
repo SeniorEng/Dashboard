@@ -145,18 +145,11 @@ export default function Dashboard() {
 
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-semibold text-foreground/90" data-testid="text-date">
-              {isToday 
-                ? `Heute, ${format(selectedDate, "d. MMMM", { locale: de })}` 
-                : format(selectedDate, "EEEE, d. MMMM", { locale: de })}
-            </h2>
-            {!isLoading && appointments && appointments.length > 0 && (
-              <span className="text-xs font-medium px-2.5 py-1 bg-primary/10 text-primary rounded-full" data-testid="text-visit-count">
-                {appointments.length} {appointments.length === 1 ? 'Termin' : 'Termine'}
-              </span>
-            )}
-          </div>
+          <h2 className="text-lg font-semibold text-foreground/90" data-testid="text-date">
+            {isToday 
+              ? `Heute, ${format(selectedDate, "d. MMMM", { locale: de })}` 
+              : format(selectedDate, "EEEE, d. MMMM", { locale: de })}
+          </h2>
           <Link href="/new-appointment">
             <Button size="sm" className="shadow-lg shadow-primary/20" data-testid="button-new-appointment">
               <Plus className={`${iconSize.sm} mr-1`} /> Neuer Termin
