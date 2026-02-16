@@ -417,6 +417,9 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
         travelMinutes: appointments.travelMinutes,
         customerKilometers: appointments.customerKilometers,
         signatureData: appointments.signatureData,
+        signatureHash: appointments.signatureHash,
+        signedAt: appointments.signedAt,
+        signedByUserId: appointments.signedByUserId,
         servicesDone: appointments.servicesDone,
         createdAt: appointments.createdAt,
         performedByEmployeeId: appointments.performedByEmployeeId,
@@ -440,9 +443,6 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     return results.map(r => ({
       ...r,
       customerName: String(r.customerName),
-      signatureHash: r.signatureHash ?? null,
-      signedAt: r.signedAt ?? null,
-      signedByUserId: r.signedByUserId ?? null,
     }));
   }
   

@@ -351,9 +351,13 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
   }
   
   if (req.body.services && Array.isArray(req.body.services)) {
-    const serviceIds = z.array(z.number().int().positive()).safeParse(req.body.services);
-    if (serviceIds.success) {
-      await storage.replaceAppointmentServices(id, serviceIds.data);
+    const serviceSchema = z.array(z.object({
+      serviceId: z.number().int().positive(),
+      plannedDurationMinutes: z.number().int().positive(),
+    }));
+    const services = serviceSchema.safeParse(req.body.services);
+    if (services.success) {
+      await storage.replaceAppointmentServices(id, services.data);
     }
   }
 

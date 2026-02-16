@@ -64,6 +64,14 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
   const docResult = appointmentService.buildDocumentationUpdate(appointment, enrichedData, req.user?.id);
   const { updateData, hauswirtschaftMinutes, alltagsbegleitungMinutes, travelKilometers, customerKilometers, hasUsage } = docResult;
 
+  const hasSignature = !!(updateData as Record<string, unknown>).signatureData;
+  if (hasSignature) {
+    const sigData = (updateData as Record<string, unknown>).signatureData as string;
+    (updateData as Record<string, unknown>).signatureHash = computeDataHash(sigData);
+    (updateData as Record<string, unknown>).signedAt = new Date();
+    (updateData as Record<string, unknown>).signedByUserId = req.user!.id;
+  }
+
   let budgetTransaction = null;
   let budgetWarning: string | null = null;
 
@@ -97,14 +105,6 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
       budgetWarning = errorMessage;
       console.warn("Budget booking warning:", budgetError);
     }
-  }
-
-  const hasSignature = !!(updateData as Record<string, unknown>).signatureData;
-  if (hasSignature) {
-    const sigData = (updateData as Record<string, unknown>).signatureData as string;
-    (updateData as Record<string, unknown>).signatureHash = computeDataHash(sigData);
-    (updateData as Record<string, unknown>).signedAt = new Date();
-    (updateData as Record<string, unknown>).signedByUserId = req.user!.id;
   }
 
   const updatedAppointment = await storage.updateAppointment(id, updateData);

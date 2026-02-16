@@ -341,7 +341,7 @@ export class AppointmentService {
       nr: input.customer.nr,
       plz: input.customer.plz,
       stadt: input.customer.stadt,
-      pflegegrad: input.customer.pflegegrad,
+      pflegegrad: input.customer.pflegegrad ?? null,
       needs: [],
     };
     

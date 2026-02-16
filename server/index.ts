@@ -7,6 +7,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { errorMiddleware } from "./lib/errors";
+import { pool } from "./lib/db";
 const app = express();
 app.set("trust proxy", 1);
 const httpServer = createServer(app);
@@ -75,12 +76,12 @@ app.use((req, res, next) => {
 
 process.on("unhandledRejection", (reason, promise) => {
   console.error("[FATAL] Unhandled Promise Rejection:", reason);
-  process.exit(1);
+  gracefulShutdown("unhandledRejection");
 });
 
 process.on("uncaughtException", (error) => {
   console.error("[FATAL] Uncaught Exception:", error);
-  process.exit(1);
+  gracefulShutdown("uncaughtException");
 });
 
 (async () => {
@@ -130,7 +131,13 @@ process.on("uncaughtException", (error) => {
 
 function gracefulShutdown(signal: string) {
   log(`${signal} received, shutting down gracefully...`);
-  httpServer.close(() => {
+  httpServer.close(async () => {
+    try {
+      await pool.end();
+      log("Database pool drained");
+    } catch (err) {
+      console.error("Error draining database pool:", err);
+    }
     process.exit(0);
   });
   setTimeout(() => {

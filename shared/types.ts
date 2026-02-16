@@ -87,7 +87,7 @@ export interface AppointmentWithCustomer extends Appointment {
  * @deprecated Verwende stattdessen die Zod-Schemas aus schema.ts
  */
 export interface UpdateAppointmentPayload {
-  status?: "scheduled" | "in-progress" | "documenting" | "completed";
+  status?: "scheduled" | "in-progress" | "documenting" | "completed" | "cancelled";
   actualStart?: string;
   actualEnd?: string;
   notes?: string;

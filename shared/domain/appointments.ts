@@ -5,7 +5,7 @@ import { timeToMinutes, addMinutesToTime, formatDurationDisplay } from "../utils
 // TYPES
 // ============================================
 
-export type AppointmentStatus = "scheduled" | "in-progress" | "documenting" | "completed";
+export type AppointmentStatus = "scheduled" | "in-progress" | "documenting" | "completed" | "cancelled";
 export type AppointmentType = "Erstberatung" | "Kundentermin";
 export type ServiceType = "Hauswirtschaft" | "Alltagsbegleitung" | "Erstberatung";
 export type TravelOriginType = "home" | "appointment";
@@ -14,7 +14,7 @@ export type TravelOriginType = "home" | "appointment";
 // CONSTANTS
 // ============================================
 
-export const APPOINTMENT_STATUSES: AppointmentStatus[] = ["scheduled", "in-progress", "documenting", "completed"];
+export const APPOINTMENT_STATUSES: AppointmentStatus[] = ["scheduled", "in-progress", "documenting", "completed", "cancelled"];
 export const APPOINTMENT_TYPES: AppointmentType[] = ["Erstberatung", "Kundentermin"];
 export const SERVICE_TYPES: ServiceType[] = ["Hauswirtschaft", "Alltagsbegleitung", "Erstberatung"];
 export const KUNDENTERMIN_SERVICE_TYPES: ServiceType[] = ["Hauswirtschaft", "Alltagsbegleitung"];
@@ -26,6 +26,7 @@ export const STATUS_ORDER: Record<AppointmentStatus, number> = {
   "in-progress": 1,
   "documenting": 2,
   "completed": 3,
+  "cancelled": 4,
 };
 
 export const STATUS_LABELS: Record<AppointmentStatus, string> = {
@@ -33,6 +34,7 @@ export const STATUS_LABELS: Record<AppointmentStatus, string> = {
   "in-progress": "Läuft",
   "documenting": "Dokumentation",
   "completed": "Abgeschlossen",
+  "cancelled": "Storniert",
 };
 
 // ============================================

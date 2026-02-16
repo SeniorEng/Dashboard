@@ -68,10 +68,6 @@ export function conflict(error: string, message: string): AppError {
   return new AppError(409, ErrorCodes.CONFLICT, message, error);
 }
 
-export function serverError(message: string): AppError {
-  return new AppError(500, ErrorCodes.SERVER_ERROR, message, "Serverfehler");
-}
-
 type AsyncRouteHandler = (req: Request, res: Response, next: NextFunction) => Promise<any>;
 
 export function asyncHandler(defaultMessage: string, handler: AsyncRouteHandler) {

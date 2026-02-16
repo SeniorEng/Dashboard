@@ -12,7 +12,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 ## System Architecture
 
 ### Frontend
-- **Frameworks**: React 18 with TypeScript, Vite, Wouter for routing.
+- **Frameworks**: React 19 with TypeScript, Vite, Wouter for routing.
 - **UI/UX**: Mobile-first responsive design using `shadcn/ui` components on Radix UI primitives, styled with Tailwind CSS v4 and a "Care & Clarity" theme. Centralized `@/design-system` for consistent styling. Touch-optimized UI components.
 - **State Management**: TanStack Query for data fetching, React memoization, ErrorBoundary.
 - **Date/Time Handling**: All times are implicitly "German local time" with no UTC conversion or timezone logic, using central utilities (`@shared/utils/datetime`).

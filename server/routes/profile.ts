@@ -113,7 +113,7 @@ router.post("/documents", asyncHandler("Dokument konnte nicht hochgeladen werden
     return;
   }
 
-  const doc = await documentStorage.createEmployeeDocument(result.data);
+  const doc = await documentStorage.uploadDocument(result.data, req.user!.id);
   res.status(201).json(doc);
 }));
 

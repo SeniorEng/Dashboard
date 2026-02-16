@@ -25,9 +25,6 @@ export const germanPhoneTransformSchema = germanPhoneSchema.transform((value) =>
   return parsed?.format("E.164") ?? value;
 });
 
-// Legacy regex (kept for backward compatibility)
-export const germanPhoneRegex = /^(\+49|0)[1-9]\d{1,14}$/;
-
 // Optional phone validation - validates and transforms to E.164 if provided
 // Handles: null, undefined, empty string, E.164 format, user input formats
 export const optionalGermanPhoneSchema = z.union([

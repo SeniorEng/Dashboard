@@ -113,10 +113,10 @@ function PersonalDataSection({ profile }: { profile: ProfileData }) {
       if (data.telefon !== (profile.telefon || "")) {
         if (data.telefon) {
           const phoneResult = validateGermanPhone(data.telefon);
-          if (!phoneResult.isValid) {
-            throw new Error(phoneResult.error || "Ungültige Telefonnummer");
+          if (!phoneResult.valid) {
+            throw new Error(!phoneResult.valid ? phoneResult.error : "Ungültige Telefonnummer");
           }
-          updates.telefon = phoneResult.normalized!;
+          updates.telefon = phoneResult.normalized;
         } else {
           updates.telefon = "";
         }
@@ -296,10 +296,10 @@ function EmergencyContactSection({ profile }: { profile: ProfileData }) {
       const updates: Record<string, string> = {};
       if (data.notfallkontaktTelefon && data.notfallkontaktTelefon.trim()) {
         const phoneResult = validateGermanPhone(data.notfallkontaktTelefon);
-        if (!phoneResult.isValid) {
-          throw new Error(phoneResult.error || "Ungültige Telefonnummer für Notfallkontakt");
+        if (!phoneResult.valid) {
+          throw new Error(!phoneResult.valid ? phoneResult.error : "Ungültige Telefonnummer für Notfallkontakt");
         }
-        updates.notfallkontaktTelefon = phoneResult.normalized!;
+        updates.notfallkontaktTelefon = phoneResult.normalized;
       } else {
         updates.notfallkontaktTelefon = "";
       }
