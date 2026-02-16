@@ -322,6 +322,11 @@ export class DocumentStorage implements IDocumentStorage {
       htmlContent: data.htmlContent,
       isSystem: data.isSystem ?? false,
       isActive: data.isActive ?? true,
+      documentTypeId: data.documentTypeId ?? null,
+      context: data.context ?? "beide",
+      targetType: data.targetType ?? "customer",
+      requiresCustomerSignature: data.requiresCustomerSignature ?? true,
+      requiresEmployeeSignature: data.requiresEmployeeSignature ?? true,
     }).returning();
     return result;
   }
@@ -358,17 +363,52 @@ export class DocumentStorage implements IDocumentStorage {
 
   async createGeneratedDocument(data: InsertGeneratedDocument, generatedByUserId: number): Promise<GeneratedDocument> {
     const [result] = await db.insert(generatedDocuments).values({
-      customerId: data.customerId,
+      customerId: data.customerId ?? null,
+      employeeId: data.employeeId ?? null,
       templateId: data.templateId,
       templateVersion: data.templateVersion,
+      documentTypeId: data.documentTypeId ?? null,
       fileName: data.fileName,
       objectPath: data.objectPath,
+      renderedHtml: data.renderedHtml ?? null,
       customerSignatureData: data.customerSignatureData || null,
       employeeSignatureData: data.employeeSignatureData || null,
       integrityHash: data.integrityHash || null,
       generatedByUserId,
     }).returning();
     return result;
+  }
+
+  async getGeneratedDocumentsByEmployee(employeeId: number): Promise<(GeneratedDocument & { template: DocumentTemplate })[]> {
+    const rows = await db
+      .select({
+        doc: generatedDocuments,
+        template: documentTemplates,
+      })
+      .from(generatedDocuments)
+      .innerJoin(documentTemplates, eq(generatedDocuments.templateId, documentTemplates.id))
+      .where(eq(generatedDocuments.employeeId, employeeId))
+      .orderBy(desc(generatedDocuments.generatedAt));
+
+    return rows.map(r => ({ ...r.doc, template: r.template }));
+  }
+
+  async getGeneratedDocument(id: number): Promise<GeneratedDocument | null> {
+    const result = await db.select().from(generatedDocuments).where(eq(generatedDocuments.id, id)).limit(1);
+    return result[0] || null;
+  }
+
+  async getTemplatesByContext(context: string, targetType: string): Promise<DocumentTemplate[]> {
+    const conditions = [
+      eq(documentTemplates.isActive, true),
+    ];
+    if (context !== "alle") {
+      conditions.push(sql`${documentTemplates.context} IN (${context}, 'beide')`);
+    }
+    if (targetType !== "beide") {
+      conditions.push(sql`${documentTemplates.targetType} IN (${targetType}, 'beide')`);
+    }
+    return db.select().from(documentTemplates).where(and(...conditions)).orderBy(asc(documentTemplates.name));
   }
 
   async updateGeneratedDocumentSignature(

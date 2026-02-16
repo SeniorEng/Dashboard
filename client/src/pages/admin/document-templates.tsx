@@ -49,8 +49,19 @@ interface TemplateData {
   version: number;
   isSystem: boolean;
   isActive: boolean;
+  documentTypeId: number | null;
+  context: string;
+  targetType: string;
+  requiresCustomerSignature: boolean;
+  requiresEmployeeSignature: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+interface DocumentType {
+  id: number;
+  name: string;
+  targetType: string;
 }
 
 interface BillingTypeAssignment {
@@ -73,6 +84,11 @@ interface TemplateFormData {
   description: string;
   htmlContent: string;
   isActive: boolean;
+  documentTypeId: number | null;
+  context: string;
+  targetType: string;
+  requiresCustomerSignature: boolean;
+  requiresEmployeeSignature: boolean;
 }
 
 const emptyForm: TemplateFormData = {
@@ -81,6 +97,11 @@ const emptyForm: TemplateFormData = {
   description: "",
   htmlContent: "",
   isActive: true,
+  documentTypeId: null,
+  context: "beide",
+  targetType: "customer",
+  requiresCustomerSignature: true,
+  requiresEmployeeSignature: true,
 };
 
 const BILLING_TYPE_LABELS: Record<string, string> = {
@@ -98,6 +119,11 @@ function toFormData(t: TemplateData): TemplateFormData {
     description: t.description || "",
     htmlContent: t.htmlContent,
     isActive: t.isActive,
+    documentTypeId: t.documentTypeId,
+    context: t.context || "beide",
+    targetType: t.targetType || "customer",
+    requiresCustomerSignature: t.requiresCustomerSignature ?? true,
+    requiresEmployeeSignature: t.requiresEmployeeSignature ?? true,
   };
 }
 
@@ -147,6 +173,15 @@ export default function AdminDocumentTemplates() {
     },
   });
 
+  const { data: documentTypes } = useQuery<DocumentType[]>({
+    queryKey: ["admin", "document-types"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/document-types", { credentials: "include" });
+      if (!res.ok) throw new Error("Dokumententypen konnten nicht geladen werden");
+      return res.json();
+    },
+  });
+
   const billingTypesByTemplate = useMemo(() => {
     const map: Record<number, BillingTypeAssignment[]> = {};
     allBillingTypes?.forEach(bt => {
@@ -157,9 +192,9 @@ export default function AdminDocumentTemplates() {
   }, [allBillingTypes]);
 
   const createMutation = useMutation({
-    mutationFn: async (data: { slug: string; name: string; description: string | null; htmlContent: string; isActive: boolean }) => {
+    mutationFn: async (data: { slug: string; name: string; description: string | null; htmlContent: string; isActive: boolean; documentTypeId: number | null; context: string; targetType: string; requiresCustomerSignature: boolean; requiresEmployeeSignature: boolean }) => {
       const result = await api.post("/admin/document-templates", data);
-      return unwrapResult(result);
+      return unwrapResult(result) as TemplateData;
     },
     onSuccess: (newTemplate: TemplateData) => {
       queryClient.invalidateQueries({ queryKey: ["admin", "document-templates"] });
@@ -173,7 +208,7 @@ export default function AdminDocumentTemplates() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: async ({ id, ...data }: { id: number; name?: string; description?: string | null; htmlContent?: string; isActive?: boolean }) => {
+    mutationFn: async ({ id, ...data }: { id: number; name?: string; description?: string | null; htmlContent?: string; isActive?: boolean; documentTypeId?: number | null; context?: string; targetType?: string; requiresCustomerSignature?: boolean; requiresEmployeeSignature?: boolean }) => {
       const result = await api.patch(`/admin/document-templates/${id}`, data);
       return unwrapResult(result);
     },
@@ -261,6 +296,11 @@ export default function AdminDocumentTemplates() {
         description: formData.description || null,
         htmlContent: formData.htmlContent,
         isActive: formData.isActive,
+        documentTypeId: formData.documentTypeId,
+        context: formData.context,
+        targetType: formData.targetType,
+        requiresCustomerSignature: formData.requiresCustomerSignature,
+        requiresEmployeeSignature: formData.requiresEmployeeSignature,
       });
     } else if (editingTemplate) {
       updateMutation.mutate({
@@ -269,6 +309,11 @@ export default function AdminDocumentTemplates() {
         description: formData.description || null,
         htmlContent: formData.htmlContent,
         isActive: formData.isActive,
+        documentTypeId: formData.documentTypeId,
+        context: formData.context,
+        targetType: formData.targetType,
+        requiresCustomerSignature: formData.requiresCustomerSignature,
+        requiresEmployeeSignature: formData.requiresEmployeeSignature,
       });
     }
   };
@@ -295,7 +340,7 @@ export default function AdminDocumentTemplates() {
           company_name: "SeniorenEngel GmbH",
         },
       });
-      const data = unwrapResult(result);
+      const data = unwrapResult(result) as { html: string };
       setPreviewHtml(data.html);
       setActiveTab("preview");
     } catch {
@@ -379,6 +424,23 @@ export default function AdminDocumentTemplates() {
                             )}
                             {!t.isActive && (
                               <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600">Inaktiv</span>
+                            )}
+                            {t.context === "vertragsabschluss" && (
+                              <span className="text-xs px-2 py-0.5 rounded bg-green-50 text-green-700">Nur bei Vertragsabschluss</span>
+                            )}
+                            {t.context === "bestandskunde" && (
+                              <span className="text-xs px-2 py-0.5 rounded bg-orange-50 text-orange-700">Nur bei Bestandskunden</span>
+                            )}
+                            {t.targetType === "employee" && (
+                              <span className="text-xs px-2 py-0.5 rounded bg-indigo-50 text-indigo-700">Mitarbeiter</span>
+                            )}
+                            {t.targetType === "beide" && (
+                              <span className="text-xs px-2 py-0.5 rounded bg-indigo-50 text-indigo-700">Beide</span>
+                            )}
+                            {t.documentTypeId && documentTypes?.find(dt => dt.id === t.documentTypeId) && (
+                              <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-600">
+                                {documentTypes.find(dt => dt.id === t.documentTypeId)!.name}
+                              </span>
                             )}
                           </div>
                           {t.description && (
@@ -489,6 +551,75 @@ export default function AdminDocumentTemplates() {
                   className="text-base"
                   data-testid="input-template-description"
                 />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Dokumentenkategorie</Label>
+                  <Select
+                    value={formData.documentTypeId?.toString() || "none"}
+                    onValueChange={(v) => setFormData(p => ({ ...p, documentTypeId: v === "none" ? null : parseInt(v) }))}
+                  >
+                    <SelectTrigger data-testid="select-document-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Keine Zuordnung</SelectItem>
+                      {documentTypes?.map((dt) => (
+                        <SelectItem key={dt.id} value={dt.id.toString()}>{dt.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Kontext</Label>
+                  <Select
+                    value={formData.context}
+                    onValueChange={(v) => setFormData(p => ({ ...p, context: v }))}
+                  >
+                    <SelectTrigger data-testid="select-context">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="beide">Immer verfügbar</SelectItem>
+                      <SelectItem value="vertragsabschluss">Nur bei Vertragsabschluss</SelectItem>
+                      <SelectItem value="bestandskunde">Nur bei Bestandskunden</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label>Zielgruppe</Label>
+                  <Select
+                    value={formData.targetType}
+                    onValueChange={(v) => setFormData(p => ({ ...p, targetType: v }))}
+                  >
+                    <SelectTrigger data-testid="select-target-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="customer">Kunden</SelectItem>
+                      <SelectItem value="employee">Mitarbeiter</SelectItem>
+                      <SelectItem value="beide">Beide</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-3 pt-6">
+                  <Switch
+                    checked={formData.requiresCustomerSignature}
+                    onCheckedChange={(v) => setFormData(p => ({ ...p, requiresCustomerSignature: v }))}
+                    data-testid="switch-requires-customer-signature"
+                  />
+                  <Label>Kundenunterschrift erforderlich</Label>
+                </div>
+                <div className="flex items-center gap-3 pt-6">
+                  <Switch
+                    checked={formData.requiresEmployeeSignature}
+                    onCheckedChange={(v) => setFormData(p => ({ ...p, requiresEmployeeSignature: v }))}
+                    data-testid="switch-requires-employee-signature"
+                  />
+                  <Label>Mitarbeiterunterschrift erforderlich</Label>
+                </div>
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">

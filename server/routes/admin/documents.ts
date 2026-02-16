@@ -4,6 +4,7 @@ import { documentStorage } from "../../storage/documents";
 import { insertDocumentTypeSchema, updateDocumentTypeSchema, insertEmployeeDocumentSchema, insertCustomerDocumentSchema, insertDocumentTemplateSchema, updateDocumentTemplateSchema } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
 import { renderTemplateForCustomer, wrapInPrintableHtml, getPlaceholderCatalog } from "../../services/template-engine";
+import { generateAndStorePdf, getDocumentPdfBuffer } from "../../services/document-pdf";
 
 const router = Router();
 
@@ -228,6 +229,85 @@ router.get("/customers/:customerId/generated-documents", asyncHandler("Generiert
   if (isNaN(customerId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" }); return; }
   const docs = await documentStorage.getGeneratedDocuments(customerId);
   res.json(docs);
+}));
+
+router.get("/employees/:employeeId/generated-documents", asyncHandler("Generierte Dokumente konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const employeeId = parseInt(req.params.employeeId);
+  if (isNaN(employeeId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Mitarbeiter-ID" }); return; }
+  const docs = await documentStorage.getGeneratedDocumentsByEmployee(employeeId);
+  res.json(docs);
+}));
+
+const generateDocumentSchema = z.object({
+  templateId: z.number().int(),
+  customerId: z.number().int().nullable().optional(),
+  employeeId: z.number().int().nullable().optional(),
+  customerSignatureData: z.string().nullable().optional(),
+  employeeSignatureData: z.string().nullable().optional(),
+  placeholderOverrides: z.record(z.string()).optional(),
+});
+
+router.post("/documents/generate-pdf", asyncHandler("PDF konnte nicht erstellt werden", async (req: Request, res: Response) => {
+  const parsed = generateDocumentSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Daten", details: parsed.error.issues });
+    return;
+  }
+
+  const { templateId, customerId, employeeId, customerSignatureData, employeeSignatureData, placeholderOverrides } = parsed.data;
+
+  if (!customerId && !employeeId) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Entweder customerId oder employeeId ist erforderlich" });
+    return;
+  }
+
+  const template = await documentStorage.getDocumentTemplate(templateId);
+  if (!template) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Vorlage nicht gefunden" });
+    return;
+  }
+
+  const result = await generateAndStorePdf({
+    template,
+    customerId: customerId ?? undefined,
+    employeeId: employeeId ?? undefined,
+    customerSignatureData,
+    employeeSignatureData,
+    placeholderOverrides,
+    generatedByUserId: req.user!.id,
+  });
+
+  res.status(201).json({
+    id: result.generatedDocId,
+    fileName: result.fileName,
+    objectPath: result.objectPath,
+    integrityHash: result.integrityHash,
+  });
+}));
+
+router.get("/generated-documents/:id/download", asyncHandler("PDF konnte nicht heruntergeladen werden", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" }); return; }
+
+  const doc = await documentStorage.getGeneratedDocument(id);
+  if (!doc) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Dokument nicht gefunden" });
+    return;
+  }
+
+  const pdfBuffer = await getDocumentPdfBuffer(doc.objectPath);
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `inline; filename="${doc.fileName}"`);
+  res.setHeader("Content-Length", pdfBuffer.length);
+  res.send(pdfBuffer);
+}));
+
+router.get("/document-templates/by-context", asyncHandler("Vorlagen konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const context = (req.query.context as string) || "alle";
+  const targetType = (req.query.targetType as string) || "beide";
+  const templates = await documentStorage.getTemplatesByContext(context, targetType);
+  res.json(templates);
 }));
 
 export default router;

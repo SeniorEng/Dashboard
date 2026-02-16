@@ -28,6 +28,8 @@ import { api, unwrapResult } from "@/lib/api/client";
 import { formatDateDisplay } from "@shared/utils/format";
 import { useUpload } from "@/hooks/use-upload";
 import { ReviewBadge, getReviewStatus } from "./review-badge";
+import { DigitalDocumentFlow } from "./digital-document-flow";
+import { Pen } from "lucide-react";
 
 interface DocumentTypeData {
   id: number;
@@ -52,10 +54,26 @@ interface CustomerDocumentData {
   documentType: DocumentTypeData;
 }
 
+interface GeneratedDocumentData {
+  id: number;
+  customerId: number | null;
+  templateId: number;
+  templateVersion: number;
+  documentTypeId: number | null;
+  fileName: string;
+  objectPath: string;
+  customerSignatureData: string | null;
+  employeeSignatureData: string | null;
+  signedAt: string | null;
+  integrityHash: string | null;
+  generatedAt: string;
+}
+
 export function CustomerDocumentsSection({ customerId, customerName }: { customerId: number; customerName: string }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [isDigitalFlowOpen, setIsDigitalFlowOpen] = useState(false);
   const [selectedDocTypeId, setSelectedDocTypeId] = useState("");
   const [notes, setNotes] = useState("");
   const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
@@ -77,6 +95,15 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
     queryFn: async () => {
       const res = await fetch("/api/admin/document-types?targetType=customer", { credentials: "include" });
       if (!res.ok) throw new Error("Dokumententypen konnten nicht geladen werden");
+      return res.json();
+    },
+  });
+
+  const { data: generatedDocs } = useQuery<GeneratedDocumentData[]>({
+    queryKey: ["admin", "customers", customerId, "generated-documents"],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/customers/${customerId}/generated-documents`, { credentials: "include" });
+      if (!res.ok) throw new Error("Generierte Dokumente konnten nicht geladen werden");
       return res.json();
     },
   });
@@ -181,15 +208,28 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
           <FileCheck2 className={iconSize.sm} />
           Dokumente
         </h3>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setIsUploadOpen(!isUploadOpen)}
-          data-testid="button-upload-customer-document"
-        >
-          <Upload className={`${iconSize.sm} mr-1`} />
-          Hinzufügen
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsDigitalFlowOpen(true)}
+            data-testid="button-digital-document"
+          >
+            <Pen className={`${iconSize.sm} mr-1`} />
+            <span className="hidden sm:inline">Digital erstellen</span>
+            <span className="sm:hidden">Digital</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsUploadOpen(!isUploadOpen)}
+            data-testid="button-upload-customer-document"
+          >
+            <Upload className={`${iconSize.sm} mr-1`} />
+            <span className="hidden sm:inline">Hochladen</span>
+            <span className="sm:hidden">Upload</span>
+          </Button>
+        </div>
       </div>
 
       {isUploadOpen && (
@@ -416,6 +456,54 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
         <p className="text-sm text-gray-500 py-4 text-center">Noch keine Dokumente hochgeladen</p>
       )}
 
+      {generatedDocs && generatedDocs.length > 0 && (
+        <div className="mt-4">
+          <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <Pen className="h-3 w-3" />
+            Digital erstellte Dokumente
+          </h4>
+          <div className="space-y-2">
+            {generatedDocs.map((doc) => (
+              <div key={doc.id} className="p-3 bg-white border border-teal-100 rounded-lg" data-testid={`generated-doc-${doc.id}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <FileText className={`${iconSize.sm} text-teal-600 shrink-0`} />
+                      <span className="text-sm font-medium text-gray-900 truncate">{doc.fileName}</span>
+                    </div>
+                    <div className="ml-6 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs text-gray-400">
+                          Erstellt: {formatDateDisplay(doc.generatedAt.split("T")[0])}
+                        </span>
+                        {doc.customerSignatureData && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-teal-50 text-teal-700">Kd. unterschrieben</span>
+                        )}
+                        {doc.employeeSignatureData && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">MA unterschrieben</span>
+                        )}
+                        {doc.integrityHash && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-green-50 text-green-700">Verifiziert</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <a
+                    href={`/api/admin/generated-documents/${doc.id}/download`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-gray-100 shrink-0"
+                    data-testid={`button-download-generated-doc-${doc.id}`}
+                  >
+                    <Download className={`${iconSize.sm} text-gray-600`} />
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {missingDocTypes.length > 0 && documents && documents.length > 0 && (
         <div className="mt-3 p-3 bg-amber-50 border border-amber-100 rounded-lg">
           <p className="text-xs font-medium text-amber-700 mb-1">Fehlende Dokumente:</p>
@@ -426,6 +514,18 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
           </div>
         </div>
       )}
+
+      <DigitalDocumentFlow
+        open={isDigitalFlowOpen}
+        onOpenChange={setIsDigitalFlowOpen}
+        customerId={customerId}
+        targetName={customerName}
+        targetType="customer"
+        context="bestandskunde"
+        onComplete={() => {
+          queryClient.invalidateQueries({ queryKey: ["admin", "customers", customerId, "documents"] });
+        }}
+      />
     </div>
   );
 }

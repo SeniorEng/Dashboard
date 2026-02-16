@@ -61,9 +61,18 @@ export const documentTemplates = pgTable("document_templates", {
   version: integer("version").notNull().default(1),
   isSystem: boolean("is_system").notNull().default(false),
   isActive: boolean("is_active").notNull().default(true),
+  documentTypeId: integer("document_type_id").references(() => documentTypes.id, { onDelete: "set null" }),
+  context: text("context").notNull().default("beide"),
+  targetType: text("target_type").notNull().default("customer"),
+  requiresCustomerSignature: boolean("requires_customer_signature").notNull().default(true),
+  requiresEmployeeSignature: boolean("requires_employee_signature").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  index("document_templates_type_idx").on(table.documentTypeId),
+  index("document_templates_context_idx").on(table.context),
+  index("document_templates_target_idx").on(table.targetType),
+]);
 
 export const documentTemplateBillingTypes = pgTable("document_template_billing_types", {
   id: serial("id").primaryKey(),
@@ -79,11 +88,14 @@ export const documentTemplateBillingTypes = pgTable("document_template_billing_t
 
 export const generatedDocuments = pgTable("generated_documents", {
   id: serial("id").primaryKey(),
-  customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  customerId: integer("customer_id").references(() => customers.id, { onDelete: "cascade" }),
+  employeeId: integer("employee_id").references(() => users.id, { onDelete: "cascade" }),
   templateId: integer("template_id").notNull().references(() => documentTemplates.id),
   templateVersion: integer("template_version").notNull(),
+  documentTypeId: integer("document_type_id").references(() => documentTypes.id, { onDelete: "set null" }),
   fileName: text("file_name").notNull(),
   objectPath: text("object_path").notNull(),
+  renderedHtml: text("rendered_html"),
   customerSignatureData: text("customer_signature_data"),
   employeeSignatureData: text("employee_signature_data"),
   signedAt: timestamp("signed_at"),
@@ -93,8 +105,28 @@ export const generatedDocuments = pgTable("generated_documents", {
   generatedByUserId: integer("generated_by_user_id").references(() => users.id),
 }, (table) => [
   index("generated_docs_customer_idx").on(table.customerId),
+  index("generated_docs_employee_idx").on(table.employeeId),
   index("generated_docs_template_idx").on(table.templateId),
+  index("generated_docs_doctype_idx").on(table.documentTypeId),
 ]);
+
+export const TEMPLATE_CONTEXTS = ["vertragsabschluss", "bestandskunde", "beide"] as const;
+export type TemplateContext = typeof TEMPLATE_CONTEXTS[number];
+
+export const TEMPLATE_CONTEXT_LABELS: Record<TemplateContext, string> = {
+  vertragsabschluss: "Nur bei Vertragsabschluss",
+  bestandskunde: "Nur bei Bestandskunden",
+  beide: "Immer verfügbar",
+};
+
+export const TEMPLATE_TARGET_TYPES = ["customer", "employee", "beide"] as const;
+export type TemplateTargetType = typeof TEMPLATE_TARGET_TYPES[number];
+
+export const TEMPLATE_TARGET_TYPE_LABELS: Record<TemplateTargetType, string> = {
+  customer: "Kunden",
+  employee: "Mitarbeiter",
+  beide: "Beide",
+};
 
 export const insertDocumentTemplateSchema = z.object({
   slug: z.string().min(1).max(100),
@@ -103,6 +135,11 @@ export const insertDocumentTemplateSchema = z.object({
   htmlContent: z.string().min(1).max(500000),
   isSystem: z.boolean().default(false),
   isActive: z.boolean().default(true),
+  documentTypeId: z.number().int().nullable().optional(),
+  context: z.enum(TEMPLATE_CONTEXTS).default("beide"),
+  targetType: z.enum(TEMPLATE_TARGET_TYPES).default("customer"),
+  requiresCustomerSignature: z.boolean().default(true),
+  requiresEmployeeSignature: z.boolean().default(true),
 });
 
 export const updateDocumentTemplateSchema = z.object({
@@ -110,14 +147,22 @@ export const updateDocumentTemplateSchema = z.object({
   description: z.string().max(1000).nullable().optional(),
   htmlContent: z.string().min(1).max(500000).optional(),
   isActive: z.boolean().optional(),
+  documentTypeId: z.number().int().nullable().optional(),
+  context: z.enum(TEMPLATE_CONTEXTS).optional(),
+  targetType: z.enum(TEMPLATE_TARGET_TYPES).optional(),
+  requiresCustomerSignature: z.boolean().optional(),
+  requiresEmployeeSignature: z.boolean().optional(),
 });
 
 export const insertGeneratedDocumentSchema = z.object({
-  customerId: z.number().int(),
+  customerId: z.number().int().nullable().optional(),
+  employeeId: z.number().int().nullable().optional(),
   templateId: z.number().int(),
   templateVersion: z.number().int(),
+  documentTypeId: z.number().int().nullable().optional(),
   fileName: z.string().min(1),
   objectPath: z.string().min(1),
+  renderedHtml: z.string().nullable().optional(),
   customerSignatureData: z.string().nullable().optional(),
   employeeSignatureData: z.string().nullable().optional(),
   integrityHash: z.string().nullable().optional(),
