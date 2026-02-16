@@ -8,7 +8,7 @@ import { AppointmentCard } from "@/features/appointments/components/appointment-
 import { 
   ArrowLeft, MapPin, Phone, Mail, User, Heart, 
   Calendar, Loader2, AlertCircle, FileSignature, ChevronRight, X, Wallet,
-  Cake, PhoneCall, Shield, PawPrint, ClipboardList, Stethoscope, Users
+  Cake, PhoneCall, Shield, PawPrint, ClipboardList, Stethoscope, Users, UserSearch
 } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { ErrorState } from "@/components/patterns/error-state";
@@ -183,6 +183,17 @@ export default function CustomerDetailPage() {
                     <span className="sr-only">Filter entfernen</span>
                   </Button>
                 </Link>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {customer.status === "erstberatung" && (
+          <Card className="mb-4 border-blue-200 bg-blue-50/50" data-testid="card-erstberatung-hint">
+            <CardContent className="py-3 px-4">
+              <div className="flex items-center gap-2">
+                <UserSearch className={`${iconSize.sm} text-blue-600`} />
+                <span className="text-sm font-medium text-blue-700">Erstberatungskunde</span>
               </div>
             </CardContent>
           </Card>

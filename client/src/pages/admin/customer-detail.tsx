@@ -31,6 +31,9 @@ import {
   CreditCard,
   UserCheck,
   UserX,
+  CheckCircle2,
+  XCircle,
+  Ban,
 } from "lucide-react";
 import { BudgetLedgerSection } from "@/components/budget/BudgetLedgerSection";
 import { BudgetTypeSettings } from "@/components/budget/BudgetTypeSettings";
@@ -42,6 +45,120 @@ import { CustomerContactsTab } from "./components/customer-contacts-tab";
 
 function formatCents(cents: number): string {
   return (cents / 100).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+}
+
+const MISSING_LABELS: Record<string, string> = {
+  pflegegrad: "Pflegegrad",
+  billingType: "Abrechnungsart",
+  primaryEmployee: "Zuständiger Mitarbeiter",
+  insurance: "Versicherung / Pflegekasse",
+  contract: "Aktiver Vertrag",
+};
+
+function ErstberatungConversionSection({
+  customerId,
+  onActivate,
+  onReject,
+  isUpdating,
+}: {
+  customerId: number;
+  onActivate: () => void;
+  onReject: () => void;
+  isUpdating: boolean;
+}) {
+  const { data: readiness, isLoading } = useQuery<{
+    ready: boolean;
+    missing: string[];
+    customerStatus: string;
+  }>({
+    queryKey: ["conversion-readiness", customerId],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/customers/${customerId}/conversion-readiness`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Prüfung fehlgeschlagen");
+      return res.json();
+    },
+    staleTime: 10000,
+  });
+
+  return (
+    <SectionCard className="mb-4 border-teal-200 bg-teal-50">
+      <div className="space-y-3">
+        <div>
+          <p className="font-medium text-teal-900">Erstberatungskunde</p>
+          <p className="text-sm text-teal-700 mt-0.5">
+            Prüfen Sie die Vollständigkeit und aktivieren Sie den Kunden für reguläre Termine.
+          </p>
+        </div>
+
+        {isLoading ? (
+          <div className="flex items-center gap-2 text-sm text-teal-600">
+            <Loader2 className={`${iconSize.sm} animate-spin`} />
+            <span>Daten werden geprüft...</span>
+          </div>
+        ) : readiness ? (
+          <>
+            <div className="space-y-1.5">
+              {Object.entries(MISSING_LABELS).map(([key, label]) => {
+                const isMissing = readiness.missing.includes(key);
+                return (
+                  <div
+                    key={key}
+                    className={`flex items-center gap-2 text-sm ${isMissing ? "text-red-700" : "text-teal-700"}`}
+                    data-testid={`readiness-${key}`}
+                  >
+                    {isMissing ? (
+                      <XCircle className={`${iconSize.sm} text-red-500 shrink-0`} />
+                    ) : (
+                      <CheckCircle2 className={`${iconSize.sm} text-green-600 shrink-0`} />
+                    )}
+                    <span>{label}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center gap-2 pt-1">
+              <Button
+                onClick={onActivate}
+                disabled={isUpdating || !readiness.ready}
+                className={componentStyles.btnPrimary}
+                data-testid="button-activate-customer"
+              >
+                {isUpdating ? (
+                  <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                ) : (
+                  <UserCheck className={`${iconSize.sm} mr-2`} />
+                )}
+                Kunde aktivieren
+              </Button>
+              <Button
+                variant="outline"
+                onClick={onReject}
+                disabled={isUpdating}
+                className="text-red-700 border-red-200 hover:bg-red-50"
+                data-testid="button-reject-customer"
+              >
+                {isUpdating ? (
+                  <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                ) : (
+                  <Ban className={`${iconSize.sm} mr-2`} />
+                )}
+                Kein Interesse
+              </Button>
+            </div>
+
+            {!readiness.ready && (
+              <p className="text-xs text-teal-600 mt-1">
+                Bitte ergänzen Sie die fehlenden Daten über "Bearbeiten", bevor Sie den Kunden aktivieren.
+              </p>
+            )}
+          </>
+        ) : null}
+      </div>
+    </SectionCard>
+  );
 }
 
 interface BudgetSummary {
@@ -200,6 +317,7 @@ export default function AdminCustomerDetail() {
       queryClient.invalidateQueries({ queryKey: customerKeys.detail(customerId) });
       queryClient.invalidateQueries({ queryKey: customerKeys.lists() });
       queryClient.invalidateQueries({ queryKey: ["customers"] });
+      queryClient.invalidateQueries({ queryKey: ["conversion-readiness", customerId] });
       toast({ title: "Kundenstatus aktualisiert" });
     },
     onError: (err: Error) => {
@@ -319,29 +437,16 @@ export default function AdminCustomerDetail() {
           />
 
           {customer.status === "erstberatung" && (
-            <SectionCard className="mb-4 border-teal-200 bg-teal-50">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="font-medium text-teal-900">Erstberatungskunde</p>
-                  <p className="text-sm text-teal-700 mt-0.5">
-                    Diesen Kunden aktivieren, um reguläre Kundentermine erstellen zu können.
-                  </p>
-                </div>
-                <Button
-                  onClick={() => updateStatus.mutate("aktiv")}
-                  disabled={updateStatus.isPending}
-                  className={componentStyles.btnPrimary}
-                  data-testid="button-activate-customer"
-                >
-                  {updateStatus.isPending ? (
-                    <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
-                  ) : (
-                    <UserCheck className={`${iconSize.sm} mr-2`} />
-                  )}
-                  Kunde aktivieren
-                </Button>
-              </div>
-            </SectionCard>
+            <ErstberatungConversionSection
+              customerId={customerId}
+              onActivate={() => updateStatus.mutate("aktiv")}
+              onReject={() => {
+                if (window.confirm("Möchten Sie diesen Erstberatungskunden wirklich als 'Kein Interesse' markieren? Er wird auf inaktiv gesetzt.")) {
+                  updateStatus.mutate("inaktiv");
+                }
+              }}
+              isUpdating={updateStatus.isPending}
+            />
           )}
 
           {customer.status === "aktiv" && (

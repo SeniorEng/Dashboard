@@ -13,6 +13,8 @@ import {
   users,
   userRoles,
   appointments,
+  customerContracts,
+  customerInsuranceHistory,
 } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
 import { z } from "zod";
@@ -399,6 +401,81 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
   birthdaysCache.invalidateAll();
   
   res.json(customer);
+}));
+
+router.get("/customers/:id/conversion-readiness", asyncHandler("Konvertierungsprüfung fehlgeschlagen", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
+    return;
+  }
+
+  const customer = await storage.getCustomer(id);
+  if (!customer) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+    return;
+  }
+
+  if (customer.status !== "erstberatung") {
+    res.json({
+      ready: customer.status === "aktiv",
+      missing: [],
+      customerStatus: customer.status,
+    });
+    return;
+  }
+
+  const missing: string[] = [];
+
+  if (!customer.pflegegrad || customer.pflegegrad === 0) {
+    missing.push("pflegegrad");
+  }
+  if (!customer.billingType) {
+    missing.push("billingType");
+  }
+  if (!customer.primaryEmployeeId) {
+    missing.push("primaryEmployee");
+  }
+
+  const isSelbstzahler = customer.billingType === "selbstzahler";
+
+  if (!isSelbstzahler) {
+    const [activeInsurance] = await db
+      .select({ id: customerInsuranceHistory.id })
+      .from(customerInsuranceHistory)
+      .where(
+        and(
+          eq(customerInsuranceHistory.customerId, id),
+          isNull(customerInsuranceHistory.validTo)
+        )
+      )
+      .limit(1);
+
+    if (!activeInsurance) {
+      missing.push("insurance");
+    }
+  }
+
+  const [activeContract] = await db
+    .select({ id: customerContracts.id })
+    .from(customerContracts)
+    .where(
+      and(
+        eq(customerContracts.customerId, id),
+        eq(customerContracts.status, "active")
+      )
+    )
+    .limit(1);
+
+  if (!activeContract) {
+    missing.push("contract");
+  }
+
+  res.json({
+    ready: missing.length === 0,
+    missing,
+    customerStatus: customer.status,
+  });
 }));
 
 // Insurance Management

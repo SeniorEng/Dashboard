@@ -63,10 +63,10 @@ export default function CustomersPage() {
   const { user } = useAuth();
 
   const { data: customers = [], isLoading, error, refetch } = useQuery<CustomerWithAccess[]>({
-    queryKey: ["customers"],
+    queryKey: ["customers", "aktiv"],
     staleTime: 60000,
     queryFn: async () => {
-      const res = await fetch("/api/customers");
+      const res = await fetch("/api/customers?status=aktiv");
       if (!res.ok) throw new Error("Kunden konnten nicht geladen werden");
       return res.json();
     },
