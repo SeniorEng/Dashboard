@@ -37,6 +37,7 @@ const AdminDocumentTemplates = lazy(() => import("@/pages/admin/document-templat
 const AdminAuditLog = lazy(() => import("@/pages/admin/audit-log"));
 const UndocumentedAppointments = lazy(() => import("@/pages/undocumented-appointments"));
 const CustomerDetail = lazy(() => import("@/pages/customer-detail"));
+const CustomerConvert = lazy(() => import("@/pages/customer-convert"));
 const TasksPage = lazy(() => import("@/pages/tasks"));
 const ServiceRecordsPage = lazy(() => import("@/pages/service-records"));
 const ServiceRecordDetailPage = lazy(() => import("@/pages/service-record-detail"));
@@ -110,6 +111,9 @@ function Router() {
       </Route>
       <Route path="/customers">
         <ProtectedRoute component={Customers} />
+      </Route>
+      <Route path="/customer/:id/convert">
+        {() => <ProtectedRoute component={() => <CustomerConvert />} />}
       </Route>
       <Route path="/customer/:id">
         {() => <ProtectedRoute component={() => <CustomerDetail />} />}

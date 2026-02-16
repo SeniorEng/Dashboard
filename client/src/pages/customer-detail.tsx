@@ -1,14 +1,18 @@
-import { useRoute, Link, useSearch } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useRoute, Link, useSearch, useLocation } from "wouter";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { AppointmentCard } from "@/features/appointments/components/appointment-card";
+import { useAuth } from "@/hooks/use-auth";
+import { useToast } from "@/hooks/use-toast";
+import { api, unwrapResult } from "@/lib/api/client";
 import { 
   ArrowLeft, MapPin, Phone, Mail, User, Heart, 
   Calendar, Loader2, AlertCircle, FileSignature, ChevronRight, X, Wallet,
-  Cake, PhoneCall, Shield, PawPrint, ClipboardList, Stethoscope, Users, UserSearch
+  Cake, PhoneCall, Shield, PawPrint, ClipboardList, Stethoscope, Users, UserSearch,
+  UserCheck, XCircle,
 } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { ErrorState } from "@/components/patterns/error-state";
@@ -38,9 +42,14 @@ interface CustomerDetails {
 export default function CustomerDetailPage() {
   const [, params] = useRoute("/customer/:id");
   const customerId = params?.id ? parseInt(params.id, 10) : null;
+  const [, setLocation] = useLocation();
   const searchString = useSearch();
   const searchParams = new URLSearchParams(searchString);
   const filterUndocumented = searchParams.get("filter") === "undocumented";
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const canConvert = user?.isAdmin || user?.roles?.includes("erstberatung");
 
   const { data: customer, isLoading: customerLoading, error: customerError, refetch: refetchCustomer } = useQuery<Customer>({
     queryKey: ["customer", customerId],
@@ -102,6 +111,22 @@ export default function CustomerDetailPage() {
       return res.json();
     },
     enabled: !!customerId,
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: async () => {
+      const result = await api.post(`/customers/${customerId}/reject`, {});
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["customer", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      toast({ title: "Kunde als inaktiv markiert" });
+      setLocation("/customers");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
   });
 
   const today = startOfToday();
@@ -191,9 +216,46 @@ export default function CustomerDetailPage() {
         {customer.status === "erstberatung" && (
           <Card className="mb-4 border-blue-200 bg-blue-50/50" data-testid="card-erstberatung-hint">
             <CardContent className="py-3 px-4">
-              <div className="flex items-center gap-2">
-                <UserSearch className={`${iconSize.sm} text-blue-600`} />
-                <span className="text-sm font-medium text-blue-700">Erstberatungskunde</span>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <UserSearch className={`${iconSize.sm} text-blue-600`} />
+                  <span className="text-sm font-medium text-blue-700">Erstberatungskunde</span>
+                </div>
+                {canConvert && (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+                      onClick={() => {
+                        if (confirm("Diesen Kunden wirklich als 'Kein Interesse' markieren?")) {
+                          rejectMutation.mutate();
+                        }
+                      }}
+                      disabled={rejectMutation.isPending}
+                      data-testid="button-reject-customer"
+                    >
+                      {rejectMutation.isPending ? (
+                        <Loader2 className={`${iconSize.sm} animate-spin`} />
+                      ) : (
+                        <>
+                          <XCircle className={`${iconSize.sm} mr-1`} />
+                          Kein Interesse
+                        </>
+                      )}
+                    </Button>
+                    <Link href={`/customer/${customerId}/convert`}>
+                      <Button
+                        size="sm"
+                        className="bg-teal-600 hover:bg-teal-700"
+                        data-testid="button-convert-customer"
+                      >
+                        <UserCheck className={`${iconSize.sm} mr-1`} />
+                        Kunde übernehmen
+                      </Button>
+                    </Link>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

@@ -3,13 +3,16 @@ import { z } from "zod";
 import { storage } from "../storage";
 import { insertCustomerSchema } from "@shared/schema";
 import { fromError } from "zod-validation-error";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requireRoles } from "../middleware/auth";
 import { birthdaysCache } from "../services/cache";
 import { documentStorage } from "../storage/documents";
 import { BILLING_TYPES } from "@shared/domain/customers";
+import { isPflegekasseCustomer } from "@shared/domain/customers";
 import { renderTemplateForCustomer } from "../services/template-engine";
 import { computeDataHash } from "../services/signature-integrity";
 import { customerManagementStorage } from "../storage/customer-management";
+import { asyncHandler } from "../lib/errors";
+import { todayISO } from "@shared/utils/datetime";
 
 const billingTypeEnum = z.enum(BILLING_TYPES as unknown as [string, ...string[]]);
 
@@ -195,5 +198,249 @@ router.post("/:id/signatures", async (req, res) => {
     res.status(500).json({ error: "Unterschriften konnten nicht gespeichert werden" });
   }
 });
+
+const convertCustomerSchema = z.object({
+  billingType: z.enum(["pflegekasse_gesetzlich", "pflegekasse_privat", "selbstzahler"]),
+  vorname: z.string().min(1),
+  nachname: z.string().min(1),
+  geburtsdatum: z.string().optional().nullable(),
+  email: z.string().email().optional().nullable(),
+  telefon: z.string().optional().nullable(),
+  festnetz: z.string().optional().nullable(),
+  strasse: z.string().min(1),
+  nr: z.string().min(1),
+  plz: z.string().regex(/^\d{5}$/),
+  stadt: z.string().min(1),
+  pflegegrad: z.number().min(0).max(5).optional(),
+  pflegegradSeit: z.string().optional(),
+  vorerkrankungen: z.string().max(2000).optional().nullable(),
+  haustierVorhanden: z.boolean().optional(),
+  haustierDetails: z.string().max(500).optional().nullable(),
+  personenbefoerderungGewuenscht: z.boolean().optional(),
+  insurance: z.object({
+    providerId: z.number(),
+    versichertennummer: z.string(),
+    validFrom: z.string(),
+  }).optional(),
+  contacts: z.array(z.object({
+    contactType: z.string(),
+    isPrimary: z.boolean(),
+    vorname: z.string(),
+    nachname: z.string(),
+    telefon: z.string(),
+    email: z.string().optional(),
+  })).optional(),
+  budgets: z.object({
+    entlastungsbetrag45b: z.number(),
+    verhinderungspflege39: z.number(),
+    pflegesachleistungen36: z.number(),
+    validFrom: z.string(),
+  }).optional(),
+  contract: z.object({
+    contractStart: z.string(),
+    contractDate: z.string().optional(),
+    vereinbarteLeistungen: z.string().optional(),
+    hoursPerPeriod: z.number(),
+    periodType: z.string(),
+    rates: z.array(z.object({
+      serviceCategory: z.string(),
+      hourlyRateCents: z.number(),
+    })).optional(),
+  }).optional(),
+  primaryEmployeeId: z.number().nullable().optional(),
+  backupEmployeeId: z.number().nullable().optional(),
+});
+
+router.post("/:id/convert", requireRoles("erstberatung"), asyncHandler("Konvertierung fehlgeschlagen", async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
+    return;
+  }
+
+  if (!req.user!.isAdmin) {
+    const assignedCustomerIds = await storage.getAssignedCustomerIds(req.user!.id);
+    if (!assignedCustomerIds.includes(id)) {
+      res.status(403).json({ error: "FORBIDDEN", message: "Zugriff verweigert" });
+      return;
+    }
+  }
+
+  const customer = await storage.getCustomer(id);
+  if (!customer) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+    return;
+  }
+
+  if (customer.status !== "erstberatung") {
+    res.status(400).json({ error: "INVALID_STATUS", message: "Nur Erstberatungskunden können konvertiert werden" });
+    return;
+  }
+
+  const data = convertCustomerSchema.parse(req.body);
+  const userId = req.user!.id;
+  const today = todayISO();
+  const warnings: string[] = [];
+
+  const updateData: any = {
+    name: `${data.nachname}, ${data.vorname}`,
+    vorname: data.vorname,
+    nachname: data.nachname,
+    email: data.email || null,
+    telefon: data.telefon || null,
+    festnetz: data.festnetz || null,
+    address: `${data.strasse} ${data.nr}, ${data.plz} ${data.stadt}`,
+    strasse: data.strasse,
+    nr: data.nr,
+    plz: data.plz,
+    stadt: data.stadt,
+    pflegegrad: data.pflegegrad || null,
+    geburtsdatum: data.geburtsdatum || null,
+    vorerkrankungen: data.vorerkrankungen || null,
+    haustierVorhanden: data.haustierVorhanden || false,
+    haustierDetails: data.haustierVorhanden ? (data.haustierDetails || null) : null,
+    personenbefoerderungGewuenscht: data.personenbefoerderungGewuenscht || false,
+    billingType: data.billingType,
+    status: "aktiv",
+  };
+
+  const updated = await customerManagementStorage.updateCustomer(id, updateData);
+  if (!updated) {
+    res.status(500).json({ error: "UPDATE_FAILED", message: "Kunde konnte nicht aktualisiert werden" });
+    return;
+  }
+
+  if (data.pflegegrad && data.pflegegradSeit) {
+    try {
+      await customerManagementStorage.addCareLevelHistory({
+        customerId: id,
+        pflegegrad: data.pflegegrad,
+        validFrom: data.pflegegradSeit,
+      }, userId);
+    } catch (err) {
+      console.error(`[POST /:id/convert] Pflegegrad-Historie fehlgeschlagen:`, err);
+      warnings.push("Pflegegrad-Historie konnte nicht gespeichert werden");
+    }
+  }
+
+  if (data.insurance && isPflegekasseCustomer(data.billingType)) {
+    try {
+      await customerManagementStorage.addCustomerInsurance({
+        customerId: id,
+        insuranceProviderId: data.insurance.providerId,
+        versichertennummer: data.insurance.versichertennummer,
+        validFrom: data.insurance.validFrom,
+      }, userId);
+    } catch (err) {
+      console.error(`[POST /:id/convert] Versicherung fehlgeschlagen:`, err);
+      warnings.push("Versicherung konnte nicht gespeichert werden");
+    }
+  }
+
+  if (data.contacts) {
+    for (let i = 0; i < data.contacts.length; i++) {
+      const c = data.contacts[i];
+      try {
+        await customerManagementStorage.addCustomerContact({
+          customerId: id,
+          contactType: c.contactType as "familie" | "angehoerige" | "nachbar" | "hausarzt" | "betreuer" | "sonstige",
+          isPrimary: c.isPrimary,
+          vorname: c.vorname,
+          nachname: c.nachname,
+          telefon: c.telefon,
+          email: c.email || null,
+          sortOrder: i,
+        });
+      } catch (err) {
+        console.error(`[POST /:id/convert] Kontakt ${i} fehlgeschlagen:`, err);
+        warnings.push(`Kontakt "${c.vorname} ${c.nachname}" konnte nicht gespeichert werden`);
+      }
+    }
+  }
+
+  if (data.budgets && isPflegekasseCustomer(data.billingType)) {
+    try {
+      await customerManagementStorage.addCustomerBudget({
+        customerId: id,
+        entlastungsbetrag45b: data.budgets.entlastungsbetrag45b,
+        verhinderungspflege39: data.budgets.verhinderungspflege39,
+        pflegesachleistungen36: data.budgets.pflegesachleistungen36,
+        validFrom: data.budgets.validFrom,
+      }, userId);
+    } catch (err) {
+      console.error(`[POST /:id/convert] Budgets fehlgeschlagen:`, err);
+      warnings.push("Budgets konnten nicht gespeichert werden");
+    }
+  }
+
+  if (data.contract) {
+    try {
+      const hauswirtschaftRate = data.contract.rates?.find(r => r.serviceCategory === "hauswirtschaft");
+      const alltagsbegleitungRate = data.contract.rates?.find(r => r.serviceCategory === "alltagsbegleitung");
+      const kilometerRate = data.contract.rates?.find(r => r.serviceCategory === "kilometer");
+      await customerManagementStorage.createCustomerContract({
+        customerId: id,
+        contractStart: data.contract.contractStart,
+        contractDate: data.contract.contractDate || null,
+        vereinbarteLeistungen: data.contract.vereinbarteLeistungen || null,
+        hoursPerPeriod: data.contract.hoursPerPeriod,
+        periodType: data.contract.periodType as "week" | "month" | "year",
+        hauswirtschaftRateCents: hauswirtschaftRate?.hourlyRateCents || 0,
+        alltagsbegleitungRateCents: alltagsbegleitungRate?.hourlyRateCents || 0,
+        kilometerRateCents: kilometerRate?.hourlyRateCents || 0,
+        status: "active",
+      }, userId);
+    } catch (err) {
+      console.error(`[POST /:id/convert] Vertrag fehlgeschlagen:`, err);
+      warnings.push("Vertrag konnte nicht erstellt werden");
+    }
+  }
+
+  if (data.primaryEmployeeId !== undefined || data.backupEmployeeId !== undefined) {
+    try {
+      await customerManagementStorage.updateCustomer(id, {
+        primaryEmployeeId: data.primaryEmployeeId ?? null,
+        backupEmployeeId: data.backupEmployeeId ?? null,
+      });
+    } catch (err) {
+      console.error(`[POST /:id/convert] Mitarbeiter-Zuordnung fehlgeschlagen:`, err);
+      warnings.push("Mitarbeiter-Zuordnung konnte nicht gespeichert werden");
+    }
+  }
+
+  birthdaysCache.invalidateAll();
+
+  res.json({ ...updated, status: "aktiv", warnings: warnings.length > 0 ? warnings : undefined });
+}));
+
+router.post("/:id/reject", requireRoles("erstberatung"), asyncHandler("Ablehnung fehlgeschlagen", async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
+    return;
+  }
+
+  if (!req.user!.isAdmin) {
+    const assignedCustomerIds = await storage.getAssignedCustomerIds(req.user!.id);
+    if (!assignedCustomerIds.includes(id)) {
+      res.status(403).json({ error: "FORBIDDEN", message: "Zugriff verweigert" });
+      return;
+    }
+  }
+
+  const customer = await storage.getCustomer(id);
+  if (!customer) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+    return;
+  }
+
+  if (customer.status !== "erstberatung") {
+    res.status(400).json({ error: "INVALID_STATUS", message: "Nur Erstberatungskunden können abgelehnt werden" });
+    return;
+  }
+
+  const updated = await customerManagementStorage.updateCustomer(id, { status: "inaktiv" });
+  res.json(updated);
+}));
 
 export default router;

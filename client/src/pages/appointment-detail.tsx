@@ -20,8 +20,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { 
   MapPin, Calendar, FileText, ChevronLeft, Loader2, 
-  Pencil, Trash2, AlertTriangle, Phone, Car, Home, ArrowRight
+  Pencil, Trash2, AlertTriangle, Phone, Car, Home, ArrowRight, UserCheck
 } from "lucide-react";
+import { Link } from "wouter";
+import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { formatTimeSlot, getEndTime } from "@/features/appointments/utils";
 import { 
@@ -36,7 +38,9 @@ export default function AppointmentDetail() {
   const [, params] = useRoute("/appointment/:id");
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { user } = useAuth();
   const id = params?.id ? parseInt(params.id) : 0;
+  const canConvert = user?.isAdmin || user?.roles?.includes("erstberatung");
   
   const { data: appointment, isLoading } = useAppointment(id);
   const { data: appointmentServices } = useQuery<Array<{ 
@@ -141,6 +145,23 @@ export default function AppointmentDetail() {
                 </a>
               </div>
             )}
+          </div>
+        )}
+
+        {isErstberatung && canConvert && appointment.customerId && appointment.customer && (appointment.customer as any).status === "erstberatung" && (
+          <div className="mt-4 p-3 bg-teal-50 border border-teal-200 rounded-lg" data-testid="card-convert-hint">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <UserCheck className={`${iconSize.sm} text-teal-600`} />
+                <span className="text-sm font-medium text-teal-700">Kunde als aktiven Kunden übernehmen?</span>
+              </div>
+              <Link href={`/customer/${appointment.customerId}/convert`}>
+                <Button size="sm" className="bg-teal-600 hover:bg-teal-700" data-testid="button-convert-from-appointment">
+                  Übernehmen
+                  <ArrowRight className={`${iconSize.sm} ml-1`} />
+                </Button>
+              </Link>
+            </div>
           </div>
         )}
       </div>
