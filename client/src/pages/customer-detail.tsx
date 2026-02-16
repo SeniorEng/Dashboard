@@ -339,12 +339,12 @@ export default function CustomerDetailPage() {
                 {details.insurance.ikNummer && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">IK-Nummer</span>
-                    <span className="font-mono text-xs" data-testid="text-insurance-ik">{details.insurance.ikNummer}</span>
+                    <span className="font-medium" data-testid="text-insurance-ik">{details.insurance.ikNummer}</span>
                   </div>
                 )}
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Versichertennr.</span>
-                  <span className="font-mono text-xs" data-testid="text-insurance-vnr">{details.insurance.versichertennummer}</span>
+                  <span className="font-medium" data-testid="text-insurance-vnr">{details.insurance.versichertennummer}</span>
                 </div>
               </div>
             </CardContent>
