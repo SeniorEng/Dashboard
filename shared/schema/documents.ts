@@ -86,6 +86,14 @@ export const documentTemplateBillingTypes = pgTable("document_template_billing_t
   uniqueIndex("dtbt_template_billing_unique").on(table.templateId, table.billingType),
 ]);
 
+export const SIGNING_STATUSES = ["complete", "pending_employee_signature"] as const;
+export type SigningStatus = typeof SIGNING_STATUSES[number];
+
+export const SIGNING_STATUS_LABELS: Record<SigningStatus, string> = {
+  complete: "Vollständig unterschrieben",
+  pending_employee_signature: "Unterschrift ausstehend",
+};
+
 export const generatedDocuments = pgTable("generated_documents", {
   id: serial("id").primaryKey(),
   customerId: integer("customer_id").references(() => customers.id, { onDelete: "cascade" }),
@@ -98,6 +106,7 @@ export const generatedDocuments = pgTable("generated_documents", {
   renderedHtml: text("rendered_html"),
   customerSignatureData: text("customer_signature_data"),
   employeeSignatureData: text("employee_signature_data"),
+  signingStatus: text("signing_status").notNull().default("complete"),
   signedAt: timestamp("signed_at"),
   signedByEmployeeId: integer("signed_by_employee_id").references(() => users.id),
   integrityHash: text("integrity_hash"),
@@ -108,6 +117,19 @@ export const generatedDocuments = pgTable("generated_documents", {
   index("generated_docs_employee_idx").on(table.employeeId),
   index("generated_docs_template_idx").on(table.templateId),
   index("generated_docs_doctype_idx").on(table.documentTypeId),
+  index("generated_docs_signing_status_idx").on(table.signingStatus),
+]);
+
+export const documentSigningTokens = pgTable("document_signing_tokens", {
+  id: serial("id").primaryKey(),
+  documentId: integer("document_id").notNull().references(() => generatedDocuments.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("signing_tokens_document_idx").on(table.documentId),
+  index("signing_tokens_hash_idx").on(table.tokenHash),
 ]);
 
 export const TEMPLATE_CONTEXTS = ["vertragsabschluss", "bestandskunde", "beide"] as const;
@@ -165,6 +187,7 @@ export const insertGeneratedDocumentSchema = z.object({
   renderedHtml: z.string().nullable().optional(),
   customerSignatureData: z.string().nullable().optional(),
   employeeSignatureData: z.string().nullable().optional(),
+  signingStatus: z.enum(SIGNING_STATUSES).optional().default("complete"),
   integrityHash: z.string().nullable().optional(),
 });
 
@@ -174,6 +197,7 @@ export type UpdateDocumentTemplate = z.infer<typeof updateDocumentTemplateSchema
 export type DocumentTemplateBillingType = typeof documentTemplateBillingTypes.$inferSelect;
 export type GeneratedDocument = typeof generatedDocuments.$inferSelect;
 export type InsertGeneratedDocument = z.infer<typeof insertGeneratedDocumentSchema>;
+export type DocumentSigningToken = typeof documentSigningTokens.$inferSelect;
 
 export const insertDocumentTypeSchema = z.object({
   name: z.string().min(1, "Name ist erforderlich").max(100),

@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
+import crypto from "crypto";
 import { documentStorage } from "../../storage/documents";
 import { insertDocumentTypeSchema, updateDocumentTypeSchema, insertEmployeeDocumentSchema, insertCustomerDocumentSchema, insertDocumentTemplateSchema, updateDocumentTemplateSchema } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
@@ -245,7 +246,16 @@ const generateDocumentSchema = z.object({
   customerSignatureData: z.string().nullable().optional(),
   employeeSignatureData: z.string().nullable().optional(),
   placeholderOverrides: z.record(z.string()).optional(),
+  deferEmployeeSignature: z.boolean().optional().default(false),
 });
+
+function generateSigningToken(): string {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+function hashToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
 
 router.post("/documents/generate-pdf", asyncHandler("PDF konnte nicht erstellt werden", async (req: Request, res: Response) => {
   const parsed = generateDocumentSchema.safeParse(req.body);
@@ -254,7 +264,7 @@ router.post("/documents/generate-pdf", asyncHandler("PDF konnte nicht erstellt w
     return;
   }
 
-  const { templateId, customerId, employeeId, customerSignatureData, employeeSignatureData, placeholderOverrides } = parsed.data;
+  const { templateId, customerId, employeeId, customerSignatureData, employeeSignatureData, placeholderOverrides, deferEmployeeSignature } = parsed.data;
 
   if (!customerId && !employeeId) {
     res.status(400).json({ error: "VALIDATION_ERROR", message: "Entweder customerId oder employeeId ist erforderlich" });
@@ -267,21 +277,40 @@ router.post("/documents/generate-pdf", asyncHandler("PDF konnte nicht erstellt w
     return;
   }
 
+  const signingStatus = deferEmployeeSignature ? "pending_employee_signature" as const : "complete" as const;
+
   const result = await generateAndStorePdf({
     template,
     customerId: customerId ?? undefined,
     employeeId: employeeId ?? undefined,
     customerSignatureData,
-    employeeSignatureData,
+    employeeSignatureData: deferEmployeeSignature ? null : employeeSignatureData,
     placeholderOverrides,
     generatedByUserId: req.user!.id,
+    signingStatus,
   });
+
+  let signingLink: string | null = null;
+
+  if (deferEmployeeSignature) {
+    const rawToken = generateSigningToken();
+    const tokenHash = hashToken(rawToken);
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+
+    await documentStorage.createSigningToken(result.generatedDocId, tokenHash, expiresAt);
+
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    signingLink = `${baseUrl}/unterschreiben/${rawToken}`;
+  }
 
   res.status(201).json({
     id: result.generatedDocId,
     fileName: result.fileName,
     objectPath: result.objectPath,
     integrityHash: result.integrityHash,
+    signingStatus,
+    signingLink,
   });
 }));
 

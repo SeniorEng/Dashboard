@@ -22,6 +22,7 @@ export const users = pgTable("users", {
   eintrittsdatum: date("eintrittsdatum"),
   austrittsDatum: date("austritts_datum"),
   vacationDaysPerYear: integer("vacation_days_per_year").notNull().default(30),
+  employmentStatus: text("employment_status").notNull().default("aktiv"),
   isActive: boolean("is_active").notNull().default(true),
   deactivatedAt: timestamp("deactivated_at"),
   isAnonymized: boolean("is_anonymized").notNull().default(false),
@@ -91,6 +92,15 @@ export const employeeCompensationHistory = pgTable("employee_compensation_histor
   index("employee_compensation_valid_idx").on(table.userId, table.validFrom, table.validTo),
 ]);
 
+export const EMPLOYMENT_STATUSES = ["in_einstellung", "aktiv", "inaktiv"] as const;
+export type EmploymentStatus = typeof EMPLOYMENT_STATUSES[number];
+
+export const EMPLOYMENT_STATUS_LABELS: Record<EmploymentStatus, string> = {
+  in_einstellung: "In Einstellung",
+  aktiv: "Aktiv",
+  inaktiv: "Inaktiv",
+};
+
 // Employee role types
 export const EMPLOYEE_ROLES = [
   "hauswirtschaft",
@@ -116,6 +126,7 @@ export const insertUserSchema = z.object({
   geburtsdatum: z.string().optional(),
   eintrittsdatum: z.string().optional(),
   vacationDaysPerYear: z.number().int().min(0).max(365).optional().default(30),
+  employmentStatus: z.enum(EMPLOYMENT_STATUSES).optional().default("aktiv"),
   isAdmin: z.boolean().optional().default(false),
   haustierAkzeptiert: z.boolean().optional().default(true),
   roles: z.array(z.enum(EMPLOYEE_ROLES)).optional().default([]),

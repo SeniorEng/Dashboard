@@ -1,4 +1,4 @@
-import { eq, and, desc, asc, lte, sql } from "drizzle-orm";
+import { eq, and, desc, asc, lte, sql, isNull } from "drizzle-orm";
 import { formatDateISO } from "@shared/utils/datetime";
 import {
   documentTypes,
@@ -8,6 +8,7 @@ import {
   documentTemplates,
   documentTemplateBillingTypes,
   generatedDocuments,
+  documentSigningTokens,
   type DocumentType,
   type InsertDocumentType,
   type UpdateDocumentType,
@@ -21,6 +22,7 @@ import {
   type DocumentTemplateBillingType,
   type GeneratedDocument,
   type InsertGeneratedDocument,
+  type DocumentSigningToken,
 } from "@shared/schema";
 import { db } from "../lib/db";
 
@@ -373,6 +375,7 @@ export class DocumentStorage implements IDocumentStorage {
       renderedHtml: data.renderedHtml ?? null,
       customerSignatureData: data.customerSignatureData || null,
       employeeSignatureData: data.employeeSignatureData || null,
+      signingStatus: data.signingStatus ?? "complete",
       integrityHash: data.integrityHash || null,
       generatedByUserId,
     }).returning();
@@ -465,6 +468,61 @@ export class DocumentStorage implements IDocumentStorage {
 
       return rows;
     });
+  }
+
+  async createSigningToken(documentId: number, tokenHash: string, expiresAt: Date): Promise<DocumentSigningToken> {
+    const [result] = await db.insert(documentSigningTokens).values({
+      documentId,
+      tokenHash,
+      expiresAt,
+    }).returning();
+    return result;
+  }
+
+  async getSigningTokenByHash(tokenHash: string): Promise<(DocumentSigningToken & { document: GeneratedDocument }) | null> {
+    const rows = await db
+      .select({
+        token: documentSigningTokens,
+        document: generatedDocuments,
+      })
+      .from(documentSigningTokens)
+      .innerJoin(generatedDocuments, eq(documentSigningTokens.documentId, generatedDocuments.id))
+      .where(eq(documentSigningTokens.tokenHash, tokenHash))
+      .limit(1);
+
+    if (rows.length === 0) return null;
+    return { ...rows[0].token, document: rows[0].document };
+  }
+
+  async markSigningTokenUsed(id: number): Promise<boolean> {
+    const [result] = await db
+      .update(documentSigningTokens)
+      .set({ usedAt: new Date() })
+      .where(and(eq(documentSigningTokens.id, id), isNull(documentSigningTokens.usedAt)))
+      .returning();
+    return !!result;
+  }
+
+  async updateGeneratedDocumentAfterSigning(
+    id: number,
+    employeeSignatureData: string,
+    integrityHash: string,
+    objectPath: string,
+    fileName: string,
+  ): Promise<GeneratedDocument | null> {
+    const [result] = await db
+      .update(generatedDocuments)
+      .set({
+        employeeSignatureData,
+        signingStatus: "complete",
+        signedAt: new Date(),
+        integrityHash,
+        objectPath,
+        fileName,
+      })
+      .where(eq(generatedDocuments.id, id))
+      .returning();
+    return result || null;
   }
 
   async ensureTemplateBillingTypes(): Promise<void> {

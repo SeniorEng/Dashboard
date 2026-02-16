@@ -18,6 +18,21 @@ function getPrivateDir(): string {
   return dir;
 }
 
+async function storePdfToObjectStorage(pdfBuffer: Buffer, fileName: string, metadata: Record<string, string>): Promise<string> {
+  const privateDir = getPrivateDir();
+  const objectFullPath = `${privateDir}/documents/${fileName}`;
+  const { bucketName, objectName } = parseObjectPath(objectFullPath);
+
+  const bucket = objectStorageClient.bucket(bucketName);
+  const file = bucket.file(objectName);
+  await file.save(pdfBuffer, {
+    contentType: "application/pdf",
+    metadata,
+  });
+
+  return `/objects/documents/${fileName}`;
+}
+
 export async function generateAndStorePdf(options: {
   template: DocumentTemplate;
   customerId?: number;
@@ -26,6 +41,7 @@ export async function generateAndStorePdf(options: {
   employeeSignatureData?: string | null;
   placeholderOverrides?: Record<string, string>;
   generatedByUserId: number;
+  signingStatus?: "complete" | "pending_employee_signature";
 }): Promise<{
   objectPath: string;
   fileName: string;
@@ -33,7 +49,7 @@ export async function generateAndStorePdf(options: {
   renderedHtml: string;
   generatedDocId: number;
 }> {
-  const { template, customerId, employeeId, customerSignatureData, employeeSignatureData, placeholderOverrides, generatedByUserId } = options;
+  const { template, customerId, employeeId, customerSignatureData, employeeSignatureData, placeholderOverrides, generatedByUserId, signingStatus = "complete" } = options;
 
   const overrides: Record<string, string> = { ...placeholderOverrides };
   if (customerSignatureData) {
@@ -59,22 +75,11 @@ export async function generateAndStorePdf(options: {
   const targetLabel = customerId ? `kunde_${customerId}` : employeeId ? `mitarbeiter_${employeeId}` : "doc";
   const fileName = `${slug}_${targetLabel}_${dateStr}.pdf`;
 
-  const privateDir = getPrivateDir();
-  const objectFullPath = `${privateDir}/documents/${fileName}`;
-  const { bucketName, objectName } = parseObjectPath(objectFullPath);
-
-  const bucket = objectStorageClient.bucket(bucketName);
-  const file = bucket.file(objectName);
-  await file.save(pdfBuffer, {
-    contentType: "application/pdf",
-    metadata: {
-      integrityHash,
-      templateSlug: template.slug,
-      templateVersion: String(template.version),
-    },
+  const objectPath = await storePdfToObjectStorage(pdfBuffer, fileName, {
+    integrityHash,
+    templateSlug: template.slug,
+    templateVersion: String(template.version),
   });
-
-  const objectPath = `/objects/documents/${fileName}`;
 
   const combinedHash = computeDataHash(
     JSON.stringify({
@@ -97,6 +102,7 @@ export async function generateAndStorePdf(options: {
     renderedHtml,
     customerSignatureData: customerSignatureData ?? null,
     employeeSignatureData: employeeSignatureData ?? null,
+    signingStatus,
     integrityHash: combinedHash,
   }, generatedByUserId);
 
@@ -107,6 +113,44 @@ export async function generateAndStorePdf(options: {
     renderedHtml,
     generatedDocId: generatedDoc.id,
   };
+}
+
+export async function regeneratePdfWithSignature(
+  doc: import("@shared/schema").GeneratedDocument,
+  employeeSignatureData: string,
+): Promise<{ objectPath: string; fileName: string; integrityHash: string }> {
+  if (!doc.renderedHtml) throw new Error("Kein gerendertetes HTML vorhanden");
+
+  const sigHtml = `<img src="${employeeSignatureData}" alt="Mitarbeiterunterschrift" style="max-height:60px;" />`;
+  let updatedHtml = doc.renderedHtml;
+  if (updatedHtml.includes("{{employee_signature}}")) {
+    updatedHtml = updatedHtml.replace(/\{\{employee_signature\}\}/g, sigHtml);
+  } else {
+    updatedHtml += `<div style="margin-top:40px;"><p><strong>Unterschrift Mitarbeiter:</strong></p>${sigHtml}<p style="font-size:10px;color:#666;">Datum: ${new Date().toLocaleDateString("de-DE")}</p></div>`;
+  }
+
+  const { pdfBuffer, integrityHash: pdfHash } = await generatePdfFromHtml(updatedHtml, doc.fileName);
+
+  const dateStr = new Date().toISOString().split("T")[0];
+  const baseName = doc.fileName.replace(/\.pdf$/i, "");
+  const fileName = `${baseName}_signed_${dateStr}.pdf`;
+
+  const objectPath = await storePdfToObjectStorage(pdfBuffer, fileName, {
+    integrityHash: pdfHash,
+    originalDocumentId: String(doc.id),
+  });
+
+  const combinedHash = computeDataHash(
+    JSON.stringify({
+      pdfHash,
+      customerSignature: doc.customerSignatureData ? computeDataHash(doc.customerSignatureData) : null,
+      employeeSignature: computeDataHash(employeeSignatureData),
+      templateId: doc.templateId,
+      templateVersion: doc.templateVersion,
+    })
+  );
+
+  return { objectPath, fileName, integrityHash: combinedHash };
 }
 
 export async function getDocumentPdfBuffer(objectPath: string): Promise<Buffer> {

@@ -20,6 +20,7 @@ import {
   ChevronUp,
   FileText,
   Download,
+  Clock,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -64,6 +65,7 @@ interface GeneratedDocumentData {
   signedAt: string | null;
   integrityHash: string | null;
   generatedAt: string;
+  signingStatus: string | null;
 }
 
 export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false }: { employeeId: number; userName: string; isAdmin?: boolean }) {
@@ -364,10 +366,15 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
                         <span className="text-xs text-gray-400">
                           Erstellt: {formatDateDisplay(doc.generatedAt.split("T")[0])}
                         </span>
-                        {doc.employeeSignatureData && (
+                        {doc.signingStatus === "pending_employee_signature" ? (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 inline-flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            Warte auf Unterschrift
+                          </span>
+                        ) : doc.employeeSignatureData ? (
                           <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">Unterschrieben</span>
-                        )}
-                        {doc.integrityHash && (
+                        ) : null}
+                        {doc.integrityHash && doc.signingStatus !== "pending_employee_signature" && (
                           <span className="text-xs px-1.5 py-0.5 rounded bg-green-50 text-green-700">Verifiziert</span>
                         )}
                       </div>

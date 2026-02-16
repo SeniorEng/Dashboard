@@ -42,6 +42,7 @@ const TasksPage = lazy(() => import("@/pages/tasks"));
 const ServiceRecordsPage = lazy(() => import("@/pages/service-records"));
 const ServiceRecordDetailPage = lazy(() => import("@/pages/service-record-detail"));
 const ProfilePage = lazy(() => import("@/pages/profile"));
+const PublicSigningPage = lazy(() => import("@/pages/public-signing"));
 
 function PageLoader() {
   return (
@@ -95,6 +96,9 @@ function AdminRoute({ component: Component }: { component: React.ComponentType }
 function Router() {
   return (
     <Switch>
+      <Route path="/unterschreiben/:token">
+        {() => <Suspense fallback={<PageLoader />}><PublicSigningPage /></Suspense>}
+      </Route>
       <Route path="/login" component={LoginPage} />
       <Route path="/forgot-password">
         <Suspense fallback={<PageLoader />}>
