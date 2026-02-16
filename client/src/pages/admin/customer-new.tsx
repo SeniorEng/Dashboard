@@ -366,6 +366,20 @@ export default function AdminCustomerNew() {
   };
 
   const handleNext = () => {
+    if (currentStepId === "contacts") {
+      const emptyContacts = formData.contacts.filter(c => !c.vorname.trim() && !c.nachname.trim());
+      if (emptyContacts.length > 0) {
+        const filledContacts = formData.contacts.filter(c => c.vorname.trim() || c.nachname.trim());
+        if (filledContacts.length === 0) {
+          filledContacts.push({ ...formData.contacts[0] });
+        }
+        setFormData(prev => ({ ...prev, contacts: filledContacts.length > 0 ? filledContacts : prev.contacts }));
+        toast({
+          title: "Leere Kontakte entfernt",
+          description: `${emptyContacts.length} leere${emptyContacts.length === 1 ? "r" : ""} Kontakt${emptyContacts.length === 1 ? "" : "e"} wurde${emptyContacts.length === 1 ? "" : "n"} entfernt.`,
+        });
+      }
+    }
     if (validateStepById(currentStepId)) {
       if (currentStep < steps.length - 1) {
         setCurrentStep(currentStep + 1);

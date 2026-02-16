@@ -15,7 +15,14 @@ interface ContactsStepProps {
   onRemoveContact: (index: number) => void;
 }
 
+function isContactEmpty(contact: ContactFormData): boolean {
+  return !contact.vorname.trim() && !contact.nachname.trim();
+}
+
 export function ContactsStep({ contacts, phoneErrors, onContactChange, onAddContact, onRemoveContact }: ContactsStepProps) {
+  const lastContact = contacts[contacts.length - 1];
+  const lastContactEmpty = lastContact ? isContactEmpty(lastContact) : false;
+
   return (
     <div className="space-y-6">
       <p className="text-sm text-gray-600">
@@ -122,16 +129,24 @@ export function ContactsStep({ contacts, phoneErrors, onContactChange, onAddCont
       ))}
 
       {contacts.length < MAX_CONTACTS && (
-        <Button
-          type="button"
-          variant="outline"
-          onClick={onAddContact}
-          className="w-full"
-          data-testid="button-add-contact"
-        >
-          <Plus className={`${iconSize.sm} mr-2`} />
-          Weiteren Kontakt hinzufügen
-        </Button>
+        <div className="space-y-1">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onAddContact}
+            className="w-full"
+            disabled={lastContactEmpty}
+            data-testid="button-add-contact"
+          >
+            <Plus className={`${iconSize.sm} mr-2`} />
+            Weiteren Kontakt hinzufügen
+          </Button>
+          {lastContactEmpty && (
+            <p className="text-xs text-amber-600 text-center" data-testid="text-empty-contact-hint">
+              Bitte zuerst den aktuellen Kontakt ausfüllen (Vor- und Nachname).
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
