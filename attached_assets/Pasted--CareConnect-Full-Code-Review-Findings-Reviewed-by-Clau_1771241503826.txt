@@ -1,0 +1,222 @@
+# CareConnect — Full Code Review Findings
+**Reviewed by:** Claude Sonnet 4.5  
+**Date:** February 2026  
+**Files reviewed:** `package.json`, `replit.md`, `server/index.ts`  
+**Codebase size:** ~43,000+ LoC
+
+---
+
+## 🔴 CRITICAL (Fix immediately)
+
+### C1 — No HTTP Security Headers (Helmet missing)
+**File:** `server/index.ts`  
+**Risk:** XSS, clickjacking, MIME sniffing attacks. Especially serious for an app handling care data, digital signatures, and insurance information.  
+**Evidence:** No `helmet` import or usage anywhere in server setup.  
+**Fix:**
+```bash
+npm install helmet
+```
+```typescript
+import helmet from "helmet";
+app.use(helmet()); // Add before other middleware
+```
+
+---
+
+### C2 — No Rate Limiting on API Routes
+**File:** `server/index.ts`  
+**Risk:** Login endpoints can be brute-forced indefinitely. bcrypt is in the stack (good) but useless without rate limiting. Any API endpoint can be hammered.  
+**Evidence:** No `express-rate-limit` or equivalent in dependencies or server setup.  
+**Fix:**
+```bash
+npm install express-rate-limit
+```
+```typescript
+import rateLimit from "express-rate-limit";
+app.use("/api/", rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
+// Stricter limit for auth:
+app.use("/api/auth/", rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }));
+```
+
+---
+
+### C3 — `vitest` in `dependencies` (not `devDependencies`)
+**File:** `package.json`  
+**Risk:** Testing library ships to production. Inflates bundle, no runtime value whatsoever.  
+**Fix:** Move `"vitest": "^4.0.15"` from `dependencies` → `devDependencies`.
+
+---
+
+## 🟠 HIGH (Fix this sprint)
+
+### H1 — `unhandledRejection` Doesn't Exit the Process
+**File:** `server/index.ts`  
+**Risk:** After an unhandled promise rejection, the app continues running in a potentially corrupted state. Especially dangerous for your budget ledger and audit log.  
+**Evidence:**
+```typescript
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("[FATAL] Unhandled Promise Rejection:", reason);
+  // ← Missing: process.exit(1)
+});
+```
+**Fix:** Add `process.exit(1)` (and optionally alert/logging before exiting).
+
+---
+
+### H2 — `compression()` Applied Before Auth — BREACH Attack Vector
+**File:** `server/index.ts`  
+**Risk:** The [BREACH attack](https://breachattack.com/) can extract secrets from compressed HTTPS responses. Compression should not apply to API routes returning sensitive data.  
+**Evidence:** `app.use(compression())` is the very first middleware, before any route logic.  
+**Fix:** Restrict compression to static assets only, or explicitly exclude API routes:
+```typescript
+app.use(compression({
+  filter: (req, res) => !req.path.startsWith("/api")
+}));
+```
+
+---
+
+### H3 — Alpha Package in Production (`react-signature-canvas`)
+**File:** `package.json`  
+**Risk:** You've built a 3-tier signature security system (SHA-256, audit log, admin-only revoke) for legally binding care contracts — but the canvas library underneath it is an unstable alpha. API can break without warning.  
+**Evidence:** `"react-signature-canvas": "^1.1.0-alpha.2"`  
+**Fix:** Downgrade to stable `"react-signature-canvas": "1.0.6"` or replace with `signature_pad` (well-maintained, stable, widely used).
+
+---
+
+### H4 — `@types/*` Packages in `dependencies`
+**File:** `package.json`  
+**Risk:** TypeScript type definitions have zero runtime value. They inflate the production bundle and signal dependency mismanagement.  
+**Evidence:** `@types/bcrypt`, `@types/compression`, `@types/cookie-parser` all in `dependencies`.  
+**Fix:** Move all three to `devDependencies`.
+
+---
+
+## 🟡 MEDIUM (Fix next sprint)
+
+### M1 — No Graceful Shutdown Handler
+**File:** `server/index.ts`  
+**Risk:** On Replit container restarts or deployment, abrupt shutdown can corrupt in-flight DB writes — especially dangerous for your budget ledger, audit log, and GoBD-compliant historization.  
+**Fix:**
+```typescript
+process.on("SIGTERM", async () => {
+  log("SIGTERM received, shutting down gracefully...");
+  httpServer.close(async () => {
+    await db.$client.end(); // close Neon connection pool
+    process.exit(0);
+  });
+});
+process.on("SIGINT", () => process.emit("SIGTERM" as any));
+```
+
+---
+
+### M2 — Two Conflicting Upload Systems
+**File:** `package.json`  
+**Risk:** `@uppy/core` + `@uppy/aws-s3` + `@uppy/dashboard` + `@uppy/react` (AWS S3) AND `@google-cloud/storage` (GCS) both present. Dead code, inflated bundle, maintenance liability.  
+**Action:** Identify which is actually used. Remove the other. One unused upload stack = ~200-400kb of dead weight.
+
+---
+
+### M3 — `setInterval` for Document Review Tasks is Fragile
+**File:** `server/index.ts`  
+**Risk:** Timer lives in process memory. Replit restarts the server regularly, resetting the 6-hour interval. Tasks may never run in practice.  
+**Evidence:**
+```typescript
+setInterval(async () => { ... }, 6 * 60 * 60 * 1000);
+```
+**Fix:** Persist last-run timestamp in DB. On startup, check if 6 hours have elapsed since last run, and run immediately if so. Then continue with interval.
+
+---
+
+### M4 — No Request Body Size Limit
+**File:** `server/index.ts`  
+**Risk:** No explicit size cap on JSON bodies. With document uploads and signature data in your system, a malicious large payload could cause memory issues.  
+**Evidence:** `app.use(express.json())` — no `limit` option.  
+**Fix:**
+```typescript
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: false, limit: "10mb" }));
+```
+
+---
+
+### M5 — `@jridgewell/trace-mapping` in `dependencies`
+**File:** `package.json`  
+**Risk:** Source map utility — this is a build/dev tool with no runtime purpose. Belongs in `devDependencies`.  
+**Fix:** Move to `devDependencies`.
+
+---
+
+## 🟢 LOW / Code Quality
+
+### L1 — `log()` Function Exported from `server/index.ts`
+**File:** `server/index.ts`  
+**Issue:** The `log` utility is defined and exported from the entry point. This creates an indirect coupling — any module importing `log` also partially initializes `index.ts`. Better practice: move to `server/lib/logger.ts`.
+
+---
+
+### L2 — Dynamic `import()` Inside IIFE Startup
+**File:** `server/index.ts`  
+**Issue:** All storage/service imports are dynamic (`await import(...)`) inside the async IIFE. This is a Replit pattern workaround, but it delays TypeScript type-checking benefits and makes the boot sequence harder to trace. Consider static imports with explicit initialization calls instead.
+
+---
+
+### L3 — React 19 + Vite 7 + Tailwind 4 Combination Risk
+**File:** `package.json`  
+**Issue:** All three are very recent majors. Individually fine, but together they increase the risk of subtle incompatibility issues. Not urgent — but if you hit mysterious bugs, version mismatches are the first thing to check.
+
+---
+
+## ✅ What's Done Well (Keep These)
+
+| Pattern | Why it's good |
+|---|---|
+| `asyncHandler` + `AppError` centralized error handling | Consistent, prevents uncaught async errors in routes |
+| `IStorage` interface abstraction | Enables testing, clean separation |
+| Drizzle + `drizzle-zod` for validated queries | Type-safe DB access with runtime validation |
+| `valid_from`/`valid_to` historization | Correct GoBD compliance pattern |
+| Single JOIN for session validation | Performance-conscious auth |
+| TanStack Query `staleTime` strategy | Thoughtful cache management |
+| SHA-256 signature integrity + audit log | Solid legal-grade signature system |
+| `wouter` instead of React Router | Lightweight, correct choice for dashboard |
+| `libphonenumber-js/min` for E.164 | Proper German phone handling |
+| Soft-delete (`deletedAt`) for appointments | GoBD compliant |
+| Bottom navigation for mobile | Correct mobile-first pattern |
+
+---
+
+## 📋 Prioritized Fix List
+
+| # | Priority | Issue | Effort | Impact |
+|---|---|---|---|---|
+| 1 | 🔴 CRITICAL | Add `helmet` security headers | 15 min | High |
+| 2 | 🔴 CRITICAL | Add `express-rate-limit` on `/api/` | 15 min | High |
+| 3 | 🔴 CRITICAL | Move `vitest` to devDependencies | 2 min | Medium |
+| 4 | 🟠 HIGH | Fix `unhandledRejection` to exit process | 5 min | High |
+| 5 | 🟠 HIGH | Fix compression BREACH vector | 10 min | Medium |
+| 6 | 🟠 HIGH | Replace alpha `react-signature-canvas` | 1-2 hrs | High |
+| 7 | 🟠 HIGH | Move `@types/*` to devDependencies | 5 min | Low |
+| 8 | 🟡 MEDIUM | Add graceful shutdown (SIGTERM) | 30 min | High |
+| 9 | 🟡 MEDIUM | Consolidate upload system (Uppy vs GCS) | 2-4 hrs | Medium |
+| 10 | 🟡 MEDIUM | Persist document review task timestamp | 1 hr | Medium |
+| 11 | 🟡 MEDIUM | Add body size limits | 5 min | Medium |
+| 12 | 🟡 MEDIUM | Move `@jridgewell/trace-mapping` to dev | 2 min | Low |
+| 13 | 🟢 LOW | Move `log()` to `server/lib/logger.ts` | 20 min | Low |
+
+---
+
+## 📱 Mobile UX — Preliminary Flags
+*(Based on dependencies — full review needs component code)*
+
+| Component | Risk | Check |
+|---|---|---|
+| `react-day-picker v9` | Touch targets may be too small | Day cells need `min-h-[44px]` |
+| Radix `Select` + `DropdownMenu` | iOS focus trap issues inside Sheets/Drawers | Verify `modal={false}` on popovers |
+| `vaul` Drawer | Good choice for mobile | Confirm `shouldScaleBackground={false}` |
+| Viewport meta tag | Missing = broken zoom behavior | Verify in `index.html` |
+
+---
+
+*Review based on: `package.json`, `replit.md`, `server/index.ts`*  
+*Pending review: `shared/schema.ts`, route handlers, frontend components*

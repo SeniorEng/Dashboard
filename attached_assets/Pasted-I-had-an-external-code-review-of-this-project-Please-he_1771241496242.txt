@@ -1,0 +1,93 @@
+I had an external code review of this project. Please help me verify each finding and then fix them in priority order. Work through them one by one, confirming whether each issue exists before making any changes.
+
+---
+
+## 🔴 CRITICAL — Verify & Fix First
+
+**C1 — No HTTP Security Headers**
+Check if `helmet` is installed and used in `server/index.ts`.
+Expected fix: `npm install helmet` and `app.use(helmet())` as the first middleware.
+
+**C2 — No Rate Limiting**
+Check if `express-rate-limit` is used anywhere on `/api/` routes.
+Expected fix: `npm install express-rate-limit`, then add to `server/index.ts`:
+- General API limit: 100 requests / 15 min
+- Auth routes `/api/auth/`: 10 requests / 15 min
+
+**C3 — `vitest` in wrong dependencies section**
+Check `package.json`: `vitest` should be in `devDependencies`, not `dependencies`. Move it if misplaced.
+
+---
+
+## 🟠 HIGH — Verify & Fix Second
+
+**H1 — `unhandledRejection` missing `process.exit(1)`**
+Check `server/index.ts`: the `unhandledRejection` handler should call `process.exit(1)` after logging, just like the `uncaughtException` handler does. Fix if missing.
+
+**H2 — `compression()` BREACH attack vector**
+Check `server/index.ts`: `compression()` should NOT apply to `/api/` routes (risk of BREACH attack on sensitive data). Fix:
+```typescript
+app.use(compression({
+  filter: (req, res) => !req.path.startsWith("/api")
+}));
+```
+
+**H3 — Alpha package `react-signature-canvas` in production**
+Check `package.json`: `react-signature-canvas` should not be an alpha version in production. This library is used for legally binding care contract signatures. Downgrade to stable `1.0.6` or replace with `signature_pad`.
+
+**H4 — `@types/*` packages in wrong section**
+Check `package.json`: `@types/bcrypt`, `@types/compression`, `@types/cookie-parser` belong in `devDependencies`, not `dependencies`. Move them.
+
+---
+
+## 🟡 MEDIUM — Verify & Fix Third
+
+**M1 — No graceful shutdown handler**
+Check `server/index.ts`: there should be a `SIGTERM` handler that closes the HTTP server and Neon DB connection cleanly before exiting. Add if missing:
+```typescript
+process.on("SIGTERM", async () => {
+  httpServer.close(async () => {
+    await db.$client.end();
+    process.exit(0);
+  });
+});
+```
+
+**M2 — Two upload systems coexisting (Uppy/S3 vs Google Cloud Storage)**
+Check `package.json` and the codebase: both `@uppy/core`, `@uppy/aws-s3`, `@uppy/react` AND `@google-cloud/storage` are present. Identify which one is actually used in the code, and remove all packages and code related to the unused one.
+
+**M3 — `setInterval` document review task is fragile on restarts**
+Check `server/index.ts`: the 6-hour `setInterval` for `generateDocumentReviewTasks` resets on every server restart. Fix: store last run timestamp in the database, check it on startup, run immediately if 6+ hours have passed, then start the interval.
+
+**M4 — No request body size limit**
+Check `server/index.ts`: `express.json()` and `express.urlencoded()` should have an explicit `limit` option. Add `{ limit: "10mb" }` to both.
+
+**M5 — `@jridgewell/trace-mapping` in wrong section**
+Check `package.json`: this source map utility belongs in `devDependencies`. Move it.
+
+---
+
+## 📱 MOBILE UX — Verify These
+
+**Mobile 1 — `react-day-picker` touch targets**
+Check all calendar/date picker usages: day cells should have `min-h-[44px] min-w-[44px]` for proper touch targets on mobile.
+
+**Mobile 2 — Radix dropdowns inside Sheets/Drawers on iOS**
+Check any `Popover`, `Select`, or `DropdownMenu` components that are rendered inside a `Sheet` or `Drawer`: they need `modal={false}` to prevent iOS focus trap conflicts.
+
+**Mobile 3 — Viewport meta tag**
+Check `client/index.html`: verify this exact tag is present:
+```html
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+```
+
+**Mobile 4 — Vaul Drawer background scaling**
+Check all `Drawer` usages: confirm `shouldScaleBackground={false}` is set (already noted in replit.md preferences, verify it's actually applied in code).
+
+---
+
+## ✅ After verifying each item:
+1. Confirm which issues actually exist in the code (some may already be fixed)
+2. Fix them in the order listed above (Critical → High → Medium → Mobile)
+3. After all fixes, run `npm run check` to confirm TypeScript still compiles cleanly
+4. Report back with a summary of what was found and what was changed
