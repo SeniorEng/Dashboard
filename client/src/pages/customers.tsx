@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { 
-  MapPin, Phone, User, Search, 
+  MapPin, Phone, PhoneCall, User, Search, 
   Heart, Loader2, Users, Cake, Gift
 } from "lucide-react";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
@@ -306,7 +306,11 @@ function BirthdayCard({ birthday }: { birthday: BirthdayEntry }) {
 const CustomerCard = memo(function CustomerCard({ customer }: { customer: CustomerWithAccess }) {
   const address = formatAddress(customer);
   const phone = customer.telefon ? formatPhoneForDisplay(customer.telefon) : null;
+  const festnetz = customer.festnetz ? formatPhoneForDisplay(customer.festnetz) : null;
   const isLegacy = customer.isCurrentlyAssigned === false;
+  const geburtsdatum = customer.geburtsdatum
+    ? formatDateForDisplay(customer.geburtsdatum, { day: "2-digit", month: "2-digit", year: "numeric" })
+    : null;
 
   return (
     <Link href={`/customer/${customer.id}`}>
@@ -332,6 +336,13 @@ const CustomerCard = memo(function CustomerCard({ customer }: { customer: Custom
             </div>
 
             <div className="space-y-1.5 text-sm">
+              {geburtsdatum && (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Cake className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
+                  <span data-testid={`text-customer-birthday-${customer.id}`}>{geburtsdatum}</span>
+                </div>
+              )}
+
               <div className="flex items-start gap-2 text-muted-foreground">
                 <MapPin className={`${iconSize.sm} mt-0.5 flex-shrink-0 text-primary/60`} />
                 <span className="break-words" data-testid={`text-customer-address-${customer.id}`}>
@@ -360,6 +371,24 @@ const CustomerCard = memo(function CustomerCard({ customer }: { customer: Custom
                   </span>
                 )}
               </div>
+
+              {festnetz && customer.festnetz && (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <PhoneCall className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
+                  <button 
+                    type="button"
+                    className="text-primary hover:underline text-left"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      window.location.href = `tel:${customer.festnetz}`;
+                    }}
+                    data-testid={`button-customer-festnetz-${customer.id}`}
+                  >
+                    {festnetz}
+                  </button>
+                </div>
+              )}
 
               {customer.needs && customer.needs.length > 0 && (
                 <div className="flex items-start gap-2 pt-1" data-testid={`container-customer-needs-${customer.id}`}>
