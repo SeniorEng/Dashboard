@@ -323,7 +323,10 @@ export default function AdminCustomerNew() {
       if (field === "pflegegrad") {
         const pg = parseInt(value as string);
         const maxCents = BUDGET_45A_MAX_BY_PFLEGEGRAD[pg] ?? 0;
-        newData.pflegesachleistungen36 = (maxCents / 100).toString();
+        const currentValue = parseFloat(prev.pflegesachleistungen36);
+        if (!currentValue || currentValue === 0) {
+          newData.pflegesachleistungen36 = (maxCents / 100).toString();
+        }
       }
       return newData;
     });

@@ -125,6 +125,11 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
                     data-testid={`input-budget-${budgetType}`}
                   />
                   <p className="text-xs text-gray-500">{BUDGET_HINTS[budgetType]}</p>
+                  {budgetType === "umwandlung_45a" && pflegegrad && pflegegrad >= 2 && (
+                    <p className="text-xs text-purple-600" data-testid="text-max-pflegesachleistungen">
+                      Maximal: {(BUDGET_45A_MAX_BY_PFLEGEGRAD[pflegegrad] ?? 0) / 100} € für Pflegegrad {pflegegrad}
+                    </p>
+                  )}
                   {error && <p className="text-xs text-red-600 font-medium">{error}</p>}
                   {is45aDisabled && (
                     <p className="text-xs text-amber-600">Erst ab Pflegegrad 2 verfügbar</p>
