@@ -96,14 +96,6 @@ export default function Dashboard() {
   return (
     <Layout>
       <div className="mb-6 animate-in slide-in-from-top-4 duration-500">
-        <div className="flex items-center justify-end mb-3">
-          <Link href="/new-appointment">
-            <Button size="sm" className="shadow-lg shadow-primary/20" data-testid="button-new-appointment">
-              <Plus className={`${iconSize.sm} mr-1`} /> Neuer Termin
-            </Button>
-          </Link>
-        </div>
-
         <div className="flex items-center gap-1">
           <Button
             variant="ghost"
@@ -153,16 +145,23 @@ export default function Dashboard() {
 
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-foreground/90" data-testid="text-date">
-            {isToday 
-              ? `Heute, ${format(selectedDate, "d. MMMM", { locale: de })}` 
-              : format(selectedDate, "EEEE, d. MMMM", { locale: de })}
-          </h2>
-          {!isLoading && appointments && (
-            <span className="text-xs font-medium px-2.5 py-1 bg-primary/10 text-primary rounded-full" data-testid="text-visit-count">
-              {appointments.length} {appointments.length === 1 ? 'Termin' : 'Termine'}
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-foreground/90" data-testid="text-date">
+              {isToday 
+                ? `Heute, ${format(selectedDate, "d. MMMM", { locale: de })}` 
+                : format(selectedDate, "EEEE, d. MMMM", { locale: de })}
+            </h2>
+            {!isLoading && appointments && (
+              <span className="text-xs font-medium px-2.5 py-1 bg-primary/10 text-primary rounded-full" data-testid="text-visit-count">
+                {appointments.length} {appointments.length === 1 ? 'Termin' : 'Termine'}
+              </span>
+            )}
+          </div>
+          <Link href="/new-appointment">
+            <Button size="sm" className="shadow-lg shadow-primary/20" data-testid="button-new-appointment">
+              <Plus className={`${iconSize.sm} mr-1`} /> Neuer Termin
+            </Button>
+          </Link>
         </div>
 
         <AppointmentList 
