@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DatePicker } from "@/components/ui/date-picker";
-import { ChevronLeft, Loader2, Calendar, Clock, User, Home, Plus, Users, AlertTriangle } from "lucide-react";
+import { ChevronLeft, Loader2, Calendar, Clock, User, Home, Plus, Users, AlertTriangle, XCircle } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { useNewAppointmentForm, ServiceSelector, AppointmentSummary } from "@/features/appointments";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS, formatDuration } from "@shared/types";
@@ -146,16 +146,22 @@ export default function NewAppointment() {
               )}
 
               {form.costEstimate?.isHardBlock && (
-                <div className="rounded-lg border bg-red-50 border-red-300 p-3 text-sm flex items-start gap-2" data-testid="budget-hard-block">
-                  <AlertTriangle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
-                  <p className="text-red-800 font-medium">Budget reicht nicht aus. Termin kann nicht erstellt werden.</p>
+                <div className="rounded-lg border bg-red-50 border-red-300 p-4 text-sm flex items-start gap-3" data-testid="budget-hard-block">
+                  <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-red-800 font-semibold">Termin kann nicht erstellt werden</p>
+                    <p className="text-red-700 mt-1">Das Budget ist aufgebraucht und der Kunde akzeptiert keine private Zuzahlung.</p>
+                  </div>
                 </div>
               )}
 
               {form.costEstimate?.warning && !form.costEstimate?.isHardBlock && (
-                <div className="rounded-lg border bg-amber-50 border-amber-200 p-3 text-sm flex items-start gap-2" data-testid="budget-warning">
-                  <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
-                  <p className="text-amber-800">{form.costEstimate.warning}</p>
+                <div className="rounded-lg border bg-amber-50 border-amber-200 p-4 text-sm flex items-start gap-3" data-testid="budget-warning">
+                  <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-amber-800 font-semibold">Budget-Hinweis</p>
+                    <p className="text-amber-700 mt-1">Das Budget reicht nicht vollständig aus. Der Restbetrag wird dem Kunden privat berechnet.</p>
+                  </div>
                 </div>
               )}
 

@@ -242,14 +242,14 @@ export default function DocumentAppointment() {
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <Label htmlFor={`details-${index}`}>Servicedetails *</Label>
-                        <span className={`text-xs ${service.details.length > 55 ? "text-destructive" : "text-muted-foreground"}`}>
-                          {service.details.length}/55
+                        <span className={`text-xs ${service.details.length > 120 ? "text-destructive" : "text-muted-foreground"}`}>
+                          {service.details.length}/120
                         </span>
                       </div>
                       <Input
                         id={`details-${index}`}
                         value={service.details}
-                        onChange={(e) => updateService(index, "details", e.target.value.slice(0, 55))}
+                        onChange={(e) => updateService(index, "details", e.target.value.slice(0, 120))}
                         placeholder={
                           service.serviceType === "Hauswirtschaft" 
                             ? "z.B. Wäsche gewaschen, Boden gewischt" 
@@ -257,7 +257,7 @@ export default function DocumentAppointment() {
                             ? "z.B. Begleitung zum Arzt, Spaziergang"
                             : "z.B. Beratung durchgeführt"
                         }
-                        maxLength={55}
+                        maxLength={120}
                         className={!service.details.trim() ? "border-amber-300" : ""}
                         data-testid={`input-details-${service.serviceType.toLowerCase()}`}
                       />

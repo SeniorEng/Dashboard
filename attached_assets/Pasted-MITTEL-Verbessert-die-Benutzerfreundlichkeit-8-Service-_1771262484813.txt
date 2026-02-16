@@ -1,0 +1,33 @@
+MITTEL — Verbessert die Benutzerfreundlichkeit
+8. Service-Details-Limit zu kurz (55 Zeichen)
+Datei: client/src/pages/document-appointment.tsx, Zeilen 242-263
+Problem: 55 Zeichen sind für Beschreibungen von Pflegeleistungen oft zu wenig. Beispiel: "Wäsche gewaschen, Boden gewischt, Staubgesaugt" = 47 Zeichen.
+Anweisung:
+
+Erhöhe das Limit von 55 auf 120 Zeichen
+Ändere in document-appointment.tsx: maxLength={120} und .slice(0, 120)
+Ändere den Zeichenzähler: {service.details.length}/120
+Prüfe auch das Backend-Schema (shared/schema/appointments.ts) und passe die varchar-Länge für das details-Feld in der appointment_services-Tabelle an (von 55 auf 120)
+Erstelle eine Drizzle-Migration für die Datenbankänderung
+
+
+9. Erstberatungs-Dauer nicht bearbeitbar
+Datei: client/src/pages/edit-appointment.tsx
+Problem: Für Erstberatungs-Termine kann die Dauer nach der Erstellung nicht mehr geändert werden. Start- und Endzeit sind editierbar, aber es fehlt ein Dauer-Feld.
+Anweisung:
+
+Füge im Erstberatungs-Bearbeitungsformular ein Dauer-Dropdown hinzu (wie beim Erstellen)
+Nutze die gleichen DURATION_OPTIONS wie in new-appointment.tsx
+Berechne die Endzeit automatisch aus Startzeit + gewählter Dauer
+Stelle sicher, dass die PATCH-API die neue Endzeit korrekt speichert
+
+
+10. Budget-Warnungen vs. Hard-Blocks unklar
+Datei: client/src/pages/new-appointment.tsx
+Problem: Der Unterschied zwischen "Budget-Warnung" (Termin kann trotzdem erstellt werden) und "Hard-Block" (Button deaktiviert) ist für Benutzer nicht verständlich.
+Anweisung:
+
+Bei Warnung (Budget niedrig, aber private Zuzahlung akzeptiert): Zeige einen gelben Hinweis-Banner mit klarem Text: "Das Budget reicht nicht vollständig aus. Der Restbetrag wird dem Kunden privat berechnet."
+Bei Hard-Block (Budget aufgebraucht, keine private Zuzahlung): Zeige einen roten Hinweis-Banner: "Das Budget ist aufgebraucht und der Kunde akzeptiert keine private Zuzahlung. Termin kann nicht erstellt werden."
+Füge jeweils ein Icon hinzu (gelbes Warndreick vs. rotes X)
+

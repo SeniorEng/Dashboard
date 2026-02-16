@@ -8,12 +8,14 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { DatePicker } from "@/components/ui/date-picker";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ChevronLeft, Loader2, Calendar, Clock, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useAppointment, useCustomerList, ServiceSelector, AppointmentSummary } from "@/features/appointments";
 import { addMinutesToTime, timeToMinutes, minutesToTimeDisplay, formatDurationDisplay } from "@shared/utils/datetime";
+import { DURATION_OPTIONS } from "@shared/types";
 import type { Service } from "@shared/schema";
 
 export default function EditAppointment() {
@@ -52,6 +54,7 @@ export default function EditAppointment() {
   const [services, setServices] = useState<Array<{ serviceId: number; durationMinutes: number }>>([]);
   const [notes, setNotes] = useState<string>("");
   const [endTime, setEndTime] = useState<string>("");
+  const [duration, setDuration] = useState<number>(60);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -68,7 +71,13 @@ export default function EditAppointment() {
           })));
         }
       } else if (appointment.scheduledEnd) {
-        setEndTime(appointment.scheduledEnd.slice(0, 5));
+        const start = appointment.scheduledStart.slice(0, 5);
+        const end = appointment.scheduledEnd.slice(0, 5);
+        setEndTime(end);
+        const startMin = timeToMinutes(start);
+        const endMin = timeToMinutes(end);
+        const dur = endMin - startMin;
+        if (dur > 0) setDuration(dur);
       }
     }
   }, [appointment, appointmentServiceEntries, catalogServices]);
@@ -77,10 +86,11 @@ export default function EditAppointment() {
     if (!appointment) return null;
     
     if (appointment.appointmentType === "Erstberatung") {
+      const calcEnd = time ? addMinutesToTime(time, duration) : "";
       return {
         startTime: time,
-        endTime: endTime,
-        totalFormatted: endTime ? `${time} - ${endTime}` : ""
+        endTime: calcEnd,
+        totalFormatted: calcEnd ? `${time} - ${calcEnd}` : ""
       };
     }
     
@@ -105,7 +115,7 @@ export default function EditAppointment() {
       endTime: calculatedEndTime,
       hasServices: servicesList.length > 0
     };
-  }, [appointment, time, endTime, services, catalogServices]);
+  }, [appointment, time, duration, endTime, services, catalogServices]);
 
   const updateMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
@@ -131,8 +141,8 @@ export default function EditAppointment() {
         newErrors.services = "Bitte wählen Sie mindestens einen Service";
       }
     } else {
-      if (time >= endTime) {
-        newErrors.time = "Endzeit muss nach Startzeit liegen";
+      if (!duration || duration <= 0) {
+        newErrors.time = "Bitte wählen Sie eine Dauer";
       }
     }
     
@@ -159,14 +169,12 @@ export default function EditAppointment() {
         })),
       });
     } else {
-      const startMinutes = parseInt(time.split(":")[0]) * 60 + parseInt(time.split(":")[1]);
-      const endMinutes = parseInt(endTime.split(":")[0]) * 60 + parseInt(endTime.split(":")[1]);
-      const duration = endMinutes - startMinutes;
+      const calculatedEnd = addMinutesToTime(time, duration);
       
       updateMutation.mutate({
         date,
         scheduledStart: time,
-        scheduledEnd: endTime,
+        scheduledEnd: calculatedEnd,
         durationPromised: duration,
         notes: notes || null,
       });
@@ -278,18 +286,38 @@ export default function EditAppointment() {
               )}
             </div>
           ) : (
-            <div className="space-y-2">
-              <Label htmlFor="endTime">
-                <Clock className={`${iconSize.sm} inline mr-1`} /> Endzeit
-              </Label>
-              <Input
-                id="endTime"
-                type="time"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
-                className="text-base"
-                data-testid="input-endtime"
-              />
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>
+                  <Clock className={`${iconSize.sm} inline mr-1`} /> Dauer
+                </Label>
+                <Select
+                  value={duration.toString()}
+                  onValueChange={(val) => {
+                    const dur = parseInt(val);
+                    setDuration(dur);
+                    if (time) {
+                      setEndTime(addMinutesToTime(time, dur));
+                    }
+                  }}
+                >
+                  <SelectTrigger data-testid="select-duration">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DURATION_OPTIONS.map((d) => (
+                      <SelectItem key={d.value} value={d.value.toString()}>
+                        {d.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {time && (
+                  <p className="text-xs text-muted-foreground">
+                    {time} – {addMinutesToTime(time, duration)}
+                  </p>
+                )}
+              </div>
               {errors.time && <p className="text-destructive text-sm">{errors.time}</p>}
             </div>
           )}

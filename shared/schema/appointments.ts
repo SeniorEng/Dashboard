@@ -110,7 +110,7 @@ export const updateAppointmentSchema = baseAppointmentSchema.partial();
 export const documentServiceEntrySchema = z.object({
   serviceId: z.number(),
   actualDurationMinutes: z.number().min(1),
-  details: z.string().min(1, "Servicedetails sind erforderlich").max(55, "Maximal 55 Zeichen"),
+  details: z.string().min(1, "Servicedetails sind erforderlich").max(120, "Maximal 120 Zeichen"),
 });
 
 export type DocumentServiceEntry = z.infer<typeof documentServiceEntrySchema>;
