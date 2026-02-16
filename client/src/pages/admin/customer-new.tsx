@@ -238,6 +238,7 @@ export default function AdminCustomerNew() {
       contract,
     };
 
+    const warnings: string[] = [];
     createMutation.mutate(payload, {
       onSuccess: async (customer) => {
         const primaryId = formData.primaryEmployeeId ? parseInt(formData.primaryEmployeeId) : null;
@@ -249,7 +250,9 @@ export default function AdminCustomerNew() {
               primaryEmployeeId: primaryId,
               backupEmployeeId: backupId,
             });
-          } catch {
+          } catch (assignError) {
+            console.error("Mitarbeiter-Zuordnung fehlgeschlagen:", assignError);
+            warnings.push("Mitarbeiter-Zuordnung konnte nicht gespeichert werden");
           }
         }
 
@@ -263,11 +266,17 @@ export default function AdminCustomerNew() {
                 customerSignatureData: signatureData,
               })),
             });
-          } catch {
+          } catch (sigError) {
+            console.error("Unterschriften-Speicherung fehlgeschlagen:", sigError);
+            warnings.push("Unterschriften konnten nicht gespeichert werden");
           }
         }
 
-        toast({ title: "Kunde erfolgreich erstellt" });
+        if (warnings.length > 0) {
+          toast({ title: "Kunde erstellt mit Hinweisen", description: warnings.join("; ") });
+        } else {
+          toast({ title: "Kunde erfolgreich erstellt" });
+        }
         setLocation(`/admin/customers/${customer.id}`);
       },
       onError: (error: Error) => {
