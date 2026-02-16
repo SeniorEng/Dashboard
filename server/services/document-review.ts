@@ -14,7 +14,10 @@ export async function shouldRunDocumentReview(): Promise<boolean> {
 }
 
 async function updateLastRunTimestamp(): Promise<void> {
-  await db.update(systemSettings).set({ lastDocumentReviewAt: new Date() });
+  const existing = await db.select({ id: systemSettings.id }).from(systemSettings).limit(1);
+  if (existing.length > 0) {
+    await db.update(systemSettings).set({ lastDocumentReviewAt: new Date() }).where(eq(systemSettings.id, existing[0].id));
+  }
 }
 
 async function getFirstAdminId(): Promise<number | null> {

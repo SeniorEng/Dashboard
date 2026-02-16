@@ -33,6 +33,7 @@ const apiLimiter = rateLimit({
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.path.startsWith("/api/auth/") || req.path.startsWith("/auth/"),
   message: { message: "Zu viele Anfragen, bitte später erneut versuchen." },
 });
 
@@ -103,7 +104,7 @@ process.on("uncaughtException", (error) => {
     }
   };
   runDocumentReviewIfDue();
-  setInterval(runDocumentReviewIfDue, 6 * 60 * 60 * 1000);
+  const reviewInterval = setInterval(runDocumentReviewIfDue, 6 * 60 * 60 * 1000);
 
   app.use(errorMiddleware);
 
@@ -127,16 +128,16 @@ process.on("uncaughtException", (error) => {
   );
 })();
 
-process.on("SIGTERM", () => {
-  log("SIGTERM received, shutting down gracefully...");
+function gracefulShutdown(signal: string) {
+  log(`${signal} received, shutting down gracefully...`);
   httpServer.close(() => {
     process.exit(0);
   });
-});
+  setTimeout(() => {
+    log("Forced shutdown after timeout");
+    process.exit(1);
+  }, 10000).unref();
+}
 
-process.on("SIGINT", () => {
-  log("SIGINT received, shutting down gracefully...");
-  httpServer.close(() => {
-    process.exit(0);
-  });
-});
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
