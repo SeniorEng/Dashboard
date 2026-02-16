@@ -125,24 +125,20 @@ export default function CustomersPage() {
     );
   }
 
-  const subtitle = activeTab === "kunden"
-    ? `${customers.length} ${customers.length === 1 ? "Kunde" : "Kunden"} insgesamt`
-    : user?.isAdmin 
-      ? `Alle Geburtstage der nächsten ${BIRTHDAY_HORIZON_DAYS} Tage`
-      : `Geburtstage in den nächsten ${BIRTHDAY_HORIZON_DAYS} Tagen`;
-
   return (
     <Layout>
       <div className="mb-6 animate-in slide-in-from-top-4 duration-500">
-        <div className="flex items-center gap-3 mb-1">
+        <div className="flex items-center gap-3">
           <Users className={`${iconSize.lg} text-primary`} />
           <h1 className={componentStyles.pageTitle} data-testid="text-customers-title">
             Kunden
           </h1>
+          {activeTab === "kunden" && customers.length > 0 && (
+            <span className="text-xs font-medium px-2.5 py-1 bg-primary/10 text-primary rounded-full" data-testid="text-customers-subtitle">
+              {customers.length}
+            </span>
+          )}
         </div>
-        <p className="text-muted-foreground text-sm ml-10" data-testid="text-customers-subtitle">
-          {subtitle}
-        </p>
       </div>
 
       <div className="flex items-center gap-1 bg-muted rounded-lg p-1 mb-4" data-testid="tab-switcher-customers">
