@@ -151,7 +151,7 @@ export default function Dashboard() {
                 ? `Heute, ${format(selectedDate, "d. MMMM", { locale: de })}` 
                 : format(selectedDate, "EEEE, d. MMMM", { locale: de })}
             </h2>
-            {!isLoading && appointments && (
+            {!isLoading && appointments && appointments.length > 0 && (
               <span className="text-xs font-medium px-2.5 py-1 bg-primary/10 text-primary rounded-full" data-testid="text-visit-count">
                 {appointments.length} {appointments.length === 1 ? 'Termin' : 'Termine'}
               </span>
