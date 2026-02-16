@@ -1,10 +1,21 @@
 import { documentStorage } from "../storage/documents";
 import { createTask } from "../storage/tasks";
-import { tasks, users } from "@shared/schema";
+import { tasks, users, systemSettings } from "@shared/schema";
 import { db } from "../lib/db";
 import { eq, and, like } from "drizzle-orm";
 
 const TASK_PREFIX = "[Dokument]";
+const REVIEW_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+export async function shouldRunDocumentReview(): Promise<boolean> {
+  const settings = await db.select({ lastRun: systemSettings.lastDocumentReviewAt }).from(systemSettings).limit(1);
+  if (!settings[0]?.lastRun) return true;
+  return Date.now() - new Date(settings[0].lastRun).getTime() >= REVIEW_INTERVAL_MS;
+}
+
+async function updateLastRunTimestamp(): Promise<void> {
+  await db.update(systemSettings).set({ lastDocumentReviewAt: new Date() });
+}
 
 async function getFirstAdminId(): Promise<number | null> {
   const adminUsers = await db
@@ -107,5 +118,6 @@ export async function generateDocumentReviewTasks(): Promise<number> {
     }
   }
 
+  await updateLastRunTimestamp();
   return tasksCreated;
 }

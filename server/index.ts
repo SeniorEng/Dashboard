@@ -1,19 +1,51 @@
 import express from "express";
 import cookieParser from "cookie-parser";
 import compression from "compression";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { errorMiddleware } from "./lib/errors";
 const app = express();
+app.set("trust proxy", 1);
 const httpServer = createServer(app);
 
-app.use(compression());
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+}));
 
-app.use(express.json());
+app.use(compression({
+  filter: (req, res) => {
+    if (req.path.startsWith("/api")) return false;
+    return compression.filter(req, res);
+  },
+}));
 
-app.use(express.urlencoded({ extended: false }));
+app.use(express.json({ limit: "10mb" }));
+
+app.use(express.urlencoded({ extended: false, limit: "10mb" }));
 app.use(cookieParser());
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Zu viele Anfragen, bitte später erneut versuchen." },
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Zu viele Anmeldeversuche, bitte später erneut versuchen." },
+});
+
+app.use("/api/auth/", authLimiter);
+app.use("/api/", apiLimiter);
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -42,6 +74,7 @@ app.use((req, res, next) => {
 
 process.on("unhandledRejection", (reason, promise) => {
   console.error("[FATAL] Unhandled Promise Rejection:", reason);
+  process.exit(1);
 });
 
 process.on("uncaughtException", (error) => {
@@ -58,22 +91,22 @@ process.on("uncaughtException", (error) => {
 
   await registerRoutes(httpServer, app);
 
-  const { generateDocumentReviewTasks } = await import("./services/document-review");
-  setInterval(async () => {
+  const { generateDocumentReviewTasks, shouldRunDocumentReview } = await import("./services/document-review");
+  const runDocumentReviewIfDue = async () => {
     try {
-      const created = await generateDocumentReviewTasks();
-      if (created > 0) log(`${created} Dokumenten-Aufgaben erstellt`);
+      if (await shouldRunDocumentReview()) {
+        const created = await generateDocumentReviewTasks();
+        if (created > 0) log(`${created} Dokumenten-Aufgaben erstellt`);
+      }
     } catch (e) {
       console.error("Fehler bei Dokumenten-Prüfung:", e);
     }
-  }, 6 * 60 * 60 * 1000); // every 6 hours
-  generateDocumentReviewTasks().catch(e => console.error("Initial document check:", e));
+  };
+  runDocumentReviewIfDue();
+  setInterval(runDocumentReviewIfDue, 6 * 60 * 60 * 1000);
 
   app.use(errorMiddleware);
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
   if (process.env.NODE_ENV === "production") {
     serveStatic(app);
   } else {
@@ -81,10 +114,6 @@ process.on("uncaughtException", (error) => {
     await setupVite(httpServer, app);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "5000", 10);
   httpServer.listen(
     {
@@ -97,3 +126,17 @@ process.on("uncaughtException", (error) => {
     },
   );
 })();
+
+process.on("SIGTERM", () => {
+  log("SIGTERM received, shutting down gracefully...");
+  httpServer.close(() => {
+    process.exit(0);
+  });
+});
+
+process.on("SIGINT", () => {
+  log("SIGINT received, shutting down gracefully...");
+  httpServer.close(() => {
+    process.exit(0);
+  });
+});

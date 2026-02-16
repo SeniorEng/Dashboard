@@ -10,6 +10,7 @@ import { users } from "./users";
 export const systemSettings = pgTable("system_settings", {
   id: serial("id").primaryKey(),
   autoBreaksEnabled: boolean("auto_breaks_enabled").notNull().default(true),
+  lastDocumentReviewAt: timestamp("last_document_review_at"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   updatedByUserId: integer("updated_by_user_id").references(() => users.id),
 });
