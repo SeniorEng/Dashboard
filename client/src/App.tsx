@@ -97,7 +97,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/unterschreiben/:token">
-        {() => <Suspense fallback={<PageLoader />}><PublicSigningPage /></Suspense>}
+        <Suspense fallback={<PageLoader />}><PublicSigningPage /></Suspense>
       </Route>
       <Route path="/login" component={LoginPage} />
       <Route path="/forgot-password">
@@ -117,10 +117,10 @@ function Router() {
         <ProtectedRoute component={Customers} />
       </Route>
       <Route path="/customer/:id/convert">
-        {() => <ProtectedRoute component={() => <CustomerConvert />} />}
+        <ProtectedRoute component={CustomerConvert} />
       </Route>
       <Route path="/customer/:id">
-        {() => <ProtectedRoute component={() => <CustomerDetail />} />}
+        <ProtectedRoute component={CustomerDetail} />
       </Route>
       <Route path="/my-times">
         <ProtectedRoute component={MyTimes} />
@@ -138,19 +138,19 @@ function Router() {
         <ProtectedRoute component={ServiceRecordsPage} />
       </Route>
       <Route path="/service-records/:id">
-        {() => <ProtectedRoute component={() => <ServiceRecordDetailPage />} />}
+        <ProtectedRoute component={ServiceRecordDetailPage} />
       </Route>
       <Route path="/appointment/:id">
-        {(params) => <ProtectedRoute component={() => <AppointmentDetail />} />}
+        <ProtectedRoute component={AppointmentDetail} />
       </Route>
       <Route path="/new-appointment">
         <ProtectedRoute component={NewAppointment} />
       </Route>
       <Route path="/edit-appointment/:id">
-        {(params) => <ProtectedRoute component={() => <EditAppointment />} />}
+        <ProtectedRoute component={EditAppointment} />
       </Route>
       <Route path="/document-appointment/:id">
-        {(params) => <ProtectedRoute component={() => <DocumentAppointment />} />}
+        <ProtectedRoute component={DocumentAppointment} />
       </Route>
       <Route path="/profile">
         <ProtectedRoute component={ProfilePage} />
@@ -168,10 +168,10 @@ function Router() {
         <AdminRoute component={AdminCustomerNew} />
       </Route>
       <Route path="/admin/customers/:id/edit">
-        {() => <AdminRoute component={() => <AdminCustomerEdit />} />}
+        <AdminRoute component={AdminCustomerEdit} />
       </Route>
       <Route path="/admin/customers/:id">
-        {() => <AdminRoute component={() => <AdminCustomerDetail />} />}
+        <AdminRoute component={AdminCustomerDetail} />
       </Route>
       <Route path="/admin/customers">
         <AdminRoute component={AdminCustomers} />
