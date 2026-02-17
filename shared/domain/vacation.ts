@@ -1,9 +1,11 @@
+import { parseLocalDate } from "../utils/datetime";
+
 export function calculateProRataVacationDays(
   vacationDaysPerYear: number,
   eintrittsdatum: string,
   year: number
 ): number {
-  const startDate = new Date(eintrittsdatum);
+  const startDate = parseLocalDate(eintrittsdatum);
   const startYear = startDate.getFullYear();
 
   if (year < startYear) return 0;
@@ -19,11 +21,11 @@ export function calculateProRataVacationDays(
 export function calculateCarryOverDays(
   unusedDaysFromPreviousYear: number,
   year: number,
-  todayISO: string
+  todayISOStr: string
 ): number {
   if (unusedDaysFromPreviousYear <= 0) return 0;
 
-  const today = new Date(todayISO);
+  const today = parseLocalDate(todayISOStr);
   const expiryDate = new Date(year, 3, 1);
 
   if (today >= expiryDate) {

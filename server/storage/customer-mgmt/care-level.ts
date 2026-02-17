@@ -8,7 +8,7 @@ import {
   customers,
 } from "@shared/schema";
 import { eq, and, isNull, desc } from "drizzle-orm";
-import { formatDateISO } from "@shared/utils/datetime";
+import { parseLocalDate, formatDateISO } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
 
 export async function getCustomerCareLevelHistory(customerId: number): Promise<CustomerCareLevelHistory[]> {
@@ -32,7 +32,7 @@ export async function getCustomerCurrentCareLevel(customerId: number): Promise<C
 }
 
 export async function addCareLevelHistory(data: InsertCareLevelHistory, userId?: number): Promise<CustomerCareLevelHistory> {
-  const validFromDate = new Date(data.validFrom);
+  const validFromDate = parseLocalDate(data.validFrom);
   validFromDate.setDate(validFromDate.getDate() - 1);
   const dayBeforeValidFrom = formatDateISO(validFromDate);
   

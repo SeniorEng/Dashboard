@@ -9,6 +9,7 @@
 import { useState, useMemo, useCallback } from "react";
 import { Link, useParams, useSearch, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { formatDateForDisplay } from "@shared/utils/datetime";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Layout } from "@/components/layout";
@@ -431,10 +432,9 @@ export default function AdminCustomerDetail() {
                     {(() => {
                       const current = customer.careLevelHistory?.find((h: { validTo: string | null }) => !h.validTo);
                       if (current?.validFrom) {
-                        const d = new Date(current.validFrom);
                         return (
                           <span className="text-xs text-gray-500" data-testid="text-pflegegrad-seit">
-                            seit {d.toLocaleDateString("de-DE", { month: "2-digit", year: "numeric" })}
+                            seit {formatDateForDisplay(current.validFrom, { month: "2-digit", year: "numeric" })}
                           </span>
                         );
                       }

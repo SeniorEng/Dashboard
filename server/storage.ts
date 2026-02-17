@@ -213,7 +213,7 @@ export interface ServiceRecordOverviewItem {
 export class DatabaseStorage implements IStorage {
   // Customers
   async getCustomers(): Promise<Customer[]> {
-    return await db.select().from(customers);
+    return await db.select().from(customers).where(isNull(customers.deletedAt));
   }
 
   async getCustomer(id: number): Promise<Customer | undefined> {
@@ -230,7 +230,11 @@ export class DatabaseStorage implements IStorage {
 
   async deleteCustomer(id: number): Promise<boolean> {
     const existing = await this.getCustomer(id);
-    const result = await db.delete(customers).where(eq(customers.id, id)).returning();
+    const result = await db
+      .update(customers)
+      .set({ deletedAt: new Date() })
+      .where(eq(customers.id, id))
+      .returning();
     if (result.length > 0 && existing) {
       customerIdsCache.invalidateForCustomer(existing.primaryEmployeeId, existing.backupEmployeeId);
     }
@@ -242,7 +246,10 @@ export class DatabaseStorage implements IStorage {
       .select({ id: customers.id })
       .from(customers)
       .where(
-        sqlBuilder`${customers.primaryEmployeeId} = ${employeeId} OR ${customers.backupEmployeeId} = ${employeeId}`
+        and(
+          isNull(customers.deletedAt),
+          sqlBuilder`(${customers.primaryEmployeeId} = ${employeeId} OR ${customers.backupEmployeeId} = ${employeeId})`
+        )
       );
     return result.map(r => r.id);
   }
@@ -257,21 +264,24 @@ export class DatabaseStorage implements IStorage {
       .selectDistinct({ id: customers.id })
       .from(customers)
       .where(
-        or(
-          eq(customers.primaryEmployeeId, employeeId),
-          eq(customers.backupEmployeeId, employeeId),
-          inArray(customers.id,
-            db.select({ id: appointments.customerId })
-              .from(appointments)
-              .where(
-                and(
-                  or(
-                    eq(appointments.assignedEmployeeId, employeeId),
-                    eq(appointments.performedByEmployeeId, employeeId)
-                  ),
-                  isNull(appointments.deletedAt)
+        and(
+          isNull(customers.deletedAt),
+          or(
+            eq(customers.primaryEmployeeId, employeeId),
+            eq(customers.backupEmployeeId, employeeId),
+            inArray(customers.id,
+              db.select({ id: appointments.customerId })
+                .from(appointments)
+                .where(
+                  and(
+                    or(
+                      eq(appointments.assignedEmployeeId, employeeId),
+                      eq(appointments.performedByEmployeeId, employeeId)
+                    ),
+                    isNull(appointments.deletedAt)
+                  )
                 )
-              )
+            )
           )
         )
       );
@@ -288,7 +298,7 @@ export class DatabaseStorage implements IStorage {
     const customerRows = await db
       .select()
       .from(customers)
-      .where(inArray(customers.id, assignedIds))
+      .where(and(inArray(customers.id, assignedIds), isNull(customers.deletedAt)))
       .orderBy(customers.nachname, customers.vorname);
 
     return customerRows.map(c => ({

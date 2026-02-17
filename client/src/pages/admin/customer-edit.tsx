@@ -22,7 +22,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useCustomer, useUpdateCustomer, useEmployees, customerKeys } from "@/features/customers";
 import { api, unwrapResult } from "@/lib/api";
 import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
-import { todayISO } from "@shared/utils/datetime";
+import { todayISO, formatDateForDisplay } from "@shared/utils/datetime";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -344,7 +344,7 @@ export default function AdminCustomerEdit() {
                         const current = customer.careLevelHistory?.find(h => !h.validTo);
                         return current ? (
                           <span className="text-xs text-gray-500">
-                            seit {new Date(current.validFrom).toLocaleDateString("de-DE")}
+                            seit {formatDateForDisplay(current.validFrom)}
                           </span>
                         ) : null;
                       })()}

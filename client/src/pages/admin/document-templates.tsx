@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { todayISO, formatDateForDisplay } from "@shared/utils/datetime";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -334,9 +335,9 @@ export default function AdminDocumentTemplates() {
           versichertennummer: "A123456789",
           insurance_name: "AOK Bayern",
           ik_nummer: "IK109034270",
-          vertragsbeginn: new Date().toISOString().split("T")[0],
+          vertragsbeginn: todayISO(),
           mandatsreferenz: "SE-42-2025",
-          current_date: new Date().toISOString().split("T")[0],
+          current_date: todayISO(),
           company_name: "SeniorenEngel GmbH",
         },
       });
@@ -348,7 +349,7 @@ export default function AdminDocumentTemplates() {
         .replace(/\{\{customer_name\}\}/g, "Max Mustermann")
         .replace(/\{\{customer_address\}\}/g, "Musterstraße 123, 12345 Berlin")
         .replace(/\{\{pflegegrad\}\}/g, "Pflegegrad 3")
-        .replace(/\{\{current_date\}\}/g, new Date().toISOString().split("T")[0])
+        .replace(/\{\{current_date\}\}/g, todayISO())
         .replace(/\{\{company_name\}\}/g, "SeniorenEngel GmbH")
         .replace(/\{\{[a-z_]+\}\}/g, "[...]");
       setPreviewHtml(rawHtml);
@@ -661,7 +662,7 @@ export default function AdminDocumentTemplates() {
               </div>
               {editingTemplate && (
                 <p className="text-xs text-gray-400">
-                  Version {editingTemplate.version} · Zuletzt aktualisiert: {new Date(editingTemplate.updatedAt).toLocaleDateString("de-DE")}
+                  Version {editingTemplate.version} · Zuletzt aktualisiert: {formatDateForDisplay(editingTemplate.updatedAt.split("T")[0])}
                   {editingTemplate.isSystem && " · System-Vorlage (Slug nicht änderbar)"}
                 </p>
               )}

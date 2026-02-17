@@ -194,6 +194,7 @@ export const STATUS_COLORS: Record<AppointmentStatus, string> = {
   "in-progress": "bg-blue-50 text-blue-700 border-blue-200 animate-pulse",
   "documenting": "bg-orange-50 text-orange-700 border-orange-200",
   "completed": "bg-green-50 text-green-700 border-green-200",
+  "cancelled": "bg-red-50 text-red-700 border-red-200",
 };
 
 export const APPOINTMENT_TYPE_COLORS: Record<AppointmentType, string> = {
@@ -239,6 +240,7 @@ export const STATUS_PRIORITY: Record<AppointmentStatus, number> = {
   "documenting": 1,
   "scheduled": 2,
   "completed": 3,
+  "cancelled": 4,
 };
 
 export function getServiceInfoFromServices(

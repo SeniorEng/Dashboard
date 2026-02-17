@@ -13,7 +13,7 @@ import { iconSize, componentStyles } from "@/design-system/tokens";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { formatCurrency, formatDateDisplay } from "@shared/utils/format";
-import { todayISO } from "@shared/utils/datetime";
+import { todayISO, parseLocalDate } from "@shared/utils/datetime";
 
 interface BudgetSummary {
   customerId: number;
@@ -194,14 +194,14 @@ export function BudgetLedgerSection({ customerId, customerName, initialSummary, 
 
             {summary!.carryoverCents > 0 && (
               <Card className={`border ${
-                summary!.carryoverExpiresAt && new Date(summary!.carryoverExpiresAt) < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+                summary!.carryoverExpiresAt && parseLocalDate(summary!.carryoverExpiresAt) < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
                   ? "bg-amber-50 border-amber-200"
                   : "bg-gray-50 border-gray-200"
               }`}>
                 <CardContent className="pt-4">
                   <div className="flex items-center justify-between">
                     <p className="text-sm text-gray-600">Übertrag</p>
-                    {summary!.carryoverExpiresAt && new Date(summary!.carryoverExpiresAt) < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) && (
+                    {summary!.carryoverExpiresAt && parseLocalDate(summary!.carryoverExpiresAt) < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) && (
                       <AlertTriangle className={`${iconSize.sm} text-amber-600`} />
                     )}
                   </div>

@@ -3,6 +3,7 @@ import { generatePdfFromHtml } from "./pdf-generator";
 import { renderTemplate, buildPlaceholders, wrapInPrintableHtml } from "./template-engine";
 import { documentStorage } from "../storage/documents";
 import { computeDataHash } from "./signature-integrity";
+import { todayISO } from "@shared/utils/datetime";
 import type { DocumentTemplate } from "@shared/schema";
 
 function parseObjectPath(path: string): { bucketName: string; objectName: string } {
@@ -70,7 +71,7 @@ export async function generateAndStorePdf(options: {
 
   const { pdfBuffer, integrityHash } = await generatePdfFromHtml(renderedHtml, template.name);
 
-  const dateStr = new Date().toISOString().split("T")[0];
+  const dateStr = todayISO();
   const slug = template.slug.replace(/[^a-z0-9_-]/gi, "_");
   const targetLabel = customerId ? `kunde_${customerId}` : employeeId ? `mitarbeiter_${employeeId}` : "doc";
   const fileName = `${slug}_${targetLabel}_${dateStr}.pdf`;
@@ -131,7 +132,7 @@ export async function regeneratePdfWithSignature(
 
   const { pdfBuffer, integrityHash: pdfHash } = await generatePdfFromHtml(updatedHtml, doc.fileName);
 
-  const dateStr = new Date().toISOString().split("T")[0];
+  const dateStr = todayISO();
   const baseName = doc.fileName.replace(/\.pdf$/i, "");
   const fileName = `${baseName}_signed_${dateStr}.pdf`;
 

@@ -188,7 +188,7 @@ const simpleCreateCustomerSchema = z.object({
   nr: z.string().min(1),
   plz: z.string().regex(/^\d{5}$/),
   stadt: z.string().min(1),
-  pflegegrad: z.number().min(0).max(5).optional(),
+  pflegegrad: z.number().min(1).max(5).optional(),
   pflegegradSeit: z.string().optional(),
   vorerkrankungen: z.string().max(2000).optional().nullable(),
   haustierVorhanden: z.boolean().optional(),

@@ -6,6 +6,7 @@ import {
   FileText,
 } from "lucide-react";
 import type { TimeEntryType } from "@/lib/api/types";
+import { parseLocalDate } from "@shared/utils/datetime";
 
 export const TIME_ENTRY_TYPE_CONFIG: Record<TimeEntryType, { label: string; icon: React.ElementType; color: string; bgColor: string }> = {
   urlaub: { label: "Urlaub", icon: Palmtree, color: "text-green-700", bgColor: "bg-green-100" },
@@ -38,6 +39,6 @@ export function isEntryLocked(entryDate: string, entryType: string): boolean {
   if (!lockedTypes.includes(entryType)) return false;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const entry = new Date(entryDate + "T00:00:00");
+  const entry = parseLocalDate(entryDate);
   return entry < today;
 }

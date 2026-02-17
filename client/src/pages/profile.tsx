@@ -600,7 +600,7 @@ function DocumentsSection({ employeeId }: { employeeId: number }) {
                   <p className="text-sm font-medium truncate">{docType.name}</p>
                   {currentDoc ? (
                     <p className="text-xs text-muted-foreground truncate">
-                      {currentDoc.fileName} — hochgeladen am {new Date(currentDoc.uploadedAt).toLocaleDateString("de-DE")}
+                      {currentDoc.fileName} — hochgeladen am {new Date(currentDoc.uploadedAt).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })}
                     </p>
                   ) : (
                     <p className="text-xs text-amber-600">Noch nicht hochgeladen</p>

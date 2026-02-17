@@ -255,7 +255,7 @@ export function SignatureDisplay({
   className,
 }: SignatureDisplayProps) {
   const formattedDate = signedAt
-    ? new Date(signedAt).toLocaleDateString("de-DE", {
+    ? new Date(signedAt).toLocaleString("de-DE", {
         day: "2-digit",
         month: "2-digit",
         year: "numeric",

@@ -47,6 +47,7 @@ export const customers = pgTable("customers", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
+  deletedAt: timestamp("deleted_at"),
 }, (table) => [
   index("customers_primary_employee_id_idx").on(table.primaryEmployeeId),
   index("customers_backup_employee_id_idx").on(table.backupEmployeeId),

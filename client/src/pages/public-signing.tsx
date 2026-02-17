@@ -153,7 +153,7 @@ export default function PublicSigningPage() {
 
                 {docData.expiresAt && (
                   <p className="text-xs text-gray-400">
-                    Gültig bis: {new Date(docData.expiresAt).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })}
+                    Gültig bis: {new Date(docData.expiresAt).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })}
                   </p>
                 )}
 
