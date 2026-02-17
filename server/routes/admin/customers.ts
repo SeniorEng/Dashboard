@@ -283,11 +283,10 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
     }
   }
 
-  if (data.contacts) {
-    for (let i = 0; i < data.contacts.length; i++) {
-      const c = data.contacts[i];
-      try {
-        await customerManagementStorage.addCustomerContact({
+  if (data.contacts && data.contacts.length > 0) {
+    try {
+      await Promise.all(data.contacts.map((c, i) =>
+        customerManagementStorage.addCustomerContact({
           customerId: customer.id,
           contactType: c.contactType as "familie" | "angehoerige" | "nachbar" | "hausarzt" | "betreuer" | "sonstige",
           isPrimary: c.isPrimary,
@@ -296,11 +295,11 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
           telefon: c.telefon,
           email: c.email || null,
           sortOrder: i,
-        });
-      } catch (err) {
-        console.error(`[POST /customers] Kontakt ${i} fehlgeschlagen für Kunde ${customer.id}:`, err);
-        warnings.push(`Kontakt "${c.vorname} ${c.nachname}" konnte nicht gespeichert werden`);
-      }
+        })
+      ));
+    } catch (err) {
+      console.error(`[POST /customers] Kontakte fehlgeschlagen für Kunde ${customer.id}:`, err);
+      warnings.push("Kontakte konnten nicht gespeichert werden");
     }
   }
 
@@ -337,15 +336,15 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
         status: "active",
       }, userId);
 
-      if (data.contract.rates) {
-        for (const rate of data.contract.rates) {
-          await customerManagementStorage.addContractRate({
+      if (data.contract.rates && data.contract.rates.length > 0) {
+        await Promise.all(data.contract.rates.map(rate =>
+          customerManagementStorage.addContractRate({
             contractId: contract.id,
             serviceCategory: rate.serviceCategory as "hauswirtschaft" | "alltagsbegleitung" | "erstberatung",
             hourlyRateCents: rate.hourlyRateCents,
             validFrom: data.contract.contractStart,
-          }, userId);
-        }
+          }, userId)
+        ));
       }
     } catch (err) {
       console.error(`[POST /customers] Vertrag fehlgeschlagen für Kunde ${customer.id}:`, err);
@@ -693,28 +692,24 @@ function plzDistance(plz1: string | null, plz2: string | null): number | null {
 }
 
 async function matchEmployees(criteria: MatchCriteria, excludeEmployeeIds: number[] = []): Promise<MatchResult[]> {
-  const activeEmployees = await db
-    .select({
+  const threeMonthsAgo = new Date();
+  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+  const threeMonthsAgoStr = formatDateISO(threeMonthsAgo);
+
+  const [activeEmployees, allRoles, activeCustomerCounts, appointmentCounts] = await Promise.all([
+    db.select({
       id: users.id,
       displayName: users.displayName,
       plz: users.plz,
       haustierAkzeptiert: users.haustierAkzeptiert,
     })
     .from(users)
-    .where(and(eq(users.isActive, true)));
+    .where(eq(users.isActive, true)),
 
-  const allRoles = await db
-    .select({ userId: userRoles.userId, role: userRoles.role })
-    .from(userRoles);
+    db.select({ userId: userRoles.userId, role: userRoles.role })
+    .from(userRoles),
 
-  const rolesByUser = new Map<number, string[]>();
-  for (const r of allRoles) {
-    if (!rolesByUser.has(r.userId)) rolesByUser.set(r.userId, []);
-    rolesByUser.get(r.userId)!.push(r.role);
-  }
-
-  const activeCustomerCounts = await db
-    .select({
+    db.select({
       employeeId: customers.primaryEmployeeId,
       count: count(),
     })
@@ -723,19 +718,9 @@ async function matchEmployees(criteria: MatchCriteria, excludeEmployeeIds: numbe
       eq(customers.status, "aktiv"),
       sql`${customers.primaryEmployeeId} IS NOT NULL`
     ))
-    .groupBy(customers.primaryEmployeeId);
+    .groupBy(customers.primaryEmployeeId),
 
-  const customerCountMap = new Map<number, number>();
-  for (const c of activeCustomerCounts) {
-    if (c.employeeId) customerCountMap.set(c.employeeId, Number(c.count));
-  }
-
-  const threeMonthsAgo = new Date();
-  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-  const threeMonthsAgoStr = formatDateISO(threeMonthsAgo);
-
-  const appointmentCounts = await db
-    .select({
+    db.select({
       employeeId: appointments.assignedEmployeeId,
       count: count(),
     })
@@ -744,7 +729,19 @@ async function matchEmployees(criteria: MatchCriteria, excludeEmployeeIds: numbe
       gte(appointments.date, threeMonthsAgoStr),
       sql`${appointments.assignedEmployeeId} IS NOT NULL`
     ))
-    .groupBy(appointments.assignedEmployeeId);
+    .groupBy(appointments.assignedEmployeeId),
+  ]);
+
+  const rolesByUser = new Map<number, string[]>();
+  for (const r of allRoles) {
+    if (!rolesByUser.has(r.userId)) rolesByUser.set(r.userId, []);
+    rolesByUser.get(r.userId)!.push(r.role);
+  }
+
+  const customerCountMap = new Map<number, number>();
+  for (const c of activeCustomerCounts) {
+    if (c.employeeId) customerCountMap.set(c.employeeId, Number(c.count));
+  }
 
   const appointmentCountMap = new Map<number, number>();
   for (const a of appointmentCounts) {

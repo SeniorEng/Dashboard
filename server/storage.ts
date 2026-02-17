@@ -253,32 +253,30 @@ export class DatabaseStorage implements IStorage {
       return cached;
     }
     
-    const currentlyAssigned = await db
-      .select({ id: customers.id })
+    const result = await db
+      .selectDistinct({ id: customers.id })
       .from(customers)
       .where(
-        sqlBuilder`${customers.primaryEmployeeId} = ${employeeId} OR ${customers.backupEmployeeId} = ${employeeId}`
+        or(
+          eq(customers.primaryEmployeeId, employeeId),
+          eq(customers.backupEmployeeId, employeeId),
+          inArray(customers.id,
+            db.select({ id: appointments.customerId })
+              .from(appointments)
+              .where(
+                and(
+                  or(
+                    eq(appointments.assignedEmployeeId, employeeId),
+                    eq(appointments.performedByEmployeeId, employeeId)
+                  ),
+                  isNull(appointments.deletedAt)
+                )
+              )
+          )
+        )
       );
     
-    const fromAppointments = await db
-      .select({ customerId: appointments.customerId })
-      .from(appointments)
-      .where(
-        and(
-          or(
-            eq(appointments.assignedEmployeeId, employeeId),
-            eq(appointments.performedByEmployeeId, employeeId)
-          ),
-          isNull(appointments.deletedAt)
-        )
-      )
-      .groupBy(appointments.customerId);
-    
-    const idSet = new Set<number>();
-    for (const r of currentlyAssigned) idSet.add(r.id);
-    for (const r of fromAppointments) idSet.add(r.customerId);
-    
-    const ids = Array.from(idSet);
+    const ids = result.map(r => r.id);
     customerIdsCache.set(employeeId, ids);
     return ids;
   }
@@ -975,19 +973,21 @@ export class DatabaseStorage implements IStorage {
     if (serviceUpdates.length === 0) return;
     const { appointmentServices } = await import("@shared/schema");
     const { eq, and } = await import("drizzle-orm");
-    for (const serviceUpdate of serviceUpdates) {
-      await db.update(appointmentServices)
-        .set({
-          actualDurationMinutes: serviceUpdate.actualDurationMinutes,
-          details: serviceUpdate.details ?? null,
-        })
-        .where(
-          and(
-            eq(appointmentServices.appointmentId, appointmentId),
-            eq(appointmentServices.serviceId, serviceUpdate.serviceId)
+    await db.transaction(async (tx) => {
+      await Promise.all(serviceUpdates.map(su =>
+        tx.update(appointmentServices)
+          .set({
+            actualDurationMinutes: su.actualDurationMinutes,
+            details: su.details ?? null,
+          })
+          .where(
+            and(
+              eq(appointmentServices.appointmentId, appointmentId),
+              eq(appointmentServices.serviceId, su.serviceId)
+            )
           )
-        );
-    }
+      ));
+    });
   }
 
   async getServicesByIds(serviceIds: number[]): Promise<{ id: number; code: string }[]> {
