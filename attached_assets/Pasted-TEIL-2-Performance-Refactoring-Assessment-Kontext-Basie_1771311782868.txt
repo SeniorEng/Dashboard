@@ -1,0 +1,523 @@
+TEIL 2: Performance & Refactoring Assessment
+Kontext
+Basierend auf aktuellen Best Practices (React 19, TanStack Query v5, Express.js, Drizzle ORM, Vite 6) wurde der gesamte Code auf Performance-Probleme, Anti-Patterns und Refactoring-Bedarf analysiert. Die Befunde sind nach Impact geordnet.
+
+A. FRONTEND PERFORMANCE
+
+A1. KRITISCH: staleTime: Infinity verhindert Daten-Aktualisierung
+Datei: client/src/lib/queryClient.ts, Zeile 93
+Problem: Die globale QueryClient-Konfiguration setzt staleTime: Infinity. Das bedeutet: Daten werden nie als veraltet betrachtet und nie automatisch neu geladen — auch nicht beim Zurücknavigieren zu einer Seite. Wenn Mitarbeiter A einen Termin dokumentiert, sieht Mitarbeiter B die Änderung erst nach manuellem Neuladen.
+Einzelne Hooks überschreiben das zwar teilweise (z.B. useCustomers mit staleTime: 30000), aber viele Queries nutzen den globalen Default und werden nie aktualisiert.
+Best Practice (TanStack Query v5): Globaler Default sollte 1-5 Minuten sein, nicht Infinity.
+Anweisung:
+typescript// client/src/lib/queryClient.ts, Zeile 87-100
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      queryFn: getQueryFn({ on401: "throw" }),
+      refetchInterval: false,
+      refetchOnWindowFocus: true,     // WAR: false → Daten aktualisieren bei Tab-Wechsel
+      staleTime: 2 * 60 * 1000,      // WAR: Infinity → 2 Minuten
+      gcTime: 10 * 60 * 1000,        // NEU: Garbage Collection nach 10 Min
+      retry: 1,                       // WAR: false → 1 Retry bei Netzwerkfehlern
+    },
+    mutations: {
+      retry: false,
+    },
+  },
+});
+Auswirkung: Alle Seiten zeigen automatisch aktuelle Daten nach 2 Minuten. Besonders wichtig für den Dashboard-Terminkalender und die Leistungsnachweis-Übersicht.
+
+A2. HOCH: Inline-Objekte und -Funktionen verursachen unnötige Re-Renders
+Dateien: Mehrere Seiten
+Problem: Inline-Objekte und -Funktionen in JSX erzeugen bei jedem Render neue Referenzen, was unnötige Re-Renders von Kind-Komponenten auslöst.
+Beispiele gefunden:
+
+customer-new.tsx Zeile 115: setLocation(/admin/customers/${customer.id}) — inline Arrow-Function in onSuccess ist hier OK (Event-Handler), aber:
+customer-detail.tsx Zeile 415:
+
+tsxonTogglePrivatePayment={(checked) => togglePrivatePayment.mutate(checked)}
+Wird bei jedem Render der Elternkomponente neu erstellt → BudgetsTabContent rendert unnötig neu.
+
+dashboard.tsx Zeile 135:
+
+tsxonSelect={setSelectedDate}
+Das ist korrekt (stabile Referenz). Aber weekDays.map(...) erzeugt neue Day-Objekte.
+
+customer-edit.tsx Zeile 541-542:
+
+tsxonCheckedChange={(checked) => setFormData(prev => ({ ...prev, haustierVorhanden: checked }))}
+Inline-Callbacks für jeden Switch — bei 5+ Switches = 5+ neue Funktionen pro Render.
+Anweisung:
+
+Extrahiere häufig genutzte Inline-Handler mit useCallback:
+
+typescript// customer-detail.tsx
+const handleTogglePrivatePayment = useCallback(
+  (checked: boolean) => togglePrivatePayment.mutate(checked),
+  [togglePrivatePayment]
+);
+
+Für Formulare mit vielen Switches: Erstelle einen generischen Handler:
+
+typescriptconst handleSwitchChange = useCallback(
+  (field: string) => (checked: boolean) => {
+    setFormData(prev => ({ ...prev, [field]: checked }));
+  },
+  []
+);
+// Nutzung: onCheckedChange={handleSwitchChange("haustierVorhanden")}
+Hinweis: Der React 19 Compiler kann viele dieser Optimierungen automatisch übernehmen (siehe A6).
+
+A3. HOCH: Dashboard-Komponente ohne Memoization für teure Berechnungen
+Datei: client/src/pages/dashboard.tsx
+Problem: weekDays (Zeile 78) ist korrekt memoisiert, aber die Appointment-Zählung pro Tag (weekAppointmentCounts) macht einen separaten API-Call pro Wochenwechsel. Das ist an sich OK, aber die Kombination mit staleTime: Infinity bedeutet: Einmal geladene Wochen werden nie aktualisiert, auch nicht beim Zurücknavigieren.
+Anweisung:
+
+Entferne die expliziten staleTime-Overrides in den Dashboard-Hooks und verlasse dich auf den neuen globalen Default (2 Min)
+Die weekAppointmentCounts Query sollte ein kürzeres staleTime haben (30 Sekunden), da Termine häufig geändert werden
+
+
+A4. HOCH: Routing erzeugt neue Komponenten-Instanzen bei jedem Render
+Datei: client/src/App.tsx, Zeilen 114-145
+Problem: Mehrere Routen nutzen ein Anti-Pattern, das bei jedem Render eine neue Komponente erzeugt:
+tsx// PROBLEM: Zeile 115
+<Route path="/customer/:id">
+  {() => <ProtectedRoute component={() => <CustomerDetail />} />}
+</Route>
+
+// PROBLEM: Zeile 133
+<Route path="/service-records/:id">
+  {() => <ProtectedRoute component={() => <ServiceRecordDetailPage />} />}
+</Route>
+Das component={() => <CustomerDetail />} erzeugt bei jedem Render eine neue anonyme Komponente. React sieht eine neue Komponente → unmountet die alte → mountet die neue → verliert den gesamten State und startet alle Queries neu.
+Anweisung:
+tsx// VORHER (schlecht):
+<Route path="/customer/:id">
+  {() => <ProtectedRoute component={() => <CustomerDetail />} />}
+</Route>
+
+// NACHHER (korrekt):
+<Route path="/customer/:id">
+  <ProtectedRoute component={CustomerDetail} />
+</Route>
+Gleiche Korrektur für alle betroffenen Routen:
+
+Zeile 115: /customer/:id → component={CustomerDetail}
+Zeile 133: /service-records/:id → component={ServiceRecordDetailPage}
+Zeile 136: /appointment/:id → component={AppointmentDetail}
+Zeile 142: /edit-appointment/:id → component={EditAppointment}
+Zeile 145: /document-appointment/:id → component={DocumentAppointment}
+Zeile 163: /admin/customers/:id/edit → component={AdminCustomerEdit}
+Zeile 166: /admin/customers/:id → component={AdminCustomerDetail}
+
+
+A5. MITTEL: Vite Build-Konfiguration nicht optimiert
+Datei: vite.config.ts
+Problem: Keine manualChunks-Konfiguration, kein Bundle-Splitting nach Vendor-Bibliotheken. Alle Dependencies landen in einem einzigen Chunk, was die initiale Ladezeit erhöht.
+Anweisung:
+typescript// vite.config.ts, build-Sektion erweitern:
+build: {
+  outDir: path.resolve(import.meta.dirname, "dist/public"),
+  emptyOutDir: true,
+  rollupOptions: {
+    output: {
+      manualChunks: {
+        vendor: ['react', 'react-dom'],
+        query: ['@tanstack/react-query'],
+        ui: ['@radix-ui/react-dialog', '@radix-ui/react-select', '@radix-ui/react-tabs'],
+        icons: ['lucide-react'],
+        dates: ['date-fns'],
+      },
+    },
+  },
+},
+Zusätzlich: Installiere rollup-plugin-visualizer um die Bundle-Größe zu analysieren:
+bashnpm install -D rollup-plugin-visualizer
+typescript// In vite.config.ts plugins:
+import { visualizer } from 'rollup-plugin-visualizer';
+// plugins: [..., visualizer({ open: true, gzipSize: true })]
+
+A6. MITTEL: React Compiler nicht aktiviert
+Problem: Die App nutzt React 19.2, aber der neue React Compiler (v1.0, seit Oktober 2025) ist nicht aktiviert. Dieser würde automatisch useMemo, useCallback und React.memo für alle Komponenten einfügen und laut Meta-Benchmarks 20-30% weniger Re-Renders erzeugen.
+Anweisung:
+bashnpm install --save-dev --save-exact babel-plugin-react-compiler@latest
+typescript// vite.config.ts
+export default defineConfig({
+  plugins: [
+    react({
+      babel: {
+        plugins: [
+          ["babel-plugin-react-compiler", {}],
+        ],
+      },
+    }),
+    // ... andere Plugins
+  ],
+});
+Hinweis: Nach Aktivierung des Compilers können die meisten manuellen useMemo/useCallback-Aufrufe entfernt werden. Der Compiler übernimmt das automatisch. Erst den Compiler aktivieren, dann testen, dann manuelle Memoization schrittweise entfernen.
+
+A7. NIEDRIG: Fehlende Error Boundaries für Seiten-Gruppen
+Datei: client/src/App.tsx
+Problem: Es gibt eine globale ErrorBoundary (Zeile 199), aber keine seiten-spezifischen Error Boundaries. Wenn ein Fehler in der Admin-Kundenliste auftritt, wird die gesamte App mit einer Fehlerseite ersetzt — statt nur den betroffenen Bereich.
+Anweisung:
+
+Füge Error Boundaries um logische Seitengruppen hinzu:
+
+tsxfunction AdminRoute({ component: Component }: { component: React.ComponentType }) {
+  // ...
+  return (
+    <ErrorBoundary fallback={<AdminErrorFallback />}>
+      <Suspense fallback={<PageLoader />}>
+        <Component />
+      </Suspense>
+    </ErrorBoundary>
+  );
+}
+
+B. BACKEND PERFORMANCE
+
+B1. KRITISCH: N+1 Query-Probleme in mehreren Routen
+Dateien & Zeilen:
+
+server/storage.ts Zeilen 974-990 — updateAppointmentServiceDocumentation:
+
+typescriptfor (const serviceUpdate of serviceUpdates) {
+  await db.update(appointmentServices)
+    .set({...})
+    .where(and(eq(...), eq(...)))
+}
+Jeder Service-Update ist ein separater DB-Roundtrip. Bei 3 Services = 3 Queries statt 1.
+
+server/routes/admin/customers.ts Zeilen 284-302 — Kontakte bei Kundenanlage:
+
+typescriptfor (let i = 0; i < data.contacts.length; i++) {
+  await customerManagementStorage.addCustomerContact({...})
+}
+Sequentielle Einzelinserts statt Batch-Insert.
+
+server/routes/admin/customers.ts Zeilen 338-347 — Vertragsraten:
+
+typescriptfor (const rate of data.contract.rates) {
+  await customerManagementStorage.addContractRate({...})
+}
+Anweisung:
+
+Ersetze Schleifen durch Batch-Operationen mit Drizzle:
+
+typescript// Statt Schleife für Kontakte:
+if (data.contacts && data.contacts.length > 0) {
+  await db.insert(customerContacts).values(
+    data.contacts.map((c, i) => ({
+      customerId: customer.id,
+      contactType: c.contactType,
+      isPrimary: c.isPrimary,
+      vorname: c.vorname,
+      nachname: c.nachname,
+      telefon: c.telefon,
+      email: c.email || null,
+      sortOrder: i,
+    }))
+  );
+}
+
+Für Service-Updates: Nutze eine Transaktion mit Promise.all:
+
+typescriptawait db.transaction(async (tx) => {
+  await Promise.all(serviceUpdates.map(su =>
+    tx.update(appointmentServices).set({...}).where(...)
+  ));
+});
+
+B2. KRITISCH: Kundenanlage ohne Transaktion — Teilweise gespeicherte Daten möglich
+Datei: server/routes/admin/customers.ts, Zeilen 227-357
+Problem: Der POST /customers-Endpoint führt 6+ sequentielle DB-Operationen aus (Kunde, Pflegegrad, Versicherung, Kontakte, Budgets, Vertrag), aber ohne Datenbank-Transaktion. Wenn Schritt 4 fehlschlägt, sind Schritte 1-3 bereits gespeichert → inkonsistente Daten.
+Anweisung:
+typescriptrouter.post("/customers", asyncHandler("...", async (req, res) => {
+  const data = simpleCreateCustomerSchema.parse(req.body);
+  const userId = req.user!.id;
+
+  const result = await db.transaction(async (tx) => {
+    const customer = await customerManagementStorage.createCustomerDirect(customerData, tx);
+
+    if (data.pflegegrad && data.pflegegradSeit) {
+      await customerManagementStorage.addCareLevelHistory({...}, userId, tx);
+    }
+    if (data.insurance) {
+      await customerManagementStorage.addCustomerInsurance({...}, userId, tx);
+    }
+    // ... alle weiteren Operationen innerhalb der Transaktion
+
+    return customer;
+  });
+
+  res.status(201).json(result);
+}));
+
+B3. HOCH: getAssignedCustomerIds macht 2 Queries statt 1
+Datei: server/storage.ts, Zeilen 250-284
+Problem: Holt zugewiesene Kunden-IDs mit zwei separaten Queries (aus customers-Tabelle UND aus appointments-Tabelle), dann dedupliziert im JavaScript.
+Anweisung:
+typescript// Statt 2 Queries + JS-Dedup:
+const result = await db.selectDistinct({ id: customers.id })
+  .from(customers)
+  .where(or(
+    eq(customers.primaryEmployeeId, employeeId),
+    eq(customers.backupEmployeeId, employeeId),
+    inArray(customers.id,
+      db.select({ id: appointments.customerId })
+        .from(appointments)
+        .where(eq(appointments.assignedEmployeeId, employeeId))
+    )
+  ));
+1 Query statt 2, Deduplizierung in der DB statt in JS.
+
+B4. HOCH: matchEmployees macht 4 separate Queries
+Datei: server/routes/admin/customers.ts, Zeilen 618-675
+Problem: Die Mitarbeiter-Matching-Funktion macht 4 unabhängige DB-Queries:
+
+Aktive Mitarbeiter laden
+Alle Rollen laden (separater Query!)
+Kunden-Counts per Mitarbeiter
+Termin-Counts per Mitarbeiter
+
+Anweisung:
+typescript// Statt 4 Queries:
+const employeesWithData = await db
+  .select({
+    id: users.id,
+    displayName: users.displayName,
+    customerCount: sql<number>`COUNT(DISTINCT ${customers.id})::int`,
+    appointmentCount: sql<number>`COUNT(DISTINCT ${appointments.id})::int`,
+  })
+  .from(users)
+  .leftJoin(customers, eq(customers.primaryEmployeeId, users.id))
+  .leftJoin(appointments, and(
+    eq(appointments.assignedEmployeeId, users.id),
+    gte(appointments.date, startDate)
+  ))
+  .where(eq(users.isActive, true))
+  .groupBy(users.id, users.displayName);
+
+// Rollen separat laden (nur 1 Query) und im JS zuordnen
+const roles = await db.select().from(userRoles);
+2 Queries statt 4.
+
+B5. HOCH: Kunden-GET ohne Pagination für Non-Admin
+Datei: server/routes/customers.ts, Zeilen 33-55
+Problem: Der /api/customers Endpoint für normale Mitarbeiter lädt alle zugeordneten Kunden ohne Pagination:
+typescriptlet allCustomers = await storage.getCustomers(); // ALLE Kunden in Memory
+Die Admin-Route (/admin/customers) hat korrekt Pagination, aber die Employee-Route nicht.
+Anweisung:
+
+Füge Pagination auch für die Employee-Route hinzu:
+
+typescriptrouter.get("/", async (req, res) => {
+  const user = req.user!;
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 50;
+
+  const customerIds = await storage.getAssignedCustomerIds(user.id);
+  const paginatedIds = customerIds.slice((page - 1) * limit, page * limit);
+  const customers = await storage.getCustomersByIds(paginatedIds);
+
+  res.json({
+    data: customers,
+    total: customerIds.length,
+    page,
+    totalPages: Math.ceil(customerIds.length / limit),
+  });
+});```
+
+---
+
+### B6. HOCH: God-File `storage.ts` mit 1017 Zeilen
+
+**Datei:** `server/storage.ts` (1017 Zeilen) + `server/storage/customer-management.ts` (559 Zeilen)
+
+**Problem:** `storage.ts` enthält Methoden für Kunden, Termine, Service-Records, Appointment-Services und Systemeinstellungen — alles in einer Klasse. Das macht Wartung und Testing schwierig.
+
+**Anweisung:**
+Teile `storage.ts` in Domain-spezifische Module auf:```
+server/storage/
+├── index.ts                    (Re-Exports)
+├── appointment-storage.ts      (Termin-Queries)
+├── service-record-storage.ts   (Leistungsnachweis-Queries)
+├── customer-storage.ts         (Kunden-Queries, aus storage.ts extrahieren)
+├── customer-management.ts      (existiert bereits)
+├── settings-storage.ts         (Systemeinstellungen)
+└── documents.ts                (existiert bereits)
+
+B7. MITTEL: Fehlende Datenbank-Indexe für häufige Queries
+Problem: Die häufigsten Queries filtern nach Spalten, die möglicherweise keine Indexe haben.
+Prüfe und erstelle Indexe für:
+sql-- Termine pro Tag (Dashboard-Query)
+CREATE INDEX idx_appointments_date ON appointments(date) WHERE deleted_at IS NULL;
+
+-- Termine pro Mitarbeiter
+CREATE INDEX idx_appointments_employee ON appointments(assigned_employee_id, date) WHERE deleted_at IS NULL;
+
+-- Kunden pro Mitarbeiter
+CREATE INDEX idx_customers_primary_employee ON customers(primary_employee_id) WHERE status = 'aktiv';
+
+-- Service Records pro Kunde/Monat
+CREATE INDEX idx_service_records_customer_period ON monthly_service_records(customer_id, year, month);
+
+-- Appointment Services pro Termin
+CREATE INDEX idx_appointment_services_appointment ON appointment_services(appointment_id);
+
+B8. MITTEL: Kein Rate-Limiting
+Problem: Keine Rate-Limiting-Middleware. Ein Bot oder fehlerhaftes Frontend könnte unbegrenzt Requests senden.
+Anweisung:
+bashnpm install express-rate-limit
+typescript// server/index.ts
+import rateLimit from 'express-rate-limit';
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 Minuten
+  max: 500,                  // Max 500 Requests pro Fenster
+  message: { error: "Zu viele Anfragen, bitte warten Sie." },
+});
+
+app.use('/api/', apiLimiter);
+
+// Strengeres Limit für Auth-Routen:
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+});
+app.use('/api/auth/', authLimiter);
+
+B9. MITTEL: Inkonsistente Fehlerbehandlung
+Problem: Manche Routen nutzen asyncHandler (gutes Pattern), andere haben manuelle try/catch-Blöcke mit generischen Fehlermeldungen.
+Dateien mit manuellen try/catch (sollten asyncHandler nutzen):
+
+server/routes/customers.ts Zeilen 33-55, 59-86, 88-105
+server/routes/customers.ts Zeilen 130-160 (document-templates)
+
+Anweisung:
+typescript// VORHER:
+router.get("/", async (req, res) => {
+  try {
+    // ...
+  } catch (error) {
+    console.error("Failed to fetch customers:", error);
+    res.status(500).json({ error: "Kunden konnten nicht geladen werden" });
+  }
+});
+
+// NACHHER:
+router.get("/", asyncHandler("Kunden konnten nicht geladen werden", async (req, res) => {
+  // ... (kein try/catch nötig)
+}));
+
+B10. NIEDRIG: Prepared Statements nicht genutzt
+Problem: Drizzle ORM unterstützt .prepare() für häufig ausgeführte Queries, was die SQL-Parsing-Zeit eliminiert. Keiner der Queries nutzt das.
+Anweisung für die 3 häufigsten Queries:
+typescript// server/storage.ts - Termine pro Tag (Dashboard-Hauptquery)
+const getAppointmentsByDatePrepared = db
+  .select(appointmentWithCustomerSelectFields)
+  .from(appointments)
+  .leftJoin(customers, eq(appointments.customerId, customers.id))
+  .where(and(
+    eq(appointments.date, sql.placeholder('date')),
+    isNull(appointments.deletedAt)
+  ))
+  .prepare('getAppointmentsByDate');
+
+// Nutzung:
+const result = await getAppointmentsByDatePrepared.execute({ date: dateString });
+
+C. CODE-QUALITÄT & REFACTORING
+
+C1. HOCH: Validierung inkonsistent — manche Routen nutzen Zod, manche nicht
+Problem:
+
+server/routes/admin/customers.ts: Nutzt z.object() (korrekt)
+server/routes/appointments.ts: Nutzt asyncHandler + Zod (korrekt)
+server/routes/customers.ts: Kein Zod für GET-Query-Parameter, manuelles Casting
+server/routes/service-records.ts: Manuelles parseInt + isNaN-Check
+
+Anweisung:
+Erstelle eine zentrale Query-Validierungs-Utility:
+typescript// server/lib/validation.ts
+import { z } from 'zod';
+
+export const paginationSchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+});
+
+export const dateQuerySchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+export const yearMonthSchema = z.object({
+  year: z.coerce.number().int().min(2020).max(2030),
+  month: z.coerce.number().int().min(1).max(12),
+});
+
+C2. HOCH: Duplizierte Business-Logik
+Gefundene Duplikate:
+
+Alter-Berechnung — isChild() in server/routes/admin/customers.ts Zeile 598. Sollte in shared/utils/ sein.
+Kunden-Laden — Zwei verschiedene Endpoints laden Kunden mit unterschiedlicher Logik:
+
+GET /api/customers (customers.ts) — ohne Pagination, client-side Filter
+GET /api/admin/customers (admin/customers.ts) — mit Pagination, server-side Filter
+
+
+Datums-Formatierung — Mehrere Stellen formatieren Daten manuell statt die Shared-Utils zu nutzen.
+
+Anweisung:
+
+Verschiebe isChild() nach shared/utils/datetime.ts
+Vereinheitliche die Kunden-Lade-Logik: Beide Endpoints sollten customerManagementStorage.getCustomersPaginated() nutzen
+
+
+C3. MITTEL: SELECT * statt gezielte Spaltenauswahl
+Datei: server/storage.ts, mehrere Stellen
+Problem: Queries wie db.select().from(customers) laden alle Spalten, auch wenn nur id und name benötigt werden. Das verschwendet Bandwidth und Memory.
+Stellen:
+
+Zeile 216: getCustomers() — lädt alle Spalten aller Kunden
+Zeile 290: getCustomersByIds() — lädt alle Spalten
+Zeile 309: getCustomersForEmployee() — lädt alle Spalten
+
+Anweisung:
+typescript// Für Listen-Ansichten:
+async getCustomersList(): Promise<CustomerListItem[]> {
+  return await db.select({
+    id: customers.id,
+    name: customers.name,
+    vorname: customers.vorname,
+    nachname: customers.nachname,
+    status: customers.status,
+    pflegegrad: customers.pflegegrad,
+    billingType: customers.billingType,
+  }).from(customers);
+}
+
+// Volle Daten nur für Detail-Ansichten laden
+
+D. ZUSAMMENFASSUNG PERFORMANCE-ASSESSMENT
+#BereichProblemPrioritätAufwandErwarteter ImpactA1FrontendstaleTime: InfinityKRITISCHKleinDaten werden aktuell gehaltenA4FrontendRoute-Pattern erzeugt neue InstanzenKRITISCHKleinVerhindert State-Verlust und Query-NeustartsB1BackendN+1 Queries in SchleifenKRITISCHMittel60-80% weniger DB-Roundtrips bei KundenanlageB2BackendKundenanlage ohne TransaktionKRITISCHMittelVerhindert inkonsistente DatenA2FrontendInline-Objekte/-FunktionenHOCHMittel~20% weniger Re-RendersA3FrontendDashboard staleTimeHOCHKleinAktuelle TerminzählungB3Backend2 Queries statt 1 für Customer-IDsHOCHKlein50% weniger DB-Calls pro RequestB4Backend4 Queries in matchEmployeesHOCHMittel75% weniger DB-CallsB5BackendFehlende PaginationHOCHKleinVerhindert Memory-ProblemeB6BackendGod-File storage.tsHOCHGroßBessere WartbarkeitC1QualitätInkonsistente ValidierungHOCHMittelWeniger Bugs, bessere FehlermeldungenC2QualitätDuplizierte Business-LogikHOCHMittelDRY, weniger WartungsaufwandA5FrontendVite Build nicht optimiertMITTELKlein~30% kleinere initiale Bundle-GrößeA6FrontendReact Compiler nicht aktivMITTELKlein20-30% weniger Re-Renders automatischB7BackendFehlende DB-IndexeMITTELKlein2-10x schnellere QueriesB8BackendKein Rate-LimitingMITTELKleinSchutz vor ÜberlastungB9BackendInkonsistente FehlerbehandlungMITTELKleinBessere FehlertransparenzC3QualitätSELECT * statt gezielte SpaltenMITTELMittelWeniger DatenübertragungA7FrontendFehlende Error BoundariesNIEDRIGKleinBessere Fehler-IsolationB10BackendPrepared Statements nicht genutztNIEDRIGKlein~10% schnellere häufige Queries
+
+Empfohlene Reihenfolge
+Sprint 1 (Quick Wins):
+
+A1: staleTime korrigieren (5 Min Aufwand)
+A4: Route-Pattern fixen (10 Min Aufwand)
+B8: Rate-Limiting hinzufügen (15 Min)
+B9: asyncHandler konsistent nutzen (20 Min)
+
+Sprint 2 (High Impact):
+5. B2: Transaktion für Kundenanlage (30 Min)
+6. B1: N+1 Queries eliminieren (45 Min)
+7. B3+B4: Query-Optimierungen (30 Min)
+8. A5: Vite manualChunks konfigurieren (10 Min)
+Sprint 3 (Refactoring):
+9. B6: storage.ts aufteilen (2-3 Stunden)
+10. C1: Validierung vereinheitlichen (1 Stunde)
+11. C2: Business-Logik-Duplikate entfernen (1 Stunde)
+12. A6: React Compiler aktivieren (15 Min + Testen)
