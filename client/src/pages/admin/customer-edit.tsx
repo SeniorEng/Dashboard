@@ -35,8 +35,14 @@ import {
   CreditCard,
   Heart,
   Stethoscope,
+  Shield,
+  Wallet,
+  FileText,
+  ChevronRight,
+  UserPlus,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
+import { formatCurrency } from "@shared/utils/format";
 import { PFLEGEGRAD_SELECT_OPTIONS, BILLING_TYPE_SELECT_OPTIONS, BILLING_TYPE_LABELS, type BillingType } from "@shared/domain/customers";
 import { AddressFields } from "./components/address-fields";
 import { EmployeeMatching } from "./components/employee-matching";
@@ -621,6 +627,87 @@ export default function AdminCustomerEdit() {
                 )}
                 Speichern
               </Button>
+            </div>
+
+            <div className="mt-2">
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Weitere Verwaltung</h3>
+              <div className="space-y-2">
+                <a
+                  href={`/admin/customers/${customerId}?tab=contacts`}
+                  onClick={(e) => { e.preventDefault(); setLocation(`/admin/customers/${customerId}?tab=contacts`); }}
+                  className="flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-lg hover:border-teal-300 hover:bg-teal-50/30 transition-colors group"
+                  data-testid="link-manage-contacts"
+                >
+                  <div className="h-9 w-9 rounded-lg bg-violet-50 flex items-center justify-center shrink-0">
+                    <UserPlus className="h-4.5 w-4.5 text-violet-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900">Notfallkontakte</p>
+                    <p className="text-xs text-gray-500">
+                      {customer.contacts && customer.contacts.length > 0
+                        ? `${customer.contacts.length} Kontakt${customer.contacts.length > 1 ? "e" : ""} hinterlegt`
+                        : "Noch keine Kontakte hinterlegt"}
+                    </p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-gray-400 group-hover:text-teal-600 shrink-0" />
+                </a>
+
+                <a
+                  href={`/admin/customers/${customerId}?tab=insurance`}
+                  onClick={(e) => { e.preventDefault(); setLocation(`/admin/customers/${customerId}?tab=insurance`); }}
+                  className="flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-lg hover:border-teal-300 hover:bg-teal-50/30 transition-colors group"
+                  data-testid="link-manage-insurance"
+                >
+                  <div className="h-9 w-9 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
+                    <Shield className="h-4.5 w-4.5 text-blue-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900">Versicherung</p>
+                    <p className="text-xs text-gray-500">
+                      {customer.currentInsurance
+                        ? `${customer.currentInsurance.providerName}${customer.currentInsurance.versichertennummer ? ` · ${customer.currentInsurance.versichertennummer}` : ""}`
+                        : "Keine Versicherung zugeordnet"}
+                    </p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-gray-400 group-hover:text-teal-600 shrink-0" />
+                </a>
+
+                <a
+                  href={`/admin/customers/${customerId}?tab=budgets`}
+                  onClick={(e) => { e.preventDefault(); setLocation(`/admin/customers/${customerId}?tab=budgets`); }}
+                  className="flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-lg hover:border-teal-300 hover:bg-teal-50/30 transition-colors group"
+                  data-testid="link-manage-budgets"
+                >
+                  <div className="h-9 w-9 rounded-lg bg-emerald-50 flex items-center justify-center shrink-0">
+                    <Wallet className="h-4.5 w-4.5 text-emerald-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900">Budgets</p>
+                    <p className="text-xs text-gray-500">
+                      {customer.budgetSummary && customer.budgetSummary.availableCents != null
+                        ? `${formatCurrency(customer.budgetSummary.availableCents)} verfügbar`
+                        : "Budgets verwalten"}
+                    </p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-gray-400 group-hover:text-teal-600 shrink-0" />
+                </a>
+
+                <a
+                  href={`/admin/customers/${customerId}?tab=documents`}
+                  onClick={(e) => { e.preventDefault(); setLocation(`/admin/customers/${customerId}?tab=documents`); }}
+                  className="flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-lg hover:border-teal-300 hover:bg-teal-50/30 transition-colors group"
+                  data-testid="link-manage-documents"
+                >
+                  <div className="h-9 w-9 rounded-lg bg-amber-50 flex items-center justify-center shrink-0">
+                    <FileText className="h-4.5 w-4.5 text-amber-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900">Dokumente</p>
+                    <p className="text-xs text-gray-500">Verträge und Dokumente verwalten</p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-gray-400 group-hover:text-teal-600 shrink-0" />
+                </a>
+              </div>
             </div>
           </div>
         </div>

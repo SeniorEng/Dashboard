@@ -6,8 +6,8 @@
  * Uses design system patterns for consistent styling.
  */
 
-import { useState } from "react";
-import { Link, useParams } from "wouter";
+import { useState, useMemo, useCallback } from "react";
+import { Link, useParams, useSearch, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -299,9 +299,27 @@ function BudgetsTabContent({
   );
 }
 
+const VALID_TABS = ["overview", "documents", "contacts", "budgets", "insurance"] as const;
+
 export default function AdminCustomerDetail() {
   const { id } = useParams<{ id: string }>();
   const customerId = parseInt(id || "0");
+  const [, setLocation] = useLocation();
+  const searchString = useSearch();
+  const activeTab = useMemo(() => {
+    const params = new URLSearchParams(searchString);
+    const tab = params.get("tab");
+    if (tab && (VALID_TABS as readonly string[]).includes(tab)) return tab;
+    return "overview";
+  }, [searchString]);
+
+  const handleTabChange = useCallback((tab: string) => {
+    if (tab === "overview") {
+      setLocation(`/admin/customers/${customerId}`);
+    } else {
+      setLocation(`/admin/customers/${customerId}?tab=${tab}`);
+    }
+  }, [customerId, setLocation]);
 
   const { data: customer, isLoading, error, refetch } = useCustomer(customerId);
   const { toast } = useToast();
@@ -513,7 +531,8 @@ export default function AdminCustomerDetail() {
               { value: "budgets", label: "Budgets", testId: "tab-budgets" },
               { value: "insurance", label: "Versicherung", testId: "tab-insurance" },
             ]}
-            defaultValue="overview"
+            value={activeTab}
+            onValueChange={handleTabChange}
             mobileVisibleCount={5}
           >
 
