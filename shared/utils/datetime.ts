@@ -352,3 +352,15 @@ export function formatDurationDisplay(totalMinutes: number, style: "compact" | "
   }
   return `${hours}:${String(minutes).padStart(2, "0")} Std`;
 }
+
+export function isChild(geburtsdatum: string | null): boolean {
+  if (!geburtsdatum) return false;
+  const birth = new Date(geburtsdatum);
+  const today = new Date();
+  const age = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+    return age - 1 < 18;
+  }
+  return age < 18;
+}

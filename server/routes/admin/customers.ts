@@ -3,7 +3,7 @@ import { storage } from "../../storage";
 import { customerManagementStorage } from "../../storage/customer-management";
 import { authService } from "../../services/auth";
 import { birthdaysCache } from "../../services/cache";
-import { formatDateISO } from "@shared/utils/datetime";
+import { formatDateISO, isChild } from "@shared/utils/datetime";
 import { 
   insertCustomerInsuranceSchema,
   insertCustomerContactSchema,
@@ -671,17 +671,6 @@ interface MatchResult {
   reasons: { label: string; matched: boolean; detail: string }[];
 }
 
-function isChild(geburtsdatum: string | null): boolean {
-  if (!geburtsdatum) return false;
-  const birth = new Date(geburtsdatum);
-  const today = new Date();
-  const age = today.getFullYear() - birth.getFullYear();
-  const monthDiff = today.getMonth() - birth.getMonth();
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
-    return age - 1 < 18;
-  }
-  return age < 18;
-}
 
 function plzDistance(plz1: string | null, plz2: string | null): number | null {
   if (!plz1 || !plz2) return null;
