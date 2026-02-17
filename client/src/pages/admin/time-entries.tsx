@@ -243,7 +243,7 @@ export default function AdminTimeEntries() {
         <div className="container mx-auto px-4 py-6 max-w-6xl">
           <div className="flex items-center gap-4 mb-6">
             <Link href="/admin">
-              <Button variant="ghost" size="icon" data-testid="button-back">
+              <Button variant="ghost" size="icon" aria-label="Zurück" data-testid="button-back">
                 <ArrowLeft className={iconSize.md} />
               </Button>
             </Link>
@@ -288,13 +288,13 @@ export default function AdminTimeEntries() {
             <CardContent className="p-4">
               <div className="flex flex-wrap items-center gap-4">
                 <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="icon" onClick={handlePrevMonth} data-testid="button-prev-month">
+                  <Button variant="ghost" size="icon" onClick={handlePrevMonth} aria-label="Vorheriger Monat" data-testid="button-prev-month">
                     <ChevronLeft className={iconSize.md} />
                   </Button>
                   <span className="font-medium min-w-[150px] text-center">
                     {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
                   </span>
-                  <Button variant="ghost" size="icon" onClick={handleNextMonth} data-testid="button-next-month">
+                  <Button variant="ghost" size="icon" onClick={handleNextMonth} aria-label="Nächster Monat" data-testid="button-next-month">
                     <ChevronRight className={iconSize.md} />
                   </Button>
                 </div>

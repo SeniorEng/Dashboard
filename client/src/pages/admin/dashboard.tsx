@@ -15,7 +15,7 @@ export default function AdminDashboard() {
         <div className="container mx-auto px-4 py-6 max-w-4xl">
           <div className="flex items-center gap-4 mb-6">
             <Link href="/">
-              <Button variant="ghost" size="icon" data-testid="button-back">
+              <Button variant="ghost" size="icon" aria-label="Zurück" data-testid="button-back">
                 <ArrowLeft className={iconSize.md} />
               </Button>
             </Link>

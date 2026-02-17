@@ -251,7 +251,7 @@ export default function AdminServices() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <Link href="/admin">
-              <Button variant="ghost" size="icon" className="shrink-0" data-testid="button-back">
+              <Button variant="ghost" size="icon" className="shrink-0" aria-label="Zurück" data-testid="button-back">
                 <ArrowLeft className={iconSize.md} />
               </Button>
             </Link>

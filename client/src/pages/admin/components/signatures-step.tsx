@@ -245,7 +245,7 @@ function SignatureDialog({
         <DialogTitle className="sr-only">Unterschrift für {docName}</DialogTitle>
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <h3 className="font-semibold text-gray-900 text-base">Unterschrift: {docName}</h3>
-          <Button variant="ghost" size="icon" onClick={onClose} className="min-h-[44px] min-w-[44px]" data-testid="button-close-signature-dialog">
+          <Button variant="ghost" size="icon" onClick={onClose} className="min-h-[44px] min-w-[44px]" aria-label="Schließen" data-testid="button-close-signature-dialog">
             <X className={iconSize.md} />
           </Button>
         </div>

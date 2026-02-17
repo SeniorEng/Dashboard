@@ -182,7 +182,7 @@ export default function ServiceRecordsPage() {
         <div className="flex items-center gap-3 mb-1">
           {customerId && (
             <Link href={`/customer/${customerId}`}>
-              <Button variant="ghost" size="icon" className="shrink-0" data-testid="button-back">
+              <Button variant="ghost" size="icon" className="shrink-0" aria-label="Zurück" data-testid="button-back">
                 <ArrowLeft className={iconSize.md} />
               </Button>
             </Link>

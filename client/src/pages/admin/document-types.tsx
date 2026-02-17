@@ -256,7 +256,7 @@ export default function AdminDocumentTypes() {
           <div className="flex items-center justify-between gap-2 mb-6">
             <div className="flex items-center gap-2 sm:gap-4 min-w-0">
               <Link href="/admin">
-                <Button variant="ghost" size="icon" data-testid="button-back">
+                <Button variant="ghost" size="icon" aria-label="Zurück" data-testid="button-back">
                   <ArrowLeft className={iconSize.md} />
                 </Button>
               </Link>

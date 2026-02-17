@@ -116,7 +116,7 @@ export class CustomerManagementStorage {
     const limit = options?.limit ?? 20;
     const offset = options?.offset ?? 0;
 
-    let baseConditions: any[] = [];
+    let baseConditions: any[] = [isNull(customers.deletedAt)];
     
     if (filters?.search) {
       const searchTerm = `%${filters.search}%`;

@@ -108,7 +108,7 @@ export default function AdminAuditLog() {
         <div className="container mx-auto px-4 py-6 max-w-5xl">
           <div className="flex items-center gap-4 mb-6">
             <Link href="/admin">
-              <Button variant="ghost" size="icon" data-testid="button-back">
+              <Button variant="ghost" size="icon" aria-label="Zurück" data-testid="button-back">
                 <ArrowLeft className={iconSize.md} />
               </Button>
             </Link>

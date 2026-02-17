@@ -705,6 +705,7 @@ async function matchEmployees(criteria: MatchCriteria, excludeEmployeeIds: numbe
     .from(customers)
     .where(and(
       eq(customers.status, "aktiv"),
+      isNull(customers.deletedAt),
       sql`${customers.primaryEmployeeId} IS NOT NULL`
     ))
     .groupBy(customers.primaryEmployeeId),

@@ -94,13 +94,13 @@ export function CalendarGrid({
     <Card className="lg:col-span-2">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <Button variant="ghost" size="icon" onClick={onPrevMonth} data-testid="button-prev-month">
+          <Button variant="ghost" size="icon" onClick={onPrevMonth} aria-label="Vorheriger Monat" data-testid="button-prev-month">
             <ChevronLeft className={iconSize.md} />
           </Button>
           <CardTitle className="text-lg">
             {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
           </CardTitle>
-          <Button variant="ghost" size="icon" onClick={onNextMonth} data-testid="button-next-month">
+          <Button variant="ghost" size="icon" onClick={onNextMonth} aria-label="Nächster Monat" data-testid="button-next-month">
             <ChevronRight className={iconSize.md} />
           </Button>
         </div>

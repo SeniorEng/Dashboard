@@ -163,7 +163,7 @@ export default function ServiceRecordDetailPage() {
       <div className="mb-6 animate-in slide-in-from-top-4 duration-500">
         <div className="flex items-center gap-3 mb-4">
           <Link href="/service-records">
-            <Button variant="ghost" size="icon" className="shrink-0" data-testid="button-back">
+            <Button variant="ghost" size="icon" className="shrink-0" aria-label="Zurück" data-testid="button-back">
               <ArrowLeft className={iconSize.md} />
             </Button>
           </Link>
