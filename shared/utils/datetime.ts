@@ -355,7 +355,7 @@ export function formatDurationDisplay(totalMinutes: number, style: "compact" | "
 
 export function isChild(geburtsdatum: string | null): boolean {
   if (!geburtsdatum) return false;
-  const birth = new Date(geburtsdatum);
+  const birth = parseLocalDate(geburtsdatum);
   const today = new Date();
   const age = today.getFullYear() - birth.getFullYear();
   const monthDiff = today.getMonth() - birth.getMonth();
