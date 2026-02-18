@@ -27,6 +27,7 @@ interface DayDetailPanelProps {
   onAddEntry: () => void;
   isAdmin: boolean;
   isDeleting: boolean;
+  isMonthLocked?: boolean;
 }
 
 function getAppointmentServices(appt: AppointmentWithCustomerName) {
@@ -69,6 +70,7 @@ export function DayDetailPanel({
   onAddEntry,
   isAdmin,
   isDeleting,
+  isMonthLocked = false,
 }: DayDetailPanelProps) {
   const hasDayItems = entries.length > 0 || appointments.length > 0;
 
@@ -95,15 +97,17 @@ export function DayDetailPanel({
         ) : !hasDayItems ? (
           <div className="text-center py-8">
             <p className="text-gray-500 text-sm mb-4">Keine Einträge an diesem Tag.</p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onAddEntry}
-              data-testid="button-add-entry-for-day"
-            >
-              <Plus className={`${iconSize.sm} mr-2`} />
-              Eintrag hinzufügen
-            </Button>
+            {!isMonthLocked && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onAddEntry}
+                data-testid="button-add-entry-for-day"
+              >
+                <Plus className={`${iconSize.sm} mr-2`} />
+                Eintrag hinzufügen
+              </Button>
+            )}
           </div>
         ) : (
           <div className="space-y-3">
@@ -155,7 +159,7 @@ export function DayDetailPanel({
             {entries.map((entry) => {
               const config = TIME_ENTRY_TYPE_CONFIG[entry.entryType as TimeEntryType];
               const Icon = config.icon;
-              const locked = isEntryLocked(entry.entryDate, entry.entryType);
+              const locked = isMonthLocked || isEntryLocked(entry.entryDate, entry.entryType);
               return (
                 <div
                   key={entry.id}
@@ -210,7 +214,7 @@ export function DayDetailPanel({
                     ) : (
                       <div
                         className="h-8 w-8 flex items-center justify-center text-gray-300"
-                        title="Vergangene Urlaubs- und Krankheitstage können nicht geändert werden"
+                        title={isMonthLocked ? "Monat ist abgeschlossen" : "Vergangene Urlaubs- und Krankheitstage können nicht geändert werden"}
                       >
                         <Pencil className={iconSize.sm} />
                       </div>
@@ -219,16 +223,18 @@ export function DayDetailPanel({
                 </div>
               );
             })}
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full mt-2"
-              onClick={onAddEntry}
-              data-testid="button-add-another-entry"
-            >
-              <Plus className={`${iconSize.sm} mr-2`} />
-              Weiteren Eintrag hinzufügen
-            </Button>
+            {!isMonthLocked && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full mt-2"
+                onClick={onAddEntry}
+                data-testid="button-add-another-entry"
+              >
+                <Plus className={`${iconSize.sm} mr-2`} />
+                Weiteren Eintrag hinzufügen
+              </Button>
+            )}
           </div>
         )}
       </CardContent>

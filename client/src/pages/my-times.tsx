@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
+import { Plus, Lock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -11,6 +11,7 @@ import {
   useUpdateTimeEntry,
   useTimeEntryConflict,
   useTimeEntryForm,
+  useMonthClosingStatus,
   TimeEntryDialog,
   MissingBreaksBanner,
   TimeOverviewSummary,
@@ -38,8 +39,10 @@ export default function MyTimes() {
   const [showEditDialog, setShowEditDialog] = useState(false);
 
   const { data: pageData, isLoading } = useTimesPageData(selectedYear, selectedMonth);
+  const { data: closingData } = useMonthClosingStatus(selectedYear, selectedMonth);
   const timeOverview = pageData?.overview;
   const vacationSummary = pageData?.vacationSummary;
+  const isMonthLocked = !!(closingData?.closing && !closingData.closing.reopenedAt) && !user?.isAdmin;
   const createMutation = useCreateTimeEntry();
   const deleteMutation = useDeleteTimeEntry();
   const updateMutation = useUpdateTimeEntry();
@@ -122,18 +125,21 @@ export default function MyTimes() {
   }, []);
 
   const handleOpenCreateDialog = useCallback(() => {
+    if (isMonthLocked) return;
     createForm.reset({ entryDate: selectedDate || todayStr });
     setShowCreateDialog(true);
-  }, [createForm, selectedDate, todayStr]);
+  }, [createForm, selectedDate, todayStr, isMonthLocked]);
 
   const handleCreateDialogChange = useCallback((open: boolean) => {
+    if (open && isMonthLocked) return;
     setShowCreateDialog(open);
     if (open) {
       createForm.reset({ entryDate: selectedDate || todayStr });
     }
-  }, [createForm, selectedDate, todayStr]);
+  }, [createForm, selectedDate, todayStr, isMonthLocked]);
 
   const handleCreate = useCallback(() => {
+    if (isMonthLocked) return;
     const req = createForm.toCreateRequest();
     if ((req.entryType === "urlaub" || req.entryType === "krankheit") && req.endDate) {
       if (req.endDate < req.entryDate) {
@@ -155,15 +161,16 @@ export default function MyTimes() {
         toast({ title: "Fehler", description: error.message, variant: "destructive" });
       },
     });
-  }, [createForm, createMutation, toast]);
+  }, [createForm, createMutation, toast, isMonthLocked]);
 
   const handleEditEntry = useCallback((entry: DayTimeEntry) => {
+    if (isMonthLocked) return;
     editForm.setForEdit(entry);
     setShowEditDialog(true);
-  }, [editForm]);
+  }, [editForm, isMonthLocked]);
 
   const handleUpdate = useCallback(() => {
-    if (!editForm.formState.id) return;
+    if (!editForm.formState.id || isMonthLocked) return;
     updateMutation.mutate({
       id: editForm.formState.id,
       data: editForm.toUpdateRequest(),
@@ -176,14 +183,15 @@ export default function MyTimes() {
         toast({ title: "Fehler", description: error.message, variant: "destructive" });
       },
     });
-  }, [editForm, updateMutation, toast]);
+  }, [editForm, updateMutation, toast, isMonthLocked]);
 
   const handleDeleteEntry = useCallback((id: number) => {
+    if (isMonthLocked) return;
     deleteMutation.mutate(id, {
       onSuccess: () => toast({ title: "Eintrag gelöscht" }),
       onError: (error: Error) => toast({ title: "Fehler", description: error.message, variant: "destructive" }),
     });
-  }, [deleteMutation, toast]);
+  }, [deleteMutation, toast, isMonthLocked]);
 
   useEffect(() => {
     if (window.location.hash === "#missing-breaks" && daysWithMissingBreaks.length > 0) {
@@ -225,6 +233,8 @@ export default function MyTimes() {
             <Button
               className="bg-teal-600 hover:bg-teal-700"
               onClick={handleOpenCreateDialog}
+              disabled={isMonthLocked}
+              title={isMonthLocked ? "Monat ist abgeschlossen" : undefined}
               data-testid="button-new-entry"
             >
               <Plus className={`${iconSize.sm} mr-2`} />
@@ -249,6 +259,7 @@ export default function MyTimes() {
           <TimeEntryDialog
             open={showEditDialog}
             onOpenChange={(open) => {
+              if (open && isMonthLocked) return;
               setShowEditDialog(open);
             }}
             title="Zeiteintrag bearbeiten"
@@ -270,6 +281,15 @@ export default function MyTimes() {
           />
 
           <MonthClosingSection year={selectedYear} month={selectedMonth} />
+
+          {isMonthLocked && (
+            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 mt-4 mb-2" data-testid="banner-month-locked">
+              <Lock className="h-4 w-4 text-amber-600 shrink-0" />
+              <p className="text-sm text-amber-800">
+                Dieser Monat ist abgeschlossen. Zeiteinträge können nicht mehr hinzugefügt, bearbeitet oder gelöscht werden. Bei Bedarf kann ein Admin den Monat wieder öffnen.
+              </p>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <CalendarGrid
@@ -295,6 +315,7 @@ export default function MyTimes() {
                 onAddEntry={handleOpenCreateDialog}
                 isAdmin={!!user?.isAdmin}
                 isDeleting={deleteMutation.isPending}
+                isMonthLocked={isMonthLocked}
               />
             </div>
           </div>
