@@ -20,6 +20,21 @@ export interface AutoBreakPreview {
   autoBreakMinutes: number;
 }
 
+export interface OpenAppointment {
+  id: number;
+  date: string;
+  scheduledStart: string;
+  status: string;
+  customerName: string;
+}
+
+export interface MonthClosingReadiness {
+  ready: boolean;
+  openAppointments: OpenAppointment[];
+  hasTimeEntries: boolean;
+  timeEntryCount: number;
+}
+
 export function useMonthClosingStatus(year: number, month: number) {
   return useQuery<{ closing: MonthClosingStatus | null }>({
     queryKey: ["month-closing", year, month],
@@ -31,6 +46,21 @@ export function useMonthClosingStatus(year: number, month: number) {
       return res.json();
     },
     staleTime: 60000,
+  });
+}
+
+export function useMonthClosingReadiness(year: number, month: number, enabled: boolean) {
+  return useQuery<MonthClosingReadiness>({
+    queryKey: ["month-closing-readiness", year, month],
+    queryFn: async () => {
+      const res = await fetch(`/api/time-entries/month-closing/${year}/${month}/readiness`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Bereitschaftsprüfung fehlgeschlagen");
+      return res.json();
+    },
+    enabled,
+    staleTime: 30000,
   });
 }
 
@@ -62,6 +92,7 @@ export function useCloseMonth() {
     },
     onSuccess: (_, { year, month }) => {
       queryClient.invalidateQueries({ queryKey: ["month-closing", year, month] });
+      queryClient.invalidateQueries({ queryKey: ["month-closing-readiness", year, month] });
       queryClient.invalidateQueries({ queryKey: ["time-overview"] });
       queryClient.invalidateQueries({ queryKey: ["open-tasks"] });
     },

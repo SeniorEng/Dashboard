@@ -4,6 +4,7 @@ import { asyncHandler, badRequest } from "../lib/errors";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { closeMonthSchema, reopenMonthSchema } from "@shared/schema";
 import { generateAutoBreaksForMonth, insertAutoBreaks, previewAutoBreaksForMonth, removeAutoBreaksForMonth } from "../services/auto-breaks";
+import { STATUS_LABELS } from "@shared/domain/appointments";
 
 const router = Router();
 router.use(requireAuth);
@@ -33,6 +34,19 @@ router.get("/month-closing/:year/:month", asyncHandler("Monatsabschluss konnte n
   res.json({ closing: closing || null });
 }));
 
+router.get("/month-closing/:year/:month/readiness", asyncHandler("Bereitschaftsprüfung fehlgeschlagen", async (req, res) => {
+  const userId = req.user!.id;
+  const year = parseInt(req.params.year);
+  const month = parseInt(req.params.month);
+
+  if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
+    throw badRequest("Ungültiges Jahr oder Monat");
+  }
+
+  const readiness = await timeTrackingStorage.getMonthClosingReadiness(userId, year, month);
+  res.json(readiness);
+}));
+
 router.get("/month-closing/:year/:month/preview", asyncHandler("Vorschau konnte nicht erstellt werden", async (req, res) => {
   const userId = req.user!.id;
   const year = parseInt(req.params.year);
@@ -58,6 +72,28 @@ router.post("/close-month", asyncHandler("Monatsabschluss fehlgeschlagen", async
   const existing = await timeTrackingStorage.getMonthClosing(userId, year, month);
   if (existing && !existing.reopenedAt) {
     throw badRequest("Dieser Monat ist bereits abgeschlossen.");
+  }
+
+  const readiness = await timeTrackingStorage.getMonthClosingReadiness(userId, year, month);
+
+  if (!readiness.hasTimeEntries) {
+    throw badRequest("Der Monat kann nicht abgeschlossen werden: Es sind keine Zeiteinträge vorhanden.");
+  }
+
+  if (readiness.openAppointments.length > 0) {
+    const appointmentList = readiness.openAppointments
+      .slice(0, 5)
+      .map(a => {
+        const statusLabel = STATUS_LABELS[a.status as keyof typeof STATUS_LABELS] ?? a.status;
+        return `${a.date} ${a.scheduledStart} – ${a.customerName} (${statusLabel})`;
+      })
+      .join(", ");
+    const more = readiness.openAppointments.length > 5
+      ? ` und ${readiness.openAppointments.length - 5} weitere`
+      : "";
+    throw badRequest(
+      `Der Monat kann nicht abgeschlossen werden: ${readiness.openAppointments.length} offene(r) Termin(e) vorhanden. ${appointmentList}${more}`
+    );
   }
 
   const autoBreaks = await generateAutoBreaksForMonth(userId, year, month);

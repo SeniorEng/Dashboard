@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, inArray, sql as sqlBuilder, asc, isNull } from "drizzle-orm";
+import { eq, and, gte, lte, inArray, sql as sqlBuilder, asc, isNull, or, notInArray, count, ne } from "drizzle-orm";
 import {
   employeeTimeEntries,
   employeeVacationAllowance,
@@ -714,6 +714,64 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       )
       .limit(1);
     return closing.length > 0 && !closing[0].reopenedAt;
+  }
+
+  async getMonthClosingReadiness(userId: number, year: number, month: number) {
+    const monthStr = month.toString().padStart(2, '0');
+    const startDate = `${year}-${monthStr}-01`;
+    const lastDay = new Date(year, month, 0).getDate();
+    const endDate = `${year}-${monthStr}-${lastDay}`;
+
+    const openAppointments = await db
+      .select({
+        id: appointments.id,
+        date: appointments.date,
+        scheduledStart: appointments.scheduledStart,
+        status: appointments.status,
+        customerId: appointments.customerId,
+        customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as('customer_name'),
+      })
+      .from(appointments)
+      .innerJoin(customers, eq(appointments.customerId, customers.id))
+      .where(
+        and(
+          sqlBuilder`(
+            ${appointments.assignedEmployeeId} = ${userId} 
+            OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId}))
+          )`,
+          gte(appointments.date, startDate),
+          lte(appointments.date, endDate),
+          isNull(appointments.deletedAt),
+          notInArray(appointments.status, ["completed", "cancelled"])
+        )
+      )
+      .orderBy(asc(appointments.date), asc(appointments.scheduledStart));
+
+    const timeEntryCount = await db
+      .select({ count: count() })
+      .from(employeeTimeEntries)
+      .where(
+        and(
+          eq(employeeTimeEntries.userId, userId),
+          gte(employeeTimeEntries.entryDate, startDate),
+          lte(employeeTimeEntries.entryDate, endDate)
+        )
+      );
+
+    const hasTimeEntries = Number(timeEntryCount[0]?.count ?? 0) > 0;
+
+    return {
+      ready: openAppointments.length === 0 && hasTimeEntries,
+      openAppointments: openAppointments.map(a => ({
+        id: a.id,
+        date: a.date,
+        scheduledStart: a.scheduledStart,
+        status: a.status,
+        customerName: String(a.customerName ?? "Unbekannt"),
+      })),
+      hasTimeEntries,
+      timeEntryCount: Number(timeEntryCount[0]?.count ?? 0),
+    };
   }
 
   async getMonthClosing(userId: number, year: number, month: number) {
