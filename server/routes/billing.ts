@@ -12,6 +12,7 @@ import {
   insuranceProviders,
 } from "@shared/schema";
 import { eq, and, gte, lte, isNull, inArray } from "drizzle-orm";
+import { z } from "zod";
 import { fromError } from "zod-validation-error";
 import { storage } from "../storage";
 import { db } from "../lib/db";
@@ -220,6 +221,203 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
 
   const invoice = await storage.createInvoice(invoiceData, lineItems, req.user!.id);
   res.json(invoice);
+}));
+
+router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstellt werden", async (req, res) => {
+  const schema = z.object({
+    billingMonth: z.number().int().min(1).max(12),
+    billingYear: z.number().int().min(2020).max(2100),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    throw badRequest(fromError(parsed.error).toString());
+  }
+
+  const { billingMonth, billingYear } = parsed.data;
+  const monthStr = billingMonth.toString().padStart(2, "0");
+  const startDate = `${billingYear}-${monthStr}-01`;
+  const lastDay = new Date(billingYear, billingMonth, 0).getDate();
+  const endDate = `${billingYear}-${monthStr}-${lastDay}`;
+
+  const allCompletedAppts = await db.select({
+    customerId: appointments.customerId,
+  })
+  .from(appointments)
+  .where(and(
+    gte(appointments.date, startDate),
+    lte(appointments.date, endDate),
+    eq(appointments.status, "completed"),
+    isNull(appointments.deletedAt)
+  ));
+
+  const uniqueCustomerIds = [...new Set(allCompletedAppts.map(a => a.customerId))];
+
+  if (uniqueCustomerIds.length === 0) {
+    return res.json({ created: 0, skipped: 0, errors: [], message: "Keine abgeschlossenen Termine für diesen Zeitraum gefunden." });
+  }
+
+  const results: { created: number; skipped: { customerName: string; reason: string }[]; errors: { customerId: number; customerName: string; reason: string }[] } = {
+    created: 0,
+    skipped: [],
+    errors: [],
+  };
+
+  for (const customerId of uniqueCustomerIds) {
+    try {
+      const customer = await storage.getCustomer(customerId);
+      const custName = customer ? ((customer as any).vorname && (customer as any).nachname ? `${(customer as any).vorname} ${(customer as any).nachname}` : (customer as any).name) : `Kunde #${customerId}`;
+
+      const existing = await storage.getInvoicesForCustomerMonth(customerId, billingYear, billingMonth);
+      const activeInvoice = existing.find(inv => inv.status !== "storniert");
+      if (activeInvoice) {
+        results.skipped.push({ customerName: custName, reason: "Rechnung bereits vorhanden" });
+        continue;
+      }
+
+      if (!customer) {
+        results.skipped.push({ customerName: custName, reason: "Kunde nicht gefunden" });
+        continue;
+      }
+
+      const completedAppts = await db.select()
+        .from(appointments)
+        .where(and(
+          eq(appointments.customerId, customerId),
+          gte(appointments.date, startDate),
+          lte(appointments.date, endDate),
+          eq(appointments.status, "completed"),
+          isNull(appointments.deletedAt)
+        ));
+
+      if (completedAppts.length === 0) {
+        results.skipped.push({ customerName: custName, reason: "Keine abgeschlossenen Termine" });
+        continue;
+      }
+
+      const apptIds = completedAppts.map(a => a.id);
+      const serviceBreakdown = await db.select({
+        appointmentId: appointmentServicesTable.appointmentId,
+        serviceCode: servicesTable.code,
+        serviceName: servicesTable.name,
+        plannedDurationMinutes: appointmentServicesTable.plannedDurationMinutes,
+        actualDurationMinutes: appointmentServicesTable.actualDurationMinutes,
+        defaultPriceCents: servicesTable.defaultPriceCents,
+        vatRate: servicesTable.vatRate,
+      })
+      .from(appointmentServicesTable)
+      .innerJoin(servicesTable, eq(appointmentServicesTable.serviceId, servicesTable.id))
+      .where(inArray(appointmentServicesTable.appointmentId, apptIds));
+
+      const lineItems: any[] = [];
+      let totalNetCents = 0;
+      let totalVatCents = 0;
+
+      for (const appt of completedAppts) {
+        const apptServices = serviceBreakdown.filter(s => s.appointmentId === appt.id);
+        let employeeName = "";
+        let employeeLbnr = "";
+        const employeeId = appt.assignedEmployeeId || appt.performedByEmployeeId;
+        if (employeeId) {
+          const [emp] = await db.select({ displayName: users.displayName, lbnr: users.lbnr }).from(users).where(eq(users.id, employeeId));
+          if (emp) {
+            employeeName = emp.displayName;
+            employeeLbnr = emp.lbnr || "";
+          }
+        }
+        for (const svc of apptServices) {
+          const durationMinutes = svc.actualDurationMinutes ?? svc.plannedDurationMinutes;
+          const pricePer60Min = svc.defaultPriceCents || 0;
+          const totalCents = Math.round((durationMinutes / 60) * pricePer60Min);
+          const vatBasisPoints = svc.vatRate || 0;
+          const vatCents = Math.round(totalCents * vatBasisPoints / 10000);
+          lineItems.push({
+            appointmentId: appt.id,
+            appointmentDate: appt.date,
+            serviceDescription: svc.serviceName || svc.serviceCode || "Dienstleistung",
+            serviceCode: svc.serviceCode,
+            startTime: appt.actualStart || appt.scheduledStart,
+            endTime: appt.actualEnd || appt.scheduledEnd,
+            durationMinutes,
+            unitPriceCents: pricePer60Min,
+            totalCents,
+            employeeName,
+            employeeLbnr,
+          });
+          totalNetCents += totalCents;
+          totalVatCents += vatCents;
+        }
+      }
+
+      const billingType = (customer as any).billingType || "selbstzahler";
+      const customerName = (customer as any).vorname && (customer as any).nachname
+        ? `${(customer as any).vorname} ${(customer as any).nachname}`
+        : (customer as any).name || "Unbekannt";
+      const customerAddress = [(customer as any).strasse, (customer as any).nr].filter(Boolean).join(" ") +
+        ((customer as any).plz || (customer as any).stadt ? `\n${(customer as any).plz || ""} ${(customer as any).stadt || ""}` : "");
+
+      let recipientName = customerName;
+      let recipientAddress = customerAddress;
+      let insuranceProviderName = "";
+      let insuranceIkNummer = "";
+      let versichertennummer = "";
+
+      if (billingType === "pflegekasse_gesetzlich" || billingType === "pflegekasse_privat") {
+        const insuranceData = await db.select({
+          providerName: insuranceProviders.name,
+          ikNummer: insuranceProviders.ikNummer,
+          versichertennummer: customerInsuranceHistory.versichertennummer,
+        })
+        .from(customerInsuranceHistory)
+        .innerJoin(insuranceProviders, eq(customerInsuranceHistory.insuranceProviderId, insuranceProviders.id))
+        .where(and(
+          eq(customerInsuranceHistory.customerId, customerId),
+          isNull(customerInsuranceHistory.validTo)
+        ))
+        .limit(1);
+
+        if (insuranceData.length > 0) {
+          insuranceProviderName = insuranceData[0].providerName;
+          insuranceIkNummer = insuranceData[0].ikNummer;
+          versichertennummer = insuranceData[0].versichertennummer;
+          if (billingType === "pflegekasse_gesetzlich") {
+            recipientName = insuranceData[0].providerName;
+            recipientAddress = "";
+          }
+        }
+      }
+
+      const invoiceNumber = await storage.getNextInvoiceNumber(billingYear);
+      const invoiceData = {
+        invoiceNumber,
+        customerId,
+        billingType,
+        invoiceType: "rechnung",
+        billingMonth,
+        billingYear,
+        recipientName,
+        recipientAddress,
+        customerName,
+        insuranceProviderName: insuranceProviderName || null,
+        insuranceIkNummer: insuranceIkNummer || null,
+        versichertennummer: versichertennummer || null,
+        pflegegrad: (customer as any).pflegegrad || null,
+        netAmountCents: totalNetCents,
+        vatAmountCents: totalVatCents,
+        grossAmountCents: totalNetCents + totalVatCents,
+        vatRate: 0,
+        status: "entwurf",
+      };
+
+      await storage.createInvoice(invoiceData, lineItems, req.user!.id);
+      results.created++;
+    } catch (err: any) {
+      const customer = await storage.getCustomer(customerId);
+      const name = customer ? ((customer as any).vorname && (customer as any).nachname ? `${(customer as any).vorname} ${(customer as any).nachname}` : (customer as any).name) : `ID ${customerId}`;
+      results.errors.push({ customerId, customerName: name || `ID ${customerId}`, reason: err.message || "Unbekannter Fehler" });
+    }
+  }
+
+  res.json(results);
 }));
 
 router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werden", async (req, res) => {
