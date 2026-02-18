@@ -387,6 +387,12 @@ export interface VacationSummary {
   sickDays: number;
 }
 
+export interface AppointmentServiceBreakdown {
+  serviceCode: string | null;
+  plannedDurationMinutes: number;
+  actualDurationMinutes: number | null;
+}
+
 export interface AppointmentWithCustomerName {
   id: number;
   customerId: number;
@@ -410,6 +416,7 @@ export interface AppointmentWithCustomerName {
   servicesDone: string[] | null;
   createdAt: string;
   customerName: string;
+  services?: AppointmentServiceBreakdown[];
 }
 
 export interface ServiceHoursSummary {

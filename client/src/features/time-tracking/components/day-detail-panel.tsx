@@ -30,29 +30,43 @@ interface DayDetailPanelProps {
   isMonthLocked?: boolean;
 }
 
-function getAppointmentServices(appt: AppointmentWithCustomerName) {
-  const services: { name: string; minutes: number }[] = [];
-  const duration = appt.durationPromised || 0;
+const SERVICE_CODE_LABELS: Record<string, string> = {
+  hauswirtschaft: "HW",
+  alltagsbegleitung: "AB",
+  erstberatung: "EB",
+};
 
-  if (appt.appointmentType === "Erstberatung") {
-    services.push({ name: "EB", minutes: duration });
-  } else if (appt.serviceType === "Hauswirtschaft & Alltagsbegleitung") {
-    services.push({ name: "HW+AB", minutes: duration });
-  } else if (appt.serviceType === "Hauswirtschaft") {
-    services.push({ name: "HW", minutes: duration });
-  } else if (appt.serviceType === "Alltagsbegleitung") {
-    services.push({ name: "AB", minutes: duration });
-  } else if (duration > 0) {
-    services.push({ name: appt.serviceType || "Service", minutes: duration });
+function getAppointmentServices(appt: AppointmentWithCustomerName) {
+  if (appt.services && appt.services.length > 0) {
+    const isDocumented = appt.status === "completed" || appt.status === "documenting";
+    return appt.services.map(s => {
+      const minutes = isDocumented
+        ? (s.actualDurationMinutes ?? s.plannedDurationMinutes)
+        : s.plannedDurationMinutes;
+      const label = s.serviceCode
+        ? (SERVICE_CODE_LABELS[s.serviceCode] || s.serviceCode)
+        : "Service";
+      return { name: label, minutes };
+    });
   }
-  return services;
+
+  const duration = appt.durationPromised || 0;
+  if (appt.appointmentType === "Erstberatung") {
+    return [{ name: "EB", minutes: duration }];
+  }
+  if (duration > 0) {
+    return [{ name: appt.serviceType || "Service", minutes: duration }];
+  }
+  return [];
 }
 
 function getAppointmentEndTime(appt: AppointmentWithCustomerName, services: { minutes: number }[]) {
+  if (appt.actualEnd) return appt.actualEnd.slice(0, 5);
   if (appt.scheduledEnd) return appt.scheduledEnd.slice(0, 5);
+  const startTime = appt.actualStart || appt.scheduledStart;
   const totalMinutes = services.reduce((sum, s) => sum + s.minutes, 0);
-  if (totalMinutes > 0 && appt.scheduledStart) {
-    const [hours, mins] = appt.scheduledStart.split(":").map(Number);
+  if (totalMinutes > 0 && startTime) {
+    const [hours, mins] = startTime.split(":").map(Number);
     const endMinutes = hours * 60 + mins + totalMinutes;
     const endHours = Math.floor(endMinutes / 60) % 24;
     const endMins = endMinutes % 60;
@@ -125,7 +139,7 @@ export function DayDetailPanel({
                     <div className="flex-1">
                       <div className="font-medium text-teal-800">{appt.customerName}</div>
                       <div className="text-sm text-gray-600">
-                        {appt.scheduledStart.slice(0, 5)}{endTime ? ` - ${endTime}` : ""} Uhr
+                        {(appt.actualStart || appt.scheduledStart).slice(0, 5)}{endTime ? ` - ${endTime}` : ""} Uhr
                       </div>
                       <div className="flex flex-wrap gap-2 mt-1">
                         {services.map((s, i) => (

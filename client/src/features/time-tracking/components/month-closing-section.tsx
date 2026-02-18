@@ -124,7 +124,7 @@ export function MonthClosingSection({ year, month }: MonthClosingSectionProps) {
                     <div className="flex items-start gap-2 mt-2 ml-6" data-testid="blocker-no-time-entries">
                       <FileX className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
                       <p className="text-sm text-red-700">
-                        Keine Zeiteinträge für diesen Monat vorhanden. Bitte erfassen Sie Ihre Arbeitszeiten.
+                        Keine Zeiteinträge oder abgeschlossene Termine für diesen Monat vorhanden.
                       </p>
                     </div>
                   )}

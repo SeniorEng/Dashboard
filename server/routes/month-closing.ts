@@ -77,7 +77,7 @@ router.post("/close-month", asyncHandler("Monatsabschluss fehlgeschlagen", async
   const readiness = await timeTrackingStorage.getMonthClosingReadiness(userId, year, month);
 
   if (!readiness.hasTimeEntries) {
-    throw badRequest("Der Monat kann nicht abgeschlossen werden: Es sind keine Zeiteinträge vorhanden.");
+    throw badRequest("Der Monat kann nicht abgeschlossen werden: Es sind keine Zeiteinträge oder abgeschlossene Termine vorhanden.");
   }
 
   if (readiness.openAppointments.length > 0) {

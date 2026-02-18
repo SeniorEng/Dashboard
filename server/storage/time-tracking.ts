@@ -576,12 +576,24 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       }
     }
     
+    const enrichedAppointments = employeeAppointments.map(appt => {
+      const apptServices = servicesByAppointment.get(appt.id) || [];
+      return {
+        ...appt,
+        services: apptServices.map(s => ({
+          serviceCode: s.serviceCode,
+          plannedDurationMinutes: s.plannedDurationMinutes,
+          actualDurationMinutes: s.actualDurationMinutes,
+        })),
+      };
+    });
+
     return {
       period: { year, month },
       serviceHours,
       travel,
       timeEntries: timeEntrySummary,
-      appointments: employeeAppointments,
+      appointments: enrichedAppointments,
       otherEntries: timeEntries,
     };
   }
@@ -758,10 +770,29 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
         )
       );
 
-    const hasTimeEntries = Number(timeEntryCount[0]?.count ?? 0) > 0;
+    const completedAppointmentCount = await db
+      .select({ count: count() })
+      .from(appointments)
+      .innerJoin(customers, eq(appointments.customerId, customers.id))
+      .where(
+        and(
+          sqlBuilder`(
+            ${appointments.assignedEmployeeId} = ${userId} 
+            OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId}))
+          )`,
+          gte(appointments.date, startDate),
+          lte(appointments.date, endDate),
+          isNull(appointments.deletedAt),
+          inArray(appointments.status, ["completed", "cancelled"])
+        )
+      );
+
+    const timeEntries = Number(timeEntryCount[0]?.count ?? 0);
+    const completedAppts = Number(completedAppointmentCount[0]?.count ?? 0);
+    const hasActivity = timeEntries > 0 || completedAppts > 0;
 
     return {
-      ready: openAppointments.length === 0 && hasTimeEntries,
+      ready: openAppointments.length === 0 && hasActivity,
       openAppointments: openAppointments.map(a => ({
         id: a.id,
         date: a.date,
@@ -769,8 +800,8 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
         status: a.status,
         customerName: String(a.customerName ?? "Unbekannt"),
       })),
-      hasTimeEntries,
-      timeEntryCount: Number(timeEntryCount[0]?.count ?? 0),
+      hasTimeEntries: hasActivity,
+      timeEntryCount: timeEntries + completedAppts,
     };
   }
 
