@@ -29,6 +29,7 @@ export const users = pgTable("users", {
   anonymizedAt: timestamp("anonymized_at"),
   isAdmin: boolean("is_admin").notNull().default(false),
   haustierAkzeptiert: boolean("haustier_akzeptiert").notNull().default(true),
+  lbnr: text("lbnr"),
   notfallkontaktName: text("notfallkontakt_name"),
   notfallkontaktTelefon: text("notfallkontakt_telefon"),
   notfallkontaktBeziehung: text("notfallkontakt_beziehung"),
@@ -129,6 +130,7 @@ export const insertUserSchema = z.object({
   employmentStatus: z.enum(EMPLOYMENT_STATUSES).optional().default("aktiv"),
   isAdmin: z.boolean().optional().default(false),
   haustierAkzeptiert: z.boolean().optional().default(true),
+  lbnr: z.string().optional().nullable(),
   roles: z.array(z.enum(EMPLOYEE_ROLES)).optional().default([]),
 });
 

@@ -13,3 +13,5 @@ export * from "./system";
 export * from "./customer-full";
 export * from "./documents";
 export * from "./audit";
+export * from "./company";
+export * from "./billing";

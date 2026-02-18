@@ -35,6 +35,7 @@ const AdminSettings = lazy(() => import("@/pages/admin/settings"));
 const AdminDocumentTypes = lazy(() => import("@/pages/admin/document-types"));
 const AdminDocumentTemplates = lazy(() => import("@/pages/admin/document-templates"));
 const AdminAuditLog = lazy(() => import("@/pages/admin/audit-log"));
+const AdminBilling = lazy(() => import("@/pages/admin/billing"));
 const UndocumentedAppointments = lazy(() => import("@/pages/undocumented-appointments"));
 const CustomerDetail = lazy(() => import("@/pages/customer-detail"));
 const CustomerConvert = lazy(() => import("@/pages/customer-convert"));
@@ -196,6 +197,9 @@ function Router() {
       </Route>
       <Route path="/admin/audit-log">
         <AdminRoute component={AdminAuditLog} />
+      </Route>
+      <Route path="/admin/billing">
+        <AdminRoute component={AdminBilling} />
       </Route>
       <Route component={NotFound} />
     </Switch>

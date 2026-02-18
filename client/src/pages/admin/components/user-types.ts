@@ -17,6 +17,7 @@ export interface UserData {
   isAnonymized: boolean;
   isAdmin: boolean;
   haustierAkzeptiert: boolean;
+  lbnr: string | null;
   roles: string[];
   createdAt: string;
 }
@@ -37,6 +38,7 @@ export interface UserFormData {
   vacationDaysPerYear?: number;
   isAdmin: boolean;
   haustierAkzeptiert: boolean;
+  lbnr?: string | null;
   roles: string[];
 }
 

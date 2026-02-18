@@ -323,6 +323,11 @@ export default function AdminUsers() {
                                 <span className="text-sm text-gray-400 italic">Keine zugewiesen</span>
                               )}
                             </div>
+                            {user.lbnr && (
+                              <div className="mt-1 text-xs text-gray-500" data-testid={`text-lbnr-${user.id}`}>
+                                LBNR: {user.lbnr}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>

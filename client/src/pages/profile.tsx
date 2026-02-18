@@ -42,6 +42,7 @@ interface ProfileData {
   geburtsdatum: string | null;
   eintrittsdatum: string | null;
   haustierAkzeptiert: boolean;
+  lbnr: string | null;
   notfallkontaktName: string | null;
   notfallkontaktTelefon: string | null;
   notfallkontaktBeziehung: string | null;
@@ -275,6 +276,14 @@ function PersonalDataSection({ profile }: { profile: ProfileData }) {
             }
             testId="text-profile-adresse"
           />
+          {profile.lbnr && (
+            <InfoRow
+              icon={<FileText className="h-4 w-4" />}
+              label="LBNR (Beschäftigtennummer)"
+              value={profile.lbnr}
+              testId="text-profile-lbnr"
+            />
+          )}
         </div>
       )}
     </SectionCard>

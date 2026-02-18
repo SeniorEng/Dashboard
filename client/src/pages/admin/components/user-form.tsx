@@ -50,6 +50,7 @@ export function UserForm({
   );
   const [isAdmin, setIsAdmin] = useState(user?.isAdmin ?? false);
   const [haustierAkzeptiert, setHaustierAkzeptiert] = useState(user?.haustierAkzeptiert ?? true);
+  const [lbnr, setLbnr] = useState(user?.lbnr ?? "");
   const [roles, setRoles] = useState<string[]>(user?.roles ?? []);
 
   const handleTelefonBlur = () => {
@@ -94,6 +95,7 @@ export function UserForm({
       vacationDaysPerYear: vacationDaysPerYear ? parseInt(vacationDaysPerYear) : undefined,
       isAdmin,
       haustierAkzeptiert,
+      lbnr: lbnr || null,
       roles,
     };
     
@@ -308,6 +310,17 @@ export function UserForm({
               data-testid="checkbox-haustier-akzeptiert"
             />
             <Label htmlFor="haustierAkzeptiert">Akzeptiert Haustiere im Haushalt</Label>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="lbnr">LBNR (Beschäftigtennummer)</Label>
+            <Input
+              id="lbnr"
+              value={lbnr}
+              onChange={(e) => setLbnr(e.target.value)}
+              placeholder="Lebenslange Beschäftigtennummer"
+              data-testid="input-lbnr"
+            />
           </div>
 
           <div className="space-y-2">

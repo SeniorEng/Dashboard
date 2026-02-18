@@ -198,6 +198,19 @@ export interface IStorage {
   // System Settings
   getSystemSettings(): Promise<any>;
   updateSystemSettings(id: number, data: any, userId: number): Promise<any>;
+
+  // Company Settings
+  getCompanySettings(): Promise<any>;
+  updateCompanySettings(data: any, userId: number): Promise<any>;
+
+  // Billing / Invoices
+  getInvoices(filters: { year?: number; month?: number; customerId?: number; status?: string }): Promise<any[]>;
+  getInvoice(id: number): Promise<any | undefined>;
+  createInvoice(data: any, lineItems: any[], userId: number): Promise<any>;
+  updateInvoiceStatus(id: number, status: string, userId: number): Promise<any>;
+  getNextInvoiceNumber(year: number): Promise<string>;
+  getInvoiceLineItems(invoiceId: number): Promise<any[]>;
+  getInvoicesForCustomerMonth(customerId: number, year: number, month: number): Promise<any[]>;
 }
 
 export interface ServiceRecordOverviewItem {
@@ -1021,6 +1034,127 @@ export class DatabaseStorage implements IStorage {
     const { eq } = await import("drizzle-orm");
     const [updated] = await db.update(systemSettings).set({ ...data, updatedAt: new Date(), updatedByUserId: userId }).where(eq(systemSettings.id, id)).returning();
     return updated;
+  }
+
+  async getCompanySettings(): Promise<any> {
+    const { companySettings } = await import("@shared/schema");
+    const existing = await db.select().from(companySettings).limit(1);
+    if (existing.length > 0) return existing[0];
+    const [created] = await db.insert(companySettings).values({}).returning();
+    return created;
+  }
+
+  async updateCompanySettings(data: any, userId: number): Promise<any> {
+    const { companySettings } = await import("@shared/schema");
+    const existing = await db.select().from(companySettings).limit(1);
+    if (existing.length === 0) {
+      const [created] = await db.insert(companySettings).values({ ...data, updatedByUserId: userId }).returning();
+      return created;
+    }
+    const { eq } = await import("drizzle-orm");
+    const [updated] = await db.update(companySettings)
+      .set({ ...data, updatedAt: new Date(), updatedByUserId: userId })
+      .where(eq(companySettings.id, existing[0].id))
+      .returning();
+    return updated;
+  }
+
+  async getInvoices(filters: { year?: number; month?: number; customerId?: number; status?: string }): Promise<any[]> {
+    const { invoices, customers } = await import("@shared/schema");
+    const { eq, and, asc, desc } = await import("drizzle-orm");
+    const conditions: any[] = [];
+    if (filters.year) conditions.push(eq(invoices.billingYear, filters.year));
+    if (filters.month) conditions.push(eq(invoices.billingMonth, filters.month));
+    if (filters.customerId) conditions.push(eq(invoices.customerId, filters.customerId));
+    if (filters.status) conditions.push(eq(invoices.status, filters.status));
+
+    const results = await db.select({
+      invoice: invoices,
+      customerName: customers.name,
+    })
+    .from(invoices)
+    .innerJoin(customers, eq(invoices.customerId, customers.id))
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(invoices.createdAt));
+
+    return results.map(r => ({ ...r.invoice, customerName: r.customerName }));
+  }
+
+  async getInvoice(id: number): Promise<any | undefined> {
+    const { invoices, customers } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    const results = await db.select({
+      invoice: invoices,
+      customerName: customers.name,
+    })
+    .from(invoices)
+    .innerJoin(customers, eq(invoices.customerId, customers.id))
+    .where(eq(invoices.id, id));
+    if (results.length === 0) return undefined;
+    return { ...results[0].invoice, customerName: results[0].customerName };
+  }
+
+  async createInvoice(data: any, lineItems: any[], userId: number): Promise<any> {
+    const { invoices, invoiceLineItems } = await import("@shared/schema");
+    return await db.transaction(async (tx) => {
+      const [invoice] = await tx.insert(invoices).values({
+        ...data,
+        createdByUserId: userId,
+      }).returning();
+
+      if (lineItems.length > 0) {
+        await tx.insert(invoiceLineItems).values(
+          lineItems.map((item, idx) => ({
+            ...item,
+            invoiceId: invoice.id,
+            sortOrder: idx,
+          }))
+        );
+      }
+
+      return invoice;
+    });
+  }
+
+  async updateInvoiceStatus(id: number, status: string, userId: number): Promise<any> {
+    const { invoices } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    const updateData: any = { status };
+    if (status === "versendet") updateData.sentAt = new Date();
+    if (status === "bezahlt") updateData.paidAt = new Date();
+    if (status === "storniert") updateData.storniertAt = new Date();
+    const [updated] = await db.update(invoices).set(updateData).where(eq(invoices.id, id)).returning();
+    return updated;
+  }
+
+  async getNextInvoiceNumber(year: number): Promise<string> {
+    const { invoices } = await import("@shared/schema");
+    const { eq, sql } = await import("drizzle-orm");
+    const result = await db.select({
+      maxNum: sql<number>`COALESCE(MAX(CAST(SUBSTRING(${invoices.invoiceNumber} FROM 'RE-\\d{4}-(\\d+)') AS INTEGER)), 0)`,
+    })
+    .from(invoices)
+    .where(eq(invoices.billingYear, year));
+    const next = (result[0]?.maxNum || 0) + 1;
+    return `RE-${year}-${String(next).padStart(4, "0")}`;
+  }
+
+  async getInvoiceLineItems(invoiceId: number): Promise<any[]> {
+    const { invoiceLineItems } = await import("@shared/schema");
+    const { eq, asc } = await import("drizzle-orm");
+    return await db.select().from(invoiceLineItems).where(eq(invoiceLineItems.invoiceId, invoiceId)).orderBy(asc(invoiceLineItems.sortOrder));
+  }
+
+  async getInvoicesForCustomerMonth(customerId: number, year: number, month: number): Promise<any[]> {
+    const { invoices } = await import("@shared/schema");
+    const { eq, and } = await import("drizzle-orm");
+    return await db.select().from(invoices).where(
+      and(
+        eq(invoices.customerId, customerId),
+        eq(invoices.billingYear, year),
+        eq(invoices.billingMonth, month)
+      )
+    );
   }
 }
 

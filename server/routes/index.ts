@@ -12,6 +12,8 @@ import servicesRouter from "./services";
 import { searchRouter } from "./search";
 import settingsRouter from "./settings";
 import profileRouter from "./profile";
+import companyRouter from "./company";
+import billingRouter from "./billing";
 import { csrfProtection, csrfTokenHandler } from "../middleware/csrf";
 import { authMiddleware } from "../middleware/auth";
 import { cacheHeaders } from "../middleware/cache-headers";
@@ -40,5 +42,7 @@ router.use("/services", servicesRouter);
 router.use("/search", searchRouter);
 router.use("/settings", settingsRouter);
 router.use("/profile", profileRouter);
+router.use("/company-settings", companyRouter);
+router.use("/billing", billingRouter);
 
 export default router;

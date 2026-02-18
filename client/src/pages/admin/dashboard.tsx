@@ -3,7 +3,7 @@ import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/ca
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { Layout } from "@/components/layout";
-import { Users, UserCog, ArrowLeft, Contact2, Clock, Settings, Building2, ClipboardList, FileCheck2, Shield, FileText } from "lucide-react";
+import { Users, UserCog, ArrowLeft, Contact2, Clock, Settings, Building2, ClipboardList, FileCheck2, Shield, FileText, Receipt } from "lucide-react";
 import { iconSize } from "@/design-system";
 
 export default function AdminDashboard() {
@@ -163,6 +163,24 @@ export default function AdminDashboard() {
                       <CardTitle>Vertragsvorlagen</CardTitle>
                       <CardDescription>
                         HTML-Vorlagen für Verträge und Dokumente im Kundenanlage-Flow
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+              </Card>
+            </Link>
+
+            <Link href="/admin/billing" className="block h-full">
+              <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid="card-billing">
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-emerald-100 rounded-lg">
+                      <Receipt className={`${iconSize.lg} text-emerald-600`} />
+                    </div>
+                    <div>
+                      <CardTitle>Abrechnung</CardTitle>
+                      <CardDescription>
+                        Rechnungen erstellen, Leistungsnachweise und Storno
                       </CardDescription>
                     </div>
                   </div>

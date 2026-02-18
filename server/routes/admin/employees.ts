@@ -122,6 +122,7 @@ const updateUserSchema = z.object({
   isActive: z.boolean().optional(),
   isAdmin: z.boolean().optional(),
   haustierAkzeptiert: z.boolean().optional(),
+  lbnr: z.string().nullable().optional(),
   notfallkontaktName: z.string().optional(),
   notfallkontaktTelefon: z.string().optional(),
   notfallkontaktBeziehung: z.string().optional(),

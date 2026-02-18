@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
@@ -5,11 +6,52 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize } from "@/design-system";
-import type { SystemSettings } from "@shared/schema";
+import type { SystemSettings, CompanySettings } from "@shared/schema";
+
+const BUNDESLAENDER = [
+  "Baden-Württemberg",
+  "Bayern",
+  "Berlin",
+  "Brandenburg",
+  "Bremen",
+  "Hamburg",
+  "Hessen",
+  "Mecklenburg-Vorpommern",
+  "Niedersachsen",
+  "Nordrhein-Westfalen",
+  "Rheinland-Pfalz",
+  "Saarland",
+  "Sachsen",
+  "Sachsen-Anhalt",
+  "Schleswig-Holstein",
+  "Thüringen",
+];
+
+const emptyCompanyForm = {
+  companyName: "",
+  geschaeftsfuehrer: "",
+  strasse: "",
+  hausnummer: "",
+  plz: "",
+  stadt: "",
+  telefon: "",
+  email: "",
+  website: "",
+  steuernummer: "",
+  ustId: "",
+  iban: "",
+  bic: "",
+  bankName: "",
+  ikNummer: "",
+  anerkennungsnummer45a: "",
+  anerkennungsBundesland: "",
+};
 
 export default function AdminSettings() {
   const { toast } = useToast();
@@ -21,6 +63,59 @@ export default function AdminSettings() {
       const res = await fetch("/api/settings", { credentials: "include" });
       if (!res.ok) throw new Error("Einstellungen konnten nicht geladen werden");
       return res.json();
+    },
+  });
+
+  const { data: companyData, isLoading: isCompanyLoading } = useQuery<CompanySettings>({
+    queryKey: ["company-settings"],
+    queryFn: async () => {
+      const res = await fetch("/api/company-settings", { credentials: "include" });
+      if (!res.ok) throw new Error("Firmendaten konnten nicht geladen werden");
+      return res.json();
+    },
+  });
+
+  const [companyForm, setCompanyForm] = useState(emptyCompanyForm);
+
+  useEffect(() => {
+    if (companyData) {
+      setCompanyForm({
+        companyName: companyData.companyName ?? "",
+        geschaeftsfuehrer: companyData.geschaeftsfuehrer ?? "",
+        strasse: companyData.strasse ?? "",
+        hausnummer: companyData.hausnummer ?? "",
+        plz: companyData.plz ?? "",
+        stadt: companyData.stadt ?? "",
+        telefon: companyData.telefon ?? "",
+        email: companyData.email ?? "",
+        website: companyData.website ?? "",
+        steuernummer: companyData.steuernummer ?? "",
+        ustId: companyData.ustId ?? "",
+        iban: companyData.iban ?? "",
+        bic: companyData.bic ?? "",
+        bankName: companyData.bankName ?? "",
+        ikNummer: companyData.ikNummer ?? "",
+        anerkennungsnummer45a: companyData.anerkennungsnummer45a ?? "",
+        anerkennungsBundesland: companyData.anerkennungsBundesland ?? "",
+      });
+    }
+  }, [companyData]);
+
+  const updateField = (field: keyof typeof companyForm, value: string) => {
+    setCompanyForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const companySaveMutation = useMutation({
+    mutationFn: async (data: typeof companyForm) => {
+      const result = await api.patch<CompanySettings>("/company-settings", data);
+      return unwrapResult(result);
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(["company-settings"], data);
+      toast({ title: "Firmendaten gespeichert" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 
@@ -42,6 +137,8 @@ export default function AdminSettings() {
     },
   });
 
+  const loading = isLoading || isCompanyLoading;
+
   return (
     <Layout>
       <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
@@ -58,12 +155,249 @@ export default function AdminSettings() {
             </div>
           </div>
 
-          {isLoading ? (
+          {loading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
             </div>
           ) : (
             <div className="flex flex-col gap-4">
+              <Card data-testid="card-company-settings">
+                <CardHeader>
+                  <CardTitle>Firmenstammdaten</CardTitle>
+                  <CardDescription>
+                    Diese Daten werden auf Rechnungen und Leistungsnachweisen verwendet.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      companySaveMutation.mutate(companyForm);
+                    }}
+                    className="flex flex-col gap-6"
+                  >
+                    <div className="flex flex-col gap-3">
+                      <h3 className="text-sm font-medium text-gray-700">Firma</h3>
+                      <div className="flex flex-col gap-3">
+                        <div>
+                          <Label htmlFor="companyName">Firmenname</Label>
+                          <Input
+                            id="companyName"
+                            data-testid="input-company-companyName"
+                            value={companyForm.companyName}
+                            onChange={(e) => updateField("companyName", e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="geschaeftsfuehrer">Geschäftsführer</Label>
+                          <Input
+                            id="geschaeftsfuehrer"
+                            data-testid="input-company-geschaeftsfuehrer"
+                            value={companyForm.geschaeftsfuehrer}
+                            onChange={(e) => updateField("geschaeftsfuehrer", e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-3">
+                      <h3 className="text-sm font-medium text-gray-700">Adresse</h3>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label htmlFor="strasse">Straße</Label>
+                          <Input
+                            id="strasse"
+                            data-testid="input-company-strasse"
+                            value={companyForm.strasse}
+                            onChange={(e) => updateField("strasse", e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="hausnummer">Hausnummer</Label>
+                          <Input
+                            id="hausnummer"
+                            data-testid="input-company-hausnummer"
+                            value={companyForm.hausnummer}
+                            onChange={(e) => updateField("hausnummer", e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label htmlFor="plz">PLZ</Label>
+                          <Input
+                            id="plz"
+                            data-testid="input-company-plz"
+                            value={companyForm.plz}
+                            onChange={(e) => updateField("plz", e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="stadt">Stadt</Label>
+                          <Input
+                            id="stadt"
+                            data-testid="input-company-stadt"
+                            value={companyForm.stadt}
+                            onChange={(e) => updateField("stadt", e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-3">
+                      <h3 className="text-sm font-medium text-gray-700">Kontakt</h3>
+                      <div className="flex flex-col gap-3">
+                        <div>
+                          <Label htmlFor="telefon">Telefon</Label>
+                          <Input
+                            id="telefon"
+                            data-testid="input-company-telefon"
+                            value={companyForm.telefon}
+                            onChange={(e) => updateField("telefon", e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="email">E-Mail</Label>
+                          <Input
+                            id="email"
+                            data-testid="input-company-email"
+                            value={companyForm.email}
+                            onChange={(e) => updateField("email", e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="website">Website</Label>
+                          <Input
+                            id="website"
+                            data-testid="input-company-website"
+                            value={companyForm.website}
+                            onChange={(e) => updateField("website", e.target.value)}
+                            placeholder="Optional"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-3">
+                      <h3 className="text-sm font-medium text-gray-700">Steuerdaten</h3>
+                      <div className="flex flex-col gap-3">
+                        <div>
+                          <Label htmlFor="steuernummer">Steuernummer</Label>
+                          <Input
+                            id="steuernummer"
+                            data-testid="input-company-steuernummer"
+                            value={companyForm.steuernummer}
+                            onChange={(e) => updateField("steuernummer", e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="ustId">USt-ID</Label>
+                          <Input
+                            id="ustId"
+                            data-testid="input-company-ustId"
+                            value={companyForm.ustId}
+                            onChange={(e) => updateField("ustId", e.target.value)}
+                            placeholder="Optional"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Entfällt bei Steuerbefreiung nach §4 Nr. 16 UStG
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-3">
+                      <h3 className="text-sm font-medium text-gray-700">Bankverbindung</h3>
+                      <div className="flex flex-col gap-3">
+                        <div>
+                          <Label htmlFor="iban">IBAN</Label>
+                          <Input
+                            id="iban"
+                            data-testid="input-company-iban"
+                            value={companyForm.iban}
+                            onChange={(e) => updateField("iban", e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="bic">BIC</Label>
+                          <Input
+                            id="bic"
+                            data-testid="input-company-bic"
+                            value={companyForm.bic}
+                            onChange={(e) => updateField("bic", e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="bankName">Bank</Label>
+                          <Input
+                            id="bankName"
+                            data-testid="input-company-bankName"
+                            value={companyForm.bankName}
+                            onChange={(e) => updateField("bankName", e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-3">
+                      <h3 className="text-sm font-medium text-gray-700">Anerkennung</h3>
+                      <div className="flex flex-col gap-3">
+                        <div>
+                          <Label htmlFor="ikNummer">IK-Nummer</Label>
+                          <Input
+                            id="ikNummer"
+                            data-testid="input-company-ikNummer"
+                            value={companyForm.ikNummer}
+                            onChange={(e) => updateField("ikNummer", e.target.value)}
+                            placeholder="9 Ziffern, Institutionskennzeichen"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="anerkennungsnummer45a">Anerkennungsnummer (§45a)</Label>
+                          <Input
+                            id="anerkennungsnummer45a"
+                            data-testid="input-company-anerkennungsnummer45a"
+                            value={companyForm.anerkennungsnummer45a}
+                            onChange={(e) => updateField("anerkennungsnummer45a", e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="anerkennungsBundesland">Bundesland der Anerkennung</Label>
+                          <Select
+                            value={companyForm.anerkennungsBundesland}
+                            onValueChange={(value) => updateField("anerkennungsBundesland", value)}
+                          >
+                            <SelectTrigger data-testid="select-company-bundesland" id="anerkennungsBundesland">
+                              <SelectValue placeholder="Bundesland wählen" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {BUNDESLAENDER.map((bl) => (
+                                <SelectItem key={bl} value={bl}>
+                                  {bl}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end">
+                      <Button
+                        type="submit"
+                        data-testid="button-save-company"
+                        disabled={companySaveMutation.isPending}
+                      >
+                        {companySaveMutation.isPending && (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        )}
+                        Speichern
+                      </Button>
+                    </div>
+                  </form>
+                </CardContent>
+              </Card>
+
               <Card data-testid="card-auto-breaks">
                 <CardHeader>
                   <CardTitle>Automatische Pausen</CardTitle>
