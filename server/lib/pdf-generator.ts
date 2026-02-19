@@ -63,12 +63,30 @@ export interface InvoicePdfData {
   
   // Notes
   notes: string | null;
+  
+  // Signatures (for Leistungsnachweis)
+  signatures?: {
+    employeeSignatureData: string | null;
+    employeeSignedAt: string | null;
+    employeeName: string | null;
+    customerSignatureData: string | null;
+    customerSignedAt: string | null;
+    customerName: string | null;
+  }[];
 }
 
 function formatCents(cents: number): string {
   const abs = Math.abs(cents);
   const sign = cents < 0 ? "-" : "";
   return `${sign}${(abs / 100).toFixed(2).replace(".", ",")} €`;
+}
+
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function isValidDataUrl(str: string): boolean {
+  return /^data:image\/(png|jpeg|svg\+xml);base64,[A-Za-z0-9+/=]+$/.test(str);
 }
 
 function formatDate(dateStr: string): string {
@@ -363,6 +381,39 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     ${data.billingType !== "selbstzahler" ? "und zur Abrechnung des Entlastungsbetrags nach § 45b SGB XI bei meiner Pflegekasse eingereicht werden dürfen" : ""}.
   </div>
 
+  ${data.signatures && data.signatures.length > 0 ? data.signatures.map(sig => {
+    const custSigValid = sig.customerSignatureData && isValidDataUrl(sig.customerSignatureData);
+    const empSigValid = sig.employeeSignatureData && isValidDataUrl(sig.employeeSignatureData);
+    return `
+  <div class="signature-area">
+    <div class="signature-box">
+      ${custSigValid ? `
+        <div style="margin-bottom: 4px;">
+          <img src="${sig.customerSignatureData}" style="max-width: 200px; max-height: 60px;" />
+        </div>
+        <div class="signature-line">
+          ${escapeHtml(sig.customerSignedAt || "")}, ${escapeHtml(sig.customerName || "Leistungsempfänger/in")}<br>
+          <span style="color: #9ca3af;">(Leistungsempfänger/in oder gesetzl. Vertreter/in)</span>
+        </div>
+      ` : `
+        <div class="signature-line">Datum, Unterschrift Leistungsempfänger/in<br>(oder gesetzl. Vertreter/in)</div>
+      `}
+    </div>
+    <div class="signature-box">
+      ${empSigValid ? `
+        <div style="margin-bottom: 4px;">
+          <img src="${sig.employeeSignatureData}" style="max-width: 200px; max-height: 60px;" />
+        </div>
+        <div class="signature-line">
+          ${escapeHtml(sig.employeeSignedAt || "")}, ${escapeHtml(sig.employeeName || "Leistungserbringer")}<br>
+          <span style="color: #9ca3af;">(Leistungserbringer)</span>
+        </div>
+      ` : `
+        <div class="signature-line">Datum, Unterschrift Leistungserbringer</div>
+      `}
+    </div>
+  </div>
+  `; }).join("") : `
   <div class="signature-area">
     <div class="signature-box">
       <div class="signature-line">Datum, Unterschrift Leistungsempfänger/in<br>(oder gesetzl. Vertreter/in)</div>
@@ -371,6 +422,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       <div class="signature-line">Datum, Unterschrift Leistungserbringer</div>
     </div>
   </div>
+  `}
 
   <div class="footer">
     ${data.companyName || ""} | ${data.companyAddress || ""} | ${data.companyPhone ? `Tel.: ${data.companyPhone}` : ""} | ${data.companyEmail || ""}

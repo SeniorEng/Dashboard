@@ -12,6 +12,7 @@ import {
   insuranceProviders,
   invoices as invoicesTable,
   invoiceLineItems,
+  monthlyServiceRecords,
 } from "@shared/schema";
 import { eq, and, gte, lte, isNull, inArray, ne, notInArray } from "drizzle-orm";
 import { z } from "zod";
@@ -600,6 +601,43 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
   const { generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
   
   const pdfData = buildPdfData(invoice, lineItems, companySettings);
+
+  const serviceRecords = await db.select({
+    employeeSignatureData: monthlyServiceRecords.employeeSignatureData,
+    employeeSignedAt: monthlyServiceRecords.employeeSignedAt,
+    employeeId: monthlyServiceRecords.employeeId,
+    customerSignatureData: monthlyServiceRecords.customerSignatureData,
+    customerSignedAt: monthlyServiceRecords.customerSignedAt,
+    status: monthlyServiceRecords.status,
+  })
+    .from(monthlyServiceRecords)
+    .where(and(
+      eq(monthlyServiceRecords.customerId, invoice.customerId),
+      eq(monthlyServiceRecords.year, invoice.billingYear),
+      eq(monthlyServiceRecords.month, invoice.billingMonth)
+    ));
+
+  const signedRecords = serviceRecords.filter(r =>
+    r.status === "completed" || r.status === "employee_signed"
+  );
+
+  if (signedRecords.length > 0) {
+    const employeeIds = [...new Set(signedRecords.map(r => r.employeeId))];
+    const employeeRows = await db.select({ id: users.id, displayName: users.displayName })
+      .from(users)
+      .where(inArray(users.id, employeeIds));
+    const employeeMap = new Map(employeeRows.map(e => [e.id, e.displayName]));
+
+    pdfData.signatures = signedRecords.map(r => ({
+      employeeSignatureData: r.employeeSignatureData,
+      employeeSignedAt: r.employeeSignedAt ? new Date(r.employeeSignedAt).toLocaleDateString("de-DE") : null,
+      employeeName: employeeMap.get(r.employeeId) || null,
+      customerSignatureData: r.customerSignatureData,
+      customerSignedAt: r.customerSignedAt ? new Date(r.customerSignedAt).toLocaleDateString("de-DE") : null,
+      customerName: invoice.customerName || invoice.recipientName,
+    }));
+  }
+
   const html = generateLeistungsnachweisHtml(pdfData);
   const { buffer } = await generatePdf(html);
   
