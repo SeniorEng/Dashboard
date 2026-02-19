@@ -289,6 +289,11 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     return (a.startTime || "").localeCompare(b.startTime || "");
   });
 
+  const employeeNames = [...new Set(sortedItems.map(i => i.employeeName).filter(Boolean))] as string[];
+  const employeeLbnrs = [...new Set(sortedItems.map(i => i.employeeLbnr).filter(Boolean))] as string[];
+  const employeeLabel = employeeNames.length > 0 ? employeeNames.map(escapeHtml).join(", ") : "Leistungserbringer/in";
+  const lbnrLabel = employeeLbnrs.map(escapeHtml).join(", ");
+
   let prevDateTimeKey = "";
   const lineItemsHtml = sortedItems.map(item => {
     const dateTimeKey = `${item.appointmentDate}|${item.startTime || ""}|${item.endTime || ""}`;
@@ -306,8 +311,6 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${timeStr}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatMinutes(item.durationMinutes)}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(item.serviceDescription)}</td>
-      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(item.employeeName || "")}</td>
-      ${item.employeeLbnr ? `<td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; font-size: 8pt;">${escapeHtml(item.employeeLbnr)}</td>` : `<td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;"></td>`}
     </tr>
   `; }).join("");
 
@@ -350,19 +353,26 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   <div class="info-grid">
     <div class="info-box">
       <div class="info-label">Leistungsempfänger/in</div>
-      <div class="info-value">${data.customerName}</div>
-      ${data.customerAddress ? `<div style="font-size: 9pt;">${data.customerAddress.replace(/\n/g, "<br>")}</div>` : ""}
+      <div class="info-value">${escapeHtml(data.customerName)}</div>
+      ${data.customerAddress ? `<div style="font-size: 9pt;">${escapeHtml(data.customerAddress).replace(/\n/g, "<br>")}</div>` : ""}
     </div>
     <div class="info-box">
+      <div class="info-label">Leistungserbringer/in</div>
+      <div class="info-value">${employeeLabel}</div>
+      ${lbnrLabel ? `<div style="font-size: 9pt;">LBNR: ${lbnrLabel}</div>` : ""}
+    </div>
+  </div>
+  <div class="info-grid">
+    <div class="info-box">
       <div class="info-label">Versicherung</div>
-      ${data.versichertennummer ? `<div class="info-value">${data.versichertennummer}</div>` : ""}
+      ${data.versichertennummer ? `<div class="info-value">${escapeHtml(data.versichertennummer)}</div>` : ""}
       ${data.pflegegrad ? `<div style="font-size: 9pt;">Pflegegrad: ${data.pflegegrad}</div>` : ""}
-      ${data.insuranceProviderName ? `<div style="font-size: 9pt;">${data.insuranceProviderName}</div>` : `<div style="font-size: 9pt; color: #9ca3af;">Selbstzahler</div>`}
+      ${data.insuranceProviderName ? `<div style="font-size: 9pt;">${escapeHtml(data.insuranceProviderName)}</div>` : `<div style="font-size: 9pt; color: #9ca3af;">Selbstzahler</div>`}
     </div>
     <div class="info-box">
       <div class="info-label">Zeitraum</div>
-      <div class="info-value">${periodLabel}</div>
-      <div style="font-size: 9pt;">Rechnungsnr.: ${data.invoiceNumber}</div>
+      <div class="info-value">${escapeHtml(periodLabel)}</div>
+      <div style="font-size: 9pt;">Rechnungsnr.: ${escapeHtml(data.invoiceNumber)}</div>
     </div>
   </div>
 
@@ -373,8 +383,6 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
         <th>Uhrzeit</th>
         <th>Dauer</th>
         <th>Tätigkeit</th>
-        <th>Mitarbeiter/in</th>
-        <th>LBNR</th>
       </tr>
     </thead>
     <tbody>
@@ -382,7 +390,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       <tr class="total-row">
         <td colspan="2">Gesamt</td>
         <td style="text-align: right;">${formatMinutes(totalMinutes)}</td>
-        <td colspan="3"></td>
+        <td></td>
       </tr>
     </tbody>
   </table>
@@ -409,11 +417,11 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
           <img src="${sig.customerSignatureData}" style="max-width: 200px; max-height: 60px;" />
         </div>
         <div class="signature-line">
-          ${escapeHtml(sig.customerSignedAt || "")}, ${escapeHtml(sig.customerName || "Leistungsempfänger/in")}<br>
-          <span style="color: #9ca3af;">(Leistungsempfänger/in oder gesetzl. Vertreter/in)</span>
+          ${escapeHtml(sig.customerSignedAt || "")}, ${escapeHtml(sig.customerName || data.customerName)}<br>
+          <span style="color: #9ca3af;">(Leistungsempfänger/in)</span>
         </div>
       ` : `
-        <div class="signature-line">Datum, Unterschrift Leistungsempfänger/in<br>(oder gesetzl. Vertreter/in)</div>
+        <div class="signature-line">${escapeHtml(data.customerName)}<br><span style="color: #9ca3af;">(Leistungsempfänger/in oder gesetzl. Vertreter/in)</span></div>
       `}
     </div>
     <div class="signature-box">
@@ -422,21 +430,21 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
           <img src="${sig.employeeSignatureData}" style="max-width: 200px; max-height: 60px;" />
         </div>
         <div class="signature-line">
-          ${escapeHtml(sig.employeeSignedAt || "")}, ${escapeHtml(sig.employeeName || "Leistungserbringer")}<br>
-          <span style="color: #9ca3af;">(Leistungserbringer)</span>
+          ${escapeHtml(sig.employeeSignedAt || "")}, ${escapeHtml(sig.employeeName || "")}<br>
+          <span style="color: #9ca3af;">(Leistungserbringer/in)</span>
         </div>
       ` : `
-        <div class="signature-line">Datum, Unterschrift Leistungserbringer</div>
+        <div class="signature-line">${employeeLabel}<br><span style="color: #9ca3af;">(Leistungserbringer/in)</span></div>
       `}
     </div>
   </div>
   `; }).join("") : `
   <div class="signature-area">
     <div class="signature-box">
-      <div class="signature-line">Datum, Unterschrift Leistungsempfänger/in<br>(oder gesetzl. Vertreter/in)</div>
+      <div class="signature-line">${escapeHtml(data.customerName)}<br><span style="color: #9ca3af;">(Leistungsempfänger/in oder gesetzl. Vertreter/in)</span></div>
     </div>
     <div class="signature-box">
-      <div class="signature-line">Datum, Unterschrift Leistungserbringer</div>
+      <div class="signature-line">${employeeLabel}<br><span style="color: #9ca3af;">(Leistungserbringer/in)</span></div>
     </div>
   </div>
   `}
