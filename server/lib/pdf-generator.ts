@@ -283,18 +283,35 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
 export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   const periodLabel = `${MONTH_NAMES[data.billingMonth - 1]} ${data.billingYear}`;
 
-  const lineItemsHtml = data.lineItems.map(item => `
-    <tr>
-      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${formatDate(item.appointmentDate)}</td>
-      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${item.startTime ? item.startTime.slice(0, 5) : ""} - ${item.endTime ? item.endTime.slice(0, 5) : ""}</td>
-      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatMinutes(item.durationMinutes)}</td>
-      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${item.serviceDescription}</td>
-      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${item.employeeName || ""}</td>
-      ${item.employeeLbnr ? `<td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; font-size: 8pt;">${item.employeeLbnr}</td>` : `<td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;"></td>`}
-    </tr>
-  `).join("");
+  const sortedItems = [...data.lineItems].sort((a, b) => {
+    const dateCmp = a.appointmentDate.localeCompare(b.appointmentDate);
+    if (dateCmp !== 0) return dateCmp;
+    return (a.startTime || "").localeCompare(b.startTime || "");
+  });
 
-  const totalMinutes = data.lineItems.reduce((sum, item) => sum + item.durationMinutes, 0);
+  let prevDateTimeKey = "";
+  const lineItemsHtml = sortedItems.map(item => {
+    const dateTimeKey = `${item.appointmentDate}|${item.startTime || ""}|${item.endTime || ""}`;
+    const isFirstOfAppointment = dateTimeKey !== prevDateTimeKey;
+    prevDateTimeKey = dateTimeKey;
+
+    const dateStr = isFirstOfAppointment ? formatDate(item.appointmentDate) : "";
+    const timeStr = isFirstOfAppointment
+      ? `${item.startTime ? item.startTime.slice(0, 5) : ""} - ${item.endTime ? item.endTime.slice(0, 5) : ""}`
+      : "";
+
+    return `
+    <tr>
+      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${dateStr}</td>
+      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${timeStr}</td>
+      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatMinutes(item.durationMinutes)}</td>
+      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(item.serviceDescription)}</td>
+      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(item.employeeName || "")}</td>
+      ${item.employeeLbnr ? `<td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; font-size: 8pt;">${escapeHtml(item.employeeLbnr)}</td>` : `<td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;"></td>`}
+    </tr>
+  `; }).join("");
+
+  const totalMinutes = sortedItems.reduce((sum, item) => sum + item.durationMinutes, 0);
 
   return `<!DOCTYPE html>
 <html lang="de">

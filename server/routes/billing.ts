@@ -32,7 +32,8 @@ async function getAlreadyInvoicedAppointmentIds(customerId: number, billingYear:
       eq(invoicesTable.customerId, customerId),
       eq(invoicesTable.billingYear, billingYear),
       eq(invoicesTable.billingMonth, billingMonth),
-      ne(invoicesTable.status, "storniert")
+      ne(invoicesTable.status, "storniert"),
+      ne(invoicesTable.invoiceType, "stornorechnung")
     ));
   return rows.map(r => r.appointmentId).filter((id): id is number => id !== null);
 }
