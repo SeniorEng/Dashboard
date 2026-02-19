@@ -48,11 +48,13 @@ export interface InvoicePdfData {
     startTime: string | null;
     endTime: string | null;
     serviceDescription: string;
+    serviceCode: string | null;
     durationMinutes: number;
     unitPriceCents: number;
     totalCents: number;
     employeeName: string | null;
     employeeLbnr: string | null;
+    appointmentNotes: string | null;
   }[];
   
   // Totals
@@ -294,27 +296,84 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   const employeeLabel = employeeNames.length > 0 ? employeeNames.map(escapeHtml).join(", ") : "Leistungserbringer/in";
   const lbnrLabel = employeeLbnrs.map(escapeHtml).join(", ");
 
-  let prevDateTimeKey = "";
-  const lineItemsHtml = sortedItems.map(item => {
+  const KM_CODES = ["travel_km", "customer_km"];
+  const isKmItem = (item: typeof sortedItems[0]) => KM_CODES.includes(item.serviceCode || "");
+
+  type AppointmentGroup = { dateTimeKey: string; date: string; time: string; services: typeof sortedItems; kmItems: typeof sortedItems; notes: string | null };
+  const appointmentGroups: AppointmentGroup[] = [];
+  let currentGroup: AppointmentGroup | null = null;
+
+  for (const item of sortedItems) {
     const dateTimeKey = `${item.appointmentDate}|${item.startTime || ""}|${item.endTime || ""}`;
-    const isFirstOfAppointment = dateTimeKey !== prevDateTimeKey;
-    prevDateTimeKey = dateTimeKey;
+    if (!currentGroup || currentGroup.dateTimeKey !== dateTimeKey) {
+      currentGroup = {
+        dateTimeKey,
+        date: formatDate(item.appointmentDate),
+        time: `${item.startTime ? item.startTime.slice(0, 5) : ""} - ${item.endTime ? item.endTime.slice(0, 5) : ""}`,
+        services: [],
+        kmItems: [],
+        notes: item.appointmentNotes || null,
+      };
+      appointmentGroups.push(currentGroup);
+    }
+    if (!currentGroup.notes && item.appointmentNotes) {
+      currentGroup.notes = item.appointmentNotes;
+    }
+    if (isKmItem(item)) {
+      currentGroup.kmItems.push(item);
+    } else {
+      currentGroup.services.push(item);
+    }
+  }
 
-    const dateStr = isFirstOfAppointment ? formatDate(item.appointmentDate) : "";
-    const timeStr = isFirstOfAppointment
-      ? `${item.startTime ? item.startTime.slice(0, 5) : ""} - ${item.endTime ? item.endTime.slice(0, 5) : ""}`
-      : "";
+  const lineItemsHtml = appointmentGroups.map((group) => {
+    const rows: string[] = [];
 
-    return `
-    <tr>
-      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${dateStr}</td>
-      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${timeStr}</td>
-      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatMinutes(item.durationMinutes)}</td>
-      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(item.serviceDescription)}</td>
-    </tr>
-  `; }).join("");
+    for (let i = 0; i < group.services.length; i++) {
+      const svc = group.services[i];
+      const showDateCol = i === 0;
+      rows.push(`
+      <tr>
+        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${showDateCol ? group.date : ""}</td>
+        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${showDateCol ? group.time : ""}</td>
+        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(svc.serviceDescription)}</td>
+        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatMinutes(svc.durationMinutes)}</td>
+        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(svc.unitPriceCents)}/Std.</td>
+        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(svc.totalCents)}</td>
+      </tr>`);
+    }
 
-  const totalMinutes = sortedItems.reduce((sum, item) => sum + item.durationMinutes, 0);
+    if (group.kmItems.length > 0) {
+      const totalKm = group.kmItems.reduce((sum, k) => sum + k.durationMinutes, 0);
+      const totalKmCents = group.kmItems.reduce((sum, k) => sum + k.totalCents, 0);
+      const kmPrice = group.kmItems[0].unitPriceCents;
+      const showDateCol = group.services.length === 0;
+      rows.push(`
+      <tr>
+        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${showDateCol ? group.date : ""}</td>
+        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${showDateCol ? group.time : ""}</td>
+        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">Kilometer</td>
+        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${totalKm} km</td>
+        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(kmPrice)}/km</td>
+        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(totalKmCents)}</td>
+      </tr>`);
+    }
+
+    if (group.notes) {
+      rows.push(`
+      <tr>
+        <td colspan="6" style="padding: 4px 8px 8px 8px; border-bottom: 2px solid #e5e7eb; font-size: 9pt; color: #6b7280; font-style: italic;">
+          ${escapeHtml(group.notes)}
+        </td>
+      </tr>`);
+    }
+
+    return rows.join("");
+  }).join("");
+
+  const totalServiceMinutes = sortedItems.filter(i => !isKmItem(i)).reduce((sum, item) => sum + item.durationMinutes, 0);
+  const totalKmAll = sortedItems.filter(i => isKmItem(i)).reduce((sum, item) => sum + item.durationMinutes, 0);
+  const totalCentsAll = sortedItems.reduce((sum, item) => sum + item.totalCents, 0);
 
   return `<!DOCTYPE html>
 <html lang="de">
@@ -332,7 +391,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     .info-value { font-weight: 600; }
     table.items { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
     table.items th { background: #f3f4f6; padding: 8px; text-align: left; font-size: 9pt; font-weight: 600; border-bottom: 2px solid #d1d5db; }
-    table.items th:nth-child(3) { text-align: right; }
+    table.items th:nth-child(4), table.items th:nth-child(5), table.items th:nth-child(6) { text-align: right; }
     .total-row td { font-weight: bold; border-top: 2px solid #0d9488; padding: 8px; }
     .signature-area { margin-top: 40px; display: flex; justify-content: space-between; }
     .signature-box { width: 45%; }
@@ -381,16 +440,19 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       <tr>
         <th>Datum</th>
         <th>Uhrzeit</th>
-        <th>Dauer</th>
-        <th>Tätigkeit</th>
+        <th>Leistung</th>
+        <th>Dauer/Km</th>
+        <th>Einzelpreis</th>
+        <th>Betrag</th>
       </tr>
     </thead>
     <tbody>
       ${lineItemsHtml}
       <tr class="total-row">
-        <td colspan="2">Gesamt</td>
-        <td style="text-align: right;">${formatMinutes(totalMinutes)}</td>
+        <td colspan="3">Gesamt</td>
+        <td style="text-align: right;">${formatMinutes(totalServiceMinutes)}${totalKmAll > 0 ? ` + ${totalKmAll} km` : ""}</td>
         <td></td>
+        <td style="text-align: right;">${formatCents(totalCentsAll)}</td>
       </tr>
     </tbody>
   </table>

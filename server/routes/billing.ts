@@ -152,6 +152,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
         totalCents,
         employeeName,
         employeeLbnr,
+        appointmentNotes: appt.notes || null,
       });
 
       totalNetCents += totalCents;
@@ -373,6 +374,7 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
             totalCents,
             employeeName,
             employeeLbnr,
+            appointmentNotes: appt.notes || null,
           });
           totalNetCents += totalCents;
           totalVatCents += vatCents;
@@ -516,6 +518,7 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
       totalCents: -item.totalCents,
       employeeName: item.employeeName,
       employeeLbnr: item.employeeLbnr,
+      appointmentNotes: item.appointmentNotes || null,
     }));
 
     await storage.createInvoice(stornoData, stornoLineItems, req.user!.id);
@@ -563,11 +566,13 @@ function buildPdfData(invoice: any, lineItems: any[], companySettings: any) {
       startTime: item.startTime,
       endTime: item.endTime,
       serviceDescription: item.serviceDescription,
+      serviceCode: item.serviceCode || null,
       durationMinutes: item.durationMinutes,
       unitPriceCents: item.unitPriceCents,
       totalCents: item.totalCents,
       employeeName: item.employeeName,
       employeeLbnr: item.employeeLbnr,
+      appointmentNotes: item.appointmentNotes || null,
     })),
     netAmountCents: invoice.netAmountCents,
     vatAmountCents: invoice.vatAmountCents,

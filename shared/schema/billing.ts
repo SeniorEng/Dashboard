@@ -80,6 +80,7 @@ export const invoiceLineItems = pgTable("invoice_line_items", {
   totalCents: integer("total_cents").notNull(),
   employeeName: text("employee_name"),
   employeeLbnr: text("employee_lbnr"),
+  appointmentNotes: text("appointment_notes"),
   sortOrder: integer("sort_order").notNull().default(0),
 }, (table) => [
   index("invoice_line_items_invoice_id_idx").on(table.invoiceId),
