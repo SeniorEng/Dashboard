@@ -188,7 +188,7 @@ export default function ServiceRecordsPage() {
             </Link>
           )}
           {!customerId && <FileSignature className={`${iconSize.lg} text-primary`} />}
-          <h1 className="text-2xl font-bold text-foreground tracking-tight" data-testid="text-title">
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight" data-testid="text-title">
             {customerId && selectedCustomer 
               ? `Leistungsnachweise: ${selectedCustomer.vorname} ${selectedCustomer.nachname}`
               : "Leistungsnachweise"

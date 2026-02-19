@@ -227,7 +227,7 @@ export default function AdminCustomerEdit() {
 
   if (isLoading) {
     return (
-      <Layout>
+      <Layout variant="admin">
         <div className="flex items-center justify-center min-h-[50vh]">
           <Loader2 className={`${iconSize.lg} animate-spin text-teal-600`} />
         </div>
@@ -237,14 +237,14 @@ export default function AdminCustomerEdit() {
 
   if (!customer) {
     return (
-      <Layout>
+      <Layout variant="admin">
         <PageHeader title="Kunde nicht gefunden" backHref="/admin/customers" />
       </Layout>
     );
   }
 
   return (
-    <Layout>
+    <Layout variant="admin">
           <PageHeader
             title="Kunde bearbeiten"
             backHref={`/admin/customers/${customerId}`}
