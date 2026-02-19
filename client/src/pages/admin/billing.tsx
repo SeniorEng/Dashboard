@@ -583,7 +583,7 @@ export default function AdminBilling() {
 
                 {selectedCustomerId === "alle" && (
                   <div className="text-sm text-teal-700 bg-teal-50 border border-teal-200 rounded-md p-3">
-                    Es werden automatisch Rechnungen für alle Kunden mit abgeschlossenen Terminen im gewählten Monat erstellt. Kunden mit bestehender Rechnung werden übersprungen.
+                    Es werden automatisch Rechnungen für alle Kunden mit abgeschlossenen Terminen im gewählten Monat erstellt. Bereits abgerechnete Termine werden übersprungen. Bei Nacherfassungen wird eine Ergänzungsrechnung erstellt.
                   </div>
                 )}
               </div>

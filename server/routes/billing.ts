@@ -10,8 +10,10 @@ import {
   users,
   customerInsuranceHistory,
   insuranceProviders,
+  invoices as invoicesTable,
+  invoiceLineItems,
 } from "@shared/schema";
-import { eq, and, gte, lte, isNull, inArray } from "drizzle-orm";
+import { eq, and, gte, lte, isNull, inArray, ne, notInArray } from "drizzle-orm";
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
 import { storage } from "../storage";
@@ -20,6 +22,19 @@ import { db } from "../lib/db";
 const router = Router();
 router.use(requireAuth);
 router.use(requireAdmin);
+
+async function getAlreadyInvoicedAppointmentIds(customerId: number, billingYear: number, billingMonth: number): Promise<number[]> {
+  const rows = await db.select({ appointmentId: invoiceLineItems.appointmentId })
+    .from(invoiceLineItems)
+    .innerJoin(invoicesTable, eq(invoiceLineItems.invoiceId, invoicesTable.id))
+    .where(and(
+      eq(invoicesTable.customerId, customerId),
+      eq(invoicesTable.billingYear, billingYear),
+      eq(invoicesTable.billingMonth, billingMonth),
+      ne(invoicesTable.status, "storniert")
+    ));
+  return rows.map(r => r.appointmentId).filter((id): id is number => id !== null);
+}
 
 router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (req, res) => {
   const filters: any = {};
@@ -47,12 +62,6 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
 
   const { customerId, billingMonth, billingYear } = parsed.data;
 
-  const existing = await storage.getInvoicesForCustomerMonth(customerId, billingYear, billingMonth);
-  const activeInvoice = existing.find(inv => inv.status !== "storniert");
-  if (activeInvoice) {
-    throw badRequest("Für diesen Kunden und Monat existiert bereits eine aktive Rechnung.");
-  }
-
   const customer = await storage.getCustomer(customerId);
   if (!customer) throw notFound("Kunde nicht gefunden");
 
@@ -61,7 +70,10 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
   const lastDay = new Date(billingYear, billingMonth, 0).getDate();
   const endDate = `${billingYear}-${monthStr}-${lastDay}`;
 
-  const completedAppts = await db.select()
+  const alreadyInvoicedIds = await getAlreadyInvoicedAppointmentIds(customerId, billingYear, billingMonth);
+  const isNachberechnung = alreadyInvoicedIds.length > 0;
+
+  let allCompletedAppts = await db.select()
     .from(appointments)
     .where(and(
       eq(appointments.customerId, customerId),
@@ -71,8 +83,14 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
       isNull(appointments.deletedAt)
     ));
 
+  const completedAppts = alreadyInvoicedIds.length > 0
+    ? allCompletedAppts.filter(a => !alreadyInvoicedIds.includes(a.id))
+    : allCompletedAppts;
+
   if (completedAppts.length === 0) {
-    throw badRequest("Keine abgeschlossenen Termine für diesen Zeitraum gefunden.");
+    throw badRequest(alreadyInvoicedIds.length > 0
+      ? "Alle abgeschlossenen Termine dieses Zeitraums wurden bereits abgerechnet."
+      : "Keine abgeschlossenen Termine für diesen Zeitraum gefunden.");
   }
 
   const apptIds = completedAppts.map(a => a.id);
@@ -202,7 +220,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
     invoiceNumber,
     customerId,
     billingType,
-    invoiceType: "rechnung",
+    invoiceType: isNachberechnung ? "nachberechnung" : "rechnung",
     billingMonth,
     billingYear,
     recipientName,
@@ -267,19 +285,15 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
       const customer = await storage.getCustomer(customerId);
       const custName = customer ? ((customer as any).vorname && (customer as any).nachname ? `${(customer as any).vorname} ${(customer as any).nachname}` : (customer as any).name) : `Kunde #${customerId}`;
 
-      const existing = await storage.getInvoicesForCustomerMonth(customerId, billingYear, billingMonth);
-      const activeInvoice = existing.find(inv => inv.status !== "storniert");
-      if (activeInvoice) {
-        results.skipped.push({ customerName: custName, reason: "Rechnung bereits vorhanden" });
-        continue;
-      }
-
       if (!customer) {
         results.skipped.push({ customerName: custName, reason: "Kunde nicht gefunden" });
         continue;
       }
 
-      const completedAppts = await db.select()
+      const alreadyInvoicedIds = await getAlreadyInvoicedAppointmentIds(customerId, billingYear, billingMonth);
+      const isNachberechnung = alreadyInvoicedIds.length > 0;
+
+      const allCompletedAppts = await db.select()
         .from(appointments)
         .where(and(
           eq(appointments.customerId, customerId),
@@ -289,8 +303,12 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
           isNull(appointments.deletedAt)
         ));
 
+      const completedAppts = alreadyInvoicedIds.length > 0
+        ? allCompletedAppts.filter(a => !alreadyInvoicedIds.includes(a.id))
+        : allCompletedAppts;
+
       if (completedAppts.length === 0) {
-        results.skipped.push({ customerName: custName, reason: "Keine abgeschlossenen Termine" });
+        results.skipped.push({ customerName: custName, reason: alreadyInvoicedIds.length > 0 ? "Alle Termine bereits abgerechnet" : "Keine abgeschlossenen Termine" });
         continue;
       }
 
@@ -391,7 +409,7 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
         invoiceNumber,
         customerId,
         billingType,
-        invoiceType: "rechnung",
+        invoiceType: isNachberechnung ? "nachberechnung" : "rechnung",
         billingMonth,
         billingYear,
         recipientName,
