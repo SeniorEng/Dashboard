@@ -14,6 +14,13 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 ### Frontend
 - **Frameworks**: React 19 with TypeScript, Vite, Wouter for routing.
 - **UI/UX**: Mobile-first responsive design using `shadcn/ui` components on Radix UI primitives, styled with Tailwind CSS v4 and a "Care & Clarity" theme. Centralized `@/design-system` for consistent styling. Touch-optimized UI components.
+- **Design System & Layout-Konventionen** (Stand: Feb 2026):
+  - **Einheitlicher Seitenhintergrund**: ALLE Seiten verwenden den warmen Beige-Gradient (`bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]`) über die `Layout`-Komponente. KEINE Seite darf eigene `min-h-screen bg-gradient-to-br` Wrapper haben — das macht Layout automatisch.
+  - **Layout-Varianten**: Die `Layout`-Komponente akzeptiert `variant` Prop: `default` (max-w-2xl, Employee-Seiten), `admin` (max-w-4xl, Admin-Seiten), `wide` (max-w-6xl, Tabellen wie Billing/Zeiten), `narrow` (max-w-xl), `full` (max-w-full). Definiert in `@/design-system/tokens.ts` als `LayoutVariant` und `layoutVariants`.
+  - **Keine hardcodierten Backgrounds in Seiten**: Seiten nutzen `<Layout variant="...">` statt eigene Container-Divs mit `container mx-auto px-4 py-6 max-w-*`. Header-Hintergrund ist `bg-white/90` (via Layout).
+  - **Konsistente Titel**: Seitentitel verwenden `componentStyles.pageTitle` (`text-xl sm:text-2xl font-bold text-gray-900`) oder die `PageHeader`-Komponente.
+  - **Card-Stile**: Standardmäßig `<Card>` Komponente mit weißem Hintergrund. Keine manuellen `bg-white rounded-xl shadow-sm` — stattdessen `componentStyles.cardMuted` oder Card-Komponente.
+  - **Ausnahmen**: Login, Forgot-Password, Reset-Password und Public-Signing haben eigene Gradient-Wrapper, weil sie NICHT die `Layout`-Komponente nutzen (keine Navigation).
 - **State Management**: TanStack Query for data fetching, React memoization, ErrorBoundary.
 - **Date/Time Handling**: All times are implicitly "German local time" with no UTC conversion or timezone logic, using central utilities (`@shared/utils/datetime`).
 - **Components**: `DatePicker`, `SearchableSelect`, `StatusBadge` (with 13+ types).

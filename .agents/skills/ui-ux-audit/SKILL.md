@@ -256,7 +256,60 @@ This agent validates that the user interface is usable, accessible, and appropri
 
 ---
 
-## Category 6: Navigation & Information Architecture
+## Category 6: Design System & Layout Consistency
+
+**Goal**: All pages use the centralized Layout component and design tokens. No page should define its own background, container width, or duplicate styling that the Layout already provides.
+
+### Steps:
+1. **No hardcoded page backgrounds**:
+   ```bash
+   # Find pages with their own gradient/background wrappers (should NOT exist inside Layout-wrapped pages)
+   grep -rn "bg-gradient-to-br from-\[#f5e6d3\]" client/src/pages/ --include="*.tsx" | grep -v login | grep -v forgot-password | grep -v reset-password | grep -v public-signing
+   ```
+   - Verify: Returns ZERO results. ALL pages (except login/forgot-password/reset-password/public-signing) get their background from the Layout component.
+   - If a page has its own `min-h-screen bg-gradient-to-br` wrapper → FAIL
+
+2. **All pages use Layout with correct variant**:
+   ```bash
+   # Check Layout usage across pages
+   grep -rn "<Layout" client/src/pages/ --include="*.tsx" | grep -v "\.test\."
+   ```
+   - Verify: Employee pages (dashboard, customers, tasks, service-records, etc.) use `<Layout>` (default variant, max-w-2xl)
+   - Verify: Admin pages use `<Layout variant="admin">` (max-w-4xl) or `<Layout variant="wide">` (max-w-6xl for tables)
+   - Verify: NO page uses its own `<div className="container mx-auto px-4 py-6 max-w-*">` wrapper — Layout handles this
+
+3. **No duplicate container wrappers**:
+   ```bash
+   # Find pages that might still have their own container div
+   grep -rn "container mx-auto px-4 py-6" client/src/pages/ --include="*.tsx"
+   ```
+   - Verify: Returns ZERO results. Layout provides the container.
+
+4. **Consistent page titles**:
+   ```bash
+   # Check title patterns
+   grep -rn "text-2xl font-bold\|text-xl font-bold\|text-3xl\|text-lg font-bold" client/src/pages/ --include="*.tsx" | head -30
+   ```
+   - Verify: All page titles use `text-xl sm:text-2xl font-bold text-gray-900` (via `componentStyles.pageTitle` or `PageHeader`)
+   - Verify: No page uses `text-3xl` or other non-standard title sizes
+
+5. **Layout variants exist in design tokens**:
+   ```bash
+   grep -rn "LayoutVariant\|layoutVariants" client/src/design-system/tokens.ts
+   ```
+   - Verify: `LayoutVariant` type and `layoutVariants` mapping are defined
+   - Verify: Values match: default=max-w-2xl, admin=max-w-4xl, wide=max-w-6xl, narrow=max-w-xl, full=max-w-full
+
+### Red Flags:
+- Page with own bg-gradient wrapper inside Layout → FAIL
+- Page with own `container mx-auto` wrapper → FAIL  
+- Page without Layout component → FAIL (except public pages)
+- Inconsistent page title sizes across tabs → WARN
+- New page not using LayoutVariant → WARN
+
+---
+
+## Category 7: Navigation & Information Architecture
 
 **Goal**: Users can always find what they need, know where they are, and get back to where they were.
 
@@ -304,7 +357,8 @@ After completing all checks, produce a summary:
 | 3. Mobile Layout | PASS/WARN/FAIL | Details |
 | 4. German Wording | PASS/WARN/FAIL | Details |
 | 5. Accessibility | PASS/WARN/FAIL | Details |
-| 6. Navigation | PASS/WARN/FAIL | Details |
+| 6. Design System & Layout | PASS/WARN/FAIL | Details |
+| 7. Navigation | PASS/WARN/FAIL | Details |
 
 ### Critical Findings (must fix)
 - [FAIL items affecting usability]
