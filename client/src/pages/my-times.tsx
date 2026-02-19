@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Lock } from "lucide-react";
+import { Plus, Lock, ChevronLeft, ChevronRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -18,6 +18,7 @@ import {
   CalendarGrid,
   DayDetailPanel,
   MonthClosingSection,
+  MONTH_NAMES,
   type DayTimeEntry,
 } from "@/features/time-tracking";
 import type { TimeEntryType } from "@/lib/api/types";
@@ -225,10 +226,10 @@ export default function MyTimes() {
             />
           </div>
 
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between mb-2">
             <div>
               <h1 className="text-2xl font-bold text-gray-900" data-testid="text-page-title">Meine Zeiten</h1>
-              <p className="text-gray-600">Kundentermine, Urlaub und Abwesenheiten</p>
+              <p className="text-gray-600 text-sm">Kundentermine, Urlaub und Abwesenheiten</p>
             </div>
             <Button
               className="bg-teal-600 hover:bg-teal-700"
@@ -239,6 +240,32 @@ export default function MyTimes() {
             >
               <Plus className={`${iconSize.sm} mr-2`} />
               Neuer Eintrag
+            </Button>
+          </div>
+
+          <div className="flex items-center justify-center gap-4 mb-6 py-3" data-testid="month-selector">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handlePrevMonth}
+              aria-label="Vorheriger Monat"
+              data-testid="button-prev-month"
+              className="h-9 w-9"
+            >
+              <ChevronLeft className={iconSize.md} />
+            </Button>
+            <h2 className="text-lg font-semibold text-gray-900 min-w-[180px] text-center" data-testid="text-current-month">
+              {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
+            </h2>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleNextMonth}
+              aria-label="Nächster Monat"
+              data-testid="button-next-month"
+              className="h-9 w-9"
+            >
+              <ChevronRight className={iconSize.md} />
             </Button>
           </div>
 
@@ -280,10 +307,8 @@ export default function MyTimes() {
             selectedYear={selectedYear}
           />
 
-          <MonthClosingSection year={selectedYear} month={selectedMonth} />
-
           {isMonthLocked && (
-            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 mt-4 mb-2" data-testid="banner-month-locked">
+            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 mb-4" data-testid="banner-month-locked">
               <Lock className="h-4 w-4 text-amber-600 shrink-0" />
               <p className="text-sm text-amber-800">
                 Dieser Monat ist abgeschlossen. Zeiteinträge können nicht mehr hinzugefügt, bearbeitet oder gelöscht werden. Bei Bedarf kann ein Admin den Monat wieder öffnen.
@@ -291,7 +316,7 @@ export default function MyTimes() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
             <CalendarGrid
               selectedYear={selectedYear}
               selectedMonth={selectedMonth}
@@ -319,6 +344,8 @@ export default function MyTimes() {
               />
             </div>
           </div>
+
+          <MonthClosingSection year={selectedYear} month={selectedMonth} />
         </div>
       </div>
     </Layout>

@@ -1,10 +1,8 @@
 import { useMemo } from "react";
 import { Coffee, Loader2 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
 import { iconSize } from "@/design-system";
-import { WEEKDAY_NAMES, MONTH_NAMES } from "../constants";
+import { WEEKDAY_NAMES } from "../constants";
 import { formatDateISO } from "@shared/utils/datetime";
 
 interface CalendarDay {
@@ -92,20 +90,7 @@ export function CalendarGrid({
 
   return (
     <Card className="lg:col-span-2">
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <Button variant="ghost" size="icon" onClick={onPrevMonth} aria-label="Vorheriger Monat" data-testid="button-prev-month">
-            <ChevronLeft className={iconSize.md} />
-          </Button>
-          <CardTitle className="text-lg">
-            {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
-          </CardTitle>
-          <Button variant="ghost" size="icon" onClick={onNextMonth} aria-label="Nächster Monat" data-testid="button-next-month">
-            <ChevronRight className={iconSize.md} />
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent>
+      <CardContent className="pt-4">
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className={`${iconSize.xl} animate-spin text-teal-600`} />
