@@ -5,6 +5,7 @@ import { timeTrackingStorage } from "../storage/time-tracking";
 import { closeMonthSchema, reopenMonthSchema } from "@shared/schema";
 import { generateAutoBreaksForMonth, insertAutoBreaks, previewAutoBreaksForMonth, removeAutoBreaksForMonth } from "../services/auto-breaks";
 import { STATUS_LABELS } from "@shared/domain/appointments";
+import { completeMonthClosingTask, reopenMonthClosingTask, ensureMonthClosingTask } from "../storage/tasks";
 
 const router = Router();
 router.use(requireAuth);
@@ -101,6 +102,9 @@ router.post("/close-month", asyncHandler("Monatsabschluss fehlgeschlagen", async
 
   await timeTrackingStorage.closeMonth(userId, year, month, userId, existing?.id);
 
+  await ensureMonthClosingTask(userId, month, year);
+  await completeMonthClosingTask(userId, month, year);
+
   res.json({
     message: `Monat ${month}/${year} abgeschlossen`,
     autoBreaksInserted: insertedCount,
@@ -122,6 +126,8 @@ router.post("/reopen-month", requireAdmin, asyncHandler("Monat konnte nicht wied
 
   await timeTrackingStorage.reopenMonth(existing.id, req.user!.id);
   await removeAutoBreaksForMonth(targetUserId, year, month);
+
+  await reopenMonthClosingTask(targetUserId, month, year);
 
   res.json({ message: `Monat ${month}/${year} wieder geöffnet` });
 }));

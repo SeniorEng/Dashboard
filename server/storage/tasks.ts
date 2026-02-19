@@ -213,3 +213,106 @@ export async function getOpenTaskCount(userId: number): Promise<number> {
 
   return result[0]?.count ?? 0;
 }
+
+const MONTH_CLOSING_TITLE_PREFIX = "Monatsabschluss";
+
+function getMonthClosingTaskTitle(month: number, year: number): string {
+  const monthNames = [
+    "Januar", "Februar", "März", "April", "Mai", "Juni",
+    "Juli", "August", "September", "Oktober", "November", "Dezember",
+  ];
+  return `${MONTH_CLOSING_TITLE_PREFIX} ${monthNames[month - 1]} ${year}`;
+}
+
+const MONTH_CLOSING_DESCRIPTION = `So schließt du deinen Monat ab:
+
+1. Gehe auf die Zeiten-Seite
+2. Prüfe deine Zeiteinträge auf Vollständigkeit
+3. Kontrolliere fehlende Pausendokumentationen (blaue Markierungen im Kalender)
+4. Klicke auf "Monat abschließen"
+
+Hinweis: Alle Termine des Monats müssen dokumentiert sein, bevor der Abschluss möglich ist.`;
+
+export async function findMonthClosingTask(
+  userId: number,
+  month: number,
+  year: number
+): Promise<Task | null> {
+  const title = getMonthClosingTaskTitle(month, year);
+  const result = await db
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.assignedToUserId, userId),
+        eq(tasks.title, title)
+      )
+    )
+    .limit(1);
+  return result[0] || null;
+}
+
+export async function ensureMonthClosingTask(
+  userId: number,
+  month: number,
+  year: number
+): Promise<Task> {
+  const existing = await findMonthClosingTask(userId, month, year);
+  if (existing) return existing;
+
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  const dueDate = `${nextYear}-${nextMonth.toString().padStart(2, "0")}-05`;
+
+  const result = await db
+    .insert(tasks)
+    .values({
+      title: getMonthClosingTaskTitle(month, year),
+      description: MONTH_CLOSING_DESCRIPTION,
+      dueDate,
+      priority: "high",
+      status: "open",
+      createdByUserId: userId,
+      assignedToUserId: userId,
+      customerId: null,
+    })
+    .returning();
+
+  return result[0];
+}
+
+export async function completeMonthClosingTask(
+  userId: number,
+  month: number,
+  year: number
+): Promise<void> {
+  const existing = await findMonthClosingTask(userId, month, year);
+  if (existing && existing.status !== "completed") {
+    await db
+      .update(tasks)
+      .set({
+        status: "completed",
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(tasks.id, existing.id));
+  }
+}
+
+export async function reopenMonthClosingTask(
+  userId: number,
+  month: number,
+  year: number
+): Promise<void> {
+  const existing = await findMonthClosingTask(userId, month, year);
+  if (existing && existing.status === "completed") {
+    await db
+      .update(tasks)
+      .set({
+        status: "open",
+        completedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(tasks.id, existing.id));
+  }
+}

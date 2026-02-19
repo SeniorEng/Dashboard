@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CheckSquare, Plus, Loader2, AlertCircle, Coffee, FileSignature } from "lucide-react";
+import { CheckSquare, Plus, Loader2, AlertCircle, Coffee, FileSignature, CalendarCheck } from "lucide-react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { iconSize, componentStyles } from "@/design-system";
@@ -68,7 +68,24 @@ export default function TasksPage() {
   });
   const pendingServiceRecordsCount = pendingServiceRecords?.length || 0;
 
-  const totalSystemHints = undocumentedCount + missingBreaksCount + pendingServiceRecordsCount;
+  const { data: monthClosingReminder } = useQuery({
+    queryKey: ["/api/tasks/month-closing-reminder"],
+    queryFn: async () => {
+      const response = await fetch(`/api/tasks/month-closing-reminder`);
+      if (!response.ok) throw new Error("Failed to fetch");
+      return response.json() as Promise<{
+        needed: boolean;
+        month?: number;
+        year?: number;
+        monthName?: string;
+        taskId?: number;
+      }>;
+    },
+    staleTime: 60000,
+  });
+  const monthClosingNeeded = monthClosingReminder?.needed || false;
+
+  const totalSystemHints = undocumentedCount + missingBreaksCount + pendingServiceRecordsCount + (monthClosingNeeded ? 1 : 0);
 
   const [newTask, setNewTask] = useState({
     title: "",
@@ -240,6 +257,21 @@ export default function TasksPage() {
                   <span className="text-sm font-medium">
                     {pendingServiceRecordsCount} {pendingServiceRecordsCount === 1 ? "Leistungsnachweis" : "Leistungsnachweise"} zum Unterschreiben
                   </span>
+                </div>
+              </Link>
+            )}
+
+            {monthClosingNeeded && monthClosingReminder && (
+              <Link href="/my-times">
+                <div
+                  className="flex items-start gap-2 px-3 py-2 bg-teal-50 border border-teal-200 rounded-lg text-teal-800 hover:bg-teal-100 transition-colors cursor-pointer"
+                  data-testid="banner-month-closing"
+                >
+                  <CalendarCheck className={`${iconSize.sm} shrink-0 mt-0.5`} />
+                  <div className="text-sm">
+                    <span className="font-medium">Monatsabschluss {monthClosingReminder.monthName} {monthClosingReminder.year}: </span>
+                    <span>Prüfe deine Zeiteinträge und schließe den Monat ab.</span>
+                  </div>
                 </div>
               </Link>
             )}

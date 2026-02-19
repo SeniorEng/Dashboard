@@ -7,7 +7,8 @@ import {
   createTask, 
   updateTask, 
   deleteTask,
-  getOpenTaskCount 
+  getOpenTaskCount,
+  ensureMonthClosingTask,
 } from "../storage/tasks";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { storage } from "../storage";
@@ -46,15 +47,55 @@ router.get("/badge-count", requireAuth, asyncHandler("Badge-Anzahl konnte nicht 
   const today = todayISO();
   const customerIds = isAdmin ? undefined : await storage.getAssignedCustomerIds(userId);
 
-  const [userTaskCount, undocumentedAppts, openTasks, pendingRecords] = await Promise.all([
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1;
+  const currentYear = now.getFullYear();
+  const prevMonth = currentMonth === 1 ? 12 : currentMonth - 1;
+  const prevYear = currentMonth === 1 ? currentYear - 1 : currentYear;
+
+  const [userTaskCount, undocumentedAppts, openTasks, pendingRecords, monthClosing] = await Promise.all([
     getOpenTaskCount(userId),
     storage.getUndocumentedAppointments(today, customerIds).then(a => a.length),
     timeTrackingStorage.getOpenTasks(userId).then(t => t.daysWithMissingBreaks?.length || 0),
     storage.getPendingServiceRecords(userId).then(r => r.length),
+    timeTrackingStorage.getMonthClosing(userId, prevYear, prevMonth),
   ]);
 
-  const count = userTaskCount + undocumentedAppts + openTasks + pendingRecords;
+  const monthClosingNeeded = !monthClosing || !!monthClosing.reopenedAt ? 1 : 0;
+  const count = userTaskCount + undocumentedAppts + openTasks + pendingRecords + monthClosingNeeded;
   res.json({ count });
+}));
+
+router.get("/month-closing-reminder", requireAuth, asyncHandler("Monatsabschluss-Erinnerung konnte nicht geladen werden", async (req, res) => {
+  const userId = req.user!.id;
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1;
+  const currentYear = now.getFullYear();
+
+  const prevMonth = currentMonth === 1 ? 12 : currentMonth - 1;
+  const prevYear = currentMonth === 1 ? currentYear - 1 : currentYear;
+
+  const closing = await timeTrackingStorage.getMonthClosing(userId, prevYear, prevMonth);
+  const isClosed = closing && !closing.reopenedAt;
+
+  if (isClosed) {
+    return res.json({ needed: false });
+  }
+
+  const task = await ensureMonthClosingTask(userId, prevMonth, prevYear);
+
+  const monthNames = [
+    "Januar", "Februar", "März", "April", "Mai", "Juni",
+    "Juli", "August", "September", "Oktober", "November", "Dezember",
+  ];
+
+  res.json({
+    needed: true,
+    month: prevMonth,
+    year: prevYear,
+    monthName: monthNames[prevMonth - 1],
+    taskId: task.id,
+  });
 }));
 
 router.get("/:id", requireAuth, asyncHandler("Aufgabe konnte nicht geladen werden", async (req, res) => {
