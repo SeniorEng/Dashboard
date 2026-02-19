@@ -379,6 +379,7 @@ const updateCustomerSchema = z.object({
   haustierDetails: z.string().max(500).nullable().optional(),
   personenbefoerderungGewuenscht: z.boolean().optional(),
   acceptsPrivatePayment: z.boolean().optional(),
+  inaktivAb: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat (YYYY-MM-DD erwartet)").nullable().optional(),
 });
 
 router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert werden", async (req: Request, res: Response) => {

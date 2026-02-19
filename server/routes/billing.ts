@@ -66,10 +66,8 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
   if (!customer) throw notFound("Kunde nicht gefunden");
 
   const customerStatus = (customer as any).status;
-  if (customerStatus !== "aktiv") {
-    throw badRequest(customerStatus === "erstberatung"
-      ? "Kunden in Erstberatung können nicht abgerechnet werden."
-      : "Nur aktive Kunden können abgerechnet werden.");
+  if (customerStatus === "erstberatung") {
+    throw badRequest("Kunden in Erstberatung können nicht abgerechnet werden.");
   }
 
   const monthStr = billingMonth.toString().padStart(2, "0");
@@ -298,8 +296,8 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
       }
 
       const customerStatus = (customer as any).status;
-      if (customerStatus !== "aktiv") {
-        results.skipped.push({ customerName: custName, reason: customerStatus === "erstberatung" ? "Erstberatung (nicht abrechenbar)" : "Nicht aktiv" });
+      if (customerStatus === "erstberatung") {
+        results.skipped.push({ customerName: custName, reason: "Erstberatung (nicht abrechenbar)" });
         continue;
       }
 

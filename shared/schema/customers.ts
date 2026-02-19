@@ -37,6 +37,8 @@ export const customers = pgTable("customers", {
   haustierDetails: text("haustier_details"),
   // Customer status: erstberatung (initial consultation), aktiv (active customer), inaktiv (deactivated)
   status: text("status").notNull().default("aktiv"),
+  // Date from which the customer is inactive (inclusive). After this date, no new appointments can be created.
+  inaktivAb: text("inaktiv_ab"),
   personenbefoerderungGewuenscht: boolean("personenbefoerderung_gewuenscht").notNull().default(false),
   // Billing
   billingType: text("billing_type").notNull().default("pflegekasse_gesetzlich"), // pflegekasse_gesetzlich, pflegekasse_privat, selbstzahler

@@ -104,6 +104,7 @@ export default function AdminCustomerEdit() {
     haustierDetails: "",
     personenbefoerderungGewuenscht: false,
     acceptsPrivatePayment: false,
+    inaktivAb: "",
   });
 
   const [phoneErrors, setPhoneErrors] = useState<Record<string, string | null>>({});
@@ -129,6 +130,7 @@ export default function AdminCustomerEdit() {
         haustierDetails: customer.haustierDetails || "",
         personenbefoerderungGewuenscht: customer.personenbefoerderungGewuenscht ?? false,
         acceptsPrivatePayment: customer.acceptsPrivatePayment ?? false,
+        inaktivAb: (customer as any).inaktivAb || "",
       });
     }
   }, [customer]);
@@ -202,6 +204,7 @@ export default function AdminCustomerEdit() {
       haustierDetails: formData.haustierVorhanden ? (formData.haustierDetails?.trim() || null) : null,
       personenbefoerderungGewuenscht: formData.personenbefoerderungGewuenscht,
       acceptsPrivatePayment: formData.acceptsPrivatePayment,
+      inaktivAb: formData.inaktivAb?.trim() || null,
     };
 
     updateMutation.mutate(
@@ -323,6 +326,18 @@ export default function AdminCustomerEdit() {
                     placeholder="email@beispiel.de"
                     data-testid="input-email"
                   />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Inaktiv ab</Label>
+                  <DatePicker
+                    value={formData.inaktivAb || null}
+                    onChange={(val) => handleChange("inaktivAb", val || "")}
+                    data-testid="input-inaktiv-ab"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Ab diesem Datum können keine neuen Termine erstellt werden. Bestehende Termine bleiben bearbeitbar.
+                  </p>
                 </div>
               </CardContent>
             </Card>

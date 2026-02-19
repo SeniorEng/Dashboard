@@ -497,13 +497,26 @@ export default function AdminCustomerDetail() {
             </SectionCard>
           )}
 
+          {customer.status === "aktiv" && (customer as any).inaktivAb && (
+            <SectionCard className="mb-4 border-blue-200 bg-blue-50">
+              <div className="flex items-center gap-2">
+                <p className="text-sm text-blue-800">
+                  <span className="font-medium">Inaktiv ab {formatDateForDisplay((customer as any).inaktivAb)}:</span>{" "}
+                  Ab diesem Datum können keine neuen Termine erstellt werden.
+                </p>
+              </div>
+            </SectionCard>
+          )}
+
           {customer.status === "inaktiv" && (
             <SectionCard className="mb-4 border-amber-200 bg-amber-50">
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <p className="font-medium text-amber-900">Inaktiver Kunde</p>
                   <p className="text-sm text-amber-700 mt-0.5">
-                    Dieser Kunde ist deaktiviert und kann keine neuen Termine erhalten.
+                    {(customer as any).inaktivAb
+                      ? `Inaktiv ab ${formatDateForDisplay((customer as any).inaktivAb)}. Keine neuen Termine ab diesem Datum.`
+                      : "Dieser Kunde ist deaktiviert und kann keine neuen Termine erhalten."}
                   </p>
                 </div>
                 <Button

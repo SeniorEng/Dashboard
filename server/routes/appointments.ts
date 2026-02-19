@@ -167,17 +167,24 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     return sendBadRequest(res, "Termine können nicht an Samstagen oder Sonntagen erstellt werden.");
   }
   
+  const customer = await storage.getCustomer(validatedData.customerId);
+  if (!customer) {
+    return sendNotFound(res, "Kunde nicht gefunden.");
+  }
+
+  if ((customer as any).inaktivAb) {
+    const inaktivAb = (customer as any).inaktivAb as string;
+    if (validatedData.date >= inaktivAb) {
+      return sendBadRequest(res, `Für diesen Kunden können ab dem ${inaktivAb.split("-").reverse().join(".")} keine neuen Termine erstellt werden.`);
+    }
+  }
+
   let assignedEmployeeId: number;
   if (user.isAdmin) {
     if (!validatedData.assignedEmployeeId) {
       return sendBadRequest(res, "Bitte wählen Sie einen Mitarbeiter für diesen Termin aus.");
     }
     assignedEmployeeId = validatedData.assignedEmployeeId;
-    
-    const customer = await storage.getCustomer(validatedData.customerId);
-    if (!customer) {
-      return sendNotFound(res, "Kunde nicht gefunden.");
-    }
     
     const isAssignedEmployee = 
       customer.primaryEmployeeId === assignedEmployeeId || 
