@@ -24,9 +24,12 @@ import {
   customerInsuranceHistory,
   customerContracts,
   customerContractRates,
+  customerContacts,
+  customerBudgets,
+  customerNeedsAssessments,
+  customerCareLevelHistory,
   users,
   customerAssignmentHistory,
-  customerCareLevelHistory,
 } from "@shared/schema";
 import { eq, and, isNull, isNotNull, desc, count, or, ilike, sql as sqlBuilder } from "drizzle-orm";
 import { customerIdsCache } from "../services/cache";
@@ -268,9 +271,7 @@ export class CustomerManagementStorage {
   }
 
   async createFullCustomer(data: CreateFullCustomer, userId: number): Promise<Customer> {
-    let customerId: number | null = null;
-    
-    try {
+    return await db.transaction(async (tx) => {
       const customerData = {
         name: `${data.nachname}, ${data.vorname}`,
         vorname: data.vorname,
@@ -288,18 +289,18 @@ export class CustomerManagementStorage {
         createdByUserId: userId,
       };
       
-      const customerResult = await db.insert(customers).values(customerData).returning();
+      const customerResult = await tx.insert(customers).values(customerData).returning();
       const customer = customerResult[0];
-      customerId = customer.id;
 
-      await this.addCustomerInsurance({
+      await tx.insert(customerInsuranceHistory).values({
         customerId: customer.id,
         insuranceProviderId: data.insuranceProviderId,
         versichertennummer: data.versichertennummer,
         validFrom: todayISO(),
-      }, userId);
+        createdByUserId: userId,
+      });
 
-      await this.addCustomerContact({
+      await tx.insert(customerContacts).values({
         customerId: customer.id,
         contactType: data.primaryContact.contactType,
         isPrimary: true,
@@ -311,7 +312,7 @@ export class CustomerManagementStorage {
 
       let sortOrder = 1;
       for (const contact of data.additionalContacts || []) {
-        await this.addCustomerContact({
+        await tx.insert(customerContacts).values({
           customerId: customer.id,
           contactType: contact.contactType,
           isPrimary: false,
@@ -322,7 +323,7 @@ export class CustomerManagementStorage {
         });
       }
 
-      await db.insert(customerCareLevelHistory).values({
+      await tx.insert(customerCareLevelHistory).values({
         customerId: customer.id,
         pflegegrad: data.pflegegrad,
         pflegegradBeantragt: data.pflegegradBeantragt,
@@ -331,7 +332,7 @@ export class CustomerManagementStorage {
       });
 
       const services = data.services || {};
-      await this.createNeedsAssessment({
+      await tx.insert(customerNeedsAssessments).values({
         customerId: customer.id,
         assessmentDate: todayISO(),
         householdSize: data.householdSize,
@@ -354,17 +355,19 @@ export class CustomerManagementStorage {
         serviceFreizeitgestaltung: services.freizeitgestaltung,
         serviceKreativ: services.kreativ,
         sonstigeLeistungen: data.sonstigeLeistungen,
-      }, userId);
+        createdByUserId: userId,
+      });
 
-      await this.addCustomerBudget({
+      await tx.insert(customerBudgets).values({
         customerId: customer.id,
         entlastungsbetrag45b: Math.round(data.entlastungsbetrag45b * 100),
         verhinderungspflege39: Math.round(data.verhinderungspflege39 * 100),
         pflegesachleistungen36: Math.round(data.pflegesachleistungen36 * 100),
         validFrom: todayISO(),
-      }, userId);
+        createdByUserId: userId,
+      });
 
-      await this.createCustomerContract({
+      await tx.insert(customerContracts).values({
         customerId: customer.id,
         contractStart: data.contractStart || todayISO(),
         hoursPerPeriod: data.contractHours,
@@ -373,15 +376,11 @@ export class CustomerManagementStorage {
         alltagsbegleitungRateCents: Math.round((data.alltagsbegleitungRate ?? 0) * 100),
         kilometerRateCents: Math.round((data.kilometerRate ?? 0) * 100),
         status: "active",
-      }, userId);
+        createdByUserId: userId,
+      });
 
       return customer;
-    } catch (error) {
-      if (customerId) {
-        await db.delete(customers).where(eq(customers.id, customerId)).catch(console.error);
-      }
-      throw error;
-    }
+    });
   }
 
   async updateCustomer(id: number, data: Partial<{

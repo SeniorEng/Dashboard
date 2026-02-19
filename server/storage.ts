@@ -7,6 +7,10 @@ import {
   type MonthlyServiceRecord,
   type InsertServiceRecord,
   type ServiceRecordStatus,
+  type Invoice,
+  type InvoiceLineItem,
+  type SystemSettings,
+  type CompanySettings,
   customers, 
   appointments,
   monthlyServiceRecords,
@@ -99,6 +103,21 @@ function mapAppointmentRow(row: any): AppointmentWithCustomer {
   };
 }
 
+export interface AppointmentServiceWithDetails {
+  id: number;
+  serviceId: number;
+  plannedDurationMinutes: number;
+  actualDurationMinutes: number | null;
+  details: string | null;
+  serviceName: string;
+  serviceCode: string | null;
+  serviceUnitType: string;
+}
+
+export interface InvoiceWithCustomer extends Invoice {
+  customerName: string;
+}
+
 export interface PaginationOptions {
   limit?: number;
   offset?: number;
@@ -188,29 +207,29 @@ export interface IStorage {
   getAppointmentCountsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<{ documentedCount: number; undocumentedCount: number }>;
 
   // Appointment Services
-  getAppointmentServices(appointmentId: number): Promise<any[]>;
-  getBatchAppointmentServices(appointmentIds: number[]): Promise<Record<number, any[]>>;
+  getAppointmentServices(appointmentId: number): Promise<AppointmentServiceWithDetails[]>;
+  getBatchAppointmentServices(appointmentIds: number[]): Promise<Record<number, AppointmentServiceWithDetails[]>>;
   createAppointmentServices(appointmentId: number, services: { serviceId: number; plannedDurationMinutes: number }[]): Promise<void>;
   replaceAppointmentServices(appointmentId: number, services: { serviceId: number; plannedDurationMinutes: number }[]): Promise<void>;
   updateAppointmentServiceDocumentation(appointmentId: number, serviceUpdates: { serviceId: number; actualDurationMinutes: number; details?: string | null }[]): Promise<void>;
   getServicesByIds(serviceIds: number[]): Promise<{ id: number; code: string }[]>;
 
   // System Settings
-  getSystemSettings(): Promise<any>;
-  updateSystemSettings(id: number, data: any, userId: number): Promise<any>;
+  getSystemSettings(): Promise<SystemSettings>;
+  updateSystemSettings(id: number, data: Partial<SystemSettings>, userId: number): Promise<SystemSettings>;
 
   // Company Settings
-  getCompanySettings(): Promise<any>;
-  updateCompanySettings(data: any, userId: number): Promise<any>;
+  getCompanySettings(): Promise<CompanySettings>;
+  updateCompanySettings(data: Partial<CompanySettings>, userId: number): Promise<CompanySettings>;
 
   // Billing / Invoices
-  getInvoices(filters: { year?: number; month?: number; customerId?: number; status?: string }): Promise<any[]>;
-  getInvoice(id: number): Promise<any | undefined>;
-  createInvoice(data: any, lineItems: any[], userId: number): Promise<any>;
-  updateInvoiceStatus(id: number, status: string, userId: number): Promise<any>;
+  getInvoices(filters: { year?: number; month?: number; customerId?: number; status?: string }): Promise<InvoiceWithCustomer[]>;
+  getInvoice(id: number): Promise<InvoiceWithCustomer | undefined>;
+  createInvoice(data: Record<string, unknown>, lineItems: Record<string, unknown>[], userId: number): Promise<Invoice>;
+  updateInvoiceStatus(id: number, status: string, userId: number): Promise<Invoice>;
   getNextInvoiceNumber(year: number): Promise<string>;
-  getInvoiceLineItems(invoiceId: number): Promise<any[]>;
-  getInvoicesForCustomerMonth(customerId: number, year: number, month: number): Promise<any[]>;
+  getInvoiceLineItems(invoiceId: number): Promise<InvoiceLineItem[]>;
+  getInvoicesForCustomerMonth(customerId: number, year: number, month: number): Promise<Invoice[]>;
 }
 
 export interface ServiceRecordOverviewItem {
@@ -565,23 +584,19 @@ export class DatabaseStorage implements IStorage {
     customerData: InsertCustomer,
     appointmentData: Omit<InsertAppointment, 'customerId'>
   ): Promise<{ customer: Customer; appointment: Appointment }> {
-    let customer: Customer | null = null;
-    
-    try {
-      customer = await this.createCustomer(customerData);
-      
-      const appointment = await this.createAppointment({
+    return await db.transaction(async (tx) => {
+      const customerResult = await tx.insert(customers).values(customerData).returning();
+      const customer = customerResult[0];
+      customerIdsCache.invalidateAll();
+
+      const appointmentResult = await tx.insert(appointments).values({
         ...appointmentData,
         customerId: customer.id,
-      });
-      
+      }).returning();
+      const appointment = appointmentResult[0];
+
       return { customer, appointment };
-    } catch (error) {
-      if (customer) {
-        await this.deleteCustomer(customer.id).catch(console.error);
-      }
-      throw error;
-    }
+    });
   }
 
   async getAppointmentsForDay(employeeId: number, date: string): Promise<AppointmentWithCustomer[]> {
@@ -918,7 +933,7 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async getAppointmentServices(appointmentId: number): Promise<any[]> {
+  async getAppointmentServices(appointmentId: number): Promise<AppointmentServiceWithDetails[]> {
     const { appointmentServices, services: servicesTable } = await import("@shared/schema");
     const { eq } = await import("drizzle-orm");
     return await db.select({
@@ -936,7 +951,7 @@ export class DatabaseStorage implements IStorage {
     .where(eq(appointmentServices.appointmentId, appointmentId));
   }
 
-  async getBatchAppointmentServices(appointmentIds: number[]): Promise<Record<number, any[]>> {
+  async getBatchAppointmentServices(appointmentIds: number[]): Promise<Record<number, AppointmentServiceWithDetails[]>> {
     if (appointmentIds.length === 0) return {};
     const { appointmentServices, services: servicesTable } = await import("@shared/schema");
     const { eq, inArray } = await import("drizzle-orm");
@@ -1021,7 +1036,7 @@ export class DatabaseStorage implements IStorage {
     return rows.filter((r): r is { id: number; code: string } => r.code !== null);
   }
 
-  async getSystemSettings(): Promise<any> {
+  async getSystemSettings(): Promise<SystemSettings> {
     const { systemSettings } = await import("@shared/schema");
     const existing = await db.select().from(systemSettings).limit(1);
     if (existing.length > 0) return existing[0];
@@ -1029,14 +1044,14 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  async updateSystemSettings(id: number, data: any, userId: number): Promise<any> {
+  async updateSystemSettings(id: number, data: Partial<SystemSettings>, userId: number): Promise<SystemSettings> {
     const { systemSettings } = await import("@shared/schema");
     const { eq } = await import("drizzle-orm");
     const [updated] = await db.update(systemSettings).set({ ...data, updatedAt: new Date(), updatedByUserId: userId }).where(eq(systemSettings.id, id)).returning();
     return updated;
   }
 
-  async getCompanySettings(): Promise<any> {
+  async getCompanySettings(): Promise<CompanySettings> {
     const { companySettings } = await import("@shared/schema");
     const existing = await db.select().from(companySettings).limit(1);
     if (existing.length > 0) return existing[0];
@@ -1044,7 +1059,7 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  async updateCompanySettings(data: any, userId: number): Promise<any> {
+  async updateCompanySettings(data: Partial<CompanySettings>, userId: number): Promise<CompanySettings> {
     const { companySettings } = await import("@shared/schema");
     const existing = await db.select().from(companySettings).limit(1);
     if (existing.length === 0) {
@@ -1059,14 +1074,14 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async getInvoices(filters: { year?: number; month?: number; customerId?: number; status?: string }): Promise<any[]> {
+  async getInvoices(filters: { year?: number; month?: number; customerId?: number; status?: string }): Promise<InvoiceWithCustomer[]> {
     const { invoices, customers } = await import("@shared/schema");
     const { eq, and, asc, desc } = await import("drizzle-orm");
-    const conditions: any[] = [];
+    const conditions: ReturnType<typeof eq>[] = [];
     if (filters.year) conditions.push(eq(invoices.billingYear, filters.year));
     if (filters.month) conditions.push(eq(invoices.billingMonth, filters.month));
     if (filters.customerId) conditions.push(eq(invoices.customerId, filters.customerId));
-    if (filters.status) conditions.push(eq(invoices.status, filters.status));
+    if (filters.status) conditions.push(eq(invoices.status, filters.status as string));
 
     const results = await db.select({
       invoice: invoices,
@@ -1080,7 +1095,7 @@ export class DatabaseStorage implements IStorage {
     return results.map(r => ({ ...r.invoice, customerName: r.customerName }));
   }
 
-  async getInvoice(id: number): Promise<any | undefined> {
+  async getInvoice(id: number): Promise<InvoiceWithCustomer | undefined> {
     const { invoices, customers } = await import("@shared/schema");
     const { eq } = await import("drizzle-orm");
     const results = await db.select({
@@ -1094,13 +1109,11 @@ export class DatabaseStorage implements IStorage {
     return { ...results[0].invoice, customerName: results[0].customerName };
   }
 
-  async createInvoice(data: any, lineItems: any[], userId: number): Promise<any> {
+  async createInvoice(data: Record<string, unknown>, lineItems: Record<string, unknown>[], userId: number): Promise<Invoice> {
     const { invoices, invoiceLineItems } = await import("@shared/schema");
     return await db.transaction(async (tx) => {
-      const [invoice] = await tx.insert(invoices).values({
-        ...data,
-        createdByUserId: userId,
-      }).returning();
+      const invoiceValues = { ...data, createdByUserId: userId } as typeof invoices.$inferInsert;
+      const [invoice] = await tx.insert(invoices).values(invoiceValues).returning();
 
       if (lineItems.length > 0) {
         await tx.insert(invoiceLineItems).values(
@@ -1108,7 +1121,7 @@ export class DatabaseStorage implements IStorage {
             ...item,
             invoiceId: invoice.id,
             sortOrder: idx,
-          }))
+          } as typeof invoiceLineItems.$inferInsert))
         );
       }
 
@@ -1116,10 +1129,10 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async updateInvoiceStatus(id: number, status: string, userId: number): Promise<any> {
+  async updateInvoiceStatus(id: number, status: string, userId: number): Promise<Invoice> {
     const { invoices } = await import("@shared/schema");
     const { eq } = await import("drizzle-orm");
-    const updateData: any = { status };
+    const updateData: Partial<Invoice> = { status: status as Invoice["status"] };
     if (status === "versendet") updateData.sentAt = new Date();
     if (status === "bezahlt") updateData.paidAt = new Date();
     if (status === "storniert") updateData.storniertAt = new Date();
@@ -1139,13 +1152,13 @@ export class DatabaseStorage implements IStorage {
     return `RE-${year}-${String(next).padStart(4, "0")}`;
   }
 
-  async getInvoiceLineItems(invoiceId: number): Promise<any[]> {
+  async getInvoiceLineItems(invoiceId: number): Promise<InvoiceLineItem[]> {
     const { invoiceLineItems } = await import("@shared/schema");
     const { eq, asc } = await import("drizzle-orm");
     return await db.select().from(invoiceLineItems).where(eq(invoiceLineItems.invoiceId, invoiceId)).orderBy(asc(invoiceLineItems.sortOrder));
   }
 
-  async getInvoicesForCustomerMonth(customerId: number, year: number, month: number): Promise<any[]> {
+  async getInvoicesForCustomerMonth(customerId: number, year: number, month: number): Promise<Invoice[]> {
     const { invoices } = await import("@shared/schema");
     const { eq, and } = await import("drizzle-orm");
     return await db.select().from(invoices).where(

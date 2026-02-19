@@ -3,7 +3,7 @@ import { generatePdfFromHtml } from "./pdf-generator";
 import { renderTemplate, buildPlaceholders, wrapInPrintableHtml } from "./template-engine";
 import { documentStorage } from "../storage/documents";
 import { computeDataHash } from "./signature-integrity";
-import { todayISO } from "@shared/utils/datetime";
+import { todayISO, formatDateForDisplay } from "@shared/utils/datetime";
 import type { DocumentTemplate } from "@shared/schema";
 
 function parseObjectPath(path: string): { bucketName: string; objectName: string } {
@@ -127,7 +127,7 @@ export async function regeneratePdfWithSignature(
   if (updatedHtml.includes("{{employee_signature}}")) {
     updatedHtml = updatedHtml.replace(/\{\{employee_signature\}\}/g, sigHtml);
   } else {
-    updatedHtml += `<div style="margin-top:40px;"><p><strong>Unterschrift Mitarbeiter:</strong></p>${sigHtml}<p style="font-size:10px;color:#666;">Datum: ${new Date().toLocaleDateString("de-DE")}</p></div>`;
+    updatedHtml += `<div style="margin-top:40px;"><p><strong>Unterschrift Mitarbeiter:</strong></p>${sigHtml}<p style="font-size:10px;color:#666;">Datum: ${formatDateForDisplay(todayISO())}</p></div>`;
   }
 
   const { pdfBuffer, integrityHash: pdfHash } = await generatePdfFromHtml(updatedHtml, doc.fileName);

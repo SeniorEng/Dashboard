@@ -18,6 +18,7 @@ import {
 import { eq, and, gte, lte, isNull, inArray, ne, notInArray } from "drizzle-orm";
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
+import { formatDateForDisplay, formatDateISO, todayISO } from "@shared/utils/datetime";
 import { storage } from "../storage";
 import { db } from "../lib/db";
 
@@ -526,7 +527,7 @@ function buildPdfData(invoice: any, lineItems: any[], companySettings: any) {
     anerkennungsBundesland: companySettings.anerkennungsBundesland,
     geschaeftsfuehrer: companySettings.geschaeftsfuehrer,
     invoiceNumber: invoice.invoiceNumber,
-    invoiceDate: invoice.sentAt ? new Date(invoice.sentAt).toLocaleDateString("de-DE") : new Date().toLocaleDateString("de-DE"),
+    invoiceDate: invoice.sentAt ? formatDateForDisplay(formatDateISO(invoice.sentAt)) : formatDateForDisplay(todayISO()),
     invoiceType: invoice.invoiceType,
     billingType: invoice.billingType,
     billingMonth: invoice.billingMonth,
@@ -617,10 +618,10 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
 
     pdfData.signatures = signedRecords.map(r => ({
       employeeSignatureData: r.employeeSignatureData,
-      employeeSignedAt: r.employeeSignedAt ? new Date(r.employeeSignedAt).toLocaleDateString("de-DE") : null,
+      employeeSignedAt: r.employeeSignedAt ? formatDateForDisplay(formatDateISO(r.employeeSignedAt instanceof Date ? r.employeeSignedAt : new Date(r.employeeSignedAt))) : null,
       employeeName: employeeMap.get(r.employeeId) || null,
       customerSignatureData: r.customerSignatureData,
-      customerSignedAt: r.customerSignedAt ? new Date(r.customerSignedAt).toLocaleDateString("de-DE") : null,
+      customerSignedAt: r.customerSignedAt ? formatDateForDisplay(formatDateISO(r.customerSignedAt instanceof Date ? r.customerSignedAt : new Date(r.customerSignedAt))) : null,
       customerName: invoice.customerName || invoice.recipientName,
     }));
   }

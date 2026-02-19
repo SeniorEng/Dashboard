@@ -30,11 +30,6 @@ export function calculateDuration(startTime: Date | null, endTime: Date | null):
   return Math.round((endTime.getTime() - startTime.getTime()) / 60000);
 }
 
-export function formatTime(date: Date | null): string {
-  if (!date) return "--:--";
-  return date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
-}
-
 export function getEndTime(appointment: AppointmentWithCustomer): string {
   return sharedGetEndTime(
     appointment.scheduledStart,
