@@ -533,7 +533,7 @@ export default function CustomerConvertPage() {
 
   if (isLoading) {
     return (
-      <Layout>
+      <Layout variant="admin">
         <div className="flex items-center justify-center min-h-[50vh]">
           <Loader2 className={`${iconSize.xl} animate-spin text-primary`} />
         </div>
@@ -543,7 +543,7 @@ export default function CustomerConvertPage() {
 
   if (error || !customer) {
     return (
-      <Layout>
+      <Layout variant="admin">
         <div className="flex items-center justify-center min-h-[50vh]">
           <ErrorState
             title="Kunde konnte nicht geladen werden"
@@ -557,7 +557,7 @@ export default function CustomerConvertPage() {
 
   if (customer.status !== "erstberatung") {
     return (
-      <Layout>
+      <Layout variant="admin">
         <div className="flex items-center justify-center min-h-[50vh]">
           <ErrorState
             title="Konvertierung nicht möglich"
@@ -569,9 +569,7 @@ export default function CustomerConvertPage() {
   }
 
   return (
-    <Layout>
-      <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
-        <div className="container mx-auto px-4 py-6 max-w-3xl">
+    <Layout variant="admin">
           <div className="flex items-center gap-4 mb-4">
             <Link href={`/customer/${customerId}`}>
               <Button variant="ghost" size="icon" aria-label="Zurück" data-testid="button-back">
@@ -677,8 +675,6 @@ export default function CustomerConvertPage() {
               </div>
             </CardContent>
           </Card>
-        </div>
-      </div>
     </Layout>
   );
 }

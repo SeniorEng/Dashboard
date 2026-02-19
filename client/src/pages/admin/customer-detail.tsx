@@ -365,8 +365,8 @@ export default function AdminCustomerDetail() {
 
   if (isLoading) {
     return (
-      <Layout>
-        <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4] flex items-center justify-center">
+      <Layout variant="admin">
+        <div className="flex items-center justify-center min-h-[50vh]">
           <Loader2 className={`${iconSize.lg} animate-spin text-teal-600`} />
         </div>
       </Layout>
@@ -375,31 +375,27 @@ export default function AdminCustomerDetail() {
 
   if (error || !customer) {
     return (
-      <Layout>
-        <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
-          <div className="container mx-auto px-4 py-6 max-w-4xl">
-            <PageHeader
-              title="Fehler"
-              backHref="/admin/customers"
-            />
-            <SectionCard className="border-red-200 bg-red-50">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <AlertCircle className={`${iconSize.lg} text-red-600`} />
-                  <div>
-                    <p className="font-medium text-red-800">Fehler beim Laden</p>
-                    <p className="text-red-700">
-                      {error instanceof Error ? error.message : "Kunde konnte nicht geladen werden"}
-                    </p>
-                  </div>
-                </div>
-                <Button variant="outline" onClick={() => refetch()}>
-                  Erneut versuchen
-                </Button>
+      <Layout variant="admin">
+        <PageHeader
+          title="Fehler"
+          backHref="/admin/customers"
+        />
+        <SectionCard className="border-red-200 bg-red-50">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <AlertCircle className={`${iconSize.lg} text-red-600`} />
+              <div>
+                <p className="font-medium text-red-800">Fehler beim Laden</p>
+                <p className="text-red-700">
+                  {error instanceof Error ? error.message : "Kunde konnte nicht geladen werden"}
+                </p>
               </div>
-            </SectionCard>
+            </div>
+            <Button variant="outline" onClick={() => refetch()}>
+              Erneut versuchen
+            </Button>
           </div>
-        </div>
+        </SectionCard>
       </Layout>
     );
   }
@@ -409,9 +405,7 @@ export default function AdminCustomerDetail() {
     : customer.name;
 
   return (
-    <Layout>
-      <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
-        <div className="container mx-auto px-4 py-6 max-w-4xl">
+    <Layout variant="admin">
           <PageHeader
             title={customerDisplayName}
             backHref="/admin/customers"
@@ -591,8 +585,6 @@ export default function AdminCustomerDetail() {
               />
             </TabsContent>
           </ResponsiveTabs>
-        </div>
-      </div>
     </Layout>
   );
 }

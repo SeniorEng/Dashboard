@@ -216,9 +216,7 @@ export default function MyTimes() {
   const selectedDayAppointments = selectedDate ? appointmentsByDate[selectedDate] || [] : [];
 
   return (
-    <Layout>
-      <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
-        <div className="container mx-auto px-4 py-6 max-w-6xl">
+    <Layout variant="wide">
           <div ref={missingBreaksRef}>
             <MissingBreaksBanner
               daysWithMissingBreaks={daysWithMissingBreaks}
@@ -342,8 +340,6 @@ export default function MyTimes() {
           </div>
 
           <MonthClosingSection year={selectedYear} month={selectedMonth} />
-        </div>
-      </div>
     </Layout>
   );
 }

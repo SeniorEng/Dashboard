@@ -242,9 +242,7 @@ export default function AdminBilling() {
   };
 
   return (
-    <Layout>
-      <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]" data-testid="page-billing">
-        <div className="container mx-auto px-4 py-6 max-w-6xl">
+    <Layout variant="wide">
           <div className="flex items-center gap-4 mb-6">
             <Link href="/admin">
               <Button variant="ghost" size="icon" aria-label="Zurück" data-testid="button-back">
@@ -490,8 +488,6 @@ export default function AdminBilling() {
               </CardContent>
             </Card>
           )}
-        </div>
-      </div>
 
       <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) { setBatchResult(null); setSelectedCustomerId(""); } }}>
         <DialogContent>

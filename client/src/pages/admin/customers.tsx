@@ -123,9 +123,7 @@ export default function AdminCustomers() {
   const total = data?.total || 0;
 
   return (
-    <Layout>
-      <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
-        <div className="container mx-auto px-4 py-6 max-w-4xl">
+    <Layout variant="admin">
           <PageHeader
             title="Kundenverwaltung"
             subtitle={`${total} ${total === 1 ? "Kunde" : "Kunden"} gefunden`}
@@ -378,8 +376,6 @@ export default function AdminCustomers() {
               </Button>
             </div>
           )}
-        </div>
-      </div>
     </Layout>
   );
 }

@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings } from "lucide-react";
+import { type LayoutVariant, layoutVariants, colors } from "@/design-system";
 
 interface SearchResult {
   type: "customer" | "appointment";
@@ -133,7 +134,7 @@ function GlobalSearch() {
   );
 }
 
-export function Layout({ children }: { children: React.ReactNode }) {
+export function Layout({ children, variant = 'default' }: { children: React.ReactNode; variant?: LayoutVariant }) {
   const [location, navigate] = useLocation();
   const { user, logout, isAuthenticated, badgeCount, birthdayCount } = useAuth();
 
@@ -150,9 +151,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="min-h-screen bg-background font-sans text-foreground pb-20">
+    <div className={`min-h-screen ${colors.surface.page} font-sans text-foreground pb-20`}>
       {/* Header */}
-      <header className="sticky top-0 z-50 w-full bg-background border-b border-border/40 shadow-sm">
+      <header className="sticky top-0 z-50 w-full bg-white/90 backdrop-blur-none border-b border-border/40 shadow-sm">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <Link href="/" className="shrink-0 hover:opacity-80 transition-opacity">
             <img src={logo} alt="Logo" className="h-10 w-10 object-cover rounded-lg shadow-sm" />
@@ -208,7 +209,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </header>
 
       {/* Main Content */}
-      <main className="container mx-auto px-4 py-6 max-w-2xl">
+      <main className={`container mx-auto px-4 py-6 ${layoutVariants[variant]}`}>
         {children}
       </main>
 

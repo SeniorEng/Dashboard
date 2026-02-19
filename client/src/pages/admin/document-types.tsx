@@ -250,9 +250,7 @@ export default function AdminDocumentTypes() {
   );
 
   return (
-    <Layout>
-      <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
-        <div className="container mx-auto px-4 py-6 max-w-4xl">
+    <Layout variant="admin">
           <div className="flex items-center justify-between gap-2 mb-6">
             <div className="flex items-center gap-2 sm:gap-4 min-w-0">
               <Link href="/admin">
@@ -368,8 +366,6 @@ export default function AdminDocumentTypes() {
               ))}
             </div>
           )}
-        </div>
-      </div>
 
       <Dialog open={!!editingType} onOpenChange={() => { setEditingType(null); setFormData(emptyForm); }}>
         <DialogContent>

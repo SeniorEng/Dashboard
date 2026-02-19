@@ -228,7 +228,7 @@ export default function AdminCustomerEdit() {
   if (isLoading) {
     return (
       <Layout>
-        <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4] flex items-center justify-center">
+        <div className="flex items-center justify-center min-h-[50vh]">
           <Loader2 className={`${iconSize.lg} animate-spin text-teal-600`} />
         </div>
       </Layout>
@@ -238,19 +238,13 @@ export default function AdminCustomerEdit() {
   if (!customer) {
     return (
       <Layout>
-        <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
-          <div className="container mx-auto px-4 py-6 max-w-2xl">
-            <PageHeader title="Kunde nicht gefunden" backHref="/admin/customers" />
-          </div>
-        </div>
+        <PageHeader title="Kunde nicht gefunden" backHref="/admin/customers" />
       </Layout>
     );
   }
 
   return (
     <Layout>
-      <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
-        <div className="container mx-auto px-4 py-6 max-w-2xl">
           <PageHeader
             title="Kunde bearbeiten"
             backHref={`/admin/customers/${customerId}`}
@@ -725,8 +719,6 @@ export default function AdminCustomerEdit() {
               </div>
             </div>
           </div>
-        </div>
-      </div>
     </Layout>
   );
 }

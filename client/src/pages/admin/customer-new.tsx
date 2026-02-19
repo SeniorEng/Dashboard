@@ -517,9 +517,7 @@ export default function AdminCustomerNew() {
   };
 
   return (
-    <Layout>
-      <div className="min-h-screen bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
-        <div className="container mx-auto px-4 py-6 max-w-3xl">
+    <Layout variant="admin">
           <div className="flex items-center gap-4 mb-6">
             <Link href="/admin/customers">
               <Button variant="ghost" size="icon" aria-label="Zurück" data-testid="button-back">
@@ -607,8 +605,6 @@ export default function AdminCustomerNew() {
               </div>
             </CardContent>
           </Card>
-        </div>
-      </div>
     </Layout>
   );
 }

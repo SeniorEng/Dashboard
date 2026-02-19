@@ -246,7 +246,7 @@ export default function AdminServices() {
   const isSaving = createMutation.isPending || updateMutation.isPending;
 
   return (
-    <Layout>
+    <Layout variant="admin">
       <div className="space-y-4">
         <div>
           <div className="flex items-center gap-2 mb-1">

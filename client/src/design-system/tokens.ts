@@ -269,14 +269,26 @@ export const datePicker = {
 } as const;
 
 // ============================================
+// LAYOUT VARIANTS
+// ============================================
+
+export type LayoutVariant = 'default' | 'admin' | 'wide' | 'narrow' | 'full';
+
+export const layoutVariants: Record<LayoutVariant, string> = {
+  default: 'max-w-2xl',
+  narrow: 'max-w-xl',
+  admin: 'max-w-4xl',
+  wide: 'max-w-6xl',
+  full: 'max-w-full',
+} as const;
+
+// ============================================
 // COMPONENT STYLE PRESETS
 // ============================================
 
 export const componentStyles = {
-  // Page container
   pageContainer: 'container mx-auto px-4 py-6',
   
-  // Page header - responsive stacked layout on mobile
   pageHeader: 'flex flex-col gap-3 mb-6 sm:flex-row sm:items-center sm:justify-between',
   pageHeaderTop: 'flex items-center gap-3',
   pageHeaderTitleWrap: 'flex-1 min-w-0',
@@ -284,7 +296,7 @@ export const componentStyles = {
   pageSubtitle: 'text-sm text-gray-600 mt-0.5',
   pageHeaderBadges: 'flex flex-wrap items-center gap-2 mt-1',
   pageHeaderActions: 'flex flex-col gap-2 w-full sm:flex-row sm:w-auto sm:items-center',
-  pageHeaderActionBtn: 'w-full sm:w-auto', // Full-width on mobile, auto on desktop
+  pageHeaderActionBtn: 'w-full sm:w-auto',
   
   // Cards (verwende Standard-Card-Komponente, keine custom bg/border)
   card: '',
