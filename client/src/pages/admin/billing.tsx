@@ -406,7 +406,7 @@ export default function AdminBilling() {
                             </Button>
                           )}
 
-                          {invoice.status !== "storniert" && (
+                          {invoice.status !== "storniert" && invoice.invoiceType !== "stornorechnung" && (
                             <Button
                               variant="ghost"
                               size="sm"

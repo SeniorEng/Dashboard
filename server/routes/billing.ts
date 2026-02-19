@@ -476,6 +476,9 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
   }
 
   if (status === "storniert") {
+    if (invoice.invoiceType === "stornorechnung") {
+      throw badRequest("Stornorechnungen können nicht erneut storniert werden.");
+    }
     const invoiceNumber = await storage.getNextInvoiceNumber(invoice.billingYear);
     const lineItems = await storage.getInvoiceLineItems(id);
 
