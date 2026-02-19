@@ -61,7 +61,7 @@ function CollapsibleCard({
   return (
     <Card data-testid={testId}>
       <CardHeader
-        className="pb-2 cursor-pointer select-none"
+        className={`cursor-pointer select-none ${isOpen ? "pb-2" : ""}`}
         onClick={() => setIsOpen(!isOpen)}
       >
         <div className="flex items-center justify-between">
