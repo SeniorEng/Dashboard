@@ -77,6 +77,7 @@ interface CustomerListItem {
   vorname: string | null;
   nachname: string | null;
   billingType: string;
+  status: string;
 }
 
 interface InvoiceItem {
@@ -557,7 +558,7 @@ export default function AdminBilling() {
                       <SelectItem value="alle" className="font-medium border-b">
                         Alle Kunden (Sammelabrechnung)
                       </SelectItem>
-                      {customers?.map((c) => (
+                      {customers?.filter(c => c.status === "aktiv").map((c) => (
                         <SelectItem key={c.id} value={c.id.toString()}>
                           {getCustomerName(c)}
                         </SelectItem>
