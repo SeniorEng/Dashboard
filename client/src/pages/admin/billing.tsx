@@ -351,7 +351,7 @@ export default function AdminBilling() {
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-1 shrink-0">
+                        <div className="flex flex-wrap items-center gap-1">
                           <a
                             href={`/api/billing/${invoice.id}/pdf`}
                             target="_blank"
