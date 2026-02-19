@@ -164,7 +164,14 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
     throw badRequest("Kein Leistungsnachweis für diesen Zeitraum vorhanden. Bitte erstellen Sie zuerst einen Leistungsnachweis im Bereich 'Nachweise'.");
   }
 
-  const serviceRecordIds = serviceRecords.map(sr => sr.id);
+  const signedRecords = serviceRecords.filter(sr =>
+    sr.status === "completed" || sr.status === "employee_signed"
+  );
+  if (signedRecords.length === 0) {
+    throw badRequest("Der Leistungsnachweis wurde noch nicht unterschrieben. Bitte lassen Sie den Leistungsnachweis zuerst vom Mitarbeiter unterschreiben.");
+  }
+
+  const serviceRecordIds = signedRecords.map(sr => sr.id);
   const allApptIds = await getAppointmentIdsFromServiceRecords(serviceRecordIds);
 
   if (allApptIds.length === 0) {
@@ -321,7 +328,16 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
       }
 
       const customerRecords = allServiceRecords.filter(sr => sr.customerId === customerId);
-      const serviceRecordIds = customerRecords.map(sr => sr.id);
+      const signedRecords = customerRecords.filter(sr =>
+        sr.status === "completed" || sr.status === "employee_signed"
+      );
+
+      if (signedRecords.length === 0) {
+        results.skipped.push({ customerName: custName, reason: "Leistungsnachweis nicht unterschrieben" });
+        continue;
+      }
+
+      const serviceRecordIds = signedRecords.map(sr => sr.id);
       const allApptIds = await getAppointmentIdsFromServiceRecords(serviceRecordIds);
 
       if (allApptIds.length === 0) {
