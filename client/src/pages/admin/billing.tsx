@@ -259,11 +259,11 @@ export default function AdminBilling() {
 
           <Card className="mb-6">
             <CardContent className="p-4">
-              <div className="flex flex-wrap items-center gap-4">
-                <div className="flex items-center gap-2">
+              <div className="flex flex-col gap-3">
+                <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-3">
                   <span className="text-sm text-gray-500">Monat:</span>
                   <Select value={selectedMonth.toString()} onValueChange={(v) => setSelectedMonth(parseInt(v))}>
-                    <SelectTrigger className="w-[140px]" data-testid="select-billing-month">
+                    <SelectTrigger className="w-full max-w-[200px]" data-testid="select-billing-month">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -274,12 +274,10 @@ export default function AdminBilling() {
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
 
-                <div className="flex items-center gap-2">
                   <span className="text-sm text-gray-500">Jahr:</span>
                   <Select value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(parseInt(v))}>
-                    <SelectTrigger className="w-[100px]" data-testid="select-billing-year">
+                    <SelectTrigger className="w-full max-w-[200px]" data-testid="select-billing-year">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -290,12 +288,10 @@ export default function AdminBilling() {
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
 
-                <div className="flex items-center gap-2">
                   <span className="text-sm text-gray-500">Status:</span>
                   <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-[140px]" data-testid="select-billing-status">
+                    <SelectTrigger className="w-full max-w-[200px]" data-testid="select-billing-status">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -308,7 +304,7 @@ export default function AdminBilling() {
                   </Select>
                 </div>
 
-                <div className="ml-auto">
+                <div className="flex justify-end">
                   <Button
                     onClick={() => setDialogOpen(true)}
                     className="bg-teal-600 hover:bg-teal-700 text-white"
