@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Lock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
@@ -101,24 +102,9 @@ export default function MyTimes() {
     }, {} as Record<string, typeof appointments>);
   }, [appointments]);
 
-  const handlePrevMonth = useCallback(() => {
-    setSelectedMonth(m => {
-      if (m === 1) {
-        setSelectedYear(y => y - 1);
-        return 12;
-      }
-      return m - 1;
-    });
-  }, []);
-
-  const handleNextMonth = useCallback(() => {
-    setSelectedMonth(m => {
-      if (m === 12) {
-        setSelectedYear(y => y + 1);
-        return 1;
-      }
-      return m + 1;
-    });
+  const yearOptions = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    return Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
   }, []);
 
   const handleDayClick = useCallback((date: string) => {
@@ -241,26 +227,27 @@ export default function MyTimes() {
             </Button>
           </div>
 
-          <div className="flex items-center justify-between rounded-lg bg-[#f5e6d3]/60 px-4 py-3 mb-6" data-testid="month-selector">
-            <button
-              onClick={handlePrevMonth}
-              aria-label="Vorheriger Monat"
-              data-testid="button-prev-month"
-              className="text-xl font-medium text-gray-600 hover:text-gray-900 px-2 py-1 select-none"
-            >
-              ‹
-            </button>
-            <span className="text-lg font-bold text-gray-900" data-testid="text-current-month">
-              {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
-            </span>
-            <button
-              onClick={handleNextMonth}
-              aria-label="Nächster Monat"
-              data-testid="button-next-month"
-              className="text-xl font-medium text-gray-600 hover:text-gray-900 px-2 py-1 select-none"
-            >
-              ›
-            </button>
+          <div className="flex items-center gap-3 mb-6" data-testid="month-selector">
+            <Select value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(parseInt(v))}>
+              <SelectTrigger className="w-[100px]" data-testid="select-year">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {yearOptions.map((y) => (
+                  <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={selectedMonth.toString()} onValueChange={(v) => setSelectedMonth(parseInt(v))}>
+              <SelectTrigger className="flex-1" data-testid="select-month">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MONTH_NAMES.map((name, idx) => (
+                  <SelectItem key={idx + 1} value={(idx + 1).toString()}>{name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <TimeEntryDialog
@@ -320,8 +307,6 @@ export default function MyTimes() {
               missingBreakDates={missingBreakDates}
               isLoading={isLoading}
               onDayClick={handleDayClick}
-              onPrevMonth={handlePrevMonth}
-              onNextMonth={handleNextMonth}
             />
 
             <div ref={dayDetailRef}>

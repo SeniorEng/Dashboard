@@ -32,8 +32,6 @@ import {
   Thermometer,
   Coffee,
   Briefcase,
-  ChevronLeft,
-  ChevronRight,
   Loader2,
   FileText,
   Users,
@@ -196,23 +194,10 @@ export default function AdminTimeEntries() {
     );
   }, [entries]);
 
-  const handlePrevMonth = () => {
-    if (selectedMonth === 1) {
-      setSelectedMonth(12);
-      setSelectedYear(selectedYear - 1);
-    } else {
-      setSelectedMonth(selectedMonth - 1);
-    }
-  };
-
-  const handleNextMonth = () => {
-    if (selectedMonth === 12) {
-      setSelectedMonth(1);
-      setSelectedYear(selectedYear + 1);
-    } else {
-      setSelectedMonth(selectedMonth + 1);
-    }
-  };
+  const yearOptions = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    return Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
+  }, []);
 
   const handleEditVacation = (userId: number, userName: string) => {
     setVacationEditUser({ id: userId, name: userName });
@@ -286,15 +271,26 @@ export default function AdminTimeEntries() {
             <CardContent className="p-4">
               <div className="flex flex-wrap items-center gap-4">
                 <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="icon" onClick={handlePrevMonth} aria-label="Vorheriger Monat" data-testid="button-prev-month">
-                    <ChevronLeft className={iconSize.md} />
-                  </Button>
-                  <span className="font-medium min-w-[150px] text-center">
-                    {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
-                  </span>
-                  <Button variant="ghost" size="icon" onClick={handleNextMonth} aria-label="Nächster Monat" data-testid="button-next-month">
-                    <ChevronRight className={iconSize.md} />
-                  </Button>
+                  <Select value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(parseInt(v))}>
+                    <SelectTrigger className="w-[100px]" data-testid="select-year">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {yearOptions.map((y) => (
+                        <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={selectedMonth.toString()} onValueChange={(v) => setSelectedMonth(parseInt(v))}>
+                    <SelectTrigger className="w-[150px]" data-testid="select-month">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MONTH_NAMES.map((name, idx) => (
+                        <SelectItem key={idx + 1} value={(idx + 1).toString()}>{name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="flex items-center gap-2">

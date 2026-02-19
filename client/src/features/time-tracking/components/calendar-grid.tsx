@@ -22,8 +22,6 @@ interface CalendarGridProps {
   missingBreakDates: Set<string>;
   isLoading: boolean;
   onDayClick: (date: string) => void;
-  onPrevMonth: () => void;
-  onNextMonth: () => void;
 }
 
 export function CalendarGrid({
@@ -35,8 +33,6 @@ export function CalendarGrid({
   missingBreakDates,
   isLoading,
   onDayClick,
-  onPrevMonth,
-  onNextMonth,
 }: CalendarGridProps) {
   const todayStr = useMemo(() => formatDateISO(new Date()), []);
 
