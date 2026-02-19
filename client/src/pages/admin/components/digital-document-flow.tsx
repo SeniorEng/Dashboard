@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import DOMPurify from "dompurify";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -386,7 +387,7 @@ export function DigitalDocumentFlow({
             <div className="border rounded-lg p-4 sm:p-6 bg-white max-h-[50vh] overflow-y-auto">
               <div
                 className="prose prose-sm max-w-none"
-                dangerouslySetInnerHTML={{ __html: renderedHtml }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(renderedHtml, { ALLOWED_TAGS: ['h1','h2','h3','h4','p','br','strong','em','ul','ol','li','table','tr','td','th','thead','tbody','img','div','span','hr','b','i','u','a'], ALLOWED_ATTR: ['class','style','src','alt','width','height','colspan','rowspan','href'] }) }}
                 data-testid="preview-rendered-document"
               />
             </div>

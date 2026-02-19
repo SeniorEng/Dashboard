@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
+import DOMPurify from "dompurify";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { todayISO, formatDateForDisplay } from "@shared/utils/datetime";
@@ -360,8 +361,12 @@ export default function AdminDocumentTemplates() {
   };
 
   const handleCopyPlaceholder = (key: string) => {
-    navigator.clipboard.writeText(key);
-    toast({ title: "Kopiert", description: `${key} in die Zwischenablage kopiert` });
+    const wrapped = `{{${key}}}`;
+    navigator.clipboard.writeText(wrapped).then(() => {
+      toast({ title: "Kopiert", description: `${wrapped} in die Zwischenablage kopiert` });
+    }).catch(() => {
+      toast({ title: "Kopieren fehlgeschlagen", variant: "destructive" });
+    });
   };
 
   const isPending = createMutation.isPending || updateMutation.isPending;
@@ -673,7 +678,7 @@ export default function AdminDocumentTemplates() {
                 <div className="border rounded-lg p-6 bg-white">
                   <div
                     className="prose prose-sm max-w-none"
-                    dangerouslySetInnerHTML={{ __html: previewHtml }}
+                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(previewHtml, { ALLOWED_TAGS: ['h1','h2','h3','h4','p','br','strong','em','ul','ol','li','table','tr','td','th','thead','tbody','img','div','span','hr','b','i','u','a'], ALLOWED_ATTR: ['class','style','src','alt','width','height','colspan','rowspan','href'] }) }}
                     data-testid="preview-content"
                   />
                 </div>

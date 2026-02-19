@@ -122,8 +122,10 @@ export async function buildPlaceholders(
 export function renderTemplate(htmlContent: string, placeholders: TemplatePlaceholders): string {
   let rendered = htmlContent;
   for (const [key, value] of Object.entries(placeholders)) {
+    const isSignature = key.includes("signature");
+    const safeValue = isSignature ? value : escapeHtml(value);
     const pattern = new RegExp(`\\{\\{${key}\\}\\}`, "g");
-    rendered = rendered.replace(pattern, value);
+    rendered = rendered.replace(pattern, safeValue);
   }
   rendered = rendered.replace(/\{\{[a-z_]+\}\}/g, "");
   return rendered;

@@ -403,9 +403,10 @@ export class CustomerManagementStorage {
     haustierDetails: string | null;
     acceptsPrivatePayment: boolean;
   }>): Promise<Customer | undefined> {
+    return await db.transaction(async (tx) => {
     const updateData: any = { ...data, updatedAt: new Date() };
     
-    const existing = await db.select().from(customers).where(eq(customers.id, id));
+    const existing = await tx.select().from(customers).where(eq(customers.id, id)).for("update");
     if (existing.length === 0) return undefined;
     
     const oldCustomer = existing[0];
@@ -424,7 +425,7 @@ export class CustomerManagementStorage {
       updateData.address = `${newStrasse} ${newNr}, ${newPlz} ${newStadt}`;
     }
     
-    const result = await db.update(customers).set(updateData).where(eq(customers.id, id)).returning();
+    const result = await tx.update(customers).set(updateData).where(eq(customers.id, id)).returning();
     const updated = result[0];
     
     if (data.primaryEmployeeId !== undefined || data.backupEmployeeId !== undefined) {
@@ -432,7 +433,7 @@ export class CustomerManagementStorage {
 
       if (data.primaryEmployeeId !== undefined && oldCustomer.primaryEmployeeId !== data.primaryEmployeeId) {
         if (oldCustomer.primaryEmployeeId) {
-          await db.update(customerAssignmentHistory)
+          await tx.update(customerAssignmentHistory)
             .set({ validTo: today })
             .where(and(
               eq(customerAssignmentHistory.customerId, id),
@@ -442,7 +443,7 @@ export class CustomerManagementStorage {
             ));
         }
         if (data.primaryEmployeeId) {
-          await db.insert(customerAssignmentHistory).values({
+          await tx.insert(customerAssignmentHistory).values({
             customerId: id,
             employeeId: data.primaryEmployeeId,
             role: "primary",
@@ -453,7 +454,7 @@ export class CustomerManagementStorage {
 
       if (data.backupEmployeeId !== undefined && oldCustomer.backupEmployeeId !== data.backupEmployeeId) {
         if (oldCustomer.backupEmployeeId) {
-          await db.update(customerAssignmentHistory)
+          await tx.update(customerAssignmentHistory)
             .set({ validTo: today })
             .where(and(
               eq(customerAssignmentHistory.customerId, id),
@@ -463,7 +464,7 @@ export class CustomerManagementStorage {
             ));
         }
         if (data.backupEmployeeId) {
-          await db.insert(customerAssignmentHistory).values({
+          await tx.insert(customerAssignmentHistory).values({
             customerId: id,
             employeeId: data.backupEmployeeId,
             role: "backup",
@@ -477,6 +478,7 @@ export class CustomerManagementStorage {
     }
     
     return updated;
+    });
   }
 
   async updateCustomerAssignment(

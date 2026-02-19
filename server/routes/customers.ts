@@ -155,6 +155,17 @@ router.post("/:id/signatures", async (req, res) => {
       return res.status(400).json({ error: "Ungültige Kunden-ID" });
     }
 
+    const user = req.user!;
+    if (!user.isAdmin) {
+      const assignedIds = await storage.getAssignedCustomerIds(user.id);
+      if (!assignedIds.includes(customerId)) {
+        return res.status(403).json({
+          error: "FORBIDDEN",
+          message: "Kein Zugriff auf diesen Kunden",
+        });
+      }
+    }
+
     const customer = await storage.getCustomer(customerId);
     if (!customer) {
       return res.status(404).json({ error: "Kunde nicht gefunden" });
@@ -165,8 +176,9 @@ router.post("/:id/signatures", async (req, res) => {
       return res.status(400).json({ error: "Ungültige Daten", details: parsed.error.issues });
     }
 
-    const userId = req.user!.id;
+    const userId = user.id;
     const results = [];
+    const errors: { slug: string; error: string }[] = [];
 
     for (const sig of parsed.data.signatures) {
       try {
@@ -188,11 +200,17 @@ router.post("/:id/signatures", async (req, res) => {
           integrityHash: hash,
         }, userId);
         results.push(doc);
-      } catch {
+      } catch (err) {
+        errors.push({ slug: sig.templateSlug, error: String(err) });
+        console.error(`Signatur ${sig.templateSlug} fehlgeschlagen:`, err);
       }
     }
 
-    res.status(201).json(results);
+    if (errors.length > 0 && results.length === 0) {
+      return res.status(500).json({ error: "Alle Unterschriften fehlgeschlagen", details: errors });
+    }
+
+    res.status(results.length === parsed.data.signatures.length ? 201 : 207).json({ results, errors });
   } catch (error) {
     console.error("Failed to save signatures:", error);
     res.status(500).json({ error: "Unterschriften konnten nicht gespeichert werden" });

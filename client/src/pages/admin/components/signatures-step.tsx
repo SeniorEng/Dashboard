@@ -77,7 +77,7 @@ function renderClientSide(htmlContent: string, formData: CustomerFormDataForPrev
     kontaktperson_telefon: primaryContact?.telefon || "",
     kontaktperson_email: primaryContact?.email || "",
     kontaktperson_typ: primaryContact?.contactType || "",
-    mandatsreferenz: `SE-NEU-${today.getFullYear()}`,
+    mandatsreferenz: `SE-[wird nach Speicherung ergänzt]-${today.getFullYear()}`,
     current_date: todayDE,
     heute: todayDE,
     company_name: "SeniorenEngel GmbH",

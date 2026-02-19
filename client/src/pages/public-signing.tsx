@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import DOMPurify from "dompurify";
 import { useParams } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -160,7 +161,7 @@ export default function PublicSigningPage() {
                 <div className="border rounded-lg p-4 bg-white max-h-[40vh] overflow-y-auto">
                   <div
                     className="prose prose-sm max-w-none"
-                    dangerouslySetInnerHTML={{ __html: docData.renderedHtml }}
+                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(docData.renderedHtml, { ALLOWED_TAGS: ['h1','h2','h3','h4','p','br','strong','em','ul','ol','li','table','tr','td','th','thead','tbody','img','div','span','hr','b','i','u','a'], ALLOWED_ATTR: ['class','style','src','alt','width','height','colspan','rowspan','href'] }) }}
                     data-testid="preview-signing-document"
                   />
                 </div>

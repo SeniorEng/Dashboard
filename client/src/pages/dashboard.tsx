@@ -9,7 +9,7 @@ import { Plus, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { iconSize } from "@/design-system";
 
-const WEEKDAY_NAMES_SHORT = ["Mo", "Di", "Mi", "Do", "Fr"];
+const WEEKDAY_NAMES_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 
 interface DayButtonProps {
   dayStr: string;
@@ -38,7 +38,7 @@ function DayButton({ dayStr, day, index, isSelected, isDayToday, appointmentCoun
   return (
     <button
       onClick={() => onSelect(day)}
-      className={`relative flex flex-col items-center justify-center flex-1 max-w-[56px] h-14 rounded-lg transition-all ${bgClass}`}
+      className={`relative flex flex-col items-center justify-center flex-1 max-w-[44px] h-14 rounded-lg transition-all ${bgClass}`}
       data-testid={`weekday-${dayStr}`}
     >
       <span className="text-[10px] font-medium uppercase tracking-wide opacity-70">
@@ -77,7 +77,7 @@ export default function Dashboard() {
 
   const weekDays = useMemo(() => {
     const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 });
-    return Array.from({ length: 5 }, (_, i) => addDays(weekStart, i));
+    return Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   }, [selectedDate]);
 
   const weekDateStrings = useMemo(() => 
