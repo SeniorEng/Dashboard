@@ -13,6 +13,7 @@ import {
   invoices as invoicesTable,
   invoiceLineItems,
   monthlyServiceRecords,
+  serviceRecordAppointments,
 } from "@shared/schema";
 import { eq, and, gte, lte, isNull, inArray, ne, notInArray } from "drizzle-orm";
 import { z } from "zod";
@@ -38,69 +39,30 @@ async function getAlreadyInvoicedAppointmentIds(customerId: number, billingYear:
   return rows.map(r => r.appointmentId).filter((id): id is number => id !== null);
 }
 
-router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (req, res) => {
-  const filters: any = {};
-  if (req.query.year) filters.year = Number(req.query.year);
-  if (req.query.month) filters.month = Number(req.query.month);
-  if (req.query.customerId) filters.customerId = Number(req.query.customerId);
-  if (req.query.status) filters.status = String(req.query.status);
-  const invoices = await storage.getInvoices(filters);
-  res.json(invoices);
-}));
-
-router.get("/:id", asyncHandler("Rechnung konnte nicht geladen werden", async (req, res) => {
-  const id = Number(req.params.id);
-  const invoice = await storage.getInvoice(id);
-  if (!invoice) throw notFound("Rechnung nicht gefunden");
-  const lineItems = await storage.getInvoiceLineItems(id);
-  res.json({ ...invoice, lineItems });
-}));
-
-router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", async (req, res) => {
-  const parsed = createInvoiceSchema.safeParse(req.body);
-  if (!parsed.success) {
-    throw badRequest(fromError(parsed.error).toString());
-  }
-
-  const { customerId, billingMonth, billingYear } = parsed.data;
-
-  const customer = await storage.getCustomer(customerId);
-  if (!customer) throw notFound("Kunde nicht gefunden");
-
-  const customerStatus = (customer as any).status;
-  if (customerStatus === "erstberatung") {
-    throw badRequest("Kunden in Erstberatung können nicht abgerechnet werden.");
-  }
-
-  const monthStr = billingMonth.toString().padStart(2, "0");
-  const startDate = `${billingYear}-${monthStr}-01`;
-  const lastDay = new Date(billingYear, billingMonth, 0).getDate();
-  const endDate = `${billingYear}-${monthStr}-${lastDay}`;
-
-  const alreadyInvoicedIds = await getAlreadyInvoicedAppointmentIds(customerId, billingYear, billingMonth);
-  const isNachberechnung = alreadyInvoicedIds.length > 0;
-
-  let allCompletedAppts = await db.select()
-    .from(appointments)
+async function getServiceRecordsForPeriod(customerId: number, year: number, month: number) {
+  return db.select()
+    .from(monthlyServiceRecords)
     .where(and(
-      eq(appointments.customerId, customerId),
-      gte(appointments.date, startDate),
-      lte(appointments.date, endDate),
-      eq(appointments.status, "completed"),
-      isNull(appointments.deletedAt)
+      eq(monthlyServiceRecords.customerId, customerId),
+      eq(monthlyServiceRecords.year, year),
+      eq(monthlyServiceRecords.month, month)
     ));
+}
 
-  const completedAppts = alreadyInvoicedIds.length > 0
-    ? allCompletedAppts.filter(a => !alreadyInvoicedIds.includes(a.id))
-    : allCompletedAppts;
+async function getAppointmentIdsFromServiceRecords(serviceRecordIds: number[]): Promise<number[]> {
+  if (serviceRecordIds.length === 0) return [];
+  const rows = await db.select({ appointmentId: serviceRecordAppointments.appointmentId })
+    .from(serviceRecordAppointments)
+    .where(inArray(serviceRecordAppointments.serviceRecordId, serviceRecordIds));
+  return rows.map(r => r.appointmentId);
+}
 
-  if (completedAppts.length === 0) {
-    throw badRequest(alreadyInvoicedIds.length > 0
-      ? "Alle abgeschlossenen Termine dieses Zeitraums wurden bereits abgerechnet."
-      : "Keine abgeschlossenen Termine für diesen Zeitraum gefunden.");
-  }
+async function buildLineItemsFromAppointments(apptIds: number[]) {
+  if (apptIds.length === 0) return { lineItems: [], totalNetCents: 0, totalVatCents: 0 };
 
-  const apptIds = completedAppts.map(a => a.id);
+  const appts = await db.select()
+    .from(appointments)
+    .where(and(inArray(appointments.id, apptIds), isNull(appointments.deletedAt)));
 
   const serviceBreakdown = await db.select({
     appointmentId: appointmentServicesTable.appointmentId,
@@ -119,7 +81,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
   let totalNetCents = 0;
   let totalVatCents = 0;
 
-  for (const appt of completedAppts) {
+  for (const appt of appts) {
     const apptServices = serviceBreakdown.filter(s => s.appointmentId === appt.id);
 
     let employeeName = "";
@@ -159,6 +121,68 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
       totalVatCents += vatCents;
     }
   }
+
+  return { lineItems, totalNetCents, totalVatCents };
+}
+
+router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (req, res) => {
+  const filters: any = {};
+  if (req.query.year) filters.year = Number(req.query.year);
+  if (req.query.month) filters.month = Number(req.query.month);
+  if (req.query.customerId) filters.customerId = Number(req.query.customerId);
+  if (req.query.status) filters.status = String(req.query.status);
+  const invoices = await storage.getInvoices(filters);
+  res.json(invoices);
+}));
+
+router.get("/:id", asyncHandler("Rechnung konnte nicht geladen werden", async (req, res) => {
+  const id = Number(req.params.id);
+  const invoice = await storage.getInvoice(id);
+  if (!invoice) throw notFound("Rechnung nicht gefunden");
+  const lineItems = await storage.getInvoiceLineItems(id);
+  res.json({ ...invoice, lineItems });
+}));
+
+router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", async (req, res) => {
+  const parsed = createInvoiceSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw badRequest(fromError(parsed.error).toString());
+  }
+
+  const { customerId, billingMonth, billingYear } = parsed.data;
+
+  const customer = await storage.getCustomer(customerId);
+  if (!customer) throw notFound("Kunde nicht gefunden");
+
+  const customerStatus = (customer as any).status;
+  if (customerStatus === "erstberatung") {
+    throw badRequest("Kunden in Erstberatung können nicht abgerechnet werden.");
+  }
+
+  const serviceRecords = await getServiceRecordsForPeriod(customerId, billingYear, billingMonth);
+  if (serviceRecords.length === 0) {
+    throw badRequest("Kein Leistungsnachweis für diesen Zeitraum vorhanden. Bitte erstellen Sie zuerst einen Leistungsnachweis im Bereich 'Nachweise'.");
+  }
+
+  const serviceRecordIds = serviceRecords.map(sr => sr.id);
+  const allApptIds = await getAppointmentIdsFromServiceRecords(serviceRecordIds);
+
+  if (allApptIds.length === 0) {
+    throw badRequest("Der Leistungsnachweis enthält keine Termine.");
+  }
+
+  const alreadyInvoicedIds = await getAlreadyInvoicedAppointmentIds(customerId, billingYear, billingMonth);
+  const isNachberechnung = alreadyInvoicedIds.length > 0;
+
+  const apptIds = alreadyInvoicedIds.length > 0
+    ? allApptIds.filter(id => !alreadyInvoicedIds.includes(id))
+    : allApptIds;
+
+  if (apptIds.length === 0) {
+    throw badRequest("Alle Termine aus dem Leistungsnachweis wurden bereits abgerechnet.");
+  }
+
+  const { lineItems, totalNetCents, totalVatCents } = await buildLineItemsFromAppointments(apptIds);
 
   const billingType = (customer as any).billingType || "selbstzahler";
   let recipientName = "";
@@ -260,26 +284,18 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
   }
 
   const { billingMonth, billingYear } = parsed.data;
-  const monthStr = billingMonth.toString().padStart(2, "0");
-  const startDate = `${billingYear}-${monthStr}-01`;
-  const lastDay = new Date(billingYear, billingMonth, 0).getDate();
-  const endDate = `${billingYear}-${monthStr}-${lastDay}`;
 
-  const allCompletedAppts = await db.select({
-    customerId: appointments.customerId,
-  })
-  .from(appointments)
-  .where(and(
-    gte(appointments.date, startDate),
-    lte(appointments.date, endDate),
-    eq(appointments.status, "completed"),
-    isNull(appointments.deletedAt)
-  ));
+  const allServiceRecords = await db.select()
+    .from(monthlyServiceRecords)
+    .where(and(
+      eq(monthlyServiceRecords.year, billingYear),
+      eq(monthlyServiceRecords.month, billingMonth)
+    ));
 
-  const uniqueCustomerIds = [...new Set(allCompletedAppts.map(a => a.customerId))];
+  const uniqueCustomerIds = [...new Set(allServiceRecords.map(sr => sr.customerId))];
 
   if (uniqueCustomerIds.length === 0) {
-    return res.json({ created: 0, skipped: 0, errors: [], message: "Keine abgeschlossenen Termine für diesen Zeitraum gefunden." });
+    return res.json({ created: 0, skipped: 0, errors: [], message: "Keine Leistungsnachweise für diesen Zeitraum vorhanden." });
   }
 
   const results: { created: number; skipped: { customerName: string; reason: string }[]; errors: { customerId: number; customerName: string; reason: string }[] } = {
@@ -304,82 +320,28 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
         continue;
       }
 
-      const alreadyInvoicedIds = await getAlreadyInvoicedAppointmentIds(customerId, billingYear, billingMonth);
-      const isNachberechnung = alreadyInvoicedIds.length > 0;
+      const customerRecords = allServiceRecords.filter(sr => sr.customerId === customerId);
+      const serviceRecordIds = customerRecords.map(sr => sr.id);
+      const allApptIds = await getAppointmentIdsFromServiceRecords(serviceRecordIds);
 
-      const allCompletedAppts = await db.select()
-        .from(appointments)
-        .where(and(
-          eq(appointments.customerId, customerId),
-          gte(appointments.date, startDate),
-          lte(appointments.date, endDate),
-          eq(appointments.status, "completed"),
-          isNull(appointments.deletedAt)
-        ));
-
-      const completedAppts = alreadyInvoicedIds.length > 0
-        ? allCompletedAppts.filter(a => !alreadyInvoicedIds.includes(a.id))
-        : allCompletedAppts;
-
-      if (completedAppts.length === 0) {
-        results.skipped.push({ customerName: custName, reason: alreadyInvoicedIds.length > 0 ? "Alle Termine bereits abgerechnet" : "Keine abgeschlossenen Termine" });
+      if (allApptIds.length === 0) {
+        results.skipped.push({ customerName: custName, reason: "Leistungsnachweis ohne Termine" });
         continue;
       }
 
-      const apptIds = completedAppts.map(a => a.id);
-      const serviceBreakdown = await db.select({
-        appointmentId: appointmentServicesTable.appointmentId,
-        serviceCode: servicesTable.code,
-        serviceName: servicesTable.name,
-        plannedDurationMinutes: appointmentServicesTable.plannedDurationMinutes,
-        actualDurationMinutes: appointmentServicesTable.actualDurationMinutes,
-        defaultPriceCents: servicesTable.defaultPriceCents,
-        vatRate: servicesTable.vatRate,
-      })
-      .from(appointmentServicesTable)
-      .innerJoin(servicesTable, eq(appointmentServicesTable.serviceId, servicesTable.id))
-      .where(inArray(appointmentServicesTable.appointmentId, apptIds));
+      const alreadyInvoicedIds = await getAlreadyInvoicedAppointmentIds(customerId, billingYear, billingMonth);
+      const isNachberechnung = alreadyInvoicedIds.length > 0;
 
-      const lineItems: any[] = [];
-      let totalNetCents = 0;
-      let totalVatCents = 0;
+      const apptIds = alreadyInvoicedIds.length > 0
+        ? allApptIds.filter(id => !alreadyInvoicedIds.includes(id))
+        : allApptIds;
 
-      for (const appt of completedAppts) {
-        const apptServices = serviceBreakdown.filter(s => s.appointmentId === appt.id);
-        let employeeName = "";
-        let employeeLbnr = "";
-        const employeeId = appt.assignedEmployeeId || appt.performedByEmployeeId;
-        if (employeeId) {
-          const [emp] = await db.select({ displayName: users.displayName, lbnr: users.lbnr }).from(users).where(eq(users.id, employeeId));
-          if (emp) {
-            employeeName = emp.displayName;
-            employeeLbnr = emp.lbnr || "";
-          }
-        }
-        for (const svc of apptServices) {
-          const durationMinutes = svc.actualDurationMinutes ?? svc.plannedDurationMinutes;
-          const pricePer60Min = svc.defaultPriceCents || 0;
-          const totalCents = Math.round((durationMinutes / 60) * pricePer60Min);
-          const vatBasisPoints = svc.vatRate || 0;
-          const vatCents = Math.round(totalCents * vatBasisPoints / 10000);
-          lineItems.push({
-            appointmentId: appt.id,
-            appointmentDate: appt.date,
-            serviceDescription: svc.serviceName || svc.serviceCode || "Dienstleistung",
-            serviceCode: svc.serviceCode,
-            startTime: appt.actualStart || appt.scheduledStart,
-            endTime: appt.actualEnd || appt.scheduledEnd,
-            durationMinutes,
-            unitPriceCents: pricePer60Min,
-            totalCents,
-            employeeName,
-            employeeLbnr,
-            appointmentNotes: appt.notes || null,
-          });
-          totalNetCents += totalCents;
-          totalVatCents += vatCents;
-        }
+      if (apptIds.length === 0) {
+        results.skipped.push({ customerName: custName, reason: alreadyInvoicedIds.length > 0 ? "Alle Termine bereits abgerechnet" : "Keine Termine" });
+        continue;
       }
+
+      const { lineItems, totalNetCents, totalVatCents } = await buildLineItemsFromAppointments(apptIds);
 
       const billingType = (customer as any).billingType || "selbstzahler";
       const customerName = (customer as any).vorname && (customer as any).nachname
