@@ -202,13 +202,19 @@ export default function EditAppointment() {
   if (appointment.status === "completed") {
     return (
       <Layout>
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          className="pl-0 text-muted-foreground hover:text-foreground mb-4" 
+          onClick={() => setLocation(appointment?.date ? `/?date=${appointment.date}` : "/")}
+          data-testid="button-back"
+        >
+          <ChevronLeft className={`${iconSize.sm} mr-1`} /> Zurück
+        </Button>
         <div className="text-center py-12 space-y-4">
           <AlertTriangle className={`${iconSize.xl} text-amber-500 mx-auto`} />
           <h2 className="text-xl font-bold">Bearbeitung nicht möglich</h2>
           <p className="text-muted-foreground">Abgeschlossene Termine können nicht bearbeitet werden.</p>
-          <Button variant="outline" onClick={() => setLocation(appointment?.date ? `/?date=${appointment.date}` : "/")}>
-            Zurück zur Übersicht
-          </Button>
         </div>
       </Layout>
     );

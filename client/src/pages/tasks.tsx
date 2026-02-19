@@ -262,7 +262,7 @@ export default function TasksPage() {
             )}
 
             {monthClosingNeeded && monthClosingReminder && (
-              <Link href="/my-times">
+              <Link href={`/my-times?year=${monthClosingReminder.year}&month=${monthClosingReminder.month}`}>
                 <div
                   className="flex items-start gap-2 px-3 py-2 bg-teal-50 border border-teal-200 rounded-lg text-teal-800 hover:bg-teal-100 transition-colors cursor-pointer"
                   data-testid="banner-month-closing"

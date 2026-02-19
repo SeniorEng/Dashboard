@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { useSearch } from "wouter";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -29,13 +30,30 @@ import { iconSize } from "@/design-system";
 export default function MyTimes() {
   const { toast } = useToast();
   const { user } = useAuth();
+  const searchString = useSearch();
   const todayStr = useMemo(() => todayISO(), []);
   const dayDetailRef = useRef<HTMLDivElement>(null);
   const missingBreaksRef = useRef<HTMLDivElement>(null);
 
-  const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth() + 1);
+  const [selectedYear, setSelectedYear] = useState(() => {
+    const params = new URLSearchParams(searchString);
+    const y = parseInt(params.get("year") || "");
+    return y >= 2020 && y <= 2100 ? y : new Date().getFullYear();
+  });
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const params = new URLSearchParams(searchString);
+    const m = parseInt(params.get("month") || "");
+    return m >= 1 && m <= 12 ? m : new Date().getMonth() + 1;
+  });
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchString);
+    const y = parseInt(params.get("year") || "");
+    const m = parseInt(params.get("month") || "");
+    if (y >= 2020 && y <= 2100) setSelectedYear(y);
+    if (m >= 1 && m <= 12) setSelectedMonth(m);
+  }, [searchString]);
 
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);

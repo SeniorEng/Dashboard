@@ -379,18 +379,6 @@ export default function AppointmentDetail() {
         </div>
       )}
 
-      {!canModify && (
-        <div className="mt-6">
-          <Button 
-            variant="outline" 
-            className="w-full"
-            onClick={() => setLocation(appointment?.date ? `/?date=${appointment.date}` : "/")}
-            data-testid="button-back-dashboard"
-          >
-            Zurück zur Übersicht
-          </Button>
-        </div>
-      )}
 
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
