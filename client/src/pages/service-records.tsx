@@ -195,9 +195,6 @@ export default function ServiceRecordsPage() {
             }
           </h1>
         </div>
-        <p className="text-muted-foreground text-sm ml-10">
-          Monatliche Unterschriften für dokumentierte Termine
-        </p>
       </div>
 
       {pendingCount > 0 && pendingRecords && (

@@ -213,7 +213,6 @@ export default function MyTimes() {
           <div className="flex items-center justify-between mb-2">
             <div>
               <h1 className="text-2xl font-bold text-gray-900" data-testid="text-page-title">Meine Zeiten</h1>
-              <p className="text-gray-600 text-sm">Kundentermine, Urlaub und Abwesenheiten</p>
             </div>
             <Button
               className="bg-teal-600 hover:bg-teal-700"
