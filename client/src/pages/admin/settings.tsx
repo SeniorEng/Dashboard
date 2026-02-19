@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, Upload, Trash2, ImageIcon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize } from "@/design-system";
@@ -137,6 +137,71 @@ export default function AdminSettings() {
     },
   });
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [logoUploading, setLogoUploading] = useState(false);
+
+  const logoUploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      setLogoUploading(true);
+      const uploadRes = await api.post<{ uploadURL: string; objectPath: string; metadata: { name: string } }>(
+        "/uploads/request-url",
+        { name: file.name, size: file.size, contentType: file.type }
+      );
+      const uploadData = unwrapResult(uploadRes);
+
+      await fetch(uploadData.uploadURL, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": file.type },
+      });
+
+      const result = await api.patch<CompanySettings>("/company-settings", {
+        logoUrl: uploadData.objectPath,
+      });
+      return unwrapResult(result);
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(["company-settings"], data);
+      toast({ title: "Logo hochgeladen" });
+      setLogoUploading(false);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler beim Logo-Upload", description: error.message, variant: "destructive" });
+      setLogoUploading(false);
+    },
+  });
+
+  const logoDeleteMutation = useMutation({
+    mutationFn: async () => {
+      const result = await api.patch<CompanySettings>("/company-settings", { logoUrl: null });
+      return unwrapResult(result);
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(["company-settings"], data);
+      toast({ title: "Logo entfernt" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleLogoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Nur Bilddateien erlaubt", variant: "destructive" });
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast({ title: "Datei zu groß (max. 2 MB)", variant: "destructive" });
+      return;
+    }
+
+    logoUploadMutation.mutate(file);
+    e.target.value = "";
+  };
+
   const loading = isLoading || isCompanyLoading;
 
   return (
@@ -159,6 +224,77 @@ export default function AdminSettings() {
             </div>
           ) : (
             <div className="flex flex-col gap-4">
+              <Card data-testid="card-company-logo">
+                <CardHeader>
+                  <CardTitle>Firmenlogo</CardTitle>
+                  <CardDescription>
+                    Wird im Header der Anwendung und auf Dokumenten angezeigt.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-6">
+                    <div className="w-24 h-24 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden bg-gray-50 shrink-0">
+                      {companyData?.logoUrl ? (
+                        <img
+                          src={companyData.logoUrl}
+                          alt="Firmenlogo"
+                          className="w-full h-full object-contain p-1"
+                          data-testid="img-company-logo"
+                        />
+                      ) : (
+                        <ImageIcon className="h-8 w-8 text-gray-400" />
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                        className="hidden"
+                        onChange={handleLogoSelect}
+                        data-testid="input-logo-file"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={logoUploading}
+                        onClick={() => fileInputRef.current?.click()}
+                        data-testid="button-upload-logo"
+                      >
+                        {logoUploading ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Upload className="mr-2 h-4 w-4" />
+                        )}
+                        {companyData?.logoUrl ? "Logo ändern" : "Logo hochladen"}
+                      </Button>
+                      {companyData?.logoUrl && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          disabled={logoDeleteMutation.isPending}
+                          onClick={() => logoDeleteMutation.mutate()}
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50 justify-start"
+                          data-testid="button-delete-logo"
+                        >
+                          {logoDeleteMutation.isPending ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="mr-2 h-4 w-4" />
+                          )}
+                          Logo entfernen
+                        </Button>
+                      )}
+                      <p className="text-xs text-gray-500">
+                        PNG, JPG, SVG oder WebP. Max. 2 MB.
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
               <Card data-testid="card-company-settings">
                 <CardHeader>
                   <CardTitle>Firmenstammdaten</CardTitle>

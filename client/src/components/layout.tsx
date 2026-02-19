@@ -141,6 +141,19 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
   const hasBadge = badgeCount > 0;
   const hasBirthdayBadge = birthdayCount > 0;
 
+  const { data: companySettings } = useQuery<{ logoUrl?: string | null }>({
+    queryKey: ["company-settings"],
+    queryFn: async () => {
+      const res = await fetch("/api/company-settings", { credentials: "include" });
+      if (!res.ok) return {};
+      return res.json();
+    },
+    enabled: isAuthenticated,
+    staleTime: 60000,
+  });
+
+  const displayLogo = companySettings?.logoUrl || logo;
+
   const handleLogout = async () => {
     try {
       await logout();
@@ -155,8 +168,8 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
       {/* Header */}
       <header className="sticky top-0 z-50 w-full bg-white/90 backdrop-blur-none border-b border-border/40 shadow-sm">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <Link href="/" className="shrink-0 hover:opacity-80 transition-opacity">
-            <img src={logo} alt="Logo" className="h-10 w-10 object-cover rounded-lg shadow-sm" />
+          <Link href="/" className="shrink-0 hover:opacity-80 transition-opacity cursor-pointer" data-testid="link-logo-home">
+            <img src={displayLogo} alt="Logo" className="h-10 w-10 object-contain rounded-lg shadow-sm pointer-events-none" />
           </Link>
 
           {isAuthenticated && <GlobalSearch />}

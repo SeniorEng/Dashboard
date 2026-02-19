@@ -22,6 +22,7 @@ export const companySettings = pgTable("company_settings", {
   ikNummer: text("ik_nummer"),
   anerkennungsnummer45a: text("anerkennungsnummer_45a"),
   anerkennungsBundesland: text("anerkennungs_bundesland"),
+  logoUrl: text("logo_url"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   updatedByUserId: integer("updated_by_user_id").references(() => users.id),
 });
@@ -46,6 +47,7 @@ export const updateCompanySettingsSchema = z.object({
   ikNummer: z.string().optional(),
   anerkennungsnummer45a: z.string().optional(),
   anerkennungsBundesland: z.string().optional(),
+  logoUrl: z.string().optional().nullable(),
 });
 
 export type UpdateCompanySettings = z.infer<typeof updateCompanySettingsSchema>;
