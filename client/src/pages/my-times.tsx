@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Lock, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Lock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -243,30 +243,26 @@ export default function MyTimes() {
             </Button>
           </div>
 
-          <div className="flex items-center justify-center gap-4 mb-6 py-3" data-testid="month-selector">
-            <Button
-              variant="ghost"
-              size="icon"
+          <div className="flex items-center justify-between rounded-lg bg-[#f5e6d3]/60 px-4 py-3 mb-6" data-testid="month-selector">
+            <button
               onClick={handlePrevMonth}
               aria-label="Vorheriger Monat"
               data-testid="button-prev-month"
-              className="h-9 w-9"
+              className="text-xl font-medium text-gray-600 hover:text-gray-900 px-2 py-1 select-none"
             >
-              <ChevronLeft className={iconSize.md} />
-            </Button>
-            <h2 className="text-lg font-semibold text-gray-900 min-w-[180px] text-center" data-testid="text-current-month">
+              ‹
+            </button>
+            <span className="text-lg font-bold text-gray-900" data-testid="text-current-month">
               {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
-            </h2>
-            <Button
-              variant="ghost"
-              size="icon"
+            </span>
+            <button
               onClick={handleNextMonth}
               aria-label="Nächster Monat"
               data-testid="button-next-month"
-              className="h-9 w-9"
+              className="text-xl font-medium text-gray-600 hover:text-gray-900 px-2 py-1 select-none"
             >
-              <ChevronRight className={iconSize.md} />
-            </Button>
+              ›
+            </button>
           </div>
 
           <TimeEntryDialog

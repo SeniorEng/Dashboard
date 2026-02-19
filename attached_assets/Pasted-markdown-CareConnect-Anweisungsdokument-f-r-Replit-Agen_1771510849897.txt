@@ -1,0 +1,775 @@
+markdown# CareConnect — Anweisungsdokument für Replit Agent
+
+## Überblick
+
+Dieses Dokument enthält priorisierte, ausführbare Anweisungen aus einem vollständigen Code-Audit.
+Arbeite die Issues **von oben nach unten** ab. Nach jeder Änderung:
+
+1. `npm run check` — TypeScript-Fehler prüfen
+2. `npm run build` — Produktions-Build testen
+3. App im Browser testen (betroffene Funktion manuell durchklicken)
+
+**Tech-Stack:** React 19.2 + TanStack Query v5 + Vite 7 + Tailwind v4 | Express.js + PostgreSQL (Neon) + Drizzle ORM
+
+---
+
+## PHASE 1: 🔴 KRITISCH — Sicherheit & Datenverlust (sofort)
+
+### 1.1 XSS: Template-HTML wird ohne Sanitisierung gerendert
+
+**Dateien:**
+- `client/src/pages/admin/document-templates.tsx` (Zeile ~544: `dangerouslySetInnerHTML`)
+- `client/src/pages/admin/components/signatures-step.tsx` (Zeilen 124-127: `window.open()` + `document.write()`)
+- `server/services/template-engine.ts` (`renderTemplate()`)
+
+**Problem:** Admin-erstellter HTML-Content UND Kundendaten (Name, Adresse) werden direkt in HTML eingefügt ohne Escaping/Sanitisierung. Ein Kundenname wie `<script>alert('xss')</script>` wird ausgeführt. Die Funktion `escapeHtml()` existiert bereits im Code, wird aber nur für den `<title>`-Tag verwendet.
+
+**Anweisung:**
+
+Schritt 1 — Dependency installieren:```bash
+npm install dompurify @types/dompurify```
+
+Schritt 2 — Client-seitig in `document-templates.tsx` und `signatures-step.tsx`:
+Überall wo `dangerouslySetInnerHTML` oder `document.write()` mit DB-Inhalt genutzt wird, vorher sanitisieren:```typescript
+import DOMPurify from "dompurify";
+const safeHtml = DOMPurify.sanitize(previewHtml, {
+  ALLOWED_TAGS: ['h1','h2','h3','p','br','strong','em','ul','ol','li','table','tr','td','th','thead','tbody','img','div','span'],
+  ALLOWED_ATTR: ['class','style','src','alt','width','height','colspan','rowspan'],
+});```
+
+Schritt 3 — Server-seitig in `server/services/template-engine.ts` → `renderTemplate()`:
+Escape ALLE Placeholder-Werte (außer Signatur-`<img>`-Tags):```typescript
+for (const [key, value] of Object.entries(placeholders)) {
+  const safeValue = key.includes("signature") ? value : escapeHtml(value);
+  result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), safeValue);
+}```
+
+**Test:** Template mit `<script>alert('test')</script>` als Kundenname erstellen → darf NICHT als Script ausgeführt werden.
+
+---
+
+### 1.2 Fehlende Autorisierung auf Signatur-Endpoint
+
+**Datei:** `server/routes/customers.ts`, `POST /:id/signatures`
+
+**Problem:** Jeder authentifizierte User kann Unterschriften für JEDEN Kunden erstellen. Andere Endpoints prüfen korrekt, ob der Mitarbeiter dem Kunden zugeordnet ist — der Signatur-Endpoint nicht.
+
+**Anweisung:** Nach der customerId-Validierung hinzufügen:```typescript
+const user = req.user!;
+if (!user.isAdmin) {
+  const assignedIds = await storage.getAssignedCustomerIds(user.id);
+  if (!assignedIds.includes(customerId)) {
+    return res.status(403).json({
+      error: "FORBIDDEN",
+      message: "Kein Zugriff auf diesen Kunden",
+    });
+  }
+}```
+
+**Test:** Als normaler Mitarbeiter: Signatur für nicht-zugeordneten Kunden → muss 403 geben.
+
+---
+
+### 1.3 Leere catch-Blöcke bei Signatur-Speicherung (Server + Client)
+
+**Dateien:**
+- `server/routes/customers.ts` — Signatur-Schleife: komplett leerer `catch {}`
+- `client/src/pages/admin/customer-new.tsx` Zeilen 252-267 — Zwei leere `catch {}`
+
+**Problem:** Wenn Unterschriften fehlschlagen, wird der Fehler komplett ignoriert. User sieht "Kunde erfolgreich erstellt" (201), aber Vertragsunterschriften fehlen in der DB. Bei einem Pflegedienst mit rechtlich relevanten Verträgen ist das kritisch.
+
+**Anweisung Server** (`server/routes/customers.ts` — Signatur-Schleife):```typescript
+const errors: { slug: string; error: string }[] = [];
+for (const sig of parsed.data.signatures) {
+  try {
+    // ... bestehende Logik
+    results.push(doc);
+  } catch (err) {
+    errors.push({ slug: sig.templateSlug, error: String(err) });
+    console.error(`Signatur ${sig.templateSlug} fehlgeschlagen:`, err);
+  }
+}
+if (errors.length > 0 && results.length === 0) {
+  return res.status(500).json({ error: "Alle Unterschriften fehlgeschlagen", details: errors });
+}
+res.status(results.length === parsed.data.signatures.length ? 201 : 207).json({ results, errors });```
+
+**Anweisung Client** (`client/src/pages/admin/customer-new.tsx`, Zeilen 246-268):```typescript
+const warnings: string[] = [];
+
+try {
+  await apiRequest("PATCH", `/api/admin/customers/${customer.id}/assign`, {...});
+} catch (assignError) {
+  console.error("Mitarbeiter-Zuordnung fehlgeschlagen:", assignError);
+  warnings.push("Mitarbeiter-Zuordnung konnte nicht gespeichert werden");
+}
+
+try {
+  await apiRequest("POST", `/api/customers/${customer.id}/signatures`, {...});
+} catch (sigError) {
+  console.error("Unterschriften-Speicherung fehlgeschlagen:", sigError);
+  warnings.push("Unterschriften konnten nicht gespeichert werden — bitte manuell prüfen");
+}
+
+toast({
+  title: warnings.length > 0 ? "Kunde erstellt mit Hinweisen" : "Kunde erfolgreich erstellt",
+  description: warnings.length > 0 ? warnings.join("; ") : undefined,
+  variant: warnings.length > 0 ? "default" : undefined,
+});```
+
+**Test:** Erzeuge bewusst einen Fehler bei Signatur-Speicherung → User muss Warnung sehen statt falschem Erfolg.
+
+---
+
+### 1.4 Kundenanlage ohne Datenbank-Transaktion
+
+**Datei:** `server/routes/admin/customers.ts` Zeilen 227-357
+
+**Problem:** POST `/customers` führt 6+ DB-Operationen sequentiell aus (Kunde → Pflegegrad → Versicherung → Kontakte → Budgets → Vertrag), aber ohne Transaktion. Wenn Schritt 4 fehlschlägt, sind Schritte 1-3 committed → inkonsistente Daten.
+
+**Anweisung:** Alle Operationen in eine Transaktion wrappen:```typescript
+const result = await db.transaction(async (tx) => {
+  const customer = await tx.insert(customers).values(customerData).returning();
+  if (data.pflegegrad) await addCareLevelHistory({...}, userId, tx);
+  if (data.insurance) await addCustomerInsurance({...}, userId, tx);
+  if (data.contacts) await tx.insert(customerContacts).values(contactsArray);
+  // ... alle Operationen innerhalb der Transaktion
+  return customer[0];
+});
+res.status(201).json(result);```
+
+**Wichtig:** Alle Storage-Funktionen (z.B. `addCareLevelHistory`, `addCustomerInsurance`, `addCustomerContact`) müssen ein optionales `tx`-Parameter akzeptieren und statt `db` dann `tx` nutzen. Prüfe auch `server/storage/customer-management.ts` `createFullCustomer()` (Zeilen 270-384) auf das gleiche Problem.
+
+**Test:** Kunden mit absichtlich fehlerhaften Kontaktdaten anlegen → entweder alles gespeichert oder nichts.
+
+---
+
+### 1.5 `staleTime: Infinity` — Daten werden nie automatisch aktualisiert
+
+**Datei:** `client/src/lib/queryClient.ts` Zeilen 87-100
+
+**Problem:** Globaler Default `staleTime: Infinity` + `refetchOnWindowFocus: false` + `retry: false`. Wenn Mitarbeiter A einen Termin dokumentiert, sieht Mitarbeiter B die Änderung erst nach komplettem Seiten-Reload.
+
+**Anweisung:**```typescript
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      queryFn: getQueryFn({ on401: "throw" }),
+      refetchInterval: false,
+      refetchOnWindowFocus: true,        // WAR: false
+      staleTime: 2 * 60 * 1000,         // WAR: Infinity → 2 Minuten
+      gcTime: 10 * 60 * 1000,           // NEU: 10 Min Garbage Collection
+      retry: 1,                          // WAR: false → 1 Retry
+    },
+    mutations: {
+      retry: false,
+    },
+  },
+});```
+
+**Test:** Öffne App in 2 Tabs → ändere Termin in Tab 1 → wechsle zu Tab 2 → nach wenigen Sekunden muss Änderung sichtbar sein.
+
+---
+
+### 1.6 Route-Pattern erzeugt neue Komponenten bei jedem Render
+
+**Datei:** `client/src/App.tsx` Zeilen 115, 133, 136, 142, 145, 163, 166
+
+**Problem:**```tsx
+// SCHLECHT:
+
+  {() => <ProtectedRoute component={() => } />}
+```
+Das doppelt verschachtelte `() =>` erzeugt bei jedem Render 2 neue anonyme Funktionen. React sieht eine "neue" Komponente → unmountet die alte → verliert State → startet alle Queries neu.
+
+**Anweisung — alle 7 betroffenen Routen korrigieren:**```tsx
+// GUT:
+
+  
+```
+
+Betroffene Routen:
+- Zeile 115: `/customer/:id` → `component={CustomerDetail}`
+- Zeile 133: `/service-records/:id` → `component={ServiceRecordDetailPage}`
+- Zeile 136: `/appointment/:id` → `component={AppointmentDetail}`
+- Zeile 142: `/edit-appointment/:id` → `component={EditAppointment}`
+- Zeile 145: `/document-appointment/:id` → `component={DocumentAppointment}`
+- Zeile 163: `/admin/customers/:id/edit` → `component={AdminCustomerEdit}`
+- Zeile 166: `/admin/customers/:id` → `component={AdminCustomerDetail}`
+
+**Test:** Navigiere zu Kundendetail → zurück → wieder hin → State (z.B. Tab-Auswahl) muss erhalten bleiben.
+
+---
+
+### 1.7 N+1 Query-Probleme in Schleifen
+
+**Dateien & Zeilen:**
+1. `server/storage.ts` Zeilen 974-991: Service-Updates einzeln in Schleife
+2. `server/routes/admin/customers.ts` Zeilen 285-302: Kontakte einzeln insertet
+3. `server/routes/admin/customers.ts` Zeilen 338-346: Vertragsraten einzeln insertet
+
+**Anweisung:** Ersetze alle Schleifen durch Batch-Operationen:
+
+Kontakte als Batch:```typescript
+if (data.contacts && data.contacts.length > 0) {
+  await db.insert(customerContacts).values(
+    data.contacts.map((c, i) => ({
+      customerId: customer.id,
+      contactType: c.contactType,
+      isPrimary: c.isPrimary,
+      vorname: c.vorname,
+      nachname: c.nachname,
+      telefon: c.telefon,
+      email: c.email || null,
+      sortOrder: i,
+    }))
+  );
+}```
+
+Service-Updates in Transaktion:```typescript
+await db.transaction(async (tx) => {
+  await Promise.all(serviceUpdates.map(su =>
+    tx.update(appointmentServices).set({...}).where(...)
+  ));
+});```
+
+---
+
+## PHASE 2: 🟠 HOCH — Vor nächstem Release
+
+### 2.1 Dashboard zeigt keine Wochenend-Termine
+
+**Datei:** `client/src/pages/dashboard.tsx`, Zeilen 12 und 78-81
+
+**Problem:** `WEEKDAY_NAMES_SHORT` enthält nur Mo-Fr. Pflegeleistungen finden auch am Wochenende statt — diese Termine sind unsichtbar.
+
+**Anweisung:**
+- Zeile 12: `WEEKDAY_NAMES_SHORT` ändern auf `["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]`
+- Zeile 81: weekDays-Berechnung ändern auf `Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))`
+- Button-Breite anpassen (`max-w-[56px]` → `max-w-[44px]`), damit 7 Tage nebeneinander passen
+
+**Test:** Termin für Samstag erstellen → muss im Dashboard sichtbar sein.
+
+---
+
+### 2.2 Leistungsnachweis: PDF-Druck/Export fehlt komplett
+
+**Datei:** `client/src/pages/service-record-detail.tsx`
+
+**Problem:** Die Leistungsnachweis-Detailseite zeigt Daten an, aber es gibt keinen Druck/PDF-Button. Leistungsnachweise müssen bei Pflegekassen eingereicht werden.
+
+**Anweisung:**
+- Füge "Drucken / PDF"-Button oben auf der Seite hinzu (neben Status-Badge)
+- Nur aktiv wenn `record.status === "completed"` (beide Unterschriften vorhanden)
+- Beim Klick: `window.print()` mit druckoptimierter Ansicht (alle Termine, Leistungsdetails, Kilometer, beide Unterschriften als Bilder)
+- CSS `@media print` Styles hinzufügen die Navigation ausblenden
+
+---
+
+### 2.3 Kein "Deaktivieren"-Button für aktive Kunden
+
+**Datei:** `client/src/pages/admin/customer-detail.tsx`
+
+**Problem:** Es gibt "Aktivieren" und "Reaktivieren", aber keinen "Deaktivieren" für aktive Kunden. Die API unterstützt `status: "inaktiv"` bereits.
+
+**Anweisung:** Nach dem Erstberatungs-Block (nach Zeile 345):```tsx
+{customer.status === "aktiv" && (
+  
+    
+      
+        Aktiver Kunde
+        
+          Kunde deaktivieren, wenn keine weiteren Leistungen mehr erbracht werden.
+        
+      
+      <Button
+        variant="outline"
+        onClick={() => {
+          if (window.confirm("Möchten Sie diesen Kunden wirklich deaktivieren?")) {
+            updateStatus.mutate("inaktiv");
+          }
+        }}
+        disabled={updateStatus.isPending}
+      >
+        
+        Deaktivieren
+      
+    
+  
+)}```
+
+---
+
+### 2.4 Placeholder-Kopie ohne `{{}}`-Klammern
+
+**Datei:** `client/src/pages/admin/document-templates.tsx` Zeile ~296
+
+**Problem:** `handleCopyPlaceholder` kopiert `customer_name` statt `{{customer_name}}`.
+
+**Anweisung:** `navigator.clipboard.writeText(`{{${key}}}`)` — inklusive Error-Handling für non-HTTPS:```typescript
+const handleCopyPlaceholder = (key: string) => {
+  const wrapped = `{{${key}}}`;
+  navigator.clipboard.writeText(wrapped).then(() => {
+    toast({ title: "Kopiert", description: `${wrapped} in die Zwischenablage kopiert` });
+  }).catch(() => {
+    toast({ title: "Kopieren fehlgeschlagen", variant: "destructive" });
+  });
+};```
+
+---
+
+### 2.5 Doppelte Route für Template-Billing-Types
+
+**Dateien:** `server/routes/customers.ts` UND `server/routes/admin/documents.ts`
+
+**Problem:** Gleicher Endpoint existiert zweimal mit unterschiedlicher Validierung.
+
+**Anweisung:** Extrahiere gemeinsame Logik in Service-Funktion:```typescript
+// server/services/template-service.ts
+export async function getTemplatesForBillingType(billingType: string) {
+  // ... gemeinsame Logik
+}```
+Dann beide Routen auf diese Funktion umstellen.
+
+---
+
+### 2.6 Mandatsreferenz-Inkonsistenz Client/Server
+
+**Dateien:**
+- `client/src/pages/admin/components/signatures-step.tsx` Zeile ~62: `SE-NEU-${year}`
+- `server/services/template-engine.ts` Zeile ~98: `SE-${customerId}-${year}`
+
+**Problem:** Vorschau zeigt andere Mandatsreferenz als gespeicherter Vertrag. Bei SEPA-Mandaten rechtlich problematisch.
+
+**Anweisung:**
+- In der Client-Vorschau Hinweis anzeigen: "Die Mandatsreferenz wird nach Speicherung automatisch ergänzt."
+- Oder einheitlichen Platzhalter nutzen: `SE-[wird ergänzt]-2026`
+- Langfristig: Eindeutigkeit durch Timestamp oder Dokument-ID sicherstellen (`SE-${customerId}-${docId}-${year}`)
+
+---
+
+### 2.7 Race Condition bei Kunden-Update
+
+**Datei:** `server/storage/customer-management.ts` Zeilen 427-442
+
+**Problem:** Zwei gleichzeitige Updates desselben Kunden erzeugen widersprüchliche History-Einträge.
+
+**Anweisung:** `SELECT ... FOR UPDATE` in Transaktion verwenden:```typescript
+const result = await db.transaction(async (tx) => {
+  const [oldCustomer] = await tx.select().from(customers)
+    .where(eq(customers.id, customerId))
+    .for('update');
+  // ... Update-Logik
+});```
+
+---
+
+### 2.8 `matchEmployees` macht 4 separate DB-Queries
+
+**Datei:** `server/routes/admin/customers.ts` Zeilen 618-675
+
+**Anweisung:** Reduziere auf 2 Queries mit JOINs:```typescript
+const employeesWithData = await db
+  .select({
+    id: users.id,
+    displayName: users.displayName,
+    customerCount: sql`COUNT(DISTINCT ${customers.id})::int`,
+    appointmentCount: sql`COUNT(DISTINCT ${appointments.id})::int`,
+  })
+  .from(users)
+  .leftJoin(customers, eq(customers.primaryEmployeeId, users.id))
+  .leftJoin(appointments, and(
+    eq(appointments.assignedEmployeeId, users.id),
+    gte(appointments.date, startDate)
+  ))
+  .where(eq(users.isActive, true))
+  .groupBy(users.id, users.displayName);
+
+const roles = await db.select().from(userRoles);```
+
+---
+
+### 2.9 Kunde bearbeiten vs. anlegen: Feature-Lücke
+
+**Dateien:** `client/src/pages/admin/customer-edit.tsx` vs. `customer-new.tsx`
+
+**Problem:** Beim Anlegen: 8-Schritt-Wizard mit allem. Beim Bearbeiten: Nur Basisdaten — kein Zugang zu Versicherung, Kontakte, Budgets, Vertrag.
+
+**Anweisung (empfohlen):** Füge unter den bestehenden Cards in `customer-edit.tsx` Schnell-Links hinzu:```tsx
+
+  Weitere Bereiche verwalten
+  
+    <Link href={`/admin/customers/${id}?tab=insurance`} className="flex items-center gap-2">
+       Versicherung verwalten 
+    
+    <Link href={`/admin/customers/${id}?tab=contacts`} className="flex items-center gap-2">
+       Notfallkontakte bearbeiten 
+    
+    <Link href={`/admin/customers/${id}?tab=budgets`} className="flex items-center gap-2">
+       Budgets anpassen 
+    
+    <Link href={`/admin/customers/${id}?tab=documents`} className="flex items-center gap-2">
+       Dokumente 
+    
+  
+```
+
+---
+
+### 2.10 Leere Kontakte werden stillschweigend verworfen
+
+**Datei:** `client/src/pages/admin/customer-new.tsx`, Zeilen 183-192
+
+**Problem:** Kontakte ohne Vor-/Nachname werden beim Speichern gefiltert, aber UI zeigt sie weiterhin an.
+
+**Anweisung:**
+- Deaktiviere "Kontakt hinzufügen" wenn der letzte Kontakt noch leer ist
+- Zeige beim Klick auf "Weiter" Warnung: "Leere Kontakte werden nicht gespeichert."
+- Oder: Entferne leere Zeilen visuell beim Verlassen des Schritts
+
+---
+
+### 2.11 Pflegegrad-Änderung überschreibt manuelle Budget-Werte
+
+**Datei:** `client/src/pages/admin/customer-new.tsx`, Zeilen 314-318
+
+**Anweisung:**```typescript
+if (field === "pflegegrad") {
+  const pg = parseInt(value as string);
+  const maxCents = BUDGET_45A_MAX_BY_PFLEGEGRAD[pg] ?? 0;
+  const currentValue = parseFloat(prev.pflegesachleistungen36);
+  if (!currentValue || currentValue === 0) {
+    newData.pflegesachleistungen36 = (maxCents / 100).toString();
+  }
+}```
+Plus Hinweis unter dem Feld: "Maximal: {maxCents/100} € für Pflegegrad {pg}"
+
+---
+
+## PHASE 3: 🟡 MITTEL — Qualität & Benutzerfreundlichkeit
+
+### 3.1 Zeitzonen-Bug bei Vertragsdatum
+
+**Datei:** `client/src/pages/admin/customer-new.tsx` Zeilen 66-67
+
+**Problem:** `new Date().toISOString().split("T")[0]` gibt UTC-Datum. Um 00:30 deutscher Sommerzeit = gestriges Datum.
+
+**Anweisung:**```typescript
+import { todayISO } from "@shared/utils/datetime";
+contractDate: todayISO(),
+contractStart: todayISO(),```
+
+---
+
+### 3.2 Scroll-Position-Bug im Fullscreen-Signaturpad
+
+**Datei:** `client/src/components/ui/signature-pad.tsx`
+
+**Problem:** `window.scrollY` wird NACH `position: fixed` gelesen → immer 0. Scroll-Position muss VOR der Style-Änderung erfasst werden.
+
+**Anweisung:** Reihenfolge umdrehen — erst Scroll-Position lesen, dann `position: fixed` setzen.
+
+---
+
+### 3.3 `company_name` hart codiert
+
+**Dateien:** `template-engine.ts` und `signatures-step.tsx`: `"SeniorenEngel GmbH"` direkt im Code.
+
+**Anweisung:** Firmenname aus `system_settings`-Tabelle oder Environment-Variable laden. Erstelle ein Setting `company_name` falls nicht vorhanden.
+
+---
+
+### 3.4 Vite Build nicht optimiert
+
+**Datei:** `vite.config.ts`
+
+**Anweisung:**```typescript
+build: {
+  rollupOptions: {
+    output: {
+      manualChunks: {
+        vendor: ['react', 'react-dom'],
+        query: ['@tanstack/react-query'],
+        ui: ['@radix-ui/react-dialog', '@radix-ui/react-select', '@radix-ui/react-tabs'],
+        icons: ['lucide-react'],
+        dates: ['date-fns'],
+      },
+    },
+  },
+},```
+
+---
+
+### 3.5 React Compiler nicht aktiviert
+
+**Problem:** React 19.2 vorhanden, aber React Compiler (v1.0) nicht aktiv. Würde 20-30% weniger Re-Renders erzeugen.
+
+**Anweisung:**```bash
+npm install --save-dev --save-exact babel-plugin-react-compiler@latest``````typescript
+// vite.config.ts
+plugins: [
+  react({
+    babel: {
+      plugins: [["babel-plugin-react-compiler", {}]],
+    },
+  }),
+],```
+
+**Hinweis:** Nach Aktivierung testen ob alles funktioniert. Dann können manuelle `useMemo`/`useCallback` schrittweise entfernt werden.
+
+---
+
+### 3.6 Kein Rate-Limiting
+
+**Anweisung:**```bash
+npm install express-rate-limit``````typescript
+// server/index.ts
+import rateLimit from 'express-rate-limit';
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 500,
+  message: { error: "Zu viele Anfragen, bitte warten Sie." },
+});
+app.use('/api/', apiLimiter);
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+});
+app.use('/api/auth/', authLimiter);```
+
+---
+
+### 3.7 Inkonsistente Fehlerbehandlung
+
+**Dateien mit manuellen try/catch (sollten `asyncHandler` nutzen):**
+- `server/routes/customers.ts` Zeilen 33-55, 59-86, 88-105, 130-160
+
+**Anweisung:** Alle manuellen try/catch durch `asyncHandler` ersetzen:```typescript
+// VORHER:
+router.get("/", async (req, res) => {
+  try { ... } catch (error) { console.error(...); res.status(500).json({...}); }
+});
+
+// NACHHER:
+router.get("/", asyncHandler("Kunden konnten nicht geladen werden", async (req, res) => {
+  // ... kein try/catch nötig
+}));```
+
+---
+
+### 3.8 Inkonsistente Input-Validierung
+
+**Problem:** Manche Routen nutzen Zod, andere manuelles `parseInt`+`isNaN`.
+
+**Anweisung:** Erstelle zentrale Validierungs-Utilities:```typescript
+// server/lib/validation.ts
+import { z } from 'zod';
+
+export const paginationSchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+});
+
+export const dateQuerySchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+export const yearMonthSchema = z.object({
+  year: z.coerce.number().int().min(2020).max(2030),
+  month: z.coerce.number().int().min(1).max(12),
+});```
+
+---
+
+### 3.9 Service-Details-Limit zu kurz (55 Zeichen)
+
+**Datei:** `client/src/pages/document-appointment.tsx`, Zeilen 242-263
+
+**Anweisung:**
+- Client: `maxLength={120}` und `.slice(0, 120)`, Zeichenzähler anpassen
+- Backend-Schema: `varchar`-Länge für `details`-Feld in `appointment_services` von 55 auf 120 ändern
+- Drizzle-Migration erstellen: `npm run db:push`
+
+---
+
+### 3.10 Erstberatungs-Dauer nicht bearbeitbar
+
+**Datei:** `client/src/pages/edit-appointment.tsx`
+
+**Anweisung:**
+- Füge Dauer-Dropdown für Erstberatungs-Termine hinzu (gleiche `DURATION_OPTIONS` wie in `new-appointment.tsx`)
+- Berechne Endzeit automatisch aus Startzeit + Dauer
+- Stelle sicher, dass PATCH-API die neue Endzeit korrekt speichert
+
+---
+
+### 3.11 Budget-Warnungen vs. Hard-Blocks unklar
+
+**Datei:** `client/src/pages/new-appointment.tsx`
+
+**Anweisung:**
+- **Warnung** (Budget niedrig, Zuzahlung akzeptiert): Gelber Banner mit "Budget reicht nicht vollständig aus. Restbetrag wird privat berechnet."
+- **Hard-Block** (Budget aufgebraucht, keine Zuzahlung): Roter Banner mit "Budget aufgebraucht, keine Zuzahlung. Termin kann nicht erstellt werden."
+
+---
+
+### 3.12 Vertrag-Validierung: 0 Stunden möglich
+
+**Datei:** `client/src/pages/admin/customer-new.tsx`, Zeilen 204-213
+
+**Anweisung:** Erweitere `validateStepById` für "contract":```typescript
+case "contract":
+  return !!(
+    formData.contractDate &&
+    formData.contractStart &&
+    formData.vereinbarteLeistungen.trim() &&
+    parseFloat(formData.contractHours) > 0
+  );```
+
+---
+
+### 3.13 Floating-Point bei Bruttopreis-Berechnung
+
+**Datei:** `client/src/pages/admin/components/budgets-contract-step.tsx`, Zeilen ~228-231
+
+**Anweisung:** Berechnung in Cents statt Euro:```typescript
+const grossCents = showGrossPrices
+  ? Math.round(service.defaultPriceCents * (100 + (service.vatRate || 0)) / 100)
+  : service.defaultPriceCents;
+const displayPrice = grossCents / 100;```
+
+---
+
+## PHASE 4: 🟢 NIEDRIG — Bei Gelegenheit
+
+### 4.1 Fehlende DB-Indexe```sql
+CREATE INDEX idx_appointments_date ON appointments(date) WHERE deleted_at IS NULL;
+CREATE INDEX idx_appointments_employee ON appointments(assigned_employee_id, date) WHERE deleted_at IS NULL;
+CREATE INDEX idx_customers_primary_employee ON customers(primary_employee_id) WHERE status = 'aktiv';
+CREATE INDEX idx_service_records_customer_period ON monthly_service_records(customer_id, year, month);
+CREATE INDEX idx_appointment_services_appointment ON appointment_services(appointment_id);```
+
+### 4.2 `getAssignedCustomerIds` — 2 Queries statt 1
+
+**Datei:** `server/storage.ts`, Zeilen 250-284
+
+Ersetze 2 Queries + JS-Dedup durch 1 Query mit Subquery:```typescript
+const result = await db.selectDistinct({ id: customers.id })
+  .from(customers)
+  .where(or(
+    eq(customers.primaryEmployeeId, employeeId),
+    eq(customers.backupEmployeeId, employeeId),
+    inArray(customers.id,
+      db.select({ id: appointments.customerId })
+        .from(appointments)
+        .where(eq(appointments.assignedEmployeeId, employeeId))
+    )
+  ));```
+
+### 4.3 Batch-Erstellung für Leistungsnachweise
+
+**Dateien:** `client/src/pages/service-records.tsx`, `server/routes/service-records.ts`
+
+- "Alle erstellen"-Button auf Übersichtsseite
+- Backend: `POST /api/service-records/batch-create` der für alle qualifizierten Kunden Records anlegt
+- Vorher Zusammenfassung zeigen: "X Leistungsnachweise für: [Kundenliste]"
+
+### 4.4 Tab-Deeplinks auf Kundendetailseite
+
+**Datei:** `client/src/pages/admin/customer-detail.tsx`
+
+- URL-Parameter `?tab=` auslesen → `defaultValue` der Tabs setzen
+- Beim Tab-Wechsel: URL aktualisieren mit `window.history.replaceState`
+
+### 4.5 Popup-Blocker-Feedback bei Druckvorschau
+
+**Datei:** `client/src/pages/admin/components/signatures-step.tsx````typescript
+const previewWindow = window.open("", "_blank");
+if (!previewWindow) {
+  toast({
+    title: "Popup blockiert",
+    description: "Bitte erlauben Sie Popups für diese Seite.",
+    variant: "destructive",
+  });
+  return;
+}```
+
+### 4.6 God-File `storage.ts` aufteilen
+
+**Datei:** `server/storage.ts` (1017 Zeilen)
+
+Aufteilen in Domain-Module:```
+server/storage/
+├── index.ts                    (Re-Exports)
+├── appointment-storage.ts      (Termin-Queries)
+├── service-record-storage.ts   (Leistungsnachweis-Queries)
+├── customer-storage.ts         (Kunden-Queries)
+├── customer-management.ts      (existiert bereits)
+├── settings-storage.ts         (Systemeinstellungen)
+└── documents.ts                (existiert bereits)```
+
+### 4.7 Fehlende Error Boundaries für Seiten-Gruppen
+
+**Datei:** `client/src/App.tsx`
+
+Error Boundaries um logische Seitengruppen hinzufügen statt nur global.
+
+### 4.8 SELECT * statt gezielte Spaltenauswahl
+
+**Datei:** `server/storage.ts` — mehrere Stellen
+
+Für Listen-Ansichten nur benötigte Spalten laden. Volle Daten nur für Detail-Ansichten.
+
+### 4.9 Prepared Statements für häufige Queries
+
+Drizzle `.prepare()` für die 3 häufigsten Queries nutzen.
+
+### 4.10 `ensureTemplateBillingTypes` Race-Condition
+
+**Datei:** `server/storage/documents.ts`
+
+Check-then-Insert ist nicht atomar. Fix: `ON CONFLICT DO NOTHING` in INSERT.
+
+### 4.11 Duplizierte Business-Logik
+
+- `isChild()` nach `shared/utils/datetime.ts` verschieben
+- Kunden-Lade-Logik vereinheitlichen
+- Datums-Formatierung zentralisieren
+
+### 4.12 Signatur-Daten als Base64 in Text-Spalten
+
+Langfristig: Signaturen in Replit Object Storage verschieben statt als base64-Text in DB.
+
+---
+
+## Zusammenfassung
+
+| Phase | Anzahl | Geschätzter Aufwand |
+|-------|--------|---------------------|
+| 🔴 KRITISCH (Phase 1) | 7 Issues | 4-6 Stunden |
+| 🟠 HOCH (Phase 2) | 11 Issues | 6-8 Stunden |
+| 🟡 MITTEL (Phase 3) | 13 Issues | 8-12 Stunden |
+| 🟢 NIEDRIG (Phase 4) | 12 Issues | 10-15 Stunden |
+| **Gesamt** | **43 Issues** | **~30-40 Stunden** |
+
+## Verifizierung nach jeder Phase```bash
+# 1. TypeScript-Check
+npm run check
+
+# 2. Produktions-Build
+npm run build
+
+# 3. Manueller Test-Durchlauf:
+# - Neuen Kunden anlegen → Unterschriften speichern → Prüfen ob gespeichert
+# - Bestehenden Kunden bearbeiten → Alle Felder korrekt geladen?
+# - Termin dokumentieren → Leistungsnachweis erstellen → Drucken
+# - Template bearbeiten → Vorschau prüfen → Kein XSS möglich
+# - Dashboard → Wochenend-Termine sichtbar?
+# - 2 Tabs öffnen → Daten-Aktualisierung prüfen
+
+# 4. Sicherheits-Tests:
+# - Als Mitarbeiter: Signatur für nicht-zugeordneten Kunden → 403
+# - Template mit alert('test') → sanitisiert
+# - Kundenanlage mit fehlerhaften Daten → Transaktion rollback```
