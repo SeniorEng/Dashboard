@@ -10,8 +10,13 @@ import { useState, useMemo, useCallback } from "react";
 import { Link, useParams, useSearch, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatDateForDisplay } from "@shared/utils/datetime";
+import { DEACTIVATION_REASON_SELECT_OPTIONS, DEACTIVATION_REASON_LABELS, type DeactivationReason } from "@shared/domain/customers";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SectionCard } from "@/components/patterns/section-card";
@@ -327,9 +332,13 @@ export default function AdminCustomerDetail() {
   const queryClient = useQueryClient();
   const [isToggling, setIsToggling] = useState(false);
 
+  const [showDeactivateDialog, setShowDeactivateDialog] = useState(false);
+  const [deactivationReason, setDeactivationReason] = useState<string>("");
+  const [deactivationNote, setDeactivationNote] = useState<string>("");
+
   const updateStatus = useMutation({
-    mutationFn: async (status: string) => {
-      const result = await api.patch(`/admin/customers/${customerId}`, { status });
+    mutationFn: async (payload: { status: string; deactivationReason?: string; deactivationNote?: string }) => {
+      const result = await api.patch(`/admin/customers/${customerId}`, payload);
       return unwrapResult(result);
     },
     onSuccess: () => {
@@ -338,6 +347,9 @@ export default function AdminCustomerDetail() {
       queryClient.invalidateQueries({ queryKey: ["customers"] });
       queryClient.invalidateQueries({ queryKey: ["conversion-readiness", customerId] });
       toast({ title: "Kundenstatus aktualisiert" });
+      setShowDeactivateDialog(false);
+      setDeactivationReason("");
+      setDeactivationNote("");
     },
     onError: (err: Error) => {
       toast({ title: "Fehler", description: err.message, variant: "destructive" });
@@ -451,11 +463,11 @@ export default function AdminCustomerDetail() {
           {customer.status === "erstberatung" && (
             <ErstberatungConversionSection
               customerId={customerId}
-              onActivate={() => updateStatus.mutate("aktiv")}
+              onActivate={() => updateStatus.mutate({ status: "aktiv" })}
               onReject={() => {
-                if (window.confirm("Möchten Sie diesen Erstberatungskunden wirklich als 'Kein Interesse' markieren? Er wird auf inaktiv gesetzt.")) {
-                  updateStatus.mutate("inaktiv");
-                }
+                setDeactivationReason("kein_interesse");
+                setDeactivationNote("");
+                setShowDeactivateDialog(true);
               }}
               isUpdating={updateStatus.isPending}
             />
@@ -473,18 +485,14 @@ export default function AdminCustomerDetail() {
                 <Button
                   variant="outline"
                   onClick={() => {
-                    if (window.confirm("Möchten Sie diesen Kunden wirklich deaktivieren? Er kann keine neuen Termine mehr erhalten.")) {
-                      updateStatus.mutate("inaktiv");
-                    }
+                    setDeactivationReason("");
+                    setDeactivationNote("");
+                    setShowDeactivateDialog(true);
                   }}
                   disabled={updateStatus.isPending}
                   data-testid="button-deactivate-customer"
                 >
-                  {updateStatus.isPending ? (
-                    <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
-                  ) : (
-                    <UserX className={`${iconSize.sm} mr-2`} />
-                  )}
+                  <UserX className={`${iconSize.sm} mr-2`} />
                   Deaktivieren
                 </Button>
               </div>
@@ -512,10 +520,24 @@ export default function AdminCustomerDetail() {
                       ? `Inaktiv ab ${formatDateForDisplay((customer as any).inaktivAb)}. Keine neuen Termine ab diesem Datum.`
                       : "Dieser Kunde ist deaktiviert und kann keine neuen Termine erhalten."}
                   </p>
+                  {(customer as any).deactivationReason && (
+                    <p className="text-sm text-amber-700 mt-1" data-testid="text-deactivation-reason">
+                      <span className="font-medium">Grund:</span>{" "}
+                      {DEACTIVATION_REASON_LABELS[(customer as any).deactivationReason as DeactivationReason] || (customer as any).deactivationReason}
+                      {(customer as any).deactivationReason === "sonstiges" && (customer as any).deactivationNote && (
+                        <span> — {(customer as any).deactivationNote}</span>
+                      )}
+                    </p>
+                  )}
+                  {(customer as any).deactivationReason !== "sonstiges" && (customer as any).deactivationNote && (
+                    <p className="text-sm text-amber-700 mt-0.5" data-testid="text-deactivation-note">
+                      <span className="font-medium">Anmerkung:</span> {(customer as any).deactivationNote}
+                    </p>
+                  )}
                 </div>
                 <Button
                   variant="outline"
-                  onClick={() => updateStatus.mutate("aktiv")}
+                  onClick={() => updateStatus.mutate({ status: "aktiv", deactivationReason: null as any, deactivationNote: null as any })}
                   disabled={updateStatus.isPending}
                   data-testid="button-reactivate-customer"
                 >
@@ -585,6 +607,90 @@ export default function AdminCustomerDetail() {
               />
             </TabsContent>
           </ResponsiveTabs>
+
+          <Dialog open={showDeactivateDialog} onOpenChange={(open) => {
+            if (!open) {
+              setShowDeactivateDialog(false);
+              setDeactivationReason("");
+              setDeactivationNote("");
+            }
+          }}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Kunde deaktivieren</DialogTitle>
+                <DialogDescription>
+                  Bitte geben Sie einen Grund an, warum dieser Kunde deaktiviert wird. Dies dient der späteren Analyse.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-2">
+                <div className="space-y-2">
+                  <Label htmlFor="deactivation-reason">Grund *</Label>
+                  <Select value={deactivationReason} onValueChange={setDeactivationReason}>
+                    <SelectTrigger id="deactivation-reason" data-testid="select-deactivation-reason">
+                      <SelectValue placeholder="Grund auswählen..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DEACTIVATION_REASON_SELECT_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value} data-testid={`option-reason-${opt.value}`}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="deactivation-note">
+                    {deactivationReason === "sonstiges" ? "Beschreibung *" : "Anmerkung (optional)"}
+                  </Label>
+                  <Textarea
+                    id="deactivation-note"
+                    value={deactivationNote}
+                    onChange={(e) => setDeactivationNote(e.target.value)}
+                    placeholder={deactivationReason === "sonstiges" ? "Bitte beschreiben Sie den Grund..." : "Optionale Anmerkung..."}
+                    maxLength={1000}
+                    rows={3}
+                    data-testid="textarea-deactivation-note"
+                  />
+                </div>
+              </div>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowDeactivateDialog(false);
+                    setDeactivationReason("");
+                    setDeactivationNote("");
+                  }}
+                  data-testid="button-cancel-deactivation"
+                >
+                  Abbrechen
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => {
+                    updateStatus.mutate({
+                      status: "inaktiv",
+                      deactivationReason: deactivationReason || undefined,
+                      deactivationNote: deactivationNote.trim() || undefined,
+                    });
+                  }}
+                  disabled={
+                    !deactivationReason ||
+                    (deactivationReason === "sonstiges" && !deactivationNote.trim()) ||
+                    updateStatus.isPending
+                  }
+                  data-testid="button-confirm-deactivation"
+                >
+                  {updateStatus.isPending ? (
+                    <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                  ) : (
+                    <UserX className={`${iconSize.sm} mr-2`} />
+                  )}
+                  Deaktivieren
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
     </Layout>
   );
 }

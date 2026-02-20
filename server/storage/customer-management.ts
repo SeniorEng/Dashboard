@@ -401,6 +401,10 @@ export class CustomerManagementStorage {
     haustierVorhanden: boolean;
     haustierDetails: string | null;
     acceptsPrivatePayment: boolean;
+    personenbefoerderungGewuenscht: boolean;
+    inaktivAb: string | null;
+    deactivationReason: string | null;
+    deactivationNote: string | null;
   }>): Promise<Customer | undefined> {
     return await db.transaction(async (tx) => {
     const updateData: any = { ...data, updatedAt: new Date() };
