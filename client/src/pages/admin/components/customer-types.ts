@@ -1,4 +1,4 @@
-import { User2, Heart, Users, Wallet, FileText, PenTool, UserCheck, CreditCard } from "lucide-react";
+import { User2, Heart, Users, Wallet, FileText, PenTool, UserCheck, CreditCard, Send } from "lucide-react";
 import { PFLEGEGRAD_SELECT_OPTIONS, CONTACT_TYPE_SELECT_OPTIONS, type BillingType } from "@shared/domain/customers";
 import { isPflegekasseCustomer, needsBudgetData } from "@shared/domain/customers";
 import type { BudgetType } from "@shared/domain/budgets";
@@ -51,6 +51,7 @@ export interface CustomerFormData {
   vereinbarteLeistungen: string;
   contractHours: string;
   contractPeriod: "weekly" | "monthly";
+  documentDeliveryMethod: "email" | "post";
 }
 
 export interface SelectOption {
@@ -73,6 +74,7 @@ const ALL_STEPS: StepConfig[] = [
   { id: "budgets", title: "Budgets", icon: Wallet },
   { id: "contract", title: "Vertrag", icon: FileText },
   { id: "signatures", title: "Unterschriften", icon: PenTool },
+  { id: "delivery", title: "Versand", icon: Send },
   { id: "matching", title: "Mitarbeiter", icon: UserCheck },
 ];
 

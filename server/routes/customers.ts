@@ -235,6 +235,7 @@ const convertCustomerSchema = z.object({
   haustierVorhanden: z.boolean().optional(),
   haustierDetails: z.string().max(500).optional().nullable(),
   personenbefoerderungGewuenscht: z.boolean().optional(),
+  documentDeliveryMethod: z.enum(["email", "post"]).optional(),
   insurance: z.object({
     providerId: z.number(),
     versichertennummer: z.string(),
@@ -318,6 +319,7 @@ router.post("/:id/convert", requireRoles("erstberatung"), asyncHandler("Konverti
     haustierVorhanden: data.haustierVorhanden || false,
     haustierDetails: data.haustierVorhanden ? (data.haustierDetails || null) : null,
     personenbefoerderungGewuenscht: data.personenbefoerderungGewuenscht || false,
+    documentDeliveryMethod: data.documentDeliveryMethod || "email",
     billingType: data.billingType,
     status: "aktiv",
   };

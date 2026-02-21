@@ -194,6 +194,7 @@ const simpleCreateCustomerSchema = z.object({
   haustierVorhanden: z.boolean().optional(),
   haustierDetails: z.string().max(500).optional().nullable(),
   personenbefoerderungGewuenscht: z.boolean().optional(),
+  documentDeliveryMethod: z.enum(["email", "post"]).optional(),
   insurance: z.object({
     providerId: z.number(),
     versichertennummer: z.string(),
@@ -248,6 +249,7 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
     haustierVorhanden: data.haustierVorhanden || false,
     haustierDetails: data.haustierVorhanden ? (data.haustierDetails || null) : null,
     personenbefoerderungGewuenscht: data.personenbefoerderungGewuenscht || false,
+    documentDeliveryMethod: data.documentDeliveryMethod || "email",
     billingType: data.billingType,
     createdByUserId: userId,
   };
@@ -378,6 +380,7 @@ const updateCustomerSchema = z.object({
   haustierVorhanden: z.boolean().optional(),
   haustierDetails: z.string().max(500).nullable().optional(),
   personenbefoerderungGewuenscht: z.boolean().optional(),
+  documentDeliveryMethod: z.enum(["email", "post"]).optional(),
   acceptsPrivatePayment: z.boolean().optional(),
   inaktivAb: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat (YYYY-MM-DD erwartet)").nullable().optional(),
   deactivationReason: z.string().nullable().optional(),

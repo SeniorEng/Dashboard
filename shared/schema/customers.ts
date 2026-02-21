@@ -44,6 +44,7 @@ export const customers = pgTable("customers", {
   billingType: text("billing_type").notNull().default("pflegekasse_gesetzlich"), // pflegekasse_gesetzlich, pflegekasse_privat, selbstzahler
   acceptsPrivatePayment: boolean("accepts_private_payment").notNull().default(false),
   // Deactivation tracking
+  documentDeliveryMethod: text("document_delivery_method").notNull().default("email"),
   deactivationReason: text("deactivation_reason"),
   deactivationNote: text("deactivation_note"),
   // Legacy fields

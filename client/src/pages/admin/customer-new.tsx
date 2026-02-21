@@ -25,6 +25,7 @@ import { ContactsStep } from "./components/contacts-step";
 import { BudgetsStep, ContractStep } from "./components/budgets-contract-step";
 import { SignaturesStep } from "./components/signatures-step";
 import { MatchingStep } from "./components/matching-step";
+import { DeliveryStep } from "./components/delivery-step";
 
 export default function AdminCustomerNew() {
   const [, setLocation] = useLocation();
@@ -68,6 +69,7 @@ export default function AdminCustomerNew() {
     vereinbarteLeistungen: "",
     contractHours: "0",
     contractPeriod: "weekly",
+    documentDeliveryMethod: "email",
   });
 
   const [customerSignatures, setCustomerSignatures] = useState<Record<string, string>>({});
@@ -232,6 +234,7 @@ export default function AdminCustomerNew() {
       haustierVorhanden: formData.haustierVorhanden,
       haustierDetails: formData.haustierVorhanden ? (formData.haustierDetails.trim() || undefined) : undefined,
       personenbefoerderungGewuenscht: formData.personenbefoerderungGewuenscht,
+      documentDeliveryMethod: formData.documentDeliveryMethod,
       insurance: isPflegekasse ? insurance : undefined,
       contacts: contacts.length > 0 ? contacts : undefined,
       budgets: isPflegekasse ? budgets : undefined,
@@ -502,6 +505,13 @@ export default function AdminCustomerNew() {
             customerSignatures={customerSignatures}
             onSignatureChange={handleSignatureChange}
             formData={formData}
+          />
+        );
+      case "delivery":
+        return (
+          <DeliveryStep
+            formData={formData}
+            onChange={handleChange}
           />
         );
       case "matching":

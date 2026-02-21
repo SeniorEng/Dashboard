@@ -40,6 +40,9 @@ import {
   FileText,
   ChevronRight,
   UserPlus,
+  Send,
+  Mail,
+  Truck,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { formatCurrency } from "@shared/utils/format";
@@ -103,6 +106,7 @@ export default function AdminCustomerEdit() {
     haustierVorhanden: false,
     haustierDetails: "",
     personenbefoerderungGewuenscht: false,
+    documentDeliveryMethod: "email" as "email" | "post",
     acceptsPrivatePayment: false,
     inaktivAb: "",
   });
@@ -129,6 +133,7 @@ export default function AdminCustomerEdit() {
         haustierVorhanden: customer.haustierVorhanden ?? false,
         haustierDetails: customer.haustierDetails || "",
         personenbefoerderungGewuenscht: customer.personenbefoerderungGewuenscht ?? false,
+        documentDeliveryMethod: (customer.documentDeliveryMethod as "email" | "post") || "email",
         acceptsPrivatePayment: customer.acceptsPrivatePayment ?? false,
         inaktivAb: (customer as any).inaktivAb || "",
       });
@@ -203,6 +208,7 @@ export default function AdminCustomerEdit() {
       haustierVorhanden: formData.haustierVorhanden ?? false,
       haustierDetails: formData.haustierVorhanden ? (formData.haustierDetails?.trim() || null) : null,
       personenbefoerderungGewuenscht: formData.personenbefoerderungGewuenscht,
+      documentDeliveryMethod: formData.documentDeliveryMethod,
       acceptsPrivatePayment: formData.acceptsPrivatePayment,
       inaktivAb: formData.inaktivAb?.trim() || null,
     };
@@ -585,6 +591,33 @@ export default function AdminCustomerEdit() {
                     onCheckedChange={(checked) => setFormData(prev => ({ ...prev, personenbefoerderungGewuenscht: checked }))}
                     data-testid="switch-personenbefoerderung"
                   />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Versandart Unterlagen</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Wie soll der Kunde Vertragsunterlagen erhalten?
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, documentDeliveryMethod: "email" as const }))}
+                      className={`flex items-center gap-2 p-3 rounded-lg border-2 transition-all text-sm ${formData.documentDeliveryMethod === "email" ? "border-teal-500 bg-teal-50 text-teal-700" : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"}`}
+                      data-testid="button-delivery-email"
+                    >
+                      <Mail className="h-4 w-4" />
+                      Per E-Mail
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, documentDeliveryMethod: "post" as const }))}
+                      className={`flex items-center gap-2 p-3 rounded-lg border-2 transition-all text-sm ${formData.documentDeliveryMethod === "post" ? "border-amber-500 bg-amber-50 text-amber-700" : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"}`}
+                      data-testid="button-delivery-post"
+                    >
+                      <Truck className="h-4 w-4" />
+                      Per Post
+                    </button>
+                  </div>
                 </div>
               </CardContent>
             </Card>

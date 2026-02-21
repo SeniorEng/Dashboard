@@ -17,6 +17,7 @@ import {
   Stethoscope,
   ClipboardList,
   History,
+  Send,
 } from "lucide-react";
 import type { CustomerDetail } from "@/lib/api/types";
 
@@ -231,6 +232,15 @@ export function CustomerOverviewTab({ customer }: CustomerOverviewTabProps) {
           </div>
         </SectionCard>
       )}
+
+      <SectionCard
+        title="Versandart Unterlagen"
+        icon={<Send className={iconSize.sm} />}
+      >
+        <p className="text-gray-700" data-testid="text-delivery-method">
+          {customer.documentDeliveryMethod === "post" ? "Per Deutsche Post (gedruckt)" : "Per E-Mail (digital)"}
+        </p>
+      </SectionCard>
 
       {customer.needsAssessment?.anamnese && (
         <SectionCard
