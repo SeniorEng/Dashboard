@@ -51,6 +51,10 @@ const emptyCompanyForm = {
   ikNummer: "",
   anerkennungsnummer45a: "",
   anerkennungsBundesland: "",
+  lohnartAlltagsbegleitung: "",
+  lohnartHauswirtschaft: "",
+  lohnartUrlaub: "",
+  lohnartKrankheit: "",
 };
 
 export default function AdminSettings() {
@@ -97,6 +101,10 @@ export default function AdminSettings() {
         ikNummer: companyData.ikNummer ?? "",
         anerkennungsnummer45a: companyData.anerkennungsnummer45a ?? "",
         anerkennungsBundesland: companyData.anerkennungsBundesland ?? "",
+        lohnartAlltagsbegleitung: companyData.lohnartAlltagsbegleitung ?? "",
+        lohnartHauswirtschaft: companyData.lohnartHauswirtschaft ?? "",
+        lohnartUrlaub: companyData.lohnartUrlaub ?? "",
+        lohnartKrankheit: companyData.lohnartKrankheit ?? "",
       });
     }
   }, [companyData]);
@@ -529,6 +537,63 @@ export default function AdminSettings() {
                       </Button>
                     </div>
                   </form>
+                </CardContent>
+              </Card>
+
+              <Card data-testid="card-lohnexport-settings">
+                <CardHeader>
+                  <CardTitle>Lohnexport (Lexware)</CardTitle>
+                  <CardDescription>
+                    Lohnartnummern für den CSV-Export nach Lexware lohn+gehalt.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="lohnartAlltagsbegleitung">Lohnart Alltagsbegleitung</Label>
+                      <Input
+                        id="lohnartAlltagsbegleitung"
+                        value={companyForm.lohnartAlltagsbegleitung}
+                        onChange={(e) => updateField("lohnartAlltagsbegleitung", e.target.value)}
+                        placeholder="z.B. 100"
+                        data-testid="input-lohnart-alltagsbegleitung"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="lohnartHauswirtschaft">Lohnart Hauswirtschaft</Label>
+                      <Input
+                        id="lohnartHauswirtschaft"
+                        value={companyForm.lohnartHauswirtschaft}
+                        onChange={(e) => updateField("lohnartHauswirtschaft", e.target.value)}
+                        placeholder="z.B. 200"
+                        data-testid="input-lohnart-hauswirtschaft"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="lohnartUrlaub">Lohnart Urlaub</Label>
+                      <Input
+                        id="lohnartUrlaub"
+                        value={companyForm.lohnartUrlaub}
+                        onChange={(e) => updateField("lohnartUrlaub", e.target.value)}
+                        placeholder="z.B. 300"
+                        data-testid="input-lohnart-urlaub"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="lohnartKrankheit">Lohnart Krankheit</Label>
+                      <Input
+                        id="lohnartKrankheit"
+                        value={companyForm.lohnartKrankheit}
+                        onChange={(e) => updateField("lohnartKrankheit", e.target.value)}
+                        placeholder="z.B. 400"
+                        data-testid="input-lohnart-krankheit"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-3">
+                    Diese Nummern werden als Lohnartnummern im Lexware-CSV-Export verwendet.
+                    Speichern über den Button "Speichern" bei den Firmendaten oben.
+                  </p>
                 </CardContent>
               </Card>
 

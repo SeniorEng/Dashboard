@@ -22,6 +22,7 @@ export const services = pgTable("services", {
   isSystem: boolean("is_system").notNull().default(false),
   isBillable: boolean("is_billable").notNull().default(true),
   employeeRateCents: integer("employee_rate_cents").notNull().default(0),
+  lohnartKategorie: text("lohnart_kategorie").notNull().default("hauswirtschaft"),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [
@@ -49,6 +50,7 @@ export const insertServiceSchema = z.object({
   isDefault: z.boolean().default(false),
   isBillable: z.boolean().default(true),
   employeeRateCents: z.number().int().min(0).default(0),
+  lohnartKategorie: z.enum(["alltagsbegleitung", "hauswirtschaft"]).default("hauswirtschaft"),
   sortOrder: z.number().int().default(0),
   budgetPots: z.array(z.enum(["entlastungsbetrag_45b", "umwandlung_45a", "ersatzpflege_39_42a"])).default([]),
 });

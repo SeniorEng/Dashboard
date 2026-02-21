@@ -51,6 +51,7 @@ export function UserForm({
   const [isAdmin, setIsAdmin] = useState(user?.isAdmin ?? false);
   const [haustierAkzeptiert, setHaustierAkzeptiert] = useState(user?.haustierAkzeptiert ?? true);
   const [lbnr, setLbnr] = useState(user?.lbnr ?? "");
+  const [personalnummer, setPersonalnummer] = useState(user?.personalnummer ?? "");
   const [roles, setRoles] = useState<string[]>(user?.roles ?? []);
 
   const handleTelefonBlur = () => {
@@ -96,6 +97,7 @@ export function UserForm({
       isAdmin,
       haustierAkzeptiert,
       lbnr: lbnr || null,
+      personalnummer: personalnummer || null,
       roles,
     };
     
@@ -312,15 +314,27 @@ export function UserForm({
             <Label htmlFor="haustierAkzeptiert">Akzeptiert Haustiere im Haushalt</Label>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="lbnr">LBNR (Beschäftigtennummer)</Label>
-            <Input
-              id="lbnr"
-              value={lbnr}
-              onChange={(e) => setLbnr(e.target.value)}
-              placeholder="Lebenslange Beschäftigtennummer"
-              data-testid="input-lbnr"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="personalnummer">Personalnummer (Lexware)</Label>
+              <Input
+                id="personalnummer"
+                value={personalnummer}
+                onChange={(e) => setPersonalnummer(e.target.value)}
+                placeholder="z.B. 0001"
+                data-testid="input-personalnummer"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="lbnr">LBNR (Beschäftigtennummer)</Label>
+              <Input
+                id="lbnr"
+                value={lbnr}
+                onChange={(e) => setLbnr(e.target.value)}
+                placeholder="Lebenslange Beschäftigtennummer"
+                data-testid="input-lbnr"
+              />
+            </div>
           </div>
 
           <div className="space-y-2">

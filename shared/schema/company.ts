@@ -23,6 +23,10 @@ export const companySettings = pgTable("company_settings", {
   anerkennungsnummer45a: text("anerkennungsnummer_45a"),
   anerkennungsBundesland: text("anerkennungs_bundesland"),
   logoUrl: text("logo_url"),
+  lohnartAlltagsbegleitung: text("lohnart_alltagsbegleitung"),
+  lohnartHauswirtschaft: text("lohnart_hauswirtschaft"),
+  lohnartUrlaub: text("lohnart_urlaub"),
+  lohnartKrankheit: text("lohnart_krankheit"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   updatedByUserId: integer("updated_by_user_id").references(() => users.id),
 });
@@ -48,6 +52,10 @@ export const updateCompanySettingsSchema = z.object({
   anerkennungsnummer45a: z.string().optional(),
   anerkennungsBundesland: z.string().optional(),
   logoUrl: z.string().optional().nullable(),
+  lohnartAlltagsbegleitung: z.string().optional().nullable(),
+  lohnartHauswirtschaft: z.string().optional().nullable(),
+  lohnartUrlaub: z.string().optional().nullable(),
+  lohnartKrankheit: z.string().optional().nullable(),
 });
 
 export type UpdateCompanySettings = z.infer<typeof updateCompanySettingsSchema>;

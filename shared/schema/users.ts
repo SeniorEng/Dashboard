@@ -30,6 +30,7 @@ export const users = pgTable("users", {
   isAdmin: boolean("is_admin").notNull().default(false),
   haustierAkzeptiert: boolean("haustier_akzeptiert").notNull().default(true),
   lbnr: text("lbnr"),
+  personalnummer: text("personalnummer"),
   notfallkontaktName: text("notfallkontakt_name"),
   notfallkontaktTelefon: text("notfallkontakt_telefon"),
   notfallkontaktBeziehung: text("notfallkontakt_beziehung"),
@@ -131,6 +132,7 @@ export const insertUserSchema = z.object({
   isAdmin: z.boolean().optional().default(false),
   haustierAkzeptiert: z.boolean().optional().default(true),
   lbnr: z.string().optional().nullable(),
+  personalnummer: z.string().optional().nullable(),
   roles: z.array(z.enum(EMPLOYEE_ROLES)).optional().default([]),
 });
 

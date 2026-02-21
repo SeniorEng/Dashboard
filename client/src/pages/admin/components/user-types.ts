@@ -18,6 +18,7 @@ export interface UserData {
   isAdmin: boolean;
   haustierAkzeptiert: boolean;
   lbnr: string | null;
+  personalnummer: string | null;
   roles: string[];
   createdAt: string;
 }
@@ -39,6 +40,7 @@ export interface UserFormData {
   isAdmin: boolean;
   haustierAkzeptiert: boolean;
   lbnr?: string | null;
+  personalnummer?: string | null;
   roles: string[];
 }
 

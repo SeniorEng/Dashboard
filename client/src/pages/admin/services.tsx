@@ -45,6 +45,7 @@ interface ServiceWithPots {
   isSystem: boolean;
   isBillable: boolean;
   employeeRateCents: number;
+  lohnartKategorie: string;
   sortOrder: number;
   budgetPots: string[];
   createdAt: string;
@@ -76,6 +77,7 @@ interface ServiceFormData {
   minDurationMinutes: string;
   isBillable: boolean;
   employeeRateCents: string;
+  lohnartKategorie: string;
   budgetPots: string[];
   isDefault: boolean;
   isActive: boolean;
@@ -92,10 +94,16 @@ const EMPTY_FORM: ServiceFormData = {
   minDurationMinutes: "",
   isBillable: true,
   employeeRateCents: "",
+  lohnartKategorie: "hauswirtschaft",
   budgetPots: [],
   isDefault: false,
   isActive: true,
   sortOrder: "0",
+};
+
+const LOHNART_LABELS: Record<string, string> = {
+  hauswirtschaft: "Hauswirtschaft",
+  alltagsbegleitung: "Alltagsbegleitung",
 };
 
 export default function AdminServices() {
@@ -152,6 +160,7 @@ export default function AdminServices() {
       minDurationMinutes: service.minDurationMinutes ? String(service.minDurationMinutes) : "",
       isBillable: service.isBillable,
       employeeRateCents: service.employeeRateCents ? formatPrice(service.employeeRateCents) : "",
+      lohnartKategorie: service.lohnartKategorie || "hauswirtschaft",
       budgetPots: service.budgetPots || [],
       isDefault: service.isDefault ?? false,
       isActive: service.isActive,
@@ -211,6 +220,7 @@ export default function AdminServices() {
       minDurationMinutes: form.unitType === "hours" && minDuration && minDuration > 0 ? minDuration : null,
       isBillable: form.isBillable,
       employeeRateCents,
+      lohnartKategorie: form.lohnartKategorie as "alltagsbegleitung" | "hauswirtschaft",
       budgetPots: form.isBillable ? form.budgetPots as ("entlastungsbetrag_45b" | "umwandlung_45a" | "ersatzpflege_39_42a")[] : [],
       isDefault: form.isDefault,
       isActive: form.isActive,
@@ -416,19 +426,35 @@ export default function AdminServices() {
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label htmlFor="employeeRateCents">Mitarbeiter-Vergütung (€)</Label>
-              <Input
-                id="employeeRateCents"
-                className="text-base"
-                type="text"
-                inputMode="decimal"
-                value={form.employeeRateCents}
-                onChange={(e) => handleChange("employeeRateCents", e.target.value)}
-                placeholder="0,00"
-                data-testid="input-service-employee-rate"
-              />
-              <p className="text-xs text-gray-500">Interne Vergütung pro Einheit (was Mitarbeiter erhalten)</p>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="employeeRateCents">Mitarbeiter-Vergütung (€)</Label>
+                <Input
+                  id="employeeRateCents"
+                  className="text-base"
+                  type="text"
+                  inputMode="decimal"
+                  value={form.employeeRateCents}
+                  onChange={(e) => handleChange("employeeRateCents", e.target.value)}
+                  placeholder="0,00"
+                  data-testid="input-service-employee-rate"
+                />
+                <p className="text-xs text-gray-500">Vergütung pro Einheit</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="lohnartKategorie">Lohnart-Kategorie</Label>
+                <Select value={form.lohnartKategorie} onValueChange={(v) => handleChange("lohnartKategorie", v)}>
+                  <SelectTrigger id="lohnartKategorie" data-testid="select-lohnart-kategorie">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(LOHNART_LABELS).map(([key, label]) => (
+                      <SelectItem key={key} value={key}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-500">Für Lexware-Lohnexport</p>
+              </div>
             </div>
 
             {form.isBillable && (
