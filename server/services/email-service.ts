@@ -28,7 +28,7 @@ function createTransporter(settings: CompanySettings) {
       pass: settings.smtpPass,
     },
     tls: {
-      rejectUnauthorized: false,
+      rejectUnauthorized: process.env.NODE_ENV === "production",
     },
   });
 }

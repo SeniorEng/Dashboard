@@ -914,7 +914,7 @@ export default function AdminSettings() {
                         placeholder="Ihre Vertragsunterlagen — {{firmenname}}"
                         data-testid="input-delivery-email-subject"
                       />
-                      <p className="text-xs text-muted-foreground">Standard: "Ihre Vertragsunterlagen — {{'{{'}}firmenname{{'}}'}}"</p>
+                      <p className="text-xs text-muted-foreground">{"Standard: \"Ihre Vertragsunterlagen — {{firmenname}}\""}</p>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="deliveryCoverLetterText">Anschreiben-Text</Label>
