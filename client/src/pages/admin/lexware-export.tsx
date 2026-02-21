@@ -5,24 +5,24 @@ import { Layout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Download, AlertTriangle, FileSpreadsheet } from "lucide-react";
+import { ArrowLeft, Clock } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 
-interface ExportRow {
-  year: number;
-  month: number;
-  personalnummer: string;
-  employeeName: string;
-  lohnartnummer: string;
-  lohnartLabel: string;
-  value: string;
-  unit: string;
+interface EmployeeSummaryRow {
+  employeeId: number;
+  nachname: string;
+  vorname: string;
+  stundenHauswirtschaft: number;
+  stundenAlltagsbegleitung: number;
+  stundenSonstiges: number;
+  kilometer: number;
+  tageUrlaub: number;
+  tageKrankheit: number;
 }
 
-interface ExportData {
-  rows: ExportRow[];
-  warnings: string[];
+interface OverviewData {
+  rows: EmployeeSummaryRow[];
   year: number;
   month: number;
 }
@@ -32,7 +32,22 @@ const MONTHS = [
   "Juli", "August", "September", "Oktober", "November", "Dezember",
 ];
 
-export default function LexwareExport() {
+function formatHours(hours: number): string {
+  if (hours === 0) return "–";
+  return hours.toFixed(2).replace(".", ",");
+}
+
+function formatKm(km: number): string {
+  if (km === 0) return "–";
+  return `${km}`;
+}
+
+function formatDays(days: number): string {
+  if (days === 0) return "–";
+  return `${days}`;
+}
+
+export default function HoursOverview() {
   const now = new Date();
   const prevMonth = now.getMonth() === 0 ? 12 : now.getMonth();
   const prevYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
@@ -40,47 +55,49 @@ export default function LexwareExport() {
   const [selectedYear, setSelectedYear] = useState(String(prevYear));
   const [selectedMonth, setSelectedMonth] = useState(String(prevMonth));
 
-  const { data, isLoading, error } = useQuery<ExportData>({
-    queryKey: ["lexware-export", selectedYear, selectedMonth],
+  const { data, isLoading, error } = useQuery<OverviewData>({
+    queryKey: ["hours-overview", selectedYear, selectedMonth],
     queryFn: async () => {
-      const result = await api.get<ExportData>(`/admin/lexware-export?year=${selectedYear}&month=${selectedMonth}`);
+      const result = await api.get<OverviewData>(`/admin/hours-overview?year=${selectedYear}&month=${selectedMonth}`);
       return unwrapResult(result);
     },
   });
-
-  const handleDownload = () => {
-    window.open(
-      `/api/admin/lexware-export/csv?year=${selectedYear}&month=${selectedMonth}`,
-      "_blank"
-    );
-  };
 
   const years = [];
   for (let y = now.getFullYear(); y >= now.getFullYear() - 2; y--) {
     years.push(String(y));
   }
 
+  const totals = data?.rows?.reduce(
+    (acc, r) => ({
+      hw: acc.hw + r.stundenHauswirtschaft,
+      ab: acc.ab + r.stundenAlltagsbegleitung,
+      sonstiges: acc.sonstiges + r.stundenSonstiges,
+      km: acc.km + r.kilometer,
+      urlaub: acc.urlaub + r.tageUrlaub,
+      krankheit: acc.krankheit + r.tageKrankheit,
+    }),
+    { hw: 0, ab: 0, sonstiges: 0, km: 0, urlaub: 0, krankheit: 0 }
+  );
+
   return (
-    <Layout variant="admin">
+    <Layout variant="wide">
       <div className="flex items-center gap-4 mb-6">
         <Link href="/admin">
           <Button variant="ghost" size="icon" data-testid="button-back" aria-label="Zurück">
             <ArrowLeft className={iconSize.md} />
           </Button>
         </Link>
-        <h1 className={componentStyles.pageTitle}>Lohnexport (Lexware)</h1>
+        <h1 className={componentStyles.pageTitle}>Stundenübersicht</h1>
       </div>
 
       <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="text-base">Zeitraum wählen</CardTitle>
-        </CardHeader>
-        <CardContent>
+        <CardContent className="pt-6">
           <div className="flex items-end gap-4">
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">Monat</label>
               <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-                <SelectTrigger className="w-[160px]" data-testid="select-export-month">
+                <SelectTrigger className="w-[160px]" data-testid="select-overview-month">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -93,7 +110,7 @@ export default function LexwareExport() {
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">Jahr</label>
               <Select value={selectedYear} onValueChange={setSelectedYear}>
-                <SelectTrigger className="w-[100px]" data-testid="select-export-year">
+                <SelectTrigger className="w-[100px]" data-testid="select-overview-year">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -103,42 +120,20 @@ export default function LexwareExport() {
                 </SelectContent>
               </Select>
             </div>
-            <Button
-              onClick={handleDownload}
-              disabled={!data?.rows?.length}
-              data-testid="button-download-csv"
-            >
-              <Download className="mr-2 h-4 w-4" />
-              CSV herunterladen
-            </Button>
           </div>
         </CardContent>
       </Card>
-
-      {data?.warnings && data.warnings.length > 0 && (
-        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2" data-testid="export-warnings">
-          <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
-          <div className="text-sm text-amber-800">
-            {data.warnings.map((w, i) => (
-              <p key={i}>{w}</p>
-            ))}
-            <p className="mt-1 font-medium">
-              <Link href="/admin/settings" className="underline">Lohnartnummern in den Einstellungen konfigurieren</Link>
-            </p>
-          </div>
-        </div>
-      )}
 
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="text-base flex items-center gap-2">
-              <FileSpreadsheet className="h-5 w-5" />
-              Vorschau — {MONTHS[parseInt(selectedMonth) - 1]} {selectedYear}
+              <Clock className="h-5 w-5" />
+              {MONTHS[parseInt(selectedMonth) - 1]} {selectedYear}
             </CardTitle>
             {data?.rows && (
-              <span className="text-sm text-muted-foreground" data-testid="text-row-count">
-                {data.rows.length} Zeilen
+              <span className="text-sm text-muted-foreground" data-testid="text-employee-count">
+                {data.rows.length} Mitarbeiter
               </span>
             )}
           </div>
@@ -151,33 +146,47 @@ export default function LexwareExport() {
           ) : !data?.rows?.length ? (
             <p className="text-sm text-muted-foreground py-8 text-center" data-testid="text-no-data">
               Keine Daten für den gewählten Zeitraum vorhanden.
-              Stellen Sie sicher, dass Mitarbeiter eine Personalnummer haben.
             </p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm" data-testid="table-export-preview">
+              <table className="w-full text-sm" data-testid="table-hours-overview">
                 <thead>
                   <tr className="border-b text-left">
-                    <th className="py-2 pr-4 font-medium text-muted-foreground">Personalnr.</th>
-                    <th className="py-2 pr-4 font-medium text-muted-foreground">Mitarbeiter</th>
-                    <th className="py-2 pr-4 font-medium text-muted-foreground">Lohnart-Nr.</th>
-                    <th className="py-2 pr-4 font-medium text-muted-foreground">Bezeichnung</th>
-                    <th className="py-2 pr-4 font-medium text-muted-foreground text-right">Wert</th>
-                    <th className="py-2 font-medium text-muted-foreground">Einheit</th>
+                    <th className="py-2 pr-4 font-medium text-muted-foreground">Name</th>
+                    <th className="py-2 pr-4 font-medium text-muted-foreground text-right">HW (Std.)</th>
+                    <th className="py-2 pr-4 font-medium text-muted-foreground text-right">AB (Std.)</th>
+                    <th className="py-2 pr-4 font-medium text-muted-foreground text-right">Sonst. (Std.)</th>
+                    <th className="py-2 pr-4 font-medium text-muted-foreground text-right">KM</th>
+                    <th className="py-2 pr-4 font-medium text-muted-foreground text-right">Urlaub (T)</th>
+                    <th className="py-2 font-medium text-muted-foreground text-right">Krank (T)</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {data.rows.map((row, idx) => (
-                    <tr key={idx} className="border-b last:border-0" data-testid={`row-export-${idx}`}>
-                      <td className="py-2 pr-4 font-mono">{row.personalnummer}</td>
-                      <td className="py-2 pr-4">{row.employeeName}</td>
-                      <td className="py-2 pr-4 font-mono">{row.lohnartnummer}</td>
-                      <td className="py-2 pr-4">{row.lohnartLabel}</td>
-                      <td className="py-2 pr-4 text-right font-mono">{row.value}</td>
-                      <td className="py-2">{row.unit}</td>
+                  {data.rows.map((row) => (
+                    <tr key={row.employeeId} className="border-b last:border-0" data-testid={`row-employee-${row.employeeId}`}>
+                      <td className="py-2 pr-4 font-medium">{row.nachname}, {row.vorname}</td>
+                      <td className="py-2 pr-4 text-right font-mono">{formatHours(row.stundenHauswirtschaft)}</td>
+                      <td className="py-2 pr-4 text-right font-mono">{formatHours(row.stundenAlltagsbegleitung)}</td>
+                      <td className="py-2 pr-4 text-right font-mono">{formatHours(row.stundenSonstiges)}</td>
+                      <td className="py-2 pr-4 text-right font-mono">{formatKm(row.kilometer)}</td>
+                      <td className="py-2 pr-4 text-right font-mono">{formatDays(row.tageUrlaub)}</td>
+                      <td className="py-2 text-right font-mono">{formatDays(row.tageKrankheit)}</td>
                     </tr>
                   ))}
                 </tbody>
+                {totals && (
+                  <tfoot>
+                    <tr className="border-t-2 font-semibold">
+                      <td className="py-2 pr-4">Gesamt</td>
+                      <td className="py-2 pr-4 text-right font-mono">{formatHours(totals.hw)}</td>
+                      <td className="py-2 pr-4 text-right font-mono">{formatHours(totals.ab)}</td>
+                      <td className="py-2 pr-4 text-right font-mono">{formatHours(totals.sonstiges)}</td>
+                      <td className="py-2 pr-4 text-right font-mono">{formatKm(totals.km)}</td>
+                      <td className="py-2 pr-4 text-right font-mono">{formatDays(totals.urlaub)}</td>
+                      <td className="py-2 text-right font-mono">{formatDays(totals.krankheit)}</td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
           )}

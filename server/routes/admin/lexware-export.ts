@@ -2,52 +2,44 @@ import { Router, Request, Response } from "express";
 import { db } from "../../lib/db";
 import { users } from "@shared/schema/users";
 import { employeeTimeEntries } from "@shared/schema/time-tracking";
-import { companySettings } from "@shared/schema/company";
 import { and, gte, lte, sql, inArray, eq } from "drizzle-orm";
 import { asyncHandler } from "../../lib/errors";
 
 const router = Router();
 
-interface ExportRow {
-  year: number;
-  month: number;
-  personalnummer: string;
-  employeeName: string;
-  lohnartnummer: string;
-  lohnartLabel: string;
-  value: string;
-  unit: string;
+interface EmployeeSummaryRow {
+  employeeId: number;
+  nachname: string;
+  vorname: string;
+  stundenHauswirtschaft: number;
+  stundenAlltagsbegleitung: number;
+  stundenSonstiges: number;
+  kilometer: number;
+  tageUrlaub: number;
+  tageKrankheit: number;
 }
 
-async function buildExportData(year: number, month: number): Promise<{ rows: ExportRow[]; warnings: string[] }> {
+router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const year = parseInt(req.query.year as string);
+  const month = parseInt(req.query.month as string);
+
+  if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültiges Jahr oder Monat" });
+    return;
+  }
+
   const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
   const endDate = new Date(year, month, 0).toISOString().split("T")[0];
-
-  const [settings] = await db.select().from(companySettings).limit(1);
-
-  const lohnartMap = {
-    alltagsbegleitung: settings?.lohnartAlltagsbegleitung || "",
-    hauswirtschaft: settings?.lohnartHauswirtschaft || "",
-    urlaub: settings?.lohnartUrlaub || "",
-    krankheit: settings?.lohnartKrankheit || "",
-  };
 
   const employees = await db.select({
     id: users.id,
     vorname: users.vorname,
     nachname: users.nachname,
-    personalnummer: users.personalnummer,
-  }).from(users).where(
-    and(
-      eq(users.isActive, true),
-      sql`${users.personalnummer} IS NOT NULL AND ${users.personalnummer} != ''`
-    )
-  );
-
-  const warnings: string[] = [];
+  }).from(users).where(eq(users.isActive, true));
 
   if (employees.length === 0) {
-    return { rows: [], warnings: ["Keine Mitarbeiter mit Personalnummer gefunden."] };
+    res.json({ rows: [], year, month });
+    return;
   }
 
   const employeeIds = employees.map(e => e.id);
@@ -56,7 +48,8 @@ async function buildExportData(year: number, month: number): Promise<{ rows: Exp
     SELECT 
       a.performed_by_employee_id as employee_id,
       COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes, 0) as minutes,
-      s.lohnart_kategorie
+      s.lohnart_kategorie,
+      s.code
     FROM appointments a
     JOIN appointment_services asvc ON asvc.appointment_id = a.id
     JOIN services s ON s.id = asvc.service_id
@@ -68,15 +61,38 @@ async function buildExportData(year: number, month: number): Promise<{ rows: Exp
       AND s.code NOT IN ('travel_km', 'customer_km')
   `);
 
-  const hoursByEmployee: Record<number, { alltagsbegleitung: number; hauswirtschaft: number }> = {};
+  const hoursByEmployee: Record<number, { alltagsbegleitung: number; hauswirtschaft: number; sonstiges: number }> = {};
 
   for (const row of appointmentServices.rows as any[]) {
     const empId = row.employee_id;
     if (!hoursByEmployee[empId]) {
-      hoursByEmployee[empId] = { alltagsbegleitung: 0, hauswirtschaft: 0 };
+      hoursByEmployee[empId] = { alltagsbegleitung: 0, hauswirtschaft: 0, sonstiges: 0 };
     }
-    const kategorie = row.lohnart_kategorie === "alltagsbegleitung" ? "alltagsbegleitung" : "hauswirtschaft";
-    hoursByEmployee[empId][kategorie] += Number(row.minutes) || 0;
+    if (row.lohnart_kategorie === "alltagsbegleitung") {
+      hoursByEmployee[empId].alltagsbegleitung += Number(row.minutes) || 0;
+    } else if (row.lohnart_kategorie === "hauswirtschaft") {
+      hoursByEmployee[empId].hauswirtschaft += Number(row.minutes) || 0;
+    } else {
+      hoursByEmployee[empId].sonstiges += Number(row.minutes) || 0;
+    }
+  }
+
+  const kmResult = await db.execute(sql`
+    SELECT 
+      performed_by_employee_id as employee_id,
+      COALESCE(SUM(COALESCE(travel_kilometers, 0) + COALESCE(customer_kilometers, 0)), 0) as total_km
+    FROM appointments
+    WHERE status = 'completed'
+      AND deleted_at IS NULL
+      AND date >= ${startDate}
+      AND date <= ${endDate}
+      AND performed_by_employee_id = ANY(${employeeIds})
+    GROUP BY performed_by_employee_id
+  `);
+
+  const kmByEmployee: Record<number, number> = {};
+  for (const row of kmResult.rows as any[]) {
+    kmByEmployee[row.employee_id] = Number(row.total_km) || 0;
   }
 
   const timeEntries = await db.select({
@@ -115,112 +131,37 @@ async function buildExportData(year: number, month: number): Promise<{ rows: Exp
     }
   }
 
-  if (!lohnartMap.alltagsbegleitung) warnings.push("Lohnartnummer für Alltagsbegleitung nicht konfiguriert.");
-  if (!lohnartMap.hauswirtschaft) warnings.push("Lohnartnummer für Hauswirtschaft nicht konfiguriert.");
-  if (!lohnartMap.urlaub) warnings.push("Lohnartnummer für Urlaub nicht konfiguriert.");
-  if (!lohnartMap.krankheit) warnings.push("Lohnartnummer für Krankheit nicht konfiguriert.");
-
-  const rows: ExportRow[] = [];
+  const rows: EmployeeSummaryRow[] = [];
 
   for (const emp of employees) {
-    const empHours = hoursByEmployee[emp.id] || { alltagsbegleitung: 0, hauswirtschaft: 0 };
+    const empHours = hoursByEmployee[emp.id] || { alltagsbegleitung: 0, hauswirtschaft: 0, sonstiges: 0 };
     const ncMinutes = nonClientMinutes[emp.id] || 0;
-    const empName = `${emp.nachname}, ${emp.vorname}`;
 
-    const totalHwMinutes = empHours.hauswirtschaft + ncMinutes;
-    const abMinutes = empHours.alltagsbegleitung;
+    const stundenHW = (empHours.hauswirtschaft + ncMinutes) / 60;
+    const stundenAB = empHours.alltagsbegleitung / 60;
+    const stundenSonstiges = empHours.sonstiges / 60;
+    const km = kmByEmployee[emp.id] || 0;
+    const urlaub = vacationDays[emp.id] || 0;
+    const krankheit = sickDays[emp.id] || 0;
 
-    if (abMinutes > 0 && lohnartMap.alltagsbegleitung) {
+    if (stundenHW > 0 || stundenAB > 0 || stundenSonstiges > 0 || km > 0 || urlaub > 0 || krankheit > 0) {
       rows.push({
-        year, month,
-        personalnummer: emp.personalnummer!,
-        employeeName: empName,
-        lohnartnummer: lohnartMap.alltagsbegleitung,
-        lohnartLabel: "Alltagsbegleitung",
-        value: (abMinutes / 60).toFixed(2).replace(".", ","),
-        unit: "Stunden",
-      });
-    }
-
-    if (totalHwMinutes > 0 && lohnartMap.hauswirtschaft) {
-      rows.push({
-        year, month,
-        personalnummer: emp.personalnummer!,
-        employeeName: empName,
-        lohnartnummer: lohnartMap.hauswirtschaft,
-        lohnartLabel: "Hauswirtschaft",
-        value: (totalHwMinutes / 60).toFixed(2).replace(".", ","),
-        unit: "Stunden",
-      });
-    }
-
-    const vDays = vacationDays[emp.id] || 0;
-    if (vDays > 0 && lohnartMap.urlaub) {
-      rows.push({
-        year, month,
-        personalnummer: emp.personalnummer!,
-        employeeName: empName,
-        lohnartnummer: lohnartMap.urlaub,
-        lohnartLabel: "Urlaub",
-        value: String(vDays).replace(".", ","),
-        unit: "Tage",
-      });
-    }
-
-    const sDays = sickDays[emp.id] || 0;
-    if (sDays > 0 && lohnartMap.krankheit) {
-      rows.push({
-        year, month,
-        personalnummer: emp.personalnummer!,
-        employeeName: empName,
-        lohnartnummer: lohnartMap.krankheit,
-        lohnartLabel: "Krankheit",
-        value: String(sDays).replace(".", ","),
-        unit: "Tage",
+        employeeId: emp.id,
+        nachname: emp.nachname,
+        vorname: emp.vorname,
+        stundenHauswirtschaft: Math.round(stundenHW * 100) / 100,
+        stundenAlltagsbegleitung: Math.round(stundenAB * 100) / 100,
+        stundenSonstiges: Math.round(stundenSonstiges * 100) / 100,
+        kilometer: km,
+        tageUrlaub: urlaub,
+        tageKrankheit: krankheit,
       });
     }
   }
 
-  rows.sort((a, b) => a.personalnummer.localeCompare(b.personalnummer) || a.lohnartnummer.localeCompare(b.lohnartnummer));
+  rows.sort((a, b) => a.nachname.localeCompare(b.nachname) || a.vorname.localeCompare(b.vorname));
 
-  return { rows, warnings };
-}
-
-router.get("/lexware-export", asyncHandler("Lexware-Export konnte nicht erstellt werden", async (req: Request, res: Response) => {
-  const year = parseInt(req.query.year as string);
-  const month = parseInt(req.query.month as string);
-
-  if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültiges Jahr oder Monat" });
-    return;
-  }
-
-  const result = await buildExportData(year, month);
-  res.json({ ...result, year, month });
-}));
-
-router.get("/lexware-export/csv", asyncHandler("CSV-Export fehlgeschlagen", async (req: Request, res: Response) => {
-  const year = parseInt(req.query.year as string);
-  const month = parseInt(req.query.month as string);
-
-  if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültiges Jahr oder Monat" });
-    return;
-  }
-
-  const { rows } = await buildExportData(year, month);
-
-  const csvHeader = "Jahr;Monat;Personalnummer;Lohnartnummer;Wert";
-  const csvRows = rows.map(r =>
-    `${r.year};${String(r.month).padStart(2, "0")};${r.personalnummer};${r.lohnartnummer};${r.value}`
-  );
-
-  const csv = [csvHeader, ...csvRows].join("\r\n");
-  const filename = `Lexware_Lohnexport_${year}_${String(month).padStart(2, "0")}.csv`;
-
-  res.setHeader("Content-Type", "text/csv; charset=utf-8");
-  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-  res.send("\uFEFF" + csv);
+  res.json({ rows, year, month });
 }));
 
 export default router;

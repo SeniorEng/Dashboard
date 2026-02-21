@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Layout } from "@/components/layout";
 import {
   Users, UserCog, ArrowLeft, Contact2, Clock, Settings,
-  Building2, ClipboardList, FileText, Shield, Receipt, Download,
+  Building2, ClipboardList, FileText, Shield, Receipt,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -146,12 +146,12 @@ export default function AdminDashboard() {
             description="Rechnungen erstellen, Leistungsnachweise und Storno"
           />
           <AdminCard
-            href="/admin/lexware-export"
-            testId="card-lexware-export"
-            icon={<Download className={`${iconSize.lg} text-cyan-600`} />}
+            href="/admin/hours-overview"
+            testId="card-hours-overview"
+            icon={<Clock className={`${iconSize.lg} text-cyan-600`} />}
             iconBg="bg-cyan-100"
-            title="Lohnexport"
-            description="CSV-Export für Lexware lohn+gehalt"
+            title="Stundenübersicht"
+            description="Monatliche Stunden, KM, Urlaub und Krankheit je Mitarbeiter"
           />
         </Section>
 
