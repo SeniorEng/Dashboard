@@ -11,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings } from "lucide-react";
+import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, ClipboardList, Building2, Receipt, FileText, UserCog, Link2, Stethoscope, BookOpen, ScrollText, Download } from "lucide-react";
 import { type LayoutVariant, layoutVariants, colors } from "@/design-system";
 
 interface SearchResult {
@@ -163,8 +163,38 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
     }
   };
 
+  const isAdmin = user?.isAdmin ?? false;
+  const isOnAdminPage = location.startsWith("/admin");
+
+  const employeeNavItems = [
+    { href: "/", label: "Termine", icon: Calendar, testId: "appointments", match: (loc: string) => loc === "/" },
+    { href: "/customers", label: "Kunden", icon: Users, testId: "customers", match: (loc: string) => loc === "/customers", badge: hasBirthdayBadge },
+    { href: "/tasks", label: "Aufgaben", icon: CheckSquare, testId: "tasks", match: (loc: string) => loc === "/tasks", badge: hasBadge },
+    { href: "/service-records", label: "Nachweise", icon: FileSignature, testId: "service-records", match: (loc: string) => loc.startsWith("/service-records") },
+    { href: "/my-times", label: "Zeiten", icon: Clock, testId: "my-times", match: (loc: string) => loc === "/my-times" },
+  ];
+
+  const adminNavItems = [
+    { href: "/admin", label: "Übersicht", icon: Shield, testId: "admin-overview", match: (loc: string) => loc === "/admin" },
+    { href: "/admin/users", label: "Mitarbeiter", icon: UserCog, testId: "admin-users", match: (loc: string) => loc === "/admin/users" },
+    { href: "/admin/customer-assignments", label: "Zuordnungen", icon: Link2, testId: "admin-assignments", match: (loc: string) => loc === "/admin/customer-assignments" },
+    { href: "/admin/customers", label: "Kunden", icon: Users, testId: "admin-customers", match: (loc: string) => loc.startsWith("/admin/customers") },
+    { href: "/admin/time-entries", label: "Zeiten", icon: Clock, testId: "admin-times", match: (loc: string) => loc === "/admin/time-entries" },
+    { href: "/admin/insurance-providers", label: "Kostenträger", icon: Building2, testId: "admin-insurance", match: (loc: string) => loc === "/admin/insurance-providers" },
+    { href: "/admin/services", label: "Leistungen", icon: Stethoscope, testId: "admin-services", match: (loc: string) => loc === "/admin/services" },
+    { href: "/admin/billing", label: "Abrechnung", icon: Receipt, testId: "admin-billing", match: (loc: string) => loc === "/admin/billing" },
+    { href: "/admin/documents", label: "Dokumente", icon: FileText, testId: "admin-documents", match: (loc: string) => loc === "/admin/documents" },
+    { href: "/admin/document-types", label: "Dok.-Kategorien", icon: BookOpen, testId: "admin-doc-types", match: (loc: string) => loc === "/admin/document-types" },
+    { href: "/admin/document-templates", label: "Vorlagen", icon: ScrollText, testId: "admin-doc-templates", match: (loc: string) => loc === "/admin/document-templates" },
+    { href: "/admin/lexware-export", label: "Lexware", icon: Download, testId: "admin-lexware", match: (loc: string) => loc === "/admin/lexware-export" },
+    { href: "/admin/settings", label: "Einstellungen", icon: Settings, testId: "admin-settings", match: (loc: string) => loc === "/admin/settings" },
+    { href: "/admin/audit-log", label: "Audit-Log", icon: ClipboardList, testId: "admin-audit-log", match: (loc: string) => loc === "/admin/audit-log" },
+  ];
+
+  const desktopNavItems = isAdmin && isOnAdminPage ? adminNavItems : employeeNavItems;
+
   return (
-    <div className={`min-h-screen ${colors.surface.page} font-sans text-foreground pb-20`}>
+    <div className={`min-h-screen ${colors.surface.page} font-sans text-foreground pb-20 md:pb-0`}>
       {/* Header */}
       <header className="sticky top-0 z-50 w-full bg-white/90 backdrop-blur-none border-b border-border/40 shadow-sm">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
@@ -219,6 +249,57 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
             </div>
           )}
         </div>
+
+        {/* Desktop Navigation */}
+        {isAuthenticated && user && (
+          <nav className="hidden md:block border-t border-border/30 bg-white/80" data-testid="nav-desktop">
+            <div className="container mx-auto px-4">
+              <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
+                {isAdmin && (
+                  <div className="flex items-center mr-2 shrink-0">
+                    <button
+                      onClick={() => navigate(isOnAdminPage ? "/" : "/admin")}
+                      className={`px-3 py-2 text-xs font-semibold rounded-md transition-colors ${
+                        isOnAdminPage
+                          ? "bg-primary/10 text-primary"
+                          : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                      }`}
+                      data-testid="nav-desktop-toggle-admin"
+                    >
+                      {isOnAdminPage ? "Zurück" : "Admin"}
+                    </button>
+                    <div className="w-px h-6 bg-border/60 ml-2" />
+                  </div>
+                )}
+                {desktopNavItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = item.match(location);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors relative shrink-0 ${
+                        isActive
+                          ? "text-primary"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      data-testid={`nav-desktop-${item.testId}`}
+                    >
+                      <Icon className="w-4 h-4" />
+                      {item.label}
+                      {'badge' in item && item.badge && (
+                        <span className="w-2 h-2 bg-red-500 rounded-full" />
+                      )}
+                      {isActive && (
+                        <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-primary rounded-full" />
+                      )}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          </nav>
+        )}
       </header>
 
       {/* Main Content */}
