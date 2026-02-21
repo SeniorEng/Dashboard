@@ -111,6 +111,7 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
   try {
     const companySettings = await storage.getCompanySettings();
     if (companySettings.smtpHost && companySettings.smtpUser) {
+      console.log(`[email] Sende Willkommens-E-Mail an ${result.data.email}...`);
       const welcomeToken = await authService.createWelcomeToken(user.id);
       const baseUrl = `${req.protocol}://${req.get("host")}`;
       const resetUrl = `${baseUrl}/reset-password?token=${welcomeToken}`;
@@ -124,14 +125,18 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
         logoUrl: companySettings.logoUrl,
       });
 
-      await sendEmail(companySettings, {
+      const emailResult = await sendEmail(companySettings, {
         to: result.data.email,
         subject: `Willkommen bei ${companySettings.companyName || "SeniorenEngel"} – Ihr Zugang`,
         html,
       });
+      console.log(`[email] Willkommens-E-Mail erfolgreich gesendet: ${emailResult.messageId}`);
+    } else {
+      console.log("[email] SMTP nicht konfiguriert, keine Willkommens-E-Mail gesendet");
     }
-  } catch (emailError) {
-    console.error("Willkommens-E-Mail konnte nicht gesendet werden:", emailError);
+  } catch (emailError: any) {
+    console.error("[email] Willkommens-E-Mail fehlgeschlagen:", emailError?.message || emailError);
+    console.error("[email] Stack:", emailError?.stack);
   }
 
   const { passwordHash, ...safeUser } = user;
@@ -267,6 +272,49 @@ router.post("/users/:id/reset-password", asyncHandler("Passwort konnte nicht zur
     success: true,
     message: "Passwort wurde zurückgesetzt",
   });
+}));
+
+router.post("/users/:id/resend-welcome", asyncHandler("Willkommens-E-Mail konnte nicht erneut gesendet werden", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Benutzer-ID" });
+    return;
+  }
+
+  const user = await authService.getUser(id);
+  if (!user) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Benutzer nicht gefunden" });
+    return;
+  }
+
+  const companySettings = await storage.getCompanySettings();
+  if (!companySettings.smtpHost || !companySettings.smtpUser) {
+    res.status(400).json({ error: "SMTP_NOT_CONFIGURED", message: "E-Mail-Versand ist nicht konfiguriert" });
+    return;
+  }
+
+  const welcomeToken = await authService.createWelcomeToken(user.id);
+  const baseUrl = `${req.protocol}://${req.get("host")}`;
+  const resetUrl = `${baseUrl}/reset-password?token=${welcomeToken}`;
+
+  const html = buildWelcomeEmailHtml({
+    vorname: user.vorname,
+    nachname: user.nachname,
+    email: user.email,
+    companyName: companySettings.companyName || "SeniorenEngel",
+    resetUrl,
+    logoUrl: companySettings.logoUrl,
+  });
+
+  const emailResult = await sendEmail(companySettings, {
+    to: user.email,
+    subject: `Willkommen bei ${companySettings.companyName || "SeniorenEngel"} – Ihr Zugang`,
+    html,
+  });
+
+  console.log(`[email] Willkommens-E-Mail erneut gesendet an ${user.email}: ${emailResult.messageId}`);
+
+  res.json({ success: true, message: "Willkommens-E-Mail wurde erneut gesendet" });
 }));
 
 router.post("/users/:id/deactivate", asyncHandler("Benutzer konnte nicht deaktiviert werden", async (req: Request, res: Response) => {

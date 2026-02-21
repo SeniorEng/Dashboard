@@ -34,6 +34,7 @@ import {
   Trash2,
   Search,
   ShieldOff,
+  Mail,
 } from "lucide-react";
 import { api, unwrapResult } from "@/lib/api/client";
 import {
@@ -126,6 +127,19 @@ export default function AdminUsers() {
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const resendWelcomeMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const result = await api.post(`/admin/users/${id}/resend-welcome`, {});
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      toast({ title: "Willkommens-E-Mail wurde erneut gesendet" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "E-Mail konnte nicht gesendet werden", description: error.message, variant: "destructive" });
     },
   });
 
@@ -345,8 +359,20 @@ export default function AdminUsers() {
                             className="h-8 w-8 p-0"
                             onClick={() => setResetPasswordUser(user)}
                             data-testid={`button-reset-password-${user.id}`}
+                            title="Passwort zurücksetzen"
                           >
                             <Key className={`${iconSize.sm} text-gray-600`} />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => resendWelcomeMutation.mutate(user.id)}
+                            disabled={resendWelcomeMutation.isPending}
+                            data-testid={`button-resend-welcome-${user.id}`}
+                            title="Willkommens-E-Mail erneut senden"
+                          >
+                            <Mail className={`${iconSize.sm} text-gray-600`} />
                           </Button>
                           <Button
                             variant="ghost"
