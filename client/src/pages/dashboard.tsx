@@ -7,6 +7,7 @@ import { format, addDays, startOfWeek, subWeeks, isSameDay } from "date-fns";
 import { de } from "date-fns/locale";
 import { Plus, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { parseLocalDate } from "@shared/utils/datetime";
+import { getHolidayMap } from "@shared/utils/holidays";
 import { iconSize } from "@/design-system";
 
 const WEEKDAY_NAMES_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
@@ -18,15 +19,20 @@ interface DayButtonProps {
   isSelected: boolean;
   isDayToday: boolean;
   appointmentCount: number;
+  holidayName?: string;
   onSelect: (day: Date) => void;
 }
 
-function DayButton({ dayStr, day, index, isSelected, isDayToday, appointmentCount, onSelect }: DayButtonProps) {
+function DayButton({ dayStr, day, index, isSelected, isDayToday, appointmentCount, holidayName, onSelect }: DayButtonProps) {
   const hasAppointments = appointmentCount > 0;
 
   let bgClass: string;
   if (isSelected) {
-    bgClass = "bg-primary text-primary-foreground shadow-md";
+    bgClass = holidayName
+      ? "bg-red-600 text-white shadow-md"
+      : "bg-primary text-primary-foreground shadow-md";
+  } else if (holidayName) {
+    bgClass = "bg-red-50 text-red-700 ring-1 ring-red-200 hover:bg-red-100";
   } else if (isDayToday) {
     bgClass = hasAppointments ? "bg-primary/15 text-primary ring-1 ring-primary/30" : "bg-primary/10 text-primary hover:bg-primary/20";
   } else if (hasAppointments) {
@@ -40,18 +46,23 @@ function DayButton({ dayStr, day, index, isSelected, isDayToday, appointmentCoun
       onClick={() => onSelect(day)}
       className={`relative flex flex-col items-center justify-center flex-1 max-w-[44px] h-14 rounded-lg transition-all ${bgClass}`}
       data-testid={`weekday-${dayStr}`}
+      title={holidayName || undefined}
     >
       <span className="text-[10px] font-medium uppercase tracking-wide opacity-70">
         {WEEKDAY_NAMES_SHORT[index]}
       </span>
-      <span className={`text-base font-semibold ${isDayToday && !isSelected ? "text-primary" : ""}`}>
+      <span className={`text-base font-semibold ${isDayToday && !isSelected && !holidayName ? "text-primary" : ""}`}>
         {format(day, "d")}
       </span>
-      {hasAppointments && (
-        <span className={`text-[9px] font-semibold leading-none ${isSelected ? "text-primary-foreground/80" : "text-primary"}`}>
+      {hasAppointments ? (
+        <span className={`text-[9px] font-semibold leading-none ${isSelected ? "text-white/80" : holidayName ? "text-red-600" : "text-primary"}`}>
           {appointmentCount === 1 ? "1" : appointmentCount}
         </span>
-      )}
+      ) : holidayName ? (
+        <span className={`text-[8px] font-medium leading-none ${isSelected ? "text-white/70" : "text-red-400"}`}>
+          ●
+        </span>
+      ) : null}
     </button>
   );
 }
@@ -87,6 +98,18 @@ export default function Dashboard() {
   
   const { data: weekAppointmentCounts } = useWeekAppointmentCounts(weekDateStrings);
 
+  const holidayMap = useMemo(() => {
+    const years = new Set(weekDays.map(d => d.getFullYear()));
+    const map = new Map<string, string>();
+    for (const year of years) {
+      const yearMap = getHolidayMap(year);
+      yearMap.forEach((v, k) => map.set(k, v));
+    }
+    return map;
+  }, [weekDays]);
+
+  const selectedHoliday = holidayMap.get(dateString);
+
   const goToPreviousWeek = () => setSelectedDate(prev => subWeeks(prev, 1));
   const goToNextWeek = () => setSelectedDate(prev => {
     const weekStart = startOfWeek(prev, { weekStartsOn: 1 });
@@ -115,6 +138,7 @@ export default function Dashboard() {
               const isSelected = dayStr === dateString;
               const isDayToday = isSameDay(day, today);
               const appointmentCount = weekAppointmentCounts?.[dayStr] || 0;
+              const holidayName = holidayMap.get(dayStr);
               
               return (
                 <DayButton
@@ -125,6 +149,7 @@ export default function Dashboard() {
                   isSelected={isSelected}
                   isDayToday={isDayToday}
                   appointmentCount={appointmentCount}
+                  holidayName={holidayName}
                   onSelect={setSelectedDate}
                 />
               );
@@ -147,11 +172,18 @@ export default function Dashboard() {
 
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-foreground/90" data-testid="text-date">
-            {isToday 
-              ? `Heute, ${format(selectedDate, "d. MMMM", { locale: de })}` 
-              : format(selectedDate, "EEEE, d. MMMM", { locale: de })}
-          </h2>
+          <div>
+            <h2 className="text-lg font-semibold text-foreground/90" data-testid="text-date">
+              {isToday 
+                ? `Heute, ${format(selectedDate, "d. MMMM", { locale: de })}` 
+                : format(selectedDate, "EEEE, d. MMMM", { locale: de })}
+            </h2>
+            {selectedHoliday && (
+              <p className="text-sm font-medium text-red-600" data-testid="text-holiday">
+                {selectedHoliday}
+              </p>
+            )}
+          </div>
           <Link href="/new-appointment">
             <Button size="sm" className="shadow-lg shadow-primary/20" data-testid="button-new-appointment">
               <Plus className={`${iconSize.sm} mr-1`} /> Neuer Termin

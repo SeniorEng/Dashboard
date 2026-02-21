@@ -14,6 +14,7 @@ import settingsRouter from "./settings";
 import profileRouter from "./profile";
 import companyRouter from "./company";
 import billingRouter from "./billing";
+import holidaysRouter from "./holidays";
 import { csrfProtection, csrfTokenHandler } from "../middleware/csrf";
 import { authMiddleware } from "../middleware/auth";
 import { cacheHeaders } from "../middleware/cache-headers";
@@ -44,5 +45,6 @@ router.use("/settings", settingsRouter);
 router.use("/profile", profileRouter);
 router.use("/company-settings", companyRouter);
 router.use("/billing", billingRouter);
+router.use("/holidays", holidaysRouter);
 
 export default router;
