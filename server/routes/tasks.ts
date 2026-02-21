@@ -55,7 +55,7 @@ router.get("/badge-count", requireAuth, asyncHandler("Badge-Anzahl konnte nicht 
 
   const [userTaskCount, undocumentedAppts, openTasks, pendingRecords, monthClosing] = await Promise.all([
     getOpenTaskCount(userId),
-    storage.getUndocumentedAppointments(today, customerIds).then(a => a.length),
+    (customerIds && customerIds.length === 0) ? Promise.resolve(0) : storage.getUndocumentedAppointments(today, customerIds).then(a => a.length),
     timeTrackingStorage.getOpenTasks(userId).then(t => t.daysWithMissingBreaks?.length || 0),
     storage.getPendingServiceRecords(userId).then(r => r.length),
     timeTrackingStorage.getMonthClosing(userId, prevYear, prevMonth),

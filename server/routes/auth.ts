@@ -97,7 +97,7 @@ router.get("/me", asyncHandler("Benutzerinformationen konnten nicht geladen werd
         const customerIds = isAdmin ? undefined : await storage.getAssignedCustomerIds(userId);
         const [userTaskCount, undocumentedAppts, openTasks, pendingRecords] = await Promise.all([
           getOpenTaskCount(userId),
-          storage.getUndocumentedAppointments(today, customerIds).then(a => a.length),
+          (customerIds && customerIds.length === 0) ? Promise.resolve(0) : storage.getUndocumentedAppointments(today, customerIds).then(a => a.length),
           timeTrackingStorage.getOpenTasks(userId).then(t => t.daysWithMissingBreaks?.length || 0),
           storage.getPendingServiceRecords(userId).then(r => r.length),
         ]);

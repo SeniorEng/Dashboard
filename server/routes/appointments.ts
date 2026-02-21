@@ -57,6 +57,9 @@ router.get("/", asyncHandler(ErrorMessages.fetchAppointmentsFailed, async (req, 
   
   if (!user.isAdmin) {
     customerIds = await storage.getAssignedCustomerIds(user.id);
+    if (customerIds.length === 0) {
+      return res.json([]);
+    }
   }
   
   if (customerId) {
@@ -90,6 +93,10 @@ router.get("/counts", asyncHandler("Fehler beim Laden der Terminzähler", async 
     ? undefined
     : await storage.getAssignedCustomerIds(user.id);
 
+  if (customerIds && customerIds.length === 0) {
+    return res.json({});
+  }
+
   const counts = await storage.getAppointmentCountsByDates(dates, customerIds);
   res.json(counts);
 }));
@@ -102,6 +109,10 @@ router.get("/undocumented", asyncHandler("Fehler beim Laden der offenen Dokument
     ? undefined 
     : await storage.getAssignedCustomerIds(user.id);
   
+  if (customerIds && customerIds.length === 0) {
+    return res.json([]);
+  }
+
   const appointments = await storage.getUndocumentedAppointments(today, customerIds);
   
   res.json(appointments);

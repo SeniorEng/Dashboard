@@ -33,6 +33,10 @@ searchRouter.get("/", async (req: Request, res: Response) => {
       ? undefined 
       : await storage.getAssignedCustomerIds(user.id);
 
+    if (assignedCustomerIds && assignedCustomerIds.length === 0) {
+      return res.json([]);
+    }
+
     const matchingCustomers = await storage.searchCustomers({
       query,
       assignedCustomerIds,

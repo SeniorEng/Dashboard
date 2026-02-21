@@ -378,6 +378,9 @@ export class DatabaseStorage implements IStorage {
 
   async searchCustomers(options: SearchOptions): Promise<Customer[]> {
     const { query, assignedCustomerIds, limit = 5 } = options;
+    if (assignedCustomerIds && assignedCustomerIds.length === 0) {
+      return [];
+    }
     const searchTerm = `%${query}%`;
     
     const conditions = [
@@ -388,7 +391,7 @@ export class DatabaseStorage implements IStorage {
       )
     ];
     
-    if (assignedCustomerIds && assignedCustomerIds.length > 0) {
+    if (assignedCustomerIds) {
       conditions.push(inArray(customers.id, assignedCustomerIds));
     }
     
@@ -401,6 +404,9 @@ export class DatabaseStorage implements IStorage {
 
   async searchAppointmentsWithCustomers(options: SearchOptions): Promise<AppointmentWithCustomer[]> {
     const { query, assignedCustomerIds, limit = 5 } = options;
+    if (assignedCustomerIds && assignedCustomerIds.length === 0) {
+      return [];
+    }
     const searchTerm = `%${query}%`;
     
     const conditions = [
@@ -411,7 +417,7 @@ export class DatabaseStorage implements IStorage {
       )
     ];
     
-    if (assignedCustomerIds && assignedCustomerIds.length > 0) {
+    if (assignedCustomerIds) {
       conditions.push(inArray(appointments.customerId, assignedCustomerIds));
     }
     
@@ -448,9 +454,10 @@ export class DatabaseStorage implements IStorage {
 
   async getAppointmentCountsByDates(dates: string[], customerIds?: number[]): Promise<Record<string, number>> {
     if (dates.length === 0) return {};
+    if (customerIds && customerIds.length === 0) return {};
     
     const conditions = [inArray(appointments.date, dates), isNull(appointments.deletedAt)];
-    if (customerIds && customerIds.length > 0) {
+    if (customerIds) {
       conditions.push(inArray(appointments.customerId, customerIds));
     }
     
@@ -499,11 +506,14 @@ export class DatabaseStorage implements IStorage {
 
   // Appointments - With Customer (single query with LEFT JOIN for performance)
   async getAppointmentsWithCustomers(date?: string, customerIds?: number[]): Promise<AppointmentWithCustomer[]> {
+    if (customerIds && customerIds.length === 0) {
+      return [];
+    }
     const conditions = [isNull(appointments.deletedAt)];
     if (date) {
       conditions.push(eq(appointments.date, date));
     }
-    if (customerIds && customerIds.length > 0) {
+    if (customerIds) {
       conditions.push(inArray(appointments.customerId, customerIds));
     }
     
@@ -561,13 +571,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUndocumentedAppointments(beforeDate: string, customerIds?: number[]): Promise<AppointmentWithCustomer[]> {
+    if (customerIds && customerIds.length === 0) {
+      return [];
+    }
     const conditions = [
       lt(appointments.date, beforeDate),
       ne(appointments.status, "completed"),
       isNull(appointments.deletedAt)
     ];
     
-    if (customerIds && customerIds.length > 0) {
+    if (customerIds) {
       conditions.push(inArray(appointments.customerId, customerIds));
     }
     
