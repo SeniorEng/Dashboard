@@ -4,6 +4,7 @@ import { StatusBadge } from "@/components/patterns/status-badge";
 import { Calendar, Plus, Car, Users, Pencil, Trash2 } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { formatDateForDisplay } from "@shared/utils/datetime";
+import { isHoliday as checkHoliday } from "@shared/utils/holidays";
 import { TIME_ENTRY_TYPE_CONFIG, formatMinutesToHours, isEntryLocked } from "../constants";
 import type { TimeEntryType, AppointmentWithCustomerName } from "@/lib/api/types";
 
@@ -87,6 +88,7 @@ export function DayDetailPanel({
   isMonthLocked = false,
 }: DayDetailPanelProps) {
   const hasDayItems = entries.length > 0 || appointments.length > 0;
+  const holidayInfo = selectedDate ? checkHoliday(selectedDate) : null;
 
   return (
     <Card>
@@ -102,6 +104,11 @@ export function DayDetailPanel({
             : "Tag auswählen"
           }
         </CardTitle>
+        {holidayInfo && (
+          <p className="text-sm font-medium text-red-600" data-testid="text-day-holiday">
+            Feiertag: {holidayInfo}
+          </p>
+        )}
       </CardHeader>
       <CardContent>
         {!selectedDate ? (
