@@ -137,9 +137,9 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
     const empHours = hoursByEmployee[emp.id] || { alltagsbegleitung: 0, hauswirtschaft: 0, sonstiges: 0 };
     const ncMinutes = nonClientMinutes[emp.id] || 0;
 
-    const stundenHW = (empHours.hauswirtschaft + ncMinutes) / 60;
+    const stundenHW = empHours.hauswirtschaft / 60;
     const stundenAB = empHours.alltagsbegleitung / 60;
-    const stundenSonstiges = empHours.sonstiges / 60;
+    const stundenSonstiges = (empHours.sonstiges + ncMinutes) / 60;
     const km = kmByEmployee[emp.id] || 0;
     const urlaub = vacationDays[emp.id] || 0;
     const krankheit = sickDays[emp.id] || 0;
