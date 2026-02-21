@@ -1,11 +1,11 @@
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { SignaturePad } from "@/components/ui/signature-pad";
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
-import { FileText, Check, AlertCircle, Loader2, AlertTriangle, X } from "lucide-react";
+import { FileText, Check, AlertCircle, Loader2, AlertTriangle } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { BILLING_TYPE_LABELS, type BillingType } from "@shared/domain/customers";
 import type { CustomerFormData, ContactFormData } from "./customer-types";
@@ -128,194 +128,6 @@ ${html}
   }
 }
 
-function SignatureDialog({
-  slug,
-  docName,
-  onSave,
-  onClose,
-  existingSignature,
-}: {
-  slug: string;
-  docName: string;
-  onSave: (data: string) => void;
-  onClose: () => void;
-  existingSignature?: string;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [hasContent, setHasContent] = useState(!!existingSignature);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const rect = container.getBoundingClientRect();
-    canvas.width = rect.width * 2;
-    canvas.height = rect.height * 2;
-    ctx.scale(2, 2);
-    ctx.strokeStyle = "#1a1a1a";
-    ctx.lineWidth = 2.5;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-
-    if (existingSignature) {
-      const img = new Image();
-      img.onload = () => {
-        ctx.drawImage(img, 0, 0, rect.width, rect.height);
-      };
-      img.src = existingSignature;
-    }
-  }, []);
-
-  const getPos = useCallback((e: React.TouchEvent | React.MouseEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    if ("touches" in e) {
-      return {
-        x: e.touches[0].clientX - rect.left,
-        y: e.touches[0].clientY - rect.top,
-      };
-    }
-    return {
-      x: (e as React.MouseEvent).clientX - rect.left,
-      y: (e as React.MouseEvent).clientY - rect.top,
-    };
-  }, []);
-
-  const startDrawing = useCallback((e: React.TouchEvent | React.MouseEvent) => {
-    e.preventDefault();
-    const ctx = canvasRef.current?.getContext("2d");
-    if (!ctx) return;
-    const pos = getPos(e);
-    ctx.beginPath();
-    ctx.moveTo(pos.x, pos.y);
-    setIsDrawing(true);
-    setHasContent(true);
-  }, [getPos]);
-
-  const draw = useCallback((e: React.TouchEvent | React.MouseEvent) => {
-    if (!isDrawing) return;
-    e.preventDefault();
-    const ctx = canvasRef.current?.getContext("2d");
-    if (!ctx) return;
-    const pos = getPos(e);
-    ctx.lineTo(pos.x, pos.y);
-    ctx.stroke();
-  }, [isDrawing, getPos]);
-
-  const stopDrawing = useCallback(() => {
-    if (!isDrawing) return;
-    setIsDrawing(false);
-  }, [isDrawing]);
-
-  const clearCanvas = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    setHasContent(false);
-  }, []);
-
-  const handleConfirm = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (canvas && hasContent) {
-      onSave(canvas.toDataURL("image/png"));
-    }
-    onClose();
-  }, [hasContent, onSave, onClose]);
-
-  const handleDelete = useCallback(() => {
-    onSave("");
-    onClose();
-  }, [onSave, onClose]);
-
-  return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent
-        className="fixed inset-0 flex flex-col items-stretch justify-center w-full max-w-lg mx-auto p-0 gap-0 bg-white rounded-none sm:rounded-xl"
-        style={{ maxHeight: "100dvh" }}
-        aria-describedby={undefined}
-      >
-        <DialogTitle className="sr-only">Unterschrift für {docName}</DialogTitle>
-        <div className="flex items-center justify-between px-4 py-3 border-b">
-          <h3 className="font-semibold text-gray-900 text-base">Unterschrift: {docName}</h3>
-          <Button variant="ghost" size="icon" onClick={onClose} className="min-h-[44px] min-w-[44px]" aria-label="Schließen" data-testid="button-close-signature-dialog">
-            <X className={iconSize.md} />
-          </Button>
-        </div>
-
-        <div className="flex-1 flex flex-col items-center justify-center p-4">
-          <p className="text-sm text-gray-500 mb-3">Bitte hier unterschreiben</p>
-          <div
-            ref={containerRef}
-            className="relative w-full border-2 border-dashed border-gray-300 rounded-lg bg-white"
-            style={{ height: "200px" }}
-          >
-            <canvas
-              ref={canvasRef}
-              className="w-full h-full touch-none cursor-crosshair"
-              role="img"
-              aria-label={`Unterschriftsfeld für ${slug}`}
-              tabIndex={0}
-              onMouseDown={startDrawing}
-              onMouseMove={draw}
-              onMouseUp={stopDrawing}
-              onMouseLeave={stopDrawing}
-              onTouchStart={startDrawing}
-              onTouchMove={draw}
-              onTouchEnd={stopDrawing}
-              data-testid={`canvas-signature-${slug}`}
-            />
-            {!hasContent && (
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <p className="text-gray-400 text-lg">Hier unterschreiben</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="flex gap-3 px-4 py-3 border-t">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={clearCanvas}
-            className="min-h-[44px]"
-            data-testid={`button-clear-signature-${slug}`}
-          >
-            Löschen
-          </Button>
-          {existingSignature && (
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={handleDelete}
-              className="min-h-[44px]"
-              data-testid={`button-delete-signature-${slug}`}
-            >
-              Entfernen
-            </Button>
-          )}
-          <div className="flex-1" />
-          <Button
-            type="button"
-            className="bg-teal-600 hover:bg-teal-700 min-h-[44px] px-6"
-            onClick={handleConfirm}
-            disabled={!hasContent}
-            data-testid={`button-confirm-signature-${slug}`}
-          >
-            Übernehmen
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 export function SignaturesStep({ billingType, customerSignatures, onSignatureChange, formData }: SignaturesStepProps) {
   const { data: templates, isLoading, isError, refetch } = useQuery({
@@ -416,7 +228,7 @@ function DocumentSignatureCard({
   onSignatureChange: (data: string) => void;
   formData?: CustomerFormDataForPreview;
 }) {
-  const [showSignatureDialog, setShowSignatureDialog] = useState(false);
+  const [showSignaturePad, setShowSignaturePad] = useState(false);
   const isSigned = !!signature;
 
   const handlePreview = useCallback(() => {
@@ -425,82 +237,83 @@ function DocumentSignatureCard({
     openPrintPreview(rendered, doc.name);
   }, [doc, formData, signature]);
 
-  return (
-    <>
-      <Card
-        className={`transition-colors ${isSigned ? "border-green-200 bg-green-50/30" : "border-gray-200"}`}
-        data-testid={`signature-doc-${doc.slug}`}
-      >
-        <CardContent className="p-4">
-          <div className="flex items-start gap-3">
-            <div
-              className={`flex items-center justify-center w-10 h-10 rounded-full shrink-0 ${
-                isSigned ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"
-              }`}
-              aria-label={isSigned ? "Unterschrieben" : "Noch nicht unterschrieben"}
-            >
-              {isSigned ? <Check className={iconSize.md} /> : <FileText className={iconSize.md} />}
-            </div>
-            <div className="flex-1 min-w-0">
-              <h4 className="font-medium text-gray-900">{doc.name}</h4>
-              <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                <Badge
-                  variant={doc.requirement === "pflicht" ? "destructive" : "secondary"}
-                  className="text-[10px] px-1.5 py-0.5 leading-none"
-                >
-                  {doc.requirement === "pflicht" ? "Pflicht" : "Optional"}
-                </Badge>
-                {isSigned && (
-                  <Badge variant="default" className="text-[10px] px-1.5 py-0.5 leading-none bg-green-600">
-                    Unterschrieben
-                  </Badge>
-                )}
-              </div>
-              {doc.description && (
-                <p className="text-sm text-gray-500 mt-1.5">{doc.description}</p>
-              )}
+  const handleSignatureSave = useCallback((signatureData: string) => {
+    onSignatureChange(signatureData);
+    setShowSignaturePad(false);
+  }, [onSignatureChange]);
 
-              <div className="space-y-2 mt-3">
+  return (
+    <Card
+      className={`transition-colors ${isSigned ? "border-green-200 bg-green-50/30" : "border-gray-200"}`}
+      data-testid={`signature-doc-${doc.slug}`}
+    >
+      <CardContent className="p-4">
+        <div className="flex items-start gap-3">
+          <div
+            className={`flex items-center justify-center w-10 h-10 rounded-full shrink-0 ${
+              isSigned ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"
+            }`}
+            aria-label={isSigned ? "Unterschrieben" : "Noch nicht unterschrieben"}
+          >
+            {isSigned ? <Check className={iconSize.md} /> : <FileText className={iconSize.md} />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <h4 className="font-medium text-gray-900">{doc.name}</h4>
+            <div className="flex flex-wrap items-center gap-1.5 mt-1">
+              <Badge
+                variant={doc.requirement === "pflicht" ? "destructive" : "secondary"}
+                className="text-[10px] px-1.5 py-0.5 leading-none"
+              >
+                {doc.requirement === "pflicht" ? "Pflicht" : "Optional"}
+              </Badge>
+              {isSigned && (
+                <Badge variant="default" className="text-[10px] px-1.5 py-0.5 leading-none bg-green-600">
+                  Unterschrieben
+                </Badge>
+              )}
+            </div>
+            {doc.description && (
+              <p className="text-sm text-gray-500 mt-1.5">{doc.description}</p>
+            )}
+
+            <div className="space-y-2 mt-3">
+              {showSignaturePad ? (
+                <SignaturePad
+                  title={`Unterschrift: ${doc.name}`}
+                  onSave={handleSignatureSave}
+                  onCancel={() => setShowSignaturePad(false)}
+                />
+              ) : (
                 <div>
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => setShowSignatureDialog(true)}
+                    onClick={() => setShowSignaturePad(true)}
                     className="text-sm min-h-[44px]"
                     data-testid={`button-sign-${doc.slug}`}
                   >
                     {isSigned ? "Unterschrift ändern" : "Unterschreiben"}
                   </Button>
                 </div>
-                {isSigned && formData && doc.htmlContent && (
-                  <div className="pt-1">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={handlePreview}
-                      className="text-sm min-h-[44px] w-full justify-center text-teal-700 border-teal-300 bg-teal-50 hover:bg-teal-100"
-                      data-testid={`button-preview-${doc.slug}`}
-                    >
-                      <FileText className={`${iconSize.sm} mr-1.5`} />
-                      Vorschau & Drucken
-                    </Button>
-                  </div>
-                )}
-              </div>
+              )}
+              {isSigned && formData && doc.htmlContent && (
+                <div className="pt-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handlePreview}
+                    className="text-sm min-h-[44px] w-full justify-center text-teal-700 border-teal-300 bg-teal-50 hover:bg-teal-100"
+                    data-testid={`button-preview-${doc.slug}`}
+                  >
+                    <FileText className={`${iconSize.sm} mr-1.5`} />
+                    Vorschau & Drucken
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
-        </CardContent>
-      </Card>
-
-      {showSignatureDialog && (
-        <SignatureDialog
-          slug={doc.slug}
-          docName={doc.name}
-          onSave={onSignatureChange}
-          onClose={() => setShowSignatureDialog(false)}
-          existingSignature={signature}
-        />
-      )}
-    </>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

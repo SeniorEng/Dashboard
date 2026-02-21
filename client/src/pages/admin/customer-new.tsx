@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Layout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
 import { useInsuranceProviders, useCreateCustomer } from "@/features/customers";
+import { api } from "@/lib/api";
 import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
 import { todayISO } from "@shared/utils/datetime";
 import {
@@ -248,8 +249,7 @@ export default function AdminCustomerNew() {
         const backupId = formData.backupEmployeeId ? parseInt(formData.backupEmployeeId) : null;
         if (primaryId || backupId) {
           try {
-            const { apiRequest } = await import("@/lib/queryClient");
-            await apiRequest("PATCH", `/api/admin/customers/${customer.id}/assign`, {
+            await api.patch(`/admin/customers/${customer.id}/assign`, {
               primaryEmployeeId: primaryId,
               backupEmployeeId: backupId,
             });
@@ -262,8 +262,7 @@ export default function AdminCustomerNew() {
         const signedSlugs = Object.entries(customerSignatures).filter(([, data]) => data && data.startsWith("data:image/"));
         if (signedSlugs.length > 0) {
           try {
-            const { apiRequest } = await import("@/lib/queryClient");
-            await apiRequest("POST", `/api/customers/${customer.id}/signatures`, {
+            await api.post(`/customers/${customer.id}/signatures`, {
               signatures: signedSlugs.map(([slug, signatureData]) => ({
                 templateSlug: slug,
                 customerSignatureData: signatureData,
@@ -277,8 +276,7 @@ export default function AdminCustomerNew() {
 
         if (formData.documentDeliveryMethod) {
           try {
-            const { apiRequest } = await import("@/lib/queryClient");
-            await apiRequest("POST", `/api/admin/document-delivery/send-for-customer/${customer.id}`, {});
+            await api.post(`/admin/document-delivery/send-for-customer/${customer.id}`, {});
           } catch (deliveryError) {
             console.error("Dokumentenversand fehlgeschlagen:", deliveryError);
             warnings.push("Dokumentenversand konnte nicht ausgelöst werden");
@@ -438,10 +436,12 @@ export default function AdminCustomerNew() {
       });
       return;
     }
-    if (!validateStepById("matching")) {
+    const matchingIdx = findStepIndex("matching");
+    if (matchingIdx >= 0 && !validateStepById("matching")) {
+      setCurrentStep(matchingIdx);
       toast({
-        title: "Hauptansprechpartner fehlt",
-        description: "Bitte wählen Sie einen Hauptansprechpartner aus.",
+        title: "Mitarbeiterzuordnung fehlt",
+        description: "Bitte wählen Sie einen Hauptmitarbeiter aus.",
         variant: "destructive",
       });
       return;
