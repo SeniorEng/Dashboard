@@ -137,7 +137,7 @@ function generateSlug(name: string): string {
     .replace(/^_|_$/g, "");
 }
 
-export default function AdminDocumentTemplates() {
+export function DocumentTemplatesContent() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [editingTemplate, setEditingTemplate] = useState<TemplateData | null>(null);
@@ -373,16 +373,8 @@ export default function AdminDocumentTemplates() {
   const isDialogOpen = isCreateMode || !!editingTemplate;
 
   return (
-    <Layout variant="admin">
-          <div className="flex items-center justify-between gap-2 mb-6">
-            <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-              <Link href="/admin">
-                <Button variant="ghost" size="icon" aria-label="Zurück" data-testid="button-back">
-                  <ArrowLeft className={iconSize.md} />
-                </Button>
-              </Link>
-              <h1 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">Vertragsvorlagen</h1>
-            </div>
+    <>
+          <div className="flex items-center justify-end gap-2 mb-4">
             <Button
               className="bg-teal-600 hover:bg-teal-700 shrink-0"
               onClick={handleOpenCreate}
@@ -824,6 +816,14 @@ export default function AdminDocumentTemplates() {
           </div>
         </DialogContent>
       </Dialog>
+    </>
+  );
+}
+
+export default function AdminDocumentTemplates() {
+  return (
+    <Layout variant="admin">
+      <DocumentTemplatesContent />
     </Layout>
   );
 }

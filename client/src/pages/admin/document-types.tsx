@@ -86,7 +86,7 @@ function toPayload(form: DocTypeFormData) {
   };
 }
 
-export default function AdminDocumentTypes() {
+export function DocumentTypesContent() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -250,19 +250,11 @@ export default function AdminDocumentTypes() {
   );
 
   return (
-    <Layout variant="admin">
-          <div className="flex items-center justify-between gap-2 mb-6">
-            <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-              <Link href="/admin">
-                <Button variant="ghost" size="icon" aria-label="Zurück" data-testid="button-back">
-                  <ArrowLeft className={iconSize.md} />
-                </Button>
-              </Link>
-              <h1 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">Dokumententypen</h1>
-            </div>
+    <>
+          <div className="flex items-center justify-between gap-2 mb-4">
             <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
               <DialogTrigger asChild>
-                <Button className="bg-teal-600 hover:bg-teal-700 shrink-0" onClick={handleOpenCreate} data-testid="button-create-doctype">
+                <Button className="bg-teal-600 hover:bg-teal-700 shrink-0 ml-auto" onClick={handleOpenCreate} data-testid="button-create-doctype">
                   <Plus className={`${iconSize.sm} sm:mr-2`} />
                   <span className="hidden sm:inline">Neuer Typ</span>
                   <span className="sm:hidden">Neu</span>
@@ -375,6 +367,14 @@ export default function AdminDocumentTypes() {
           {formContent}
         </DialogContent>
       </Dialog>
+    </>
+  );
+}
+
+export default function AdminDocumentTypes() {
+  return (
+    <Layout variant="admin">
+      <DocumentTypesContent />
     </Layout>
   );
 }

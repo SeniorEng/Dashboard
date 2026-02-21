@@ -3,243 +3,177 @@ import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/ca
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { Layout } from "@/components/layout";
-import { Users, UserCog, ArrowLeft, Contact2, Clock, Settings, Building2, ClipboardList, FileCheck2, Shield, FileText, Receipt, Download } from "lucide-react";
+import {
+  Users, UserCog, ArrowLeft, Contact2, Clock, Settings,
+  Building2, ClipboardList, FileText, Shield, Receipt, Download,
+} from "lucide-react";
 import { iconSize } from "@/design-system";
+
+interface AdminCardProps {
+  href: string;
+  testId: string;
+  icon: React.ReactNode;
+  iconBg: string;
+  title: string;
+  description: string;
+}
+
+function AdminCard({ href, testId, icon, iconBg, title, description }: AdminCardProps) {
+  return (
+    <Link href={href} className="block h-full">
+      <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid={testId}>
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className={`p-2 rounded-lg ${iconBg}`}>
+              {icon}
+            </div>
+            <div>
+              <CardTitle>{title}</CardTitle>
+              <CardDescription>{description}</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
+    </Link>
+  );
+}
+
+interface SectionProps {
+  title: string;
+  children: React.ReactNode;
+}
+
+function Section({ title, children }: SectionProps) {
+  return (
+    <div className="space-y-3">
+      <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider" data-testid={`section-${title.toLowerCase().replace(/\s+/g, "-")}`}>
+        {title}
+      </h2>
+      <div className="grid gap-4 md:grid-cols-2 auto-rows-fr">
+        {children}
+      </div>
+    </div>
+  );
+}
 
 export default function AdminDashboard() {
   const { user } = useAuth();
 
   return (
     <Layout variant="admin">
-          <div className="flex items-center gap-4 mb-6">
-            <Link href="/">
-              <Button variant="ghost" size="icon" aria-label="Zurück" data-testid="button-back">
-                <ArrowLeft className={iconSize.md} />
-              </Button>
-            </Link>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Administration</h1>
-              <p className="text-gray-600">Willkommen, {user?.displayName}</p>
-            </div>
-          </div>
+      <div className="flex items-center gap-4 mb-6">
+        <Link href="/">
+          <Button variant="ghost" size="icon" aria-label="Zurück" data-testid="button-back">
+            <ArrowLeft className={iconSize.md} />
+          </Button>
+        </Link>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Administration</h1>
+          <p className="text-gray-600">Willkommen, {user?.displayName}</p>
+        </div>
+      </div>
 
-          <div className="grid gap-4 md:grid-cols-2 auto-rows-fr">
-            <Link href="/admin/users" className="block h-full">
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid="card-users">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-teal-100 rounded-lg">
-                      <Users className={`${iconSize.lg} text-teal-600`} />
-                    </div>
-                    <div>
-                      <CardTitle>Benutzerverwaltung</CardTitle>
-                      <CardDescription>
-                        Mitarbeiter hinzufügen, bearbeiten und Rollen zuweisen
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
+      <div className="space-y-8">
+        <Section title="Personal & Team">
+          <AdminCard
+            href="/admin/users"
+            testId="card-users"
+            icon={<Users className={`${iconSize.lg} text-teal-600`} />}
+            iconBg="bg-teal-100"
+            title="Benutzerverwaltung"
+            description="Mitarbeiter hinzufügen, bearbeiten und Rollen zuweisen"
+          />
+          <AdminCard
+            href="/admin/customer-assignments"
+            testId="card-assignments"
+            icon={<UserCog className={`${iconSize.lg} text-orange-600`} />}
+            iconBg="bg-orange-100"
+            title="Kundenzuordnung"
+            description="Kunden zu Mitarbeitern zuweisen"
+          />
+          <AdminCard
+            href="/admin/time-entries"
+            testId="card-time-entries"
+            icon={<Clock className={`${iconSize.lg} text-green-600`} />}
+            iconBg="bg-green-100"
+            title="Zeiterfassung"
+            description="Urlaub, Krankheit und Arbeitszeiten"
+          />
+        </Section>
 
-            <Link href="/admin/customer-assignments" className="block h-full">
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid="card-assignments">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-orange-100 rounded-lg">
-                      <UserCog className={`${iconSize.lg} text-orange-600`} />
-                    </div>
-                    <div>
-                      <CardTitle>Kundenzuordnung</CardTitle>
-                      <CardDescription>
-                        Kunden zu Mitarbeitern zuweisen
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
+        <Section title="Kunden & Verträge">
+          <AdminCard
+            href="/admin/customers"
+            testId="card-customers"
+            icon={<Contact2 className={`${iconSize.lg} text-blue-600`} />}
+            iconBg="bg-blue-100"
+            title="Kundenverwaltung"
+            description="Kunden anlegen, bearbeiten und verwalten"
+          />
+          <AdminCard
+            href="/admin/insurance-providers"
+            testId="card-insurance-providers"
+            icon={<Building2 className={`${iconSize.lg} text-pink-600`} />}
+            iconBg="bg-pink-100"
+            title="Kostenträger"
+            description="Pflegekassen anlegen und verwalten"
+          />
+          <AdminCard
+            href="/admin/documents"
+            testId="card-documents"
+            icon={<FileText className={`${iconSize.lg} text-amber-600`} />}
+            iconBg="bg-amber-100"
+            title="Dokumente & Vorlagen"
+            description="Dokumententypen, Vertragsvorlagen und Prüffristen"
+          />
+          <AdminCard
+            href="/admin/services"
+            testId="card-services"
+            icon={<ClipboardList className={`${iconSize.lg} text-cyan-600`} />}
+            iconBg="bg-cyan-100"
+            title="Dienstleistungen"
+            description="Leistungskatalog und Standardpreise verwalten"
+          />
+        </Section>
 
-            <Link href="/admin/customers" className="block h-full">
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid="card-customers">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-100 rounded-lg">
-                      <Contact2 className={`${iconSize.lg} text-blue-600`} />
-                    </div>
-                    <div>
-                      <CardTitle>Kundenverwaltung</CardTitle>
-                      <CardDescription>
-                        Kunden anlegen, bearbeiten und verwalten
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
+        <Section title="Abrechnung & Finanzen">
+          <AdminCard
+            href="/admin/billing"
+            testId="card-billing"
+            icon={<Receipt className={`${iconSize.lg} text-emerald-600`} />}
+            iconBg="bg-emerald-100"
+            title="Abrechnung"
+            description="Rechnungen erstellen, Leistungsnachweise und Storno"
+          />
+          <AdminCard
+            href="/admin/lexware-export"
+            testId="card-lexware-export"
+            icon={<Download className={`${iconSize.lg} text-cyan-600`} />}
+            iconBg="bg-cyan-100"
+            title="Lohnexport"
+            description="CSV-Export für Lexware lohn+gehalt"
+          />
+        </Section>
 
-            <Link href="/admin/services" className="block h-full">
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid="card-services">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-cyan-100 rounded-lg">
-                      <ClipboardList className={`${iconSize.lg} text-cyan-600`} />
-                    </div>
-                    <div>
-                      <CardTitle>Dienstleistungen</CardTitle>
-                      <CardDescription>
-                        Leistungskatalog und Standardpreise verwalten
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
-
-            <Link href="/admin/insurance-providers" className="block h-full">
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid="card-insurance-providers">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-pink-100 rounded-lg">
-                      <Building2 className={`${iconSize.lg} text-pink-600`} />
-                    </div>
-                    <div>
-                      <CardTitle>Kostenträger</CardTitle>
-                      <CardDescription>
-                        Pflegekassen anlegen und verwalten
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
-
-            <Link href="/admin/time-entries" className="block h-full">
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid="card-time-entries">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-green-100 rounded-lg">
-                      <Clock className={`${iconSize.lg} text-green-600`} />
-                    </div>
-                    <div>
-                      <CardTitle>Zeiterfassung</CardTitle>
-                      <CardDescription>
-                        Urlaub, Krankheit und Arbeitszeiten
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
-
-            <Link href="/admin/document-types" className="block h-full">
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid="card-document-types">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-amber-100 rounded-lg">
-                      <FileCheck2 className={`${iconSize.lg} text-amber-600`} />
-                    </div>
-                    <div>
-                      <CardTitle>Dokumententypen</CardTitle>
-                      <CardDescription>
-                        Dokumentenarten und Prüffristen für Mitarbeiter definieren
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
-
-            <Link href="/admin/document-templates" className="block h-full">
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid="card-document-templates">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-teal-100 rounded-lg">
-                      <FileText className={`${iconSize.lg} text-teal-600`} />
-                    </div>
-                    <div>
-                      <CardTitle>Vertragsvorlagen</CardTitle>
-                      <CardDescription>
-                        HTML-Vorlagen für Verträge und Dokumente im Kundenanlage-Flow
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
-
-            <Link href="/admin/billing" className="block h-full">
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid="card-billing">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-emerald-100 rounded-lg">
-                      <Receipt className={`${iconSize.lg} text-emerald-600`} />
-                    </div>
-                    <div>
-                      <CardTitle>Abrechnung</CardTitle>
-                      <CardDescription>
-                        Rechnungen erstellen, Leistungsnachweise und Storno
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
-
-            <Link href="/admin/lexware-export" className="block h-full">
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid="card-lexware-export">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-cyan-100 rounded-lg">
-                      <Download className={`${iconSize.lg} text-cyan-600`} />
-                    </div>
-                    <div>
-                      <CardTitle>Lohnexport</CardTitle>
-                      <CardDescription>
-                        CSV-Export für Lexware lohn+gehalt
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
-
-            <Link href="/admin/audit-log" className="block h-full">
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid="card-audit-log">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-red-100 rounded-lg">
-                      <Shield className={`${iconSize.lg} text-red-600`} />
-                    </div>
-                    <div>
-                      <CardTitle>Audit-Log</CardTitle>
-                      <CardDescription>
-                        Unveränderliches Protokoll aller Unterschriften und Änderungen
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
-
-            <Link href="/admin/settings" className="block h-full">
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid="card-settings">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-purple-100 rounded-lg">
-                      <Settings className={`${iconSize.lg} text-purple-600`} />
-                    </div>
-                    <div>
-                      <CardTitle>Einstellungen</CardTitle>
-                      <CardDescription>
-                        Systemweite Konfiguration und automatische Pausen
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
-          </div>
+        <Section title="System & Sicherheit">
+          <AdminCard
+            href="/admin/settings"
+            testId="card-settings"
+            icon={<Settings className={`${iconSize.lg} text-purple-600`} />}
+            iconBg="bg-purple-100"
+            title="Einstellungen"
+            description="Firmendaten, E-Mail-Versand und Systemkonfiguration"
+          />
+          <AdminCard
+            href="/admin/audit-log"
+            testId="card-audit-log"
+            icon={<Shield className={`${iconSize.lg} text-red-600`} />}
+            iconBg="bg-red-100"
+            title="Audit-Log"
+            description="Unveränderliches Protokoll aller Unterschriften und Änderungen"
+          />
+        </Section>
+      </div>
     </Layout>
   );
 }
