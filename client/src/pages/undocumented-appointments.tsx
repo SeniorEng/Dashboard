@@ -4,7 +4,7 @@ import { Layout } from "@/components/layout";
 import { AppointmentCard } from "@/features/appointments/components/appointment-card";
 import { ArrowLeft, Loader2, FileCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { iconSize } from "@/design-system";
+import { iconSize, componentStyles } from "@/design-system";
 import { ErrorState } from "@/components/patterns/error-state";
 import type { AppointmentWithCustomer } from "@shared/types";
 
@@ -34,7 +34,7 @@ export default function UndocumentedAppointments() {
               <ArrowLeft className={iconSize.md} />
             </Button>
           </Link>
-          <h1 className="text-xl font-semibold text-foreground">Offene Dokumentationen</h1>
+          <h1 className={componentStyles.pageTitle}>Offene Dokumentationen</h1>
         </div>
 
         {isLoading && (

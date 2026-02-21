@@ -9,10 +9,10 @@ import { EmptyState } from "@/components/patterns/empty-state";
 import { ErrorState } from "@/components/patterns/error-state";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { 
-  FileSignature, Loader2, Calendar, User, Clock, MapPin, 
+  Loader2, Calendar, User, Clock, MapPin, 
   ChevronRight, Check, AlertCircle, FileText, ArrowLeft, Plus
 } from "lucide-react";
-import { iconSize } from "@/design-system";
+import { iconSize, componentStyles } from "@/design-system";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { Link, useLocation, useSearch } from "wouter";
 import { useToast } from "@/hooks/use-toast";
@@ -178,8 +178,8 @@ export default function ServiceRecordsPage() {
 
   return (
     <Layout>
-      <div className="mb-6 animate-in slide-in-from-top-4 duration-500">
-        <div className="flex items-center gap-3 mb-1">
+      <div className={componentStyles.pageHeader}>
+        <div className={componentStyles.pageHeaderTop}>
           {customerId && (
             <Link href={`/customer/${customerId}`}>
               <Button variant="ghost" size="icon" className="shrink-0" aria-label="Zurück" data-testid="button-back">
@@ -187,8 +187,7 @@ export default function ServiceRecordsPage() {
               </Button>
             </Link>
           )}
-          {!customerId && <FileSignature className={`${iconSize.lg} text-primary`} />}
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight" data-testid="text-title">
+          <h1 className={componentStyles.pageTitle} data-testid="text-title">
             {customerId && selectedCustomer 
               ? `Leistungsnachweise: ${selectedCustomer.vorname} ${selectedCustomer.nachname}`
               : "Leistungsnachweise"

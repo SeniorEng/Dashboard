@@ -25,7 +25,7 @@ import {
 } from "@/features/time-tracking";
 import type { TimeEntryType } from "@/lib/api/types";
 import { todayISO } from "@shared/utils/datetime";
-import { iconSize } from "@/design-system";
+import { iconSize, componentStyles } from "@/design-system";
 
 export default function MyTimes() {
   const { toast } = useToast();
@@ -228,20 +228,23 @@ export default function MyTimes() {
             />
           </div>
 
-          <div className="flex items-center justify-between mb-2">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900" data-testid="text-page-title">Meine Zeiten</h1>
+          <div className={componentStyles.pageHeader}>
+            <div className={componentStyles.pageHeaderTop}>
+              <h1 className={componentStyles.pageTitle} data-testid="text-page-title">Meine Zeiten</h1>
             </div>
-            <Button
-              className="bg-teal-600 hover:bg-teal-700"
-              onClick={handleOpenCreateDialog}
-              disabled={isMonthLocked}
-              title={isMonthLocked ? "Monat ist abgeschlossen" : undefined}
-              data-testid="button-new-entry"
-            >
-              <Plus className={`${iconSize.sm} mr-2`} />
-              Neuer Eintrag
-            </Button>
+            <div className={componentStyles.pageHeaderActions}>
+              <Button
+                size="sm"
+                className={componentStyles.pageHeaderActionBtn}
+                onClick={handleOpenCreateDialog}
+                disabled={isMonthLocked}
+                title={isMonthLocked ? "Monat ist abgeschlossen" : undefined}
+                data-testid="button-new-entry"
+              >
+                <Plus className={`${iconSize.sm} mr-1`} />
+                Neuer Eintrag
+              </Button>
+            </div>
           </div>
 
           <div className="flex items-center gap-3 mb-6" data-testid="month-selector">

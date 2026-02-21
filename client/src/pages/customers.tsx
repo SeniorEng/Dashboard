@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { 
   MapPin, Phone, PhoneCall, User, Search, 
-  Heart, Loader2, Users, Cake, Gift
+  Heart, Loader2, Cake, Gift
 } from "lucide-react";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { formatDateForDisplay } from "@shared/utils/datetime";
@@ -127,9 +127,8 @@ export default function CustomersPage() {
 
   return (
     <Layout>
-      <div className="mb-6 animate-in slide-in-from-top-4 duration-500">
-        <div className="flex items-center gap-3">
-          <Users className={`${iconSize.lg} text-primary`} />
+      <div className={componentStyles.pageHeader}>
+        <div className={componentStyles.pageHeaderTop}>
           <h1 className={componentStyles.pageTitle} data-testid="text-customers-title">
             Kunden
           </h1>

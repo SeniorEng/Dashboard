@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CheckSquare, Plus, Loader2, AlertCircle, Coffee, FileSignature, CalendarCheck } from "lucide-react";
+import { Plus, Loader2, AlertCircle, Coffee, FileSignature, CalendarCheck } from "lucide-react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { iconSize, componentStyles } from "@/design-system";
@@ -123,10 +123,7 @@ export default function TasksPage() {
       <div className="animate-in slide-in-from-top-4 duration-500">
         <div className={componentStyles.pageHeader}>
           <div className={componentStyles.pageHeaderTop}>
-            <CheckSquare className={`${iconSize.md} text-primary`} />
-            <div className={componentStyles.pageHeaderTitleWrap}>
-              <h1 className={componentStyles.pageTitle} data-testid="text-tasks-title">Aufgaben</h1>
-            </div>
+            <h1 className={componentStyles.pageTitle} data-testid="text-tasks-title">Aufgaben</h1>
           </div>
           <div className={componentStyles.pageHeaderActions}>
             <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
