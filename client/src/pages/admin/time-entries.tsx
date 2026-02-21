@@ -13,7 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
 import { useEmployees } from "@/features/customers";
-import { iconSize } from "@/design-system";
+import { iconSize, componentStyles } from "@/design-system";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import {
   AlertDialog,
@@ -224,108 +224,74 @@ export default function AdminTimeEntries() {
 
   return (
     <Layout variant="wide">
-          <div className="flex items-center gap-4 mb-6">
-            <Link href="/admin">
-              <Button variant="ghost" size="icon" aria-label="Zurück" data-testid="button-back">
-                <ArrowLeft className={iconSize.md} />
-              </Button>
-            </Link>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900" data-testid="text-page-title">
-                Zeiterfassung
-              </h1>
-              <p className="text-gray-600">Übersicht aller Mitarbeiter-Zeiteinträge</p>
+          <div className={componentStyles.pageHeader}>
+            <div className={componentStyles.pageHeaderTop}>
+              <Link href="/admin">
+                <Button variant="ghost" size="icon" aria-label="Zurück" data-testid="button-back">
+                  <ArrowLeft className={iconSize.md} />
+                </Button>
+              </Link>
+              <div className={componentStyles.pageHeaderTitleWrap}>
+                <h1 className={componentStyles.pageTitle} data-testid="text-page-title">Zeiterfassung</h1>
+              </div>
             </div>
           </div>
 
-          {/* Stats Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <Card>
-              <CardContent className="p-4 text-center">
-                <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
-                <div className="text-xs text-gray-500">Einträge gesamt</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4 text-center">
-                <div className="text-2xl font-bold text-green-700">{stats.vacation}</div>
-                <div className="text-xs text-gray-500">Urlaubstage</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4 text-center">
-                <div className="text-2xl font-bold text-red-700">{stats.sick}</div>
-                <div className="text-xs text-gray-500">Krankheitstage</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4 text-center">
-                <div className="text-2xl font-bold text-blue-700">{stats.other}</div>
-                <div className="text-xs text-gray-500">Sonstige</div>
-              </CardContent>
-            </Card>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-gray-600 mb-4">
+            <span><span className="font-semibold text-gray-900" data-testid="text-stats-total">{stats.total}</span> Einträge</span>
+            <span className="text-gray-300">|</span>
+            <span><span className="font-semibold text-green-700" data-testid="text-stats-vacation">{stats.vacation}</span> Urlaub</span>
+            <span className="text-gray-300">|</span>
+            <span><span className="font-semibold text-red-700" data-testid="text-stats-sick">{stats.sick}</span> Krankheit</span>
+            <span className="text-gray-300">|</span>
+            <span><span className="font-semibold text-blue-700" data-testid="text-stats-other">{stats.other}</span> Sonstige</span>
           </div>
 
-          {/* Filters */}
-          <Card className="mb-6">
-            <CardContent className="p-4">
-              <div className="flex flex-wrap items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <Select value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(parseInt(v))}>
-                    <SelectTrigger className="w-[100px]" data-testid="select-year">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {yearOptions.map((y) => (
-                        <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Select value={selectedMonth.toString()} onValueChange={(v) => setSelectedMonth(parseInt(v))}>
-                    <SelectTrigger className="w-[150px]" data-testid="select-month">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {MONTH_NAMES.map((name, idx) => (
-                        <SelectItem key={idx + 1} value={(idx + 1).toString()}>{name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Label className="text-sm text-gray-500">Mitarbeiter:</Label>
-                  <SearchableSelect
-                    options={employeeFilterOptions}
-                    value={selectedUserId}
-                    onValueChange={setSelectedUserId}
-                    placeholder="Alle Mitarbeiter"
-                    searchPlaceholder="Mitarbeiter suchen..."
-                    emptyText="Kein Mitarbeiter gefunden."
-                    className="w-[180px]"
-                    data-testid="select-employee"
-                  />
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Label className="text-sm text-gray-500">Art:</Label>
-                  <Select value={selectedEntryType} onValueChange={setSelectedEntryType}>
-                    <SelectTrigger className="w-[150px]" data-testid="select-entry-type">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Alle Arten</SelectItem>
-                      {Object.entries(TIME_ENTRY_TYPE_CONFIG).map(([type, config]) => (
-                        <SelectItem key={type} value={type}>
-                          {config.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="flex flex-wrap items-center gap-3 mb-6">
+            <Select value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(parseInt(v))}>
+              <SelectTrigger className="w-[100px]" data-testid="select-year">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {yearOptions.map((y) => (
+                  <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={selectedMonth.toString()} onValueChange={(v) => setSelectedMonth(parseInt(v))}>
+              <SelectTrigger className="w-[140px]" data-testid="select-month">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MONTH_NAMES.map((name, idx) => (
+                  <SelectItem key={idx + 1} value={(idx + 1).toString()}>{name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <SearchableSelect
+              options={employeeFilterOptions}
+              value={selectedUserId}
+              onValueChange={setSelectedUserId}
+              placeholder="Alle Mitarbeiter"
+              searchPlaceholder="Mitarbeiter suchen..."
+              emptyText="Kein Mitarbeiter gefunden."
+              className="w-[180px]"
+              data-testid="select-employee"
+            />
+            <Select value={selectedEntryType} onValueChange={setSelectedEntryType}>
+              <SelectTrigger className="w-[150px]" data-testid="select-entry-type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alle Arten</SelectItem>
+                {Object.entries(TIME_ENTRY_TYPE_CONFIG).map(([type, config]) => (
+                  <SelectItem key={type} value={type}>
+                    {config.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
           {/* Entries List */}
           {isLoading ? (
