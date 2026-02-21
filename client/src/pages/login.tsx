@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, AlertCircle } from "lucide-react";
+import { Loader2, AlertCircle, Eye, EyeOff } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { useAuth } from "@/hooks/use-auth";
 import logoImage from "@/assets/logo-seniorenengel.png";
@@ -18,6 +18,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   const { data: setupData, isLoading: setupLoading } = useQuery({
     queryKey: ["auth", "setup-required"],
@@ -105,15 +106,27 @@ export default function LoginPage() {
 
             <div className="space-y-2">
               <Label htmlFor="password">Passwort</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                data-testid="input-password"
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  className="pr-10"
+                  data-testid="input-password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  aria-label={showPassword ? "Passwort verbergen" : "Passwort anzeigen"}
+                  data-testid="button-toggle-password"
+                >
+                  {showPassword ? <EyeOff className={iconSize.sm} /> : <Eye className={iconSize.sm} />}
+                </button>
+              </div>
             </div>
 
             <Button
