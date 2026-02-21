@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Loader2, Upload, Trash2, ImageIcon } from "lucide-react";
+import { ArrowLeft, Loader2, Upload, Trash2, ImageIcon, Mail, Truck, CheckCircle2, XCircle, Eye, EyeOff } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize } from "@/design-system";
@@ -55,6 +55,18 @@ const emptyCompanyForm = {
   lohnartHauswirtschaft: "",
   lohnartUrlaub: "",
   lohnartKrankheit: "",
+  smtpHost: "",
+  smtpPort: "",
+  smtpUser: "",
+  smtpPass: "",
+  smtpFromEmail: "",
+  smtpFromName: "",
+  smtpSecure: false,
+  epostVendorId: "",
+  epostEkp: "",
+  epostPassword: "",
+  epostSalt: "",
+  epostTestMode: true,
 };
 
 export default function AdminSettings() {
@@ -105,13 +117,30 @@ export default function AdminSettings() {
         lohnartHauswirtschaft: companyData.lohnartHauswirtschaft ?? "",
         lohnartUrlaub: companyData.lohnartUrlaub ?? "",
         lohnartKrankheit: companyData.lohnartKrankheit ?? "",
+        smtpHost: companyData.smtpHost ?? "",
+        smtpPort: companyData.smtpPort ?? "",
+        smtpUser: companyData.smtpUser ?? "",
+        smtpPass: companyData.smtpPass ?? "",
+        smtpFromEmail: companyData.smtpFromEmail ?? "",
+        smtpFromName: companyData.smtpFromName ?? "",
+        smtpSecure: companyData.smtpSecure ?? false,
+        epostVendorId: companyData.epostVendorId ?? "",
+        epostEkp: companyData.epostEkp ?? "",
+        epostPassword: companyData.epostPassword ?? "",
+        epostSalt: companyData.epostSalt ?? "",
+        epostTestMode: companyData.epostTestMode ?? true,
       });
     }
   }, [companyData]);
 
-  const updateField = (field: keyof typeof companyForm, value: string) => {
+  const updateField = (field: keyof typeof companyForm, value: string | boolean) => {
     setCompanyForm((prev) => ({ ...prev, [field]: value }));
   };
+
+  const [showSmtpPass, setShowSmtpPass] = useState(false);
+  const [showEpostPass, setShowEpostPass] = useState(false);
+  const [smtpTestResult, setSmtpTestResult] = useState<{ success: boolean; error?: string } | null>(null);
+  const [epostTestResult, setEpostTestResult] = useState<{ success: boolean; error?: string } | null>(null);
 
   const companySaveMutation = useMutation({
     mutationFn: async (data: typeof companyForm) => {
@@ -124,6 +153,38 @@ export default function AdminSettings() {
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const smtpTestMutation = useMutation({
+    mutationFn: async () => {
+      await companySaveMutation.mutateAsync(companyForm);
+      const result = await api.post<{ success: boolean; error?: string }>("/admin/document-delivery/test-smtp", {});
+      return unwrapResult(result);
+    },
+    onSuccess: (data) => {
+      setSmtpTestResult(data);
+      toast({ title: data.success ? "SMTP-Verbindung erfolgreich" : "SMTP-Verbindung fehlgeschlagen", variant: data.success ? "default" : "destructive" });
+    },
+    onError: (error: Error) => {
+      setSmtpTestResult({ success: false, error: error.message });
+      toast({ title: "SMTP-Test fehlgeschlagen", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const epostTestMutation = useMutation({
+    mutationFn: async () => {
+      await companySaveMutation.mutateAsync(companyForm);
+      const result = await api.post<{ success: boolean; error?: string }>("/admin/document-delivery/test-epost", {});
+      return unwrapResult(result);
+    },
+    onSuccess: (data) => {
+      setEpostTestResult(data);
+      toast({ title: data.success ? "E-POST-Verbindung erfolgreich" : "E-POST-Verbindung fehlgeschlagen", variant: data.success ? "default" : "destructive" });
+    },
+    onError: (error: Error) => {
+      setEpostTestResult({ success: false, error: error.message });
+      toast({ title: "E-POST-Test fehlgeschlagen", description: error.message, variant: "destructive" });
     },
   });
 
@@ -594,6 +655,236 @@ export default function AdminSettings() {
                     Diese Nummern werden als Lohnartnummern im Lexware-CSV-Export verwendet.
                     Speichern über den Button "Speichern" bei den Firmendaten oben.
                   </p>
+                </CardContent>
+              </Card>
+
+              <Card data-testid="card-smtp-settings">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Mail className="h-5 w-5 text-teal-600" />
+                    E-Mail-Versand (SMTP)
+                  </CardTitle>
+                  <CardDescription>
+                    SMTP-Server-Konfiguration für den automatischen E-Mail-Versand von Vertragsunterlagen an Kunden.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-col gap-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="smtpHost">SMTP-Server</Label>
+                        <Input
+                          id="smtpHost"
+                          value={companyForm.smtpHost}
+                          onChange={(e) => updateField("smtpHost", e.target.value)}
+                          placeholder="z.B. smtp.office365.com"
+                          data-testid="input-smtp-host"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="smtpPort">Port</Label>
+                        <Input
+                          id="smtpPort"
+                          value={companyForm.smtpPort}
+                          onChange={(e) => updateField("smtpPort", e.target.value)}
+                          placeholder="587"
+                          data-testid="input-smtp-port"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="smtpUser">Benutzername</Label>
+                        <Input
+                          id="smtpUser"
+                          value={companyForm.smtpUser}
+                          onChange={(e) => updateField("smtpUser", e.target.value)}
+                          placeholder="user@example.com"
+                          data-testid="input-smtp-user"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="smtpPass">Passwort</Label>
+                        <div className="relative">
+                          <Input
+                            id="smtpPass"
+                            type={showSmtpPass ? "text" : "password"}
+                            value={companyForm.smtpPass}
+                            onChange={(e) => updateField("smtpPass", e.target.value)}
+                            placeholder="••••••••"
+                            data-testid="input-smtp-pass"
+                          />
+                          <button
+                            type="button"
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                            onClick={() => setShowSmtpPass(!showSmtpPass)}
+                          >
+                            {showSmtpPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="smtpFromEmail">Absender E-Mail</Label>
+                        <Input
+                          id="smtpFromEmail"
+                          value={companyForm.smtpFromEmail}
+                          onChange={(e) => updateField("smtpFromEmail", e.target.value)}
+                          placeholder="info@firma.de"
+                          data-testid="input-smtp-from-email"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="smtpFromName">Absender Name</Label>
+                        <Input
+                          id="smtpFromName"
+                          value={companyForm.smtpFromName}
+                          onChange={(e) => updateField("smtpFromName", e.target.value)}
+                          placeholder="Firmenname"
+                          data-testid="input-smtp-from-name"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="smtpSecure">SSL/TLS verwenden</Label>
+                        <p className="text-xs text-muted-foreground">Aktivieren für Port 465 (SSL). Für Port 587 (STARTTLS) deaktiviert lassen.</p>
+                      </div>
+                      <Switch
+                        id="smtpSecure"
+                        checked={companyForm.smtpSecure}
+                        onCheckedChange={(checked) => updateField("smtpSecure", checked)}
+                        data-testid="switch-smtp-secure"
+                      />
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={smtpTestMutation.isPending || !companyForm.smtpHost}
+                        onClick={() => smtpTestMutation.mutate()}
+                        data-testid="button-test-smtp"
+                      >
+                        {smtpTestMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Mail className="mr-2 h-4 w-4" />}
+                        Verbindung testen
+                      </Button>
+                      {smtpTestResult && (
+                        <div className={`flex items-center gap-1.5 text-sm ${smtpTestResult.success ? "text-green-600" : "text-red-600"}`}>
+                          {smtpTestResult.success ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                          {smtpTestResult.success ? "Verbindung OK" : smtpTestResult.error}
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Einstellungen werden beim Speichern der Firmendaten mit gespeichert.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card data-testid="card-epost-settings">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Truck className="h-5 w-5 text-amber-600" />
+                    Deutsche Post E-POST Mailer
+                  </CardTitle>
+                  <CardDescription>
+                    API-Zugangsdaten für den automatischen Briefversand über den E-POST Mailer der Deutschen Post.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-col gap-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="epostVendorId">Vendor-ID</Label>
+                        <Input
+                          id="epostVendorId"
+                          value={companyForm.epostVendorId}
+                          onChange={(e) => updateField("epostVendorId", e.target.value)}
+                          placeholder="Vendor-ID"
+                          data-testid="input-epost-vendor-id"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="epostEkp">EKP (Kundennummer)</Label>
+                        <Input
+                          id="epostEkp"
+                          value={companyForm.epostEkp}
+                          onChange={(e) => updateField("epostEkp", e.target.value)}
+                          placeholder="Deutsche Post Kundennummer"
+                          data-testid="input-epost-ekp"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="epostPassword">Passwort</Label>
+                        <div className="relative">
+                          <Input
+                            id="epostPassword"
+                            type={showEpostPass ? "text" : "password"}
+                            value={companyForm.epostPassword}
+                            onChange={(e) => updateField("epostPassword", e.target.value)}
+                            placeholder="••••••••"
+                            data-testid="input-epost-password"
+                          />
+                          <button
+                            type="button"
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                            onClick={() => setShowEpostPass(!showEpostPass)}
+                          >
+                            {showEpostPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="epostSalt">Salt</Label>
+                        <Input
+                          id="epostSalt"
+                          value={companyForm.epostSalt}
+                          onChange={(e) => updateField("epostSalt", e.target.value)}
+                          placeholder="Authentifizierungs-Salt"
+                          data-testid="input-epost-salt"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="epostTestMode">Testmodus</Label>
+                        <p className="text-xs text-muted-foreground">Im Testmodus werden Briefe nicht gedruckt/versendet. Für Produktivbetrieb deaktivieren.</p>
+                      </div>
+                      <Switch
+                        id="epostTestMode"
+                        checked={companyForm.epostTestMode}
+                        onCheckedChange={(checked) => updateField("epostTestMode", checked)}
+                        data-testid="switch-epost-test-mode"
+                      />
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={epostTestMutation.isPending || !companyForm.epostVendorId}
+                        onClick={() => epostTestMutation.mutate()}
+                        data-testid="button-test-epost"
+                      >
+                        {epostTestMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Truck className="mr-2 h-4 w-4" />}
+                        Verbindung testen
+                      </Button>
+                      {epostTestResult && (
+                        <div className={`flex items-center gap-1.5 text-sm ${epostTestResult.success ? "text-green-600" : "text-red-600"}`}>
+                          {epostTestResult.success ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                          {epostTestResult.success ? "Verbindung OK" : epostTestResult.error}
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Einstellungen werden beim Speichern der Firmendaten mit gespeichert.
+                    </p>
+                  </div>
                 </CardContent>
               </Card>
 

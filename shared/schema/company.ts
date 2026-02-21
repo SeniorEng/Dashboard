@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, boolean } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp } from "./common";
 import { users } from "./users";
@@ -27,6 +27,18 @@ export const companySettings = pgTable("company_settings", {
   lohnartHauswirtschaft: text("lohnart_hauswirtschaft"),
   lohnartUrlaub: text("lohnart_urlaub"),
   lohnartKrankheit: text("lohnart_krankheit"),
+  smtpHost: text("smtp_host"),
+  smtpPort: text("smtp_port"),
+  smtpUser: text("smtp_user"),
+  smtpPass: text("smtp_pass"),
+  smtpFromEmail: text("smtp_from_email"),
+  smtpFromName: text("smtp_from_name"),
+  smtpSecure: boolean("smtp_secure").notNull().default(false),
+  epostVendorId: text("epost_vendor_id"),
+  epostEkp: text("epost_ekp"),
+  epostPassword: text("epost_password"),
+  epostSalt: text("epost_salt"),
+  epostTestMode: boolean("epost_test_mode").notNull().default(true),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   updatedByUserId: integer("updated_by_user_id").references(() => users.id),
 });
@@ -56,6 +68,39 @@ export const updateCompanySettingsSchema = z.object({
   lohnartHauswirtschaft: z.string().optional().nullable(),
   lohnartUrlaub: z.string().optional().nullable(),
   lohnartKrankheit: z.string().optional().nullable(),
+  smtpHost: z.string().optional().nullable(),
+  smtpPort: z.string().optional().nullable(),
+  smtpUser: z.string().optional().nullable(),
+  smtpPass: z.string().optional().nullable(),
+  smtpFromEmail: z.string().optional().nullable(),
+  smtpFromName: z.string().optional().nullable(),
+  smtpSecure: z.boolean().optional(),
+  epostVendorId: z.string().optional().nullable(),
+  epostEkp: z.string().optional().nullable(),
+  epostPassword: z.string().optional().nullable(),
+  epostSalt: z.string().optional().nullable(),
+  epostTestMode: z.boolean().optional(),
 });
 
 export type UpdateCompanySettings = z.infer<typeof updateCompanySettingsSchema>;
+
+export const documentDeliveries = pgTable("document_deliveries", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id"),
+  generatedDocumentId: integer("generated_document_id"),
+  deliveryMethod: text("delivery_method").notNull(),
+  status: text("status").notNull().default("pending"),
+  recipientEmail: text("recipient_email"),
+  recipientName: text("recipient_name"),
+  recipientAddress: text("recipient_address"),
+  epostLetterId: text("epost_letter_id"),
+  errorMessage: text("error_message"),
+  documentFileNames: text("document_file_names"),
+  sentAt: timestamp("sent_at"),
+  deliveredAt: timestamp("delivered_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdByUserId: integer("created_by_user_id").references(() => users.id),
+});
+
+export type DocumentDelivery = typeof documentDeliveries.$inferSelect;
+export type InsertDocumentDelivery = typeof documentDeliveries.$inferInsert;

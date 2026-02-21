@@ -1,0 +1,148 @@
+import type { CompanySettings } from "@shared/schema";
+
+const EPOST_API_PROD = "https://api.epost.de/api/v1";
+const EPOST_API_TEST = "https://api-qa.epost.de/api/v1";
+
+interface EpostLoginResponse {
+  token: string;
+}
+
+interface EpostLetterResponse {
+  letterId: string;
+}
+
+interface EpostStatusResponse {
+  status: string;
+  details?: string;
+}
+
+function getBaseUrl(testMode: boolean): string {
+  return testMode ? EPOST_API_TEST : EPOST_API_PROD;
+}
+
+function validateEpostConfig(settings: CompanySettings): void {
+  if (!settings.epostVendorId || !settings.epostEkp || !settings.epostPassword || !settings.epostSalt) {
+    throw new Error("E-POST-Konfiguration unvollständig. Bitte in den Einstellungen konfigurieren.");
+  }
+}
+
+async function loginEpost(settings: CompanySettings): Promise<string> {
+  validateEpostConfig(settings);
+
+  const baseUrl = getBaseUrl(settings.epostTestMode);
+
+  const response = await fetch(`${baseUrl}/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      vendorID: settings.epostVendorId,
+      ekp: settings.epostEkp,
+      password: settings.epostPassword,
+      salt: settings.epostSalt,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "Unbekannter Fehler");
+    throw new Error(`E-POST Login fehlgeschlagen (${response.status}): ${errorText}`);
+  }
+
+  const data = (await response.json()) as EpostLoginResponse;
+  if (!data.token) {
+    throw new Error("E-POST Login: Kein Token erhalten");
+  }
+
+  return data.token;
+}
+
+export async function sendEpostLetter(
+  settings: CompanySettings,
+  options: {
+    pdfBuffer: Buffer;
+    recipientFirstName: string;
+    recipientLastName: string;
+    recipientStreet: string;
+    recipientHouseNumber: string;
+    recipientPostalCode: string;
+    recipientCity: string;
+    recipientCompany?: string;
+    senderLine?: string;
+  }
+): Promise<{ letterId: string }> {
+  const token = await loginEpost(settings);
+  const baseUrl = getBaseUrl(settings.epostTestMode);
+
+  const senderLine =
+    options.senderLine ||
+    [settings.companyName, settings.strasse, settings.hausnummer, settings.plz, settings.stadt]
+      .filter(Boolean)
+      .join(", ");
+
+  const letterPayload = {
+    recipient: {
+      firstName: options.recipientFirstName,
+      lastName: options.recipientLastName,
+      street: options.recipientStreet,
+      houseNumber: options.recipientHouseNumber,
+      postalCode: options.recipientPostalCode,
+      city: options.recipientCity,
+      company: options.recipientCompany || "",
+      country: "",
+    },
+    senderAddress: senderLine,
+    printOptions: {
+      color: false,
+      duplex: true,
+    },
+    document: options.pdfBuffer.toString("base64"),
+  };
+
+  const response = await fetch(`${baseUrl}/letters`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(letterPayload),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "Unbekannter Fehler");
+    throw new Error(`E-POST Briefversand fehlgeschlagen (${response.status}): ${errorText}`);
+  }
+
+  const data = (await response.json()) as EpostLetterResponse;
+  return { letterId: data.letterId };
+}
+
+export async function getEpostLetterStatus(
+  settings: CompanySettings,
+  letterId: string
+): Promise<{ status: string; details?: string }> {
+  const token = await loginEpost(settings);
+  const baseUrl = getBaseUrl(settings.epostTestMode);
+
+  const response = await fetch(`${baseUrl}/letters/${letterId}/status`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "Unbekannter Fehler");
+    throw new Error(`E-POST Status-Abfrage fehlgeschlagen (${response.status}): ${errorText}`);
+  }
+
+  return (await response.json()) as EpostStatusResponse;
+}
+
+export async function testEpostConnection(settings: CompanySettings): Promise<{ success: boolean; error?: string }> {
+  try {
+    validateEpostConfig(settings);
+    await loginEpost(settings);
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Verbindung fehlgeschlagen" };
+  }
+}

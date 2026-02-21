@@ -8,6 +8,7 @@ import pricingRouter from "./admin/pricing";
 import documentsRouter from "./admin/documents";
 import auditRouter from "./admin/audit";
 import lexwareExportRouter from "./admin/lexware-export";
+import documentDeliveryRouter from "./admin/document-delivery";
 
 const router = Router();
 
@@ -21,5 +22,6 @@ router.use("/", pricingRouter);
 router.use("/", documentsRouter);
 router.use("/", auditRouter);
 router.use("/", lexwareExportRouter);
+router.use("/", documentDeliveryRouter);
 
 export default router;
