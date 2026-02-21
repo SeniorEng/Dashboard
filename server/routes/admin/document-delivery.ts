@@ -59,6 +59,58 @@ router.get("/document-delivery/recent", asyncHandler("Versandprotokoll konnte ni
   res.json(deliveries);
 }));
 
+router.post("/document-delivery/send-for-customer/:customerId", asyncHandler("Versand fehlgeschlagen", async (req: Request, res: Response) => {
+  const customerId = parseInt(req.params.customerId);
+  if (isNaN(customerId)) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
+    return;
+  }
+
+  const customer = await storage.getCustomer(customerId);
+  if (!customer) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+    return;
+  }
+
+  const deliveryMethod = customer.documentDeliveryMethod as "email" | "post" | null;
+  if (!deliveryMethod) {
+    res.json({ skipped: true, message: "Keine Versandmethode beim Kunden hinterlegt" });
+    return;
+  }
+
+  const { documentStorage } = await import("../../storage/documents");
+  const generatedDocs = await documentStorage.getGeneratedDocuments(customerId);
+  const pdfDocs = generatedDocs.filter((d: any) => d.objectPath && d.objectPath.endsWith(".pdf"));
+
+  if (pdfDocs.length === 0) {
+    res.json({ skipped: true, message: "Keine PDF-Dokumente zum Versenden vorhanden" });
+    return;
+  }
+
+  const result = await deliverDocuments({
+    customerId,
+    generatedDocumentIds: pdfDocs.map((d: any) => d.id),
+    deliveryMethod,
+    userId: req.user!.id,
+  });
+
+  if (result.status === "error") {
+    res.status(500).json({
+      error: "DELIVERY_ERROR",
+      message: result.error || "Versand fehlgeschlagen",
+      deliveryId: result.deliveryId,
+    });
+    return;
+  }
+
+  res.json({
+    message: "Dokumente erfolgreich versendet",
+    deliveryId: result.deliveryId,
+    status: result.status,
+    method: deliveryMethod,
+  });
+}));
+
 router.post("/document-delivery/test-smtp", asyncHandler("SMTP-Test fehlgeschlagen", async (_req: Request, res: Response) => {
   const settings = await storage.getCompanySettings();
   if (!settings) {

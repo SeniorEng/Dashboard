@@ -59,6 +59,7 @@
     "libphonenumber-js": "^1.12.31",
     "lucide-react": "^0.545.0",
     "nodemailer": "^8.0.1",
+    "pdf-lib": "^1.17.1",
     "puppeteer-core": "^24.37.3",
     "react": "^19.2.0",
     "react-day-picker": "^9.11.1",

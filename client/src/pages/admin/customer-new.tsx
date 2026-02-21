@@ -275,6 +275,16 @@ export default function AdminCustomerNew() {
           }
         }
 
+        if (formData.documentDeliveryMethod) {
+          try {
+            const { apiRequest } = await import("@/lib/queryClient");
+            await apiRequest("POST", `/api/admin/document-delivery/send-for-customer/${customer.id}`, {});
+          } catch (deliveryError) {
+            console.error("Dokumentenversand fehlgeschlagen:", deliveryError);
+            warnings.push("Dokumentenversand konnte nicht ausgelöst werden");
+          }
+        }
+
         if (warnings.length > 0) {
           toast({ title: "Kunde erstellt mit Hinweisen", description: warnings.join("; ") });
         } else {

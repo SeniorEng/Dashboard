@@ -8,7 +8,8 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Loader2, Upload, Trash2, ImageIcon, Mail, Truck, CheckCircle2, XCircle, Eye, EyeOff } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { ArrowLeft, Loader2, Upload, Trash2, ImageIcon, Mail, Truck, CheckCircle2, XCircle, Eye, EyeOff, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize } from "@/design-system";
@@ -67,6 +68,8 @@ const emptyCompanyForm = {
   epostPassword: "",
   epostSalt: "",
   epostTestMode: true,
+  deliveryEmailSubject: "",
+  deliveryCoverLetterText: "",
 };
 
 export default function AdminSettings() {
@@ -129,6 +132,8 @@ export default function AdminSettings() {
         epostPassword: companyData.epostPassword ?? "",
         epostSalt: companyData.epostSalt ?? "",
         epostTestMode: companyData.epostTestMode ?? true,
+        deliveryEmailSubject: companyData.deliveryEmailSubject ?? "",
+        deliveryCoverLetterText: companyData.deliveryCoverLetterText ?? "",
       });
     }
   }, [companyData]);
@@ -883,6 +888,59 @@ export default function AdminSettings() {
                     </div>
                     <p className="text-xs text-muted-foreground">
                       Einstellungen werden beim Speichern der Firmendaten mit gespeichert.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card data-testid="card-cover-letter-settings">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileText className="h-5 w-5 text-indigo-600" />
+                    Anschreiben (E-Mail & Brief)
+                  </CardTitle>
+                  <CardDescription>
+                    Betreff und Anschreibentext für den Dokumentenversand an Kunden. Wird für E-Mail und Postversand verwendet.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-col gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="deliveryEmailSubject">E-Mail-Betreff</Label>
+                      <Input
+                        id="deliveryEmailSubject"
+                        value={companyForm.deliveryEmailSubject}
+                        onChange={(e) => updateField("deliveryEmailSubject", e.target.value)}
+                        placeholder="Ihre Vertragsunterlagen — {{firmenname}}"
+                        data-testid="input-delivery-email-subject"
+                      />
+                      <p className="text-xs text-muted-foreground">Standard: "Ihre Vertragsunterlagen — {{'{{'}}firmenname{{'}}'}}"</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="deliveryCoverLetterText">Anschreiben-Text</Label>
+                      <Textarea
+                        id="deliveryCoverLetterText"
+                        value={companyForm.deliveryCoverLetterText}
+                        onChange={(e) => updateField("deliveryCoverLetterText", e.target.value)}
+                        placeholder={"Sehr geehrte/r {{kundenname}},\n\nanbei erhalten Sie Ihre unterschriebenen Vertragsunterlagen:\n\n{{dokumentenliste}}\n\nBitte bewahren Sie diese Unterlagen sorgfältig auf.\n\nMit freundlichen Grüßen\n{{firmenname}}"}
+                        rows={10}
+                        className="font-mono text-sm"
+                        data-testid="textarea-delivery-cover-letter"
+                      />
+                    </div>
+                    <div className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
+                      <p className="font-medium mb-2">Verfügbare Platzhalter:</p>
+                      <div className="grid grid-cols-2 gap-1 text-xs">
+                        <div><code className="bg-white px-1 rounded">{"{{kundenname}}"}</code> — Vollständiger Kundenname</div>
+                        <div><code className="bg-white px-1 rounded">{"{{vorname}}"}</code> — Vorname des Kunden</div>
+                        <div><code className="bg-white px-1 rounded">{"{{nachname}}"}</code> — Nachname des Kunden</div>
+                        <div><code className="bg-white px-1 rounded">{"{{firmenname}}"}</code> — Name Ihres Unternehmens</div>
+                        <div><code className="bg-white px-1 rounded">{"{{datum}}"}</code> — Heutiges Datum</div>
+                        <div><code className="bg-white px-1 rounded">{"{{dokumentenliste}}"}</code> — Liste der Dokumente</div>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Leer lassen für den Standardtext. Speichern über den Button "Speichern" bei den Firmendaten oben.
                     </p>
                   </div>
                 </CardContent>

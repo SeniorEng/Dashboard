@@ -1,6 +1,7 @@
-import { sendEmail, buildContractEmailHtml } from "./email-service";
+import { sendEmail } from "./email-service";
 import { sendEpostLetter } from "./epost-service";
 import { getDocumentPdfBuffer } from "./document-pdf";
+import { renderEmailSubject, renderEmailHtml, renderCoverLetterPdf } from "./cover-letter";
 import { deliveryStorage } from "../storage/deliveries";
 import { storage } from "../storage";
 import type { CompanySettings } from "@shared/schema";
@@ -62,11 +63,19 @@ export async function deliverDocuments(options: DeliveryOptions): Promise<Delive
     createdByUserId: userId,
   });
 
+  const placeholderData = {
+    kundenname: customerFullName,
+    vorname: customer.vorname || "",
+    nachname: customer.nachname || "",
+    firmenname: companyName,
+    documentNames: validDocs.map((d) => d!.fileName.replace(/_/g, " ").replace(/\.pdf$/i, "")),
+  };
+
   try {
     if (deliveryMethod === "email") {
-      await deliverByEmail(settings, customer, validDocs, companyName, customerFullName);
+      await deliverByEmail(settings, customer, validDocs, placeholderData);
     } else {
-      const letterId = await deliverByPost(settings, customer, validDocs, companyName);
+      const letterId = await deliverByPost(settings, customer, validDocs, placeholderData);
       await deliveryStorage.updateDeliveryStatus(delivery.id, {
         status: "sent",
         sentAt: new Date(),
@@ -95,8 +104,7 @@ async function deliverByEmail(
   settings: CompanySettings,
   customer: any,
   documents: any[],
-  companyName: string,
-  customerFullName: string
+  placeholderData: { kundenname: string; vorname: string; nachname: string; firmenname: string; documentNames: string[] }
 ): Promise<void> {
   if (!customer.email) {
     throw new Error("Keine E-Mail-Adresse beim Kunden hinterlegt");
@@ -113,16 +121,12 @@ async function deliverByEmail(
     })
   );
 
-  const html = buildContractEmailHtml({
-    customerName: customerFullName,
-    companyName,
-    documentNames: documents.map((d) => d.fileName.replace(/_/g, " ").replace(/\.pdf$/i, "")),
-    logoUrl: settings.logoUrl,
-  });
+  const subject = renderEmailSubject(settings, placeholderData);
+  const html = renderEmailHtml(settings, placeholderData);
 
   await sendEmail(settings, {
     to: customer.email,
-    subject: `Ihre Vertragsunterlagen — ${companyName}`,
+    subject,
     html,
     attachments,
   });
@@ -132,19 +136,21 @@ async function deliverByPost(
   settings: CompanySettings,
   customer: any,
   documents: any[],
-  companyName: string
+  placeholderData: { kundenname: string; vorname: string; nachname: string; firmenname: string; documentNames: string[] }
 ): Promise<string> {
   if (!customer.strasse || !customer.plz || !customer.stadt) {
     throw new Error("Unvollständige Adresse beim Kunden für Postversand");
   }
 
-  const pdfBuffers = await Promise.all(
+  const coverLetterPdf = await renderCoverLetterPdf(settings, placeholderData);
+
+  const documentPdfs = await Promise.all(
     documents.map((doc) => getDocumentPdfBuffer(doc.objectPath))
   );
 
-  const combinedBuffer = pdfBuffers.length === 1 ? pdfBuffers[0] : pdfBuffers[0];
+  const combinedBuffer = await combinePdfBuffers([coverLetterPdf, ...documentPdfs]);
 
-  const senderLine = [companyName, settings.strasse, settings.hausnummer, settings.plz, settings.stadt]
+  const senderLine = [settings.companyName, settings.strasse, settings.hausnummer, settings.plz, settings.stadt]
     .filter(Boolean)
     .join(", ");
 
@@ -160,4 +166,25 @@ async function deliverByPost(
   });
 
   return result.letterId;
+}
+
+async function combinePdfBuffers(buffers: Buffer[]): Promise<Buffer> {
+  if (buffers.length === 1) return buffers[0];
+
+  try {
+    const { PDFDocument } = await import("pdf-lib");
+    const merged = await PDFDocument.create();
+
+    for (const buf of buffers) {
+      const doc = await PDFDocument.load(buf);
+      const pages = await merged.copyPages(doc, doc.getPageIndices());
+      pages.forEach((page) => merged.addPage(page));
+    }
+
+    const mergedBytes = await merged.save();
+    return Buffer.from(mergedBytes);
+  } catch (error: any) {
+    console.error("PDF-Zusammenführung fehlgeschlagen, sende nur erstes Dokument:", error.message);
+    return buffers[0];
+  }
 }

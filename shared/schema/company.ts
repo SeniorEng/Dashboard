@@ -39,6 +39,8 @@ export const companySettings = pgTable("company_settings", {
   epostPassword: text("epost_password"),
   epostSalt: text("epost_salt"),
   epostTestMode: boolean("epost_test_mode").notNull().default(true),
+  deliveryEmailSubject: text("delivery_email_subject"),
+  deliveryCoverLetterText: text("delivery_cover_letter_text"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   updatedByUserId: integer("updated_by_user_id").references(() => users.id),
 });
@@ -80,6 +82,8 @@ export const updateCompanySettingsSchema = z.object({
   epostPassword: z.string().optional().nullable(),
   epostSalt: z.string().optional().nullable(),
   epostTestMode: z.boolean().optional(),
+  deliveryEmailSubject: z.string().optional().nullable(),
+  deliveryCoverLetterText: z.string().optional().nullable(),
 });
 
 export type UpdateCompanySettings = z.infer<typeof updateCompanySettingsSchema>;
