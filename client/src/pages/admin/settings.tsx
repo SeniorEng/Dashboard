@@ -749,17 +749,8 @@ export default function AdminSettings() {
                         />
                       </div>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label htmlFor="smtpSecure">SSL/TLS verwenden</Label>
-                        <p className="text-xs text-muted-foreground">Aktivieren für Port 465 (SSL). Für Port 587 (STARTTLS) deaktiviert lassen.</p>
-                      </div>
-                      <Switch
-                        id="smtpSecure"
-                        checked={companyForm.smtpSecure}
-                        onCheckedChange={(checked) => updateField("smtpSecure", checked)}
-                        data-testid="switch-smtp-secure"
-                      />
+                    <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
+                      <p className="text-xs text-blue-700">Port 465 → automatisch SSL/TLS. Port 587 → automatisch STARTTLS. Die Verschlüsselung wird anhand des Ports erkannt.</p>
                     </div>
                     <div className="flex items-center gap-3">
                       <Button

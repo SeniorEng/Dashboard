@@ -18,11 +18,12 @@ function createTransporter(settings: CompanySettings) {
   }
 
   const port = parseInt(settings.smtpPort, 10);
+  const useSecure = port === 465;
 
   return nodemailer.createTransport({
     host: settings.smtpHost,
     port,
-    secure: settings.smtpSecure || port === 465,
+    secure: useSecure,
     auth: {
       user: settings.smtpUser,
       pass: settings.smtpPass,
