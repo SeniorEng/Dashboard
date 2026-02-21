@@ -47,6 +47,7 @@ import {
 import { UserForm } from "./components/user-form";
 import { EmployeeDocumentsSection } from "./components/employee-documents-section";
 import { EmployeeServiceRates } from "./components/employee-service-rates";
+import { EmployeeQualificationsSection } from "./components/employee-qualifications-section";
 import { ResetPasswordForm } from "./components/reset-password-form";
 
 type StatusFilter = "aktiv" | "inaktiv" | "alle";
@@ -424,6 +425,7 @@ export default function AdminUsers() {
                 isLoading={updateMutation.isPending}
               />
               <EmployeeServiceRates />
+              <EmployeeQualificationsSection employeeId={editingUser.id} />
               <EmployeeDocumentsSection employeeId={editingUser.id} userName={editingUser.displayName} isAdmin={true} />
             </>
           )}

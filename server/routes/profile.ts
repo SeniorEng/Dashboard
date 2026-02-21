@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../lib/errors";
 import { authService } from "../services/auth";
 import { documentStorage } from "../storage/documents";
+import { qualificationStorage } from "../storage/qualifications";
 import { usersCache, birthdaysCache } from "../services/cache";
 
 const router = Router();
@@ -115,6 +116,53 @@ router.post("/documents", asyncHandler("Dokument konnte nicht hochgeladen werden
 
   const doc = await documentStorage.uploadDocument(result.data, req.user!.id);
   res.status(201).json(doc);
+}));
+
+router.get("/qualifications", asyncHandler("Qualifikationen konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const qualifications = await qualificationStorage.getEmployeeQualifications(req.user!.id);
+  res.json(qualifications);
+}));
+
+router.get("/proofs", asyncHandler("Nachweise konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const proofs = await qualificationStorage.getEmployeeProofs(req.user!.id);
+  res.json(proofs);
+}));
+
+router.get("/proofs/pending-count", asyncHandler("Anzahl ausstehender Nachweise konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const count = await qualificationStorage.getPendingProofCount(req.user!.id);
+  res.json({ count });
+}));
+
+router.patch("/proofs/:proofId/upload", asyncHandler("Nachweis konnte nicht hochgeladen werden", async (req: Request, res: Response) => {
+  const proofId = parseInt(req.params.proofId);
+  if (isNaN(proofId)) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" });
+    return;
+  }
+
+  const proof = await qualificationStorage.getProofById(proofId);
+  if (!proof || proof.employeeId !== req.user!.id) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Nachweis nicht gefunden" });
+    return;
+  }
+
+  if (proof.status !== "pending" && proof.status !== "rejected") {
+    res.status(400).json({ error: "INVALID_STATE", message: "Nachweis kann in diesem Status nicht hochgeladen werden" });
+    return;
+  }
+
+  const schema = z.object({
+    fileName: z.string().min(1),
+    objectPath: z.string().min(1),
+  });
+  const result = schema.safeParse(req.body);
+  if (!result.success) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Daten" });
+    return;
+  }
+
+  const updated = await qualificationStorage.uploadProof(proofId, result.data.fileName, result.data.objectPath);
+  res.json(updated);
 }));
 
 export default router;
