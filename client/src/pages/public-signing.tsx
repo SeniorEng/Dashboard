@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SignaturePad } from "@/components/ui/signature-pad";
 import { Loader2, FileText, Check, AlertTriangle, Clock, ShieldCheck } from "lucide-react";
+import { componentStyles } from "@/design-system";
 
 interface DocumentData {
   documentId: number;
@@ -138,7 +139,7 @@ export default function PublicSigningPage() {
         <div className="flex items-center gap-2 py-3">
           <ShieldCheck className="h-6 w-6 text-teal-600" />
           <div>
-            <h1 className="text-lg font-semibold text-gray-900">Digitale Unterschrift</h1>
+            <h1 className={componentStyles.pageTitle}>Digitale Unterschrift</h1>
             <p className="text-xs text-gray-500">SeniorenEngel Dokumentenverwaltung</p>
           </div>
         </div>

@@ -344,7 +344,7 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
             contractId: contract.id,
             serviceCategory: rate.serviceCategory as "hauswirtschaft" | "alltagsbegleitung" | "erstberatung",
             hourlyRateCents: rate.hourlyRateCents,
-            validFrom: data.contract.contractStart,
+            validFrom: data.contract!.contractStart,
           }, userId)
         ));
       }

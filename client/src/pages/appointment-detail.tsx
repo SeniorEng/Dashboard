@@ -25,6 +25,7 @@ import {
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
+import { api, unwrapResult } from "@/lib/api/client";
 import { formatTimeSlot, getEndTime } from "@/features/appointments/utils";
 import { 
   formatDuration, 
@@ -55,9 +56,17 @@ export default function AppointmentDetail() {
   }>>({
     queryKey: [`/api/appointments/${id}/services`],
     queryFn: async () => {
-      const res = await fetch(`/api/appointments/${id}/services`);
-      if (!res.ok) throw new Error("Failed to fetch services");
-      return res.json();
+      const result = await api.get<Array<{ 
+        id: number;
+        serviceId: number; 
+        serviceName: string;
+        serviceCode: string;
+        serviceUnitType: string;
+        plannedDurationMinutes: number; 
+        actualDurationMinutes: number | null; 
+        details: string | null;
+      }>>(`/appointments/${id}/services`);
+      return unwrapResult(result);
     },
     enabled: !!id && !!appointment,
   });
@@ -130,7 +139,7 @@ export default function AppointmentDetail() {
 
         {appointment.customer && (
           <div className="mb-6">
-            <h1 className="text-2xl font-bold leading-tight" data-testid="text-customer-name">
+            <h1 className={componentStyles.pageTitle} data-testid="text-customer-name">
               {appointment.customer.name}
             </h1>
             <div className="flex items-center text-muted-foreground text-sm mt-2">

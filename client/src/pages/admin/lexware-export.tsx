@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Download, AlertTriangle, FileSpreadsheet } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
+import { api, unwrapResult } from "@/lib/api/client";
 
 interface ExportRow {
   year: number;
@@ -42,11 +43,8 @@ export default function LexwareExport() {
   const { data, isLoading, error } = useQuery<ExportData>({
     queryKey: ["lexware-export", selectedYear, selectedMonth],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/lexware-export?year=${selectedYear}&month=${selectedMonth}`, {
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error("Export-Daten konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<ExportData>(`/admin/lexware-export?year=${selectedYear}&month=${selectedMonth}`);
+      return unwrapResult(result);
     },
   });
 
@@ -66,7 +64,7 @@ export default function LexwareExport() {
     <Layout variant="admin">
       <div className="flex items-center gap-4 mb-6">
         <Link href="/admin">
-          <Button variant="ghost" size="icon" data-testid="button-back">
+          <Button variant="ghost" size="icon" data-testid="button-back" aria-label="Zurück">
             <ArrowLeft className={iconSize.md} />
           </Button>
         </Link>

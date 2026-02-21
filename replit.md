@@ -25,7 +25,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **State Management**: TanStack Query for data fetching, React memoization, ErrorBoundary.
 - **Date/Time Handling**: All times are implicitly "German local time" with no UTC conversion or timezone logic, using central utilities (`@shared/utils/datetime`).
 - **Components**: `DatePicker`, `SearchableSelect`, `StatusBadge` (with 13+ types).
-- **API Calls**: Central API client for CSRF protection on state-changing requests.
+- **API Calls**: Central API client (`@/lib/api/client`) for ALL HTTP requests. Use `api.get()` for queries (with `unwrapResult()` for data extraction), `api.post()`/`api.patch()`/`api.delete()` for mutations (includes CSRF automatically). No raw `fetch()` calls — always use the central client.
 - **Phone Number Handling**: Uses `libphonenumber-js/min` for validating, formatting, and storing German phone numbers in E.164 format.
 - **Type Organization**: Hierarchical type structure (`@shared/schema.ts`, `@shared/domain/*`, `@shared/utils/*`, `@shared/types.ts`).
 

@@ -144,6 +144,7 @@ export function ServiceSelector({ services, onChange, error }: ServiceSelectorPr
                 size="icon"
                 onClick={() => setShowPicker(false)}
                 data-testid="button-cancel-add-service"
+                aria-label="Schließen"
               >
                 <X className={iconSize.sm} />
               </Button>

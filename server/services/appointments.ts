@@ -341,8 +341,8 @@ export class AppointmentService {
       nr: input.customer.nr,
       plz: input.customer.plz,
       stadt: input.customer.stadt,
-      pflegegrad: input.customer.pflegegrad ?? null,
-      needs: [],
+      pflegegrad: input.customer.pflegegrad ?? 0,
+      needs: [] as string[],
     };
     
     const appointmentData: Omit<InsertAppointment, 'customerId'> = {

@@ -79,11 +79,8 @@ function ErstberatungConversionSection({
   }>({
     queryKey: ["conversion-readiness", customerId],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/customers/${customerId}/conversion-readiness`, {
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error("Prüfung fehlgeschlagen");
-      return res.json();
+      const result = await api.get<{ ready: boolean; missing: string[]; customerStatus: string }>(`/admin/customers/${customerId}/conversion-readiness`);
+      return unwrapResult(result);
     },
     staleTime: 10000,
   });
@@ -194,11 +191,8 @@ function BudgetsTabContent({
   const { data: budget } = useQuery<BudgetSummary>({
     queryKey: ["budget-summary", customerId],
     queryFn: async () => {
-      const response = await fetch(`/api/budget/${customerId}/summary`, {
-        credentials: "include",
-      });
-      if (!response.ok) throw new Error("Budget-Zusammenfassung konnte nicht geladen werden");
-      return response.json();
+      const result = await api.get<BudgetSummary>(`/budget/${customerId}/summary`);
+      return unwrapResult(result);
     },
     staleTime: 30000,
   });

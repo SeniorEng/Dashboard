@@ -265,7 +265,7 @@ export default function AdminServices() {
                 <ArrowLeft className={iconSize.md} />
               </Button>
             </Link>
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Dienstleistungskatalog</h1>
+            <h1 className={componentStyles.pageTitle}>Dienstleistungskatalog</h1>
           </div>
           <div className="flex items-center justify-between">
             <p className="text-sm text-gray-600">Leistungen und Standardpreise</p>

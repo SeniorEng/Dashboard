@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import logo from "@assets/Logo-04_250x250_1764898165379.jpg";
 import { useAuth } from "@/hooks/use-auth";
+import { api, unwrapResult } from "@/lib/api/client";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,9 +42,8 @@ function GlobalSearch() {
     queryKey: ["search", query],
     queryFn: async () => {
       if (query.length < 2) return [];
-      const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
-      if (!response.ok) throw new Error("Search failed");
-      return response.json();
+      const result = await api.get<SearchResult[]>(`/search?q=${encodeURIComponent(query)}`);
+      return unwrapResult(result);
     },
     enabled: query.length >= 2,
     staleTime: 30000,
@@ -144,9 +144,9 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
   const { data: companySettings } = useQuery<{ logoUrl?: string | null }>({
     queryKey: ["company-settings"],
     queryFn: async () => {
-      const res = await fetch("/api/company-settings", { credentials: "include" });
-      if (!res.ok) return {};
-      return res.json();
+      const result = await api.get<{ logoUrl?: string | null }>("/company-settings");
+      if (!result.success) return {};
+      return result.data;
     },
     enabled: isAuthenticated,
     staleTime: 60000,

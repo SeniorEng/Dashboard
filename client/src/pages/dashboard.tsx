@@ -104,6 +104,7 @@ export default function Dashboard() {
             onClick={goToPreviousWeek}
             data-testid="button-prev-week"
             title="Vorherige Woche"
+            aria-label="Vorherige Woche"
           >
             <ChevronsLeft className={iconSize.sm} />
           </Button>
@@ -137,6 +138,7 @@ export default function Dashboard() {
             onClick={goToNextWeek}
             data-testid="button-next-week"
             title="Nächste Woche"
+            aria-label="Nächste Woche"
           >
             <ChevronsRight className={iconSize.sm} />
           </Button>

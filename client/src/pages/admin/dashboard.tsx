@@ -7,7 +7,7 @@ import {
   Users, UserCog, ArrowLeft, Contact2, Clock, Settings,
   Building2, ClipboardList, FileText, Shield, Receipt, Download,
 } from "lucide-react";
-import { iconSize } from "@/design-system";
+import { iconSize, componentStyles } from "@/design-system";
 
 interface AdminCardProps {
   href: string;
@@ -68,7 +68,7 @@ export default function AdminDashboard() {
           </Button>
         </Link>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Administration</h1>
+          <h1 className={componentStyles.pageTitle}>Administration</h1>
           <p className="text-gray-600">Willkommen, {user?.displayName}</p>
         </div>
       </div>

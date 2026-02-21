@@ -43,9 +43,8 @@ export function EmployeeMatching({ customerId, inlineCriteria, onSelect, selecte
   const existingQuery = useQuery<MatchResult[]>({
     queryKey: ["employee-matching", customerId],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/customers/${customerId}/match-employees`);
-      if (!res.ok) throw new Error("Matching fehlgeschlagen");
-      return res.json();
+      const result = await api.get<MatchResult[]>(`/admin/customers/${customerId}/match-employees`);
+      return unwrapResult(result);
     },
     enabled: !!customerId && !inlineCriteria,
     staleTime: 30000,

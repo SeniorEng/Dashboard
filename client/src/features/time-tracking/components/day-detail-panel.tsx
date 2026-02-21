@@ -211,6 +211,7 @@ export function DayDetailPanel({
                           className="text-gray-400 hover:text-teal-600"
                           onClick={() => onEditEntry(entry)}
                           data-testid={`button-edit-entry-${entry.id}`}
+                          aria-label="Eintrag bearbeiten"
                         >
                           <Pencil className={iconSize.sm} />
                         </Button>
@@ -221,6 +222,7 @@ export function DayDetailPanel({
                           onClick={() => onDeleteEntry(entry.id)}
                           disabled={isDeleting}
                           data-testid={`button-delete-entry-${entry.id}`}
+                          aria-label="Eintrag löschen"
                         >
                           <Trash2 className={iconSize.sm} />
                         </Button>

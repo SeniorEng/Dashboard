@@ -160,6 +160,6 @@ export async function renderCoverLetterPdf(settings: CompanySettings, data: Plac
 </body>
 </html>`;
 
-  const { pdfBuffer } = await generatePdfFromHtml(html);
+  const { pdfBuffer } = await generatePdfFromHtml(html, "Begleitschreiben");
   return pdfBuffer;
 }

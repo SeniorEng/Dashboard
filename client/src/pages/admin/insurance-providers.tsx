@@ -198,7 +198,7 @@ export default function AdminInsuranceProviders() {
               </Button>
             </Link>
             <div className="flex-1">
-              <h1 className="text-2xl font-bold text-gray-900">Kostenträger</h1>
+              <h1 className={componentStyles.pageTitle}>Kostenträger</h1>
               <p className="text-gray-600">Pflegekassen verwalten</p>
             </div>
             <Button onClick={openCreate} className={componentStyles.btnPrimary} data-testid="button-add-provider">

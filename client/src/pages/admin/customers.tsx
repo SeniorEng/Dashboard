@@ -359,6 +359,7 @@ export default function AdminCustomers() {
                 onClick={() => handlePageChange(currentPage - 1)}
                 disabled={currentPage === 1}
                 data-testid="button-prev-page"
+                aria-label="Vorherige Seite"
               >
                 <ChevronLeft className={iconSize.sm} />
               </Button>
@@ -371,6 +372,7 @@ export default function AdminCustomers() {
                 onClick={() => handlePageChange(currentPage + 1)}
                 disabled={currentPage === totalPages}
                 data-testid="button-next-page"
+                aria-label="Nächste Seite"
               >
                 <ChevronRight className={iconSize.sm} />
               </Button>

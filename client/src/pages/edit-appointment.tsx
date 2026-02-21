@@ -15,7 +15,7 @@ import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useAppointment, useCustomerList, ServiceSelector, AppointmentSummary } from "@/features/appointments";
 import { addMinutesToTime, timeToMinutes, minutesToTimeDisplay, formatDurationDisplay } from "@shared/utils/datetime";
-import { DURATION_OPTIONS } from "@shared/types";
+import { DURATION_OPTIONS, formatDuration } from "@shared/types";
 import type { Service } from "@shared/schema";
 
 export default function EditAppointment() {
@@ -234,7 +234,7 @@ export default function EditAppointment() {
         >
           <ChevronLeft className={`${iconSize.sm} mr-1`} /> Zurück
         </Button>
-        <h1 className="text-2xl font-bold">Termin bearbeiten</h1>
+        <h1 className={componentStyles.pageTitle}>Termin bearbeiten</h1>
         {appointment.customer && (
           <p className="text-muted-foreground mt-1">{appointment.customer.name}</p>
         )}
@@ -312,8 +312,8 @@ export default function EditAppointment() {
                   </SelectTrigger>
                   <SelectContent>
                     {DURATION_OPTIONS.map((d) => (
-                      <SelectItem key={d.value} value={d.value.toString()}>
-                        {d.label}
+                      <SelectItem key={d} value={d.toString()}>
+                        {formatDuration(d)}
                       </SelectItem>
                     ))}
                   </SelectContent>

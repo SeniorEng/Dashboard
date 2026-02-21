@@ -11,10 +11,10 @@ import {
   ArrowLeft, Loader2, Calendar, Clock, MapPin, User,
   FileText, Check, AlertTriangle, Car
 } from "lucide-react";
-import { iconSize } from "@/design-system";
+import { iconSize, componentStyles } from "@/design-system";
 import { formatDateForDisplay, formatTimeHHMM } from "@shared/utils/datetime";
 import { useToast } from "@/hooks/use-toast";
-import { api } from "@/lib/api/client";
+import { api, unwrapResult } from "@/lib/api/client";
 import type { MonthlyServiceRecord, Customer } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 
@@ -35,9 +35,8 @@ export default function ServiceRecordDetailPage() {
   const { data: record, isLoading: recordLoading, error: recordError, refetch } = useQuery<MonthlyServiceRecord>({
     queryKey: ["/api/service-records", recordId],
     queryFn: async () => {
-      const response = await fetch(`/api/service-records/${recordId}`);
-      if (!response.ok) throw new Error("Leistungsnachweis konnte nicht geladen werden");
-      return response.json();
+      const result = await api.get<MonthlyServiceRecord>(`/service-records/${recordId}`);
+      return unwrapResult(result);
     },
     enabled: !!recordId,
   });
@@ -45,9 +44,8 @@ export default function ServiceRecordDetailPage() {
   const { data: customer } = useQuery<Customer>({
     queryKey: ["customer", record?.customerId],
     queryFn: async () => {
-      const response = await fetch(`/api/customers/${record?.customerId}`);
-      if (!response.ok) throw new Error("Kunde konnte nicht geladen werden");
-      return response.json();
+      const result = await api.get<Customer>(`/customers/${record?.customerId}`);
+      return unwrapResult(result);
     },
     enabled: !!record?.customerId,
   });
@@ -55,9 +53,8 @@ export default function ServiceRecordDetailPage() {
   const { data: appointments = [], isLoading: appointmentsLoading } = useQuery<AppointmentWithCustomer[]>({
     queryKey: ["/api/service-records", recordId, "appointments"],
     queryFn: async () => {
-      const response = await fetch(`/api/service-records/${recordId}/appointments`);
-      if (!response.ok) throw new Error("Termine konnten nicht geladen werden");
-      return response.json();
+      const result = await api.get<AppointmentWithCustomer[]>(`/service-records/${recordId}/appointments`);
+      return unwrapResult(result);
     },
     enabled: !!recordId,
   });
@@ -73,9 +70,16 @@ export default function ServiceRecordDetailPage() {
     queryKey: ["/api/service-records", recordId, "appointment-services"],
     queryFn: async () => {
       const ids = appointments.map(a => a.id).join(",");
-      const res = await fetch(`/api/appointments/batch-services?ids=${ids}`);
-      if (!res.ok) return {};
-      return res.json();
+      const result = await api.get<Record<number, Array<{
+        serviceId: number;
+        serviceName: string;
+        serviceCode: string;
+        plannedDurationMinutes: number;
+        actualDurationMinutes: number | null;
+        details: string | null;
+      }>>>(`/appointments/batch-services?ids=${ids}`);
+      if (!result.success) return {};
+      return result.data;
     },
     enabled: appointments.length > 0,
   });
@@ -83,11 +87,10 @@ export default function ServiceRecordDetailPage() {
   const { data: employeeMap = {} } = useQuery<Record<number, string>>({
     queryKey: ["employee-names-map"],
     queryFn: async () => {
-      const res = await fetch("/api/service-records/employee-names", { credentials: "include" });
-      if (!res.ok) return {};
-      const employees: { id: number; displayName: string }[] = await res.json();
+      const result = await api.get<{ id: number; displayName: string }[]>("/service-records/employee-names");
+      if (!result.success) return {};
       const map: Record<number, string> = {};
-      employees.forEach(e => { map[e.id] = e.displayName; });
+      result.data.forEach(e => { map[e.id] = e.displayName; });
       return map;
     },
   });
@@ -168,7 +171,7 @@ export default function ServiceRecordDetailPage() {
             </Button>
           </Link>
           <div>
-            <h1 className="text-xl font-semibold text-foreground" data-testid="text-title">
+            <h1 className={componentStyles.pageTitle} data-testid="text-title">
               Leistungsnachweis
             </h1>
             <p className="text-sm text-muted-foreground">

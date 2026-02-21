@@ -8,7 +8,7 @@
  * WICHTIG: Immer diese zentralen Funktionen verwenden statt lokale zu definieren.
  */
 
-import { parseLocalDate } from "./datetime";
+import { parseLocalDate, formatDateForDisplay } from "./datetime";
 
 /**
  * Formatiert einen Cent-Betrag als Euro-String mit deutschem Format.
@@ -39,7 +39,10 @@ export function formatCurrency(cents: number, options?: { showSign?: boolean }):
 }
 
 /**
+ * @deprecated Use formatDateForDisplay from @shared/utils/datetime instead.
+ * 
  * Formatiert einen Datumsstring für die deutsche Anzeige.
+ * Delegates to formatDateForDisplay() from datetime.ts.
  * 
  * @param dateStr - Datumsstring im Format "YYYY-MM-DD" oder ISO-Timestamp "YYYY-MM-DDTHH:mm:ss"
  * @param style - Anzeigeformat
@@ -48,11 +51,6 @@ export function formatCurrency(cents: number, options?: { showSign?: boolean }):
  *   - "long": "4. Dezember 2025"
  *   - "relative": "Heute", "Gestern", "Morgen" wenn passend
  * @returns Formatierter deutscher Datumsstring
- * 
- * @example
- * formatDateDisplay("2025-12-04") → "04.12.2025"
- * formatDateDisplay("2025-12-04T14:30:00.000Z") → "04.12.2025"
- * formatDateDisplay("2025-12-04", "long") → "4. Dezember 2025"
  */
 export function formatDateDisplay(
   dateStr: string,
@@ -60,11 +58,10 @@ export function formatDateDisplay(
 ): string {
   if (!dateStr) return "";
   
-  // Handle ISO timestamps by extracting just the date part
   const dateOnly = dateStr.includes("T") ? dateStr.split("T")[0] : dateStr;
-  const date = parseLocalDate(dateOnly);
   
   if (style === "relative") {
+    const date = parseLocalDate(dateOnly);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
@@ -73,18 +70,10 @@ export function formatDateDisplay(
     if (diffDays === 0) return "Heute";
     if (diffDays === 1) return "Morgen";
     if (diffDays === -1) return "Gestern";
-    // Fall through to short format
-  }
-  
-  if (style === "long") {
-    const months = [
-      "Januar", "Februar", "März", "April", "Mai", "Juni",
-      "Juli", "August", "September", "Oktober", "November", "Dezember"
-    ];
-    return `${date.getDate()}. ${months[date.getMonth()]} ${date.getFullYear()}`;
   }
   
   if (style === "medium") {
+    const date = parseLocalDate(dateOnly);
     const months = [
       "Jan.", "Feb.", "März", "Apr.", "Mai", "Juni",
       "Juli", "Aug.", "Sep.", "Okt.", "Nov.", "Dez."
@@ -92,11 +81,11 @@ export function formatDateDisplay(
     return `${date.getDate()}. ${months[date.getMonth()]} ${date.getFullYear()}`;
   }
   
-  // short format (default)
-  const day = String(date.getDate()).padStart(2, "0");
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const year = date.getFullYear();
-  return `${day}.${month}.${year}`;
+  if (style === "long") {
+    return formatDateForDisplay(dateOnly, { day: "numeric", month: "long", year: "numeric" });
+  }
+  
+  return formatDateForDisplay(dateOnly);
 }
 
 export function formatAddress(entity: {

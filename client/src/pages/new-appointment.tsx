@@ -30,7 +30,7 @@ export default function NewAppointment() {
         >
           <ChevronLeft className={`${iconSize.sm} mr-1`} /> Zurück
         </Button>
-        <h1 className="text-2xl font-bold">Neuer Termin</h1>
+        <h1 className={componentStyles.pageTitle}>Neuer Termin</h1>
       </div>
 
       <Tabs value={form.activeTab} onValueChange={form.setActiveTab} className="w-full">

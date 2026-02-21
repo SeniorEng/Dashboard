@@ -298,7 +298,7 @@ export class CustomerManagementStorage {
         versichertennummer: data.versichertennummer,
         validFrom: todayISO(),
         createdByUserId: userId,
-      });
+      } as typeof customerInsuranceHistory.$inferInsert);
 
       await tx.insert(customerContacts).values({
         customerId: customer.id,
@@ -329,7 +329,7 @@ export class CustomerManagementStorage {
         pflegegradBeantragt: data.pflegegradBeantragt,
         validFrom: data.pflegegradSeit,
         createdByUserId: userId,
-      });
+      } as typeof customerCareLevelHistory.$inferInsert);
 
       const services = data.services || {};
       await tx.insert(customerNeedsAssessments).values({

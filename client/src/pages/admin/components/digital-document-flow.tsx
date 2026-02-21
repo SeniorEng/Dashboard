@@ -99,9 +99,8 @@ export function DigitalDocumentFlow({
   const { data: templates, isLoading: templatesLoading } = useQuery<TemplateOption[]>({
     queryKey: ["admin", "document-templates", "by-context", context, targetType],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/document-templates/by-context?context=${context}&targetType=${targetType}`, { credentials: "include" });
-      if (!res.ok) throw new Error("Vorlagen konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<TemplateOption[]>(`/admin/document-templates/by-context?context=${context}&targetType=${targetType}`);
+      return unwrapResult(result);
     },
     enabled: open,
   });

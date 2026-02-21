@@ -198,6 +198,7 @@ router.post("/:id/signatures", async (req, res) => {
           objectPath: `generated/${customerId}/${sig.templateSlug}_${Date.now()}.html`,
           customerSignatureData: sig.customerSignatureData,
           integrityHash: hash,
+          signingStatus: "complete" as const,
         }, userId);
         results.push(doc);
       } catch (err) {

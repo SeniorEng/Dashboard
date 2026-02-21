@@ -74,28 +74,6 @@ export function addDays(dateString: string, days: number): string {
 }
 
 /**
- * Formatiert ein Datum für die deutsche Anzeige
- * @param dateStr - Datum als "YYYY-MM-DD" String
- * @param style - "short" für "04.12.2025", "long" für "4. Dezember 2025"
- */
-function formatDateGerman(dateStr: string, style: "short" | "long" = "short"): string {
-  const d = parseLocalDate(dateStr);
-
-  if (style === "long") {
-    const months = [
-      "Januar", "Februar", "März", "April", "Mai", "Juni",
-      "Juli", "August", "September", "Oktober", "November", "Dezember"
-    ];
-    return `${d.getDate()}. ${months[d.getMonth()]} ${d.getFullYear()}`;
-  }
-
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const year = d.getFullYear();
-  return `${day}.${month}.${year}`;
-}
-
-/**
  * Gibt den Wochentag zurück (Montag = 0, Sonntag = 6)
  * @param dateStr - Datum als "YYYY-MM-DD" String
  */
@@ -103,17 +81,6 @@ function getWeekdayIndex(dateStr: string): number {
   const d = parseLocalDate(dateStr);
   const jsDay = d.getDay();
   return jsDay === 0 ? 6 : jsDay - 1;
-}
-
-/**
- * Gibt den deutschen Wochentagsnamen zurück
- * @param dateStr - Datum als "YYYY-MM-DD" String
- */
-function getWeekdayName(dateStr: string, style: "short" | "long" = "short"): string {
-  const shortNames = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
-  const longNames = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
-  const index = getWeekdayIndex(dateStr);
-  return style === "long" ? longNames[index] : shortNames[index];
 }
 
 /**
@@ -163,17 +130,6 @@ export function isPast(dateString: string): boolean {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return date < today;
-}
-
-/**
- * Berechnet die Differenz in Tagen zwischen zwei Datumsstrings.
- * @returns Positive Zahl wenn date2 nach date1 liegt, negative wenn davor
- */
-function daysBetween(date1: string, date2: string): number {
-  const d1 = parseLocalDate(date1);
-  const d2 = parseLocalDate(date2);
-  const diffTime = d2.getTime() - d1.getTime();
-  return Math.round(diffTime / (1000 * 60 * 60 * 24));
 }
 
 // ============================================================
@@ -256,16 +212,6 @@ export function addMinutesToTimeHHMMSS(time: string, minutes: number): string {
 }
 
 /**
- * Kombiniert Datum und Zeit zu einem Date-Objekt (lokale Zeit)
- * Nur für spezielle Berechnungen verwenden, NICHT für Anzeige oder Speicherung!
- */
-function combineDateAndTime(dateString: string, timeString: string): Date {
-  const [year, month, day] = dateString.split("-").map(Number);
-  const parsed = parseLocalTime(timeString);
-  return new Date(year, month - 1, day, parsed.hours, parsed.minutes, parsed.seconds);
-}
-
-/**
  * Konvertiert eine Zeit zu Minuten seit Mitternacht
  * @param time - Zeit als "HH:MM" oder "HH:MM:SS" String, oder null/undefined
  * @returns Minuten seit Mitternacht (0 bei null/undefined)
@@ -297,32 +243,6 @@ export function minutesToTimeDisplay(totalMinutes: number): string {
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-}
-
-/**
- * Berechnet die Differenz zwischen zwei Zeiten in Minuten
- * @param startTime - Startzeit als "HH:MM" oder "HH:MM:SS" String
- * @param endTime - Endzeit als "HH:MM" oder "HH:MM:SS" String
- */
-function timeDifferenceMinutes(startTime: string, endTime: string): number {
-  return timeToMinutes(endTime) - timeToMinutes(startTime);
-}
-
-/**
- * Prüft ob eine Zeit zwischen zwei anderen Zeiten liegt (inklusiv)
- * @param time - Prüfzeit als "HH:MM" oder "HH:MM:SS" String
- * @param startTime - Startzeit als String
- * @param endTime - Endzeit als String
- */
-function isTimeBetween(
-  time: string,
-  startTime: string,
-  endTime: string
-): boolean {
-  const timeMinutes = timeToMinutes(time);
-  const startMinutes = timeToMinutes(startTime);
-  const endMinutes = timeToMinutes(endTime);
-  return timeMinutes >= startMinutes && timeMinutes <= endMinutes;
 }
 
 // ============================================================

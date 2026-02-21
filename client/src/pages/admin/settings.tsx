@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ArrowLeft, Loader2, Upload, Trash2, ImageIcon, Mail, Truck, CheckCircle2, XCircle, Eye, EyeOff, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
-import { iconSize } from "@/design-system";
+import { iconSize, componentStyles } from "@/design-system";
 import type { SystemSettings, CompanySettings } from "@shared/schema";
 
 const BUNDESLAENDER = [
@@ -79,18 +79,16 @@ export default function AdminSettings() {
   const { data: settings, isLoading } = useQuery<SystemSettings>({
     queryKey: ["settings"],
     queryFn: async () => {
-      const res = await fetch("/api/settings", { credentials: "include" });
-      if (!res.ok) throw new Error("Einstellungen konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<SystemSettings>("/settings");
+      return unwrapResult(result);
     },
   });
 
   const { data: companyData, isLoading: isCompanyLoading } = useQuery<CompanySettings>({
     queryKey: ["company-settings"],
     queryFn: async () => {
-      const res = await fetch("/api/company-settings", { credentials: "include" });
-      if (!res.ok) throw new Error("Firmendaten konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<CompanySettings>("/company-settings");
+      return unwrapResult(result);
     },
   });
 
@@ -287,7 +285,7 @@ export default function AdminSettings() {
               </Button>
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Einstellungen</h1>
+              <h1 className={componentStyles.pageTitle}>Einstellungen</h1>
               <p className="text-gray-600">Systemweite Konfiguration</p>
             </div>
           </div>

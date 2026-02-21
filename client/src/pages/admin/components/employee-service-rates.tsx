@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { iconSize } from "@/design-system";
 import { Loader2, Euro } from "lucide-react";
+import { api, unwrapResult } from "@/lib/api/client";
 
 interface ServiceData {
   id: number;
@@ -27,9 +28,8 @@ export function EmployeeServiceRates() {
   const { data: services, isLoading } = useQuery<ServiceData[]>({
     queryKey: ["services"],
     queryFn: async () => {
-      const res = await fetch("/api/services", { credentials: "include" });
-      if (!res.ok) throw new Error("Dienstleistungen konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<ServiceData[]>("/services");
+      return unwrapResult(result);
     },
     staleTime: 60000,
   });

@@ -17,7 +17,7 @@ import {
   Check,
   UserCheck,
 } from "lucide-react";
-import { iconSize } from "@/design-system";
+import { iconSize, componentStyles } from "@/design-system";
 import { CustomerFormData, ContactFormData, BudgetTypeSettingForm, getStepsForBillingType, DEFAULT_BUDGETS, EMPTY_CONTACT, MAX_CONTACTS } from "./admin/components/customer-types";
 import { BUDGET_45A_MAX_BY_PFLEGEGRAD, BUDGET_TYPES, type BudgetType } from "@shared/domain/budgets";
 import { isPflegekasseCustomer, type BillingType } from "@shared/domain/customers";
@@ -43,9 +43,8 @@ export default function CustomerConvertPage() {
   const { data: customer, isLoading, error, refetch } = useQuery<Customer>({
     queryKey: ["customer", customerId],
     queryFn: async () => {
-      const res = await fetch(`/api/customers/${customerId}`);
-      if (!res.ok) throw new Error("Kunde konnte nicht geladen werden");
-      return res.json();
+      const result = await api.get<Customer>(`/customers/${customerId}`);
+      return unwrapResult(result);
     },
     enabled: !!customerId,
   });
@@ -87,6 +86,7 @@ export default function CustomerConvertPage() {
     vereinbarteLeistungen: "",
     contractHours: "0",
     contractPeriod: "weekly",
+    documentDeliveryMethod: "email" as const,
   });
 
   useEffect(() => {
@@ -577,7 +577,7 @@ export default function CustomerConvertPage() {
               </Button>
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900" data-testid="text-convert-title">
+              <h1 className={componentStyles.pageTitle} data-testid="text-convert-title">
                 Kunde übernehmen
               </h1>
               <p className="text-sm text-muted-foreground">

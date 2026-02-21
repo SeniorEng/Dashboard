@@ -26,7 +26,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
-import { iconSize } from "@/design-system";
+import { iconSize, componentStyles } from "@/design-system";
 import {
   ArrowLeft,
   Plus,
@@ -250,7 +250,7 @@ export default function AdminBilling() {
               </Button>
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Abrechnung</h1>
+              <h1 className={componentStyles.pageTitle}>Abrechnung</h1>
               <p className="text-gray-600">Rechnungen erstellen und verwalten</p>
             </div>
           </div>

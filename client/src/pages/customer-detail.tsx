@@ -14,7 +14,7 @@ import {
   Cake, PhoneCall, Shield, PawPrint, ClipboardList, Stethoscope, Users, UserSearch,
   UserCheck, XCircle,
 } from "lucide-react";
-import { iconSize } from "@/design-system";
+import { iconSize, componentStyles } from "@/design-system";
 import { ErrorState } from "@/components/patterns/error-state";
 import type { Customer, CustomerContact } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
@@ -54,9 +54,8 @@ export default function CustomerDetailPage() {
   const { data: customer, isLoading: customerLoading, error: customerError, refetch: refetchCustomer } = useQuery<Customer>({
     queryKey: ["customer", customerId],
     queryFn: async () => {
-      const res = await fetch(`/api/customers/${customerId}`);
-      if (!res.ok) throw new Error("Kunde konnte nicht geladen werden");
-      return res.json();
+      const result = await api.get<Customer>(`/customers/${customerId}`);
+      return unwrapResult(result);
     },
     enabled: !!customerId,
   });
@@ -64,9 +63,8 @@ export default function CustomerDetailPage() {
   const { data: details } = useQuery<CustomerDetails>({
     queryKey: ["customer-details", customerId],
     queryFn: async () => {
-      const res = await fetch(`/api/customers/${customerId}/details`);
-      if (!res.ok) throw new Error("Details konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<CustomerDetails>(`/customers/${customerId}/details`);
+      return unwrapResult(result);
     },
     enabled: !!customerId,
   });
@@ -96,9 +94,30 @@ export default function CustomerDetailPage() {
   }>({
     queryKey: ["budget-overview", customerId],
     queryFn: async () => {
-      const res = await fetch(`/api/budget/${customerId}/overview`);
-      if (!res.ok) throw new Error("Budget konnte nicht geladen werden");
-      return res.json();
+      const result = await api.get<{
+        entlastungsbetrag45b: {
+          totalAllocatedCents: number;
+          totalUsedCents: number;
+          availableCents: number;
+          currentMonthUsedCents: number;
+          monthlyLimitCents: number | null;
+        };
+        umwandlung45a: { 
+          monthlyBudgetCents: number; 
+          currentMonthAllocatedCents: number;
+          currentMonthUsedCents: number;
+          currentMonthAvailableCents: number;
+          label: string;
+        };
+        ersatzpflege39_42a: { 
+          yearlyBudgetCents: number;
+          currentYearAllocatedCents: number;
+          currentYearUsedCents: number;
+          currentYearAvailableCents: number;
+          label: string;
+        };
+      }>(`/budget/${customerId}/overview`);
+      return unwrapResult(result);
     },
     enabled: !!customerId,
   });
@@ -106,9 +125,8 @@ export default function CustomerDetailPage() {
   const { data: appointments = [], isLoading: appointmentsLoading } = useQuery<AppointmentWithCustomer[]>({
     queryKey: ["appointments", "customer", customerId],
     queryFn: async () => {
-      const res = await fetch(`/api/appointments?customerId=${customerId}`);
-      if (!res.ok) throw new Error("Termine konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<AppointmentWithCustomer[]>(`/appointments?customerId=${customerId}`);
+      return unwrapResult(result);
     },
     enabled: !!customerId,
   });
@@ -187,7 +205,7 @@ export default function CustomerDetailPage() {
               <ArrowLeft className={iconSize.md} />
             </Button>
           </Link>
-          <h1 className="text-xl font-semibold text-foreground" data-testid="text-customer-name">
+          <h1 className={componentStyles.pageTitle} data-testid="text-customer-name">
             {customer.name}
           </h1>
         </div>

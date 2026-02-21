@@ -84,36 +84,32 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
   const { data: documents, isLoading: docsLoading } = useQuery<CustomerDocumentData[]>({
     queryKey: ["admin", "customers", customerId, "documents"],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/customers/${customerId}/documents`, { credentials: "include" });
-      if (!res.ok) throw new Error("Dokumente konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<CustomerDocumentData[]>(`/admin/customers/${customerId}/documents`);
+      return unwrapResult(result);
     },
   });
 
   const { data: docTypes } = useQuery<DocumentTypeData[]>({
     queryKey: ["admin", "document-types", "customer"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/document-types?targetType=customer", { credentials: "include" });
-      if (!res.ok) throw new Error("Dokumententypen konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<DocumentTypeData[]>("/admin/document-types?targetType=customer");
+      return unwrapResult(result);
     },
   });
 
   const { data: generatedDocs } = useQuery<GeneratedDocumentData[]>({
     queryKey: ["admin", "customers", customerId, "generated-documents"],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/customers/${customerId}/generated-documents`, { credentials: "include" });
-      if (!res.ok) throw new Error("Generierte Dokumente konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<GeneratedDocumentData[]>(`/admin/customers/${customerId}/generated-documents`);
+      return unwrapResult(result);
     },
   });
 
   const { data: history, isLoading: historyLoading } = useQuery<CustomerDocumentData[]>({
     queryKey: ["admin", "customers", customerId, "documents", expandedHistory, "history"],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/customers/${customerId}/documents/${expandedHistory}/history`, { credentials: "include" });
-      if (!res.ok) throw new Error("Dokumentenhistorie konnte nicht geladen werden");
-      return res.json();
+      const result = await api.get<CustomerDocumentData[]>(`/admin/customers/${customerId}/documents/${expandedHistory}/history`);
+      return unwrapResult(result);
     },
     enabled: !!expandedHistory,
   });

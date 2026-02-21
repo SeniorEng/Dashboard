@@ -291,8 +291,8 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     return (a.startTime || "").localeCompare(b.startTime || "");
   });
 
-  const employeeNames = [...new Set(sortedItems.map(i => i.employeeName).filter(Boolean))] as string[];
-  const employeeLbnrs = [...new Set(sortedItems.map(i => i.employeeLbnr).filter(Boolean))] as string[];
+  const employeeNames = Array.from(new Set(sortedItems.map(i => i.employeeName).filter(Boolean))) as string[];
+  const employeeLbnrs = Array.from(new Set(sortedItems.map(i => i.employeeLbnr).filter(Boolean))) as string[];
   const employeeLabel = employeeNames.length > 0 ? employeeNames.map(escapeHtml).join(", ") : "Leistungserbringer/in";
   const lbnrLabel = employeeLbnrs.map(escapeHtml).join(", ");
 

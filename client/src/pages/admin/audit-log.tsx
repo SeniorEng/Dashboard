@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { ArrowLeft, Loader2, Shield, ChevronLeft, ChevronRight } from "lucide-react";
-import { iconSize } from "@/design-system";
+import { iconSize, componentStyles } from "@/design-system";
+import { api, unwrapResult } from "@/lib/api/client";
 
 const ACTION_LABELS: Record<string, string> = {
   documentation_submitted: "Dokumentation eingereicht",
@@ -59,9 +60,8 @@ export default function AdminAuditLog() {
       if (action !== "all") params.set("action", action);
       params.set("limit", pageSize.toString());
       params.set("offset", (page * pageSize).toString());
-      const res = await fetch(`/api/admin/audit-log?${params}`, { credentials: "include" });
-      if (!res.ok) throw new Error("Audit-Log konnte nicht geladen werden");
-      return res.json();
+      const result = await api.get<AuditResponse>(`/admin/audit-log?${params}`);
+      return unwrapResult(result);
     },
     staleTime: 10000,
   });
@@ -111,7 +111,7 @@ export default function AdminAuditLog() {
               </Button>
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              <h1 className={`${componentStyles.pageTitle} flex items-center gap-2`}>
                 <Shield className={iconSize.lg} />
                 Audit-Log
               </h1>

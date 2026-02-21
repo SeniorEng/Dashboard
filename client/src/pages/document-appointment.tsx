@@ -93,7 +93,7 @@ export default function DocumentAppointment() {
           {step === 1 ? "Zurück" : "Schritt 1"}
         </Button>
         
-        <h1 className="text-2xl font-bold text-foreground" data-testid="text-title">
+        <h1 className={componentStyles.pageTitle} data-testid="text-title">
           Dokumentation
         </h1>
         <p className="text-muted-foreground text-sm">

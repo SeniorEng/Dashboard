@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { iconSize } from "@/design-system";
+import { iconSize, componentStyles } from "@/design-system";
 import {
   Dialog,
   DialogContent,
@@ -65,9 +65,8 @@ export default function AdminUsers() {
   const { data: users, isLoading } = useQuery<UserData[]>({
     queryKey: ["admin", "users"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/users", { credentials: "include" });
-      if (!res.ok) throw new Error("Benutzer konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<UserData[]>("/admin/users");
+      return unwrapResult(result);
     },
   });
 
@@ -194,7 +193,7 @@ export default function AdminUsers() {
                   <ArrowLeft className={iconSize.md} />
                 </Button>
               </Link>
-              <h1 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">Benutzerverwaltung</h1>
+              <h1 className={componentStyles.pageTitle}>Benutzerverwaltung</h1>
             </div>
             <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
               <DialogTrigger asChild>

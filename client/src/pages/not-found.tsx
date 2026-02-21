@@ -1,6 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { AlertCircle } from "lucide-react";
-import { iconSize, colors } from "@/design-system";
+import { iconSize, colors, componentStyles } from "@/design-system";
 
 export default function NotFound() {
   return (
@@ -9,7 +9,7 @@ export default function NotFound() {
         <CardContent className="pt-6">
           <div className="flex mb-4 gap-2">
             <AlertCircle className={`${iconSize.xl} text-red-500`} />
-            <h1 className="text-2xl font-bold text-gray-900">404 – Seite nicht gefunden</h1>
+            <h1 className={componentStyles.pageTitle}>404 – Seite nicht gefunden</h1>
           </div>
 
           <p className="mt-4 text-sm text-gray-600">

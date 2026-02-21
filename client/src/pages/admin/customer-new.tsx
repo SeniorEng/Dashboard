@@ -15,7 +15,7 @@ import {
   ChevronLeft,
   Check,
 } from "lucide-react";
-import { iconSize } from "@/design-system";
+import { iconSize, componentStyles } from "@/design-system";
 import { CustomerFormData, ContactFormData, BudgetTypeSettingForm, getStepsForBillingType, DEFAULT_BUDGETS, EMPTY_CONTACT, MAX_CONTACTS } from "./components/customer-types";
 import { BUDGET_45A_MAX_BY_PFLEGEGRAD, BUDGET_TYPES, type BudgetType } from "@shared/domain/budgets";
 import { isPflegekasseCustomer, type BillingType } from "@shared/domain/customers";
@@ -544,7 +544,7 @@ export default function AdminCustomerNew() {
                 <ArrowLeft className={iconSize.md} />
               </Button>
             </Link>
-            <h1 className="text-2xl font-bold text-gray-900">Neuen Kunden anlegen</h1>
+            <h1 className={componentStyles.pageTitle}>Neuen Kunden anlegen</h1>
           </div>
 
           <div className="mb-6">

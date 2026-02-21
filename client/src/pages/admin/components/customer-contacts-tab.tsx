@@ -84,9 +84,8 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
   const { data: contacts, isLoading } = useQuery<CustomerContactItem[]>({
     queryKey: contactsQueryKey,
     queryFn: async () => {
-      const res = await fetch(`/api/admin/customers/${customerId}/contacts`, { credentials: "include" });
-      if (!res.ok) throw new Error("Kontakte konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<CustomerContactItem[]>(`/admin/customers/${customerId}/contacts`);
+      return unwrapResult(result);
     },
     initialData: initialContacts,
   });

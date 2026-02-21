@@ -16,7 +16,7 @@ import { iconSize, componentStyles } from "@/design-system";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { Link, useLocation, useSearch } from "wouter";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/api/client";
+import { api, unwrapResult } from "@/lib/api/client";
 import { useAuth } from "@/hooks/use-auth";
 import type { MonthlyServiceRecord, Customer, Appointment } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
@@ -60,9 +60,8 @@ export default function ServiceRecordsPage() {
   const { data: selectedCustomer } = useQuery<Customer>({
     queryKey: ["customer", customerId],
     queryFn: async () => {
-      const response = await fetch(`/api/customers/${customerId}`);
-      if (!response.ok) throw new Error("Kunde konnte nicht geladen werden");
-      return response.json();
+      const result = await api.get<Customer>(`/customers/${customerId}`);
+      return unwrapResult(result);
     },
     enabled: !!customerId,
   });
@@ -70,20 +69,18 @@ export default function ServiceRecordsPage() {
   const { data: records, isLoading, error, refetch } = useQuery<MonthlyServiceRecord[]>({
     queryKey: ["/api/service-records", selectedYear, selectedMonth, customerId],
     queryFn: async () => {
-      let url = `/api/service-records?year=${selectedYear}&month=${selectedMonth}`;
+      let url = `/service-records?year=${selectedYear}&month=${selectedMonth}`;
       if (customerId) url += `&customerId=${customerId}`;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error("Leistungsnachweise konnten nicht geladen werden");
-      return response.json();
+      const result = await api.get<MonthlyServiceRecord[]>(url);
+      return unwrapResult(result);
     },
   });
 
   const { data: pendingRecords } = useQuery<MonthlyServiceRecord[]>({
     queryKey: ["/api/service-records/pending"],
     queryFn: async () => {
-      const response = await fetch(`/api/service-records/pending`);
-      if (!response.ok) throw new Error("Ausstehende Leistungsnachweise konnten nicht geladen werden");
-      return response.json();
+      const result = await api.get<MonthlyServiceRecord[]>("/service-records/pending");
+      return unwrapResult(result);
     },
     enabled: !customerId,
   });
@@ -92,11 +89,8 @@ export default function ServiceRecordsPage() {
   const { data: overview, isLoading: isOverviewLoading } = useQuery<CustomerOverviewItem[]>({
     queryKey: ["/api/service-records/overview", selectedYear, selectedMonth],
     queryFn: async () => {
-      const response = await fetch(
-        `/api/service-records/overview?year=${selectedYear}&month=${selectedMonth}`
-      );
-      if (!response.ok) throw new Error("Übersicht konnte nicht geladen werden");
-      return response.json();
+      const result = await api.get<CustomerOverviewItem[]>(`/service-records/overview?year=${selectedYear}&month=${selectedMonth}`);
+      return unwrapResult(result);
     },
     enabled: !customerId,
   });
@@ -105,11 +99,8 @@ export default function ServiceRecordsPage() {
   const { data: periodCheck, isLoading: isPeriodCheckLoading } = useQuery<PeriodCheckResponse>({
     queryKey: ["/api/service-records/check-period", customerId, selectedYear, selectedMonth],
     queryFn: async () => {
-      const response = await fetch(
-        `/api/service-records/check-period?customerId=${customerId}&year=${selectedYear}&month=${selectedMonth}`
-      );
-      if (!response.ok) throw new Error("Periodenprüfung fehlgeschlagen");
-      return response.json();
+      const result = await api.get<PeriodCheckResponse>(`/service-records/check-period?customerId=${customerId}&year=${selectedYear}&month=${selectedMonth}`);
+      return unwrapResult(result);
     },
     enabled: !!customerId,
   });
@@ -120,19 +111,13 @@ export default function ServiceRecordsPage() {
       if (!user?.id) {
         throw new Error("Nicht angemeldet");
       }
-      const result = await apiRequest<MonthlyServiceRecord>("/service-records", {
-        method: "POST",
-        body: {
-          customerId,
-          employeeId: user.id,
-          year: selectedYear,
-          month: selectedMonth,
-        },
+      const result = await api.post<MonthlyServiceRecord>("/service-records", {
+        customerId,
+        employeeId: user.id,
+        year: selectedYear,
+        month: selectedMonth,
       });
-      if (!result.success) {
-        throw new Error(result.error.message || "Fehler beim Erstellen");
-      }
-      return result.data;
+      return unwrapResult(result);
     },
     onSuccess: (newRecord) => {
       toast({ title: "Leistungsnachweis erstellt" });
@@ -372,9 +357,8 @@ function ServiceRecordCard({ record }: ServiceRecordCardProps) {
   const { data: customer } = useQuery<Customer>({
     queryKey: ["customer", record.customerId],
     queryFn: async () => {
-      const response = await fetch(`/api/customers/${record.customerId}`);
-      if (!response.ok) throw new Error("Kunde konnte nicht geladen werden");
-      return response.json();
+      const result = await api.get<Customer>(`/customers/${record.customerId}`);
+      return unwrapResult(result);
     },
   });
 

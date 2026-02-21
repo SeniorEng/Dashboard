@@ -300,7 +300,7 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
       eq(monthlyServiceRecords.month, billingMonth)
     ));
 
-  const uniqueCustomerIds = [...new Set(allServiceRecords.map(sr => sr.customerId))];
+  const uniqueCustomerIds = Array.from(new Set(allServiceRecords.map(sr => sr.customerId)));
 
   if (uniqueCustomerIds.length === 0) {
     return res.json({ created: 0, skipped: 0, errors: [], message: "Keine Leistungsnachweise für diesen Zeitraum vorhanden." });
@@ -610,13 +610,13 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
   );
 
   if (signedRecords.length > 0) {
-    const employeeIds = [...new Set(signedRecords.map(r => r.employeeId))];
+    const employeeIds = Array.from(new Set(signedRecords.map(r => r.employeeId)));
     const employeeRows = await db.select({ id: users.id, displayName: users.displayName })
       .from(users)
       .where(inArray(users.id, employeeIds));
     const employeeMap = new Map(employeeRows.map(e => [e.id, e.displayName]));
 
-    pdfData.signatures = signedRecords.map(r => ({
+    (pdfData as any).signatures = signedRecords.map(r => ({
       employeeSignatureData: r.employeeSignatureData,
       employeeSignedAt: r.employeeSignedAt ? formatDateForDisplay(formatDateISO(r.employeeSignedAt instanceof Date ? r.employeeSignedAt : new Date(r.employeeSignedAt))) : null,
       employeeName: employeeMap.get(r.employeeId) || null,

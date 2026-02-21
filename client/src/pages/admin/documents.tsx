@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Layout } from "@/components/layout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowLeft, FileCheck2, FileText } from "lucide-react";
-import { iconSize } from "@/design-system";
+import { iconSize, componentStyles } from "@/design-system";
 import { DocumentTypesContent } from "./document-types";
 import { DocumentTemplatesContent } from "./document-templates";
 
@@ -19,7 +19,7 @@ export default function AdminDocuments() {
             <ArrowLeft className={iconSize.md} />
           </Button>
         </Link>
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">Dokumente & Vorlagen</h1>
+        <h1 className={componentStyles.pageTitle}>Dokumente & Vorlagen</h1>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>

@@ -40,18 +40,16 @@ export default function AdminCustomerAssignments() {
   const { data: customers, isLoading: customersLoading } = useQuery<Customer[]>({
     queryKey: ["customers"],
     queryFn: async () => {
-      const res = await fetch("/api/customers", { credentials: "include" });
-      if (!res.ok) throw new Error("Kunden konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<Customer[]>("/customers");
+      return unwrapResult(result);
     },
   });
 
   const { data: employees, isLoading: employeesLoading } = useQuery<Employee[]>({
     queryKey: ["admin", "employees"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/employees", { credentials: "include" });
-      if (!res.ok) throw new Error("Mitarbeiter konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<Employee[]>("/admin/employees");
+      return unwrapResult(result);
     },
   });
 
@@ -124,7 +122,7 @@ export default function AdminCustomerAssignments() {
               </Button>
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Kundenzuordnung</h1>
+              <h1 className={componentStyles.pageTitle}>Kundenzuordnung</h1>
               <p className="text-gray-600">
                 Weisen Sie Kunden einem Hauptansprechpartner und einer Vertretung zu
               </p>

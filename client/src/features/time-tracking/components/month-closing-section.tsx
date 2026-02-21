@@ -159,7 +159,7 @@ export function MonthClosingSection({ year, month }: MonthClosingSectionProps) {
                                 <div key={apt.id} className="flex items-center justify-between text-xs text-red-600 bg-red-100/50 rounded px-2 py-1">
                                   <span>{formatDate(apt.date)} {apt.scheduledStart?.slice(0, 5)}</span>
                                   <span className="truncate ml-2">{apt.customerName}</span>
-                                  <StatusBadge type="appointment" value={apt.status} className="ml-2 text-[10px]" />
+                                  <StatusBadge type="status" value={apt.status} className="ml-2 text-[10px]" />
                                 </div>
                               ))}
                             </div>
