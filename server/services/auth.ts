@@ -18,6 +18,7 @@ import { sessionCache } from "./cache";
 
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const PASSWORD_RESET_DURATION_MS = 60 * 60 * 1000; // 1 hour
+const WELCOME_TOKEN_DURATION_MS = 48 * 60 * 60 * 1000; // 48 hours
 const BCRYPT_ROUNDS = 12;
 
 async function hashPassword(password: string): Promise<string> {
@@ -422,6 +423,20 @@ export class AuthService {
 
     await db.insert(passwordResetTokens).values({
       userId: user.id,
+      tokenHash,
+      expiresAt,
+    });
+
+    return token;
+  }
+
+  async createWelcomeToken(userId: number): Promise<string> {
+    const token = generateToken();
+    const tokenHash = hashToken(token);
+    const expiresAt = new Date(Date.now() + WELCOME_TOKEN_DURATION_MS);
+
+    await db.insert(passwordResetTokens).values({
+      userId,
       tokenHash,
       expiresAt,
     });

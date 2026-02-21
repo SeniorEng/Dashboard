@@ -65,16 +65,7 @@ export async function testSmtpConnection(settings: CompanySettings): Promise<{ s
   }
 }
 
-export function buildContractEmailHtml(options: {
-  customerName: string;
-  companyName: string;
-  documentNames: string[];
-  logoUrl?: string | null;
-}): string {
-  const { customerName, companyName, documentNames, logoUrl } = options;
-
-  const docList = documentNames.map((name) => `<li style="padding: 4px 0;">${name}</li>`).join("");
-
+function buildEmailLayout(companyName: string, logoUrl: string | null | undefined, bodyContent: string): string {
   return `<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -94,24 +85,7 @@ export function buildContractEmailHtml(options: {
           </tr>
           <tr>
             <td style="padding: 32px;">
-              <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">
-                Sehr geehrte/r ${customerName},
-              </p>
-              <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">
-                anbei erhalten Sie Ihre unterschriebenen Vertragsunterlagen:
-              </p>
-              <div style="background-color: #f0fdfa; border: 1px solid #99f6e4; border-radius: 8px; padding: 16px; margin: 16px 0;">
-                <ul style="margin: 0; padding-left: 20px; color: #0f766e; font-size: 15px; line-height: 1.8;">
-                  ${docList}
-                </ul>
-              </div>
-              <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 16px 0 0;">
-                Bitte bewahren Sie diese Unterlagen sorgfältig auf. Bei Fragen stehen wir Ihnen jederzeit gerne zur Verfügung.
-              </p>
-              <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 16px 0 0;">
-                Mit freundlichen Grüßen<br />
-                <strong>${companyName}</strong>
-              </p>
+              ${bodyContent}
             </td>
           </tr>
           <tr>
@@ -127,4 +101,112 @@ export function buildContractEmailHtml(options: {
   </table>
 </body>
 </html>`;
+}
+
+function buildButtonHtml(label: string, url: string): string {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin: 24px 0;">
+    <tr>
+      <td style="background-color: #0d9488; border-radius: 8px; padding: 14px 28px;">
+        <a href="${url}" style="color: #ffffff; text-decoration: none; font-size: 16px; font-weight: 600; display: inline-block;">${label}</a>
+      </td>
+    </tr>
+  </table>`;
+}
+
+export function buildContractEmailHtml(options: {
+  customerName: string;
+  companyName: string;
+  documentNames: string[];
+  logoUrl?: string | null;
+}): string {
+  const { customerName, companyName, documentNames, logoUrl } = options;
+  const docList = documentNames.map((name) => `<li style="padding: 4px 0;">${name}</li>`).join("");
+
+  const body = `
+    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">
+      Sehr geehrte/r ${customerName},
+    </p>
+    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">
+      anbei erhalten Sie Ihre unterschriebenen Vertragsunterlagen:
+    </p>
+    <div style="background-color: #f0fdfa; border: 1px solid #99f6e4; border-radius: 8px; padding: 16px; margin: 16px 0;">
+      <ul style="margin: 0; padding-left: 20px; color: #0f766e; font-size: 15px; line-height: 1.8;">
+        ${docList}
+      </ul>
+    </div>
+    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 16px 0 0;">
+      Bitte bewahren Sie diese Unterlagen sorgfältig auf. Bei Fragen stehen wir Ihnen jederzeit gerne zur Verfügung.
+    </p>
+    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 16px 0 0;">
+      Mit freundlichen Grüßen<br />
+      <strong>${companyName}</strong>
+    </p>`;
+
+  return buildEmailLayout(companyName, logoUrl, body);
+}
+
+export function buildWelcomeEmailHtml(options: {
+  vorname: string;
+  nachname: string;
+  email: string;
+  companyName: string;
+  resetUrl: string;
+  logoUrl?: string | null;
+}): string {
+  const { vorname, nachname, companyName, email, resetUrl, logoUrl } = options;
+
+  const body = `
+    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">
+      Hallo ${vorname} ${nachname},
+    </p>
+    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">
+      Sie wurden als Mitarbeiter/in bei ${companyName} angelegt. Um Ihren Zugang zu aktivieren, setzen Sie bitte Ihr persönliches Passwort über den folgenden Link:
+    </p>
+    ${buildButtonHtml("Passwort setzen", resetUrl)}
+    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">
+      Dieser Link ist 48 Stunden gültig. Falls er abgelaufen ist, können Sie über „Passwort vergessen" auf der Login-Seite einen neuen Link anfordern.
+    </p>
+    <div style="background-color: #f0fdfa; border: 1px solid #99f6e4; border-radius: 8px; padding: 16px; margin: 16px 0;">
+      <p style="margin: 0; color: #0f766e; font-size: 15px;">
+        <strong>Ihre Anmeldedaten:</strong><br />
+        E-Mail: ${email}
+      </p>
+    </div>
+    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">
+      Bei Fragen wenden Sie sich an Ihre Teamleitung.
+    </p>
+    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 16px 0 0;">
+      Mit freundlichen Grüßen<br />
+      <strong>${companyName}</strong>
+    </p>`;
+
+  return buildEmailLayout(companyName, logoUrl, body);
+}
+
+export function buildPasswordResetEmailHtml(options: {
+  vorname: string;
+  nachname: string;
+  companyName: string;
+  resetUrl: string;
+  logoUrl?: string | null;
+}): string {
+  const { vorname, nachname, companyName, resetUrl, logoUrl } = options;
+
+  const body = `
+    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">
+      Hallo ${vorname} ${nachname},
+    </p>
+    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">
+      Sie haben das Zurücksetzen Ihres Passworts angefordert. Klicken Sie auf den folgenden Link, um ein neues Passwort zu setzen:
+    </p>
+    ${buildButtonHtml("Neues Passwort setzen", resetUrl)}
+    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">
+      Dieser Link ist 1 Stunde gültig. Falls Sie diese Anfrage nicht gestellt haben, können Sie diese E-Mail ignorieren.
+    </p>
+    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 16px 0 0;">
+      Mit freundlichen Grüßen<br />
+      <strong>${companyName}</strong>
+    </p>`;
+
+  return buildEmailLayout(companyName, logoUrl, body);
 }

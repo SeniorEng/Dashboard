@@ -101,7 +101,7 @@ export function UserForm({
       roles,
     };
     
-    if (mode === "create") {
+    if (mode === "create" && password) {
       data.password = password;
     }
     
@@ -276,17 +276,19 @@ export function UserForm({
           
           {isCreate && (
             <div className="space-y-2">
-              <Label htmlFor="password">Passwort *</Label>
+              <Label htmlFor="password">Passwort</Label>
               <Input
                 id="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                required
                 minLength={8}
                 placeholder="Mindestens 8 Zeichen"
                 data-testid="input-user-password"
               />
+              <p className="text-xs text-gray-500">
+                Leer lassen, um automatisch ein Passwort zu generieren. Der Mitarbeiter erhält eine Willkommens-E-Mail mit einem Link zur Passwort-Einrichtung.
+              </p>
             </div>
           )}
         </div>

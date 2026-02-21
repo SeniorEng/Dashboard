@@ -19,6 +19,7 @@ import { asyncHandler } from "../lib/errors";
 import { generateCsrfToken, setCsrfCookie, csrfProtection } from "../middleware/csrf";
 import { getOpenTaskCount } from "../storage/tasks";
 import { storage } from "../storage";
+import { sendEmail, buildPasswordResetEmailHtml } from "../services/email-service";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { birthdaysCache } from "../services/cache";
 import { todayISO } from "@shared/utils/datetime";
@@ -164,9 +165,30 @@ router.post(
     const token = await authService.createPasswordResetToken(result.data.email);
     
     if (token) {
-      // SECURITY: Token wird NICHT geloggt um Account-Übernahme zu verhindern
-      // In Produktion würde hier eine E-Mail gesendet werden
-      
+      try {
+        const user = await authService.getUserByEmail(result.data.email);
+        const companySettings = await storage.getCompanySettings();
+        if (user && companySettings.smtpHost && companySettings.smtpUser) {
+          const baseUrl = `${req.protocol}://${req.get("host")}`;
+          const resetUrl = `${baseUrl}/reset-password?token=${token}`;
+
+          const html = buildPasswordResetEmailHtml({
+            vorname: user.vorname,
+            nachname: user.nachname,
+            companyName: companySettings.companyName || "SeniorenEngel",
+            resetUrl,
+            logoUrl: companySettings.logoUrl,
+          });
+
+          await sendEmail(companySettings, {
+            to: result.data.email,
+            subject: `Passwort zurücksetzen – ${companySettings.companyName || "SeniorenEngel"}`,
+            html,
+          });
+        }
+      } catch (emailError) {
+        console.error("Passwort-Reset-E-Mail konnte nicht gesendet werden:", emailError);
+      }
     }
 
     res.json({

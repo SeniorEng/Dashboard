@@ -71,7 +71,7 @@ export default function AdminUsers() {
   });
 
   const createMutation = useMutation({
-    mutationFn: async (data: UserFormData & { password: string }) => {
+    mutationFn: async (data: UserFormData & { password?: string }) => {
       const result = await api.post("/admin/users", data);
       return unwrapResult(result);
     },
@@ -175,7 +175,6 @@ export default function AdminUsers() {
   }, [users, statusFilter, roleFilter, searchQuery]);
 
   const handleCreateSubmit = (data: UserFormData & { password?: string }) => {
-    if (!data.password) return;
     createMutation.mutate(data as UserFormData & { password: string });
   };
 

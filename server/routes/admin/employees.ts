@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { randomBytes } from "crypto";
 import { authService } from "../../services/auth";
 import { storage } from "../../storage";
 import { usersCache, birthdaysCache } from "../../services/cache";
@@ -15,6 +16,7 @@ import { auditService } from "../../services/audit";
 import { db } from "../../lib/db";
 import { eq, and, ne, or, isNull } from "drizzle-orm";
 import { z } from "zod";
+import { sendEmail, buildWelcomeEmailHtml } from "../../services/email-service";
 
 const router = Router();
 
@@ -58,7 +60,12 @@ router.get("/users/:id", asyncHandler("Benutzer konnte nicht geladen werden", as
 }));
 
 router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", async (req: Request, res: Response) => {
-  const result = insertUserSchema.safeParse(req.body);
+  const bodyWithPassword = {
+    ...req.body,
+    password: req.body.password || randomBytes(24).toString("hex"),
+  };
+
+  const result = insertUserSchema.safeParse(bodyWithPassword);
   if (!result.success) {
     res.status(400).json({
       error: "VALIDATION_ERROR",
@@ -98,9 +105,34 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
     throw error;
   }
 
-  // Invalidate caches after creating user (affects users list and birthdays)
   usersCache.invalidateAll();
   birthdaysCache.invalidateAll();
+
+  try {
+    const companySettings = await storage.getCompanySettings();
+    if (companySettings.smtpHost && companySettings.smtpUser) {
+      const welcomeToken = await authService.createWelcomeToken(user.id);
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const resetUrl = `${baseUrl}/reset-password?token=${welcomeToken}`;
+
+      const html = buildWelcomeEmailHtml({
+        vorname: result.data.vorname,
+        nachname: result.data.nachname,
+        email: result.data.email,
+        companyName: companySettings.companyName || "SeniorenEngel",
+        resetUrl,
+        logoUrl: companySettings.logoUrl,
+      });
+
+      await sendEmail(companySettings, {
+        to: result.data.email,
+        subject: `Willkommen bei ${companySettings.companyName || "SeniorenEngel"} – Ihr Zugang`,
+        html,
+      });
+    }
+  } catch (emailError) {
+    console.error("Willkommens-E-Mail konnte nicht gesendet werden:", emailError);
+  }
 
   const { passwordHash, ...safeUser } = user;
   res.status(201).json(safeUser);
