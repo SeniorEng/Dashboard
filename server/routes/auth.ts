@@ -14,6 +14,7 @@ import {
   setSessionCookie,
   clearSessionCookie,
   getAvailableServiceTypes,
+  getSessionToken,
 } from "../middleware/auth";
 import { asyncHandler } from "../lib/errors";
 import { generateCsrfToken, setCsrfCookie, csrfProtection } from "../middleware/csrf";
@@ -261,6 +262,39 @@ router.post(
     });
   })
 );
+
+router.get("/session-info", requireAuth, asyncHandler("Session-Info konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const token = getSessionToken(req);
+  if (!token) {
+    res.status(401).json({ error: "UNAUTHORIZED" });
+    return;
+  }
+
+  const info = await authService.getSessionInfo(token);
+  if (!info) {
+    res.status(401).json({ error: "SESSION_EXPIRED" });
+    return;
+  }
+
+  res.json(info);
+}));
+
+router.post("/keepalive", requireAuth, asyncHandler("Session konnte nicht verlängert werden", async (req: Request, res: Response) => {
+  const token = getSessionToken(req);
+  if (!token) {
+    res.status(401).json({ error: "UNAUTHORIZED" });
+    return;
+  }
+
+  const success = await authService.touchSession(token);
+  if (!success) {
+    res.status(401).json({ error: "SESSION_EXPIRED" });
+    return;
+  }
+
+  const info = await authService.getSessionInfo(token);
+  res.json({ success: true, ...info });
+}));
 
 router.get("/setup-required", asyncHandler("Setup-Status konnte nicht überprüft werden", async (_req: Request, res: Response) => {
   const hasAdmin = await authService.hasAnyAdmin();

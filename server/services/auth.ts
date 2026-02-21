@@ -1,4 +1,4 @@
-import { eq, and, lt, gt, isNull } from "drizzle-orm";
+import { eq, and, lt, gt, isNull, sql } from "drizzle-orm";
 import { createHash, randomBytes } from "crypto";
 import bcrypt from "bcrypt";
 import { formatDateISO } from "@shared/utils/datetime";
@@ -16,7 +16,8 @@ import {
 import { db } from "../lib/db";
 import { sessionCache } from "./cache";
 
-const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes idle timeout
+const SESSION_ABSOLUTE_TIMEOUT_MS = 12 * 60 * 60 * 1000; // 12 hours absolute maximum
 const PASSWORD_RESET_DURATION_MS = 60 * 60 * 1000; // 1 hour
 const WELCOME_TOKEN_DURATION_MS = 48 * 60 * 60 * 1000; // 48 hours
 const BCRYPT_ROUNDS = 12;
@@ -132,12 +133,14 @@ export class AuthService {
 
     const token = generateToken();
     const tokenHash = hashToken(token);
-    const expiresAt = new Date(Date.now() + SESSION_DURATION_MS);
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + SESSION_ABSOLUTE_TIMEOUT_MS);
 
     await db.insert(sessions).values({
       userId: user.id,
       tokenHash,
       expiresAt,
+      lastActivityAt: now,
     });
 
     return {
@@ -161,13 +164,10 @@ export class AuthService {
     await db.delete(sessions).where(eq(sessions.userId, userId));
   }
 
-  async validateSession(token: string): Promise<UserWithRoles | null> {
+  async validateSession(token: string, touch: boolean = true): Promise<UserWithRoles | null> {
     const tokenHash = hashToken(token);
 
-    const cached = sessionCache.get(tokenHash);
-    if (cached) {
-      return cached;
-    }
+    const now = new Date();
 
     const results = await db
       .select({
@@ -179,15 +179,36 @@ export class AuthService {
       .where(
         and(
           eq(sessions.tokenHash, tokenHash),
-          gt(sessions.expiresAt, new Date())
+          gt(sessions.expiresAt, now)
         )
       );
 
     if (results.length === 0) {
+      sessionCache.invalidateByTokenHash(tokenHash);
       return null;
     }
 
-    const { user } = results[0];
+    const { session, user } = results[0];
+
+    const lastActivity = session.lastActivityAt?.getTime() ?? session.createdAt.getTime();
+    if (now.getTime() - lastActivity > SESSION_IDLE_TIMEOUT_MS) {
+      sessionCache.invalidateByTokenHash(tokenHash);
+      await db.delete(sessions).where(eq(sessions.tokenHash, tokenHash));
+      return null;
+    }
+
+    if (touch) {
+      db.update(sessions)
+        .set({ lastActivityAt: now })
+        .where(eq(sessions.id, session.id))
+        .execute()
+        .catch(() => {});
+    }
+
+    const cached = sessionCache.get(tokenHash);
+    if (cached) {
+      return cached;
+    }
 
     const roleRows = await db
       .select()
@@ -198,6 +219,55 @@ export class AuthService {
     const userWithRoles = { ...user, roles };
     sessionCache.set(tokenHash, userWithRoles);
     return userWithRoles;
+  }
+
+  async getSessionInfo(token: string): Promise<{ idleExpiresAt: number; absoluteExpiresAt: number } | null> {
+    const tokenHash = hashToken(token);
+    const now = new Date();
+
+    const results = await db
+      .select({
+        expiresAt: sessions.expiresAt,
+        lastActivityAt: sessions.lastActivityAt,
+        createdAt: sessions.createdAt,
+      })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.tokenHash, tokenHash),
+          gt(sessions.expiresAt, now)
+        )
+      );
+
+    if (results.length === 0) return null;
+
+    const session = results[0];
+    const lastActivity = session.lastActivityAt?.getTime() ?? session.createdAt.getTime();
+    const idleExpiresAt = lastActivity + SESSION_IDLE_TIMEOUT_MS;
+    const absoluteExpiresAt = session.expiresAt.getTime();
+
+    return { idleExpiresAt, absoluteExpiresAt };
+  }
+
+  async touchSession(token: string): Promise<boolean> {
+    const tokenHash = hashToken(token);
+    const now = new Date();
+
+    const result = await db
+      .update(sessions)
+      .set({ lastActivityAt: now })
+      .where(
+        and(
+          eq(sessions.tokenHash, tokenHash),
+          gt(sessions.expiresAt, now)
+        )
+      )
+      .returning({ id: sessions.id });
+
+    if (result.length > 0) {
+      sessionCache.invalidateByTokenHash(tokenHash);
+    }
+    return result.length > 0;
   }
 
   async getUserRoles(userId: number): Promise<EmployeeRole[]> {
@@ -488,9 +558,12 @@ export class AuthService {
 
   async cleanupExpiredSessions(): Promise<number> {
     const now = new Date();
+    const idleThreshold = new Date(now.getTime() - SESSION_IDLE_TIMEOUT_MS);
     const result = await db
       .delete(sessions)
-      .where(lt(sessions.expiresAt, now))
+      .where(
+        sql`${sessions.expiresAt} < ${now} OR ${sessions.lastActivityAt} < ${idleThreshold}`
+      )
       .returning({ id: sessions.id });
     return result.length;
   }

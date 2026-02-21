@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { SessionTimeoutWarning } from "@/components/session-timeout-warning";
 import { Loader2 } from "lucide-react";
 import { lazy, Suspense } from "react";
 
@@ -221,6 +222,7 @@ function App() {
         <AuthProvider>
           <TooltipProvider>
             <Toaster />
+            <SessionTimeoutWarning />
             <Router />
           </TooltipProvider>
         </AuthProvider>

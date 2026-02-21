@@ -34,7 +34,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **API Design**: RESTful endpoints, Zod validation, structured error responses, modular routing.
 - **Business Logic**: Separated into a dedicated service layer with dependency injection; no direct DB access from route handlers.
 - **Error Handling**: Centralized `asyncHandler` wrapper and `AppError` class hierarchy for consistent JSON error responses.
-- **Security**: Role-based access control with SQL-level data filtering, CSRF protection.
+- **Security**: Role-based access control with SQL-level data filtering, CSRF protection. Session management: 30-min idle timeout with sliding expiry, 12h absolute maximum, frontend warning 2 min before expiry with keepalive option.
 - **Access Model**: Two-tiered access for employees (full vs. legacy based on customer assignment).
 
 ### Data Storage

@@ -93,6 +93,23 @@ process.on("uncaughtException", (error) => {
 
   await registerRoutes(httpServer, app);
 
+  const { authService } = await import("./services/auth");
+  const runSessionCleanup = async () => {
+    try {
+      const [sessionCount, tokenCount] = await Promise.all([
+        authService.cleanupExpiredSessions(),
+        authService.cleanupExpiredResetTokens(),
+      ]);
+      if (sessionCount > 0 || tokenCount > 0) {
+        log(`Bereinigt: ${sessionCount} abgelaufene Sessions, ${tokenCount} abgelaufene Tokens`);
+      }
+    } catch (e) {
+      console.error("Fehler bei Session-Bereinigung:", e);
+    }
+  };
+  runSessionCleanup();
+  setInterval(runSessionCleanup, 60 * 60 * 1000);
+
   const { generateDocumentReviewTasks, shouldRunDocumentReview } = await import("./services/document-review");
   const runDocumentReviewIfDue = async () => {
     try {
