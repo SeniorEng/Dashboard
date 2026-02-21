@@ -17,6 +17,9 @@ export interface UserData {
   isAnonymized: boolean;
   isAdmin: boolean;
   haustierAkzeptiert: boolean;
+  isEuRentner: boolean;
+  employmentType: string;
+  weeklyWorkDays: number;
   lbnr: string | null;
   personalnummer: string | null;
   roles: string[];
@@ -39,6 +42,9 @@ export interface UserFormData {
   vacationDaysPerYear?: number;
   isAdmin: boolean;
   haustierAkzeptiert: boolean;
+  isEuRentner: boolean;
+  employmentType: string;
+  weeklyWorkDays: number;
   lbnr?: string | null;
   personalnummer?: string | null;
   roles: string[];

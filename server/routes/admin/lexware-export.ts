@@ -17,6 +17,9 @@ interface EmployeeSummaryRow {
   kilometer: number;
   tageUrlaub: number;
   tageKrankheit: number;
+  isEuRentner: boolean;
+  employmentType: string;
+  weeklyWorkDays: number;
 }
 
 router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
@@ -35,6 +38,9 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
     id: users.id,
     vorname: users.vorname,
     nachname: users.nachname,
+    isEuRentner: users.isEuRentner,
+    employmentType: users.employmentType,
+    weeklyWorkDays: users.weeklyWorkDays,
   }).from(users).where(eq(users.isActive, true));
 
   if (employees.length === 0) {
@@ -147,14 +153,17 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
     if (stundenHW > 0 || stundenAB > 0 || stundenSonstiges > 0 || km > 0 || urlaub > 0 || krankheit > 0) {
       rows.push({
         employeeId: emp.id,
-        nachname: emp.nachname,
-        vorname: emp.vorname,
+        nachname: emp.nachname || "",
+        vorname: emp.vorname || "",
         stundenHauswirtschaft: Math.round(stundenHW * 100) / 100,
         stundenAlltagsbegleitung: Math.round(stundenAB * 100) / 100,
         stundenSonstiges: Math.round(stundenSonstiges * 100) / 100,
         kilometer: km,
         tageUrlaub: urlaub,
         tageKrankheit: krankheit,
+        isEuRentner: emp.isEuRentner,
+        employmentType: emp.employmentType,
+        weeklyWorkDays: emp.weeklyWorkDays,
       });
     }
   }

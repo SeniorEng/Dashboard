@@ -15,6 +15,9 @@ export interface User {
   displayName: string;
   isActive: boolean;
   isAdmin: boolean;
+  isEuRentner: boolean;
+  employmentType: string;
+  weeklyWorkDays: number;
   roles: string[];
   createdAt: string;
   updatedAt: string;

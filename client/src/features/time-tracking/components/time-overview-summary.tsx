@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Car, Palmtree, ChevronDown } from "lucide-react";
+import { Users, Car, Palmtree, ChevronDown, AlertTriangle } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { MONTH_NAMES, formatMinutesToHours } from "../constants";
 
@@ -39,6 +39,7 @@ interface TimeOverviewSummaryProps {
   vacationSummary: VacationSummary | undefined;
   selectedMonth: number;
   selectedYear: number;
+  isEuRentner?: boolean;
 }
 
 function CollapsibleCard({
@@ -90,7 +91,7 @@ function CollapsibleCard({
   );
 }
 
-export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMonth, selectedYear }: TimeOverviewSummaryProps) {
+export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMonth, selectedYear, isEuRentner = false }: TimeOverviewSummaryProps) {
   const hw = timeOverview?.serviceHours?.hauswirtschaftMinutes || 0;
   const ab = timeOverview?.serviceHours?.alltagsbegleitungMinutes || 0;
   const eb = timeOverview?.serviceHours?.erstberatungMinutes || 0;
@@ -102,6 +103,18 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
     (timeOverview?.timeEntries?.besprechungMinutes || 0) +
     (timeOverview?.timeEntries?.sonstigesMinutes || 0);
   const totalServiceMinutes = hw + ab + eb + travel + sonstigesMinutes;
+
+  const euRentnerMonthWarning = (() => {
+    if (!isEuRentner) return null;
+    const totalHours = totalServiceMinutes / 60;
+    const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
+    const weeksInMonth = daysInMonth / 7;
+    const maxMonthlyHours = 15 * weeksInMonth;
+    if (totalHours >= maxMonthlyHours) {
+      return { totalHours, maxMonthlyHours };
+    }
+    return null;
+  })();
 
   const totalKm = (timeOverview?.travel?.totalKilometers || 0) + (timeOverview?.travel?.customerKilometers || 0);
 
@@ -131,6 +144,14 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
               <span className="text-xs">davon Pause (unbezahlt)</span>
               <span className="text-xs font-medium" data-testid="text-pause-hours">
                 {formatMinutesToHours(timeOverview?.timeEntries?.pauseMinutes || 0)}
+              </span>
+            </div>
+          )}
+          {euRentnerMonthWarning && (
+            <div className="flex items-start gap-1.5 mt-3 p-2 rounded bg-red-50 border border-red-200" data-testid="text-eu-rentner-monthly-warning">
+              <AlertTriangle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+              <span className="text-xs text-red-700 font-medium">
+                EU-Rentner-Grenze erreicht: {euRentnerMonthWarning.totalHours.toFixed(1)}h / max. {euRentnerMonthWarning.maxMonthlyHours.toFixed(1)}h (15h/Woche)
               </span>
             </div>
           )}

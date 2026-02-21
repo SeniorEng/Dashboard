@@ -15,63 +15,57 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 ### Frontend
 - **Frameworks**: React 19 with TypeScript, Vite, Wouter for routing.
 - **UI/UX**: Mobile-first responsive design using `shadcn/ui` components on Radix UI primitives, styled with Tailwind CSS v4 and a "Care & Clarity" theme. Centralized `@/design-system` for consistent styling. Touch-optimized UI components.
-- **Design System & Layout-Konventionen** (Stand: Feb 2026):
-  - **Einheitlicher Seitenhintergrund**: ALLE Seiten verwenden den warmen Beige-Gradient (`bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]`) über die `Layout`-Komponente. KEINE Seite darf eigene `min-h-screen bg-gradient-to-br` Wrapper haben — das macht Layout automatisch.
-  - **Layout-Varianten**: Die `Layout`-Komponente akzeptiert `variant` Prop: `default` (max-w-2xl, Employee-Seiten), `admin` (max-w-4xl, Admin-Seiten), `wide` (max-w-6xl, Tabellen wie Billing/Zeiten), `narrow` (max-w-xl), `full` (max-w-full). Definiert in `@/design-system/tokens.ts` als `LayoutVariant` und `layoutVariants`.
-  - **Keine hardcodierten Backgrounds in Seiten**: Seiten nutzen `<Layout variant="...">` statt eigene Container-Divs mit `container mx-auto px-4 py-6 max-w-*`. Header-Hintergrund ist `bg-white/90` (via Layout).
-  - **Konsistente Titel**: Seitentitel verwenden `componentStyles.pageTitle` (`text-xl sm:text-2xl font-bold text-gray-900`) oder die `PageHeader`-Komponente.
-  - **Card-Stile**: Standardmäßig `<Card>` Komponente mit weißem Hintergrund. Keine manuellen `bg-white rounded-xl shadow-sm` — stattdessen `componentStyles.cardMuted` oder Card-Komponente.
-  - **Ausnahmen**: Login, Forgot-Password, Reset-Password und Public-Signing haben eigene Gradient-Wrapper, weil sie NICHT die `Layout`-Komponente nutzen (keine Navigation).
+- **Layout Conventions**: Unified page background using a warm beige gradient. Layout component offers variants (`default`, `admin`, `wide`, `narrow`, `full`). Consistent page titles and card styles. Login/public pages use custom gradients.
 - **State Management**: TanStack Query for data fetching, React memoization, ErrorBoundary.
-- **Date/Time Handling**: All times are implicitly "German local time" with no UTC conversion or timezone logic, using central utilities (`@shared/utils/datetime`).
-- **Components**: `DatePicker`, `SearchableSelect`, `StatusBadge` (with 13+ types).
-- **API Calls**: Central API client (`@/lib/api/client`) for ALL HTTP requests. Use `api.get()` for queries (with `unwrapResult()` for data extraction), `api.post()`/`api.patch()`/`api.delete()` for mutations (includes CSRF automatically). No raw `fetch()` calls — always use the central client.
-- **Phone Number Handling**: Uses `libphonenumber-js/min` for validating, formatting, and storing German phone numbers in E.164 format.
-- **Type Organization**: Hierarchical type structure (`@shared/schema.ts`, `@shared/domain/*`, `@shared/utils/*`, `@shared/types.ts`).
+- **Date/Time Handling**: German local time, no UTC conversion.
+- **API Calls**: Central API client for all HTTP requests, including CSRF protection.
+- **Phone Number Handling**: `libphonenumber-js/min` for German numbers in E.164 format.
+- **Type Organization**: Hierarchical type structure.
 
 ### Backend
 - **Framework**: Express.js with TypeScript.
 - **API Design**: RESTful endpoints, Zod validation, structured error responses, modular routing.
-- **Business Logic**: Separated into a dedicated service layer with dependency injection; no direct DB access from route handlers.
-- **Error Handling**: Centralized `asyncHandler` wrapper and `AppError` class hierarchy for consistent JSON error responses.
-- **Security**: Role-based access control with SQL-level data filtering, CSRF protection. Session management: 30-min idle timeout with sliding expiry, 12h absolute maximum, frontend warning 2 min before expiry with keepalive option.
-- **Access Model**: Two-tiered access for employees (full vs. legacy based on customer assignment).
+- **Business Logic**: Separated service layer with dependency injection.
+- **Error Handling**: Centralized `asyncHandler` and `AppError` for consistent JSON error responses.
+- **Security**: Role-based access control with SQL-level data filtering, CSRF protection. Session management with idle/absolute timeouts and keepalive.
+- **Access Model**: Two-tiered access for employees.
 
 ### Data Storage
 - **Database**: PostgreSQL via Neon serverless with Drizzle ORM.
-- **Schema**: Tables for `customers`, `appointments`, `insurance_providers`, `employee_time_entries`, using historization (`valid_from`/`valid_to`). Database indexes defined. All timestamps use `withTimezone: true`.
-- **Soft-Delete (GoBD)**: Appointments use `deletedAt` for GoBD compliance.
-- **Data Layer**: `IStorage` interface abstraction with `DatabaseStorage` for optimized queries and application-level rollback.
-- **Caching**: In-memory cache for assigned customer IDs, sessions, and birthdays with TTL and invalidation logic.
-- **Performance**: Combined API endpoints for multi-data pages, scoped auth middleware, single JOIN query for session validation, batch cleanup for expired sessions/tokens.
-- **Frontend staleTime-Strategie**: Configurable `staleTime` for data stability (60s for stable, shorter for volatile, `Infinity` for session).
+- **Schema**: Tables for `customers`, `appointments`, `insurance_providers`, `employee_time_entries`, with historization (`valid_from`/`valid_to`). All timestamps use `withTimezone: true`.
+- **Soft-Delete**: `deletedAt` for GoBD compliance.
+- **Data Layer**: `IStorage` interface abstraction.
+- **Caching**: In-memory cache for assigned customer IDs, sessions, and birthdays.
+- **Performance**: Combined API endpoints, scoped auth middleware, single JOIN for session validation, batch cleanup.
+- **StaleTime Strategy**: Configurable `staleTime` for frontend data stability.
 
 ### Business Rules & Patterns
-- **Shared Domain Logic**: Single source of truth in `@shared/domain/*`.
-- **Appointment Workflow**: Status-driven field editing rules, overlap checking.
-- **Customer Management**: Multi-step creation, detailed views with 5-tab structure (Übersicht, Dokumente, Kontakte, Budgets, Versicherung), German-specific validation (`Pflegegrad`). Customer `status` (`erstberatung`, `aktiv`, `inaktiv`). Customer `billingType` (`pflegekasse_gesetzlich`, `pflegekasse_privat`, `selbstzahler`) drives dynamic step flows, conditional fields, and document requirements. **Deactivation Tracking**: When deactivating a customer, a dialog prompts for a predefined reason (11 options from domain constants) and optional free-text note ("Sonstiges" requires note). Reason and note are stored in `deactivation_reason`/`deactivation_note` columns and displayed in the inaktiv status card. Reactivation clears these fields.
-- **Document Templates**: HTML-based document templates with placeholder system (`{{customer_name}}`, `{{pflegegrad}}`, etc.), billing-type associations (pflicht/optional), and versioning. Templates seeded in DB: Betreuungsvertrag, Dienstleistungsvertrag, Datenschutzvereinbarung, Forderungsabtretung, SEPA-Lastschriftmandat. Template engine renders HTML with customer data. Digital signature capture via canvas in customer creation flow. Templates now support `documentTypeId` linking (to Dokumentenkategorien), `context` (vertragsabschluss/bestandskunde/beide), `targetType` (customer/employee/beide), and dual-signature requirements (`requiresCustomerSignature`, `requiresEmployeeSignature`).
-- **PDF Generation**: Server-side HTML→PDF conversion using Puppeteer/Chromium for GoBD-compliant immutable documents. Generated PDFs stored in Object Storage with SHA-256 integrity hashing. Digital document flow: template selection → preview with customer/employee data → dual-signature collection → PDF generation. Available for both customer and employee documents via `DigitalDocumentFlow` component.
-- **Insurance Providers**: Admin management, historized assignment, IK-Nummer and Versichertennummer validation.
-- **Budgeting & Pricing**: Three-pot budget ledger system based on German care law (§45b, §45a, §39/§42a). Kaskaden-Buchung (cascading allocation), FIFO for §45b, carryover budgets with write-off. Cost estimation with VAT.
-- **Dienstleistungskatalog (Service Catalog)**: Central management of services with code, name, unit type, standard price, VAT rate, `isBillable` flag, and `employeeRateCents`. No customer-specific price overrides. `isBillable` controls cost generation. Budget pot assignment via `service_budget_pots`. Customer-specific budget cascade priority in `customer_budget_type_settings`. Dynamic service selection for appointments. System-Services (e.g., `travel_km`, `customer_km`) are non-deletable/editable and seeded on startup.
-- **Employee Time Tracking**: Comprehensive tracking for client and non-client work, vacation allowance, multi-day entries. Past entries locked for non-admins.
-- **German Labor Law Compliance**: Automatic detection and generation of missing break documentation (`§4 ArbZG`).
-- **Month-Closing Workflow**: Employee-initiated month closing locks CRUD operations for non-admins; admins can reopen.
-- **Aufgaben-System (Task System)**: Centralized page for system notices and personal tasks.
-- **Customer Kilometers**: Separate tracking for kilometers driven with/for the customer.
-- **Birthdays**: Integrated tab in Customers page, showing upcoming birthdays for employees and assigned customers, utilizing server-side cache.
-- **Employee Self-Service Profile**: Employees can manage contact data, emergency contact, pet acceptance, password, and predefined document uploads.
-- **Navigation Structure**: Bottom navigation tabs: Termine, Kunden (with Birthdays tab), Aufgaben, Nachweise, Zeiten. User dropdown includes "Mein Profil" link.
-- **Signature Security (3-Tier)**: Immutable `audit_log` table, SHA-256 integrity hashing for appointment and service record signatures with verification endpoint, signature locking with admin-only revoke workflow.
-- **Invoicing Module**: Full billing system with `invoices` and `invoice_line_items` tables. **Audit-safe data flow**: Invoice generation requires a signed Leistungsnachweis (`monthly_service_records` with status `employee_signed` or `completed`). Appointments are sourced exclusively via `service_record_appointments` join table, ensuring the chain: Termin → Dokumentieren → Leistungsnachweis (unterschrieben) → Rechnung. Snapshot approach (recipient/insurance data frozen at creation). Three invoice formats per billing type: gesetzlich (to Pflegekasse with IK-Nr.), privat (to customer with insurance reference), selbstzahler (standard invoice). GoBD-compliant Stornorechnung workflow (negative amounts, references original invoice). LBNR (Beschäftigtennummer) on invoices since Oct 2025. PDF generation via Puppeteer/Chromium with HTML templates for Rechnung and Leistungsnachweis. Invoice statuses: Entwurf → Versendet → Bezahlt (with Storniert branch). Sequential invoice numbering per year (RE-YYYY-NNNN). Nachberechnung: if some appointments from service records are already invoiced, remaining ones create a Nachberechnung invoice.
-- **Company Settings**: `company_settings` table for firm master data (name, address, tax, bank, IK-Nummer, §45a Anerkennung, `logoUrl`). Used on invoice PDFs and Leistungsnachweise. Admin-editable via Settings page. Custom logo upload via Object Storage with preview in admin settings; displayed in Layout header with fallback to default logo.
-- **Document Delivery Preference**: `documentDeliveryMethod` field on customers (`email` or `post`). New "Versand" step in customer creation flow between Signatures and Employee Matching. Editable in customer edit page. Displayed in customer overview tab. Tracks how the customer wants to receive signed contract documents.
-- **Stundenübersicht (Hours Overview)**: Admin page at `/admin/hours-overview` showing monthly summary per employee: Hauswirtschaft hours, Alltagsbegleitung hours, Sonstiges (other) hours, total kilometers (travel + customer), vacation days, sick days. Sources: completed appointment services (by `lohnartKategorie`), appointment `travelKilometers`/`customerKilometers`, employee time entries (non-client → Sonstiges hours, urlaub/krankheit days). Month/year selector, totals row. Replaces former Lexware CSV export.
-- **Feiertage (Public Holidays)**: Shared utility (`@shared/utils/holidays.ts`) computes German public holidays (bundeseinheitlich + Sachsen: Reformationstag, Buß- und Bettag) using Easter-based calculation. Calendar/dashboard shows holidays with red styling on day buttons, holiday name below date heading. API endpoint: `GET /api/holidays?year=YYYY`.
+- **Shared Domain Logic**: Single source of truth.
+- **Appointment Workflow**: Status-driven field editing, overlap checking.
+- **Customer Management**: Multi-step creation, detailed views with 5 tabs, German-specific validation (`Pflegegrad`). `status` and `billingType` drive dynamic flows. Deactivation tracking with predefined reasons.
+- **Document Templates**: HTML-based templates with placeholders, billing-type associations, and versioning. Supports `documentTypeId`, `context`, `targetType`, and dual signatures.
+- **PDF Generation**: Server-side HTML→PDF using Puppeteer/Chromium for GoBD-compliant documents. Digital signature capture and integrity hashing.
+- **Insurance Providers**: Admin management, historized assignment, IK-Nummer validation.
+- **Budgeting & Pricing**: Three-pot budget ledger system based on German care law, cascading allocation, FIFO for §45b, carryover budgets.
+- **Service Catalog**: Central management of services with code, name, unit type, price, VAT, `isBillable` flag, `employeeRateCents`. System services are non-editable.
+- **Employee Time Tracking**: Comprehensive tracking for client/non-client work, vacation. Past entries locked for non-admins.
+- **German Labor Law Compliance**: Automatic detection of missing break documentation (`§4 ArbZG`).
+- **Month-Closing Workflow**: Employee-initiated month closing locks CRUD operations.
+- **Task System**: Centralized page for system notices and personal tasks.
+- **Customer Kilometers**: Separate tracking for travel with/for the customer.
+- **Birthdays**: Integrated tab showing upcoming birthdays.
+- **Employee Self-Service Profile**: Employees manage contact data, emergency contact, pet acceptance, password, and document uploads.
+- **Navigation Structure**: Bottom navigation tabs: Termine, Kunden, Aufgaben, Nachweise, Zeiten. User dropdown for "Mein Profil".
+- **Signature Security**: 3-tier system with immutable audit log, SHA-256 integrity hashing, and locking with admin-only revoke.
+- **Invoicing Module**: Full billing system with audit-safe data flow requiring signed Leistungsnachweis. Snapshot approach for data. Three invoice formats per billing type. GoBD-compliant Stornorechnung workflow. Sequential numbering, Nachberechnung.
+- **Company Settings**: `company_settings` table for master data, editable via Admin Settings. Custom logo upload.
+- **Document Delivery Preference**: `documentDeliveryMethod` field on customers for email or post, used in customer creation and editing.
+- **Hours Overview**: Admin page for monthly employee summaries: hours by category, kilometers, vacation, sick days.
+- **Public Holidays**: Shared utility for German public holidays (bundeseinheitlich + Sachsen).
+- **Employee Clustering**: Dimensions for `isEuRentner`, `employmentType`, `weeklyWorkDays`. Vacation entitlement formula. Warnings for EU-Rentner hour limits.
 
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)
 - **Frontend Libraries**: React, TypeScript, Vite, Wouter, `shadcn/ui`, Radix UI, Tailwind CSS v4, TanStack Query, Zod.
 - **Backend Libraries**: Express.js, TypeScript, Zod, Drizzle ORM.
-- **Utilities**: `libphonenumber-js/min`.
+- **Utilities**: `libphonenumber-js/min`, Puppeteer (for PDF generation).

@@ -306,6 +306,7 @@ export default function MyTimes() {
             vacationSummary={vacationSummary}
             selectedMonth={selectedMonth}
             selectedYear={selectedYear}
+            isEuRentner={!!user?.isEuRentner}
           />
 
           {isMonthLocked && (
@@ -340,6 +341,7 @@ export default function MyTimes() {
                 isAdmin={!!user?.isAdmin}
                 isDeleting={deleteMutation.isPending}
                 isMonthLocked={isMonthLocked}
+                isEuRentner={!!user?.isEuRentner}
               />
             </div>
           </div>

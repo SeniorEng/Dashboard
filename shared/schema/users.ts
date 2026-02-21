@@ -29,6 +29,9 @@ export const users = pgTable("users", {
   anonymizedAt: timestamp("anonymized_at"),
   isAdmin: boolean("is_admin").notNull().default(false),
   haustierAkzeptiert: boolean("haustier_akzeptiert").notNull().default(true),
+  isEuRentner: boolean("is_eu_rentner").notNull().default(false),
+  employmentType: text("employment_type").notNull().default("sozialversicherungspflichtig"), // "minijobber" | "sozialversicherungspflichtig"
+  weeklyWorkDays: integer("weekly_work_days").notNull().default(5),
   lbnr: text("lbnr"),
   personalnummer: text("personalnummer"),
   notfallkontaktName: text("notfallkontakt_name"),
@@ -95,6 +98,14 @@ export const employeeCompensationHistory = pgTable("employee_compensation_histor
   index("employee_compensation_valid_idx").on(table.userId, table.validFrom, table.validTo),
 ]);
 
+export const EMPLOYMENT_TYPES = ["minijobber", "sozialversicherungspflichtig"] as const;
+export type EmploymentType = typeof EMPLOYMENT_TYPES[number];
+
+export const EMPLOYMENT_TYPE_LABELS: Record<EmploymentType, string> = {
+  minijobber: "Minijobber",
+  sozialversicherungspflichtig: "Sozialversicherungspflichtig",
+};
+
 export const EMPLOYMENT_STATUSES = ["in_einstellung", "aktiv", "inaktiv"] as const;
 export type EmploymentStatus = typeof EMPLOYMENT_STATUSES[number];
 
@@ -132,6 +143,9 @@ export const insertUserSchema = z.object({
   employmentStatus: z.enum(EMPLOYMENT_STATUSES).optional().default("aktiv"),
   isAdmin: z.boolean().optional().default(false),
   haustierAkzeptiert: z.boolean().optional().default(true),
+  isEuRentner: z.boolean().optional().default(false),
+  employmentType: z.enum(EMPLOYMENT_TYPES).optional().default("sozialversicherungspflichtig"),
+  weeklyWorkDays: z.number().int().min(1).max(7).optional().default(5),
   lbnr: z.string().optional().nullable(),
   personalnummer: z.string().optional().nullable(),
   roles: z.array(z.enum(EMPLOYEE_ROLES)).optional().default([]),

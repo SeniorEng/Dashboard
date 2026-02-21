@@ -6,6 +6,7 @@ import { usersCache, birthdaysCache } from "../../services/cache";
 import { 
   insertUserSchema, 
   EMPLOYEE_ROLES,
+  EMPLOYMENT_TYPES,
   users,
   appointments,
   sessions,
@@ -92,6 +93,9 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
       vacationDaysPerYear: result.data.vacationDaysPerYear,
       isAdmin: result.data.isAdmin,
       haustierAkzeptiert: result.data.haustierAkzeptiert,
+      isEuRentner: result.data.isEuRentner,
+      employmentType: result.data.employmentType,
+      weeklyWorkDays: result.data.weeklyWorkDays,
       roles: result.data.roles,
     });
   } catch (error) {
@@ -159,6 +163,9 @@ const updateUserSchema = z.object({
   isActive: z.boolean().optional(),
   isAdmin: z.boolean().optional(),
   haustierAkzeptiert: z.boolean().optional(),
+  isEuRentner: z.boolean().optional(),
+  employmentType: z.enum(EMPLOYMENT_TYPES).optional(),
+  weeklyWorkDays: z.number().int().min(1).max(7).optional(),
   lbnr: z.string().nullable().optional(),
   personalnummer: z.string().nullable().optional(),
   notfallkontaktName: z.string().optional(),

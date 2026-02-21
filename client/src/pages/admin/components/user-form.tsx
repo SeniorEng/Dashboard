@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DatePicker } from "@/components/ui/date-picker";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { iconSize } from "@/design-system";
 import {
   DialogDescription,
@@ -20,6 +21,7 @@ import {
   formatPhoneForDisplay,
   validateGermanPhone,
 } from "./user-types";
+import { calculateVacationEntitlementByWorkDays } from "@shared/domain/vacation";
 
 export function UserForm({
   mode,
@@ -50,9 +52,36 @@ export function UserForm({
   );
   const [isAdmin, setIsAdmin] = useState(user?.isAdmin ?? false);
   const [haustierAkzeptiert, setHaustierAkzeptiert] = useState(user?.haustierAkzeptiert ?? true);
+  const [isEuRentner, setIsEuRentner] = useState(user?.isEuRentner ?? false);
+  const [employmentType, setEmploymentType] = useState(user?.employmentType ?? "sozialversicherungspflichtig");
+  const [weeklyWorkDays, setWeeklyWorkDays] = useState(user?.weeklyWorkDays?.toString() ?? "5");
   const [lbnr, setLbnr] = useState(user?.lbnr ?? "");
   const [personalnummer, setPersonalnummer] = useState(user?.personalnummer ?? "");
   const [roles, setRoles] = useState<string[]>(user?.roles ?? []);
+
+  const updateVacationFromWorkDays = (days: number) => {
+    const vacation = calculateVacationEntitlementByWorkDays(days);
+    setVacationDaysPerYear(vacation.toString());
+  };
+
+  const handleEmploymentTypeChange = (value: string) => {
+    setEmploymentType(value);
+    if (value === "minijobber") {
+      setWeeklyWorkDays("2");
+      updateVacationFromWorkDays(2);
+    } else {
+      setWeeklyWorkDays("5");
+      updateVacationFromWorkDays(5);
+    }
+  };
+
+  const handleWeeklyWorkDaysChange = (value: string) => {
+    setWeeklyWorkDays(value);
+    const days = parseInt(value);
+    if (!isNaN(days) && days >= 1 && days <= 7) {
+      updateVacationFromWorkDays(days);
+    }
+  };
 
   const handleTelefonBlur = () => {
     if (!telefon.trim()) {
@@ -96,6 +125,9 @@ export function UserForm({
       vacationDaysPerYear: vacationDaysPerYear ? parseInt(vacationDaysPerYear) : undefined,
       isAdmin,
       haustierAkzeptiert,
+      isEuRentner,
+      employmentType,
+      weeklyWorkDays: weeklyWorkDays ? parseInt(weeklyWorkDays) : 5,
       lbnr: lbnr || null,
       personalnummer: personalnummer || null,
       roles,
@@ -209,6 +241,51 @@ export function UserForm({
                 data-testid="input-user-vacation-days"
               />
               <p className="text-xs text-gray-500">Urlaubsanspruch auf 12 Monate</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold text-gray-700 border-b pb-2">Beschäftigungsverhältnis</h3>
+          
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Beschäftigungsart</Label>
+              <Select value={employmentType} onValueChange={handleEmploymentTypeChange}>
+                <SelectTrigger data-testid="select-employment-type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sozialversicherungspflichtig">Sozialversicherungspflichtig</SelectItem>
+                  <SelectItem value="minijobber">Minijobber</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="weeklyWorkDays">Arbeitstage pro Woche</Label>
+              <Input
+                id="weeklyWorkDays"
+                type="number"
+                min="1"
+                max="7"
+                value={weeklyWorkDays}
+                onChange={(e) => handleWeeklyWorkDaysChange(e.target.value)}
+                data-testid="input-weekly-work-days"
+              />
+              <p className="text-xs text-gray-500">Beeinflusst Urlaubs- und Krankheitsberechnung</p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="isEuRentner"
+              checked={isEuRentner}
+              onCheckedChange={(checked) => setIsEuRentner(!!checked)}
+              data-testid="checkbox-eu-rentner"
+            />
+            <div>
+              <Label htmlFor="isEuRentner">EU-Rentner (Erwerbsminderungsrente)</Label>
+              <p className="text-xs text-gray-500">Max. unter 3h/Tag, unter 15h/Woche (§43 SGB VI)</p>
             </div>
           </div>
         </div>

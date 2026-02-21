@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/patterns/status-badge";
-import { Calendar, Plus, Car, Users, Pencil, Trash2 } from "lucide-react";
+import { Calendar, Plus, Car, Users, Pencil, Trash2, AlertTriangle } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { isHoliday as checkHoliday } from "@shared/utils/holidays";
@@ -29,6 +29,7 @@ interface DayDetailPanelProps {
   isAdmin: boolean;
   isDeleting: boolean;
   isMonthLocked?: boolean;
+  isEuRentner?: boolean;
 }
 
 const SERVICE_CODE_LABELS: Record<string, string> = {
@@ -86,9 +87,33 @@ export function DayDetailPanel({
   isAdmin,
   isDeleting,
   isMonthLocked = false,
+  isEuRentner = false,
 }: DayDetailPanelProps) {
   const hasDayItems = entries.length > 0 || appointments.length > 0;
   const holidayInfo = selectedDate ? checkHoliday(selectedDate) : null;
+
+  const euRentnerDailyWarning = (() => {
+    if (!isEuRentner || !hasDayItems) return null;
+    let totalMinutes = 0;
+    for (const appt of appointments) {
+      const services = getAppointmentServices(appt);
+      totalMinutes += services.reduce((sum, s) => sum + s.minutes, 0);
+    }
+    for (const entry of entries) {
+      if (entry.startTime && entry.endTime) {
+        const [sh, sm] = entry.startTime.split(":").map(Number);
+        const [eh, em] = entry.endTime.split(":").map(Number);
+        totalMinutes += (eh * 60 + em) - (sh * 60 + sm);
+      } else if (entry.isFullDay) {
+        totalMinutes += 480;
+      }
+    }
+    const totalHours = totalMinutes / 60;
+    if (totalHours >= 3) {
+      return `${(totalHours).toFixed(1)}h an diesem Tag (EU-Rentner: max. 3h/Tag)`;
+    }
+    return null;
+  })();
 
   return (
     <Card>
@@ -108,6 +133,12 @@ export function DayDetailPanel({
           <p className="text-sm font-medium text-red-600" data-testid="text-day-holiday">
             Feiertag: {holidayInfo}
           </p>
+        )}
+        {euRentnerDailyWarning && (
+          <div className="flex items-center gap-1.5 text-sm font-medium text-red-600" data-testid="text-eu-rentner-daily-warning">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            {euRentnerDailyWarning}
+          </div>
         )}
       </CardHeader>
       <CardContent>

@@ -5,7 +5,7 @@ import { Layout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Clock } from "lucide-react";
+import { ArrowLeft, Clock, AlertTriangle } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 
@@ -19,6 +19,9 @@ interface EmployeeSummaryRow {
   kilometer: number;
   tageUrlaub: number;
   tageKrankheit: number;
+  isEuRentner: boolean;
+  employmentType: string;
+  weeklyWorkDays: number;
 }
 
 interface OverviewData {
@@ -162,17 +165,47 @@ export default function HoursOverview() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.rows.map((row) => (
-                    <tr key={row.employeeId} className="border-b last:border-0" data-testid={`row-employee-${row.employeeId}`}>
-                      <td className="py-2 pr-4 font-medium">{row.nachname}, {row.vorname}</td>
-                      <td className="py-2 pr-4 text-right font-mono">{formatHours(row.stundenHauswirtschaft)}</td>
-                      <td className="py-2 pr-4 text-right font-mono">{formatHours(row.stundenAlltagsbegleitung)}</td>
-                      <td className="py-2 pr-4 text-right font-mono">{formatHours(row.stundenSonstiges)}</td>
-                      <td className="py-2 pr-4 text-right font-mono">{formatKm(row.kilometer)}</td>
-                      <td className="py-2 pr-4 text-right font-mono">{formatDays(row.tageUrlaub)}</td>
-                      <td className="py-2 text-right font-mono">{formatDays(row.tageKrankheit)}</td>
-                    </tr>
-                  ))}
+                  {data.rows.map((row) => {
+                    const totalHours = row.stundenHauswirtschaft + row.stundenAlltagsbegleitung + row.stundenSonstiges;
+                    const euWeeklyLimit = 15;
+                    const weeksInMonth = new Date(parseInt(selectedYear), parseInt(selectedMonth), 0).getDate() / 7;
+                    const maxMonthlyHours = euWeeklyLimit * weeksInMonth;
+                    const isOverLimit = row.isEuRentner && totalHours >= maxMonthlyHours;
+
+                    return (
+                      <tr key={row.employeeId} className={`border-b last:border-0 ${isOverLimit ? "bg-red-50" : ""}`} data-testid={`row-employee-${row.employeeId}`}>
+                        <td className="py-2 pr-4 font-medium">
+                          <div className="flex items-center gap-2">
+                            <span>{row.nachname}, {row.vorname}</span>
+                            {row.isEuRentner && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-100 text-amber-800" data-testid={`badge-eu-rentner-${row.employeeId}`}>
+                                EU
+                              </span>
+                            )}
+                            {row.employmentType === "minijobber" && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-100 text-blue-800" data-testid={`badge-minijobber-${row.employeeId}`}>
+                                MJ
+                              </span>
+                            )}
+                          </div>
+                          {isOverLimit && (
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <AlertTriangle className="h-3 w-3 text-red-600" />
+                              <span className="text-[11px] text-red-600 font-medium">
+                                {formatHours(totalHours)}h / max. {formatHours(maxMonthlyHours)}h (EU-Grenze)
+                              </span>
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-2 pr-4 text-right font-mono">{formatHours(row.stundenHauswirtschaft)}</td>
+                        <td className="py-2 pr-4 text-right font-mono">{formatHours(row.stundenAlltagsbegleitung)}</td>
+                        <td className="py-2 pr-4 text-right font-mono">{formatHours(row.stundenSonstiges)}</td>
+                        <td className="py-2 pr-4 text-right font-mono">{formatKm(row.kilometer)}</td>
+                        <td className="py-2 pr-4 text-right font-mono">{formatDays(row.tageUrlaub)}</td>
+                        <td className="py-2 text-right font-mono">{formatDays(row.tageKrankheit)}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
                 {totals && (
                   <tfoot>

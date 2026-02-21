@@ -60,3 +60,7 @@ export function calculateUnusedDays(
 
 export const VACATION_EXPIRY_DATE = "01.04.";
 export const DEFAULT_VACATION_DAYS = 30;
+
+export function calculateVacationEntitlementByWorkDays(weeklyWorkDays: number): number {
+  return Math.round((weeklyWorkDays * 24) / 6);
+}
