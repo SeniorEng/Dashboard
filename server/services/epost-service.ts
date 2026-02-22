@@ -1,7 +1,6 @@
 import type { CompanySettings } from "@shared/schema";
 
-const EPOST_API_PROD = "https://api.epost.de/api/v1";
-const EPOST_API_TEST = "https://api-qa.epost.de/api/v1";
+const EPOST_API_BASE = "https://api.epost.docuguide.com";
 
 interface EpostLoginResponse {
   token: string;
@@ -16,12 +15,8 @@ interface EpostStatusResponse {
   details?: string;
 }
 
-function getBaseUrl(testMode: boolean): string {
-  return testMode ? EPOST_API_TEST : EPOST_API_PROD;
-}
-
 function validateEpostConfig(settings: CompanySettings): void {
-  if (!settings.epostVendorId || !settings.epostEkp || !settings.epostPassword || !settings.epostSalt) {
+  if (!settings.epostVendorId || !settings.epostEkp || !settings.epostPassword || !settings.epostSecret) {
     throw new Error("E-POST-Konfiguration unvollständig. Bitte in den Einstellungen konfigurieren.");
   }
 }
@@ -29,16 +24,14 @@ function validateEpostConfig(settings: CompanySettings): void {
 async function loginEpost(settings: CompanySettings): Promise<string> {
   validateEpostConfig(settings);
 
-  const baseUrl = getBaseUrl(settings.epostTestMode);
-
-  const response = await fetch(`${baseUrl}/login`, {
+  const response = await fetch(`${EPOST_API_BASE}/api/Login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       vendorID: settings.epostVendorId,
       ekp: settings.epostEkp,
       password: settings.epostPassword,
-      salt: settings.epostSalt,
+      secret: settings.epostSecret,
     }),
   });
 
@@ -53,6 +46,83 @@ async function loginEpost(settings: CompanySettings): Promise<string> {
   }
 
   return data.token;
+}
+
+export async function requestSmsCode(
+  vendorId: string,
+  ekp: string
+): Promise<{ success: boolean; message?: string; error?: string }> {
+  try {
+    const response = await fetch(`${EPOST_API_BASE}/api/Login/smsRequest`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        vendorID: vendorId,
+        ekp: ekp,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "Unbekannter Fehler");
+      return { success: false, error: `SMS-Anfrage fehlgeschlagen (${response.status}): ${errorText}` };
+    }
+
+    const message = await response.text().catch(() => "");
+    return { success: true, message: message || "SMS-Code wurde an die hinterlegte Mobilnummer gesendet." };
+  } catch (error: any) {
+    return { success: false, error: error.message || "SMS-Anfrage fehlgeschlagen" };
+  }
+}
+
+export async function setEpostPassword(
+  vendorId: string,
+  ekp: string,
+  newPassword: string,
+  smsCode: string
+): Promise<{ success: boolean; secret?: string; error?: string }> {
+  try {
+    const response = await fetch(`${EPOST_API_BASE}/api/Login/setPassword`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        vendorID: vendorId,
+        ekp: ekp,
+        newPassword: newPassword,
+        smsCode: smsCode,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "Unbekannter Fehler");
+      return { success: false, error: `Passwort setzen fehlgeschlagen (${response.status}): ${errorText}` };
+    }
+
+    const secret = await response.text();
+    if (!secret) {
+      return { success: false, error: "Kein Sicherheitsschlüssel (Secret) vom Server erhalten" };
+    }
+
+    return { success: true, secret };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Passwort setzen fehlgeschlagen" };
+  }
+}
+
+export async function checkEpostHealthCheck(): Promise<{ success: boolean; error?: string }> {
+  try {
+    const response = await fetch(`${EPOST_API_BASE}/api/Login/HealthCheck`, {
+      method: "GET",
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "Unbekannter Fehler");
+      return { success: false, error: `API nicht erreichbar (${response.status}): ${errorText}` };
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || "API nicht erreichbar" };
+  }
 }
 
 export async function sendEpostLetter(
@@ -70,7 +140,6 @@ export async function sendEpostLetter(
   }
 ): Promise<{ letterId: string }> {
   const token = await loginEpost(settings);
-  const baseUrl = getBaseUrl(settings.epostTestMode);
 
   const senderLine =
     options.senderLine ||
@@ -97,7 +166,7 @@ export async function sendEpostLetter(
     document: options.pdfBuffer.toString("base64"),
   };
 
-  const response = await fetch(`${baseUrl}/letters`, {
+  const response = await fetch(`${EPOST_API_BASE}/api/Letter`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -120,9 +189,8 @@ export async function getEpostLetterStatus(
   letterId: string
 ): Promise<{ status: string; details?: string }> {
   const token = await loginEpost(settings);
-  const baseUrl = getBaseUrl(settings.epostTestMode);
 
-  const response = await fetch(`${baseUrl}/letters/${letterId}/status`, {
+  const response = await fetch(`${EPOST_API_BASE}/api/Letter/${letterId}/status`, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
