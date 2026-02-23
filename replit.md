@@ -18,7 +18,8 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Layout Conventions**: Unified page background using a warm beige gradient. Layout component offers variants (`default`, `admin`, `wide`, `narrow`, `full`). Consistent page titles and card styles. Login/public pages use custom gradients.
 - **State Management**: TanStack Query for data fetching, React memoization, ErrorBoundary.
 - **Date/Time Handling**: German local time, no UTC conversion.
-- **API Calls**: Central API client for all HTTP requests, including CSRF protection.
+- **API Calls**: Central API client (`@/lib/api/client.ts`) for ALL HTTP requests, including CSRF protection. Every frontend file uses `api.get/post/put/patch/delete` with `unwrapResult()` for data extraction. Direct `fetch()` calls are forbidden.
+- **Toast Feedback**: All `useMutation` hooks provide German toast notifications on success and error via `useToast()`.
 - **Phone Number Handling**: `libphonenumber-js/min` for German numbers in E.164 format.
 - **Type Organization**: Hierarchical type structure.
 
