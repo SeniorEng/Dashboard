@@ -54,15 +54,15 @@ function DayButton({ dayStr, day, index, isSelected, isDayToday, appointmentCoun
       <span className={`text-base font-semibold ${isDayToday && !isSelected && !holidayName ? "text-primary" : ""}`}>
         {format(day, "d")}
       </span>
-      {hasAppointments ? (
-        <span className={`text-[9px] font-semibold leading-none ${isSelected ? "text-white/80" : holidayName ? "text-red-600" : "text-primary"}`}>
-          {appointmentCount === 1 ? "1" : appointmentCount}
-        </span>
-      ) : holidayName ? (
-        <span className={`text-[8px] font-medium leading-none ${isSelected ? "text-white/70" : "text-red-400"}`}>
-          ●
-        </span>
-      ) : null}
+      <span className={`text-[9px] font-semibold leading-none h-[10px] flex items-center justify-center ${
+        hasAppointments
+          ? isSelected ? "text-white/80" : holidayName ? "text-red-600" : "text-primary"
+          : holidayName
+            ? isSelected ? "text-white/70" : "text-red-400"
+            : "opacity-0"
+      }`} aria-hidden={!hasAppointments && !holidayName}>
+        {hasAppointments ? appointmentCount : holidayName ? "●" : "\u00A0"}
+      </span>
     </button>
   );
 }
@@ -116,9 +116,28 @@ export default function Dashboard() {
     return addDays(weekStart, 7);
   });
 
+  const goToToday = () => setSelectedDate(new Date());
+  const monthLabel = format(selectedDate, "MMMM yyyy", { locale: de });
+
   return (
     <Layout>
       <div className="mb-6 animate-in slide-in-from-top-4 duration-500">
+        <div className="flex items-center justify-between mb-2 px-1">
+          <span className="text-sm font-medium text-muted-foreground capitalize" data-testid="text-month-label">
+            {monthLabel}
+          </span>
+          {!isToday && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs px-3"
+              onClick={goToToday}
+              data-testid="button-go-today"
+            >
+              Heute
+            </Button>
+          )}
+        </div>
         <div className="flex items-center gap-1">
           <Button
             variant="ghost"
