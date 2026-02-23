@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Layout } from "@/components/layout";
 import {
   Users, UserCog, ArrowLeft, Contact2, Clock, Settings,
-  Building2, ClipboardList, FileText, Shield, Receipt, Gift,
+  Building2, ClipboardList, FileText, Shield, Receipt, Gift, BarChart3,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -106,6 +106,14 @@ export default function AdminDashboard() {
             iconBg="bg-rose-100"
             title="Geburtstagskarten"
             description="Versandstatus von Geburtstagskarten verwalten"
+          />
+          <AdminCard
+            href="/admin/statistics"
+            testId="card-statistics"
+            icon={<BarChart3 className={`${iconSize.lg} text-indigo-600`} />}
+            iconBg="bg-indigo-100"
+            title="Statistiken"
+            description="Kennzahlen, Umsatz und Performance-Analysen"
           />
         </Section>
 

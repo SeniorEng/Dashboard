@@ -38,6 +38,7 @@ const AdminDocumentTypes = lazy(() => import("@/pages/admin/document-types"));
 const AdminDocumentTemplates = lazy(() => import("@/pages/admin/document-templates"));
 const AdminAuditLog = lazy(() => import("@/pages/admin/audit-log"));
 const AdminBirthdayCards = lazy(() => import("@/pages/admin/birthday-cards"));
+const AdminStatistics = lazy(() => import("@/pages/admin/statistics"));
 const AdminBilling = lazy(() => import("@/pages/admin/billing"));
 const AdminHoursOverview = lazy(() => import("@/pages/admin/lexware-export"));
 const AdminQualifications = lazy(() => import("@/pages/admin/qualifications"));
@@ -209,6 +210,9 @@ function Router() {
       </Route>
       <Route path="/admin/birthday-cards">
         <AdminRoute component={AdminBirthdayCards} />
+      </Route>
+      <Route path="/admin/statistics">
+        <AdminRoute component={AdminStatistics} />
       </Route>
       <Route path="/admin/billing">
         <AdminRoute component={AdminBilling} />
