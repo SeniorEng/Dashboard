@@ -51,36 +51,36 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
   const employeeIds = employees.map(e => e.id);
   const employeeIdArray = sql`${sql.raw(employeeIds.join(','))}`;
 
-  const appointmentServices = await db.execute(sql`
+  const appointmentHours = await db.execute(sql`
     SELECT 
-      a.performed_by_employee_id as employee_id,
-      COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes, 0) as minutes,
-      s.lohnart_kategorie,
-      s.code
-    FROM appointments a
-    JOIN appointment_services asvc ON asvc.appointment_id = a.id
-    JOIN services s ON s.id = asvc.service_id
-    WHERE a.status = 'completed'
-      AND a.deleted_at IS NULL
-      AND a.date >= ${startDate}
-      AND a.date <= ${endDate}
-      AND a.performed_by_employee_id IN (${employeeIdArray})
-      AND s.code NOT IN ('travel_km', 'customer_km')
+      performed_by_employee_id as employee_id,
+      service_type,
+      SUM(EXTRACT(EPOCH FROM (actual_end::time - actual_start::time)) / 60) as minutes
+    FROM appointments
+    WHERE status = 'completed'
+      AND deleted_at IS NULL
+      AND date >= ${startDate}
+      AND date <= ${endDate}
+      AND performed_by_employee_id IN (${employeeIdArray})
+      AND actual_start IS NOT NULL
+      AND actual_end IS NOT NULL
+    GROUP BY performed_by_employee_id, service_type
   `);
 
   const hoursByEmployee: Record<number, { alltagsbegleitung: number; hauswirtschaft: number; sonstiges: number }> = {};
 
-  for (const row of appointmentServices.rows as any[]) {
+  for (const row of appointmentHours.rows as any[]) {
     const empId = row.employee_id;
     if (!hoursByEmployee[empId]) {
       hoursByEmployee[empId] = { alltagsbegleitung: 0, hauswirtschaft: 0, sonstiges: 0 };
     }
-    if (row.lohnart_kategorie === "alltagsbegleitung") {
-      hoursByEmployee[empId].alltagsbegleitung += Number(row.minutes) || 0;
-    } else if (row.lohnart_kategorie === "hauswirtschaft") {
-      hoursByEmployee[empId].hauswirtschaft += Number(row.minutes) || 0;
+    const minutes = Number(row.minutes) || 0;
+    if (row.service_type === "alltagsbegleitung") {
+      hoursByEmployee[empId].alltagsbegleitung += minutes;
+    } else if (row.service_type === "hauswirtschaft") {
+      hoursByEmployee[empId].hauswirtschaft += minutes;
     } else {
-      hoursByEmployee[empId].sonstiges += Number(row.minutes) || 0;
+      hoursByEmployee[empId].sonstiges += minutes;
     }
   }
 
