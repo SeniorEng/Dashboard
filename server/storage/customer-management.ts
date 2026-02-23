@@ -395,6 +395,7 @@ export class CustomerManagementStorage {
     plz: string;
     stadt: string;
     status: string;
+    billingType: string;
     primaryEmployeeId: number | null;
     backupEmployeeId: number | null;
     vorerkrankungen: string | null;
@@ -402,6 +403,7 @@ export class CustomerManagementStorage {
     haustierDetails: string | null;
     acceptsPrivatePayment: boolean;
     personenbefoerderungGewuenscht: boolean;
+    documentDeliveryMethod: string;
     inaktivAb: string | null;
     deactivationReason: string | null;
     deactivationNote: string | null;
