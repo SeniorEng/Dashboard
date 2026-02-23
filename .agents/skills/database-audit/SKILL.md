@@ -12,13 +12,15 @@ Run this audit after every significant code change that involves data persistenc
 - After adding/removing/renaming database columns
 - After changing storage queries or API routes
 - After modifying frontend data display
+- After adding new editable fields to forms (Category 10: Update-Persistenz)
+- After adding/modifying PATCH/PUT endpoints or service methods
 - Before marking a major feature as complete
 - During periodic codebase health checks
 - After refactoring that touches multiple layers
 
 ## Audit Process
 
-Work through all 10 categories. For each, report: PASS, WARN (non-critical), or FAIL (must fix).
+Work through all 11 categories. For each, report: PASS, WARN (non-critical), or FAIL (must fix).
 
 ---
 
@@ -228,7 +230,87 @@ const customers = await storage.getCustomersWithAppointments(); // 1 query with 
 
 ---
 
-## Category 10: Security
+## Category 10: Update-Persistenz-Check (Form-to-DB Pipeline)
+
+**Goal**: Every field editable in a frontend form actually gets persisted to the database when saved. No field should be silently dropped anywhere in the pipeline: Frontend Form → API Request → Zod Validation Schema → Route Handler → Service/Storage Method → DB Update.
+
+### Background:
+This check was introduced after discovering that `authService.updateUser()` had a narrow TypeScript type signature that silently dropped fields like `employmentType`, `weeklyWorkDays`, `isEuRentner`, `lbnr`, `personalnummer`, and `austrittsDatum`. The frontend sent these fields, the Zod schema validated them, but the service method's explicit field-mapping ignored them — causing data loss with no error.
+
+### Steps:
+
+#### Step 1: Identify all update endpoints
+```bash
+# Find all PATCH/PUT routes
+grep -rn "router\.\(patch\|put\)(" server/routes/ --include="*.ts"
+```
+
+#### Step 2: For each endpoint, trace the full pipeline
+For every PATCH/PUT endpoint found:
+
+1. **Frontend → API**: What fields does the frontend form submit?
+   ```bash
+   # Find the mutation that calls this endpoint
+   grep -rn "api\.\(patch\|put\)" client/src/ --include="*.ts" --include="*.tsx"
+   # Trace back to the form's handleSubmit/onSave to see what data object is constructed
+   ```
+
+2. **API → Zod Schema**: What does the validation schema accept?
+   ```bash
+   # Find the schema used in the route handler
+   grep -rn "Schema\.\(parse\|safeParse\)" <route_file>
+   # Read the schema definition to see all accepted fields
+   ```
+
+3. **Zod Schema → Service/Storage**: Does the service method accept ALL validated fields?
+   - **CRITICAL**: Check for explicit type signatures that are narrower than the Zod schema
+   - **CRITICAL**: Check for explicit field-by-field mapping (`if (data.X !== undefined) updateData.X = data.X`) — any field NOT in this mapping is silently dropped
+   ```bash
+   # Find the storage/service method called from the route
+   grep -n "storage\.\|service\.\|Service\." <route_file>
+   # Read the method and check its type signature + field mapping
+   ```
+
+4. **Storage → DB**: Does the DB update include all fields?
+   - **Safe patterns** (all fields pass through automatically):
+     - `db.update(table).set(data)` — direct spread, all fields included
+     - `db.update(table).set({ ...data, updatedAt: new Date() })` — spread with extras
+   - **Dangerous patterns** (fields can be silently dropped):
+     - Explicit field-by-field mapping: `if (data.X !== undefined) updateData.X = data.X`
+     - Narrow type signature: `updates: { field1?: string; field2?: number }` (any field not listed is dropped)
+     - `const updateData: any = {}` followed by selective assignment
+
+#### Step 3: Cross-reference frontend form fields vs DB mapping
+For each form, create a checklist:
+```
+Form Field          → Zod Schema  → Service Type  → DB Mapping  → Status
+employmentType      → ✓            → ✓              → ✓            → OK
+weeklyWorkDays      → ✓            → ✓              → ✓            → OK
+someNewField        → ✓            → ✗ MISSING      → ✗ MISSING   → FAIL
+```
+
+### Common Dangerous Patterns:
+1. **Narrow type signature**: Service method has `updates: { field1?: string }` but Zod schema accepts more fields
+2. **Incomplete field mapping**: Method has `if (data.field1 !== undefined) updateData.field1 = data.field1` but doesn't include all schema fields
+3. **Type: any bypass**: `const updateData: any = { ...data }` works but hides the type mismatch — WARN (fix type for safety)
+4. **Schema.partial() vs explicit schema**: `insertSchema.partial()` auto-includes all fields, but explicit `z.object({...})` may miss newly added fields
+
+### Red Flags:
+- Zod schema validates field X, but service/storage type signature doesn't include X → **FAIL** (data loss)
+- Explicit field-mapping (`if/undefined` pattern) missing a field that Zod accepts → **FAIL** (data loss)
+- Service type is narrower than Zod schema but uses `any` spread → **WARN** (works but fragile, fix type)
+- New column added to DB schema but not added to update Zod schema OR service method → **FAIL** (field not editable)
+- Frontend form has a field but no corresponding Zod schema entry → **FAIL** (field sent but rejected)
+
+### Prevention Rules:
+1. When adding a new editable field: Always update ALL layers (schema → Zod → service type → DB mapping)
+2. Prefer spread patterns (`set({ ...data })`) over explicit field-by-field mapping
+3. If using explicit mapping, add a comment listing all expected fields for easy auditing
+4. Use `typeof schema._type` or Zod inference for service method parameter types instead of hand-written types
+
+---
+
+## Category 11: Security
 
 **Goal**: Database access is secure and follows least-privilege.
 
@@ -266,7 +348,8 @@ After completing all checks, produce a summary:
 | 7. GDPR/DSGVO | PASS/WARN/FAIL | Details |
 | 8. Historization | PASS/WARN/FAIL | Details |
 | 9. Data Integrity | PASS/WARN/FAIL | Details |
-| 10. Security | PASS/WARN/FAIL | Details |
+| 10. Update-Persistenz | PASS/WARN/FAIL | Details |
+| 11. Security | PASS/WARN/FAIL | Details |
 
 ### Action Items
 - FAIL items: Must fix before completion

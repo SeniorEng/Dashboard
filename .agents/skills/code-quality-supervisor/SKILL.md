@@ -224,7 +224,49 @@ This agent acts as a skeptical Senior Engineer who questions every change before
 
 ---
 
-## Category 6: Documentation-Code Alignment
+## Category 6: Update Pipeline Consistency (Quick Check)
+
+**Goal**: When adding or modifying form fields, verify the complete save pipeline is intact. This is a quick cross-cutting check complementing the deep analysis in `database-audit` Category 10.
+
+### When to Check:
+- After adding a new editable field to any form
+- After modifying a Zod validation schema for update endpoints
+- After changing a service/storage method's type signature
+- After adding a new PATCH/PUT endpoint
+
+### Steps:
+1. **New field added?** → Verify it exists in ALL pipeline layers:
+   ```bash
+   # For a field named "newField", check it appears in:
+   # 1. Frontend form state + submit data construction
+   grep -rn "newField" client/src/ --include="*.tsx" --include="*.ts"
+   # 2. Zod validation schema (route or shared)
+   grep -rn "newField" server/routes/ shared/schema/ --include="*.ts"
+   # 3. Service/storage method type signature + field mapping
+   grep -rn "newField" server/services/ server/storage/ --include="*.ts"
+   ```
+   → If ANY layer is missing the field → **FAIL** (data loss or validation rejection)
+
+2. **Explicit field-mapping pattern detected?** → Extra scrutiny required:
+   ```bash
+   # Find methods that use if-undefined mapping (dangerous pattern)
+   grep -rn "if (data\.\|if (updates\." server/services/ server/storage/ --include="*.ts" | grep "!== undefined"
+   ```
+   → For each method found, verify the field list matches its Zod schema
+
+3. **Type signature vs schema mismatch?**:
+   - If a service method has a hand-written type like `updates: { field1?: string; field2?: number }`, compare it against the corresponding Zod schema
+   - Prefer using Zod inference (`z.infer<typeof schema>`) over hand-written types
+
+### Red Flags:
+- New form field not in Zod schema → FAIL (field rejected at validation)
+- New Zod field not in service type signature → FAIL if explicit mapping, WARN if spread
+- Hand-written type signature diverged from Zod schema → WARN (fragile, use type inference)
+- `if (data.X !== undefined)` mapping with fewer fields than schema → FAIL (silent data loss)
+
+---
+
+## Category 7: Documentation-Code Alignment
 
 **Goal**: `replit.md` and code comments accurately describe the current implementation.
 
@@ -273,7 +315,8 @@ After completing all checks, produce a summary:
 | 3. Migration Completeness | PASS/WARN/FAIL | Details |
 | 4. Import Consistency | PASS/WARN/FAIL | Details |
 | 5. Dead Code | PASS/WARN/FAIL | Details |
-| 6. Documentation Alignment | PASS/WARN/FAIL | Details |
+| 6. Update Pipeline | PASS/WARN/FAIL | Details |
+| 7. Documentation Alignment | PASS/WARN/FAIL | Details |
 
 ### Action Items
 - FAIL items: Must fix before telling user "fertig"
@@ -291,4 +334,4 @@ After completing all checks, produce a summary:
 2. **Scope**: Adapt checks to the specific change made (don't re-audit everything every time)
 3. **Escalation**: FAIL items block completion. WARN items are reported but don't block.
 4. **Efficiency**: Focus on files touched by the current change + their direct dependents
-5. **Cross-reference**: After this audit, also run `database-audit` if data layer was touched, and `business-logic-audit` if workflows were touched
+5. **Cross-reference**: After this audit, also run `database-audit` if data layer was touched (especially Category 10: Update-Persistenz for new form fields), and `business-logic-audit` if workflows were touched
