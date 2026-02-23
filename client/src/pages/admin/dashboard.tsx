@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Layout } from "@/components/layout";
 import {
   Users, UserCog, ArrowLeft, Contact2, Clock, Settings,
-  Building2, ClipboardList, FileText, Shield, Receipt,
+  Building2, ClipboardList, FileText, Shield, Receipt, Gift,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -98,6 +98,14 @@ export default function AdminDashboard() {
             iconBg="bg-green-100"
             title="Zeiterfassung"
             description="Urlaub, Krankheit und Arbeitszeiten"
+          />
+          <AdminCard
+            href="/admin/birthday-cards"
+            testId="card-birthday-cards"
+            icon={<Gift className={`${iconSize.lg} text-rose-600`} />}
+            iconBg="bg-rose-100"
+            title="Geburtstagskarten"
+            description="Versandstatus von Geburtstagskarten verwalten"
           />
         </Section>
 
