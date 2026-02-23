@@ -60,6 +60,10 @@ export interface CreateUserData {
   vacationDaysPerYear?: number;
   isAdmin?: boolean;
   haustierAkzeptiert?: boolean;
+  isEuRentner?: boolean;
+  employmentType?: string;
+  weeklyWorkDays?: number;
+  monthlyWorkHours?: number | null;
   roles?: EmployeeRole[];
 }
 
@@ -95,6 +99,10 @@ export class AuthService {
         vacationDaysPerYear: data.vacationDaysPerYear ?? 30,
         isAdmin: data.isAdmin ?? false,
         haustierAkzeptiert: data.haustierAkzeptiert ?? true,
+        isEuRentner: data.isEuRentner ?? false,
+        employmentType: data.employmentType ?? "sozialversicherungspflichtig",
+        weeklyWorkDays: data.weeklyWorkDays ?? 5,
+        monthlyWorkHours: data.monthlyWorkHours ?? null,
         isActive: true,
       })
       .returning();
@@ -372,6 +380,7 @@ export class AuthService {
       isEuRentner?: boolean;
       employmentType?: string;
       weeklyWorkDays?: number;
+      monthlyWorkHours?: number | null;
       lbnr?: string | null;
       personalnummer?: string | null;
       notfallkontaktName?: string;
@@ -409,6 +418,7 @@ export class AuthService {
     if (updates.isEuRentner !== undefined) dbUpdates.isEuRentner = updates.isEuRentner;
     if (updates.employmentType !== undefined) dbUpdates.employmentType = updates.employmentType;
     if (updates.weeklyWorkDays !== undefined) dbUpdates.weeklyWorkDays = updates.weeklyWorkDays;
+    if (updates.monthlyWorkHours !== undefined) dbUpdates.monthlyWorkHours = updates.monthlyWorkHours;
     if (updates.lbnr !== undefined) dbUpdates.lbnr = updates.lbnr || null;
     if (updates.personalnummer !== undefined) dbUpdates.personalnummer = updates.personalnummer || null;
     if (updates.notfallkontaktName !== undefined) dbUpdates.notfallkontaktName = updates.notfallkontaktName || null;

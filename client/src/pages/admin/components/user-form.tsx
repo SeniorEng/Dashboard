@@ -55,6 +55,7 @@ export function UserForm({
   const [isEuRentner, setIsEuRentner] = useState(user?.isEuRentner ?? false);
   const [employmentType, setEmploymentType] = useState(user?.employmentType ?? "sozialversicherungspflichtig");
   const [weeklyWorkDays, setWeeklyWorkDays] = useState(user?.weeklyWorkDays?.toString() ?? "5");
+  const [monthlyWorkHours, setMonthlyWorkHours] = useState(user?.monthlyWorkHours?.toString() ?? "");
   const [lbnr, setLbnr] = useState(user?.lbnr ?? "");
   const [personalnummer, setPersonalnummer] = useState(user?.personalnummer ?? "");
   const [roles, setRoles] = useState<string[]>(user?.roles ?? []);
@@ -128,6 +129,7 @@ export function UserForm({
       isEuRentner,
       employmentType,
       weeklyWorkDays: weeklyWorkDays ? parseInt(weeklyWorkDays) : 5,
+      monthlyWorkHours: monthlyWorkHours ? parseFloat(monthlyWorkHours) : null,
       lbnr: lbnr || null,
       personalnummer: personalnummer || null,
       roles,
@@ -275,6 +277,24 @@ export function UserForm({
               <p className="text-xs text-gray-500">Beeinflusst Urlaubs- und Krankheitsberechnung</p>
             </div>
           </div>
+
+          {employmentType !== "minijobber" && (
+            <div className="space-y-2">
+              <Label htmlFor="monthlyWorkHours">Monatsarbeitszeit (Stunden)</Label>
+              <Input
+                id="monthlyWorkHours"
+                type="number"
+                min="1"
+                max="300"
+                step="0.5"
+                value={monthlyWorkHours}
+                onChange={(e) => setMonthlyWorkHours(e.target.value)}
+                placeholder="z.B. 120"
+                data-testid="input-monthly-work-hours"
+              />
+              <p className="text-xs text-gray-500">Vertraglich vereinbarte monatliche Arbeitszeit (für Feiertagsberechnung)</p>
+            </div>
+          )}
 
           <div className="flex items-center space-x-2">
             <Checkbox

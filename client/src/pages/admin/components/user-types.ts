@@ -20,6 +20,7 @@ export interface UserData {
   isEuRentner: boolean;
   employmentType: string;
   weeklyWorkDays: number;
+  monthlyWorkHours: number | null;
   lbnr: string | null;
   personalnummer: string | null;
   roles: string[];
@@ -45,6 +46,7 @@ export interface UserFormData {
   isEuRentner: boolean;
   employmentType: string;
   weeklyWorkDays: number;
+  monthlyWorkHours?: number | null;
   lbnr?: string | null;
   personalnummer?: string | null;
   roles: string[];

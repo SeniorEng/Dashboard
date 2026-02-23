@@ -4,6 +4,7 @@ import { users } from "@shared/schema/users";
 import { employeeTimeEntries } from "@shared/schema/time-tracking";
 import { and, gte, lte, sql, inArray, eq } from "drizzle-orm";
 import { asyncHandler } from "../../lib/errors";
+import { getHolidays } from "@shared/utils/holidays";
 
 const router = Router();
 
@@ -13,13 +14,49 @@ interface EmployeeSummaryRow {
   vorname: string;
   stundenHauswirtschaft: number;
   stundenAlltagsbegleitung: number;
+  stundenErstberatung: number;
   stundenSonstiges: number;
+  stundenFeiertage: number;
   kilometer: number;
   tageUrlaub: number;
   tageKrankheit: number;
   isEuRentner: boolean;
   employmentType: string;
   weeklyWorkDays: number;
+  monthlyWorkHours: number | null;
+}
+
+function calculateHolidayHours(
+  year: number,
+  month: number,
+  employmentType: string,
+  monthlyWorkHours: number | null
+): number {
+  const holidays = getHolidays(year);
+  const monthStr = String(month).padStart(2, "0");
+  const monthHolidays = holidays.filter(h => h.date.startsWith(`${year}-${monthStr}`));
+
+  let totalHours = 0;
+
+  for (const holiday of monthHolidays) {
+    const date = new Date(holiday.date);
+    const dayOfWeek = date.getDay();
+
+    if (dayOfWeek === 0 || dayOfWeek === 6) continue;
+
+    if (employmentType === "minijobber") {
+      if (dayOfWeek === 1 || dayOfWeek === 2) {
+        totalHours += 2.5;
+      }
+    } else {
+      if (monthlyWorkHours && monthlyWorkHours > 0) {
+        const dailyHours = monthlyWorkHours / 21.7;
+        totalHours += Math.round(dailyHours * 100) / 100;
+      }
+    }
+  }
+
+  return Math.round(totalHours * 100) / 100;
 }
 
 router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
@@ -41,6 +78,7 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
     isEuRentner: users.isEuRentner,
     employmentType: users.employmentType,
     weeklyWorkDays: users.weeklyWorkDays,
+    monthlyWorkHours: users.monthlyWorkHours,
   }).from(users).where(eq(users.isActive, true));
 
   if (employees.length === 0) {
@@ -67,18 +105,20 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
     GROUP BY performed_by_employee_id, service_type
   `);
 
-  const hoursByEmployee: Record<number, { alltagsbegleitung: number; hauswirtschaft: number; sonstiges: number }> = {};
+  const hoursByEmployee: Record<number, { alltagsbegleitung: number; hauswirtschaft: number; erstberatung: number; sonstiges: number }> = {};
 
   for (const row of appointmentHours.rows as any[]) {
     const empId = row.employee_id;
     if (!hoursByEmployee[empId]) {
-      hoursByEmployee[empId] = { alltagsbegleitung: 0, hauswirtschaft: 0, sonstiges: 0 };
+      hoursByEmployee[empId] = { alltagsbegleitung: 0, hauswirtschaft: 0, erstberatung: 0, sonstiges: 0 };
     }
     const minutes = Number(row.minutes) || 0;
     if (row.service_type === "alltagsbegleitung") {
       hoursByEmployee[empId].alltagsbegleitung += minutes;
     } else if (row.service_type === "hauswirtschaft") {
       hoursByEmployee[empId].hauswirtschaft += minutes;
+    } else if (row.service_type === "erstberatung") {
+      hoursByEmployee[empId].erstberatung += minutes;
     } else {
       hoursByEmployee[empId].sonstiges += minutes;
     }
@@ -141,30 +181,35 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
   const rows: EmployeeSummaryRow[] = [];
 
   for (const emp of employees) {
-    const empHours = hoursByEmployee[emp.id] || { alltagsbegleitung: 0, hauswirtschaft: 0, sonstiges: 0 };
+    const empHours = hoursByEmployee[emp.id] || { alltagsbegleitung: 0, hauswirtschaft: 0, erstberatung: 0, sonstiges: 0 };
     const ncMinutes = nonClientMinutes[emp.id] || 0;
 
     const stundenHW = empHours.hauswirtschaft / 60;
     const stundenAB = empHours.alltagsbegleitung / 60;
+    const stundenEB = empHours.erstberatung / 60;
     const stundenSonstiges = (empHours.sonstiges + ncMinutes) / 60;
     const km = kmByEmployee[emp.id] || 0;
     const urlaub = vacationDays[emp.id] || 0;
     const krankheit = sickDays[emp.id] || 0;
+    const feiertage = calculateHolidayHours(year, month, emp.employmentType, emp.monthlyWorkHours);
 
-    if (stundenHW > 0 || stundenAB > 0 || stundenSonstiges > 0 || km > 0 || urlaub > 0 || krankheit > 0) {
+    if (stundenHW > 0 || stundenAB > 0 || stundenEB > 0 || stundenSonstiges > 0 || km > 0 || urlaub > 0 || krankheit > 0 || feiertage > 0) {
       rows.push({
         employeeId: emp.id,
         nachname: emp.nachname || "",
         vorname: emp.vorname || "",
         stundenHauswirtschaft: Math.round(stundenHW * 100) / 100,
         stundenAlltagsbegleitung: Math.round(stundenAB * 100) / 100,
+        stundenErstberatung: Math.round(stundenEB * 100) / 100,
         stundenSonstiges: Math.round(stundenSonstiges * 100) / 100,
+        stundenFeiertage: feiertage,
         kilometer: km,
         tageUrlaub: urlaub,
         tageKrankheit: krankheit,
         isEuRentner: emp.isEuRentner,
         employmentType: emp.employmentType,
         weeklyWorkDays: emp.weeklyWorkDays,
+        monthlyWorkHours: emp.monthlyWorkHours,
       });
     }
   }

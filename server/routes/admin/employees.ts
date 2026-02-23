@@ -96,6 +96,7 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
       isEuRentner: result.data.isEuRentner,
       employmentType: result.data.employmentType,
       weeklyWorkDays: result.data.weeklyWorkDays,
+      monthlyWorkHours: result.data.monthlyWorkHours,
       roles: result.data.roles,
     });
   } catch (error) {
@@ -166,6 +167,7 @@ const updateUserSchema = z.object({
   isEuRentner: z.boolean().optional(),
   employmentType: z.enum(EMPLOYMENT_TYPES).optional(),
   weeklyWorkDays: z.number().int().min(1).max(7).optional(),
+  monthlyWorkHours: z.number().min(1).max(300).nullable().optional(),
   lbnr: z.string().nullable().optional(),
   personalnummer: z.string().nullable().optional(),
   notfallkontaktName: z.string().optional(),

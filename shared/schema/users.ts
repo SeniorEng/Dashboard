@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, date, boolean, unique, index } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, date, boolean, unique, index, real } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp } from "./common";
 
@@ -32,6 +32,7 @@ export const users = pgTable("users", {
   isEuRentner: boolean("is_eu_rentner").notNull().default(false),
   employmentType: text("employment_type").notNull().default("sozialversicherungspflichtig"), // "minijobber" | "sozialversicherungspflichtig"
   weeklyWorkDays: integer("weekly_work_days").notNull().default(5),
+  monthlyWorkHours: real("monthly_work_hours"),
   lbnr: text("lbnr"),
   personalnummer: text("personalnummer"),
   notfallkontaktName: text("notfallkontakt_name"),
@@ -146,6 +147,7 @@ export const insertUserSchema = z.object({
   isEuRentner: z.boolean().optional().default(false),
   employmentType: z.enum(EMPLOYMENT_TYPES).optional().default("sozialversicherungspflichtig"),
   weeklyWorkDays: z.number().int().min(1).max(7).optional().default(5),
+  monthlyWorkHours: z.number().min(1).max(300).optional().nullable(),
   lbnr: z.string().optional().nullable(),
   personalnummer: z.string().optional().nullable(),
   roles: z.array(z.enum(EMPLOYEE_ROLES)).optional().default([]),
