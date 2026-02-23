@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ArrowLeft, Loader2, BarChart3, Users, TrendingUp, Activity,
-  Euro, Car, Clock, UserCheck, Heart, CalendarDays,
+  Euro, Car, Clock, UserCheck, Heart, CalendarDays, PiggyBank,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -96,6 +96,15 @@ export default function AdminStatistics() {
     staleTime: 60000,
   });
 
+  const { data: profitability } = useQuery<any>({
+    queryKey: ["statistics-profitability", selectedYear, selectedMonth],
+    queryFn: async () => {
+      const result = await api.get(`/statistics/profitability?year=${selectedYear}${monthParam}`);
+      return unwrapResult(result);
+    },
+    staleTime: 60000,
+  });
+
   const employees = data?.employees ?? [];
   const revenue = data?.revenue ?? {};
   const customerStats = data?.customers ?? {};
@@ -104,20 +113,12 @@ export default function AdminStatistics() {
   const pflegegrad = data?.pflegegradDistribution ?? [];
   const budget = data?.budgetUtilization ?? {};
 
-  const maxRevenue = useMemo(() => {
-    return Math.max(...trends.map((t: any) => Number(t.revenueCents || 0)), 1);
-  }, [trends]);
-
   const maxAppointments = useMemo(() => {
     return Math.max(...trends.map((t: any) => Number(t.completedCount || 0)), 1);
   }, [trends]);
 
   const maxEmpAppts = useMemo(() => {
     return Math.max(...employees.map((e: any) => Number(e.appointments || 0)), 1);
-  }, [employees]);
-
-  const maxEmpRevenue = useMemo(() => {
-    return Math.max(...employees.map((e: any) => Number(e.revenueCents || 0)), 1);
   }, [employees]);
 
   const periodLabel = selectedMonth !== "all"
@@ -176,8 +177,8 @@ export default function AdminStatistics() {
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="mb-6 flex-wrap h-auto gap-1">
               <TabsTrigger value="overview" data-testid="tab-overview">Übersicht</TabsTrigger>
+              <TabsTrigger value="profitability" data-testid="tab-profitability">Deckungsbeitrag</TabsTrigger>
               <TabsTrigger value="employees" data-testid="tab-employees">Mitarbeiter</TabsTrigger>
-              <TabsTrigger value="revenue" data-testid="tab-revenue">Umsatz</TabsTrigger>
               <TabsTrigger value="customers" data-testid="tab-customers">Kunden</TabsTrigger>
               <TabsTrigger value="trends" data-testid="tab-trends">Trends</TabsTrigger>
             </TabsList>
@@ -186,8 +187,9 @@ export default function AdminStatistics() {
             <TabsContent value="overview">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
                 <StatCard
-                  label="Umsatz"
-                  value={cents(revenue.totalRevenueCents || 0)}
+                  label="Erlöse (kalk.)"
+                  value={cents(profitability?.totals?.revenueCents || 0)}
+                  sub={`DB: ${cents(profitability?.totals?.marginCents || 0)} (${profitability?.marginPercent || 0}%)`}
                   icon={<Euro className="w-5 h-5" />}
                   color="text-emerald-600"
                   testId="stat-revenue"
@@ -271,7 +273,7 @@ export default function AdminStatistics() {
               {/* Quick Monthly Trend */}
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Monatlicher Umsatz {selectedYear}</CardTitle>
+                  <CardTitle className="text-base">Monatliche Termine {selectedYear}</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2">
@@ -279,9 +281,9 @@ export default function AdminStatistics() {
                       <div key={t.month} className="flex items-center gap-3">
                         <span className="text-xs text-muted-foreground w-8 text-right">{MONTH_NAMES[t.month].slice(0, 3)}</span>
                         <div className="flex-1">
-                          <BarSimple value={Number(t.revenueCents)} max={maxRevenue} color="bg-emerald-500" />
+                          <BarSimple value={Number(t.completedCount)} max={maxAppointments} color="bg-blue-500" />
                         </div>
-                        <span className="text-xs font-medium w-20 text-right">{cents(t.revenueCents)}</span>
+                        <span className="text-xs font-medium w-16 text-right">{t.completedCount} Termine</span>
                       </div>
                     ))}
                   </div>
@@ -297,7 +299,12 @@ export default function AdminStatistics() {
                     <CardContent className="p-4">
                       <div className="flex items-center justify-between mb-3">
                         <span className="font-semibold">{emp.name}</span>
-                        <span className="text-sm font-medium text-emerald-600">{cents(emp.revenueCents)}</span>
+                        {(() => {
+                          const profEmp = profitability?.employees?.find((pe: any) => pe.employeeId === emp.id);
+                          return profEmp ? (
+                            <span className="text-sm font-medium text-emerald-600">{cents(profEmp.marginCents)} DB</span>
+                          ) : null;
+                        })()}
                       </div>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
                         <div>
@@ -313,9 +320,14 @@ export default function AdminStatistics() {
                           <div className="font-medium">{hours(emp.workMinutes)}</div>
                         </div>
                         <div>
-                          <div className="text-muted-foreground text-xs">Umsatz/Stunde</div>
+                          <div className="text-muted-foreground text-xs">DB/Stunde</div>
                           <div className="font-medium">
-                            {emp.workMinutes > 0 ? cents(Math.round(Number(emp.revenueCents) / (emp.workMinutes / 60))) : "–"}
+                            {(() => {
+                              const profEmp = profitability?.employees?.find((pe: any) => pe.employeeId === emp.id);
+                              return profEmp && Number(profEmp.totalMinutes) > 0
+                                ? cents(Math.round(Number(profEmp.marginCents) / (Number(profEmp.totalMinutes) / 60)))
+                                : "–";
+                            })()}
                           </div>
                         </div>
                       </div>
@@ -354,75 +366,167 @@ export default function AdminStatistics() {
               </div>
             </TabsContent>
 
-            {/* REVENUE TAB */}
-            <TabsContent value="revenue">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-                <StatCard label="Gesamtumsatz" value={cents(revenue.totalRevenueCents || 0)} color="text-emerald-600" testId="rev-total" />
-                <StatCard label="Bezahlt" value={cents(revenue.paidRevenueCents || 0)} color="text-green-600" testId="rev-paid" />
-                <StatCard label="Offen" value={cents(revenue.openRevenueCents || 0)} color="text-amber-600" testId="rev-open" />
-                <StatCard label="Rechnungen" value={`${revenue.totalInvoices || 0}`} sub={`${revenue.paidInvoices || 0} bezahlt, ${revenue.openInvoices || 0} offen`} color="text-blue-600" testId="rev-invoices" />
-              </div>
-
-              {/* Top Customers */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Top-Kunden nach Umsatz</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {topCustomers && topCustomers.length > 0 ? (
-                    <div className="space-y-2">
-                      {topCustomers.filter((c: any) => Number(c.revenueCents) > 0).map((c: any, i: number) => (
-                        <div key={c.id} className="flex items-center gap-3" data-testid={`top-customer-${c.id}`}>
-                          <span className="text-xs text-muted-foreground w-6 text-right">{i + 1}.</span>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium truncate">{c.name}</span>
-                              {c.pflegegrad && (
-                                <span className="text-xs px-1.5 py-0.5 rounded bg-teal-100 text-teal-700">PG {c.pflegegrad}</span>
-                              )}
+            {/* PROFITABILITY TAB */}
+            <TabsContent value="profitability">
+              {profitability ? (() => {
+                const t = profitability.totals;
+                const empList = profitability.employees || [];
+                const maxEmpMargin = Math.max(...empList.map((e: any) => Number(e.marginCents || 0)), 1);
+                const prices = profitability.servicePrices || [];
+                const hwPrice = prices.find((p: any) => p.code === 'hauswirtschaft');
+                const abPrice = prices.find((p: any) => p.code === 'alltagsbegleitung');
+                const kmPrice = prices.find((p: any) => p.code === 'travel_km');
+                return (
+                  <>
+                    <Card className="mb-4 border-emerald-200 bg-emerald-50/50">
+                      <CardContent className="p-4">
+                        <div className="flex items-center gap-3 mb-3">
+                          <PiggyBank className="w-6 h-6 text-emerald-600" />
+                          <div>
+                            <div className="text-sm text-muted-foreground">Deckungsbeitrag (ohne Fixkosten)</div>
+                            <div className="text-2xl font-bold text-emerald-700" data-testid="profit-margin-total">{cents(t.marginCents)}</div>
+                          </div>
+                          <div className="ml-auto text-right">
+                            <div className={`text-xl font-bold ${profitability.marginPercent >= 50 ? 'text-emerald-600' : profitability.marginPercent >= 30 ? 'text-amber-600' : 'text-red-600'}`} data-testid="profit-margin-pct">
+                              {profitability.marginPercent}%
                             </div>
-                            <BarSimple
-                              value={Number(c.revenueCents)}
-                              max={Number(topCustomers[0]?.revenueCents || 1)}
-                              color="bg-emerald-400"
-                            />
-                          </div>
-                          <div className="text-right shrink-0">
-                            <div className="text-sm font-medium">{cents(c.revenueCents)}</div>
-                            <div className="text-xs text-muted-foreground">{c.appointmentCount} Termine</div>
+                            <div className="text-xs text-muted-foreground">DB-Marge</div>
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">Keine Umsatzdaten vorhanden.</p>
-                  )}
-                </CardContent>
-              </Card>
+                      </CardContent>
+                    </Card>
 
-              {/* Employee Revenue Ranking */}
-              <Card className="mt-4">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Umsatz pro Mitarbeiter</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    {employees.filter((e: any) => Number(e.revenueCents) > 0).map((e: any, i: number) => (
-                      <div key={e.id} className="flex items-center gap-3">
-                        <span className="text-xs text-muted-foreground w-6 text-right">{i + 1}.</span>
-                        <div className="flex-1">
-                          <div className="text-sm font-medium mb-0.5">{e.name}</div>
-                          <BarSimple value={Number(e.revenueCents)} max={maxEmpRevenue} color="bg-teal-500" />
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                      <StatCard
+                        label="Kalkulierte Erlöse"
+                        value={cents(t.revenueCents)}
+                        sub={`${cents(t.revenueServiceCents)} Dienst + ${cents(t.revenueKmCents)} KM`}
+                        icon={<Euro className="w-5 h-5" />}
+                        color="text-emerald-600"
+                        testId="profit-revenue"
+                      />
+                      <StatCard
+                        label="Personalkosten"
+                        value={cents(t.costCents)}
+                        sub={`${cents(t.costServiceCents)} Dienst + ${cents(t.costKmCents)} KM`}
+                        icon={<Users className="w-5 h-5" />}
+                        color="text-red-600"
+                        testId="profit-costs"
+                      />
+                      <StatCard
+                        label="Einsatzstunden"
+                        value={hours(t.totalMinutes)}
+                        sub={`${t.appointments} Termine`}
+                        icon={<Clock className="w-5 h-5" />}
+                        color="text-blue-600"
+                        testId="profit-hours"
+                      />
+                      <StatCard
+                        label="Erlös/Stunde"
+                        value={t.totalMinutes > 0 ? cents(Math.round(t.revenueCents / (t.totalMinutes / 60))) : "–"}
+                        sub={t.totalMinutes > 0 ? `Kosten: ${cents(Math.round(t.costCents / (t.totalMinutes / 60)))}/h` : ""}
+                        icon={<TrendingUp className="w-5 h-5" />}
+                        color="text-teal-600"
+                        testId="profit-per-hour"
+                      />
+                    </div>
+
+                    <Card className="mb-4">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base">Kalkulationsgrundlage</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                          {hwPrice && (
+                            <div className="bg-gray-50 rounded-lg p-3">
+                              <div className="font-medium mb-1">Hauswirtschaft</div>
+                              <div className="text-muted-foreground">Erlös: {cents(hwPrice.priceCents)}/h</div>
+                              <div className="text-muted-foreground">MA-Kosten: {cents(hwPrice.rateCents)}/h</div>
+                              <div className="text-emerald-600 font-medium">Marge: {cents(hwPrice.priceCents - hwPrice.rateCents)}/h ({Math.round(((hwPrice.priceCents - hwPrice.rateCents) / hwPrice.priceCents) * 100)}%)</div>
+                            </div>
+                          )}
+                          {abPrice && (
+                            <div className="bg-gray-50 rounded-lg p-3">
+                              <div className="font-medium mb-1">Alltagsbegleitung</div>
+                              <div className="text-muted-foreground">Erlös: {cents(abPrice.priceCents)}/h</div>
+                              <div className="text-muted-foreground">MA-Kosten: {cents(abPrice.rateCents)}/h</div>
+                              <div className="text-emerald-600 font-medium">Marge: {cents(abPrice.priceCents - abPrice.rateCents)}/h ({Math.round(((abPrice.priceCents - abPrice.rateCents) / abPrice.priceCents) * 100)}%)</div>
+                            </div>
+                          )}
+                          {kmPrice && (
+                            <div className="bg-gray-50 rounded-lg p-3">
+                              <div className="font-medium mb-1">Fahrtkilometer</div>
+                              <div className="text-muted-foreground">Erlös: {cents(kmPrice.priceCents)}/km</div>
+                              <div className="text-muted-foreground">MA-Kosten: {cents(kmPrice.rateCents)}/km</div>
+                              <div className="text-muted-foreground font-medium">Marge: {cents(kmPrice.priceCents - kmPrice.rateCents)}/km</div>
+                            </div>
+                          )}
                         </div>
-                        <div className="text-right shrink-0">
-                          <div className="text-sm font-medium">{cents(e.revenueCents)}</div>
-                          <div className="text-xs text-muted-foreground">{e.appointments} Termine</div>
+                      </CardContent>
+                    </Card>
+
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base">Deckungsbeitrag pro Mitarbeiter</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-3">
+                          {empList.map((emp: any, i: number) => {
+                            const empMarginPct = Number(emp.revenueCents) > 0
+                              ? Math.round((Number(emp.marginCents) / Number(emp.revenueCents)) * 100)
+                              : 0;
+                            return (
+                              <div key={emp.employeeId} className="border rounded-lg p-3" data-testid={`profit-employee-${emp.employeeId}`}>
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs text-muted-foreground">{i + 1}.</span>
+                                    <span className="font-semibold text-sm">{emp.employeeName}</span>
+                                  </div>
+                                  <div className="text-right">
+                                    <span className={`font-bold ${Number(emp.marginCents) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                      {cents(emp.marginCents)}
+                                    </span>
+                                    <span className={`text-xs ml-1.5 px-1.5 py-0.5 rounded ${empMarginPct >= 50 ? 'bg-emerald-100 text-emerald-700' : empMarginPct >= 30 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
+                                      {empMarginPct}%
+                                    </span>
+                                  </div>
+                                </div>
+                                <BarSimple value={Number(emp.marginCents)} max={maxEmpMargin} color={Number(emp.marginCents) >= 0 ? "bg-emerald-500" : "bg-red-500"} />
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-2 text-xs">
+                                  <div>
+                                    <span className="text-muted-foreground">Erlöse: </span>
+                                    <span className="font-medium">{cents(emp.revenueCents)}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Kosten: </span>
+                                    <span className="font-medium">{cents(emp.costCents)}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Stunden: </span>
+                                    <span className="font-medium">{hours(emp.totalMinutes)}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Termine: </span>
+                                    <span className="font-medium">{emp.appointments}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">KM: </span>
+                                    <span className="font-medium">{emp.totalTravelKm} km</span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
+                      </CardContent>
+                    </Card>
+                  </>
+                );
+              })() : (
+                <div className="flex justify-center py-16">
+                  <Loader2 className={`${iconSize.lg} animate-spin text-teal-600`} />
+                </div>
+              )}
             </TabsContent>
 
             {/* CUSTOMERS TAB */}
@@ -521,25 +625,6 @@ export default function AdminStatistics() {
                             <span className="text-red-500 ml-1">({t.cancelledCount} storn.)</span>
                           )}
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="mb-4">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Monatlicher Umsatz {selectedYear}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    {trends.map((t: any) => (
-                      <div key={t.month} className="flex items-center gap-3">
-                        <span className="text-xs text-muted-foreground w-8 text-right">{MONTH_NAMES[t.month].slice(0, 3)}</span>
-                        <div className="flex-1">
-                          <BarSimple value={Number(t.revenueCents)} max={maxRevenue} color="bg-emerald-500" />
-                        </div>
-                        <span className="text-xs font-medium w-20 text-right">{cents(t.revenueCents)}</span>
                       </div>
                     ))}
                   </div>
