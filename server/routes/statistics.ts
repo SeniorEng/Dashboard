@@ -94,16 +94,16 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
       ORDER BY apt.total_appointments DESC NULLS LAST
     `),
 
-    // 2. Revenue Stats
+    // 2. Revenue Stats – only count rechnung/nachberechnung, exclude stornorechnung
     db.execute(sql`
       SELECT
-        COALESCE(SUM(CASE WHEN i.status != 'storniert' THEN i.gross_amount_cents ELSE 0 END), 0)::bigint AS "totalRevenueCents",
-        COALESCE(SUM(CASE WHEN i.status = 'bezahlt' THEN i.gross_amount_cents ELSE 0 END), 0)::bigint AS "paidRevenueCents",
-        COALESCE(SUM(CASE WHEN i.status = 'versendet' THEN i.gross_amount_cents ELSE 0 END), 0)::bigint AS "openRevenueCents",
-        COUNT(CASE WHEN i.status != 'storniert' THEN 1 END)::int AS "totalInvoices",
-        COUNT(CASE WHEN i.status = 'bezahlt' THEN 1 END)::int AS "paidInvoices",
-        COUNT(CASE WHEN i.status = 'versendet' THEN 1 END)::int AS "openInvoices",
-        COUNT(CASE WHEN i.status = 'storniert' THEN 1 END)::int AS "cancelledInvoices"
+        COALESCE(SUM(CASE WHEN i.status != 'storniert' AND i.invoice_type != 'stornorechnung' THEN i.gross_amount_cents ELSE 0 END), 0)::bigint AS "totalRevenueCents",
+        COALESCE(SUM(CASE WHEN i.status = 'bezahlt' AND i.invoice_type != 'stornorechnung' THEN i.gross_amount_cents ELSE 0 END), 0)::bigint AS "paidRevenueCents",
+        COALESCE(SUM(CASE WHEN i.status = 'versendet' AND i.invoice_type != 'stornorechnung' THEN i.gross_amount_cents ELSE 0 END), 0)::bigint AS "openRevenueCents",
+        COUNT(CASE WHEN i.status != 'storniert' AND i.invoice_type != 'stornorechnung' THEN 1 END)::int AS "totalInvoices",
+        COUNT(CASE WHEN i.status = 'bezahlt' AND i.invoice_type != 'stornorechnung' THEN 1 END)::int AS "paidInvoices",
+        COUNT(CASE WHEN i.status = 'versendet' AND i.invoice_type != 'stornorechnung' THEN 1 END)::int AS "openInvoices",
+        COUNT(CASE WHEN i.status = 'storniert' OR i.invoice_type = 'stornorechnung' THEN 1 END)::int AS "cancelledInvoices"
       FROM invoices i
       WHERE i.billing_year = ${year}
         ${monthFilterInv}
@@ -162,8 +162,8 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
       LEFT JOIN (
         SELECT
           i.billing_month,
-          SUM(CASE WHEN i.status != 'storniert' THEN i.gross_amount_cents ELSE 0 END) AS revenue_cents,
-          COUNT(CASE WHEN i.status != 'storniert' THEN 1 END) AS invoice_count
+          SUM(CASE WHEN i.status != 'storniert' AND i.invoice_type != 'stornorechnung' THEN i.gross_amount_cents ELSE 0 END) AS revenue_cents,
+          COUNT(CASE WHEN i.status != 'storniert' AND i.invoice_type != 'stornorechnung' THEN 1 END) AS invoice_count
         FROM invoices i
         WHERE i.billing_year = ${year}
         GROUP BY i.billing_month
@@ -194,17 +194,17 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
       ORDER BY c.pflegegrad NULLS FIRST
     `),
 
-    // 7. Budget utilization (§45b)
+    // 7. Budget utilization (§45b) – consumption amounts are stored as negative, use ABS()
     db.execute(sql`
       SELECT
         COALESCE(SUM(ba.amount_cents), 0)::bigint AS "totalAllocatedCents",
-        COALESCE((
+        COALESCE(ABS((
           SELECT SUM(bt.amount_cents)
           FROM budget_transactions bt
           WHERE bt.budget_type = 'entlastungsbetrag_45b'
             AND EXTRACT(YEAR FROM bt.transaction_date::date) = ${year}
-            AND bt.transaction_type != 'reversal'
-        ), 0)::bigint AS "totalUsedCents"
+            AND bt.transaction_type = 'consumption'
+        )), 0)::bigint AS "totalUsedCents"
       FROM budget_allocations ba
       WHERE ba.budget_type = 'entlastungsbetrag_45b'
         AND ba.year = ${year}
@@ -249,6 +249,7 @@ router.get("/top-customers", asyncHandler("Top-Kunden konnten nicht geladen werd
     LEFT JOIN invoices i ON i.customer_id = c.id
       AND i.billing_year = ${year}
       AND i.status != 'storniert'
+      AND i.invoice_type != 'stornorechnung'
     WHERE c.deleted_at IS NULL AND c.status = 'aktiv'
     GROUP BY c.id, c.name, c.pflegegrad
     ORDER BY "revenueCents" DESC

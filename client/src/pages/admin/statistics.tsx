@@ -232,12 +232,12 @@ export default function AdminStatistics() {
                   testId="stat-km"
                 />
                 <StatCard
-                  label="Fahrzeitquote"
-                  value={pct(efficiency.totalTravelMinutes || 0, (efficiency.totalServiceMinutes || 0) + (efficiency.totalTravelMinutes || 0))}
-                  sub={`${hours(efficiency.totalTravelMinutes || 0)} von ${hours((efficiency.totalServiceMinutes || 0) + (efficiency.totalTravelMinutes || 0))}`}
+                  label="Einsatzzeit"
+                  value={hours(efficiency.totalServiceMinutes || 0)}
+                  sub={`${efficiency.completedAppointments || 0} Termine`}
                   icon={<Clock className="w-5 h-5" />}
                   color="text-amber-600"
-                  testId="stat-travel-rate"
+                  testId="stat-service-time"
                 />
                 <StatCard
                   label="§45b Nutzung"
