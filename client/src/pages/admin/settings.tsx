@@ -254,6 +254,29 @@ export default function AdminSettings() {
     },
   });
 
+  const [minijobLimit, setMinijobLimit] = useState("");
+
+  useEffect(() => {
+    if (companyData?.minijobEarningsLimitCents != null) {
+      setMinijobLimit(String(companyData.minijobEarningsLimitCents / 100));
+    }
+  }, [companyData?.minijobEarningsLimitCents]);
+
+  const minijobLimitMutation = useMutation({
+    mutationFn: async (limitEuro: string) => {
+      const cents = Math.round(parseFloat(limitEuro) * 100);
+      const result = await api.patch<CompanySettings>("/company-settings", { minijobEarningsLimitCents: cents });
+      return unwrapResult(result);
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(["company-settings"], data);
+      toast({ title: "Minijob-Verdienstgrenze gespeichert" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [logoUploading, setLogoUploading] = useState(false);
 
@@ -1036,6 +1059,40 @@ export default function AdminSettings() {
                     <p className="text-xs text-muted-foreground">
                       Leer lassen für den Standardtext. Speichern über den Button "Speichern" bei den Firmendaten oben.
                     </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card data-testid="card-minijob-limit">
+                <CardHeader>
+                  <CardTitle>Minijob-Verdienstgrenze</CardTitle>
+                  <CardDescription>
+                    Monatliche Verdienstgrenze für Minijobber. Überschüssige Stunden werden automatisch
+                    in den Folgemonat übertragen (sichtbar in der Stundenübersicht).
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-end gap-4">
+                    <div className="space-y-1 flex-1 max-w-[200px]">
+                      <Label htmlFor="minijob-limit">Grenze (€ / Monat)</Label>
+                      <Input
+                        id="minijob-limit"
+                        data-testid="input-minijob-limit"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={minijobLimit}
+                        onChange={(e) => setMinijobLimit(e.target.value)}
+                      />
+                    </div>
+                    <Button
+                      data-testid="button-save-minijob-limit"
+                      size="sm"
+                      disabled={minijobLimitMutation.isPending || !minijobLimit}
+                      onClick={() => minijobLimitMutation.mutate(minijobLimit)}
+                    >
+                      Speichern
+                    </Button>
                   </div>
                 </CardContent>
               </Card>

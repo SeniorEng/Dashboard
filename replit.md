@@ -64,7 +64,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Hours Overview**: Admin page for monthly employee summaries: hours by category, kilometers, vacation, sick days.
 - **Public Holidays**: Shared utility for German public holidays (bundeseinheitlich + Sachsen).
 - **Employee Clustering**: Dimensions for `isEuRentner`, `employmentType`, `weeklyWorkDays`, `monthlyWorkHours`. Vacation entitlement formula. Warnings for EU-Rentner hour limits.
-- **Hours Overview (Stundenübersicht)**: Monthly employee summary with columns: HW, AB, EB (Erstberatung), Sonstiges, Feiertage, KM, Urlaub, Krank. Holiday hours: Minijobber 2,5h nur Mo/Di, SV-pflichtig `monthlyWorkHours / 21,7` pro Werktags-Feiertag.
+- **Hours Overview (Stundenübersicht)**: Monthly employee summary with columns: HW, AB, EB (Erstberatung), Sonstiges, Feiertage, KM, Urlaub, Krank. Holiday hours: Minijobber 2,5h nur Mo/Di, SV-pflichtig `monthlyWorkHours / 21,7` pro Werktags-Feiertag. **Minijob-Stundenübertrag**: For Minijobber, additional columns show Brutto(€), Übertrag Vormonat(€), Auszahlbar(€), Übertrag neu(€). Carryover tracked in cents, cumulative from January. Configurable `minijobEarningsLimitCents` in company_settings (default 556€). Uses weighted gross from HW×HW-Satz + AB×AB-Satz + EB×AB-Satz + Sonstiges×HW-Satz + Feiertage×HW-Satz. Batch query for all months in one DB call for performance.
 
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)

@@ -25,12 +25,17 @@ interface EmployeeSummaryRow {
   employmentType: string;
   weeklyWorkDays: number;
   monthlyWorkHours: number | null;
+  bruttoCents: number | null;
+  uebertragVormonatCents: number | null;
+  auszahlbarCents: number | null;
+  uebertragNeuCents: number | null;
 }
 
 interface OverviewData {
   rows: EmployeeSummaryRow[];
   year: number;
   month: number;
+  earningsLimitCents: number;
 }
 
 const MONTHS = [
@@ -41,6 +46,11 @@ const MONTHS = [
 function formatHours(hours: number): string {
   if (hours === 0) return "–";
   return hours.toFixed(2).replace(".", ",");
+}
+
+function formatEuro(cents: number): string {
+  if (cents === 0) return "–";
+  return (cents / 100).toFixed(2).replace(".", ",") + " €";
 }
 
 function formatKm(km: number): string {
@@ -73,6 +83,8 @@ export default function HoursOverview() {
   for (let y = now.getFullYear(); y >= now.getFullYear() - 2; y--) {
     years.push(String(y));
   }
+
+  const hasMinijobber = data?.rows?.some(r => r.employmentType === "minijobber") ?? false;
 
   const totals = data?.rows?.reduce(
     (acc, r) => ({
@@ -168,7 +180,15 @@ export default function HoursOverview() {
                     <th className="py-2 pr-4 font-medium text-muted-foreground text-right">Feiert. (Std.)</th>
                     <th className="py-2 pr-4 font-medium text-muted-foreground text-right">KM</th>
                     <th className="py-2 pr-4 font-medium text-muted-foreground text-right">Urlaub (T)</th>
-                    <th className="py-2 font-medium text-muted-foreground text-right">Krank (T)</th>
+                    <th className="py-2 pr-4 font-medium text-muted-foreground text-right">Krank (T)</th>
+                    {hasMinijobber && (
+                      <>
+                        <th className="py-2 pr-4 font-medium text-muted-foreground text-right border-l pl-4">Brutto (€)</th>
+                        <th className="py-2 pr-4 font-medium text-muted-foreground text-right">Übertr. Vor. (€)</th>
+                        <th className="py-2 pr-4 font-medium text-muted-foreground text-right">Auszahlbar (€)</th>
+                        <th className="py-2 font-medium text-muted-foreground text-right">Übertr. neu (€)</th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -178,9 +198,10 @@ export default function HoursOverview() {
                     const weeksInMonth = new Date(parseInt(selectedYear), parseInt(selectedMonth), 0).getDate() / 7;
                     const maxMonthlyHours = euWeeklyLimit * weeksInMonth;
                     const isOverLimit = row.isEuRentner && totalHours >= maxMonthlyHours;
+                    const hasCarryover = row.uebertragNeuCents !== null && row.uebertragNeuCents > 0;
 
                     return (
-                      <tr key={row.employeeId} className={`border-b last:border-0 ${isOverLimit ? "bg-red-50" : ""}`} data-testid={`row-employee-${row.employeeId}`}>
+                      <tr key={row.employeeId} className={`border-b last:border-0 ${isOverLimit ? "bg-red-50" : hasCarryover ? "bg-amber-50" : ""}`} data-testid={`row-employee-${row.employeeId}`}>
                         <td className="py-2 pr-4 font-medium">
                           <div className="flex items-center gap-2">
                             <span>{row.nachname}, {row.vorname}</span>
@@ -211,7 +232,23 @@ export default function HoursOverview() {
                         <td className="py-2 pr-4 text-right font-mono">{formatHours(row.stundenFeiertage)}</td>
                         <td className="py-2 pr-4 text-right font-mono">{formatKm(row.kilometer)}</td>
                         <td className="py-2 pr-4 text-right font-mono">{formatDays(row.tageUrlaub)}</td>
-                        <td className="py-2 text-right font-mono">{formatDays(row.tageKrankheit)}</td>
+                        <td className="py-2 pr-4 text-right font-mono">{formatDays(row.tageKrankheit)}</td>
+                        {hasMinijobber && (
+                          <>
+                            <td className="py-2 pr-4 text-right font-mono border-l pl-4">
+                              {row.bruttoCents !== null ? formatEuro(row.bruttoCents) : "–"}
+                            </td>
+                            <td className="py-2 pr-4 text-right font-mono">
+                              {row.uebertragVormonatCents !== null ? formatEuro(row.uebertragVormonatCents) : "–"}
+                            </td>
+                            <td className="py-2 pr-4 text-right font-mono">
+                              {row.auszahlbarCents !== null ? formatEuro(row.auszahlbarCents) : "–"}
+                            </td>
+                            <td className={`py-2 text-right font-mono ${hasCarryover ? "text-amber-700 font-semibold" : ""}`}>
+                              {row.uebertragNeuCents !== null ? formatEuro(row.uebertragNeuCents) : "–"}
+                            </td>
+                          </>
+                        )}
                       </tr>
                     );
                   })}
@@ -227,7 +264,15 @@ export default function HoursOverview() {
                       <td className="py-2 pr-4 text-right font-mono">{formatHours(totals.feiertage)}</td>
                       <td className="py-2 pr-4 text-right font-mono">{formatKm(totals.km)}</td>
                       <td className="py-2 pr-4 text-right font-mono">{formatDays(totals.urlaub)}</td>
-                      <td className="py-2 text-right font-mono">{formatDays(totals.krankheit)}</td>
+                      <td className="py-2 pr-4 text-right font-mono">{formatDays(totals.krankheit)}</td>
+                      {hasMinijobber && (
+                        <>
+                          <td className="py-2 pr-4 text-right font-mono border-l pl-4"></td>
+                          <td className="py-2 pr-4 text-right font-mono"></td>
+                          <td className="py-2 pr-4 text-right font-mono"></td>
+                          <td className="py-2 text-right font-mono"></td>
+                        </>
+                      )}
                     </tr>
                   </tfoot>
                 )}
@@ -236,6 +281,12 @@ export default function HoursOverview() {
           )}
         </CardContent>
       </Card>
+
+      {hasMinijobber && data?.earningsLimitCents && (
+        <p className="text-xs text-muted-foreground mt-4" data-testid="text-minijob-info">
+          Minijob-Verdienstgrenze: {formatEuro(data.earningsLimitCents)} / Monat. Übertrag-Spalten nur für Minijobber mit hinterlegten Stundensätzen.
+        </p>
+      )}
     </Layout>
   );
 }
