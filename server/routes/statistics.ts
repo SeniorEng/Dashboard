@@ -271,7 +271,12 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
 
   const result = await db.execute(sql`
     WITH service_prices AS (
-      SELECT code, default_price_cents, employee_rate_cents FROM services
+      SELECT id, code, default_price_cents, employee_rate_cents FROM services
+    ),
+    active_customer_prices AS (
+      SELECT csp.customer_id, csp.service_id, csp.price_cents
+      FROM customer_service_prices csp
+      WHERE csp.valid_to IS NULL
     ),
     appointment_calc AS (
       SELECT
@@ -283,8 +288,18 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
         COALESCE(a.travel_kilometers, 0) AS travel_km,
         COALESCE(a.customer_kilometers, 0) AS customer_km,
         CASE
-          WHEN a.service_type = 'hauswirtschaft' THEN (SELECT default_price_cents FROM service_prices WHERE code = 'hauswirtschaft')
-          WHEN a.service_type = 'alltagsbegleitung' THEN (SELECT default_price_cents FROM service_prices WHERE code = 'alltagsbegleitung')
+          WHEN a.service_type = 'hauswirtschaft' THEN COALESCE(
+            (SELECT acp.price_cents FROM active_customer_prices acp
+             JOIN service_prices sp ON sp.id = acp.service_id AND sp.code = 'hauswirtschaft'
+             WHERE acp.customer_id = a.customer_id),
+            (SELECT default_price_cents FROM service_prices WHERE code = 'hauswirtschaft')
+          )
+          WHEN a.service_type = 'alltagsbegleitung' THEN COALESCE(
+            (SELECT acp.price_cents FROM active_customer_prices acp
+             JOIN service_prices sp ON sp.id = acp.service_id AND sp.code = 'alltagsbegleitung'
+             WHERE acp.customer_id = a.customer_id),
+            (SELECT default_price_cents FROM service_prices WHERE code = 'alltagsbegleitung')
+          )
           ELSE 0
         END AS hourly_price,
         CASE
@@ -292,8 +307,20 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
           WHEN a.service_type = 'alltagsbegleitung' THEN (SELECT employee_rate_cents FROM service_prices WHERE code = 'alltagsbegleitung')
           ELSE 0
         END AS hourly_cost,
-        (SELECT default_price_cents FROM service_prices WHERE code = 'travel_km') AS km_price,
-        (SELECT employee_rate_cents FROM service_prices WHERE code = 'travel_km') AS km_cost
+        COALESCE(
+          (SELECT acp.price_cents FROM active_customer_prices acp
+           JOIN service_prices sp ON sp.id = acp.service_id AND sp.code = 'travel_km'
+           WHERE acp.customer_id = a.customer_id),
+          (SELECT default_price_cents FROM service_prices WHERE code = 'travel_km')
+        ) AS km_price,
+        (SELECT employee_rate_cents FROM service_prices WHERE code = 'travel_km') AS km_cost,
+        COALESCE(
+          (SELECT acp.price_cents FROM active_customer_prices acp
+           JOIN service_prices sp ON sp.id = acp.service_id AND sp.code = 'customer_km'
+           WHERE acp.customer_id = a.customer_id),
+          (SELECT default_price_cents FROM service_prices WHERE code = 'customer_km')
+        ) AS ckm_price,
+        (SELECT employee_rate_cents FROM service_prices WHERE code = 'customer_km') AS ckm_cost
       FROM appointments a
       WHERE a.deleted_at IS NULL
         AND a.status IN ('completed', 'documented')
@@ -307,8 +334,8 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
         ROUND(ac.duration_promised / 60.0 * ac.hourly_cost) AS cost_service_cents,
         ROUND(ac.travel_km * ac.km_price) AS revenue_km_cents,
         ROUND(ac.travel_km * ac.km_cost) AS cost_km_cents,
-        ROUND(ac.customer_km * ac.km_price) AS revenue_ckm_cents,
-        ROUND(ac.customer_km * ac.km_cost) AS cost_ckm_cents
+        ROUND(ac.customer_km * ac.ckm_price) AS revenue_ckm_cents,
+        ROUND(ac.customer_km * ac.ckm_cost) AS cost_ckm_cents
       FROM appointment_calc ac
     )
     SELECT
@@ -368,7 +395,7 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
 
   const servicePrices = await db.execute(sql`
     SELECT code, default_price_cents AS "priceCents", employee_rate_cents AS "rateCents"
-    FROM services WHERE code IN ('hauswirtschaft', 'alltagsbegleitung', 'travel_km')
+    FROM services WHERE code IN ('hauswirtschaft', 'alltagsbegleitung', 'travel_km', 'customer_km')
   `);
 
   res.json({

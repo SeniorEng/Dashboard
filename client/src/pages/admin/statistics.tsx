@@ -376,6 +376,7 @@ export default function AdminStatistics() {
                 const hwPrice = prices.find((p: any) => p.code === 'hauswirtschaft');
                 const abPrice = prices.find((p: any) => p.code === 'alltagsbegleitung');
                 const kmPrice = prices.find((p: any) => p.code === 'travel_km');
+                const ckmPrice = prices.find((p: any) => p.code === 'customer_km');
                 return (
                   <>
                     <Card className="mb-4 border-emerald-200 bg-emerald-50/50">
@@ -455,10 +456,18 @@ export default function AdminStatistics() {
                           )}
                           {kmPrice && (
                             <div className="bg-gray-50 rounded-lg p-3">
-                              <div className="font-medium mb-1">Fahrtkilometer</div>
+                              <div className="font-medium mb-1">Anfahrtskilometer</div>
                               <div className="text-muted-foreground">Erlös: {cents(kmPrice.priceCents)}/km</div>
                               <div className="text-muted-foreground">MA-Kosten: {cents(kmPrice.rateCents)}/km</div>
                               <div className="text-muted-foreground font-medium">Marge: {cents(kmPrice.priceCents - kmPrice.rateCents)}/km</div>
+                            </div>
+                          )}
+                          {ckmPrice && (
+                            <div className="bg-gray-50 rounded-lg p-3">
+                              <div className="font-medium mb-1">Kundenkilometer</div>
+                              <div className="text-muted-foreground">Erlös: {cents(ckmPrice.priceCents)}/km</div>
+                              <div className="text-muted-foreground">MA-Kosten: {cents(ckmPrice.rateCents)}/km</div>
+                              <div className="text-muted-foreground font-medium">Marge: {cents(ckmPrice.priceCents - ckmPrice.rateCents)}/km</div>
                             </div>
                           )}
                         </div>
@@ -511,7 +520,7 @@ export default function AdminStatistics() {
                                   </div>
                                   <div>
                                     <span className="text-muted-foreground">KM: </span>
-                                    <span className="font-medium">{emp.totalTravelKm} km</span>
+                                    <span className="font-medium">{emp.totalTravelKm}+{emp.totalCustomerKm} km</span>
                                   </div>
                                 </div>
                               </div>

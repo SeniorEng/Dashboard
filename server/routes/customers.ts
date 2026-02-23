@@ -11,8 +11,11 @@ import { isPflegekasseCustomer } from "@shared/domain/customers";
 import { renderTemplateForCustomer } from "../services/template-engine";
 import { computeDataHash } from "../services/signature-integrity";
 import { customerManagementStorage } from "../storage/customer-management";
-import { asyncHandler } from "../lib/errors";
+import { asyncHandler, forbidden } from "../lib/errors";
 import { todayISO } from "@shared/utils/datetime";
+import { db } from "../lib/db";
+import { sql } from "drizzle-orm";
+import { insertCustomerServicePriceSchema } from "@shared/schema";
 
 const billingTypeEnum = z.enum(BILLING_TYPES as unknown as [string, ...string[]]);
 
@@ -462,6 +465,54 @@ router.post("/:id/reject", requireRoles("erstberatung"), asyncHandler("Ablehnung
 
   const updated = await customerManagementStorage.updateCustomer(id, { status: "inaktiv" });
   res.json(updated);
+}));
+
+router.get("/:id/service-prices", requireRoles("admin"), asyncHandler("Kundenpreise konnten nicht geladen werden", async (req, res) => {
+  const customerId = parseInt(req.params.id);
+  const result = await db.execute(sql`
+    SELECT csp.id, csp.customer_id AS "customerId", csp.service_id AS "serviceId",
+           csp.price_cents AS "priceCents", csp.valid_from AS "validFrom", csp.valid_to AS "validTo",
+           s.name AS "serviceName", s.code AS "serviceCode", s.default_price_cents AS "defaultPriceCents",
+           s.unit_type AS "unitType"
+    FROM customer_service_prices csp
+    JOIN services s ON s.id = csp.service_id
+    WHERE csp.customer_id = ${customerId} AND csp.valid_to IS NULL
+    ORDER BY s.sort_order
+  `);
+  res.json(result.rows);
+}));
+
+router.post("/:id/service-prices", requireRoles("admin"), asyncHandler("Kundenpreis konnte nicht gespeichert werden", async (req, res) => {
+  const customerId = parseInt(req.params.id);
+  const parsed = insertCustomerServicePriceSchema.safeParse({ ...req.body, customerId });
+  if (!parsed.success) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: parsed.error.message });
+    return;
+  }
+  const { serviceId, priceCents } = parsed.data;
+  await db.execute(sql`
+    UPDATE customer_service_prices
+    SET valid_to = NOW()
+    WHERE customer_id = ${customerId} AND service_id = ${serviceId} AND valid_to IS NULL
+  `);
+  const result = await db.execute(sql`
+    INSERT INTO customer_service_prices (customer_id, service_id, price_cents)
+    VALUES (${customerId}, ${serviceId}, ${priceCents})
+    RETURNING id, customer_id AS "customerId", service_id AS "serviceId", price_cents AS "priceCents",
+              valid_from AS "validFrom", valid_to AS "validTo"
+  `);
+  res.json(result.rows[0]);
+}));
+
+router.delete("/:id/service-prices/:priceId", requireRoles("admin"), asyncHandler("Kundenpreis konnte nicht gelöscht werden", async (req, res) => {
+  const customerId = parseInt(req.params.id);
+  const priceId = parseInt(req.params.priceId);
+  await db.execute(sql`
+    UPDATE customer_service_prices
+    SET valid_to = NOW()
+    WHERE id = ${priceId} AND customer_id = ${customerId} AND valid_to IS NULL
+  `);
+  res.json({ success: true });
 }));
 
 export default router;

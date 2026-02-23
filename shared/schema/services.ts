@@ -38,6 +38,28 @@ export const serviceBudgetPots = pgTable("service_budget_pots", {
   uniqueIndex("service_budget_pots_unique_idx").on(table.serviceId, table.budgetType),
 ]);
 
+export const customerServicePrices = pgTable("customer_service_prices", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id").notNull(),
+  serviceId: integer("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
+  priceCents: integer("price_cents").notNull(),
+  validFrom: timestamp("valid_from").notNull().defaultNow(),
+  validTo: timestamp("valid_to"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("csp_customer_service_idx").on(table.customerId, table.serviceId),
+  uniqueIndex("csp_customer_service_active_idx").on(table.customerId, table.serviceId, table.validTo),
+]);
+
+export const insertCustomerServicePriceSchema = z.object({
+  customerId: z.number().int(),
+  serviceId: z.number().int(),
+  priceCents: z.number().int().min(0, "Preis muss positiv sein"),
+});
+
+export type CustomerServicePrice = typeof customerServicePrices.$inferSelect;
+export type InsertCustomerServicePrice = z.infer<typeof insertCustomerServicePriceSchema>;
+
 export const insertServiceSchema = z.object({
   code: z.string().max(50).nullable().optional(),
   name: z.string().min(1, "Name ist erforderlich").max(100),
