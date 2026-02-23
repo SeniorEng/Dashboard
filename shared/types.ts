@@ -110,5 +110,7 @@ export interface BirthdayEntry {
   geburtsdatum: string;
   daysUntil: number;
   age: number;
+  cardSent?: boolean;
+  cardSentAt?: string | null;
 }
 

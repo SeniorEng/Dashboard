@@ -11,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, ClipboardList, Building2, Receipt, FileText, UserCog, Link2, Stethoscope, BookOpen, ScrollText, GraduationCap } from "lucide-react";
+import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, ClipboardList, Building2, Receipt, FileText, UserCog, Link2, Stethoscope, BookOpen, ScrollText, GraduationCap, Gift } from "lucide-react";
 import { type LayoutVariant, layoutVariants, colors } from "@/design-system";
 
 interface SearchResult {
@@ -189,6 +189,7 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
     { href: "/admin/hours-overview", label: "Stunden", icon: Clock, testId: "admin-hours", match: (loc: string) => loc === "/admin/hours-overview" },
     { href: "/admin/qualifications", label: "Qualifikationen", icon: GraduationCap, testId: "admin-qualifications", match: (loc: string) => loc === "/admin/qualifications" },
     { href: "/admin/settings", label: "Einstellungen", icon: Settings, testId: "admin-settings", match: (loc: string) => loc === "/admin/settings" },
+    { href: "/admin/birthday-cards", label: "Geburtstag", icon: Gift, testId: "admin-birthday-cards", match: (loc: string) => loc === "/admin/birthday-cards" },
     { href: "/admin/audit-log", label: "Audit-Log", icon: ClipboardList, testId: "admin-audit-log", match: (loc: string) => loc === "/admin/audit-log" },
   ];
 
