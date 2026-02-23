@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Loader2, Gift, Check, Cake } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
-import { api } from "@/lib/api/client";
+import { api, unwrapResult } from "@/lib/api/client";
 import type { BirthdayEntry } from "@shared/types";
 
 interface CardRecord {
@@ -35,29 +35,43 @@ export default function AdminBirthdayCards() {
 
   const { data: birthdays = [], isLoading: loadingBirthdays } = useQuery<BirthdayEntry[]>({
     queryKey: ["birthdays", 365],
-    queryFn: () => api.get<BirthdayEntry[]>("/birthdays?days=365"),
+    queryFn: async () => {
+      const result = await api.get<BirthdayEntry[]>("/birthdays?days=365");
+      return unwrapResult(result);
+    },
   });
 
   const { data: cardRecordsCurrent = [], isLoading: loadingCards1 } = useQuery<CardRecord[]>({
     queryKey: ["birthday-cards", currentYear],
-    queryFn: () => api.get<CardRecord[]>(`/birthday-cards?year=${currentYear}`),
+    queryFn: async () => {
+      const result = await api.get<CardRecord[]>(`/birthday-cards?year=${currentYear}`);
+      return unwrapResult(result);
+    },
   });
 
   const { data: cardRecordsNext = [], isLoading: loadingCards2 } = useQuery<CardRecord[]>({
     queryKey: ["birthday-cards", currentYear + 1],
-    queryFn: () => api.get<CardRecord[]>(`/birthday-cards?year=${currentYear + 1}`),
+    queryFn: async () => {
+      const result = await api.get<CardRecord[]>(`/birthday-cards?year=${currentYear + 1}`);
+      return unwrapResult(result);
+    },
     enabled: selectedYear === currentYear,
   });
 
   const { data: cardRecordsSelected = [], isLoading: loadingCards3 } = useQuery<CardRecord[]>({
     queryKey: ["birthday-cards", selectedYear],
-    queryFn: () => api.get<CardRecord[]>(`/birthday-cards?year=${selectedYear}`),
+    queryFn: async () => {
+      const result = await api.get<CardRecord[]>(`/birthday-cards?year=${selectedYear}`);
+      return unwrapResult(result);
+    },
     enabled: selectedYear !== currentYear && selectedYear !== currentYear + 1,
   });
 
   const toggleMutation = useMutation({
-    mutationFn: (data: { personType: string; personId: number; year: number; sent: boolean }) =>
-      api.post("/birthday-cards/toggle", data),
+    mutationFn: async (data: { personType: string; personId: number; year: number; sent: boolean }) => {
+      const result = await api.post("/birthday-cards/toggle", data);
+      return unwrapResult(result);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["birthday-cards"] });
     },

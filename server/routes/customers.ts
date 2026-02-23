@@ -490,17 +490,20 @@ router.post("/:id/service-prices", requireRoles("admin"), asyncHandler("Kundenpr
     return;
   }
   const { serviceId, priceCents } = parsed.data;
-  await db.execute(sql`
-    UPDATE customer_service_prices
-    SET valid_to = NOW()
-    WHERE customer_id = ${customerId} AND service_id = ${serviceId} AND valid_to IS NULL
-  `);
-  const result = await db.execute(sql`
-    INSERT INTO customer_service_prices (customer_id, service_id, price_cents)
-    VALUES (${customerId}, ${serviceId}, ${priceCents})
-    RETURNING id, customer_id AS "customerId", service_id AS "serviceId", price_cents AS "priceCents",
-              valid_from AS "validFrom", valid_to AS "validTo"
-  `);
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`
+      UPDATE customer_service_prices
+      SET valid_to = NOW()
+      WHERE customer_id = ${customerId} AND service_id = ${serviceId} AND valid_to IS NULL
+    `);
+    const inserted = await tx.execute(sql`
+      INSERT INTO customer_service_prices (customer_id, service_id, price_cents)
+      VALUES (${customerId}, ${serviceId}, ${priceCents})
+      RETURNING id, customer_id AS "customerId", service_id AS "serviceId", price_cents AS "priceCents",
+                valid_from AS "validFrom", valid_to AS "validTo"
+    `);
+    return inserted;
+  });
   res.json(result.rows[0]);
 }));
 
