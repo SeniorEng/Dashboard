@@ -7,6 +7,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 import type {
   CustomerListItem,
   CustomerListParams,
@@ -81,6 +82,7 @@ export function useCustomer(id: number) {
  */
 export function useCreateCustomer() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   return useMutation({
     mutationFn: async (data: CreateCustomerRequest) => {
@@ -89,6 +91,10 @@ export function useCreateCustomer() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: customerKeys.lists() });
+      toast({ title: "Erfolg", description: "Kunde wurde angelegt" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message || "Kunde konnte nicht angelegt werden", variant: "destructive" });
     },
   });
 }
@@ -98,6 +104,7 @@ export function useCreateCustomer() {
  */
 export function useUpdateCustomer() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   return useMutation({
     mutationFn: async ({ id, data }: { id: number; data: Partial<CreateCustomerRequest> }) => {
@@ -107,6 +114,10 @@ export function useUpdateCustomer() {
     onSuccess: (_, { id }) => {
       queryClient.invalidateQueries({ queryKey: customerKeys.detail(id) });
       queryClient.invalidateQueries({ queryKey: customerKeys.lists() });
+      toast({ title: "Erfolg", description: "Kundendaten wurden aktualisiert" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message || "Kundendaten konnten nicht aktualisiert werden", variant: "destructive" });
     },
   });
 }
@@ -116,6 +127,7 @@ export function useUpdateCustomer() {
  */
 export function useDeleteCustomer() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   return useMutation({
     mutationFn: async (id: number) => {
@@ -124,6 +136,10 @@ export function useDeleteCustomer() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: customerKeys.lists() });
+      toast({ title: "Erfolg", description: "Kunde wurde deaktiviert" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message || "Kunde konnte nicht deaktiviert werden", variant: "destructive" });
     },
   });
 }

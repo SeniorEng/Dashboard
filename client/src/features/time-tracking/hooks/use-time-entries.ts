@@ -6,6 +6,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 import type { 
   TimeEntry, 
   CreateTimeEntryRequest, 
@@ -85,6 +86,7 @@ export function useVacationSummary(year: number) {
  */
 export function useCreateTimeEntry() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   
   return useMutation({
     mutationFn: async (data: CreateTimeEntryRequest) => {
@@ -94,6 +96,10 @@ export function useCreateTimeEntry() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: timeEntryKeys.all });
       queryClient.invalidateQueries({ queryKey: timeEntryKeys.openTasks, refetchType: "all" });
+      toast({ title: "Erfolg", description: "Zeiteintrag wurde erstellt" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message || "Zeiteintrag konnte nicht erstellt werden", variant: "destructive" });
     },
   });
 }
@@ -103,6 +109,7 @@ export function useCreateTimeEntry() {
  */
 export function useUpdateTimeEntry() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   
   return useMutation({
     mutationFn: async ({ id, data }: { id: number; data: UpdateTimeEntryRequest }) => {
@@ -111,6 +118,10 @@ export function useUpdateTimeEntry() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: timeEntryKeys.all });
+      toast({ title: "Erfolg", description: "Zeiteintrag wurde aktualisiert" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message || "Zeiteintrag konnte nicht aktualisiert werden", variant: "destructive" });
     },
   });
 }
@@ -120,6 +131,7 @@ export function useUpdateTimeEntry() {
  */
 export function useDeleteTimeEntry() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   
   return useMutation({
     mutationFn: async (id: number) => {
@@ -129,6 +141,10 @@ export function useDeleteTimeEntry() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: timeEntryKeys.all });
       queryClient.invalidateQueries({ queryKey: timeEntryKeys.openTasks, refetchType: "all" });
+      toast({ title: "Erfolg", description: "Zeiteintrag wurde gelöscht" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message || "Zeiteintrag konnte nicht gelöscht werden", variant: "destructive" });
     },
   });
 }

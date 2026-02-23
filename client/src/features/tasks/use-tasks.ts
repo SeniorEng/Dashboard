@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api/client";
+import { useToast } from "@/hooks/use-toast";
 import type { Task } from "@shared/schema";
 
 export interface TaskWithRelations extends Task {
@@ -26,6 +27,7 @@ export function useTasks(options: { includeCompleted?: boolean; all?: boolean } 
 
 export function useCreateTask() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   return useMutation({
     mutationFn: async (data: {
@@ -41,12 +43,17 @@ export function useCreateTask() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      toast({ title: "Erfolg", description: "Aufgabe wurde erstellt" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message || "Aufgabe konnte nicht erstellt werden", variant: "destructive" });
     },
   });
 }
 
 export function useUpdateTask() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   return useMutation({
     mutationFn: async ({ id, ...data }: {
@@ -64,12 +71,17 @@ export function useUpdateTask() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      toast({ title: "Erfolg", description: "Aufgabe wurde aktualisiert" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message || "Aufgabe konnte nicht aktualisiert werden", variant: "destructive" });
     },
   });
 }
 
 export function useDeleteTask() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   return useMutation({
     mutationFn: async (id: number) => {
@@ -78,12 +90,17 @@ export function useDeleteTask() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      toast({ title: "Erfolg", description: "Aufgabe wurde gelöscht" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message || "Aufgabe konnte nicht gelöscht werden", variant: "destructive" });
     },
   });
 }
 
 export function useToggleTaskStatus() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   return useMutation({
     mutationFn: async ({ id, currentStatus }: { id: number; currentStatus: string }) => {
@@ -91,8 +108,13 @@ export function useToggleTaskStatus() {
       const result = await api.patch<Task>(`/tasks/${id}`, { status: newStatus });
       return unwrapResult(result);
     },
-    onSuccess: () => {
+    onSuccess: (_, { currentStatus }) => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      const message = currentStatus === "completed" ? "Aufgabe wurde wieder geöffnet" : "Aufgabe wurde erledigt";
+      toast({ title: "Erfolg", description: message });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message || "Status konnte nicht geändert werden", variant: "destructive" });
     },
   });
 }

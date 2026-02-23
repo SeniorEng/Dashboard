@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api/client";
+import { useToast } from "@/hooks/use-toast";
 
 export interface MonthClosingStatus {
   id: number;
@@ -72,6 +73,7 @@ export function useMonthClosingPreview(year: number, month: number, enabled: boo
 
 export function useCloseMonth() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   return useMutation({
     mutationFn: async ({ year, month }: { year: number; month: number }) => {
@@ -86,6 +88,10 @@ export function useCloseMonth() {
       queryClient.invalidateQueries({ queryKey: ["month-closing-readiness", year, month] });
       queryClient.invalidateQueries({ queryKey: ["time-overview"] });
       queryClient.invalidateQueries({ queryKey: ["open-tasks"] });
+      toast({ title: "Erfolg", description: "Monat wurde abgeschlossen" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message || "Monat konnte nicht abgeschlossen werden", variant: "destructive" });
     },
   });
 }
