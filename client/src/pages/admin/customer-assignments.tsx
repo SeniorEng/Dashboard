@@ -7,7 +7,8 @@ import { StatusBadge } from "@/components/patterns/status-badge";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Layout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Loader2, User, Users, Save } from "lucide-react";
+import { ArrowLeft, Loader2, User, Users, Save, Search } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -32,6 +33,7 @@ interface Employee {
 export default function AdminCustomerAssignments() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [searchQuery, setSearchQuery] = useState("");
   const [editingCustomer, setEditingCustomer] = useState<number | null>(null);
   const [assignments, setAssignments] = useState<
     Record<number, { primary: number | null; backup: number | null }>
@@ -77,6 +79,18 @@ export default function AdminCustomerAssignments() {
   });
 
   const isLoading = customersLoading || employeesLoading;
+
+  const filteredCustomers = useMemo(() => {
+    if (!customers) return [];
+    if (!searchQuery.trim()) return customers;
+    const q = searchQuery.toLowerCase();
+    return customers.filter((customer) => {
+      const fullName = customer.vorname && customer.nachname
+        ? `${customer.vorname} ${customer.nachname}`
+        : customer.name;
+      return fullName.toLowerCase().includes(q) || customer.address.toLowerCase().includes(q);
+    });
+  }, [customers, searchQuery]);
 
   const employeeOptions = useMemo(() => [
     { value: "none", label: "Nicht zugewiesen" },
@@ -129,13 +143,25 @@ export default function AdminCustomerAssignments() {
             </div>
           </div>
 
+          <div className="relative mb-4">
+            <Search className={`absolute left-3 top-1/2 -translate-y-1/2 ${iconSize.sm} text-gray-400`} />
+            <Input
+              type="text"
+              placeholder="Kunde suchen (Name oder Adresse)..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 bg-white"
+              data-testid="input-search-assignments"
+            />
+          </div>
+
           {isLoading ? (
             <div className="flex justify-center py-12">
               <Loader2 className={`${iconSize.xl} animate-spin text-teal-600`} />
             </div>
           ) : (
             <div className="flex flex-col gap-3">
-              {customers?.map((customer) => {
+              {filteredCustomers.map((customer) => {
                 const isEditing = editingCustomer === customer.id;
                 const assignment = assignments[customer.id] || {
                   primary: customer.primaryEmployeeId,
@@ -254,10 +280,10 @@ export default function AdminCustomerAssignments() {
                 );
               })}
 
-              {customers?.length === 0 && (
+              {filteredCustomers.length === 0 && (
                 <Card>
                   <CardContent className="p-8 text-center text-gray-500">
-                    Keine Kunden vorhanden
+                    {searchQuery.trim() ? "Keine Kunden gefunden" : "Keine Kunden vorhanden"}
                   </CardContent>
                 </Card>
               )}
