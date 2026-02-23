@@ -49,6 +49,7 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
   }
 
   const employeeIds = employees.map(e => e.id);
+  const employeeIdArray = sql`${sql.raw(employeeIds.join(','))}`;
 
   const appointmentServices = await db.execute(sql`
     SELECT 
@@ -63,7 +64,7 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
       AND a.deleted_at IS NULL
       AND a.date >= ${startDate}
       AND a.date <= ${endDate}
-      AND a.performed_by_employee_id = ANY(${employeeIds})
+      AND a.performed_by_employee_id IN (${employeeIdArray})
       AND s.code NOT IN ('travel_km', 'customer_km')
   `);
 
@@ -92,7 +93,7 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
       AND deleted_at IS NULL
       AND date >= ${startDate}
       AND date <= ${endDate}
-      AND performed_by_employee_id = ANY(${employeeIds})
+      AND performed_by_employee_id IN (${employeeIdArray})
     GROUP BY performed_by_employee_id
   `);
 
