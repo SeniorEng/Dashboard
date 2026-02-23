@@ -11,7 +11,7 @@ import {
   Euro, Car, Clock, UserCheck, Heart, CalendarDays,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
-import { api } from "@/lib/api/client";
+import { api, unwrapResult } from "@/lib/api/client";
 
 const MONTH_NAMES = [
   "", "Januar", "Februar", "März", "April", "Mai", "Juni",
@@ -80,13 +80,19 @@ export default function AdminStatistics() {
 
   const { data, isLoading } = useQuery<any>({
     queryKey: ["statistics", selectedYear, selectedMonth],
-    queryFn: () => api.get(`/statistics/overview?year=${selectedYear}${monthParam}`),
+    queryFn: async () => {
+      const result = await api.get(`/statistics/overview?year=${selectedYear}${monthParam}`);
+      return unwrapResult(result);
+    },
     staleTime: 60000,
   });
 
   const { data: topCustomers } = useQuery<any[]>({
     queryKey: ["statistics-top-customers", selectedYear],
-    queryFn: () => api.get(`/statistics/top-customers?year=${selectedYear}`),
+    queryFn: async () => {
+      const result = await api.get(`/statistics/top-customers?year=${selectedYear}`);
+      return unwrapResult(result);
+    },
     staleTime: 60000,
   });
 
