@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Loader2, AlertCircle, Coffee, FileSignature, CalendarCheck } from "lucide-react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
+import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
 import { useTasks, useCreateTask, useToggleTaskStatus, type TaskWithRelations, TaskCard, TaskDetailSheet } from "@/features/tasks";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -31,9 +32,8 @@ export default function TasksPage() {
   const { data: undocumentedAppointments } = useQuery({
     queryKey: ["appointments", "undocumented"],
     queryFn: async () => {
-      const response = await fetch(`/api/appointments/undocumented`);
-      if (!response.ok) throw new Error("Failed to fetch");
-      return response.json();
+      const result = await api.get("/appointments/undocumented");
+      return unwrapResult(result);
     },
     staleTime: 60000,
   });
@@ -42,16 +42,15 @@ export default function TasksPage() {
   const { data: openTimeTasks } = useQuery({
     queryKey: ["time-entries", "open-tasks"],
     queryFn: async () => {
-      const response = await fetch(`/api/time-entries/open-tasks`);
-      if (!response.ok) throw new Error("Failed to fetch");
-      return response.json() as Promise<{
+      const result = await api.get<{
         daysWithMissingBreaks: Array<{
           date: string;
           totalWorkMinutes: number;
           requiredBreakMinutes: number;
           documentedBreakMinutes: number;
         }>;
-      }>;
+      }>("/time-entries/open-tasks");
+      return unwrapResult(result);
     },
     staleTime: 60000,
   });
@@ -60,9 +59,8 @@ export default function TasksPage() {
   const { data: pendingServiceRecords } = useQuery({
     queryKey: ["/api/service-records/pending"],
     queryFn: async () => {
-      const response = await fetch(`/api/service-records/pending`);
-      if (!response.ok) throw new Error("Failed to fetch");
-      return response.json();
+      const result = await api.get("/service-records/pending");
+      return unwrapResult(result);
     },
     staleTime: 60000,
   });
@@ -71,15 +69,14 @@ export default function TasksPage() {
   const { data: monthClosingReminder } = useQuery({
     queryKey: ["/api/tasks/month-closing-reminder"],
     queryFn: async () => {
-      const response = await fetch(`/api/tasks/month-closing-reminder`);
-      if (!response.ok) throw new Error("Failed to fetch");
-      return response.json() as Promise<{
+      const result = await api.get<{
         needed: boolean;
         month?: number;
         year?: number;
         monthName?: string;
         taskId?: number;
-      }>;
+      }>("/tasks/month-closing-reminder");
+      return unwrapResult(result);
     },
     staleTime: 60000,
   });

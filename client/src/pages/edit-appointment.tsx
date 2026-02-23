@@ -37,9 +37,13 @@ export default function EditAppointment() {
   }>>({
     queryKey: [`/api/appointments/${id}/services`],
     queryFn: async () => {
-      const res = await fetch(`/api/appointments/${id}/services`);
-      if (!res.ok) return [];
-      return res.json();
+      const result = await api.get<Array<{
+        serviceId: number;
+        plannedDurationMinutes: number;
+        serviceName: string;
+        serviceCode: string | null;
+      }>>(`/appointments/${id}/services`);
+      return unwrapResult(result);
     },
     enabled: id > 0,
   });

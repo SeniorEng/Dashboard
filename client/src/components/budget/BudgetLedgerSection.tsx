@@ -75,11 +75,8 @@ export function BudgetLedgerSection({ customerId, customerName, initialSummary, 
   const { data: fetchedSummary, isLoading: summaryLoading } = useQuery<BudgetSummary>({
     queryKey: ["budget-summary", customerId],
     queryFn: async () => {
-      const response = await fetch(`/api/budget/${customerId}/summary`, {
-        credentials: "include",
-      });
-      if (!response.ok) throw new Error("Failed to fetch budget summary");
-      return response.json();
+      const result = await api.get<BudgetSummary>(`/budget/${customerId}/summary`);
+      return unwrapResult(result);
     },
     enabled: !hasInitialSummary,
     staleTime: 30000,
@@ -90,11 +87,8 @@ export function BudgetLedgerSection({ customerId, customerName, initialSummary, 
   const { data: transactions } = useQuery<BudgetTransaction[]>({
     queryKey: ["budget-transactions", customerId],
     queryFn: async () => {
-      const response = await fetch(`/api/budget/${customerId}/transactions?limit=10`, {
-        credentials: "include",
-      });
-      if (!response.ok) throw new Error("Failed to fetch transactions");
-      return response.json();
+      const result = await api.get<BudgetTransaction[]>(`/budget/${customerId}/transactions?limit=10`);
+      return unwrapResult(result);
     },
     staleTime: 30000,
   });

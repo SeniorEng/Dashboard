@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { SignaturePad } from "@/components/ui/signature-pad";
 import { Loader2, FileText, Check, AlertTriangle, Clock, ShieldCheck } from "lucide-react";
 import { componentStyles } from "@/design-system";
+import { api } from "@/lib/api/client";
 
 interface DocumentData {
   documentId: number;
@@ -28,24 +29,25 @@ export default function PublicSigningPage() {
 
   useEffect(() => {
     if (!token) return;
-    fetch(`/api/public/sign/${token}`)
-      .then(async (res) => {
-        const data = await res.json();
-        if (!res.ok) {
-          if (data.error === "ALREADY_USED") {
+    api.get<DocumentData>(`/public/sign/${token}`)
+      .then((result) => {
+        if (!result.success) {
+          const msg = result.error.message;
+          const code = result.error.code;
+          if (code === "ALREADY_USED" || msg.includes("ALREADY_USED")) {
             setErrorType("used");
-            setErrorMessage(data.message);
-          } else if (data.error === "EXPIRED") {
+            setErrorMessage(msg);
+          } else if (code === "EXPIRED" || msg.includes("EXPIRED")) {
             setErrorType("expired");
-            setErrorMessage(data.message);
+            setErrorMessage(msg);
           } else {
             setErrorType("not_found");
-            setErrorMessage(data.message || "Link ungültig.");
+            setErrorMessage(msg || "Link ungültig.");
           }
           setPageState("error");
           return;
         }
-        setDocData(data);
+        setDocData(result.data);
         setPageState("ready");
       })
       .catch(() => {
@@ -58,14 +60,9 @@ export default function PublicSigningPage() {
   const handleSign = useCallback(async (signatureData: string) => {
     setPageState("submitting");
     try {
-      const res = await fetch(`/api/public/sign/${token}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ signatureData }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setErrorMessage(data.message || "Fehler beim Speichern der Unterschrift.");
+      const result = await api.post(`/public/sign/${token}`, { signatureData });
+      if (!result.success) {
+        setErrorMessage(result.error.message || "Fehler beim Speichern der Unterschrift.");
         setPageState("ready");
         return;
       }

@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { api, unwrapResult } from "@/lib/api/client";
 import { useAppointment } from "./use-appointments";
 import { useDocumentAppointment, useTravelSuggestion } from "./use-appointment-mutations";
 import type { TravelOriginType, ServiceType } from "@shared/types";
@@ -55,9 +56,8 @@ export function useDocumentationForm(id: number) {
   const { data: appointmentServicesData } = useQuery<Array<{ serviceId: number; serviceCode: string; plannedDurationMinutes: number; actualDurationMinutes: number | null; details: string | null }>>({
     queryKey: [`/api/appointments/${id}/services`],
     queryFn: async () => {
-      const res = await fetch(`/api/appointments/${id}/services`);
-      if (!res.ok) throw new Error("Failed to fetch appointment services");
-      return res.json();
+      const result = await api.get<Array<{ serviceId: number; serviceCode: string; plannedDurationMinutes: number; actualDurationMinutes: number | null; details: string | null }>>(`/appointments/${id}/services`);
+      return unwrapResult(result);
     },
     enabled: id > 0,
   });

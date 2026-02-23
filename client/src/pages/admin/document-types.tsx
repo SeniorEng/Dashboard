@@ -97,9 +97,8 @@ export function DocumentTypesContent() {
   const { data: docTypes, isLoading } = useQuery<DocumentTypeData[]>({
     queryKey: ["admin", "document-types"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/document-types?includeInactive=true", { credentials: "include" });
-      if (!res.ok) throw new Error("Dokumententypen konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<DocumentTypeData[]>("/admin/document-types?includeInactive=true");
+      return unwrapResult(result);
     },
   });
 

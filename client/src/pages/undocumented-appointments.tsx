@@ -4,6 +4,7 @@ import { Layout } from "@/components/layout";
 import { AppointmentCard } from "@/features/appointments/components/appointment-card";
 import { ArrowLeft, Loader2, FileCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
 import { ErrorState } from "@/components/patterns/error-state";
 import type { AppointmentWithCustomer } from "@shared/types";
@@ -12,11 +13,8 @@ export default function UndocumentedAppointments() {
   const { data: appointments, isLoading, error, refetch } = useQuery<AppointmentWithCustomer[]>({
     queryKey: ["appointments", "undocumented"],
     queryFn: async () => {
-      const response = await fetch(`/api/appointments/undocumented`);
-      if (!response.ok) {
-        throw new Error("Failed to fetch undocumented appointments");
-      }
-      return response.json();
+      const result = await api.get<AppointmentWithCustomer[]>("/appointments/undocumented");
+      return unwrapResult(result);
     },
   });
 

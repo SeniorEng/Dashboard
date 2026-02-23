@@ -6,20 +6,14 @@ import { api, unwrapResult } from "@/lib/api/client";
 const QUERY_KEY = "appointments";
 
 async function fetchAppointments(date?: string): Promise<AppointmentWithCustomer[]> {
-  const url = date ? `/api/appointments?date=${date}` : "/api/appointments";
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error("Failed to fetch appointments");
-  }
-  return response.json();
+  const endpoint = date ? `/appointments?date=${date}` : "/appointments";
+  const result = await api.get<AppointmentWithCustomer[]>(endpoint);
+  return unwrapResult(result);
 }
 
 async function fetchAppointment(id: number): Promise<AppointmentWithCustomer> {
-  const response = await fetch(`/api/appointments/${id}`);
-  if (!response.ok) {
-    throw new Error("Failed to fetch appointment");
-  }
-  return response.json();
+  const result = await api.get<AppointmentWithCustomer>(`/appointments/${id}`);
+  return unwrapResult(result);
 }
 
 async function updateAppointment(id: number, data: UpdateAppointmentPayload): Promise<Appointment> {
@@ -41,13 +35,8 @@ export function useAppointments(date?: string) {
 }
 
 async function fetchAppointmentCounts(dates: string[]): Promise<Record<string, number>> {
-  const response = await fetch(`/api/appointments/counts?dates=${dates.join(",")}`);
-  if (!response.ok) {
-    const counts: Record<string, number> = {};
-    for (const d of dates) counts[d] = 0;
-    return counts;
-  }
-  return response.json();
+  const result = await api.get<Record<string, number>>(`/appointments/counts?dates=${dates.join(",")}`);
+  return unwrapResult(result);
 }
 
 export function useWeekAppointmentCounts(dates: string[]) {

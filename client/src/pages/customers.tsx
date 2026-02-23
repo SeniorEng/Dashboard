@@ -19,6 +19,7 @@ import {
   componentStyles
 } from "@/design-system";
 import { formatAddress } from "@shared/utils/format";
+import { api, unwrapResult } from "@/lib/api/client";
 import { useAuth } from "@/hooks/use-auth";
 import type { CustomerWithAccess } from "@/features/appointments";
 import type { BirthdayEntry } from "@shared/types";
@@ -66,9 +67,8 @@ export default function CustomersPage() {
     queryKey: ["customers", "aktiv"],
     staleTime: 60000,
     queryFn: async () => {
-      const res = await fetch("/api/customers?status=aktiv");
-      if (!res.ok) throw new Error("Kunden konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<CustomerWithAccess[]>("/customers?status=aktiv");
+      return unwrapResult(result);
     },
   });
 

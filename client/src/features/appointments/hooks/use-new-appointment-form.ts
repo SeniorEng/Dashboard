@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { api, unwrapResult } from "@/lib/api/client";
 import { useCustomerList } from "./use-customer-list";
 import { useAdminEmployees } from "./use-active-employees";
 import { useCreateKundentermin, useCreateErstberatung } from "./use-appointment-mutations";
@@ -90,9 +91,9 @@ export function useNewAppointmentForm() {
   }>({
     queryKey: ["/api/budget", ktCustomerId, "cost-estimate", budgetEstimateParams],
     queryFn: async () => {
-      const res = await fetch(`/api/budget/${ktCustomerId}/cost-estimate?${budgetEstimateParams}`);
-      if (!res.ok) return { totalCents: 0, warning: null };
-      return res.json();
+      const result = await api.get(`/budget/${ktCustomerId}/cost-estimate?${budgetEstimateParams}`);
+      if (!result.success) return { totalCents: 0, warning: null };
+      return result.data;
     },
     enabled: !!ktCustomerId && !!budgetEstimateParams,
     staleTime: 30_000,

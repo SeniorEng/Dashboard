@@ -151,36 +151,32 @@ export function DocumentTemplatesContent() {
   const { data: templates, isLoading } = useQuery<TemplateData[]>({
     queryKey: ["admin", "document-templates"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/document-templates?includeInactive=true", { credentials: "include" });
-      if (!res.ok) throw new Error("Vorlagen konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<TemplateData[]>("/admin/document-templates?includeInactive=true");
+      return unwrapResult(result);
     },
   });
 
   const { data: allBillingTypes, isLoading: isBillingLoading } = useQuery<BillingTypeAssignment[]>({
     queryKey: ["admin", "document-templates-billing-types"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/document-templates-billing-types/all", { credentials: "include" });
-      if (!res.ok) throw new Error("Zuordnungen konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<BillingTypeAssignment[]>("/admin/document-templates-billing-types/all");
+      return unwrapResult(result);
     },
   });
 
   const { data: placeholders } = useQuery<PlaceholderInfo[]>({
     queryKey: ["admin", "placeholders-catalog"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/document-templates/placeholders/catalog", { credentials: "include" });
-      if (!res.ok) throw new Error("Platzhalter konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<PlaceholderInfo[]>("/admin/document-templates/placeholders/catalog");
+      return unwrapResult(result);
     },
   });
 
   const { data: documentTypes } = useQuery<DocumentType[]>({
     queryKey: ["admin", "document-types"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/document-types", { credentials: "include" });
-      if (!res.ok) throw new Error("Dokumententypen konnten nicht geladen werden");
-      return res.json();
+      const result = await api.get<DocumentType[]>("/admin/document-types");
+      return unwrapResult(result);
     },
   });
 

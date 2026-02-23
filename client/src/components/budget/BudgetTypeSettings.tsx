@@ -96,11 +96,8 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
   const { data, isLoading } = useQuery<BudgetTypeSetting[]>({
     queryKey: ["budget-type-settings", customerId],
     queryFn: async () => {
-      const response = await fetch(`/api/budget/${customerId}/type-settings`, {
-        credentials: "include",
-      });
-      if (!response.ok) throw new Error("Laden fehlgeschlagen");
-      return response.json();
+      const result = await api.get<BudgetTypeSetting[]>(`/budget/${customerId}/type-settings`);
+      return unwrapResult(result);
     },
     staleTime: 60000,
   });
@@ -377,11 +374,8 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
   const { data: allocations, isLoading } = useQuery<InitialBalanceAllocation[]>({
     queryKey: ["initial-balances", customerId, budgetType],
     queryFn: async () => {
-      const response = await fetch(`/api/budget/${customerId}/initial-balances/${budgetType}`, {
-        credentials: "include",
-      });
-      if (!response.ok) throw new Error("Laden fehlgeschlagen");
-      return response.json();
+      const result = await api.get<InitialBalanceAllocation[]>(`/budget/${customerId}/initial-balances/${budgetType}`);
+      return unwrapResult(result);
     },
     staleTime: 30000,
   });

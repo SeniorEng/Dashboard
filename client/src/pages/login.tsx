@@ -23,8 +23,8 @@ export default function LoginPage() {
   const { data: setupData, isLoading: setupLoading } = useQuery({
     queryKey: ["auth", "setup-required"],
     queryFn: async () => {
-      const res = await fetch("/api/auth/setup-required");
-      return res.json();
+      const result = await api.get("/auth/setup-required");
+      return unwrapResult(result);
     },
   });
 

@@ -60,9 +60,8 @@ export function useTravelSuggestion(appointmentId: number) {
   return useQuery<TravelSuggestion>({
     queryKey: [QUERY_KEY, appointmentId, "travel-suggestion"],
     queryFn: async () => {
-      const res = await fetch(`/api/appointments/${appointmentId}/travel-suggestion`);
-      if (!res.ok) throw new Error("Failed to fetch travel suggestion");
-      return res.json();
+      const result = await api.get<TravelSuggestion>(`/appointments/${appointmentId}/travel-suggestion`);
+      return unwrapResult(result);
     },
     enabled: appointmentId > 0,
   });

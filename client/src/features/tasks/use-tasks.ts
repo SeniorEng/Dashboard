@@ -17,11 +17,8 @@ export function useTasks(options: { includeCompleted?: boolean; all?: boolean } 
   return useQuery<TaskWithRelations[]>({
     queryKey: ["tasks", options],
     queryFn: async () => {
-      const response = await fetch(`/api/tasks${queryString ? `?${queryString}` : ""}`);
-      if (!response.ok) {
-        throw new Error("Aufgaben konnten nicht geladen werden");
-      }
-      return response.json();
+      const result = await api.get<TaskWithRelations[]>(`/tasks${queryString ? `?${queryString}` : ""}`);
+      return unwrapResult(result);
     },
     staleTime: 30000,
   });

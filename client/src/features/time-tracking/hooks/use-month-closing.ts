@@ -39,11 +39,8 @@ export function useMonthClosingStatus(year: number, month: number) {
   return useQuery<{ closing: MonthClosingStatus | null }>({
     queryKey: ["month-closing", year, month],
     queryFn: async () => {
-      const res = await fetch(`/api/time-entries/month-closing/${year}/${month}`, {
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error("Status konnte nicht geladen werden");
-      return res.json();
+      const result = await api.get<{ closing: MonthClosingStatus | null }>(`/time-entries/month-closing/${year}/${month}`);
+      return unwrapResult(result);
     },
     staleTime: 60000,
   });
@@ -53,11 +50,8 @@ export function useMonthClosingReadiness(year: number, month: number, enabled: b
   return useQuery<MonthClosingReadiness>({
     queryKey: ["month-closing-readiness", year, month],
     queryFn: async () => {
-      const res = await fetch(`/api/time-entries/month-closing/${year}/${month}/readiness`, {
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error("Bereitschaftsprüfung fehlgeschlagen");
-      return res.json();
+      const result = await api.get<MonthClosingReadiness>(`/time-entries/month-closing/${year}/${month}/readiness`);
+      return unwrapResult(result);
     },
     enabled,
     staleTime: 30000,
@@ -68,11 +62,8 @@ export function useMonthClosingPreview(year: number, month: number, enabled: boo
   return useQuery<{ autoBreaks: AutoBreakPreview[] }>({
     queryKey: ["month-closing-preview", year, month],
     queryFn: async () => {
-      const res = await fetch(`/api/time-entries/month-closing/${year}/${month}/preview`, {
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error("Vorschau konnte nicht geladen werden");
-      return res.json();
+      const result = await api.get<{ autoBreaks: AutoBreakPreview[] }>(`/time-entries/month-closing/${year}/${month}/preview`);
+      return unwrapResult(result);
     },
     enabled,
     staleTime: 30000,

@@ -41,18 +41,14 @@ interface AuthContextType extends AuthState {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 async function fetchCurrentUser(): Promise<{ user: User; availableServices: string[]; badgeCount?: number; birthdayCount?: number } | null> {
-  const res = await fetch("/api/auth/me", {
-    credentials: "include",
-  });
-
-  if (!res.ok) {
-    if (res.status === 401) {
+  const result = await api.get<{ user: User; availableServices: string[]; badgeCount?: number; birthdayCount?: number }>("/auth/me");
+  if (!result.success) {
+    if (result.error.code === 'UNAUTHORIZED' || result.error.message.includes('401') || result.error.message.includes('Nicht angemeldet')) {
       return null;
     }
-    throw new Error("Failed to fetch user");
+    throw new Error(result.error.message);
   }
-
-  return res.json();
+  return result.data;
 }
 
 async function loginRequest(email: string, password: string): Promise<{ user: User; availableServices: string[] }> {

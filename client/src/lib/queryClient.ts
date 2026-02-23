@@ -1,11 +1,5 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
-
-async function throwIfResNotOk(res: Response) {
-  if (!res.ok) {
-    const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
-  }
-}
+import { api } from "@/lib/api/client";
 
 type UnauthorizedBehavior = "returnNull" | "throw";
 const getQueryFn: <T>(options: {
@@ -13,16 +7,18 @@ const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const res = await fetch(queryKey.join("/") as string, {
-      credentials: "include",
-    });
+    const url = (queryKey.join("/") as string);
+    const endpoint = url.startsWith("/api") ? url.slice(4) : url;
+    const result = await api.get<T>(endpoint);
 
-    if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-      return null;
+    if (!result.success) {
+      if (unauthorizedBehavior === "returnNull" &&
+          (result.error.code === 'UNAUTHORIZED' || result.error.message.includes('Nicht angemeldet'))) {
+        return null as T;
+      }
+      throw new Error(result.error.message);
     }
-
-    await throwIfResNotOk(res);
-    return await res.json();
+    return result.data;
   };
 
 export const queryClient = new QueryClient({

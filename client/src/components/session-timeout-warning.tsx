@@ -36,13 +36,13 @@ export function SessionTimeoutWarning() {
     if (!isAuthenticated) return;
 
     try {
-      const res = await fetch("/api/auth/session-info", { credentials: "include" });
-      if (!res.ok) {
+      const result = await api.get<{ idleExpiresAt: number; absoluteExpiresAt: number }>("/auth/session-info");
+      if (!result.success) {
         handleExpired();
         return;
       }
 
-      const data = await res.json();
+      const data = result.data;
       const now = Date.now();
       const idleExpires = data.idleExpiresAt;
       const absoluteExpires = data.absoluteExpiresAt;
