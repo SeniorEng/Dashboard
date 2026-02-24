@@ -26,21 +26,27 @@ async function getBrowser(): Promise<Browser> {
   return browserInstance;
 }
 
+function isFullHtmlDocument(html: string): boolean {
+  const trimmed = html.trimStart().toLowerCase();
+  return trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
+}
+
 export async function generatePdfFromHtml(
   html: string,
   title: string
 ): Promise<{ pdfBuffer: Buffer; integrityHash: string }> {
-  const fullHtml = wrapInPrintableHtml(html, title);
+  const fullHtml = isFullHtmlDocument(html) ? html : wrapInPrintableHtml(html, title);
   const browser = await getBrowser();
   const page = await browser.newPage();
 
   try {
     await page.setContent(fullHtml, { waitUntil: "networkidle0", timeout: 15000 });
 
+    const isFullDoc = isFullHtmlDocument(html);
     const pdfBuffer = Buffer.from(await page.pdf({
       format: "A4",
       printBackground: true,
-      margin: { top: "2cm", right: "2cm", bottom: "2cm", left: "2cm" },
+      margin: isFullDoc ? { top: "0", right: "0", bottom: "0", left: "0" } : { top: "2cm", right: "2cm", bottom: "2cm", left: "2cm" },
       displayHeaderFooter: false,
     }));
 

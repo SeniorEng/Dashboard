@@ -49,7 +49,23 @@ const PLACEHOLDER_CATALOG: Record<string, { label: string; source: string }> = {
   mandatsreferenz: { label: "SEPA-Mandatsreferenz", source: "system" },
   current_date: { label: "Aktuelles Datum", source: "system" },
   heute: { label: "Heutiges Datum", source: "system" },
-  company_name: { label: "Firmenname", source: "system" },
+  company_name: { label: "Firmenname", source: "company" },
+  company_strasse: { label: "Firmenadresse Straße", source: "company" },
+  company_plz: { label: "Firmenadresse PLZ", source: "company" },
+  company_stadt: { label: "Firmenadresse Stadt", source: "company" },
+  company_address: { label: "Firmenadresse vollständig", source: "company" },
+  company_telefon: { label: "Firmentelefon", source: "company" },
+  company_email: { label: "Firmen-E-Mail", source: "company" },
+  company_website: { label: "Firmenwebsite", source: "company" },
+  company_ik_nummer: { label: "Firmen IK-Nummer", source: "company" },
+  company_steuernummer: { label: "Steuernummer", source: "company" },
+  company_ust_id: { label: "USt-ID", source: "company" },
+  company_geschaeftsfuehrer: { label: "Geschäftsführer", source: "company" },
+  company_iban: { label: "IBAN", source: "company" },
+  company_bic: { label: "BIC", source: "company" },
+  company_bank_name: { label: "Bankname", source: "company" },
+  company_logo: { label: "Firmenlogo (als <img>-Tag)", source: "company" },
+  company_logo_url: { label: "Firmenlogo URL (nur die URL)", source: "company" },
   customer_signature: { label: "Kundenunterschrift", source: "signature" },
   employee_signature: { label: "Mitarbeiterunterschrift", source: "signature" },
 };
@@ -142,10 +158,55 @@ export async function buildPlaceholders(
     mandatsreferenz: `SE-${customerId}-${today.getFullYear()}`,
     current_date: todayDE,
     heute: todayDE,
-    company_name: "SeniorenEngel GmbH",
+    company_name: "",
+    company_strasse: "",
+    company_plz: "",
+    company_stadt: "",
+    company_address: "",
+    company_telefon: "",
+    company_email: "",
+    company_website: "",
+    company_ik_nummer: "",
+    company_steuernummer: "",
+    company_ust_id: "",
+    company_geschaeftsfuehrer: "",
+    company_iban: "",
+    company_bic: "",
+    company_bank_name: "",
+    company_logo: "",
+    company_logo_url: "",
     customer_signature: "",
     employee_signature: "",
   };
+
+  try {
+    const companySettings = await storage.getCompanySettings();
+    if (companySettings) {
+      placeholders.company_name = companySettings.companyName || "";
+      placeholders.company_strasse = [companySettings.strasse, companySettings.hausnummer].filter(Boolean).join(" ");
+      placeholders.company_plz = companySettings.plz || "";
+      placeholders.company_stadt = companySettings.stadt || "";
+      placeholders.company_address = [
+        companySettings.strasse ? `${companySettings.strasse} ${companySettings.hausnummer || ""}`.trim() : "",
+        [companySettings.plz, companySettings.stadt].filter(Boolean).join(" "),
+      ].filter(Boolean).join(", ");
+      placeholders.company_telefon = companySettings.telefon || "";
+      placeholders.company_email = companySettings.email || "";
+      placeholders.company_website = companySettings.website || "";
+      placeholders.company_ik_nummer = companySettings.ikNummer || "";
+      placeholders.company_steuernummer = companySettings.steuernummer || "";
+      placeholders.company_ust_id = companySettings.ustId || "";
+      placeholders.company_geschaeftsfuehrer = companySettings.geschaeftsfuehrer || "";
+      placeholders.company_iban = companySettings.iban || "";
+      placeholders.company_bic = companySettings.bic || "";
+      placeholders.company_bank_name = companySettings.bankName || "";
+      if (companySettings.logoUrl) {
+        placeholders.company_logo_url = companySettings.logoUrl;
+        placeholders.company_logo = `<img src="${companySettings.logoUrl}" alt="Firmenlogo" style="max-height:80px;" />`;
+      }
+    }
+  } catch (_e) {
+  }
 
   try {
     const insurance = await getCustomerCurrentInsurance(customerId);
@@ -180,9 +241,9 @@ export function renderTemplate(htmlContent: string, placeholders: TemplatePlaceh
     return value ? escapeHtml(value) : "";
   });
 
+  const rawHtmlKeys = new Set(["customer_signature", "employee_signature", "company_logo"]);
   for (const [key, value] of Object.entries(placeholders)) {
-    const isSignature = key.includes("signature");
-    const safeValue = isSignature ? value : escapeHtml(value);
+    const safeValue = rawHtmlKeys.has(key) ? value : escapeHtml(value);
     const pattern = new RegExp(`\\{\\{${key}\\}\\}`, "g");
     rendered = rendered.replace(pattern, safeValue);
   }
