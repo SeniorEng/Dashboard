@@ -111,22 +111,6 @@ export function DigitalDocumentFlow({
 
   const [autoAdvanced, setAutoAdvanced] = useState(false);
 
-  useEffect(() => {
-    if (open && preselectedTemplateSlug && templates && templates.length > 0 && !autoAdvanced) {
-      const match = templates.find(t => t.slug === preselectedTemplateSlug);
-      if (match) {
-        setSelectedTemplateId(match.id.toString());
-        setAutoAdvanced(true);
-      }
-    }
-  }, [open, preselectedTemplateSlug, templates, autoAdvanced]);
-
-  useEffect(() => {
-    if (autoAdvanced && selectedTemplate && step === "select") {
-      handleSelectNext();
-    }
-  }, [autoAdvanced, selectedTemplate, step, handleSelectNext]);
-
   const generateMutation = useMutation({
     mutationFn: async (data: {
       templateId: number;
@@ -183,6 +167,22 @@ export function DigitalDocumentFlow({
   const handleInputsNext = useCallback(() => {
     handleRenderPreview(inputValues);
   }, [inputValues, handleRenderPreview]);
+
+  useEffect(() => {
+    if (open && preselectedTemplateSlug && templates && templates.length > 0 && !autoAdvanced) {
+      const match = templates.find(t => t.slug === preselectedTemplateSlug);
+      if (match) {
+        setSelectedTemplateId(match.id.toString());
+        setAutoAdvanced(true);
+      }
+    }
+  }, [open, preselectedTemplateSlug, templates, autoAdvanced]);
+
+  useEffect(() => {
+    if (autoAdvanced && selectedTemplate && step === "select") {
+      handleSelectNext();
+    }
+  }, [autoAdvanced, selectedTemplate, step, handleSelectNext]);
 
   const handleNextFromPreview = useCallback(() => {
     if (!selectedTemplate) return;

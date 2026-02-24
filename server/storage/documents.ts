@@ -563,17 +563,17 @@ export class DocumentStorage implements IDocumentStorage {
     const existingNames = new Set(existing.map(t => t.name));
 
     const defaultTypes = [
-      { name: "Schlüsselübergabeprotokoll", description: "Protokoll über die Übergabe von Schlüsseln an den Pflegedienst", targetType: "customer" as const },
-      { name: "Vollmacht", description: "Vollmacht des Kunden für den Pflegedienst", targetType: "customer" as const },
-      { name: "Einwilligungserklärung", description: "Einwilligung des Kunden zu bestimmten Maßnahmen", targetType: "customer" as const },
-      { name: "Sonstiges Dokument", description: "Allgemeines Dokument ohne spezifische Kategorie", targetType: "customer" as const },
-      { name: "Ärztliche Verordnung", description: "Verordnung oder Bescheinigung vom Arzt", targetType: "customer" as const },
-      { name: "Pflegegradbescheid", description: "Bescheid über den zugewiesenen Pflegegrad", targetType: "customer" as const },
+      { name: "Schlüsselübergabeprotokoll", description: "Protokoll über die Übergabe von Schlüsseln an den Pflegedienst", targetType: "customer" as const, context: "beide" as const },
+      { name: "Vollmacht", description: "Vollmacht des Kunden für den Pflegedienst", targetType: "customer" as const, context: "beide" as const },
+      { name: "Einwilligungserklärung", description: "Einwilligung des Kunden zu bestimmten Maßnahmen", targetType: "customer" as const, context: "beide" as const },
+      { name: "Sonstiges Dokument", description: "Allgemeines Dokument ohne spezifische Kategorie", targetType: "customer" as const, context: "beide" as const },
+      { name: "Ärztliche Verordnung", description: "Verordnung oder Bescheinigung vom Arzt", targetType: "customer" as const, context: "bestandskunde" as const },
+      { name: "Pflegegradbescheid", description: "Bescheid über den zugewiesenen Pflegegrad", targetType: "customer" as const, context: "bestandskunde" as const },
     ];
 
     for (const dt of defaultTypes) {
       if (!existingNames.has(dt.name)) {
-        await this.createDocumentType({ ...dt, isActive: true });
+        await this.createDocumentType({ ...dt, isActive: true, reminderLeadTimeDays: 30 });
       }
     }
   }
