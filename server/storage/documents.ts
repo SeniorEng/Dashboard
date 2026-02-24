@@ -55,6 +55,38 @@ export class DocumentStorage implements IDocumentStorage {
     return db.select().from(documentTypes).orderBy(asc(documentTypes.name));
   }
 
+  async getDocumentTypesWithTemplateInfo(activeOnly = true, targetType?: string): Promise<(DocumentType & { hasTemplate: boolean; templateName: string | null; templateSlug: string | null })[]> {
+    const types = await this.getDocumentTypes(activeOnly, targetType);
+    if (types.length === 0) return [];
+
+    const typeIds = types.map(t => t.id);
+    const templates = await db
+      .select({
+        documentTypeId: documentTemplates.documentTypeId,
+        name: documentTemplates.name,
+        slug: documentTemplates.slug,
+      })
+      .from(documentTemplates)
+      .where(and(
+        sql`${documentTemplates.documentTypeId} IN (${sql.join(typeIds.map(id => sql`${id}`), sql`, `)})`,
+        eq(documentTemplates.isActive, true)
+      ));
+
+    const templateMap = new Map<number, { name: string; slug: string }>();
+    for (const t of templates) {
+      if (t.documentTypeId != null) {
+        templateMap.set(t.documentTypeId, { name: t.name, slug: t.slug });
+      }
+    }
+
+    return types.map(dt => ({
+      ...dt,
+      hasTemplate: templateMap.has(dt.id),
+      templateName: templateMap.get(dt.id)?.name || null,
+      templateSlug: templateMap.get(dt.id)?.slug || null,
+    }));
+  }
+
   async getDocumentType(id: number): Promise<DocumentType | null> {
     const result = await db.select().from(documentTypes).where(eq(documentTypes.id, id)).limit(1);
     return result[0] || null;
@@ -65,6 +97,7 @@ export class DocumentStorage implements IDocumentStorage {
       name: data.name,
       description: data.description || null,
       targetType: data.targetType ?? "employee",
+      context: data.context ?? "beide",
       reviewIntervalMonths: data.reviewIntervalMonths || null,
       reminderLeadTimeDays: data.reminderLeadTimeDays ?? 14,
       isActive: data.isActive ?? true,

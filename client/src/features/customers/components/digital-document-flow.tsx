@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import DOMPurify from "dompurify";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -75,6 +75,7 @@ interface DigitalDocumentFlowProps {
   customerId: number;
   customerName: string;
   onComplete?: () => void;
+  preselectedTemplateSlug?: string;
 }
 
 export function DigitalDocumentFlow({
@@ -83,6 +84,7 @@ export function DigitalDocumentFlow({
   customerId,
   customerName,
   onComplete,
+  preselectedTemplateSlug,
 }: DigitalDocumentFlowProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -103,6 +105,15 @@ export function DigitalDocumentFlow({
     },
     enabled: open,
   });
+
+  useEffect(() => {
+    if (open && preselectedTemplateSlug && templates && templates.length > 0 && !selectedTemplateId) {
+      const match = templates.find(t => t.slug === preselectedTemplateSlug);
+      if (match) {
+        setSelectedTemplateId(match.id.toString());
+      }
+    }
+  }, [open, preselectedTemplateSlug, templates, selectedTemplateId]);
 
   const selectedTemplate = templates?.find(t => t.id.toString() === selectedTemplateId);
   const hasInputFields = selectedTemplate && selectedTemplate.inputFields.length > 0;

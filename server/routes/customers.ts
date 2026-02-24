@@ -25,8 +25,14 @@ const router = Router();
 
 router.use(requireAuth);
 
-router.get("/document-types/customer", asyncHandler("Dokumententypen konnten nicht geladen werden", async (_req, res) => {
-  const types = await documentStorage.getDocumentTypes(true, "customer");
+router.get("/document-types/customer", asyncHandler("Dokumententypen konnten nicht geladen werden", async (req, res) => {
+  const context = req.query.context as string | undefined;
+  const types = await documentStorage.getDocumentTypesWithTemplateInfo(true, "customer");
+  if (context && context !== "alle") {
+    const filtered = types.filter(t => t.context === context || t.context === "beide");
+    res.json(filtered);
+    return;
+  }
   res.json(types);
 }));
 

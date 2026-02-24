@@ -24,7 +24,7 @@ import { PersonalDataStep } from "./components/personal-data-step";
 import { InsuranceStep } from "./components/insurance-step";
 import { ContactsStep } from "./components/contacts-step";
 import { BudgetsStep, ContractStep } from "./components/budgets-contract-step";
-import { SignaturesStep } from "./components/signatures-step";
+import { SignaturesStep, type WizardUploadedDoc } from "./components/signatures-step";
 import { MatchingStep } from "./components/matching-step";
 import { DeliveryStep } from "./components/delivery-step";
 
@@ -74,6 +74,7 @@ export default function AdminCustomerNew() {
   });
 
   const [customerSignatures, setCustomerSignatures] = useState<Record<string, string>>({});
+  const [uploadedDocuments, setUploadedDocuments] = useState<WizardUploadedDoc[]>([]);
 
   const handleSignatureChange = useCallback((slug: string, signatureData: string) => {
     setCustomerSignatures((prev) => ({ ...prev, [slug]: signatureData }));
@@ -271,6 +272,21 @@ export default function AdminCustomerNew() {
           } catch (sigError) {
             console.error("Unterschriften-Speicherung fehlgeschlagen:", sigError);
             warnings.push("Unterschriften konnten nicht gespeichert werden");
+          }
+        }
+
+        if (uploadedDocuments.length > 0) {
+          try {
+            for (const doc of uploadedDocuments) {
+              await api.post(`/customers/${customer.id}/documents`, {
+                documentTypeId: doc.documentTypeId,
+                fileName: doc.fileName,
+                objectPath: doc.objectPath,
+              });
+            }
+          } catch (docError) {
+            console.error("Dokument-Upload-Speicherung fehlgeschlagen:", docError);
+            warnings.push("Hochgeladene Dokumente konnten nicht gespeichert werden");
           }
         }
 
@@ -514,6 +530,8 @@ export default function AdminCustomerNew() {
             billingType={formData.billingType}
             customerSignatures={customerSignatures}
             onSignatureChange={handleSignatureChange}
+            uploadedDocuments={uploadedDocuments}
+            onUploadedDocumentsChange={setUploadedDocuments}
             formData={formData}
           />
         );

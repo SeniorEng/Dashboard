@@ -1,13 +1,16 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
 import { SignaturePad } from "@/components/ui/signature-pad";
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
-import { FileText, Check, AlertCircle, Loader2, AlertTriangle } from "lucide-react";
+import { FileText, Check, AlertCircle, Loader2, AlertTriangle, Upload, Camera, X, Pen } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { BILLING_TYPE_LABELS, type BillingType } from "@shared/domain/customers";
+import { useUpload } from "@/hooks/use-upload";
+import { useToast } from "@/hooks/use-toast";
 import type { CustomerFormData, ContactFormData } from "./customer-types";
 
 interface TemplateWithRequirement {
@@ -20,12 +23,31 @@ interface TemplateWithRequirement {
   sortOrder: number;
 }
 
+interface DocumentTypeWithTemplate {
+  id: number;
+  name: string;
+  description: string | null;
+  targetType: string;
+  context: string;
+  hasTemplate: boolean;
+  templateName: string | null;
+  templateSlug: string | null;
+}
+
+export interface WizardUploadedDoc {
+  documentTypeId: number;
+  fileName: string;
+  objectPath: string;
+}
+
 type CustomerFormDataForPreview = CustomerFormData;
 
 interface SignaturesStepProps {
   billingType: BillingType;
   customerSignatures: Record<string, string>;
   onSignatureChange: (slug: string, signatureData: string) => void;
+  uploadedDocuments: WizardUploadedDoc[];
+  onUploadedDocumentsChange: (docs: WizardUploadedDoc[]) => void;
   formData?: CustomerFormDataForPreview;
 }
 
@@ -129,8 +151,15 @@ ${html}
 }
 
 
-export function SignaturesStep({ billingType, customerSignatures, onSignatureChange, formData }: SignaturesStepProps) {
-  const { data: templates, isLoading, isError, refetch } = useQuery({
+export function SignaturesStep({
+  billingType,
+  customerSignatures,
+  onSignatureChange,
+  uploadedDocuments,
+  onUploadedDocumentsChange,
+  formData,
+}: SignaturesStepProps) {
+  const { data: templates, isLoading: templatesLoading, isError, refetch } = useQuery({
     queryKey: ["/api/customers/document-templates/billing-type", billingType],
     queryFn: async () => {
       const result = await api.get<TemplateWithRequirement[]>(
@@ -140,6 +169,19 @@ export function SignaturesStep({ billingType, customerSignatures, onSignatureCha
     },
     staleTime: 60000,
   });
+
+  const { data: docTypes, isLoading: docTypesLoading } = useQuery({
+    queryKey: ["customers", "document-types", "customer", "vertragsabschluss"],
+    queryFn: async () => {
+      const result = await api.get<DocumentTypeWithTemplate[]>(
+        "/customers/document-types/customer?context=vertragsabschluss"
+      );
+      return unwrapResult(result);
+    },
+    staleTime: 60000,
+  });
+
+  const isLoading = templatesLoading || docTypesLoading;
 
   if (isLoading) {
     return (
@@ -163,13 +205,16 @@ export function SignaturesStep({ billingType, customerSignatures, onSignatureCha
     );
   }
 
+  const templateSlugs = new Set((templates || []).map(t => t.slug));
+  const uploadOnlyDocTypes = (docTypes || []).filter(dt => !dt.hasTemplate && !templateSlugs.has(dt.templateSlug || ""));
+
   const pflichtDocs = templates?.filter(t => t.requirement === "pflicht") || [];
   const optionalDocs = templates?.filter(t => t.requirement === "optional") || [];
 
   return (
     <div className="space-y-6">
       <p className="text-sm text-gray-600">
-        Folgende Dokumente müssen vom Kunden unterschrieben werden. Pflichtdokumente sind markiert.
+        Folgende Dokumente werden bei der Kundenanlage benötigt. Sie können digital unterschrieben oder als physisches Dokument hochgeladen werden.
       </p>
 
       {pflichtDocs.length > 0 && (
@@ -184,6 +229,22 @@ export function SignaturesStep({ billingType, customerSignatures, onSignatureCha
               doc={doc}
               signature={customerSignatures[doc.slug]}
               onSignatureChange={(data) => onSignatureChange(doc.slug, data)}
+              uploadedDoc={uploadedDocuments.find(u => {
+                const matchingType = (docTypes || []).find(dt => dt.templateSlug === doc.slug);
+                return matchingType && u.documentTypeId === matchingType.id;
+              })}
+              documentTypeId={(docTypes || []).find(dt => dt.templateSlug === doc.slug)?.id}
+              onDocUploaded={(uploaded) => {
+                const matchingType = (docTypes || []).find(dt => dt.templateSlug === doc.slug);
+                if (!matchingType) return;
+                const filtered = uploadedDocuments.filter(u => u.documentTypeId !== matchingType.id);
+                onUploadedDocumentsChange([...filtered, uploaded]);
+              }}
+              onDocRemoved={() => {
+                const matchingType = (docTypes || []).find(dt => dt.templateSlug === doc.slug);
+                if (!matchingType) return;
+                onUploadedDocumentsChange(uploadedDocuments.filter(u => u.documentTypeId !== matchingType.id));
+              }}
               formData={formData}
             />
           ))}
@@ -201,7 +262,46 @@ export function SignaturesStep({ billingType, customerSignatures, onSignatureCha
               doc={doc}
               signature={customerSignatures[doc.slug]}
               onSignatureChange={(data) => onSignatureChange(doc.slug, data)}
+              uploadedDoc={uploadedDocuments.find(u => {
+                const matchingType = (docTypes || []).find(dt => dt.templateSlug === doc.slug);
+                return matchingType && u.documentTypeId === matchingType.id;
+              })}
+              documentTypeId={(docTypes || []).find(dt => dt.templateSlug === doc.slug)?.id}
+              onDocUploaded={(uploaded) => {
+                const matchingType = (docTypes || []).find(dt => dt.templateSlug === doc.slug);
+                if (!matchingType) return;
+                const filtered = uploadedDocuments.filter(u => u.documentTypeId !== matchingType.id);
+                onUploadedDocumentsChange([...filtered, uploaded]);
+              }}
+              onDocRemoved={() => {
+                const matchingType = (docTypes || []).find(dt => dt.templateSlug === doc.slug);
+                if (!matchingType) return;
+                onUploadedDocumentsChange(uploadedDocuments.filter(u => u.documentTypeId !== matchingType.id));
+              }}
               formData={formData}
+            />
+          ))}
+        </div>
+      )}
+
+      {uploadOnlyDocTypes.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+            <Upload className="w-4 h-4 text-gray-500" />
+            Weitere Dokumente (nur Upload)
+          </h3>
+          {uploadOnlyDocTypes.map((dt) => (
+            <UploadOnlyCard
+              key={dt.id}
+              docType={dt}
+              uploadedDoc={uploadedDocuments.find(u => u.documentTypeId === dt.id)}
+              onDocUploaded={(uploaded) => {
+                const filtered = uploadedDocuments.filter(u => u.documentTypeId !== dt.id);
+                onUploadedDocumentsChange([...filtered, uploaded]);
+              }}
+              onDocRemoved={() => {
+                onUploadedDocumentsChange(uploadedDocuments.filter(u => u.documentTypeId !== dt.id));
+              }}
             />
           ))}
         </div>
@@ -209,7 +309,7 @@ export function SignaturesStep({ billingType, customerSignatures, onSignatureCha
 
       <div className="p-3 bg-teal-50 border border-teal-100 rounded-lg">
         <p className="text-xs text-teal-800">
-          Unterschriften können auch nachträglich in der Kundenansicht unter "Dokumente" erfasst werden.
+          Unterschriften und Uploads können auch nachträglich in der Kundenansicht unter "Dokumente" erfasst werden.
           Der Kunde kann trotzdem angelegt werden.
         </p>
       </div>
@@ -221,15 +321,47 @@ function DocumentSignatureCard({
   doc,
   signature,
   onSignatureChange,
+  uploadedDoc,
+  documentTypeId,
+  onDocUploaded,
+  onDocRemoved,
   formData,
 }: {
   doc: TemplateWithRequirement;
   signature?: string;
   onSignatureChange: (data: string) => void;
+  uploadedDoc?: WizardUploadedDoc;
+  documentTypeId?: number;
+  onDocUploaded: (doc: WizardUploadedDoc) => void;
+  onDocRemoved: () => void;
   formData?: CustomerFormDataForPreview;
 }) {
+  const { toast } = useToast();
   const [showSignaturePad, setShowSignaturePad] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const isSigned = !!signature;
+  const isUploaded = !!uploadedDoc;
+  const isFulfilled = isSigned || isUploaded;
+
+  const { uploadFile, isUploading } = useUpload({
+    onError: (error) => {
+      toast({ title: "Upload-Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleFileSelect = useCallback(async (file: File) => {
+    if (!documentTypeId) return;
+    const result = await uploadFile(file);
+    if (result) {
+      onDocUploaded({
+        documentTypeId,
+        fileName: file.name,
+        objectPath: result.objectPath,
+      });
+      setShowUpload(false);
+    }
+  }, [documentTypeId, uploadFile, onDocUploaded]);
 
   const handlePreview = useCallback(() => {
     if (!formData || !doc.htmlContent) return;
@@ -240,22 +372,23 @@ function DocumentSignatureCard({
   const handleSignatureSave = useCallback((signatureData: string) => {
     onSignatureChange(signatureData);
     setShowSignaturePad(false);
-  }, [onSignatureChange]);
+    if (isUploaded) onDocRemoved();
+  }, [onSignatureChange, isUploaded, onDocRemoved]);
 
   return (
     <Card
-      className={`transition-colors ${isSigned ? "border-green-200 bg-green-50/30" : "border-gray-200"}`}
+      className={`transition-colors ${isFulfilled ? "border-green-200 bg-green-50/30" : "border-gray-200"}`}
       data-testid={`signature-doc-${doc.slug}`}
     >
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
           <div
             className={`flex items-center justify-center w-10 h-10 rounded-full shrink-0 ${
-              isSigned ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"
+              isFulfilled ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"
             }`}
-            aria-label={isSigned ? "Unterschrieben" : "Noch nicht unterschrieben"}
+            aria-label={isFulfilled ? "Erledigt" : "Noch offen"}
           >
-            {isSigned ? <Check className={iconSize.md} /> : <FileText className={iconSize.md} />}
+            {isFulfilled ? <Check className={iconSize.md} /> : <FileText className={iconSize.md} />}
           </div>
           <div className="flex-1 min-w-0">
             <h4 className="font-medium text-gray-900">{doc.name}</h4>
@@ -271,6 +404,11 @@ function DocumentSignatureCard({
                   Unterschrieben
                 </Badge>
               )}
+              {isUploaded && !isSigned && (
+                <Badge variant="default" className="text-[10px] px-1.5 py-0.5 leading-none bg-blue-600">
+                  Hochgeladen
+                </Badge>
+              )}
             </div>
             {doc.description && (
               <p className="text-sm text-gray-500 mt-1.5">{doc.description}</p>
@@ -283,19 +421,56 @@ function DocumentSignatureCard({
                   onSave={handleSignatureSave}
                   onCancel={() => setShowSignaturePad(false)}
                 />
+              ) : showUpload ? (
+                <UploadArea
+                  isUploading={isUploading}
+                  onFileSelect={handleFileSelect}
+                  onCancel={() => setShowUpload(false)}
+                  cameraInputRef={cameraInputRef}
+                  testIdSuffix={doc.slug}
+                />
               ) : (
-                <div>
+                <div className="flex flex-wrap gap-2">
                   <Button
                     type="button"
-                    variant="outline"
+                    variant={isSigned ? "outline" : "default"}
                     onClick={() => setShowSignaturePad(true)}
-                    className="text-sm min-h-[44px]"
+                    className={`text-sm min-h-[44px] ${!isSigned ? "bg-teal-600 hover:bg-teal-700" : ""}`}
                     data-testid={`button-sign-${doc.slug}`}
                   >
+                    <Pen className={`${iconSize.sm} mr-1.5`} />
                     {isSigned ? "Unterschrift ändern" : "Unterschreiben"}
                   </Button>
+                  {documentTypeId && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setShowUpload(true)}
+                      className="text-sm min-h-[44px]"
+                      data-testid={`button-upload-alt-${doc.slug}`}
+                    >
+                      <Upload className={`${iconSize.sm} mr-1.5`} />
+                      {isUploaded ? "Erneut hochladen" : "Stattdessen hochladen"}
+                    </Button>
+                  )}
                 </div>
               )}
+
+              {isUploaded && !showUpload && (
+                <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-md">
+                  <FileText className="h-4 w-4 text-blue-500 shrink-0" />
+                  <span className="text-xs text-blue-700 truncate flex-1">{uploadedDoc!.fileName}</span>
+                  <button
+                    type="button"
+                    onClick={() => onDocRemoved()}
+                    className="text-xs text-gray-400 hover:text-red-500"
+                    data-testid={`button-remove-upload-${doc.slug}`}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+
               {isSigned && formData && doc.htmlContent && (
                 <div className="pt-1">
                   <Button
@@ -314,6 +489,200 @@ function DocumentSignatureCard({
           </div>
         </div>
       </CardContent>
+
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleFileSelect(file);
+          e.target.value = "";
+        }}
+        className="hidden"
+        data-testid={`input-camera-${doc.slug}`}
+      />
     </Card>
+  );
+}
+
+function UploadOnlyCard({
+  docType,
+  uploadedDoc,
+  onDocUploaded,
+  onDocRemoved,
+}: {
+  docType: DocumentTypeWithTemplate;
+  uploadedDoc?: WizardUploadedDoc;
+  onDocUploaded: (doc: WizardUploadedDoc) => void;
+  onDocRemoved: () => void;
+}) {
+  const { toast } = useToast();
+  const [showUpload, setShowUpload] = useState(false);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const isUploaded = !!uploadedDoc;
+
+  const { uploadFile, isUploading } = useUpload({
+    onError: (error) => {
+      toast({ title: "Upload-Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleFileSelect = useCallback(async (file: File) => {
+    const result = await uploadFile(file);
+    if (result) {
+      onDocUploaded({
+        documentTypeId: docType.id,
+        fileName: file.name,
+        objectPath: result.objectPath,
+      });
+      setShowUpload(false);
+    }
+  }, [docType.id, uploadFile, onDocUploaded]);
+
+  return (
+    <Card
+      className={`transition-colors ${isUploaded ? "border-green-200 bg-green-50/30" : "border-gray-200"}`}
+      data-testid={`upload-only-doc-${docType.id}`}
+    >
+      <CardContent className="p-4">
+        <div className="flex items-start gap-3">
+          <div
+            className={`flex items-center justify-center w-10 h-10 rounded-full shrink-0 ${
+              isUploaded ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"
+            }`}
+          >
+            {isUploaded ? <Check className={iconSize.md} /> : <Upload className={iconSize.md} />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <h4 className="font-medium text-gray-900">{docType.name}</h4>
+            <div className="flex flex-wrap items-center gap-1.5 mt-1">
+              <Badge variant="secondary" className="text-[10px] px-1.5 py-0.5 leading-none">
+                Nur Upload
+              </Badge>
+              {isUploaded && (
+                <Badge variant="default" className="text-[10px] px-1.5 py-0.5 leading-none bg-blue-600">
+                  Hochgeladen
+                </Badge>
+              )}
+            </div>
+            {docType.description && (
+              <p className="text-sm text-gray-500 mt-1.5">{docType.description}</p>
+            )}
+
+            <div className="space-y-2 mt-3">
+              {showUpload ? (
+                <UploadArea
+                  isUploading={isUploading}
+                  onFileSelect={handleFileSelect}
+                  onCancel={() => setShowUpload(false)}
+                  cameraInputRef={cameraInputRef}
+                  testIdSuffix={`type-${docType.id}`}
+                />
+              ) : (
+                <Button
+                  type="button"
+                  variant={isUploaded ? "outline" : "default"}
+                  onClick={() => setShowUpload(true)}
+                  className={`text-sm min-h-[44px] ${!isUploaded ? "bg-teal-600 hover:bg-teal-700" : ""}`}
+                  data-testid={`button-upload-${docType.id}`}
+                >
+                  <Upload className={`${iconSize.sm} mr-1.5`} />
+                  {isUploaded ? "Erneut hochladen" : "Hochladen"}
+                </Button>
+              )}
+
+              {isUploaded && !showUpload && (
+                <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-md">
+                  <FileText className="h-4 w-4 text-blue-500 shrink-0" />
+                  <span className="text-xs text-blue-700 truncate flex-1">{uploadedDoc!.fileName}</span>
+                  <button
+                    type="button"
+                    onClick={() => onDocRemoved()}
+                    className="text-xs text-gray-400 hover:text-red-500"
+                    data-testid={`button-remove-upload-type-${docType.id}`}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </CardContent>
+
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleFileSelect(file);
+          e.target.value = "";
+        }}
+        className="hidden"
+        data-testid={`input-camera-type-${docType.id}`}
+      />
+    </Card>
+  );
+}
+
+function UploadArea({
+  isUploading,
+  onFileSelect,
+  onCancel,
+  cameraInputRef,
+  testIdSuffix,
+}: {
+  isUploading: boolean;
+  onFileSelect: (file: File) => void;
+  onCancel: () => void;
+  cameraInputRef: React.RefObject<HTMLInputElement | null>;
+  testIdSuffix: string;
+}) {
+  return (
+    <div className="p-3 bg-gray-50 rounded-lg space-y-2">
+      <Label>Dokument hochladen</Label>
+      <div className="flex gap-2">
+        <label className="flex-1 cursor-pointer">
+          <input
+            type="file"
+            accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) onFileSelect(file);
+              e.target.value = "";
+            }}
+            className="hidden"
+            disabled={isUploading}
+            data-testid={`input-file-upload-${testIdSuffix}`}
+          />
+          <div className="flex items-center justify-center gap-2 h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100 transition-colors">
+            {isUploading ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> Wird hochgeladen...</>
+            ) : (
+              <><Upload className="h-4 w-4" /> Datei wählen</>
+            )}
+          </div>
+        </label>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => cameraInputRef.current?.click()}
+          disabled={isUploading}
+          className="flex items-center gap-2"
+          data-testid={`button-camera-upload-${testIdSuffix}`}
+        >
+          <Camera className="h-4 w-4" />
+          Foto
+        </Button>
+      </div>
+      <p className="text-[11px] text-gray-400">PDF, Bild oder Word-Dokument (max. 10 MB)</p>
+      <Button type="button" variant="ghost" size="sm" onClick={onCancel} data-testid={`button-cancel-upload-${testIdSuffix}`}>
+        Abbrechen
+      </Button>
+    </div>
   );
 }

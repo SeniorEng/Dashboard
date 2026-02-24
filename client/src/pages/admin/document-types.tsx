@@ -32,6 +32,7 @@ import {
   Bell,
   Users,
   User,
+  FileText,
 } from "lucide-react";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
@@ -41,24 +42,36 @@ interface DocumentTypeData {
   name: string;
   description: string | null;
   targetType: string;
+  context: string;
   reviewIntervalMonths: number | null;
   reminderLeadTimeDays: number | null;
   isActive: boolean;
+  hasTemplate: boolean;
+  templateName: string | null;
+  templateSlug: string | null;
 }
 
 interface DocTypeFormData {
   name: string;
   description: string;
   targetType: string;
+  context: string;
   reviewIntervalMonths: string;
   reminderLeadTimeDays: string;
   isActive: boolean;
 }
 
+const CONTEXT_OPTIONS = [
+  { value: "beide", label: "Immer verfügbar" },
+  { value: "vertragsabschluss", label: "Nur bei Vertragsabschluss" },
+  { value: "bestandskunde", label: "Nur bei Bestandskunden" },
+];
+
 const emptyForm: DocTypeFormData = {
   name: "",
   description: "",
   targetType: "employee",
+  context: "beide",
   reviewIntervalMonths: "",
   reminderLeadTimeDays: "14",
   isActive: true,
@@ -69,6 +82,7 @@ function toFormData(dt: DocumentTypeData): DocTypeFormData {
     name: dt.name,
     description: dt.description || "",
     targetType: dt.targetType || "employee",
+    context: dt.context || "beide",
     reviewIntervalMonths: dt.reviewIntervalMonths?.toString() || "",
     reminderLeadTimeDays: dt.reminderLeadTimeDays?.toString() || "14",
     isActive: dt.isActive,
@@ -80,6 +94,7 @@ function toPayload(form: DocTypeFormData) {
     name: form.name,
     description: form.description || null,
     targetType: form.targetType,
+    context: form.context,
     reviewIntervalMonths: form.reviewIntervalMonths ? parseInt(form.reviewIntervalMonths) : null,
     reminderLeadTimeDays: form.reminderLeadTimeDays ? parseInt(form.reminderLeadTimeDays) : 14,
     isActive: form.isActive,
@@ -192,6 +207,20 @@ export function DocumentTypesContent() {
             <SelectItem value="customer">Kunde</SelectItem>
           </SelectContent>
         </Select>
+      </div>
+      <div className="space-y-2">
+        <Label>Kontext</Label>
+        <Select value={formData.context} onValueChange={(v) => setFormData(p => ({ ...p, context: v }))}>
+          <SelectTrigger data-testid="select-doctype-context">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {CONTEXT_OPTIONS.map(opt => (
+              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-[11px] text-gray-400">Wann wird dieses Dokument benötigt?</p>
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
@@ -326,6 +355,22 @@ export function DocumentTypesContent() {
                           <p className="text-sm text-gray-500 mb-2 ml-6">{dt.description}</p>
                         )}
                         <div className="flex flex-wrap gap-x-4 gap-y-1 ml-6">
+                          {dt.hasTemplate ? (
+                            <span className="text-xs text-teal-600 flex items-center gap-1">
+                              <FileText className="h-3 w-3" />
+                              Digitale Vorlage: {dt.templateName}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400 flex items-center gap-1">
+                              <FileText className="h-3 w-3" />
+                              Nur Upload
+                            </span>
+                          )}
+                          {dt.context !== "beide" && (
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">
+                              {CONTEXT_OPTIONS.find(c => c.value === dt.context)?.label || dt.context}
+                            </span>
+                          )}
                           {dt.reviewIntervalMonths ? (
                             <span className="text-xs text-gray-500 flex items-center gap-1">
                               <CalendarClock className="h-3 w-3" />

@@ -12,7 +12,7 @@ const router = Router();
 router.get("/document-types", asyncHandler("Dokumententypen konnten nicht geladen werden", async (_req: Request, res: Response) => {
   const includeInactive = _req.query.includeInactive === "true";
   const targetType = _req.query.targetType as string | undefined;
-  const types = await documentStorage.getDocumentTypes(!includeInactive, targetType);
+  const types = await documentStorage.getDocumentTypesWithTemplateInfo(!includeInactive, targetType);
   res.json(types);
 }));
 

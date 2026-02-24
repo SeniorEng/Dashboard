@@ -4,11 +4,21 @@ import { timestamp } from "./common";
 import { users } from "./users";
 import { customers } from "./customers";
 
+export const DOCUMENT_TYPE_CONTEXTS = ["vertragsabschluss", "bestandskunde", "beide"] as const;
+export type DocumentTypeContext = typeof DOCUMENT_TYPE_CONTEXTS[number];
+
+export const DOCUMENT_TYPE_CONTEXT_LABELS: Record<DocumentTypeContext, string> = {
+  vertragsabschluss: "Nur bei Vertragsabschluss",
+  bestandskunde: "Nur bei Bestandskunden",
+  beide: "Immer verfügbar",
+};
+
 export const documentTypes = pgTable("document_types", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description"),
   targetType: text("target_type").notNull().default("employee"),
+  context: text("context").notNull().default("beide"),
   reviewIntervalMonths: integer("review_interval_months"),
   reminderLeadTimeDays: integer("reminder_lead_time_days").default(14),
   isActive: boolean("is_active").notNull().default(true),
@@ -203,6 +213,7 @@ export const insertDocumentTypeSchema = z.object({
   name: z.string().min(1, "Name ist erforderlich").max(100),
   description: z.string().max(500).nullable().optional(),
   targetType: z.enum(["employee", "customer"]).default("employee"),
+  context: z.enum(DOCUMENT_TYPE_CONTEXTS).default("beide"),
   reviewIntervalMonths: z.number().int().min(1).nullable().optional(),
   reminderLeadTimeDays: z.number().int().min(1).max(365).default(14),
   isActive: z.boolean().default(true),
