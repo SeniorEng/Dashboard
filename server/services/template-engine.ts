@@ -200,9 +200,10 @@ export async function buildPlaceholders(
       placeholders.company_iban = companySettings.iban || "";
       placeholders.company_bic = companySettings.bic || "";
       placeholders.company_bank_name = companySettings.bankName || "";
-      if (companySettings.logoUrl) {
-        placeholders.company_logo_url = companySettings.logoUrl;
-        placeholders.company_logo = `<img src="${companySettings.logoUrl}" alt="Firmenlogo" style="max-height:80px;" />`;
+      const pdfLogo = companySettings.pdfLogoUrl || companySettings.logoUrl;
+      if (pdfLogo) {
+        placeholders.company_logo_url = pdfLogo;
+        placeholders.company_logo = `<img src="${pdfLogo}" alt="Firmenlogo" style="max-height:80px;" />`;
       }
     }
   } catch (_e) {
