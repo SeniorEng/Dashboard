@@ -452,7 +452,6 @@ export default function CustomerDetailPage() {
             </p>
           </CardContent>
         </Card>
-        )}
 
         {/* Budget Übersicht */}
         {budgetOverview && (
