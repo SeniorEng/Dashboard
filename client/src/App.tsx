@@ -24,7 +24,6 @@ const ForgotPasswordPage = lazy(() => import("@/pages/forgot-password"));
 const ResetPasswordPage = lazy(() => import("@/pages/reset-password"));
 const AdminDashboard = lazy(() => import("@/pages/admin/dashboard"));
 const AdminUsers = lazy(() => import("@/pages/admin/users"));
-const AdminCustomerAssignments = lazy(() => import("@/pages/admin/customer-assignments"));
 const AdminCustomers = lazy(() => import("@/pages/admin/customers"));
 const AdminCustomerDetail = lazy(() => import("@/pages/admin/customer-detail"));
 const AdminCustomerNew = lazy(() => import("@/pages/admin/customer-new"));
@@ -168,9 +167,6 @@ function Router() {
       </Route>
       <Route path="/admin/users">
         <AdminRoute component={AdminUsers} />
-      </Route>
-      <Route path="/admin/customer-assignments">
-        <AdminRoute component={AdminCustomerAssignments} />
       </Route>
       <Route path="/admin/customers/new">
         <AdminRoute component={AdminCustomerNew} />

@@ -11,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, ClipboardList, Building2, Receipt, FileText, UserCog, Link2, Stethoscope, BookOpen, ScrollText, GraduationCap, Gift } from "lucide-react";
+import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, ClipboardList, Building2, Receipt, FileText, UserCog, Stethoscope, BookOpen, ScrollText, GraduationCap, Gift } from "lucide-react";
 import { type LayoutVariant, layoutVariants, colors } from "@/design-system";
 
 interface SearchResult {
@@ -177,7 +177,6 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
   const adminNavItems = [
     { href: "/admin", label: "Übersicht", icon: Shield, testId: "admin-overview", match: (loc: string) => loc === "/admin" },
     { href: "/admin/users", label: "Mitarbeiter", icon: UserCog, testId: "admin-users", match: (loc: string) => loc === "/admin/users" },
-    { href: "/admin/customer-assignments", label: "Zuordnungen", icon: Link2, testId: "admin-assignments", match: (loc: string) => loc === "/admin/customer-assignments" },
     { href: "/admin/customers", label: "Kunden", icon: Users, testId: "admin-customers", match: (loc: string) => loc.startsWith("/admin/customers") },
     { href: "/admin/time-entries", label: "Zeiten", icon: Clock, testId: "admin-times", match: (loc: string) => loc === "/admin/time-entries" },
     { href: "/admin/insurance-providers", label: "Kostenträger", icon: Building2, testId: "admin-insurance", match: (loc: string) => loc === "/admin/insurance-providers" },

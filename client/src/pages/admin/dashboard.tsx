@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { Layout } from "@/components/layout";
 import {
-  Users, UserCog, ArrowLeft, Contact2, Clock, Settings,
+  Users, ArrowLeft, Contact2, Clock, Settings,
   Building2, ClipboardList, FileText, Shield, Receipt, Gift, BarChart3,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
@@ -82,14 +82,6 @@ export default function AdminDashboard() {
             iconBg="bg-teal-100"
             title="Benutzerverwaltung"
             description="Mitarbeiter hinzufügen, bearbeiten und Rollen zuweisen"
-          />
-          <AdminCard
-            href="/admin/customer-assignments"
-            testId="card-assignments"
-            icon={<UserCog className={`${iconSize.lg} text-orange-600`} />}
-            iconBg="bg-orange-100"
-            title="Kundenzuordnung"
-            description="Kunden zu Mitarbeitern zuweisen"
           />
           <AdminCard
             href="/admin/time-entries"
