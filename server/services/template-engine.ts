@@ -1,5 +1,6 @@
 import { documentStorage } from "../storage/documents";
 import { storage } from "../storage";
+import { getCustomerCurrentInsurance } from "../storage/customer-mgmt/insurance";
 import { formatDateISO, formatDateForDisplay } from "@shared/utils/datetime";
 import { BILLING_TYPE_LABELS, type BillingType } from "@shared/domain/customers";
 
@@ -25,8 +26,13 @@ const PLACEHOLDER_CATALOG: Record<string, { label: string; source: string }> = {
   pflegegrad_seit: { label: "Pflegegrad seit (Datum)", source: "customer" },
   abrechnungsart: { label: "Abrechnungsart (z.B. 'Selbstzahler')", source: "customer" },
   versichertennummer: { label: "Versichertennummer", source: "insurance" },
-  insurance_name: { label: "Pflegekasse Name", source: "insurance" },
+  insurance_name: { label: "Pflegekasse Name (Suchbegriff)", source: "insurance" },
+  insurance_empfaenger: { label: "Pflegekasse Empfänger", source: "insurance" },
   ik_nummer: { label: "IK-Nummer", source: "insurance" },
+  insurance_strasse: { label: "Pflegekasse Straße + Hausnummer", source: "insurance" },
+  insurance_plz: { label: "Pflegekasse PLZ", source: "insurance" },
+  insurance_stadt: { label: "Pflegekasse Stadt", source: "insurance" },
+  insurance_address: { label: "Pflegekasse vollständige Adresse", source: "insurance" },
   vorerkrankungen: { label: "Vorerkrankungen", source: "customer" },
   haustier: { label: "Haustier vorhanden (Ja/Nein)", source: "customer" },
   haustier_details: { label: "Haustier Details", source: "customer" },
@@ -115,6 +121,11 @@ export async function buildPlaceholders(
     versichertennummer: "",
     insurance_name: "",
     ik_nummer: "",
+    insurance_empfaenger: "",
+    insurance_strasse: "",
+    insurance_plz: "",
+    insurance_stadt: "",
+    insurance_address: "",
     vorerkrankungen: customer.vorerkrankungen || "",
     haustier: customer.haustierVorhanden ? "Ja" : "Nein",
     haustier_details: customer.haustierDetails || "",
@@ -134,8 +145,27 @@ export async function buildPlaceholders(
     company_name: "SeniorenEngel GmbH",
     customer_signature: "",
     employee_signature: "",
-    ...overrides,
   };
+
+  try {
+    const insurance = await getCustomerCurrentInsurance(customerId);
+    if (insurance) {
+      placeholders.versichertennummer = insurance.versichertennummer || "";
+      placeholders.insurance_name = insurance.provider.name || "";
+      placeholders.ik_nummer = insurance.provider.ikNummer || "";
+      placeholders.insurance_empfaenger = insurance.provider.empfaenger || insurance.provider.name || "";
+      placeholders.insurance_strasse = [insurance.provider.strasse, insurance.provider.hausnummer].filter(Boolean).join(" ");
+      placeholders.insurance_plz = insurance.provider.plz || "";
+      placeholders.insurance_stadt = insurance.provider.stadt || "";
+      placeholders.insurance_address = [
+        insurance.provider.strasse ? `${insurance.provider.strasse} ${insurance.provider.hausnummer || ""}`.trim() : "",
+        [insurance.provider.plz, insurance.provider.stadt].filter(Boolean).join(" "),
+      ].filter(Boolean).join(", ");
+    }
+  } catch (_e) {
+  }
+
+  Object.assign(placeholders, overrides);
 
   return placeholders;
 }
