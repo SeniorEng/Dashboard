@@ -106,17 +106,26 @@ export function DigitalDocumentFlow({
     enabled: open,
   });
 
+  const selectedTemplate = templates?.find(t => t.id.toString() === selectedTemplateId);
+  const hasInputFields = selectedTemplate && selectedTemplate.inputFields.length > 0;
+
+  const [autoAdvanced, setAutoAdvanced] = useState(false);
+
   useEffect(() => {
-    if (open && preselectedTemplateSlug && templates && templates.length > 0 && !selectedTemplateId) {
+    if (open && preselectedTemplateSlug && templates && templates.length > 0 && !autoAdvanced) {
       const match = templates.find(t => t.slug === preselectedTemplateSlug);
       if (match) {
         setSelectedTemplateId(match.id.toString());
+        setAutoAdvanced(true);
       }
     }
-  }, [open, preselectedTemplateSlug, templates, selectedTemplateId]);
+  }, [open, preselectedTemplateSlug, templates, autoAdvanced]);
 
-  const selectedTemplate = templates?.find(t => t.id.toString() === selectedTemplateId);
-  const hasInputFields = selectedTemplate && selectedTemplate.inputFields.length > 0;
+  useEffect(() => {
+    if (autoAdvanced && selectedTemplate && step === "select") {
+      handleSelectNext();
+    }
+  }, [autoAdvanced, selectedTemplate, step, handleSelectNext]);
 
   const generateMutation = useMutation({
     mutationFn: async (data: {
@@ -221,6 +230,7 @@ export function DigitalDocumentFlow({
       setCustomerSignature(null);
       setEmployeeSignature(null);
       setGeneratedDoc(null);
+      setAutoAdvanced(false);
     }, 300);
     if (generatedDoc) {
       onComplete?.();

@@ -316,11 +316,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
       ) : !hasAnyDocs ? (
         <div className="py-8 text-center">
           <FileText className="h-8 w-8 text-gray-300 mx-auto mb-2" />
-          <p className="text-sm text-gray-500 mb-3">Noch keine Dokumente vorhanden</p>
-          <Button variant="outline" size="sm" onClick={openAddSheet} data-testid="button-add-document-empty">
-            <Plus className={`${iconSize.sm} mr-1`} />
-            Dokument hinzufügen
-          </Button>
+          <p className="text-sm text-gray-500">Noch keine Dokumente vorhanden</p>
         </div>
       ) : (
         <div className="space-y-2">
