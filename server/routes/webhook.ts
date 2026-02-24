@@ -44,13 +44,20 @@ router.post("/email-lead", async (req: Request, res: Response) => {
       pflegegrad: leadData.pflegegrad || null,
       status: "neu",
       quelle: leadData.quelle || from || null,
-      quelleDetails: subject || null,
+      quelleDetails: leadData.quelleDetails || subject || null,
       rawEmailContent: body,
     });
 
+    const noteParts: string[] = [];
+    noteParts.push(`Automatisch aus E-Mail erstellt. Absender: ${from || "unbekannt"}, Betreff: ${subject || "kein Betreff"}`);
+    if (leadData.notizen) {
+      noteParts.push("");
+      noteParts.push(leadData.notizen);
+    }
+
     await prospectStorage.addNote({
       prospectId: prospect.id,
-      noteText: `Automatisch aus E-Mail erstellt. Absender: ${from || "unbekannt"}, Betreff: ${subject || "kein Betreff"}`,
+      noteText: noteParts.join("\n"),
       noteType: "email",
     });
 
