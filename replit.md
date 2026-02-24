@@ -43,7 +43,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 ### Business Rules & Patterns
 - **Shared Domain Logic**: Single source of truth.
 - **Appointment Workflow**: Status-driven field editing, overlap checking.
-- **Customer Management**: Multi-step creation, detailed views with 5 tabs, German-specific validation (`Pflegegrad`). `status` and `billingType` drive dynamic flows. Deactivation tracking with predefined reasons.
+- **Customer Management**: Multi-step creation, detailed views with 6 tabs (Übersicht, Vertrag, Dokumente, Kontakte, Budgets, Versicherung), German-specific validation (`Pflegegrad`). `status` and `billingType` drive dynamic flows. Deactivation tracking with predefined reasons. Inline editing directly in tabs (no separate edit page). All DB fields always displayed with fallbacks ("Nicht angegeben", "Kein Festnetz", etc.).
 - **Document Templates**: HTML-based templates with placeholders, billing-type associations, and versioning. Supports `documentTypeId`, `context`, `targetType`, and dual signatures.
 - **PDF Generation**: Server-side HTML→PDF using Puppeteer/Chromium for GoBD-compliant documents. Digital signature capture and integrity hashing.
 - **Insurance Providers**: Admin management, historized assignment, IK-Nummer validation.

@@ -7,7 +7,7 @@
  */
 
 import { useState, useMemo, useCallback } from "react";
-import { Link, useParams, useSearch, useLocation } from "wouter";
+import { useParams, useSearch, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { DEACTIVATION_REASON_SELECT_OPTIONS, DEACTIVATION_REASON_LABELS, type DeactivationReason } from "@shared/domain/customers";
@@ -29,7 +29,6 @@ import { iconSize, componentStyles } from "@/design-system";
 import {
   Loader2,
   Wallet,
-  Edit,
   Euro,
   AlertCircle,
   Settings,
@@ -48,6 +47,7 @@ import { CustomerInsuranceTab } from "./components/customer-insurance-tab";
 import { PricingSection } from "./components/customer-pricing-section";
 import { CustomerDocumentsSection } from "./components/customer-documents-section";
 import { CustomerContactsTab } from "./components/customer-contacts-tab";
+import { CustomerContractTab } from "./components/customer-contract-tab";
 
 function formatCents(cents: number): string {
   return (cents / 100).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
@@ -390,7 +390,7 @@ function BudgetsTabContent({
   );
 }
 
-const VALID_TABS = ["overview", "documents", "contacts", "budgets", "insurance"] as const;
+const VALID_TABS = ["overview", "vertrag", "documents", "contacts", "budgets", "insurance"] as const;
 
 export default function AdminCustomerDetail() {
   const { id } = useParams<{ id: string }>();
@@ -535,14 +535,6 @@ export default function AdminCustomerDetail() {
                 )}
               </>
             }
-            actions={
-              <Link href={`/admin/customers/${customerId}/edit`}>
-                <Button variant="outline" className={`bg-white ${componentStyles.pageHeaderActionBtn}`} data-testid="button-edit-customer">
-                  <Edit className={`${iconSize.sm} mr-2`} />
-                  Bearbeiten
-                </Button>
-              </Link>
-            }
           />
 
           {customer.status === "erstberatung" && (
@@ -584,11 +576,11 @@ export default function AdminCustomerDetail() {
             </SectionCard>
           )}
 
-          {customer.status === "aktiv" && (customer as any).inaktivAb && (
+          {customer.status === "aktiv" && customer.inaktivAb && (
             <SectionCard className="mb-4 border-blue-200 bg-blue-50">
               <div className="flex items-center gap-2">
                 <p className="text-sm text-blue-800">
-                  <span className="font-medium">Inaktiv ab {formatDateForDisplay((customer as any).inaktivAb)}:</span>{" "}
+                  <span className="font-medium">Inaktiv ab {formatDateForDisplay(customer.inaktivAb)}:</span>{" "}
                   Ab diesem Datum können keine neuen Termine erstellt werden.
                 </p>
               </div>
@@ -601,22 +593,22 @@ export default function AdminCustomerDetail() {
                 <div>
                   <p className="font-medium text-amber-900">Inaktiver Kunde</p>
                   <p className="text-sm text-amber-700 mt-0.5">
-                    {(customer as any).inaktivAb
-                      ? `Inaktiv ab ${formatDateForDisplay((customer as any).inaktivAb)}. Keine neuen Termine ab diesem Datum.`
+                    {customer.inaktivAb
+                      ? `Inaktiv ab ${formatDateForDisplay(customer.inaktivAb)}. Keine neuen Termine ab diesem Datum.`
                       : "Dieser Kunde ist deaktiviert und kann keine neuen Termine erhalten."}
                   </p>
-                  {(customer as any).deactivationReason && (
+                  {customer.deactivationReason && (
                     <p className="text-sm text-amber-700 mt-1" data-testid="text-deactivation-reason">
                       <span className="font-medium">Grund:</span>{" "}
-                      {DEACTIVATION_REASON_LABELS[(customer as any).deactivationReason as DeactivationReason] || (customer as any).deactivationReason}
-                      {(customer as any).deactivationReason === "sonstiges" && (customer as any).deactivationNote && (
-                        <span> — {(customer as any).deactivationNote}</span>
+                      {DEACTIVATION_REASON_LABELS[customer.deactivationReason as DeactivationReason] || customer.deactivationReason}
+                      {customer.deactivationReason === "sonstiges" && customer.deactivationNote && (
+                        <span> — {customer.deactivationNote}</span>
                       )}
                     </p>
                   )}
-                  {(customer as any).deactivationReason !== "sonstiges" && (customer as any).deactivationNote && (
+                  {customer.deactivationReason !== "sonstiges" && customer.deactivationNote && (
                     <p className="text-sm text-amber-700 mt-0.5" data-testid="text-deactivation-note">
-                      <span className="font-medium">Anmerkung:</span> {(customer as any).deactivationNote}
+                      <span className="font-medium">Anmerkung:</span> {customer.deactivationNote}
                     </p>
                   )}
                 </div>
@@ -640,6 +632,7 @@ export default function AdminCustomerDetail() {
           <ResponsiveTabs
             tabs={[
               { value: "overview", label: "Übersicht", testId: "tab-overview" },
+              { value: "vertrag", label: "Vertrag", testId: "tab-vertrag" },
               { value: "documents", label: "Dokumente", testId: "tab-documents" },
               { value: "contacts", label: "Kontakte", testId: "tab-contacts" },
               { value: "budgets", label: "Budgets", testId: "tab-budgets" },
@@ -647,11 +640,15 @@ export default function AdminCustomerDetail() {
             ]}
             value={activeTab}
             onValueChange={handleTabChange}
-            mobileVisibleCount={5}
+            mobileVisibleCount={6}
           >
 
             <TabsContent value="overview" className="space-y-4">
-              <CustomerOverviewTab customer={customer} />
+              <CustomerOverviewTab customer={customer} customerId={customerId} />
+            </TabsContent>
+
+            <TabsContent value="vertrag" className="space-y-4">
+              <CustomerContractTab customer={customer} customerId={customerId} />
             </TabsContent>
 
             <TabsContent value="documents" className="space-y-4">
