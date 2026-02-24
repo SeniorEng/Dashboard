@@ -320,12 +320,12 @@ export default function NewAppointment() {
                     <Users className={`${iconSize.sm} inline mr-1`} /> Mitarbeiter zuweisen *
                   </Label>
                   <SearchableSelect
-                    options={form.employeeOptions}
+                    options={form.ebEmployeeOptions}
                     value={form.ebAssignedEmployeeId}
                     onValueChange={form.setEbAssignedEmployeeId}
                     placeholder="Mitarbeiter auswählen..."
                     searchPlaceholder="Mitarbeiter suchen..."
-                    emptyText="Kein Mitarbeiter gefunden."
+                    emptyText="Kein Mitarbeiter mit Erstberatungs-Berechtigung gefunden."
                     className={form.errors.ebAssignedEmployeeId ? "border-destructive" : ""}
                     data-testid="select-eb-employee"
                   />

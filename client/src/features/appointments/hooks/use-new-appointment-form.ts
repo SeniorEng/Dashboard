@@ -268,6 +268,15 @@ export function useNewAppointmentForm() {
     }));
   }, [employees, selectedCustomer]);
 
+  const ebEmployeeOptions = useMemo(() => {
+    return employees
+      .filter(e => e.isActive && e.roles?.includes("erstberatung"))
+      .map((e) => ({
+        value: e.id.toString(),
+        label: e.displayName,
+      }));
+  }, [employees]);
+
   const isPending = createKundenterminMutation.isPending || createErstberatungMutation.isPending;
 
   return {
@@ -322,6 +331,7 @@ export function useNewAppointmentForm() {
     ebSummary,
     customerOptions,
     employeeOptions,
+    ebEmployeeOptions,
     isPending,
 
     handleKundenterminSubmit,
