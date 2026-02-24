@@ -20,7 +20,7 @@ function AppointmentListComponent({ appointments, isLoading, error, onRetry }: A
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-12" data-testid="loading-appointments">
+      <div className="flex items-center justify-center min-h-[200px]" data-testid="loading-appointments">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
       </div>
     );
@@ -28,7 +28,7 @@ function AppointmentListComponent({ appointments, isLoading, error, onRetry }: A
 
   if (error) {
     return (
-      <div data-testid="error-appointments">
+      <div className="min-h-[200px]" data-testid="error-appointments">
         <ErrorState
           title="Termine konnten nicht geladen werden"
           description={error.message || "Bitte versuchen Sie es erneut."}
@@ -40,14 +40,14 @@ function AppointmentListComponent({ appointments, isLoading, error, onRetry }: A
 
   if (sortedAppointments.length === 0) {
     return (
-      <div className="text-center py-12 text-muted-foreground" data-testid="empty-appointments">
+      <div className="text-center py-12 min-h-[200px] text-muted-foreground" data-testid="empty-appointments">
         <p>Keine Termine für heute geplant.</p>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-4 animate-in slide-in-from-bottom-4 duration-700 fade-in fill-mode-backwards">
+    <div className="flex flex-col gap-4 animate-in fade-in duration-300">
       {sortedAppointments.map((apt) => (
         <AppointmentCard key={apt.id} appointment={apt} />
       ))}

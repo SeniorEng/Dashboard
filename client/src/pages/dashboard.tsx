@@ -121,7 +121,7 @@ export default function Dashboard() {
 
   return (
     <Layout>
-      <div className="mb-6 animate-in slide-in-from-top-4 duration-500">
+      <div className="mb-6 animate-in fade-in duration-300">
         <div className="flex items-center justify-between mb-2 px-1">
           <span className="text-sm font-medium text-muted-foreground capitalize" data-testid="text-month-label">
             {monthLabel}
