@@ -5,7 +5,7 @@ import { useAppointments, useWeekAppointmentCounts, AppointmentList } from "@/fe
 import { Button } from "@/components/ui/button";
 import { format, addDays, startOfWeek, subWeeks, isSameDay } from "date-fns";
 import { de } from "date-fns/locale";
-import { Plus, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { Plus, ChevronsLeft, ChevronsRight, CalendarCheck } from "lucide-react";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { getHolidayMap } from "@shared/utils/holidays";
 import { iconSize } from "@/design-system";
@@ -126,17 +126,17 @@ export default function Dashboard() {
           <span className="text-sm font-medium text-muted-foreground capitalize" data-testid="text-month-label">
             {monthLabel}
           </span>
-          {!isToday && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs px-3"
-              onClick={goToToday}
-              data-testid="button-go-today"
-            >
-              Heute
-            </Button>
-          )}
+          <Button
+            variant={isToday ? "ghost" : "outline"}
+            size="sm"
+            className={`h-7 text-xs px-3 ${isToday ? "text-muted-foreground/50 cursor-default" : "border-primary/30 text-primary font-medium"}`}
+            onClick={goToToday}
+            disabled={isToday}
+            data-testid="button-go-today"
+          >
+            <CalendarCheck className="h-3.5 w-3.5 mr-1" />
+            Heute
+          </Button>
         </div>
         <div className="flex items-center gap-1">
           <Button
