@@ -9,7 +9,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { 
-  ArrowLeft, MapPin, Phone, Mail, User, Heart, 
+  ArrowLeft, MapPin, Phone, Mail, User, 
   Calendar, Loader2, AlertCircle, FileSignature, ChevronRight, X, Wallet,
   Cake, PhoneCall, Shield, PawPrint, ClipboardList, Stethoscope, Users, UserSearch,
   UserCheck, XCircle,
@@ -288,24 +288,22 @@ export default function CustomerDetailPage() {
               </div>
               <div className="flex-1 min-w-0 space-y-2.5">
                 <div className="flex items-center gap-2 flex-wrap">
-                  {hasPflegegrad && (
+                  {hasPflegegrad ? (
                     <StatusBadge type="pflegegrad" value={customer.pflegegrad!} data-testid="badge-pflegegrad" />
+                  ) : (
+                    <span className="text-xs text-muted-foreground/60">Kein Pflegegrad</span>
                   )}
                 </div>
 
-                {geburtsdatum && (
-                  <div className="flex items-center gap-2 text-sm" data-testid="text-geburtsdatum">
-                    <Cake className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
-                    <span className="text-muted-foreground">{geburtsdatum}</span>
-                  </div>
-                )}
+                <div className="flex items-center gap-2 text-sm" data-testid="text-geburtsdatum">
+                  <Cake className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
+                  <span className="text-muted-foreground">{geburtsdatum || "Kein Geburtsdatum"}</span>
+                </div>
 
-                {address && (
-                  <div className="flex items-start gap-2 text-sm">
-                    <MapPin className={`${iconSize.sm} mt-0.5 flex-shrink-0 text-primary/60`} />
-                    <span className="text-muted-foreground" data-testid="text-address">{address}</span>
-                  </div>
-                )}
+                <div className="flex items-start gap-2 text-sm">
+                  <MapPin className={`${iconSize.sm} mt-0.5 flex-shrink-0 text-primary/60`} />
+                  <span className="text-muted-foreground" data-testid="text-address">{address || "Keine Adresse"}</span>
+                </div>
 
                 <div className="flex items-center gap-2 text-sm">
                   <Phone className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
@@ -318,62 +316,56 @@ export default function CustomerDetailPage() {
                   )}
                 </div>
 
-                {phoneFestnetz && (
-                  <div className="flex items-center gap-2 text-sm">
-                    <PhoneCall className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
+                <div className="flex items-center gap-2 text-sm">
+                  <PhoneCall className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
+                  {phoneFestnetz ? (
                     <a href={`tel:${customer.festnetz}`} className="text-primary hover:underline" data-testid="link-phone-festnetz">
                       {phoneFestnetz}
                     </a>
-                  </div>
-                )}
+                  ) : (
+                    <span className="text-muted-foreground/60">Kein Festnetz</span>
+                  )}
+                </div>
 
-                {customer.email && (
-                  <div className="flex items-center gap-2 text-sm">
-                    <Mail className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
+                <div className="flex items-center gap-2 text-sm">
+                  <Mail className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
+                  {customer.email ? (
                     <a href={`mailto:${customer.email}`} className="text-primary hover:underline" data-testid="link-email">
                       {customer.email}
                     </a>
-                  </div>
-                )}
+                  ) : (
+                    <span className="text-muted-foreground/60">Keine E-Mail</span>
+                  )}
+                </div>
 
-                {customer.needs && customer.needs.length > 0 && (
-                  <div className="flex items-start gap-2 pt-1">
-                    <Heart className={`${iconSize.sm} mt-0.5 flex-shrink-0 text-rose-400`} />
-                    <div className="flex flex-wrap gap-1">
-                      {customer.needs.map((need, index) => (
-                        <StatusBadge key={index} type="need" value={need} size="sm" />
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           </CardContent>
         </Card>
 
         {/* Haustier */}
-        {customer.haustierVorhanden && (
-          <Card className="mb-4" data-testid="card-pet">
-            <CardContent className="p-4">
-              <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
-                <PawPrint className={`${iconSize.sm} text-amber-600`} />
-                Haustier
-              </h2>
-              <p className="text-sm text-muted-foreground" data-testid="text-pet-details">
-                {customer.haustierDetails || "Ja, keine weiteren Details"}
-              </p>
-            </CardContent>
-          </Card>
-        )}
+        <Card className="mb-4" data-testid="card-pet">
+          <CardContent className="p-4">
+            <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
+              <PawPrint className={`${iconSize.sm} text-amber-600`} />
+              Haustier
+            </h2>
+            <p className="text-sm text-muted-foreground" data-testid="text-pet-details">
+              {customer.haustierVorhanden
+                ? (customer.haustierDetails || "Ja, keine weiteren Details")
+                : "Kein Haustier"}
+            </p>
+          </CardContent>
+        </Card>
 
         {/* Notfallkontakte */}
-        {details?.contacts && details.contacts.length > 0 && (
-          <Card className="mb-4" data-testid="card-emergency-contacts">
-            <CardContent className="p-4">
-              <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                <Users className={`${iconSize.sm} text-red-500`} />
-                Notfallkontakte
-              </h2>
+        <Card className="mb-4" data-testid="card-emergency-contacts">
+          <CardContent className="p-4">
+            <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
+              <Users className={`${iconSize.sm} text-red-500`} />
+              Notfallkontakte
+            </h2>
+            {details?.contacts && details.contacts.length > 0 ? (
               <div className="space-y-3">
                 {details.contacts.map((contact) => (
                   <div key={contact.id} className="flex items-start justify-between gap-3 text-sm" data-testid={`contact-${contact.id}`}>
@@ -399,18 +391,20 @@ export default function CustomerDetailPage() {
                   </div>
                 ))}
               </div>
-            </CardContent>
-          </Card>
-        )}
+            ) : (
+              <p className="text-sm text-muted-foreground/60">Keine Notfallkontakte hinterlegt</p>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Versicherung */}
-        {details?.insurance && (
-          <Card className="mb-4" data-testid="card-insurance">
-            <CardContent className="p-4">
-              <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
-                <Shield className={`${iconSize.sm} text-blue-500`} />
-                Pflegekasse
-              </h2>
+        <Card className="mb-4" data-testid="card-insurance">
+          <CardContent className="p-4">
+            <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
+              <Shield className={`${iconSize.sm} text-blue-500`} />
+              Pflegekasse
+            </h2>
+            {details?.insurance ? (
               <div className="space-y-1.5 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Kasse</span>
@@ -427,36 +421,34 @@ export default function CustomerDetailPage() {
                   <span className="font-medium" data-testid="text-insurance-vnr">{details.insurance.versichertennummer}</span>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        )}
+            ) : (
+              <p className="text-sm text-muted-foreground/60">Keine Pflegekasse zugeordnet</p>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Vorerkrankungen */}
-        {customer.vorerkrankungen && (
-          <Card className="mb-4" data-testid="card-medical-history">
-            <CardContent className="p-4">
-              <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
-                <Stethoscope className={`${iconSize.sm} text-rose-500`} />
-                Vorerkrankungen
-              </h2>
-              <p className="text-sm text-muted-foreground whitespace-pre-line" data-testid="text-medical-history">
-                {customer.vorerkrankungen}
-              </p>
-            </CardContent>
-          </Card>
-        )}
+        <Card className="mb-4" data-testid="card-medical-history">
+          <CardContent className="p-4">
+            <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
+              <Stethoscope className={`${iconSize.sm} text-rose-500`} />
+              Vorerkrankungen
+            </h2>
+            <p className="text-sm text-muted-foreground whitespace-pre-line" data-testid="text-medical-history">
+              {customer.vorerkrankungen || "Keine Angabe"}
+            </p>
+          </CardContent>
+        </Card>
 
         {/* Vereinbarte Leistungen */}
-        {details?.contract?.vereinbarteLeistungen && (
-          <Card className="mb-4" data-testid="card-agreed-services">
-            <CardContent className="p-4">
-              <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
-                <ClipboardList className={`${iconSize.sm} text-green-600`} />
-                Vereinbarte Leistungen
-              </h2>
-              <p className="text-sm text-muted-foreground whitespace-pre-line" data-testid="text-agreed-services">
-                {details.contract.vereinbarteLeistungen}
-              </p>
+        <Card className="mb-4" data-testid="card-agreed-services">
+          <CardContent className="p-4">
+            <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
+              <ClipboardList className={`${iconSize.sm} text-green-600`} />
+              Vereinbarte Leistungen
+            </h2>
+            <p className="text-sm text-muted-foreground whitespace-pre-line" data-testid="text-agreed-services">
+              {details?.contract?.vereinbarteLeistungen || "Keine Angabe"}
             </CardContent>
           </Card>
         )}

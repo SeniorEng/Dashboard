@@ -330,18 +330,6 @@ export default function AppointmentDetail() {
         </SectionCard>
       )}
 
-      {appointment.customer?.needs && appointment.customer.needs.length > 0 && (
-        <SectionCard title="Kundenbedürfnisse" className="mb-4">
-          <ul className="space-y-2">
-            {appointment.customer.needs.map((need, i) => (
-              <li key={i} className="flex items-center gap-2 text-sm">
-                <div className="w-1.5 h-1.5 rounded-full bg-primary/60" />
-                {need}
-              </li>
-            ))}
-          </ul>
-        </SectionCard>
-      )}
 
       {appointment.notes && (
         <SectionCard title="Notizen" className="mb-4">

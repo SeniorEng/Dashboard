@@ -47,8 +47,6 @@ export const customers = pgTable("customers", {
   documentDeliveryMethod: text("document_delivery_method").notNull().default("email"),
   deactivationReason: text("deactivation_reason"),
   deactivationNote: text("deactivation_note"),
-  // Legacy fields
-  needs: text("needs").array().notNull().default([]),
   // Audit fields
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

@@ -27,8 +27,7 @@ type StatusBadgeType =
   | "month"
   | "info"
   | "warning"
-  | "counter"
-  | "need";
+  | "counter";
 
 interface StatusBadgeProps {
   type: StatusBadgeType;
@@ -265,10 +264,6 @@ export function StatusBadge({
 
   if (type === "warning") {
     return renderColoredBadge(v, "amber", null, false, size, className, testId);
-  }
-
-  if (type === "need") {
-    return renderColoredBadge(v, "rose", null, false, size, className, testId);
   }
 
   if (type === "counter") {

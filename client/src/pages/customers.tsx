@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { 
   MapPin, Phone, PhoneCall, User, Search, 
-  Heart, Loader2, Cake, Gift
+  Loader2, Cake, Gift
 } from "lucide-react";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { formatDateForDisplay } from "@shared/utils/datetime";
@@ -389,16 +389,6 @@ const CustomerCard = memo(function CustomerCard({ customer }: { customer: Custom
                 </div>
               )}
 
-              {customer.needs && customer.needs.length > 0 && (
-                <div className="flex items-start gap-2 pt-1" data-testid={`container-customer-needs-${customer.id}`}>
-                  <Heart className={`${iconSize.sm} mt-0.5 flex-shrink-0 text-rose-400`} />
-                  <div className="flex flex-wrap gap-1">
-                    {customer.needs.map((need, index) => (
-                      <StatusBadge key={index} type="need" value={need} size="sm" data-testid={`badge-customer-need-${customer.id}-${index}`} />
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         </div>
