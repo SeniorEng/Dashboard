@@ -44,6 +44,7 @@ export function useNewAppointmentForm() {
   const [ebVorname, setEbVorname] = useState<string>(urlParams.get("vorname") || "");
   const [ebNachname, setEbNachname] = useState<string>(urlParams.get("nachname") || "");
   const [ebTelefon, setEbTelefon] = useState<string>(urlParams.get("telefon") || "");
+  const [ebEmail, setEbEmail] = useState<string>(urlParams.get("email") || "");
   const [ebStrasse, setEbStrasse] = useState<string>(urlParams.get("strasse") || "");
   const [ebNr, setEbNr] = useState<string>(urlParams.get("nr") || "");
   const [ebPlz, setEbPlz] = useState<string>(urlParams.get("plz") || "");
@@ -183,6 +184,7 @@ export function useNewAppointmentForm() {
         vorname: ebVorname,
         nachname: ebNachname,
         telefon: normalizedPhone,
+        email: ebEmail || undefined,
         strasse: ebStrasse,
         nr: ebNr,
         plz: ebPlz,
@@ -320,6 +322,8 @@ export function useNewAppointmentForm() {
     setEbNachname,
     ebTelefon,
     setEbTelefon,
+    ebEmail,
+    setEbEmail,
     ebStrasse,
     setEbStrasse,
     ebNr,

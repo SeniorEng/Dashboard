@@ -221,6 +221,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
       vorname: prospect.vorname,
       nachname: prospect.nachname,
       ...(prospect.telefon && { telefon: prospect.telefon }),
+      ...(prospect.email && { email: prospect.email }),
       ...(prospect.strasse && { strasse: prospect.strasse }),
       ...(prospect.nr && { nr: prospect.nr }),
       ...(prospect.plz && { plz: prospect.plz }),

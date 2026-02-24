@@ -240,6 +240,18 @@ export default function NewAppointment() {
                 {form.errors.ebTelefon && <p className="text-destructive text-sm">{form.errors.ebTelefon}</p>}
               </div>
 
+              <div className="space-y-2">
+                <Label htmlFor="eb-email">E-Mail</Label>
+                <Input
+                  id="eb-email"
+                  type="email"
+                  value={form.ebEmail}
+                  onChange={(e) => form.setEbEmail(e.target.value)}
+                  placeholder="beispiel@email.de"
+                  data-testid="input-eb-email"
+                />
+              </div>
+
               {/* Address */}
               <div className="space-y-4">
                 <Label className="flex items-center gap-2">
