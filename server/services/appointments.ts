@@ -320,7 +320,6 @@ export class AppointmentService {
       plz: string;
       stadt: string;
       pflegegrad: number;
-      needs: string[];
     };
     appointmentData: Omit<InsertAppointment, 'customerId'>;
     scheduledEnd: string;
@@ -342,7 +341,6 @@ export class AppointmentService {
       plz: input.customer.plz,
       stadt: input.customer.stadt,
       pflegegrad: input.customer.pflegegrad ?? 0,
-      needs: [] as string[],
     };
     
     const appointmentData: Omit<InsertAppointment, 'customerId'> = {
