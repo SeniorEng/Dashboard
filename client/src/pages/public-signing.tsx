@@ -137,7 +137,7 @@ export default function PublicSigningPage() {
           <ShieldCheck className="h-6 w-6 text-teal-600" />
           <div>
             <h1 className={componentStyles.pageTitle}>Digitale Unterschrift</h1>
-            <p className="text-xs text-gray-500">SeniorenEngel Dokumentenverwaltung</p>
+            <p className="text-xs text-gray-500">EngelDesk Dokumentenverwaltung</p>
           </div>
         </div>
 

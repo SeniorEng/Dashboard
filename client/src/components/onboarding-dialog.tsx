@@ -28,9 +28,9 @@ const STEPS: OnboardingStep[] = [
     icon: Sparkles,
     iconColor: "text-primary",
     iconBg: "bg-primary/10",
-    title: "Willkommen bei Senioren Engel!",
+    title: "Willkommen bei EngelDesk!",
     description:
-      "Senioren Engel hilft dir, deinen Arbeitsalltag in der Pflege effizient zu organisieren. In dieser kurzen Tour zeigen wir dir die wichtigsten Bereiche.",
+      "EngelDesk hilft dir, deinen Arbeitsalltag in der Pflege effizient zu organisieren. In dieser kurzen Tour zeigen wir dir die wichtigsten Bereiche.",
   },
   {
     icon: Calendar,
@@ -78,7 +78,7 @@ const STEPS: OnboardingStep[] = [
     iconBg: "bg-primary/10",
     title: "Los geht's!",
     description:
-      "Du bist bereit! Bei Fragen hilft dir dein Administrator gerne weiter. Wir wünschen dir viel Erfolg mit Senioren Engel.",
+      "Du bist bereit! Bei Fragen hilft dir dein Administrator gerne weiter. Wir wünschen dir viel Erfolg mit EngelDesk.",
   },
 ];
 

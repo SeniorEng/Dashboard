@@ -78,7 +78,7 @@ export default function LoginPage() {
         <CardHeader className="text-center pb-2">
           <img 
             src={logoImage} 
-            alt="SeniorenEngel" 
+            alt="EngelDesk" 
             className="h-16 mx-auto mb-2"
           />
         </CardHeader>
@@ -199,7 +199,7 @@ function SetupPage() {
         <CardHeader className="text-center pb-2">
           <img 
             src={logoImage} 
-            alt="SeniorenEngel" 
+            alt="EngelDesk" 
             className="h-16 mx-auto mb-2"
           />
           <CardTitle className="text-xl font-bold text-gray-900">Ersteinrichtung</CardTitle>
