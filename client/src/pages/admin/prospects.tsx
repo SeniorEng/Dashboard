@@ -46,9 +46,10 @@ import {
   XCircle,
   ArrowRightCircle,
   Loader2,
+  RefreshCw,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
-import { useProspects, useProspectStats, useProspect, useCreateProspect, useUpdateProspect, useAddProspectNote, useDeleteProspect } from "@/features/prospects";
+import { useProspects, useProspectStats, useProspect, useCreateProspect, useUpdateProspect, useAddProspectNote, useReparseProspect, useDeleteProspect } from "@/features/prospects";
 import { PROSPECT_STATUS_LABELS, PROSPECT_STATUSES, PROSPECT_NOTE_TYPE_LABELS, type ProspectStatus, type ProspectNoteType } from "@shared/schema";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
@@ -167,6 +168,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
   const updateMutation = useUpdateProspect();
   const addNoteMutation = useAddProspectNote();
   const deleteMutation = useDeleteProspect();
+  const reparseMutation = useReparseProspect();
   const [, navigate] = useLocation();
   const [noteText, setNoteText] = useState("");
   const [noteType, setNoteType] = useState<ProspectNoteType>("notiz");
@@ -248,7 +250,22 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
               <div className="space-y-6 mt-4">
                 <Card>
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-sm">Kontaktdaten</CardTitle>
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm">Kontaktdaten</CardTitle>
+                      {prospect.rawEmailContent && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs gap-1"
+                          onClick={() => prospectId && reparseMutation.mutate(prospectId)}
+                          disabled={reparseMutation.isPending}
+                          data-testid="button-reparse-prospect"
+                        >
+                          <RefreshCw className={`h-3 w-3 ${reparseMutation.isPending ? "animate-spin" : ""}`} />
+                          Neu parsen
+                        </Button>
+                      )}
+                    </div>
                   </CardHeader>
                   <CardContent className="space-y-2 text-sm">
                     {prospect.telefon && (

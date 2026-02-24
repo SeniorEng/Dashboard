@@ -100,6 +100,26 @@ export function useAddProspectNote() {
   });
 }
 
+export function useReparseProspect() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const result = await api.post<ProspectWithNotes>(`/admin/prospects/${id}/reparse`);
+      return unwrapResult(result);
+    },
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: ["prospect", id] });
+      queryClient.invalidateQueries({ queryKey: ["prospects"] });
+      toast({ title: "Neu geparst", description: "Die Daten wurden aus der E-Mail aktualisiert." });
+    },
+    onError: () => {
+      toast({ title: "Fehler", description: "Die E-Mail konnte nicht neu geparst werden.", variant: "destructive" });
+    },
+  });
+}
+
 export function useDeleteProspect() {
   const queryClient = useQueryClient();
   const { toast } = useToast();

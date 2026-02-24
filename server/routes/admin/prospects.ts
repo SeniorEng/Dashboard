@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prospectStorage } from "../../storage/prospects";
 import { insertProspectSchema, updateProspectSchema, insertProspectNoteSchema, PROSPECT_STATUSES } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
+import { parseLeadEmail } from "../../services/email-parser";
 
 const router = Router();
 
@@ -112,6 +113,58 @@ router.post("/prospects/:id/notes", asyncHandler("Notiz konnte nicht erstellt we
 
   const note = await prospectStorage.addNote(parsed.data);
   res.status(201).json(note);
+}));
+
+router.post("/prospects/:id/reparse", asyncHandler("E-Mail konnte nicht neu geparst werden", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Ungültige ID" });
+    return;
+  }
+
+  const prospect = await prospectStorage.getById(id);
+  if (!prospect) {
+    res.status(404).json({ error: "Interessent nicht gefunden" });
+    return;
+  }
+
+  if (!prospect.rawEmailContent) {
+    res.status(400).json({ error: "Kein E-Mail-Inhalt vorhanden" });
+    return;
+  }
+
+  const leadData = parseLeadEmail(prospect.rawEmailContent, prospect.quelleDetails || undefined);
+
+  const updated = await prospectStorage.update(id, {
+    vorname: leadData.vorname,
+    nachname: leadData.nachname,
+    telefon: leadData.telefon || null,
+    email: leadData.email || null,
+    strasse: leadData.strasse || null,
+    nr: leadData.nr || null,
+    plz: leadData.plz || null,
+    stadt: leadData.stadt || null,
+    pflegegrad: leadData.pflegegrad || null,
+    quelle: leadData.quelle || prospect.quelle || null,
+    quelleDetails: leadData.quelleDetails || prospect.quelleDetails || null,
+  });
+
+  const userId = (req as any).user?.id;
+  const noteParts: string[] = ["Daten aus E-Mail neu geparst"];
+  if (leadData.notizen) {
+    noteParts.push("");
+    noteParts.push(leadData.notizen);
+  }
+
+  await prospectStorage.addNote({
+    prospectId: id,
+    userId,
+    noteText: noteParts.join("\n"),
+    noteType: "notiz",
+  });
+
+  const notes = await prospectStorage.getNotes(id);
+  res.json({ ...updated, notes });
 }));
 
 router.delete("/prospects/:id", asyncHandler("Interessent konnte nicht gelöscht werden", async (req: Request, res: Response) => {
