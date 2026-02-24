@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Abtretungserklärung - Senioren Engel</title>
+    <style>
+        /* Grundlegendes Layout & Typografie */
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #212121; /* Textfarbe aus deinem Design System */
+            line-height: 1.5;
+            background-color: #f4f4f4; /* Grauer Hintergrund für Web-Ansicht */
+            margin: 0;
+            padding: 40px;
+        }
+
+        /* Die A4-Seite */
+        .page {
+            background: #FFFFFF;
+            max-width: 210mm; /* A4 Breite */
+            min-height: 297mm; /* A4 Höhe */
+            margin: 0 auto;
+            padding: 20mm;
+            box-sizing: border-box;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+
+        /* Kopfzeile & Logo */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 40px;
+            border-bottom: 2px solid #64B5F6; /* Primärblau */
+            padding-bottom: 10px;
+        }
+        
+        .logo-placeholder img {
+            height: 60px; /* Hier später den Link zu deinem Logo einfügen */
+        }
+
+        .header-text {
+            text-align: right;
+        }
+
+        .header-text h1 {
+            margin: 0;
+            font-size: 24px;
+            color: #212121;
+        }
+
+        .header-text p {
+            margin: 0;
+            font-size: 14px;
+            color: #64B5F6;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+        }
+
+        /* Dokumententitel */
+        .document-title {
+            font-size: 22px;
+            font-weight: bold;
+            margin-bottom: 30px;
+        }
+
+        /* Info-Boxen für Erbringer und Empfänger */
+        .section-title {
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #64B5F6;
+        }
+
+        .info-box {
+            border: 1px solid #B0BEC5; /* Sekundärgrau */
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 25px;
+            font-size: 13px;
+        }
+
+        /* Formularfelder für den Klienten */
+        .form-row {
+            display: flex;
+            margin-bottom: 10px;
+            align-items: flex-end;
+        }
+
+        .form-label {
+            width: 220px;
+            font-weight: 500;
+        }
+
+        .form-field {
+            flex-grow: 1;
+            border-bottom: 1px dotted #212121;
+            height: 20px;
+            /* Wenn deine Software Variablen nutzt, kannst du diese hier einfügen, z.B. {{vorname_name}} */
+        }
+
+        /* Hauptinhalt & Checkboxen */
+        .content {
+            font-size: 14px;
+            margin-top: 30px;
+        }
+
+        .leistungen-list {
+            list-style-type: none;
+            padding-left: 0;
+            margin-top: 15px;
+        }
+
+        .leistungen-list li {
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+        }
+
+        .leistungen-list li::before {
+            content: '☐'; /* Checkbox-Symbol */
+            font-size: 20px;
+            margin-right: 10px;
+            color: #212121;
+        }
+
+        /* Unterschriften-Bereich */
+        .signature-section {
+            margin-top: 60px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .signature-box {
+            width: 45%;
+            border-top: 1px solid #212121;
+            padding-top: 5px;
+            font-size: 13px;
+        }
+
+        /* Fußzeile */
+        .footer {
+            margin-top: 50px;
+            font-size: 11px;
+            color: #B0BEC5;
+            text-align: center;
+            line-height: 1.4;
+        }
+
+        /* Optimierung für den echten Druck / PDF-Export */
+        @media print {
+            body { background: none; padding: 0; }
+            .page { box-shadow: none; margin: 0; padding: 0; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="page">
+        
+        <div class="header">
+            <div class="logo-placeholder">
+                <img src="DEIN_LOGO_LINK_HIER.png" alt="Senioren Engel Logo">
+            </div>
+            <div class="header-text">
+                <h1>Senioren Engel</h1>
+                <p>ALLTAGEBEGLEITUNG</p>
+            </div>
+        </div>
+
+        <div class="document-title">
+            Abtretungserklärung
+        </div>
+
+        <div class="section-title">Leistungserbringer</div>
+        <div class="info-box">
+            <strong>Senioren Engel Alltagsbegleitung UG</strong> | Zwickauer Straße 145 | 09116 Chemnitz<br>
+            Telefon: +49 371 24359408 | E-Mail: kontakt@seniorenengel-alltagsbegleitung.de<br>
+            Institutskennzeichen (IK): 461438852 | Steuernummer: 215/118/00053
+        </div>
+
+        <div class="section-title">Leistungsempfänger/Leistungsempfängerin</div>
+        <div class="info-box">
+            <div class="form-row">
+                <div class="form-label">Vorname, Name:</div>
+                <div class="form-field"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-label">Anschrift:</div>
+                <div class="form-field"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-label">Geburtsdatum:</div>
+                <div class="form-field"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-label">Versicherten-Nummer:</div>
+                <div class="form-field"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-label">Pflegekasse:</div>
+                <div class="form-field"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-label">Institutskennzeichen (IK):</div>
+                <div class="form-field"></div>
+            </div>
+        </div>
+
+        <div class="content">
+            <p>Sehr geehrte Damen und Herren,</p>
+            <p>mit diesem Brief erteile ich eine Abtretungserklärung und gebe mein Einverständnis, dass der oben genannte Leistungserbringer folgende Positionen direkt mit ihnen abrechnen darf:</p>
+            
+            <ul class="leistungen-list">
+                <li>Entlastungsbetrag nach § 45b SGB XI</li>
+                <li>Umwandlungsanspruch nach § 45a SGB XI</li>
+                <li>Verhinderungspflege § 39 SGB XI</li>
+                <li>Kurzzeitpflege § 42 SGB XI</li>
+            </ul>
+
+            <p style="margin-top: 40px;">Mit freundlichen Grüßen</p>
+        </div>
+
+        <div class="signature-section">
+            <div class="signature-box">
+                Ort, Datum
+            </div>
+            <div class="signature-box">
+                Unterschrift Antragsteller/in oder Bevollmächtigte/r
+            </div>
+        </div>
+
+        <div class="footer">
+            Senioren Engel Alltagsbegleitung UG | Zwickauer Straße 145 | 09116 Chemnitz<br>
+            E-Mail: kontakt@seniorenengel-alltagsbegleitung.de<br>
+            Seite 15
+        </div>
+
+    </div>
+
+</body>
+</html>
