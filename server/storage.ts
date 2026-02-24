@@ -215,6 +215,7 @@ export interface IStorage {
 
   // User Onboarding
   updateUserOnboarding(userId: number): Promise<void>;
+  resetUserOnboarding(userId: number): Promise<void>;
 
   // System Settings
   getSystemSettings(): Promise<SystemSettings>;
@@ -1053,6 +1054,10 @@ export class DatabaseStorage implements IStorage {
 
   async updateUserOnboarding(userId: number): Promise<void> {
     await db.update(users).set({ onboardingCompleted: true }).where(eq(users.id, userId));
+  }
+
+  async resetUserOnboarding(userId: number): Promise<void> {
+    await db.update(users).set({ onboardingCompleted: false }).where(eq(users.id, userId));
   }
 
   async getSystemSettings(): Promise<SystemSettings> {

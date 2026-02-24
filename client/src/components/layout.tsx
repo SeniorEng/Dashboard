@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { useState, useRef, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import logo from "@assets/Logo-04_250x250_1764898165379.jpg";
 import { useAuth } from "@/hooks/use-auth";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -154,6 +154,18 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
 
   const displayLogo = companySettings?.logoUrl || logo;
 
+  const queryClient = useQueryClient();
+
+  const resetOnboarding = useMutation({
+    mutationFn: async () => {
+      const result = await api.post("/auth/onboarding/reset", {});
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+    },
+  });
+
   const handleLogout = async () => {
     try {
       await logout();
@@ -226,6 +238,14 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
                 <DropdownMenuItem onClick={() => navigate("/profile")} data-testid="menu-profile">
                   <Settings className="mr-2 h-4 w-4" />
                   Mein Profil
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => resetOnboarding.mutate()}
+                  disabled={resetOnboarding.isPending}
+                  data-testid="menu-restart-tour"
+                >
+                  <BookOpen className="mr-2 h-4 w-4" />
+                  Tour erneut starten
                 </DropdownMenuItem>
                 {user.isAdmin && (
                   <>
