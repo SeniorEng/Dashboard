@@ -636,7 +636,9 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         const s45b = settingsMap.get("entlastungsbetrag_45b");
         if (s45b && !s45b.enabled) effective45b = 0;
         if (s45b?.monthlyLimitCents !== null && s45b?.monthlyLimitCents !== undefined) {
-          const monthlyRemaining45b = Math.max(0, s45b.monthlyLimitCents - summaries.entlastungsbetrag45b.currentMonthUsedCents);
+          const carryoverAvailable = await this.getAvailableCarryoverCents(params.customerId, params.transactionDate);
+          const effectiveLimit = s45b.monthlyLimitCents + carryoverAvailable;
+          const monthlyRemaining45b = Math.max(0, effectiveLimit - summaries.entlastungsbetrag45b.currentMonthUsedCents);
           effective45b = Math.min(effective45b, monthlyRemaining45b);
         }
 
@@ -656,7 +658,9 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       } else {
         const preferences = await this.getBudgetPreferences(params.customerId);
         if (preferences?.monthlyLimitCents !== null && preferences?.monthlyLimitCents !== undefined) {
-          const monthlyRemaining45b = Math.max(0, preferences.monthlyLimitCents - summaries.entlastungsbetrag45b.currentMonthUsedCents);
+          const carryoverAvailable = await this.getAvailableCarryoverCents(params.customerId, params.transactionDate);
+          const effectiveLimit = preferences.monthlyLimitCents + carryoverAvailable;
+          const monthlyRemaining45b = Math.max(0, effectiveLimit - summaries.entlastungsbetrag45b.currentMonthUsedCents);
           effective45b = Math.min(effective45b, monthlyRemaining45b);
         }
       }
@@ -966,6 +970,45 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return { entlastungsbetrag45b, umwandlung45a, ersatzpflege39_42a };
   }
 
+  async getAvailableCarryoverCents(customerId: number, asOfDate: string): Promise<number> {
+    const carryoverAllocations = await db.select()
+      .from(budgetAllocations)
+      .where(and(
+        eq(budgetAllocations.customerId, customerId),
+        eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
+        eq(budgetAllocations.source, "carryover"),
+        lte(budgetAllocations.validFrom, asOfDate),
+        or(
+          isNull(budgetAllocations.expiresAt),
+          gte(budgetAllocations.expiresAt, asOfDate)
+        )
+      ));
+
+    if (carryoverAllocations.length === 0) return 0;
+
+    const allocationIds = carryoverAllocations.map(a => a.id);
+    const consumed = await db.select({
+      allocationId: budgetTransactions.allocationId,
+      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+    })
+      .from(budgetTransactions)
+      .where(and(
+        inArray(budgetTransactions.allocationId, allocationIds),
+        sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`
+      ))
+      .groupBy(budgetTransactions.allocationId);
+
+    const consumedMap = new Map(consumed.map(c => [c.allocationId, Number(c.total)]));
+
+    let totalAvailable = 0;
+    for (const alloc of carryoverAllocations) {
+      const used = consumedMap.get(alloc.id) ?? 0;
+      totalAvailable += Math.max(0, alloc.amountCents - used);
+    }
+
+    return totalAvailable;
+  }
+
   async processExpiredCarryover(customerId: number): Promise<BudgetTransaction[]> {
     const today = todayISO();
 
@@ -1224,7 +1267,14 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           ));
 
         const alreadyUsedThisMonth = Number(monthTransactions[0]?.total ?? 0);
-        const monthlyRemaining = Math.max(0, pot.monthlyLimitCents - alreadyUsedThisMonth);
+
+        let effectiveMonthlyLimit = pot.monthlyLimitCents;
+        if (pot.budgetType === "entlastungsbetrag_45b") {
+          const carryoverAvailable = await this.getAvailableCarryoverCents(params.customerId, params.transactionDate);
+          effectiveMonthlyLimit = pot.monthlyLimitCents + carryoverAvailable;
+        }
+
+        const monthlyRemaining = Math.max(0, effectiveMonthlyLimit - alreadyUsedThisMonth);
         maxConsumable = Math.min(remaining, monthlyRemaining);
       }
 
