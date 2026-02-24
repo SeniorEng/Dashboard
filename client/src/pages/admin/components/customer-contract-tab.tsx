@@ -180,13 +180,13 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
     </Button>
   );
 
-  const saveCancel = (onSave: () => void, isSaving: boolean, extraDisabled = false) => (
+  const saveCancel = (onSave: () => void, isSaving: boolean, testIdPrefix: string, extraDisabled = false) => (
     <div className="flex items-center gap-2 pt-3">
       <Button
         className={componentStyles.btnPrimary}
         onClick={onSave}
         disabled={isSaving || extraDisabled}
-        data-testid="button-save"
+        data-testid={`button-save-${testIdPrefix}`}
       >
         {isSaving ? (
           <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
@@ -199,7 +199,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
         variant="outline"
         onClick={cancelEditing}
         disabled={isSaving}
-        data-testid="button-cancel"
+        data-testid={`button-cancel-${testIdPrefix}`}
       >
         <X className={`${iconSize.sm} mr-2`} />
         Abbrechen
@@ -325,7 +325,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
                 </div>
               </div>
             </div>
-            {saveCancel(handleSaveVertragsdaten, saving)}
+            {saveCancel(handleSaveVertragsdaten, saving, "vertragsdaten")}
           </div>
         ) : (
           <div className="space-y-3" data-testid="text-contract">
@@ -389,7 +389,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
               disabled={!contract}
               data-testid="input-vereinbarte-leistungen"
             />
-            {saveCancel(handleSaveLeistungen, saving, !contract)}
+            {saveCancel(handleSaveLeistungen, saving, "leistungen", !contract)}
           </div>
         ) : (
           <p className="text-gray-700 whitespace-pre-wrap" data-testid="text-vereinbarte-leistungen">

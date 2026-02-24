@@ -19,8 +19,7 @@ import { ErrorState } from "@/components/patterns/error-state";
 import type { Customer, CustomerContact } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
-import { format, parseISO, isAfter, isBefore, startOfToday } from "date-fns";
-import { de } from "date-fns/locale";
+import { formatDateForDisplay, todayISO } from "@shared/utils/datetime";
 import { UNDOCUMENTED_STATUSES } from "@shared/domain/appointments";
 import { CONTACT_TYPE_LABELS } from "@shared/domain/customers";
 import { formatAddress } from "@shared/utils/format";
@@ -147,7 +146,7 @@ export default function CustomerDetailPage() {
     },
   });
 
-  const today = startOfToday();
+  const today = todayISO();
   
   const undocumentedAppointments = appointments.filter(apt => 
     UNDOCUMENTED_STATUSES.includes(apt.status as typeof UNDOCUMENTED_STATUSES[number])
@@ -156,11 +155,11 @@ export default function CustomerDetailPage() {
   const displayAppointments = filterUndocumented ? undocumentedAppointments : appointments;
   
   const upcomingAppointments = displayAppointments
-    .filter(apt => isAfter(parseISO(apt.date), today) || apt.date === format(today, "yyyy-MM-dd"))
+    .filter(apt => apt.date >= today)
     .sort((a, b) => a.date.localeCompare(b.date));
   
   const pastAppointments = displayAppointments
-    .filter(apt => isBefore(parseISO(apt.date), today) && apt.date !== format(today, "yyyy-MM-dd"))
+    .filter(apt => apt.date < today)
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, filterUndocumented ? 50 : 5);
 
@@ -193,7 +192,7 @@ export default function CustomerDetailPage() {
   const phoneFestnetz = customer.festnetz ? formatPhoneForDisplay(customer.festnetz) : null;
   const hasPflegegrad = customer.pflegegrad && customer.pflegegrad > 0;
   const geburtsdatum = customer.geburtsdatum 
-    ? format(parseISO(customer.geburtsdatum), "dd.MM.yyyy", { locale: de })
+    ? formatDateForDisplay(customer.geburtsdatum)
     : null;
 
   return (
