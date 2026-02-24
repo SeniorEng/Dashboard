@@ -449,8 +449,9 @@ export default function CustomerDetailPage() {
             </h2>
             <p className="text-sm text-muted-foreground whitespace-pre-line" data-testid="text-agreed-services">
               {details?.contract?.vereinbarteLeistungen || "Keine Angabe"}
-            </CardContent>
-          </Card>
+            </p>
+          </CardContent>
+        </Card>
         )}
 
         {/* Budget Übersicht */}
