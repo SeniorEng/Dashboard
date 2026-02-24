@@ -12,7 +12,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { DEACTIVATION_REASON_SELECT_OPTIONS, DEACTIVATION_REASON_LABELS, type DeactivationReason } from "@shared/domain/customers";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
@@ -33,7 +32,6 @@ import {
   AlertCircle,
   Settings,
   FileCheck2,
-  CreditCard,
   UserCheck,
   UserX,
   CheckCircle2,
@@ -48,10 +46,6 @@ import { PricingSection } from "./components/customer-pricing-section";
 import { CustomerDocumentsSection } from "./components/customer-documents-section";
 import { CustomerContactsTab } from "./components/customer-contacts-tab";
 import { CustomerContractTab } from "./components/customer-contract-tab";
-
-function formatCents(cents: number): string {
-  return (cents / 100).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
-}
 
 const MISSING_LABELS: Record<string, string> = {
   pflegegrad: "Pflegegrad",
@@ -164,13 +158,6 @@ function ErstberatungConversionSection({
   );
 }
 
-interface BudgetSummary {
-  availableCents: number;
-  totalUsedCents: number;
-  monthlyLimitCents: number | null;
-  currentMonthUsedCents: number;
-}
-
 function BackfillSection({ customerId, onRefresh }: { customerId: number; onRefresh: () => void }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -263,99 +250,16 @@ function BackfillSection({ customerId, onRefresh }: { customerId: number; onRefr
 function BudgetsTabContent({
   customerId,
   customerDisplayName,
-  acceptsPrivatePayment,
   pflegegrad,
-  isToggling,
-  onTogglePrivatePayment,
   onRefresh,
 }: {
   customerId: number;
   customerDisplayName: string;
-  acceptsPrivatePayment: boolean;
   pflegegrad?: number;
-  isToggling: boolean;
-  onTogglePrivatePayment: (checked: boolean) => void;
   onRefresh: () => void;
 }) {
-  const { data: budget } = useQuery<BudgetSummary>({
-    queryKey: ["budget-summary", customerId],
-    queryFn: async () => {
-      const result = await api.get<BudgetSummary>(`/budget/${customerId}/summary`);
-      return unwrapResult(result);
-    },
-    staleTime: 30000,
-  });
-
   return (
     <>
-      <SectionCard
-        title="Abrechnung"
-        icon={<CreditCard className={iconSize.sm} />}
-      >
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <p className="text-sm font-medium text-gray-700">Private Zuzahlung</p>
-              <p className="text-xs text-gray-500">
-                Restbeträge über das Budget hinaus werden privat mit MwSt. berechnet
-              </p>
-            </div>
-            <Switch
-              checked={acceptsPrivatePayment}
-              onCheckedChange={onTogglePrivatePayment}
-              disabled={isToggling}
-              data-testid="switch-accepts-private-payment"
-            />
-          </div>
-
-          {budget && (
-            <div className="border-t pt-3">
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <p className="text-gray-500">Budget verfügbar</p>
-                  <p className={`font-semibold ${budget.availableCents > 0 ? "text-green-700" : "text-red-600"}`} data-testid="text-budget-available">
-                    {formatCents(budget.availableCents)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-500">Verbraucht (gesamt)</p>
-                  <p className="font-semibold text-gray-800" data-testid="text-budget-used">
-                    {formatCents(budget.totalUsedCents)}
-                  </p>
-                </div>
-                {budget.monthlyLimitCents !== null && (
-                  <>
-                    <div>
-                      <p className="text-gray-500">Monatslimit</p>
-                      <p className="font-medium text-gray-700">{formatCents(budget.monthlyLimitCents)}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-500">Diesen Monat verbraucht</p>
-                      <p className="font-medium text-gray-700">{formatCents(budget.currentMonthUsedCents)}</p>
-                    </div>
-                  </>
-                )}
-              </div>
-              {budget.availableCents <= 0 && acceptsPrivatePayment && (
-                <div className="mt-2 p-2 rounded bg-amber-50 border border-amber-200">
-                  <p className="text-xs text-amber-800 font-medium">
-                    <Wallet className="inline h-3 w-3 mr-1" />
-                    Budget aufgebraucht — weitere Leistungen werden privat berechnet
-                  </p>
-                </div>
-              )}
-              {budget.availableCents <= 0 && !acceptsPrivatePayment && (
-                <div className="mt-2 p-2 rounded bg-red-50 border border-red-200">
-                  <p className="text-xs text-red-800 font-medium">
-                    Budget aufgebraucht — private Zuzahlung ist nicht aktiviert
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </SectionCard>
-
       <SectionCard
         title="Budget-Einstellungen"
         icon={<Settings className={iconSize.sm} />}
@@ -415,8 +319,6 @@ export default function AdminCustomerDetail() {
   const { data: customer, isLoading, error, refetch } = useCustomer(customerId);
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [isToggling, setIsToggling] = useState(false);
-
   const [showDeactivateDialog, setShowDeactivateDialog] = useState(false);
   const [deactivationReason, setDeactivationReason] = useState<string>("");
   const [deactivationNote, setDeactivationNote] = useState<string>("");
@@ -438,25 +340,6 @@ export default function AdminCustomerDetail() {
     },
     onError: (err: Error) => {
       toast({ title: "Fehler", description: err.message, variant: "destructive" });
-    },
-  });
-
-  const togglePrivatePayment = useMutation({
-    mutationFn: async (accepts: boolean) => {
-      setIsToggling(true);
-      const result = await api.patch(`/admin/customers/${customerId}`, {
-        acceptsPrivatePayment: accepts,
-      });
-      return unwrapResult(result);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: customerKeys.detail(customerId) });
-      toast({ title: "Abrechnungseinstellung aktualisiert" });
-      setIsToggling(false);
-    },
-    onError: (err: Error) => {
-      toast({ title: "Fehler", description: err.message, variant: "destructive" });
-      setIsToggling(false);
     },
   });
 
@@ -674,10 +557,7 @@ export default function AdminCustomerDetail() {
               <BudgetsTabContent
                 customerId={customerId}
                 customerDisplayName={customerDisplayName}
-                acceptsPrivatePayment={customer.acceptsPrivatePayment ?? false}
                 pflegegrad={customer.pflegegrad ?? undefined}
-                isToggling={isToggling}
-                onTogglePrivatePayment={(checked) => togglePrivatePayment.mutate(checked)}
                 onRefresh={refetch}
               />
             </TabsContent>

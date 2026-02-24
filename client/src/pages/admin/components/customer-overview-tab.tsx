@@ -22,36 +22,10 @@ import { AddressFields } from "./address-fields";
 import { EmployeeMatching } from "./employee-matching";
 import {
   User2, MapPin, Phone, Mail, Shield, Users, Calendar, FileText,
-  PawPrint, Stethoscope, ClipboardList, History, Send, Pencil, Save, X,
+  PawPrint, Stethoscope, History, Send, Pencil, Save, X,
   Loader2, Car, Truck,
 } from "lucide-react";
 import type { CustomerDetail } from "@/lib/api/types";
-
-const SERVICE_LABELS: Record<string, string> = {
-  serviceHaushaltHilfe: "Haushaltshilfe",
-  serviceMahlzeiten: "Mahlzeiten",
-  serviceReinigung: "Reinigung",
-  serviceWaeschePflege: "Wäschepflege",
-  serviceEinkauf: "Einkauf",
-  serviceTagesablauf: "Tagesablauf",
-  serviceAlltagsverrichtungen: "Alltagsverrichtungen",
-  serviceTerminbegleitung: "Terminbegleitung",
-  serviceBotengaenge: "Botengänge",
-  serviceGrundpflege: "Grundpflege",
-  serviceFreizeitbegleitung: "Freizeitbegleitung",
-  serviceDemenzbetreuung: "Demenzbetreuung",
-  serviceGesellschaft: "Gesellschaft",
-  serviceSozialeKontakte: "Soziale Kontakte",
-  serviceFreizeitgestaltung: "Freizeitgestaltung",
-  serviceKreativ: "Kreative Beschäftigung",
-};
-
-function getSelectedServices(needsAssessment: CustomerDetail["needsAssessment"]): string[] {
-  if (!needsAssessment) return [];
-  return Object.entries(needsAssessment)
-    .filter(([key, value]) => key.startsWith("service") && value === true)
-    .map(([key]) => SERVICE_LABELS[key] || key);
-}
 
 interface CustomerOverviewTabProps {
   customer: CustomerDetail;
@@ -100,7 +74,6 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
 
   const [documentDeliveryMethod, setDocumentDeliveryMethod] = useState<"email" | "post">("email");
 
-  const selectedServices = getSelectedServices(customer.needsAssessment);
   const currentCareLevel = customer.careLevelHistory?.find((e) => !e.validTo);
 
   const employeeOptions = useMemo(() => [
@@ -849,42 +822,6 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
         )}
       </SectionCard>
 
-      <SectionCard
-        title="Bedarfserfassung"
-        icon={<ClipboardList className={iconSize.sm} />}
-      >
-        {customer.needsAssessment ? (
-          <div className="space-y-3">
-            {selectedServices.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {selectedServices.map((service, index) => (
-                  <StatusBadge key={index} type="info" value={service} />
-                ))}
-              </div>
-            )}
-            {customer.needsAssessment.sonstigeLeistungen && (
-              <div className={selectedServices.length > 0 ? "pt-3 border-t" : ""}>
-                <p className="text-sm text-gray-500 mb-1">Sonstige Leistungen</p>
-                <p className="text-gray-700 text-sm">{customer.needsAssessment.sonstigeLeistungen}</p>
-              </div>
-            )}
-            {customer.needsAssessment.householdSize && (
-              <div className="pt-3 border-t">
-                <p className="text-sm text-gray-500">Haushaltsgröße</p>
-                <p className="text-gray-700">{customer.needsAssessment.householdSize} Person(en)</p>
-              </div>
-            )}
-            {customer.needsAssessment.anamnese && (
-              <div className="pt-3 border-t">
-                <p className="text-sm text-gray-500">Anamnese</p>
-                <p className="text-gray-700 whitespace-pre-wrap">{customer.needsAssessment.anamnese}</p>
-              </div>
-            )}
-          </div>
-        ) : (
-          <p className="text-sm text-gray-400" data-testid="text-needs-assessment-empty">Keine Bedarfserfassung vorhanden</p>
-        )}
-      </SectionCard>
     </div>
   );
 }
