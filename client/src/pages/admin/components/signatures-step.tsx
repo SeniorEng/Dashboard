@@ -116,6 +116,17 @@ function renderClientSide(htmlContent: string, formData: CustomerFormDataForPrev
 }
 
 function openPrintPreview(html: string, title: string) {
+  const isFullDocument = html.trimStart().startsWith("<!DOCTYPE") || html.trimStart().startsWith("<html");
+
+  if (isFullDocument) {
+    const win = window.open("", "_blank");
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+    }
+    return;
+  }
+
   const fullHtml = `<!DOCTYPE html>
 <html lang="de">
 <head>

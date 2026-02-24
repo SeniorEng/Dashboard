@@ -275,6 +275,10 @@ function escapeHtml(str: string): string {
 }
 
 export function wrapInPrintableHtml(bodyHtml: string, title: string): string {
+  const trimmed = bodyHtml.trimStart();
+  if (trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html")) {
+    return bodyHtml;
+  }
   return `<!DOCTYPE html>
 <html lang="de">
 <head>

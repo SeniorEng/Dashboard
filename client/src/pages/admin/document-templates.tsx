@@ -659,13 +659,25 @@ export function DocumentTemplatesContent() {
 
             <TabsContent value="preview" className="mt-4">
               {previewHtml ? (
-                <div className="border rounded-lg p-6 bg-white">
-                  <div
-                    className="prose prose-sm max-w-none"
-                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(previewHtml, { ALLOWED_TAGS: ['html','head','body','style','h1','h2','h3','h4','h5','h6','p','br','strong','em','ul','ol','li','table','tr','td','th','thead','tbody','tfoot','caption','colgroup','col','img','div','span','hr','b','i','u','a','header','footer','section','nav','main','article','aside','figure','figcaption','blockquote','pre','code','dl','dt','dd','meta','title','label','input'], ALLOWED_ATTR: ['class','style','src','alt','width','height','colspan','rowspan','href','id','lang','charset','name','content','type','for','value','placeholder','readonly'] }) }}
-                    data-testid="preview-content"
-                  />
-                </div>
+                (previewHtml.trimStart().startsWith("<!DOCTYPE") || previewHtml.trimStart().startsWith("<html")) ? (
+                  <div className="border rounded-lg bg-white overflow-hidden" style={{ height: "70vh" }}>
+                    <iframe
+                      srcDoc={previewHtml}
+                      className="w-full h-full border-0"
+                      sandbox="allow-same-origin"
+                      title="Dokumentenvorschau"
+                      data-testid="preview-content"
+                    />
+                  </div>
+                ) : (
+                  <div className="border rounded-lg p-6 bg-white">
+                    <div
+                      className="prose prose-sm max-w-none"
+                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(previewHtml, { ALLOWED_TAGS: ['html','head','body','style','h1','h2','h3','h4','h5','h6','p','br','strong','em','ul','ol','li','table','tr','td','th','thead','tbody','tfoot','caption','colgroup','col','img','div','span','hr','b','i','u','a','header','footer','section','nav','main','article','aside','figure','figcaption','blockquote','pre','code','dl','dt','dd','meta','title','label','input'], ALLOWED_ATTR: ['class','style','src','alt','width','height','colspan','rowspan','href','id','lang','charset','name','content','type','for','value','placeholder','readonly'] }) }}
+                      data-testid="preview-content"
+                    />
+                  </div>
+                )
               ) : (
                 <div className="text-center py-12 text-gray-400">
                   <Eye className="h-12 w-12 mx-auto mb-3 opacity-30" />
