@@ -38,7 +38,7 @@ const apiLimiter = rateLimit({
   message: { message: "Zu viele Anfragen, bitte später erneut versuchen." },
 });
 
-const authLimiter = rateLimit({
+const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
   standardHeaders: true,
@@ -46,7 +46,7 @@ const authLimiter = rateLimit({
   message: { message: "Zu viele Anmeldeversuche, bitte später erneut versuchen." },
 });
 
-app.use("/api/auth/", authLimiter);
+app.post("/api/auth/login", loginLimiter);
 app.use("/api/", apiLimiter);
 
 export function log(message: string, source = "express") {
