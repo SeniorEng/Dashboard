@@ -437,7 +437,53 @@ const updateContractSchema = z.object({
   contractDate: z.string().nullable().optional(),
   contractStart: z.string().optional(),
   contractEnd: z.string().nullable().optional(),
+  hoursPerPeriod: z.number().int().min(0).optional(),
+  periodType: z.enum(["week", "month", "year"]).optional(),
 });
+
+const createContractSchema = z.object({
+  contractStart: z.string(),
+  contractDate: z.string().nullable().optional(),
+  contractEnd: z.string().nullable().optional(),
+  hoursPerPeriod: z.number().int().min(0).optional(),
+  periodType: z.enum(["week", "month", "year"]).optional(),
+});
+
+router.post("/customers/:id/contract", asyncHandler("Vertrag konnte nicht angelegt werden", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
+    return;
+  }
+
+  const customer = await storage.getCustomer(id);
+  if (!customer) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+    return;
+  }
+
+  const existingContract = (customer as any).contract;
+  if (existingContract) {
+    res.status(409).json({ error: "CONFLICT", message: "Kunde hat bereits einen aktiven Vertrag" });
+    return;
+  }
+
+  const data = createContractSchema.parse(req.body);
+  const result = await customerManagementStorage.createCustomerContract({
+    customerId: id,
+    contractStart: data.contractStart,
+    contractDate: data.contractDate || null,
+    contractEnd: data.contractEnd || null,
+    hoursPerPeriod: data.hoursPerPeriod ?? 0,
+    periodType: data.periodType ?? "week",
+    status: "active",
+    hauswirtschaftRateCents: 0,
+    alltagsbegleitungRateCents: 0,
+    kilometerRateCents: 0,
+  });
+
+  res.status(201).json(result);
+}));
 
 router.patch("/customers/:id/contract", asyncHandler("Vertrag konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
   const id = parseInt(req.params.id);

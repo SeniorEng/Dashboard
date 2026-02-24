@@ -4,9 +4,17 @@ import { formatDateForDisplay } from "@shared/utils/datetime";
 import { SectionCard } from "@/components/patterns/section-card";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { customerKeys } from "@/features/customers";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api";
@@ -43,12 +51,29 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
   const [editingSection, setEditingSection] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const [contractStart, setContractStart] = useState("");
+  const [contractDate, setContractDate] = useState("");
+  const [contractEnd, setContractEnd] = useState("");
+  const [hoursPerPeriod, setHoursPerPeriod] = useState(0);
+  const [periodType, setPeriodType] = useState("week");
+
   const [vereinbarteLeistungen, setVereinbarteLeistungen] = useState("");
   const [acceptsPrivatePayment, setAcceptsPrivatePayment] = useState(false);
 
+  const [creatingContract, setCreatingContract] = useState(false);
+  const [newContractStart, setNewContractStart] = useState("");
+
+  const contract = customer.currentContract;
+
   const startEditing = (section: string) => {
-    if (section === "leistungen") {
-      setVereinbarteLeistungen(customer.currentContract?.vereinbarteLeistungen || "");
+    if (section === "vertragsdaten" && contract) {
+      setContractStart(contract.contractStart || "");
+      setContractDate(contract.contractDate || "");
+      setContractEnd(contract.contractEnd || "");
+      setHoursPerPeriod(contract.hoursPerPeriod || 0);
+      setPeriodType(contract.periodType || "week");
+    } else if (section === "leistungen") {
+      setVereinbarteLeistungen(contract?.vereinbarteLeistungen || "");
     } else if (section === "abrechnung") {
       setAcceptsPrivatePayment(customer.acceptsPrivatePayment ?? false);
     }
@@ -64,10 +89,53 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
     queryClient.invalidateQueries({ queryKey: customerKeys.lists() });
   };
 
+  const handleCreateContract = async () => {
+    if (!newContractStart) {
+      toast({ variant: "destructive", title: "Fehler", description: "Bitte Vertragsbeginn angeben." });
+      return;
+    }
+    setSaving(true);
+    try {
+      const result = await api.post(`/admin/customers/${customerId}/contract`, {
+        contractStart: newContractStart,
+      });
+      unwrapResult(result);
+      toast({ title: "Vertrag angelegt" });
+      invalidateCustomer();
+      setCreatingContract(false);
+      setNewContractStart("");
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message || "Vertrag konnte nicht angelegt werden." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveVertragsdaten = async () => {
+    setSaving(true);
+    try {
+      const result = await api.patch(`/admin/customers/${customerId}/contract`, {
+        contractStart: contractStart || undefined,
+        contractDate: contractDate || null,
+        contractEnd: contractEnd || null,
+        hoursPerPeriod,
+        periodType,
+      });
+      unwrapResult(result);
+      toast({ title: "Vertragsdaten gespeichert" });
+      invalidateCustomer();
+      setEditingSection(null);
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message || "Speichern fehlgeschlagen." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleSaveLeistungen = async () => {
     setSaving(true);
     try {
-      if (customer.currentContract?.id) {
+      if (contract?.id) {
         const contractPatch = await api.patch(`/admin/customers/${customerId}/contract`, {
           vereinbarteLeistungen: vereinbarteLeistungen.trim() || null,
         });
@@ -112,45 +180,192 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
     </Button>
   );
 
+  const saveCancel = (onSave: () => void, isSaving: boolean, extraDisabled = false) => (
+    <div className="flex items-center gap-2 pt-3">
+      <Button
+        className={componentStyles.btnPrimary}
+        onClick={onSave}
+        disabled={isSaving || extraDisabled}
+        data-testid="button-save"
+      >
+        {isSaving ? (
+          <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+        ) : (
+          <Save className={`${iconSize.sm} mr-2`} />
+        )}
+        Speichern
+      </Button>
+      <Button
+        variant="outline"
+        onClick={cancelEditing}
+        disabled={isSaving}
+        data-testid="button-cancel"
+      >
+        <X className={`${iconSize.sm} mr-2`} />
+        Abbrechen
+      </Button>
+    </div>
+  );
+
   return (
     <div className="space-y-4">
       <SectionCard
         title="Vertragsdaten"
         icon={<FileText className={iconSize.sm} />}
+        actions={contract && editingSection !== "vertragsdaten" ? editButton("vertragsdaten") : undefined}
       >
-        {customer.currentContract ? (
+        {!contract ? (
+          <div className="space-y-3">
+            {creatingContract ? (
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="newContractStart">Vertragsbeginn</Label>
+                  <Input
+                    id="newContractStart"
+                    type="date"
+                    value={newContractStart}
+                    onChange={(e) => setNewContractStart(e.target.value)}
+                    data-testid="input-new-contract-start"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    className={componentStyles.btnPrimary}
+                    onClick={handleCreateContract}
+                    disabled={saving}
+                    data-testid="button-create-contract"
+                  >
+                    {saving ? (
+                      <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                    ) : (
+                      <Save className={`${iconSize.sm} mr-2`} />
+                    )}
+                    Vertrag anlegen
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => { setCreatingContract(false); setNewContractStart(""); }}
+                    disabled={saving}
+                    data-testid="button-cancel-create-contract"
+                  >
+                    <X className={`${iconSize.sm} mr-2`} />
+                    Abbrechen
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-400" data-testid="text-no-contract">Kein aktiver Vertrag vorhanden</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCreatingContract(true)}
+                  data-testid="button-start-create-contract"
+                >
+                  Vertrag anlegen
+                </Button>
+              </div>
+            )}
+          </div>
+        ) : editingSection === "vertragsdaten" ? (
+          <div className="space-y-4">
+            <div className="grid gap-4 grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="contractStart">Vertragsbeginn</Label>
+                <Input
+                  id="contractStart"
+                  type="date"
+                  value={contractStart}
+                  onChange={(e) => setContractStart(e.target.value)}
+                  data-testid="input-contract-start"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="contractDate">Vertragsabschluss</Label>
+                <Input
+                  id="contractDate"
+                  type="date"
+                  value={contractDate}
+                  onChange={(e) => setContractDate(e.target.value)}
+                  data-testid="input-contract-date"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="contractEnd">Vertragsende</Label>
+                <Input
+                  id="contractEnd"
+                  type="date"
+                  value={contractEnd}
+                  onChange={(e) => setContractEnd(e.target.value)}
+                  data-testid="input-contract-end"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hoursPerPeriod">Stundenumfang</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="hoursPerPeriod"
+                    type="number"
+                    min={0}
+                    value={hoursPerPeriod}
+                    onChange={(e) => setHoursPerPeriod(parseInt(e.target.value) || 0)}
+                    className="w-20"
+                    data-testid="input-hours-per-period"
+                  />
+                  <Select value={periodType} onValueChange={setPeriodType}>
+                    <SelectTrigger className="flex-1" data-testid="select-period-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="week">pro Woche</SelectItem>
+                      <SelectItem value="month">pro Monat</SelectItem>
+                      <SelectItem value="year">pro Jahr</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+            {saveCancel(handleSaveVertragsdaten, saving)}
+          </div>
+        ) : (
           <div className="space-y-3" data-testid="text-contract">
             <div className="grid gap-3 grid-cols-2">
               <div>
+                <p className="text-sm text-gray-500">Vertragsbeginn</p>
+                <p className="font-medium" data-testid="text-contract-start">
+                  {formatDateForDisplay(contract.contractStart)}
+                </p>
+              </div>
+              <div>
                 <p className="text-sm text-gray-500">Vertragsabschluss</p>
-                <p className="font-medium">
-                  {customer.currentContract.contractDate
-                    ? formatDateForDisplay(customer.currentContract.contractDate)
+                <p className="font-medium" data-testid="text-contract-date">
+                  {contract.contractDate
+                    ? formatDateForDisplay(contract.contractDate)
                     : "Nicht angegeben"}
                 </p>
               </div>
               <div>
-                <p className="text-sm text-gray-500">Vertragsbeginn</p>
-                <p className="font-medium" data-testid="text-contract-start">
-                  {formatDateForDisplay(customer.currentContract.contractStart)}
+                <p className="text-sm text-gray-500">Vertragsende</p>
+                <p className="font-medium" data-testid="text-contract-end">
+                  {contract.contractEnd
+                    ? formatDateForDisplay(contract.contractEnd)
+                    : "Kein Ende festgelegt"}
                 </p>
               </div>
               <div>
                 <p className="text-sm text-gray-500">Vertragsumfang</p>
                 <p className="font-medium" data-testid="text-contract-hours">
-                  {customer.currentContract.hoursPerPeriod > 0
-                    ? `${customer.currentContract.hoursPerPeriod} Std. / ${formatPeriodType(customer.currentContract.periodType)}`
+                  {contract.hoursPerPeriod > 0
+                    ? `${contract.hoursPerPeriod} Std. / ${formatPeriodType(contract.periodType)}`
                     : "Nicht festgelegt"}
                 </p>
               </div>
               <div>
                 <p className="text-sm text-gray-500">Status</p>
-                <StatusBadge type="contract" value={customer.currentContract.status} />
+                <StatusBadge type="contract" value={contract.status} />
               </div>
             </div>
           </div>
-        ) : (
-          <p className="text-sm text-gray-400" data-testid="text-no-contract">Kein aktiver Vertrag vorhanden</p>
         )}
       </SectionCard>
 
@@ -161,7 +376,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
       >
         {editingSection === "leistungen" ? (
           <div className="space-y-4">
-            {!customer.currentContract && (
+            {!contract && (
               <p className="text-xs text-amber-600 bg-amber-50 p-2 rounded">
                 Kein aktiver Vertrag vorhanden. Leistungstext kann erst nach Vertragsanlage gespeichert werden.
               </p>
@@ -171,37 +386,14 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
               onChange={(e) => setVereinbarteLeistungen(e.target.value)}
               placeholder="Beschreibung der vereinbarten Leistungen..."
               rows={4}
-              disabled={!customer.currentContract}
+              disabled={!contract}
               data-testid="input-vereinbarte-leistungen"
             />
-            <div className="flex items-center gap-2 pt-3">
-              <Button
-                className={componentStyles.btnPrimary}
-                onClick={handleSaveLeistungen}
-                disabled={saving || !customer.currentContract}
-                data-testid="button-save-leistungen"
-              >
-                {saving ? (
-                  <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
-                ) : (
-                  <Save className={`${iconSize.sm} mr-2`} />
-                )}
-                Speichern
-              </Button>
-              <Button
-                variant="outline"
-                onClick={cancelEditing}
-                disabled={saving}
-                data-testid="button-cancel-leistungen"
-              >
-                <X className={`${iconSize.sm} mr-2`} />
-                Abbrechen
-              </Button>
-            </div>
+            {saveCancel(handleSaveLeistungen, saving, !contract)}
           </div>
         ) : (
           <p className="text-gray-700 whitespace-pre-wrap" data-testid="text-vereinbarte-leistungen">
-            {customer.currentContract?.vereinbarteLeistungen || "Keine Angabe"}
+            {contract?.vereinbarteLeistungen || "Keine Angabe"}
           </p>
         )}
       </SectionCard>
