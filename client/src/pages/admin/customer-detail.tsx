@@ -171,6 +171,92 @@ interface BudgetSummary {
   currentMonthUsedCents: number;
 }
 
+function BackfillSection({ customerId, onRefresh }: { customerId: number; onRefresh: () => void }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [isRunning, setIsRunning] = useState(false);
+  const [result, setResult] = useState<{ total: number; created: number; skipped: number; errors: number } | null>(null);
+
+  const { data: preview, isLoading: previewLoading } = useQuery<{
+    totalAppointments: number;
+    customerBreakdown: Record<string, { count: number; missingSignatures: number; dates: string[] }>;
+  }>({
+    queryKey: ["backfill-preview", customerId],
+    queryFn: async () => {
+      const res = await api.get(`/admin/budget/backfill-preview?customerId=${customerId}`);
+      return unwrapResult(res);
+    },
+    staleTime: 60000,
+  });
+
+  const count = preview?.totalAppointments || 0;
+
+  if (previewLoading || count === 0) return null;
+
+  const handleBackfill = async () => {
+    setIsRunning(true);
+    setResult(null);
+    try {
+      const res = await api.post("/admin/budget/backfill-transactions", { customerId });
+      const data = unwrapResult(res) as { total: number; created: number; skipped: number; errors: number };
+      setResult(data);
+      if (data.created > 0) {
+        toast({ title: "Nachbuchung erfolgreich", description: `${data.created} Budget-Buchungen erstellt.` });
+        queryClient.invalidateQueries({ queryKey: ["budget-summary", customerId] });
+        queryClient.invalidateQueries({ queryKey: ["budget-transactions", customerId] });
+        queryClient.invalidateQueries({ queryKey: ["backfill-preview", customerId] });
+        onRefresh();
+      }
+      if (data.errors > 0) {
+        toast({ variant: "destructive", title: "Teilweise Fehler", description: `${data.errors} Termine konnten nicht nachgebucht werden.` });
+      }
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Fehler", description: err.message || "Nachbuchung fehlgeschlagen" });
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  return (
+    <SectionCard
+      title="Importierte Termine nachbuchen"
+      icon={<AlertCircle className={iconSize.sm} />}
+    >
+      <div className="space-y-3">
+        <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">
+          <p className="text-sm text-amber-800">
+            <strong>{count} Termin{count !== 1 ? "e" : ""}</strong> ohne Budget-Buchung gefunden.
+            Diese Termine wurden importiert und haben den Dokumentationsprozess nicht durchlaufen.
+          </p>
+          <p className="text-xs text-amber-700 mt-1">
+            Die Nachbuchung setzt "SYSTEMGENERIERT" als Unterschrift und erstellt die fehlenden Budget-Transaktionen.
+          </p>
+        </div>
+
+        {result && (
+          <div className="p-3 rounded-lg bg-green-50 border border-green-200 text-sm text-green-800">
+            <p><strong>Ergebnis:</strong> {result.created} erstellt, {result.skipped} übersprungen, {result.errors} Fehler</p>
+          </div>
+        )}
+
+        <Button
+          className={`w-full ${componentStyles.btnPrimary}`}
+          onClick={handleBackfill}
+          disabled={isRunning}
+          data-testid="button-backfill-budgets"
+        >
+          {isRunning ? (
+            <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+          ) : (
+            <CheckCircle2 className={`${iconSize.sm} mr-2`} />
+          )}
+          {count} Termin{count !== 1 ? "e" : ""} nachbuchen
+        </Button>
+      </div>
+    </SectionCard>
+  );
+}
+
 function BudgetsTabContent({
   customerId,
   customerDisplayName,
@@ -295,6 +381,8 @@ function BudgetsTabContent({
           onRefresh={onRefresh}
         />
       </SectionCard>
+
+      <BackfillSection customerId={customerId} onRefresh={onRefresh} />
     </>
   );
 }

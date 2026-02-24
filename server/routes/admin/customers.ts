@@ -4,6 +4,8 @@ import { customerManagementStorage } from "../../storage/customer-management";
 import { authService } from "../../services/auth";
 import { birthdaysCache } from "../../services/cache";
 import { budgetLedgerStorage } from "../../storage/budget-ledger";
+import { computeDataHash } from "../../services/signature-integrity";
+import { auditService } from "../../services/audit";
 import { formatDateISO, isChild } from "@shared/utils/datetime";
 import { 
   insertCustomerInsuranceSchema,
@@ -1015,7 +1017,63 @@ router.post("/customers/match-employees", asyncHandler("Matching konnte nicht du
   res.json(results);
 }));
 
+router.get("/budget/backfill-preview", asyncHandler("Vorschau fehlgeschlagen", async (req: Request, res: Response) => {
+  const customerIdFilter = req.query.customerId ? parseInt(req.query.customerId as string) : null;
+
+  const conditions = [
+    eq(appointments.status, "completed"),
+    isNotNull(appointments.actualStart),
+    isNotNull(appointments.actualEnd),
+    isNull(appointments.deletedAt),
+    sql`${appointments.id} NOT IN (SELECT appointment_id FROM budget_transactions WHERE appointment_id IS NOT NULL)`,
+  ];
+  if (customerIdFilter) {
+    conditions.push(eq(appointments.customerId, customerIdFilter));
+  }
+
+  const appointmentsWithoutBudget = await db.select({
+    id: appointments.id,
+    customerId: appointments.customerId,
+    date: appointments.date,
+    serviceType: appointments.serviceType,
+    actualStart: appointments.actualStart,
+    actualEnd: appointments.actualEnd,
+    signatureData: appointments.signatureData,
+  })
+  .from(appointments)
+  .where(and(...conditions))
+  .orderBy(appointments.date);
+
+  const byCustomer: Record<number, { count: number; missingSignatures: number; dates: string[] }> = {};
+  for (const appt of appointmentsWithoutBudget) {
+    if (!byCustomer[appt.customerId]) {
+      byCustomer[appt.customerId] = { count: 0, missingSignatures: 0, dates: [] };
+    }
+    byCustomer[appt.customerId].count++;
+    if (!appt.signatureData) byCustomer[appt.customerId].missingSignatures++;
+    byCustomer[appt.customerId].dates.push(String(appt.date));
+  }
+
+  res.json({
+    totalAppointments: appointmentsWithoutBudget.length,
+    customerBreakdown: byCustomer,
+  });
+}));
+
 router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fehlgeschlagen", async (req: Request, res: Response) => {
+  const customerIdFilter = req.body.customerId ? parseInt(req.body.customerId) : null;
+
+  const conditions = [
+    eq(appointments.status, "completed"),
+    isNotNull(appointments.actualStart),
+    isNotNull(appointments.actualEnd),
+    isNull(appointments.deletedAt),
+    sql`${appointments.id} NOT IN (SELECT appointment_id FROM budget_transactions WHERE appointment_id IS NOT NULL)`,
+  ];
+  if (customerIdFilter) {
+    conditions.push(eq(appointments.customerId, customerIdFilter));
+  }
+
   const appointmentsWithoutBudget = await db.select({
     id: appointments.id,
     customerId: appointments.customerId,
@@ -1025,18 +1083,15 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
     actualEnd: appointments.actualEnd,
     travelKilometers: appointments.travelKilometers,
     customerKilometers: appointments.customerKilometers,
+    signatureData: appointments.signatureData,
   })
   .from(appointments)
-  .where(and(
-    eq(appointments.status, "completed"),
-    isNotNull(appointments.actualStart),
-    isNotNull(appointments.actualEnd),
-    isNull(appointments.deletedAt),
-    sql`${appointments.id} NOT IN (SELECT appointment_id FROM budget_transactions WHERE appointment_id IS NOT NULL)`
-  ))
+  .where(and(...conditions))
   .orderBy(appointments.date);
 
   const results: Array<{ appointmentId: number; customerId: number; date: string; status: string; error?: string }> = [];
+  const systemSignatureText = "SYSTEMGENERIERT";
+  const signatureHash = computeDataHash(systemSignatureText);
 
   for (const appt of appointmentsWithoutBudget) {
     const startParts = appt.actualStart!.split(":").map(Number);
@@ -1059,6 +1114,15 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
     }
 
     try {
+      if (!appt.signatureData) {
+        await db.update(appointments).set({
+          signatureData: systemSignatureText,
+          signatureHash: signatureHash,
+          signedAt: new Date(),
+          signedByUserId: req.user!.id,
+        }).where(eq(appointments.id, appt.id));
+      }
+
       await budgetLedgerStorage.createConsumptionTransaction({
         customerId: appt.customerId,
         appointmentId: appt.id,
@@ -1069,6 +1133,16 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
         customerKilometers: customerKm,
         userId: req.user?.id,
       });
+
+      await auditService.log(
+        req.user!.id,
+        "documentation_submitted",
+        "appointment",
+        appt.id,
+        { customerId: appt.customerId, systemBackfill: true, hasSignature: true, signatureType: "SYSTEMGENERIERT" },
+        req.ip || req.socket.remoteAddress
+      );
+
       results.push({ appointmentId: appt.id, customerId: appt.customerId, date: String(appt.date), status: "created" });
     } catch (err: any) {
       results.push({ appointmentId: appt.id, customerId: appt.customerId, date: String(appt.date), status: "error", error: err.message });
