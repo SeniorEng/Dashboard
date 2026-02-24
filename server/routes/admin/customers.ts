@@ -1114,15 +1114,6 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
     }
 
     try {
-      if (!appt.signatureData) {
-        await db.update(appointments).set({
-          signatureData: systemSignatureText,
-          signatureHash: signatureHash,
-          signedAt: new Date(),
-          signedByUserId: req.user!.id,
-        }).where(eq(appointments.id, appt.id));
-      }
-
       await budgetLedgerStorage.createConsumptionTransaction({
         customerId: appt.customerId,
         appointmentId: appt.id,
@@ -1133,6 +1124,15 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
         customerKilometers: customerKm,
         userId: req.user?.id,
       });
+
+      if (!appt.signatureData) {
+        await db.update(appointments).set({
+          signatureData: systemSignatureText,
+          signatureHash: signatureHash,
+          signedAt: new Date(),
+          signedByUserId: req.user!.id,
+        }).where(eq(appointments.id, appt.id));
+      }
 
       await auditService.log(
         req.user!.id,

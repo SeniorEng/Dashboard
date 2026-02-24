@@ -200,15 +200,18 @@ function BackfillSection({ customerId, onRefresh }: { customerId: number; onRefr
       const res = await api.post("/admin/budget/backfill-transactions", { customerId });
       const data = unwrapResult(res) as { total: number; created: number; skipped: number; errors: number };
       setResult(data);
-      if (data.created > 0) {
-        toast({ title: "Nachbuchung erfolgreich", description: `${data.created} Budget-Buchungen erstellt.` });
-        queryClient.invalidateQueries({ queryKey: ["budget-summary", customerId] });
-        queryClient.invalidateQueries({ queryKey: ["budget-transactions", customerId] });
-        queryClient.invalidateQueries({ queryKey: ["backfill-preview", customerId] });
-        onRefresh();
-      }
-      if (data.errors > 0) {
-        toast({ variant: "destructive", title: "Teilweise Fehler", description: `${data.errors} Termine konnten nicht nachgebucht werden.` });
+      queryClient.invalidateQueries({ queryKey: ["budget-summary", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["budget-transactions", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["backfill-preview", customerId] });
+      onRefresh();
+      if (data.errors > 0 && data.created > 0) {
+        toast({ variant: "destructive", title: "Teilweise erfolgreich", description: `${data.created} erstellt, ${data.errors} fehlgeschlagen.` });
+      } else if (data.errors > 0) {
+        toast({ variant: "destructive", title: "Fehler", description: `${data.errors} Termine konnten nicht nachgebucht werden.` });
+      } else if (data.created > 0) {
+        toast({ title: "Nachbuchung erfolgreich", description: `${data.created} Budget-Buchung${data.created !== 1 ? "en" : ""} erstellt.` });
+      } else {
+        toast({ title: "Keine Änderungen", description: "Alle Termine wurden übersprungen." });
       }
     } catch (err: any) {
       toast({ variant: "destructive", title: "Fehler", description: err.message || "Nachbuchung fehlgeschlagen" });
