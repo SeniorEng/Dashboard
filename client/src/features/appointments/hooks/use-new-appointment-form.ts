@@ -227,15 +227,46 @@ export function useNewAppointmentForm() {
     }));
   }, [customers, isAdmin]);
 
-  const employeeOptions = useMemo(() =>
-    employees
-      .filter(e => e.isActive)
-      .map((e) => ({
-        value: e.id.toString(),
-        label: e.displayName,
-      })),
-    [employees]
-  );
+  const selectedCustomer = useMemo(() => {
+    if (!ktCustomerId) return null;
+    return customers.find(c => c.id.toString() === ktCustomerId) ?? null;
+  }, [ktCustomerId, customers]);
+
+  const prevCustomerIdRef = useRef(ktCustomerId);
+  useEffect(() => {
+    if (prevCustomerIdRef.current === ktCustomerId) return;
+    prevCustomerIdRef.current = ktCustomerId;
+    if (!selectedCustomer) {
+      setKtAssignedEmployeeId("");
+      return;
+    }
+    if (selectedCustomer.primaryEmployeeId) {
+      setKtAssignedEmployeeId(selectedCustomer.primaryEmployeeId.toString());
+    } else if (selectedCustomer.backupEmployeeId) {
+      setKtAssignedEmployeeId(selectedCustomer.backupEmployeeId.toString());
+    } else {
+      setKtAssignedEmployeeId("");
+    }
+  }, [selectedCustomer, ktCustomerId]);
+
+  const employeeOptions = useMemo(() => {
+    const active = employees.filter(e => e.isActive);
+    if (selectedCustomer) {
+      const assignedIds = [selectedCustomer.primaryEmployeeId, selectedCustomer.backupEmployeeId].filter(Boolean);
+      if (assignedIds.length > 0) {
+        return active
+          .filter(e => assignedIds.includes(e.id))
+          .map((e) => ({
+            value: e.id.toString(),
+            label: e.displayName + (e.id === selectedCustomer.primaryEmployeeId ? " (Haupt)" : " (Vertretung)"),
+          }));
+      }
+    }
+    return active.map((e) => ({
+      value: e.id.toString(),
+      label: e.displayName,
+    }));
+  }, [employees, selectedCustomer]);
 
   const isPending = createKundenterminMutation.isPending || createErstberatungMutation.isPending;
 
