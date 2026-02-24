@@ -103,6 +103,8 @@ export class CustomerManagementStorage {
   updateNeedsAssessment = careLevelModule.updateNeedsAssessment;
   createNeedsAssessment = careLevelModule.createNeedsAssessment;
 
+  updateCustomerContract = contractsModule.updateCustomerContract;
+
   getCustomerCurrentBudget = budgetsModule.getCustomerCurrentBudget;
   getCustomerBudgetHistory = budgetsModule.getCustomerBudgetHistory;
   addCustomerBudget = budgetsModule.addCustomerBudget;

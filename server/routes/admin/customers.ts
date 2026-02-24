@@ -430,6 +430,43 @@ const updateNeedsAssessmentSchema = z.object({
   sonstigeLeistungen: z.string().max(250).nullable().optional(),
 });
 
+const updateContractSchema = z.object({
+  vereinbarteLeistungen: z.string().max(2000).nullable().optional(),
+  contractDate: z.string().nullable().optional(),
+  contractStart: z.string().optional(),
+  contractEnd: z.string().nullable().optional(),
+});
+
+router.patch("/customers/:id/contract", asyncHandler("Vertrag konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
+    return;
+  }
+
+  const customer = await storage.getCustomer(id);
+  if (!customer) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+    return;
+  }
+
+  const contract = (customer as any).contract;
+  if (!contract) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kein aktiver Vertrag gefunden" });
+    return;
+  }
+
+  const validatedData = updateContractSchema.parse(req.body);
+  const result = await customerManagementStorage.updateCustomerContract(contract.id, validatedData);
+
+  if (!result) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Vertrag nicht gefunden" });
+    return;
+  }
+
+  res.json(result);
+}));
+
 router.patch("/customers/:id/needs-assessment", asyncHandler("Leistungen konnten nicht aktualisiert werden", async (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) {

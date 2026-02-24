@@ -65,6 +65,21 @@ export async function addContractRate(data: InsertContractRate, userId?: number)
   return result[0];
 }
 
+export async function updateCustomerContract(contractId: number, data: Partial<{
+  vereinbarteLeistungen: string | null;
+  contractDate: string | null;
+  contractStart: string;
+  contractEnd: string | null;
+  hoursPerPeriod: number;
+  periodType: string;
+}>): Promise<CustomerContract | undefined> {
+  const result = await db.update(customerContracts)
+    .set(data)
+    .where(eq(customerContracts.id, contractId))
+    .returning();
+  return result[0];
+}
+
 export async function getCurrentServiceRates(): Promise<ServiceRate[]> {
   return await db
     .select()
