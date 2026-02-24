@@ -9,7 +9,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2, AlertCircle, Eye, EyeOff } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { useAuth } from "@/hooks/use-auth";
-import logoImage from "@/assets/logo-seniorenengel.png";
+import fallbackLogo from "@/assets/logo-seniorenengel.png";
 import { api, unwrapResult } from "@/lib/api/client";
 
 export default function LoginPage() {
@@ -27,6 +27,18 @@ export default function LoginPage() {
       return unwrapResult(result);
     },
   });
+
+  const { data: branding } = useQuery<{ logoUrl: string | null; pdfLogoUrl: string | null; companyName: string | null }>({
+    queryKey: ["public-branding"],
+    queryFn: async () => {
+      const result = await api.get<{ logoUrl: string | null; pdfLogoUrl: string | null; companyName: string | null }>("/public/branding");
+      if (!result.success) return { logoUrl: null, pdfLogoUrl: null, companyName: null };
+      return result.data;
+    },
+    staleTime: 300000,
+  });
+
+  const displayLogo = branding?.pdfLogoUrl || branding?.logoUrl || fallbackLogo;
 
   const loginMutation = useMutation({
     mutationFn: async () => {
@@ -77,9 +89,10 @@ export default function LoginPage() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center pb-2">
           <img 
-            src={logoImage} 
-            alt="EngelDesk" 
+            src={displayLogo} 
+            alt={branding?.companyName || "EngelDesk"} 
             className="h-16 mx-auto mb-2"
+            data-testid="img-login-logo"
           />
         </CardHeader>
         <CardContent>
@@ -170,6 +183,18 @@ function SetupPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  const { data: branding } = useQuery<{ logoUrl: string | null; pdfLogoUrl: string | null; companyName: string | null }>({
+    queryKey: ["public-branding"],
+    queryFn: async () => {
+      const result = await api.get<{ logoUrl: string | null; pdfLogoUrl: string | null; companyName: string | null }>("/public/branding");
+      if (!result.success) return { logoUrl: null, pdfLogoUrl: null, companyName: null };
+      return result.data;
+    },
+    staleTime: 300000,
+  });
+
+  const displayLogo = branding?.pdfLogoUrl || branding?.logoUrl || fallbackLogo;
+
   const setupMutation = useMutation({
     mutationFn: async () => {
       if (password !== confirmPassword) {
@@ -198,9 +223,10 @@ function SetupPage() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center pb-2">
           <img 
-            src={logoImage} 
-            alt="EngelDesk" 
+            src={displayLogo} 
+            alt={branding?.companyName || "EngelDesk"} 
             className="h-16 mx-auto mb-2"
+            data-testid="img-setup-logo"
           />
           <CardTitle className="text-xl font-bold text-gray-900">Ersteinrichtung</CardTitle>
           <CardDescription>

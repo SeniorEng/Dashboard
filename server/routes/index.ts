@@ -26,6 +26,20 @@ const router = Router();
 
 router.use("/webhook", webhookRouter);
 
+router.get("/public/branding", async (_req, res) => {
+  try {
+    const { storage } = await import("../storage");
+    const settings = await storage.getCompanySettings();
+    res.json({
+      logoUrl: settings?.logoUrl || null,
+      pdfLogoUrl: settings?.pdfLogoUrl || null,
+      companyName: settings?.companyName || null,
+    });
+  } catch {
+    res.json({ logoUrl: null, pdfLogoUrl: null, companyName: null });
+  }
+});
+
 router.use(authMiddleware);
 router.use(cacheHeaders);
 

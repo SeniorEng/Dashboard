@@ -60,7 +60,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Navigation Structure**: Bottom navigation tabs: Termine, Kunden, Aufgaben, Nachweise, Zeiten. User dropdown for "Mein Profil".
 - **Signature Security**: 3-tier system with immutable audit log, SHA-256 integrity hashing, and locking with admin-only revoke.
 - **Invoicing Module**: Full billing system with audit-safe data flow requiring signed Leistungsnachweis. Snapshot approach for data. Three invoice formats per billing type. GoBD-compliant Stornorechnung workflow. Sequential numbering, Nachberechnung.
-- **Company Settings**: `company_settings` table for master data, editable via Admin Settings. Custom logo upload.
+- **Company Settings**: `company_settings` table for master data, editable via Admin Settings. Two-logo system: `logoUrl` (quadratisches App-Logo für Header/Favicon) + `pdfLogoUrl` (Dokumenten-Logo für PDFs, Login-Screen). Public endpoint `GET /api/public/branding` liefert Logos ohne Auth. Template engine nutzt `pdfLogoUrl` mit Fallback auf `logoUrl` für `{{company_logo}}`.
 - **Document Delivery Preference**: `documentDeliveryMethod` field on customers for email or post, used in customer creation and editing.
 - **Hours Overview**: Admin page for monthly employee summaries: hours by category, kilometers, vacation, sick days.
 - **Public Holidays**: Shared utility for German public holidays (bundeseinheitlich + Sachsen).
