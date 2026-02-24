@@ -17,11 +17,14 @@ import companyRouter from "./company";
 import billingRouter from "./billing";
 import holidaysRouter from "./holidays";
 import statisticsRouter from "./statistics";
+import webhookRouter from "./webhook";
 import { csrfProtection, csrfTokenHandler } from "../middleware/csrf";
 import { authMiddleware } from "../middleware/auth";
 import { cacheHeaders } from "../middleware/cache-headers";
 
 const router = Router();
+
+router.use("/webhook", webhookRouter);
 
 router.use(authMiddleware);
 router.use(cacheHeaders);
