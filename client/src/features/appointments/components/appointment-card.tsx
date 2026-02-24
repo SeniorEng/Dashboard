@@ -12,7 +12,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { MapPin, CheckCircle2, Clock, FileText, Pencil, Trash2, MoreVertical } from "lucide-react";
+import { MapPin, CheckCircle2, Clock, FileText, Pencil, Trash2, MoreVertical, Phone, Navigation } from "lucide-react";
 import { useLocation } from "wouter";
 import type { AppointmentWithCustomer, AppointmentStatus } from "@shared/types";
 import { getCardServiceInfoFromAppointment, canModifyAppointment } from "@shared/types";
@@ -196,28 +196,59 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
                   <h3 className="font-semibold text-foreground truncate">
                     {appointment.customer?.name}
                   </h3>
+                  <div className="flex items-center text-xs text-muted-foreground mt-1">
+                    <MapPin className="w-3 h-3 mr-1 shrink-0" />
+                    <span className="truncate">{appointment.customer?.address || "Keine Adresse"}</span>
+                  </div>
+                </div>
+                
+                {/* Quick Action Buttons + Status */}
+                <div className="shrink-0 flex items-center gap-1">
+                  {(() => {
+                    const phoneNumber = appointment.customer?.telefon || appointment.customer?.festnetz;
+                    return phoneNumber ? (
+                      <a
+                        href={`tel:${phoneNumber}`}
+                        className="p-2 rounded-full bg-green-50 text-green-600 hover:bg-green-100 active:bg-green-200 transition-colors"
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label="Anrufen"
+                        data-testid={`button-call-${appointment.id}`}
+                      >
+                        <Phone className="w-4 h-4" />
+                      </a>
+                    ) : (
+                      <span
+                        className="p-2 rounded-full bg-gray-50 text-gray-300 cursor-default"
+                        aria-label="Keine Telefonnummer"
+                        data-testid={`button-call-disabled-${appointment.id}`}
+                      >
+                        <Phone className="w-4 h-4" />
+                      </span>
+                    );
+                  })()}
+
                   {appointment.customer?.address ? (
                     <a
                       href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(appointment.customer.address)}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center text-xs text-muted-foreground mt-1 hover:text-primary transition-colors"
+                      className="p-2 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 active:bg-blue-200 transition-colors"
                       onClick={(e) => e.stopPropagation()}
-                      data-testid={`link-address-${appointment.id}`}
+                      aria-label="In Google Maps öffnen"
+                      data-testid={`button-maps-${appointment.id}`}
                     >
-                      <MapPin className="w-3 h-3 mr-1 shrink-0" />
-                      <span className="truncate">{appointment.customer.address}</span>
+                      <Navigation className="w-4 h-4" />
                     </a>
                   ) : (
-                    <div className="flex items-center text-xs text-muted-foreground mt-1">
-                      <MapPin className="w-3 h-3 mr-1 shrink-0" />
-                      <span className="truncate">Keine Adresse</span>
-                    </div>
+                    <span
+                      className="p-2 rounded-full bg-gray-50 text-gray-300 cursor-default"
+                      aria-label="Keine Adresse"
+                      data-testid={`button-maps-disabled-${appointment.id}`}
+                    >
+                      <Navigation className="w-4 h-4" />
+                    </span>
                   )}
-                </div>
-                
-                {/* Status Icon + Actions */}
-                <div className="shrink-0 flex items-center gap-1">
+
                   {getStatusIcon(appointment.status)}
                   
                   {/* Desktop Actions Menu */}
