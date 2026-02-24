@@ -55,6 +55,27 @@ export function getPlaceholderCatalog() {
   }));
 }
 
+export interface InputField {
+  key: string;
+  label: string;
+}
+
+export function extractInputPlaceholders(htmlContent: string): InputField[] {
+  const regex = /\{\{input:([^}]+)\}\}/g;
+  const fields: InputField[] = [];
+  const seen = new Set<string>();
+  let match;
+  while ((match = regex.exec(htmlContent)) !== null) {
+    const label = match[1].trim();
+    const key = `input_${label.toLowerCase().replace(/[^a-zäöüß0-9]+/gi, "_").replace(/^_|_$/g, "")}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      fields.push({ key, label });
+    }
+  }
+  return fields;
+}
+
 function formatDE(dateStr: string | null | undefined): string {
   if (!dateStr) return "";
   try {
@@ -121,6 +142,14 @@ export async function buildPlaceholders(
 
 export function renderTemplate(htmlContent: string, placeholders: TemplatePlaceholders): string {
   let rendered = htmlContent;
+
+  rendered = rendered.replace(/\{\{input:([^}]+)\}\}/g, (_match, rawLabel: string) => {
+    const label = rawLabel.trim();
+    const key = `input_${label.toLowerCase().replace(/[^a-zäöüß0-9]+/gi, "_").replace(/^_|_$/g, "")}`;
+    const value = placeholders[key];
+    return value ? escapeHtml(value) : "";
+  });
+
   for (const [key, value] of Object.entries(placeholders)) {
     const isSignature = key.includes("signature");
     const safeValue = isSignature ? value : escapeHtml(value);

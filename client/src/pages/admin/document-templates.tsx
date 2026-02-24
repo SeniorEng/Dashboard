@@ -679,6 +679,17 @@ export function DocumentTemplatesContent() {
                 <p className="text-sm text-gray-600 mb-3">
                   Diese Platzhalter können im HTML-Inhalt verwendet werden. Sie werden beim Generieren automatisch mit den Kundendaten ersetzt.
                 </p>
+
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg mb-4" data-testid="hint-input-placeholders">
+                  <p className="text-sm font-medium text-amber-800 mb-1">Eingabefelder</p>
+                  <p className="text-sm text-amber-700">
+                    Verwenden Sie <code className="bg-amber-100 px-1 rounded font-mono text-xs">{"{{input:Bezeichnung}}"}</code> für Felder, die der Mitarbeiter vor Ort ausfüllt.
+                  </p>
+                  <p className="text-xs text-amber-600 mt-1">
+                    Beispiel: <code className="bg-amber-100 px-1 rounded font-mono">{"{{input:Anzahl Schlüssel}}"}</code>, <code className="bg-amber-100 px-1 rounded font-mono">{"{{input:Bemerkung}}"}</code>
+                  </p>
+                </div>
+
                 <div className="grid gap-2">
                   {placeholders?.map((p) => (
                     <div

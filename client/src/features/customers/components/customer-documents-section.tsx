@@ -21,11 +21,13 @@ import {
   Download,
   Camera,
   X,
+  FilePlus2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { formatDateDisplay } from "@shared/utils/format";
 import { useUpload } from "@/hooks/use-upload";
+import { DigitalDocumentFlow } from "./digital-document-flow";
 
 interface DocumentTypeData {
   id: number;
@@ -84,10 +86,23 @@ function ReviewBadge({ reviewDueDate }: { reviewDueDate: string | null }) {
   );
 }
 
-export function CustomerDocumentsSection({ customerId }: { customerId: number }) {
+interface GeneratedDocumentData {
+  id: number;
+  customerId: number;
+  templateId: number;
+  fileName: string;
+  objectPath: string;
+  integrityHash: string | null;
+  signingStatus: string;
+  generatedAt: string;
+  templateName?: string;
+}
+
+export function CustomerDocumentsSection({ customerId, customerName }: { customerId: number; customerName: string }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [isDigitalFlowOpen, setIsDigitalFlowOpen] = useState(false);
   const [selectedDocTypeId, setSelectedDocTypeId] = useState("");
   const [notes, setNotes] = useState("");
   const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
@@ -107,6 +122,14 @@ export function CustomerDocumentsSection({ customerId }: { customerId: number })
     queryKey: ["customers", "document-types", "customer"],
     queryFn: async () => {
       const result = await api.get<DocumentTypeData[]>("/customers/document-types/customer");
+      return unwrapResult(result);
+    },
+  });
+
+  const { data: generatedDocs, isLoading: generatedDocsLoading } = useQuery<GeneratedDocumentData[]>({
+    queryKey: ["customers", customerId, "generated-documents"],
+    queryFn: async () => {
+      const result = await api.get<GeneratedDocumentData[]>(`/customers/${customerId}/generated-documents`);
       return unwrapResult(result);
     },
   });
@@ -204,16 +227,28 @@ export function CustomerDocumentsSection({ customerId }: { customerId: number })
           <FileCheck2 className={iconSize.sm} />
           Dokumente
         </h3>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setIsUploadOpen(!isUploadOpen)}
-          data-testid="button-upload-customer-document"
-        >
-          <Upload className={`${iconSize.sm} mr-1`} />
-          <span className="hidden sm:inline">Hochladen</span>
-          <span className="sm:hidden">Upload</span>
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsDigitalFlowOpen(true)}
+            data-testid="button-digital-document-flow"
+          >
+            <FilePlus2 className={`${iconSize.sm} mr-1`} />
+            <span className="hidden sm:inline">Digital erstellen</span>
+            <span className="sm:hidden">Digital</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsUploadOpen(!isUploadOpen)}
+            data-testid="button-upload-customer-document"
+          >
+            <Upload className={`${iconSize.sm} mr-1`} />
+            <span className="hidden sm:inline">Hochladen</span>
+            <span className="sm:hidden">Upload</span>
+          </Button>
+        </div>
       </div>
 
       {isUploadOpen && (
@@ -435,6 +470,59 @@ export function CustomerDocumentsSection({ customerId }: { customerId: number })
       ) : (
         <p className="text-sm text-gray-500 py-4 text-center">Noch keine Dokumente hochgeladen</p>
       )}
+
+      {generatedDocs && generatedDocs.length > 0 && (
+        <div className="mt-6">
+          <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+            <FilePlus2 className="h-3.5 w-3.5" />
+            Digital erstellte Dokumente
+          </h4>
+          <div className="space-y-2">
+            {generatedDocs.map((doc) => (
+              <div key={doc.id} className="p-3 bg-white border border-gray-100 rounded-lg" data-testid={`generated-doc-${doc.id}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <FileText className={`${iconSize.sm} text-teal-500 shrink-0`} />
+                      <span className="text-sm font-medium text-gray-900 truncate">{doc.fileName}</span>
+                    </div>
+                    <div className="ml-6 flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-gray-400">
+                        Erstellt: {formatDateDisplay(doc.generatedAt.split("T")[0])}
+                      </span>
+                      <span className={`text-xs px-2 py-0.5 rounded ${
+                        doc.signingStatus === "complete" ? "bg-green-100 text-green-700" :
+                        doc.signingStatus === "pending_employee_signature" ? "bg-amber-100 text-amber-700" :
+                        "bg-gray-100 text-gray-600"
+                      }`}>
+                        {doc.signingStatus === "complete" ? "Unterschrieben" :
+                         doc.signingStatus === "pending_employee_signature" ? "Warte auf Unterschrift" :
+                         "Ohne Unterschrift"}
+                      </span>
+                    </div>
+                  </div>
+                  <a
+                    href={`/api/customers/generated-documents/${doc.id}/download`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-gray-100 shrink-0"
+                    data-testid={`button-download-generated-doc-${doc.id}`}
+                  >
+                    <Download className={`${iconSize.sm} text-gray-600`} />
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <DigitalDocumentFlow
+        open={isDigitalFlowOpen}
+        onOpenChange={setIsDigitalFlowOpen}
+        customerId={customerId}
+        customerName={customerName}
+      />
     </div>
   );
 }

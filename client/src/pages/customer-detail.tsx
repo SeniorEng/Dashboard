@@ -599,7 +599,7 @@ export default function CustomerDetailPage() {
         {/* Dokumente */}
         <Card className="mt-4" data-testid="card-customer-documents">
           <CardContent className="p-4">
-            <CustomerDocumentsSection customerId={customerId!} />
+            <CustomerDocumentsSection customerId={customerId!} customerName={customer?.name || ""} />
           </CardContent>
         </Card>
       </div>
