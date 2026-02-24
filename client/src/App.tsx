@@ -41,6 +41,7 @@ const AdminStatistics = lazy(() => import("@/pages/admin/statistics"));
 const AdminBilling = lazy(() => import("@/pages/admin/billing"));
 const AdminHoursOverview = lazy(() => import("@/pages/admin/lexware-export"));
 const AdminQualifications = lazy(() => import("@/pages/admin/qualifications"));
+const AdminProspects = lazy(() => import("@/pages/admin/prospects"));
 const AdminProofReview = lazy(() => import("@/pages/admin/proof-review"));
 const UndocumentedAppointments = lazy(() => import("@/pages/undocumented-appointments"));
 const CustomerDetail = lazy(() => import("@/pages/customer-detail"));
@@ -218,6 +219,9 @@ function Router() {
       </Route>
       <Route path="/admin/proof-review">
         <AdminRoute component={AdminProofReview} />
+      </Route>
+      <Route path="/admin/prospects">
+        <AdminRoute component={AdminProspects} />
       </Route>
       <Route component={NotFound} />
     </Switch>

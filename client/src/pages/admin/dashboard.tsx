@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Layout } from "@/components/layout";
 import {
   Users, ArrowLeft, Contact2, Clock, Settings,
-  Building2, ClipboardList, FileText, Shield, Receipt, Gift, BarChart3,
+  Building2, ClipboardList, FileText, Shield, Receipt, Gift, BarChart3, UserPlus,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -110,6 +110,14 @@ export default function AdminDashboard() {
         </Section>
 
         <Section title="Kunden & Verträge">
+          <AdminCard
+            href="/admin/prospects"
+            testId="card-prospects"
+            icon={<UserPlus className={`${iconSize.lg} text-violet-600`} />}
+            iconBg="bg-violet-100"
+            title="Interessenten"
+            description="Lead-Pipeline, Kontaktverfolgung und Erstberatungs-Konvertierung"
+          />
           <AdminCard
             href="/admin/customers"
             testId="card-customers"

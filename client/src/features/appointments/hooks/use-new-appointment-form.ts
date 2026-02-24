@@ -15,7 +15,8 @@ export function useNewAppointmentForm() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<string>("kundentermin");
+  const initialTab = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("type") === "erstberatung" ? "erstberatung" : "kundentermin";
+  const [activeTab, setActiveTab] = useState<string>(initialTab);
 
   const isAdmin = user?.isAdmin ?? false;
 
@@ -37,14 +38,17 @@ export function useNewAppointmentForm() {
   const [ktNotes, setKtNotes] = useState<string>("");
   const [ktAssignedEmployeeId, setKtAssignedEmployeeId] = useState<string>("");
 
-  const [ebVorname, setEbVorname] = useState<string>("");
-  const [ebNachname, setEbNachname] = useState<string>("");
-  const [ebTelefon, setEbTelefon] = useState<string>("");
-  const [ebStrasse, setEbStrasse] = useState<string>("");
-  const [ebNr, setEbNr] = useState<string>("");
-  const [ebPlz, setEbPlz] = useState<string>("");
-  const [ebStadt, setEbStadt] = useState<string>("");
-  const [ebPflegegrad, setEbPflegegrad] = useState<string>("1");
+  const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const fromProspectId = urlParams.get("fromProspect");
+
+  const [ebVorname, setEbVorname] = useState<string>(urlParams.get("vorname") || "");
+  const [ebNachname, setEbNachname] = useState<string>(urlParams.get("nachname") || "");
+  const [ebTelefon, setEbTelefon] = useState<string>(urlParams.get("telefon") || "");
+  const [ebStrasse, setEbStrasse] = useState<string>(urlParams.get("strasse") || "");
+  const [ebNr, setEbNr] = useState<string>(urlParams.get("nr") || "");
+  const [ebPlz, setEbPlz] = useState<string>(urlParams.get("plz") || "");
+  const [ebStadt, setEbStadt] = useState<string>(urlParams.get("stadt") || "");
+  const [ebPflegegrad, setEbPflegegrad] = useState<string>(urlParams.get("pflegegrad") || "1");
   const [ebDate, setEbDate] = useState<string>(todayISO());
   const [ebStartTime, setEbStartTime] = useState<string>("09:00");
   const [ebErstberatungDauer, setEbErstberatungDauer] = useState<number>(60);
@@ -191,7 +195,19 @@ export function useNewAppointmentForm() {
       notes: ebNotes || undefined,
       assignedEmployeeId: isAdmin && ebAssignedEmployeeId ? parseInt(ebAssignedEmployeeId) : undefined,
     }, {
-      onSuccess: () => {
+      onSuccess: async (data: any) => {
+        if (fromProspectId) {
+          try {
+            await api.patch(`/admin/prospects/${fromProspectId}`, {
+              status: "erstberatung",
+              convertedCustomerId: data?.customerId || null,
+              statusNotiz: "Automatisch in Erstberatung umgewandelt",
+            });
+          } catch (e) {
+            console.warn("Prospect update failed:", e);
+            toast({ variant: "destructive", title: "Hinweis", description: "Erstberatung wurde erstellt, aber der Interessent konnte nicht automatisch aktualisiert werden." });
+          }
+        }
         toast({ title: "Erstberatung erstellt", description: "Die Erstberatung und der neue Kunde wurden erfolgreich angelegt." });
         setLocation(ebDate ? `/?date=${ebDate}` : "/");
       },
@@ -325,6 +341,7 @@ export function useNewAppointmentForm() {
     ebAssignedEmployeeId,
     setEbAssignedEmployeeId,
 
+    fromProspectId,
     errors,
     costEstimate,
     ktSummary,

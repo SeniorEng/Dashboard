@@ -10,6 +10,7 @@ import auditRouter from "./admin/audit";
 import lexwareExportRouter from "./admin/lexware-export";
 import documentDeliveryRouter from "./admin/document-delivery";
 import qualificationsRouter from "./admin/qualifications";
+import prospectsRouter from "./admin/prospects";
 
 const router = Router();
 
@@ -25,5 +26,6 @@ router.use("/", auditRouter);
 router.use("/", lexwareExportRouter);
 router.use("/", documentDeliveryRouter);
 router.use("/qualifications", qualificationsRouter);
+router.use("/", prospectsRouter);
 
 export default router;
