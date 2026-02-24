@@ -151,6 +151,12 @@ router.get("/me", asyncHandler("Benutzerinformationen konnten nicht geladen werd
   });
 }));
 
+router.post("/onboarding/complete", requireAuth, csrfProtection, asyncHandler("Onboarding konnte nicht abgeschlossen werden", async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  await storage.updateUserOnboarding(userId);
+  res.json({ success: true });
+}));
+
 router.post(
   "/password-reset/request",
   asyncHandler("Passwort-Zurücksetzung fehlgeschlagen", async (req: Request, res: Response) => {

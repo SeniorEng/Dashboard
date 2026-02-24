@@ -19,6 +19,7 @@ export interface User {
   employmentType: string;
   weeklyWorkDays: number;
   roles: string[];
+  onboardingCompleted: boolean;
   createdAt: string;
   updatedAt: string;
 }

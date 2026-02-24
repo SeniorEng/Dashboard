@@ -6,8 +6,9 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { SessionTimeoutWarning } from "@/components/session-timeout-warning";
+import { OnboardingDialog } from "@/components/onboarding-dialog";
 import { Loader2 } from "lucide-react";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
 
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
@@ -223,6 +224,17 @@ function Router() {
   );
 }
 
+function OnboardingWrapper() {
+  const { user, isAuthenticated } = useAuth();
+  const [dismissed, setDismissed] = useState(false);
+
+  if (!isAuthenticated || !user || user.onboardingCompleted || dismissed) {
+    return null;
+  }
+
+  return <OnboardingDialog open={true} onComplete={() => setDismissed(true)} />;
+}
+
 function App() {
   return (
     <ErrorBoundary>
@@ -231,6 +243,7 @@ function App() {
           <TooltipProvider>
             <Toaster />
             <SessionTimeoutWarning />
+            <OnboardingWrapper />
             <Router />
           </TooltipProvider>
         </AuthProvider>

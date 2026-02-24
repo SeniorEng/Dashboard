@@ -213,6 +213,9 @@ export interface IStorage {
   updateAppointmentServiceDocumentation(appointmentId: number, serviceUpdates: { serviceId: number; actualDurationMinutes: number; details?: string | null }[]): Promise<void>;
   getServicesByIds(serviceIds: number[]): Promise<{ id: number; code: string }[]>;
 
+  // User Onboarding
+  updateUserOnboarding(userId: number): Promise<void>;
+
   // System Settings
   getSystemSettings(): Promise<SystemSettings>;
   updateSystemSettings(id: number, data: Partial<SystemSettings>, userId: number): Promise<SystemSettings>;
@@ -1046,6 +1049,10 @@ export class DatabaseStorage implements IStorage {
     const { inArray } = await import("drizzle-orm");
     const rows = await db.select({ id: servicesTable.id, code: servicesTable.code }).from(servicesTable).where(inArray(servicesTable.id, serviceIds));
     return rows.filter((r): r is { id: number; code: string } => r.code !== null);
+  }
+
+  async updateUserOnboarding(userId: number): Promise<void> {
+    await db.update(users).set({ onboardingCompleted: true }).where(eq(users.id, userId));
   }
 
   async getSystemSettings(): Promise<SystemSettings> {
