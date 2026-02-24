@@ -8,7 +8,7 @@ import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { SessionTimeoutWarning } from "@/components/session-timeout-warning";
 import { OnboardingDialog } from "@/components/onboarding-dialog";
 import { Loader2 } from "lucide-react";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useState, useEffect, useCallback } from "react";
 
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
@@ -227,12 +227,29 @@ function Router() {
 function OnboardingWrapper() {
   const { user, isAuthenticated } = useAuth();
   const [dismissed, setDismissed] = useState(false);
+  const [manualTrigger, setManualTrigger] = useState(false);
 
-  if (!isAuthenticated || !user || user.onboardingCompleted || dismissed) {
+  useEffect(() => {
+    const handler = () => {
+      setDismissed(false);
+      setManualTrigger(true);
+    };
+    window.addEventListener("restart-onboarding", handler);
+    return () => window.removeEventListener("restart-onboarding", handler);
+  }, []);
+
+  const handleComplete = useCallback(() => {
+    setDismissed(true);
+    setManualTrigger(false);
+  }, []);
+
+  const showOnboarding = isAuthenticated && user && (manualTrigger || (!user.onboardingCompleted && !dismissed));
+
+  if (!showOnboarding) {
     return null;
   }
 
-  return <OnboardingDialog open={true} onComplete={() => setDismissed(true)} />;
+  return <OnboardingDialog open={true} onComplete={handleComplete} />;
 }
 
 function App() {

@@ -163,6 +163,7 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+      window.dispatchEvent(new Event("restart-onboarding"));
     },
   });
 
