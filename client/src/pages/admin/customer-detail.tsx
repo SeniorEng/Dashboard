@@ -418,6 +418,24 @@ export default function AdminCustomerDetail() {
                 )}
               </>
             }
+            actions={
+              customer.status === "aktiv" ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setDeactivationReason("");
+                    setDeactivationNote("");
+                    setShowDeactivateDialog(true);
+                  }}
+                  disabled={updateStatus.isPending}
+                  data-testid="button-deactivate-customer"
+                >
+                  <UserX className={`${iconSize.sm} mr-2`} />
+                  Deaktivieren
+                </Button>
+              ) : undefined
+            }
           />
 
           {customer.status === "erstberatung" && (
@@ -431,32 +449,6 @@ export default function AdminCustomerDetail() {
               }}
               isUpdating={updateStatus.isPending}
             />
-          )}
-
-          {customer.status === "aktiv" && (
-            <SectionCard className="mb-4 border-gray-200 bg-gray-50">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="font-medium text-gray-900">Aktiver Kunde</p>
-                  <p className="text-sm text-gray-600 mt-0.5">
-                    Kunde deaktivieren, wenn keine weiteren Leistungen mehr erbracht werden.
-                  </p>
-                </div>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setDeactivationReason("");
-                    setDeactivationNote("");
-                    setShowDeactivateDialog(true);
-                  }}
-                  disabled={updateStatus.isPending}
-                  data-testid="button-deactivate-customer"
-                >
-                  <UserX className={`${iconSize.sm} mr-2`} />
-                  Deaktivieren
-                </Button>
-              </div>
-            </SectionCard>
           )}
 
           {customer.status === "aktiv" && customer.inaktivAb && (
