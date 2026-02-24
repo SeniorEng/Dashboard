@@ -23,7 +23,18 @@ function stripHtml(html: string): string {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
+    .replace(/&auml;/gi, "ä")
+    .replace(/&ouml;/gi, "ö")
+    .replace(/&uuml;/gi, "ü")
+    .replace(/&Auml;/gi, "Ä")
+    .replace(/&Ouml;/gi, "Ö")
+    .replace(/&Uuml;/gi, "Ü")
+    .replace(/&szlig;/gi, "ß")
     .replace(/&#\d+;/g, "")
+    .replace(/&\w+;/g, "")
+    .replace(/\u200B/g, "")
+    .replace(/\u00AD/g, "")
+    .replace(/\uFEFF/g, "")
     .replace(/[ \t]+/g, " ")
     .replace(/\n\s*\n+/g, "\n")
     .trim();
@@ -44,14 +55,33 @@ function extractTableValue(text: string, label: string): string | undefined {
 }
 
 function extractSection(text: string, startMarker: string, endMarkers: string[]): string {
-  const startIdx = text.indexOf(startMarker);
-  if (startIdx === -1) return "";
+  const textLower = text.toLowerCase();
+  const markerLower = startMarker.toLowerCase();
+
+  let startIdx = textLower.indexOf(markerLower);
+  if (startIdx === -1) {
+    const words = markerLower.split(/\s+/);
+    if (words.length > 1) {
+      const fuzzyPattern = new RegExp(words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"), "i");
+      const fuzzyMatch = text.match(fuzzyPattern);
+      if (fuzzyMatch && fuzzyMatch.index !== undefined) {
+        startIdx = fuzzyMatch.index;
+        const sectionStart = startIdx + fuzzyMatch[0].length;
+        return findSectionEnd(text, textLower, sectionStart, endMarkers);
+      }
+    }
+    return "";
+  }
 
   const sectionStart = startIdx + startMarker.length;
+  return findSectionEnd(text, textLower, sectionStart, endMarkers);
+}
+
+function findSectionEnd(text: string, textLower: string, sectionStart: number, endMarkers: string[]): string {
   let sectionEnd = text.length;
 
   for (const marker of endMarkers) {
-    const idx = text.indexOf(marker, sectionStart);
+    const idx = textLower.indexOf(marker.toLowerCase(), sectionStart);
     if (idx !== -1 && idx < sectionEnd) {
       sectionEnd = idx;
     }
@@ -95,6 +125,7 @@ function parseBedarfsort(raw: string): { plz?: string; stadt?: string } {
 function parsePflegehilfeEmail(body: string, subject?: string): ParsedLead {
   const text = stripHtml(body);
   console.log("[email-parser] Pflegehilfe format detected, stripped text length:", text.length);
+  console.log("[email-parser] First 800 chars:", text.substring(0, 800));
 
   const kontaktSection = extractSection(text, "Kontaktinformationen des Interessenten", [
     "Informationen zum Senior",
@@ -116,6 +147,9 @@ function parsePflegehilfeEmail(body: string, subject?: string): ParsedLead {
   let nachname = "";
   const rawName = extractTableValue(kontaktSection, "Name");
   console.log("[email-parser] Sections found - kontakt:", kontaktSection.length, "senior:", seniorSection.length, "anfrage:", anfrageSection.length);
+  if (kontaktSection.length > 0) {
+    console.log("[email-parser] Kontakt section:", kontaktSection.substring(0, 400));
+  }
   console.log("[email-parser] Raw name:", rawName);
   if (rawName) {
     const parsed = parseName(rawName);
