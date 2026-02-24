@@ -210,6 +210,7 @@ export const insertErstberatungCustomerSchema = z.object({
   vorname: z.string().min(1, "Vorname ist erforderlich"),
   nachname: z.string().min(1, "Nachname ist erforderlich"),
   telefon: germanPhoneTransformSchema,
+  email: z.string().email("Ungültige E-Mail-Adresse").optional().or(z.literal("")).nullable(),
   strasse: z.string().min(1, "Straße ist erforderlich"),
   nr: z.string().min(1, "Hausnummer ist erforderlich"),
   plz: z.string().regex(/^\d{5}$/, "PLZ muss 5 Ziffern haben"),

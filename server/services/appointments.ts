@@ -314,6 +314,7 @@ export class AppointmentService {
       vorname: string;
       nachname: string;
       telefon: string;
+      email?: string | null;
       address: string;
       strasse: string;
       nr: string;
@@ -334,6 +335,7 @@ export class AppointmentService {
       vorname: input.customer.vorname,
       nachname: input.customer.nachname,
       telefon: input.customer.telefon,
+      email: input.customer.email || null,
       status: "erstberatung" as const,
       address: fullAddress,
       strasse: input.customer.strasse,
