@@ -23,6 +23,11 @@ const router = Router();
 
 router.use(requireAuth);
 
+router.get("/document-types/customer", asyncHandler("Dokumententypen konnten nicht geladen werden", async (_req, res) => {
+  const types = await documentStorage.getDocumentTypes(true, "customer");
+  res.json(types);
+}));
+
 router.get("/document-templates/billing-type/:billingType", async (req, res) => {
   try {
     const parsed = billingTypeEnum.safeParse(req.params.billingType);
@@ -516,6 +521,63 @@ router.delete("/:id/service-prices/:priceId", requireRoles("admin"), asyncHandle
     WHERE id = ${priceId} AND customer_id = ${customerId} AND valid_to IS NULL
   `);
   res.json({ success: true });
+}));
+
+router.get("/:id/documents", asyncHandler("Kundendokumente konnten nicht geladen werden", async (req, res) => {
+  const user = req.user!;
+  const customerId = parseInt(req.params.id);
+  if (isNaN(customerId)) { res.status(400).json({ error: "Ungültige Kunden-ID" }); return; }
+
+  if (!user.isAdmin) {
+    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
+    if (!assignedCustomerIds.includes(customerId)) {
+      return res.status(403).json({ error: "Zugriff verweigert" });
+    }
+  }
+
+  const docs = await documentStorage.getCurrentCustomerDocuments(customerId);
+  res.json(docs);
+}));
+
+router.get("/:id/documents/:documentTypeId/history", asyncHandler("Dokumentenhistorie konnte nicht geladen werden", async (req, res) => {
+  const user = req.user!;
+  const customerId = parseInt(req.params.id);
+  const documentTypeId = parseInt(req.params.documentTypeId);
+  if (isNaN(customerId) || isNaN(documentTypeId)) { res.status(400).json({ error: "Ungültige ID" }); return; }
+
+  if (!user.isAdmin) {
+    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
+    if (!assignedCustomerIds.includes(customerId)) {
+      return res.status(403).json({ error: "Zugriff verweigert" });
+    }
+  }
+
+  const docs = await documentStorage.getCustomerDocumentHistory(customerId, documentTypeId);
+  res.json(docs);
+}));
+
+router.post("/:id/documents", asyncHandler("Kundendokument konnte nicht hochgeladen werden", async (req, res) => {
+  const user = req.user!;
+  const customerId = parseInt(req.params.id);
+  if (isNaN(customerId)) { res.status(400).json({ error: "Ungültige Kunden-ID" }); return; }
+
+  if (!user.isAdmin) {
+    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
+    if (!assignedCustomerIds.includes(customerId)) {
+      return res.status(403).json({ error: "Zugriff verweigert" });
+    }
+  }
+
+  const { insertCustomerDocumentSchema } = await import("@shared/schema");
+  const data = { ...req.body, customerId };
+  const result = insertCustomerDocumentSchema.safeParse(data);
+  if (!result.success) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Daten", details: result.error.issues });
+    return;
+  }
+
+  const doc = await documentStorage.uploadCustomerDocument(result.data, user.id);
+  res.status(201).json(doc);
 }));
 
 export default router;

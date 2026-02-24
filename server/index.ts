@@ -90,6 +90,7 @@ process.on("uncaughtException", (error) => {
 
   const { documentStorage } = await import("./storage/documents");
   await documentStorage.ensureTemplateBillingTypes();
+  await documentStorage.ensureCustomerDocumentTypes();
 
   await registerRoutes(httpServer, app);
 

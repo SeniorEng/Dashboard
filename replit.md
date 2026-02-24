@@ -56,6 +56,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Customer Kilometers**: Separate tracking for travel with/for the customer.
 - **Birthdays**: Integrated tab showing upcoming birthdays.
 - **Employee Self-Service Profile**: Employees manage contact data, emergency contact, pet acceptance, password, and document uploads.
+- **Employee Document Upload**: Employees can upload and view customer documents (PDF, images, Word) directly from the customer detail page. Auto-seeded document types: Schlüsselübergabeprotokoll, Vollmacht, Einwilligungserklärung, Sonstiges Dokument, Ärztliche Verordnung, Pflegegradbescheid. Employee API endpoints at `/api/customers/:id/documents` with access-scoped to assigned customers. Component: `client/src/features/customers/components/customer-documents-section.tsx`.
 - **Navigation Structure**: Bottom navigation tabs: Termine, Kunden, Aufgaben, Nachweise, Zeiten. User dropdown for "Mein Profil".
 - **Signature Security**: 3-tier system with immutable audit log, SHA-256 integrity hashing, and locking with admin-only revoke.
 - **Invoicing Module**: Full billing system with audit-safe data flow requiring signed Leistungsnachweis. Snapshot approach for data. Three invoice formats per billing type. GoBD-compliant Stornorechnung workflow. Sequential numbering, Nachberechnung.

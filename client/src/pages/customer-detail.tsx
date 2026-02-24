@@ -9,7 +9,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { 
-  ArrowLeft, MapPin, Phone, Mail, User, 
+  ArrowLeft, MapPin, Phone, Mail,
   Calendar, Loader2, AlertCircle, FileSignature, ChevronRight, X, Wallet,
   Cake, PhoneCall, Shield, PawPrint, ClipboardList, Stethoscope, Users, UserSearch,
   UserCheck, XCircle,
@@ -23,6 +23,7 @@ import { formatDateForDisplay, todayISO } from "@shared/utils/datetime";
 import { UNDOCUMENTED_STATUSES } from "@shared/domain/appointments";
 import { CONTACT_TYPE_LABELS } from "@shared/domain/customers";
 import { formatAddress } from "@shared/utils/format";
+import { CustomerDocumentsSection } from "@/features/customers/components/customer-documents-section";
 
 interface CustomerDetails {
   contacts: CustomerContact[];
@@ -281,11 +282,7 @@ export default function CustomerDetailPage() {
         {/* Persönliche Daten & Kontakt */}
         <Card className="mb-4" data-testid="card-personal-info">
           <CardContent className="p-4">
-            <div className="flex items-start gap-4">
-              <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                <User className={`${iconSize.lg} text-primary`} />
-              </div>
-              <div className="flex-1 min-w-0 space-y-2.5">
+            <div className="space-y-2.5">
                 <div className="flex items-center gap-2 flex-wrap">
                   {hasPflegegrad ? (
                     <StatusBadge type="pflegegrad" value={customer.pflegegrad!} data-testid="badge-pflegegrad" />
@@ -336,8 +333,6 @@ export default function CustomerDetailPage() {
                     <span className="text-muted-foreground/60">Keine E-Mail</span>
                   )}
                 </div>
-
-              </div>
             </div>
           </CardContent>
         </Card>
@@ -600,6 +595,13 @@ export default function CustomerDetailPage() {
             </Card>
           </Link>
         </div>
+
+        {/* Dokumente */}
+        <Card className="mt-4" data-testid="card-customer-documents">
+          <CardContent className="p-4">
+            <CustomerDocumentsSection customerId={customerId!} />
+          </CardContent>
+        </Card>
       </div>
     </Layout>
   );

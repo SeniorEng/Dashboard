@@ -525,6 +525,26 @@ export class DocumentStorage implements IDocumentStorage {
     return result || null;
   }
 
+  async ensureCustomerDocumentTypes(): Promise<void> {
+    const existing = await this.getDocumentTypes(false, "customer");
+    const existingNames = new Set(existing.map(t => t.name));
+
+    const defaultTypes = [
+      { name: "Schlüsselübergabeprotokoll", description: "Protokoll über die Übergabe von Schlüsseln an den Pflegedienst", targetType: "customer" as const },
+      { name: "Vollmacht", description: "Vollmacht des Kunden für den Pflegedienst", targetType: "customer" as const },
+      { name: "Einwilligungserklärung", description: "Einwilligung des Kunden zu bestimmten Maßnahmen", targetType: "customer" as const },
+      { name: "Sonstiges Dokument", description: "Allgemeines Dokument ohne spezifische Kategorie", targetType: "customer" as const },
+      { name: "Ärztliche Verordnung", description: "Verordnung oder Bescheinigung vom Arzt", targetType: "customer" as const },
+      { name: "Pflegegradbescheid", description: "Bescheid über den zugewiesenen Pflegegrad", targetType: "customer" as const },
+    ];
+
+    for (const dt of defaultTypes) {
+      if (!existingNames.has(dt.name)) {
+        await this.createDocumentType({ ...dt, isActive: true });
+      }
+    }
+  }
+
   async ensureTemplateBillingTypes(): Promise<void> {
     const existing = await db.select().from(documentTemplateBillingTypes);
     if (existing.length > 0) return;
