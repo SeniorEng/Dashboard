@@ -462,7 +462,15 @@ router.post("/customers/:id/contract", asyncHandler("Vertrag konnte nicht angele
     return;
   }
 
-  const existingContract = (customer as any).contract;
+  const [existingContract] = await db
+    .select({ id: customerContracts.id })
+    .from(customerContracts)
+    .where(and(
+      eq(customerContracts.customerId, id),
+      eq(customerContracts.status, "active")
+    ))
+    .limit(1);
+
   if (existingContract) {
     res.status(409).json({ error: "CONFLICT", message: "Kunde hat bereits einen aktiven Vertrag" });
     return;
@@ -498,14 +506,22 @@ router.patch("/customers/:id/contract", asyncHandler("Vertrag konnte nicht aktua
     return;
   }
 
-  const contract = (customer as any).contract;
-  if (!contract) {
+  const [activeContract] = await db
+    .select()
+    .from(customerContracts)
+    .where(and(
+      eq(customerContracts.customerId, id),
+      eq(customerContracts.status, "active")
+    ))
+    .limit(1);
+
+  if (!activeContract) {
     res.status(404).json({ error: "NOT_FOUND", message: "Kein aktiver Vertrag gefunden" });
     return;
   }
 
   const validatedData = updateContractSchema.parse(req.body);
-  const result = await customerManagementStorage.updateCustomerContract(contract.id, validatedData);
+  const result = await customerManagementStorage.updateCustomerContract(activeContract.id, validatedData);
 
   if (!result) {
     res.status(404).json({ error: "NOT_FOUND", message: "Vertrag nicht gefunden" });
