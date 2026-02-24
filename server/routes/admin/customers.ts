@@ -3,6 +3,7 @@ import { storage } from "../../storage";
 import { customerManagementStorage } from "../../storage/customer-management";
 import { authService } from "../../services/auth";
 import { birthdaysCache } from "../../services/cache";
+import { budgetLedgerStorage } from "../../storage/budget-ledger";
 import { formatDateISO, isChild } from "@shared/utils/datetime";
 import { 
   insertCustomerInsuranceSchema,
@@ -15,12 +16,13 @@ import {
   appointments,
   customerContracts,
   customerInsuranceHistory,
+  budgetTransactions,
 } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
 import { z } from "zod";
 import { validate45aAmount, validate45bAmount, validate39_42aAmount } from "@shared/domain/budgets";
 import { db } from "../../lib/db";
-import { eq, and, sql, gte, isNull, or, count } from "drizzle-orm";
+import { eq, and, sql, gte, isNull, or, count, notInArray, isNotNull } from "drizzle-orm";
 
 const router = Router();
 
@@ -406,6 +408,44 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
   birthdaysCache.invalidateAll();
   
   res.json(customer);
+}));
+
+const updateNeedsAssessmentSchema = z.object({
+  serviceHaushaltHilfe: z.boolean().optional(),
+  serviceMahlzeiten: z.boolean().optional(),
+  serviceReinigung: z.boolean().optional(),
+  serviceWaeschePflege: z.boolean().optional(),
+  serviceEinkauf: z.boolean().optional(),
+  serviceTagesablauf: z.boolean().optional(),
+  serviceAlltagsverrichtungen: z.boolean().optional(),
+  serviceTerminbegleitung: z.boolean().optional(),
+  serviceBotengaenge: z.boolean().optional(),
+  serviceGrundpflege: z.boolean().optional(),
+  serviceFreizeitbegleitung: z.boolean().optional(),
+  serviceDemenzbetreuung: z.boolean().optional(),
+  serviceGesellschaft: z.boolean().optional(),
+  serviceSozialeKontakte: z.boolean().optional(),
+  serviceFreizeitgestaltung: z.boolean().optional(),
+  serviceKreativ: z.boolean().optional(),
+  sonstigeLeistungen: z.string().max(250).nullable().optional(),
+});
+
+router.patch("/customers/:id/needs-assessment", asyncHandler("Leistungen konnten nicht aktualisiert werden", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
+    return;
+  }
+
+  const validatedData = updateNeedsAssessmentSchema.parse(req.body);
+  const result = await customerManagementStorage.updateNeedsAssessment(id, validatedData);
+
+  if (!result) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Bedarfserhebung nicht gefunden" });
+    return;
+  }
+
+  res.json(result);
 }));
 
 router.get("/customers/:id/conversion-readiness", asyncHandler("Konvertierungsprüfung fehlgeschlagen", async (req: Request, res: Response) => {
@@ -936,6 +976,79 @@ router.post("/customers/match-employees", asyncHandler("Matching konnte nicht du
   }, data.excludeEmployeeIds || []);
 
   res.json(results);
+}));
+
+router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fehlgeschlagen", async (req: Request, res: Response) => {
+  const appointmentsWithoutBudget = await db.select({
+    id: appointments.id,
+    customerId: appointments.customerId,
+    date: appointments.date,
+    serviceType: appointments.serviceType,
+    actualStart: appointments.actualStart,
+    actualEnd: appointments.actualEnd,
+    travelKilometers: appointments.travelKilometers,
+    customerKilometers: appointments.customerKilometers,
+  })
+  .from(appointments)
+  .where(and(
+    eq(appointments.status, "completed"),
+    isNotNull(appointments.actualStart),
+    isNotNull(appointments.actualEnd),
+    isNull(appointments.deletedAt),
+    sql`${appointments.id} NOT IN (SELECT appointment_id FROM budget_transactions WHERE appointment_id IS NOT NULL)`
+  ))
+  .orderBy(appointments.date);
+
+  const results: Array<{ appointmentId: number; customerId: number; date: string; status: string; error?: string }> = [];
+
+  for (const appt of appointmentsWithoutBudget) {
+    const startParts = appt.actualStart!.split(":").map(Number);
+    const endParts = appt.actualEnd!.split(":").map(Number);
+    const durationMinutes = (endParts[0] * 60 + endParts[1]) - (startParts[0] * 60 + startParts[1]);
+
+    if (durationMinutes <= 0) {
+      results.push({ appointmentId: appt.id, customerId: appt.customerId, date: String(appt.date), status: "skipped", error: "Ungültige Dauer" });
+      continue;
+    }
+
+    const hwMinutes = appt.serviceType === "hauswirtschaft" ? durationMinutes : 0;
+    const abMinutes = appt.serviceType === "alltagsbegleitung" ? durationMinutes : 0;
+    const travelKm = appt.travelKilometers || 0;
+    const customerKm = appt.customerKilometers || 0;
+
+    if (hwMinutes === 0 && abMinutes === 0 && travelKm === 0 && customerKm === 0) {
+      results.push({ appointmentId: appt.id, customerId: appt.customerId, date: String(appt.date), status: "skipped", error: "Keine abrechenbare Leistung" });
+      continue;
+    }
+
+    try {
+      await budgetLedgerStorage.createConsumptionTransaction({
+        customerId: appt.customerId,
+        appointmentId: appt.id,
+        transactionDate: String(appt.date),
+        hauswirtschaftMinutes: hwMinutes,
+        alltagsbegleitungMinutes: abMinutes,
+        travelKilometers: travelKm,
+        customerKilometers: customerKm,
+        userId: req.user?.id,
+      });
+      results.push({ appointmentId: appt.id, customerId: appt.customerId, date: String(appt.date), status: "created" });
+    } catch (err: any) {
+      results.push({ appointmentId: appt.id, customerId: appt.customerId, date: String(appt.date), status: "error", error: err.message });
+    }
+  }
+
+  const created = results.filter(r => r.status === "created").length;
+  const skipped = results.filter(r => r.status === "skipped").length;
+  const errors = results.filter(r => r.status === "error").length;
+
+  res.json({
+    total: appointmentsWithoutBudget.length,
+    created,
+    skipped,
+    errors,
+    details: results,
+  });
 }));
 
 export default router;

@@ -74,3 +74,32 @@ export async function createNeedsAssessment(data: InsertNeedsAssessment, userId?
   }).returning();
   return result[0];
 }
+
+export async function updateNeedsAssessment(customerId: number, data: Partial<{
+  serviceHaushaltHilfe: boolean;
+  serviceMahlzeiten: boolean;
+  serviceReinigung: boolean;
+  serviceWaeschePflege: boolean;
+  serviceEinkauf: boolean;
+  serviceTagesablauf: boolean;
+  serviceAlltagsverrichtungen: boolean;
+  serviceTerminbegleitung: boolean;
+  serviceBotengaenge: boolean;
+  serviceGrundpflege: boolean;
+  serviceFreizeitbegleitung: boolean;
+  serviceDemenzbetreuung: boolean;
+  serviceGesellschaft: boolean;
+  serviceSozialeKontakte: boolean;
+  serviceFreizeitgestaltung: boolean;
+  serviceKreativ: boolean;
+  sonstigeLeistungen: string | null;
+}>): Promise<CustomerNeedsAssessment | undefined> {
+  const existing = await getCustomerNeedsAssessment(customerId);
+  if (!existing) return undefined;
+
+  const result = await db.update(customerNeedsAssessments)
+    .set(data)
+    .where(eq(customerNeedsAssessments.id, existing.id))
+    .returning();
+  return result[0];
+}

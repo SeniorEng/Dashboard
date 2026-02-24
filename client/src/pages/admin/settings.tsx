@@ -9,11 +9,67 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, Loader2, Upload, Trash2, ImageIcon, Mail, Truck, CheckCircle2, XCircle, Eye, EyeOff, FileText, Smartphone, KeyRound } from "lucide-react";
+import { ArrowLeft, Loader2, Upload, Trash2, ImageIcon, Mail, Truck, CheckCircle2, XCircle, Eye, EyeOff, FileText, Smartphone, KeyRound, Wrench } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
 import type { SystemSettings, CompanySettings } from "@shared/schema";
+
+function BackfillBudgetCard() {
+  const { toast } = useToast();
+  const [result, setResult] = useState<{ total: number; created: number; skipped: number; errors: number } | null>(null);
+
+  const backfillMutation = useMutation({
+    mutationFn: async () => {
+      const res = await api.post<{ total: number; created: number; skipped: number; errors: number }>("/admin/budget/backfill-transactions");
+      return unwrapResult(res);
+    },
+    onSuccess: (data) => {
+      setResult(data);
+      toast({ title: `${data.created} Budget-Buchungen nachgetragen`, description: `${data.total} Termine geprüft, ${data.skipped} übersprungen, ${data.errors} Fehler` });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  return (
+    <Card data-testid="card-backfill-budget">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Wrench className={iconSize.sm} />
+          Wartung: Budget-Nachbuchung
+        </CardTitle>
+        <CardDescription>
+          Importierte Termine, die keine Budget-Abbuchung haben, werden nachträglich gebucht.
+          Betrifft abgeschlossene Termine ohne zugehörige Budget-Transaktion.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button
+          onClick={() => backfillMutation.mutate()}
+          disabled={backfillMutation.isPending}
+          variant="outline"
+          data-testid="button-backfill-budget"
+        >
+          {backfillMutation.isPending ? (
+            <><Loader2 className={`${iconSize.sm} animate-spin mr-2`} />Wird verarbeitet...</>
+          ) : (
+            "Budget-Buchungen nachtragen"
+          )}
+        </Button>
+        {result && (
+          <div className="mt-4 rounded-md bg-muted/50 p-3 text-sm space-y-1">
+            <p><strong>{result.total}</strong> Termine ohne Budget-Buchung gefunden</p>
+            <p className="text-green-700"><strong>{result.created}</strong> Buchungen erfolgreich erstellt</p>
+            {result.skipped > 0 && <p className="text-gray-600"><strong>{result.skipped}</strong> übersprungen</p>}
+            {result.errors > 0 && <p className="text-red-600"><strong>{result.errors}</strong> Fehler (z.B. fehlende Preisvereinbarungen)</p>}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 const BUNDESLAENDER = [
   "Baden-Württemberg",
@@ -1130,6 +1186,8 @@ export default function AdminSettings() {
                   </div>
                 </CardContent>
               </Card>
+
+              <BackfillBudgetCard />
             </div>
           )}
     </Layout>

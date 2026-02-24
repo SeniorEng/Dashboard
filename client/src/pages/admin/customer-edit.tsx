@@ -43,6 +43,7 @@ import {
   Send,
   Mail,
   Truck,
+  ClipboardList,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { formatCurrency } from "@shared/utils/format";
@@ -64,6 +65,28 @@ export default function AdminCustomerEdit() {
   const [newPflegegrad, setNewPflegegrad] = useState<string>("");
   const [pflegegradSeit, setPflegegradSeit] = useState<string>(todayISO());
 
+  const SERVICE_FIELDS = [
+    { key: "serviceHaushaltHilfe", label: "Haushaltshilfe", group: "hauswirtschaft" },
+    { key: "serviceMahlzeiten", label: "Mahlzeiten", group: "hauswirtschaft" },
+    { key: "serviceReinigung", label: "Reinigung", group: "hauswirtschaft" },
+    { key: "serviceWaeschePflege", label: "Wäschepflege", group: "hauswirtschaft" },
+    { key: "serviceEinkauf", label: "Einkauf", group: "hauswirtschaft" },
+    { key: "serviceTagesablauf", label: "Tagesablauf", group: "betreuung" },
+    { key: "serviceAlltagsverrichtungen", label: "Alltagsverrichtungen", group: "betreuung" },
+    { key: "serviceTerminbegleitung", label: "Terminbegleitung", group: "betreuung" },
+    { key: "serviceBotengaenge", label: "Botengänge", group: "betreuung" },
+    { key: "serviceGrundpflege", label: "Grundpflege", group: "betreuung" },
+    { key: "serviceFreizeitbegleitung", label: "Freizeitbegleitung", group: "betreuung" },
+    { key: "serviceDemenzbetreuung", label: "Demenzbetreuung", group: "betreuung" },
+    { key: "serviceGesellschaft", label: "Gesellschaft", group: "betreuung" },
+    { key: "serviceSozialeKontakte", label: "Soziale Kontakte", group: "betreuung" },
+    { key: "serviceFreizeitgestaltung", label: "Freizeitgestaltung", group: "betreuung" },
+    { key: "serviceKreativ", label: "Kreative Beschäftigung", group: "betreuung" },
+  ] as const;
+
+  const [servicesData, setServicesData] = useState<Record<string, boolean>>({});
+  const [sonstigeLeistungen, setSonstigeLeistungen] = useState("");
+
   const changeCareLevelMutation = useMutation({
     mutationFn: async (data: { pflegegrad: number; validFrom: string }) => {
       const result = await api.post(`/admin/customers/${customerId}/care-level`, data);
@@ -74,6 +97,20 @@ export default function AdminCustomerEdit() {
       queryClient.invalidateQueries({ queryKey: customerKeys.detail(customerId) });
       queryClient.invalidateQueries({ queryKey: customerKeys.lists() });
       setNewPflegegrad("");
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+    },
+  });
+
+  const updateServicesMutation = useMutation({
+    mutationFn: async (data: Record<string, boolean | string | null>) => {
+      const result = await api.patch(`/admin/customers/${customerId}/needs-assessment`, data);
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      toast({ title: "Leistungen aktualisiert", description: "Die vereinbarten Leistungen wurden gespeichert." });
+      queryClient.invalidateQueries({ queryKey: customerKeys.detail(customerId) });
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
@@ -137,6 +174,16 @@ export default function AdminCustomerEdit() {
         acceptsPrivatePayment: customer.acceptsPrivatePayment ?? false,
         inaktivAb: (customer as any).inaktivAb || "",
       });
+
+      const na = (customer as any).needsAssessment;
+      if (na) {
+        const svcState: Record<string, boolean> = {};
+        SERVICE_FIELDS.forEach(f => {
+          svcState[f.key] = !!(na as any)[f.key];
+        });
+        setServicesData(svcState);
+        setSonstigeLeistungen(na.sonstigeLeistungen || "");
+      }
     }
   }, [customer]);
 
@@ -646,6 +693,81 @@ export default function AdminCustomerEdit() {
                 </div>
               </CardContent>
             </Card>
+
+            {(customer as any)?.needsAssessment && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <ClipboardList className={iconSize.sm} />
+                    Vereinbarte Leistungen
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground mb-2">Haushaltsnahe Dienstleistungen</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      {SERVICE_FIELDS.filter(f => f.group === "hauswirtschaft").map(f => (
+                        <div key={f.key} className="flex items-center gap-2">
+                          <Switch
+                            id={`svc-${f.key}`}
+                            checked={servicesData[f.key] ?? false}
+                            onCheckedChange={(checked) => setServicesData(prev => ({ ...prev, [f.key]: checked }))}
+                            data-testid={`switch-${f.key}`}
+                          />
+                          <Label htmlFor={`svc-${f.key}`} className="text-sm cursor-pointer">{f.label}</Label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground mb-2">Betreuungsleistungen</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      {SERVICE_FIELDS.filter(f => f.group === "betreuung").map(f => (
+                        <div key={f.key} className="flex items-center gap-2">
+                          <Switch
+                            id={`svc-${f.key}`}
+                            checked={servicesData[f.key] ?? false}
+                            onCheckedChange={(checked) => setServicesData(prev => ({ ...prev, [f.key]: checked }))}
+                            data-testid={`switch-${f.key}`}
+                          />
+                          <Label htmlFor={`svc-${f.key}`} className="text-sm cursor-pointer">{f.label}</Label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="sonstigeLeistungen">Sonstige Leistungen</Label>
+                    <Textarea
+                      id="sonstigeLeistungen"
+                      value={sonstigeLeistungen}
+                      onChange={(e) => setSonstigeLeistungen(e.target.value)}
+                      placeholder="Weitere vereinbarte Leistungen..."
+                      maxLength={250}
+                      data-testid="input-sonstige-leistungen"
+                    />
+                  </div>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => {
+                      updateServicesMutation.mutate({
+                        ...servicesData,
+                        sonstigeLeistungen: sonstigeLeistungen || null,
+                      });
+                    }}
+                    disabled={updateServicesMutation.isPending}
+                    data-testid="button-save-services"
+                  >
+                    {updateServicesMutation.isPending ? (
+                      <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                    ) : (
+                      <Save className={`${iconSize.sm} mr-2`} />
+                    )}
+                    Leistungen speichern
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
 
             <div className="flex gap-3">
               <Button
