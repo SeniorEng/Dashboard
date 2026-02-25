@@ -409,10 +409,13 @@ export default function AdminCustomerNew() {
           filledContacts.push({ ...formData.contacts[0] });
         }
         setFormData(prev => ({ ...prev, contacts: filledContacts.length > 0 ? filledContacts : prev.contacts }));
-        toast({
-          title: "Leere Kontakte entfernt",
-          description: `${emptyContacts.length} leere${emptyContacts.length === 1 ? "r" : ""} Kontakt${emptyContacts.length === 1 ? "" : "e"} wurde${emptyContacts.length === 1 ? "" : "n"} entfernt.`,
-        });
+        const userAddedEmpty = formData.contacts.length > 1 && emptyContacts.length > 0;
+        if (userAddedEmpty) {
+          toast({
+            title: "Leere Kontakte entfernt",
+            description: `${emptyContacts.length} leere${emptyContacts.length === 1 ? "r" : ""} Kontakt${emptyContacts.length === 1 ? "" : "e"} wurde${emptyContacts.length === 1 ? "" : "n"} entfernt.`,
+          });
+        }
       }
     }
     if (validateStepById(currentStepId)) {
