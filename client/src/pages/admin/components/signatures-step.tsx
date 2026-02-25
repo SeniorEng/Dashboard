@@ -377,19 +377,19 @@ function DocumentSignatureCard({
       className={`transition-colors ${isFulfilled ? "border-green-200 bg-green-50/30" : "border-gray-200"}`}
       data-testid={`signature-doc-${doc.slug}`}
     >
-      <CardContent className="p-4">
-        <div className="flex items-start gap-3">
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-center gap-3">
           <div
-            className={`flex items-center justify-center w-10 h-10 rounded-full shrink-0 ${
+            className={`flex items-center justify-center w-8 h-8 rounded-full shrink-0 ${
               isFulfilled ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"
             }`}
             aria-label={isFulfilled ? "Erledigt" : "Noch offen"}
           >
-            {isFulfilled ? <Check className={iconSize.md} /> : <FileText className={iconSize.md} />}
+            {isFulfilled ? <Check className={iconSize.sm} /> : <FileText className={iconSize.sm} />}
           </div>
           <div className="flex-1 min-w-0">
             <h4 className="font-medium text-gray-900">{doc.name}</h4>
-            <div className="flex flex-wrap items-center gap-1.5 mt-1">
+            <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
               <Badge
                 variant={doc.requirement === "pflicht" ? "destructive" : "secondary"}
                 className="text-[10px] px-1.5 py-0.5 leading-none"
@@ -407,83 +407,83 @@ function DocumentSignatureCard({
                 </Badge>
               )}
             </div>
-            {doc.description && (
-              <p className="text-sm text-gray-500 mt-1.5">{doc.description}</p>
-            )}
+          </div>
+        </div>
+        {doc.description && (
+          <p className="text-sm text-gray-500">{doc.description}</p>
+        )}
 
-            <div className="space-y-2 mt-3">
-              {showSignaturePad ? (
-                <SignaturePad
-                  title={`Unterschrift: ${doc.name}`}
-                  onSave={handleSignatureSave}
-                  onCancel={() => setShowSignaturePad(false)}
-                />
-              ) : showUpload ? (
-                <UploadArea
-                  isUploading={isUploading}
-                  onFileSelect={handleFileSelect}
-                  onCancel={() => setShowUpload(false)}
-                  cameraInputRef={cameraInputRef}
-                  testIdSuffix={doc.slug}
-                />
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant={isSigned ? "outline" : "default"}
-                    onClick={() => setShowSignaturePad(true)}
-                    className={`text-sm min-h-[44px] ${!isSigned ? "bg-teal-600 hover:bg-teal-700" : ""}`}
-                    data-testid={`button-sign-${doc.slug}`}
-                  >
-                    <Pen className={`${iconSize.sm} mr-1.5`} />
-                    {isSigned ? "Unterschrift ändern" : "Unterschreiben"}
-                  </Button>
-                  {documentTypeId && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setShowUpload(true)}
-                      className="text-sm min-h-[44px]"
-                      data-testid={`button-upload-alt-${doc.slug}`}
-                    >
-                      <Upload className={`${iconSize.sm} mr-1.5`} />
-                      {isUploaded ? "Erneut hochladen" : "Stattdessen hochladen"}
-                    </Button>
-                  )}
-                </div>
-              )}
-
-              {isUploaded && !showUpload && (
-                <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-md">
-                  <FileText className="h-4 w-4 text-blue-500 shrink-0" />
-                  <span className="text-xs text-blue-700 truncate flex-1">{uploadedDoc!.fileName}</span>
-                  <button
-                    type="button"
-                    onClick={() => onDocRemoved()}
-                    className="text-xs text-gray-400 hover:text-red-500"
-                    data-testid={`button-remove-upload-${doc.slug}`}
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              )}
-
-              {isSigned && formData && doc.htmlContent && (
-                <div className="pt-1">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handlePreview}
-                    className="text-sm min-h-[44px] w-full justify-center text-teal-700 border-teal-300 bg-teal-50 hover:bg-teal-100"
-                    data-testid={`button-preview-${doc.slug}`}
-                  >
-                    <FileText className={`${iconSize.sm} mr-1.5`} />
-                    Vorschau & Drucken
-                  </Button>
-                </div>
+        <div className="space-y-2">
+          {showSignaturePad ? (
+            <SignaturePad
+              title={`Unterschrift: ${doc.name}`}
+              onSave={handleSignatureSave}
+              onCancel={() => setShowSignaturePad(false)}
+            />
+          ) : showUpload ? (
+            <UploadArea
+              isUploading={isUploading}
+              onFileSelect={handleFileSelect}
+              onCancel={() => setShowUpload(false)}
+              cameraInputRef={cameraInputRef}
+              testIdSuffix={doc.slug}
+            />
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant={isSigned ? "outline" : "default"}
+                onClick={() => setShowSignaturePad(true)}
+                className={`text-sm min-h-[44px] ${!isSigned ? "bg-teal-600 hover:bg-teal-700" : ""}`}
+                data-testid={`button-sign-${doc.slug}`}
+              >
+                <Pen className={`${iconSize.sm} mr-1.5`} />
+                {isSigned ? "Unterschrift ändern" : "Unterschreiben"}
+              </Button>
+              {documentTypeId && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowUpload(true)}
+                  className="text-sm min-h-[44px]"
+                  data-testid={`button-upload-alt-${doc.slug}`}
+                >
+                  <Upload className={`${iconSize.sm} mr-1.5`} />
+                  {isUploaded ? "Erneut hochladen" : "Stattdessen hochladen"}
+                </Button>
               )}
             </div>
-          </div>
+          )}
+
+          {isUploaded && !showUpload && (
+            <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-md">
+              <FileText className="h-4 w-4 text-blue-500 shrink-0" />
+              <span className="text-xs text-blue-700 truncate flex-1">{uploadedDoc!.fileName}</span>
+              <button
+                type="button"
+                onClick={() => onDocRemoved()}
+                className="text-xs text-gray-400 hover:text-red-500"
+                data-testid={`button-remove-upload-${doc.slug}`}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
+          {isSigned && formData && doc.htmlContent && (
+            <div className="pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handlePreview}
+                className="text-sm min-h-[44px] w-full justify-center text-teal-700 border-teal-300 bg-teal-50 hover:bg-teal-100"
+                data-testid={`button-preview-${doc.slug}`}
+              >
+                <FileText className={`${iconSize.sm} mr-1.5`} />
+                Vorschau & Drucken
+              </Button>
+            </div>
+          )}
         </div>
       </CardContent>
 
@@ -591,18 +591,18 @@ function UploadOnlyCard({
       className={`transition-colors ${isUploaded ? "border-green-200 bg-green-50/30" : "border-gray-200"}`}
       data-testid={`upload-only-doc-${docType.id}`}
     >
-      <CardContent className="p-4">
-        <div className="flex items-start gap-3">
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-center gap-3">
           <div
-            className={`flex items-center justify-center w-10 h-10 rounded-full shrink-0 ${
+            className={`flex items-center justify-center w-8 h-8 rounded-full shrink-0 ${
               isUploaded ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"
             }`}
           >
-            {isUploaded ? <Check className={iconSize.md} /> : <Upload className={iconSize.md} />}
+            {isUploaded ? <Check className={iconSize.sm} /> : <Upload className={iconSize.sm} />}
           </div>
           <div className="flex-1 min-w-0">
             <h4 className="font-medium text-gray-900">{docType.name}</h4>
-            <div className="flex flex-wrap items-center gap-1.5 mt-1">
+            <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
               <Badge variant="secondary" className="text-[10px] px-1.5 py-0.5 leading-none">
                 Nur Upload
               </Badge>
@@ -612,48 +612,48 @@ function UploadOnlyCard({
                 </Badge>
               )}
             </div>
-            {docType.description && (
-              <p className="text-sm text-gray-500 mt-1.5">{docType.description}</p>
-            )}
-
-            <div className="space-y-2 mt-3">
-              {showUpload ? (
-                <UploadArea
-                  isUploading={isUploading}
-                  onFileSelect={handleFileSelect}
-                  onCancel={() => setShowUpload(false)}
-                  cameraInputRef={cameraInputRef}
-                  testIdSuffix={`type-${docType.id}`}
-                />
-              ) : (
-                <Button
-                  type="button"
-                  variant={isUploaded ? "outline" : "default"}
-                  onClick={() => setShowUpload(true)}
-                  className={`text-sm min-h-[44px] ${!isUploaded ? "bg-teal-600 hover:bg-teal-700" : ""}`}
-                  data-testid={`button-upload-${docType.id}`}
-                >
-                  <Upload className={`${iconSize.sm} mr-1.5`} />
-                  {isUploaded ? "Erneut hochladen" : "Hochladen"}
-                </Button>
-              )}
-
-              {isUploaded && !showUpload && (
-                <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-md">
-                  <FileText className="h-4 w-4 text-blue-500 shrink-0" />
-                  <span className="text-xs text-blue-700 truncate flex-1">{uploadedDoc!.fileName}</span>
-                  <button
-                    type="button"
-                    onClick={() => onDocRemoved()}
-                    className="text-xs text-gray-400 hover:text-red-500"
-                    data-testid={`button-remove-upload-type-${docType.id}`}
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              )}
-            </div>
           </div>
+        </div>
+        {docType.description && (
+          <p className="text-sm text-gray-500">{docType.description}</p>
+        )}
+
+        <div className="space-y-2">
+          {showUpload ? (
+            <UploadArea
+              isUploading={isUploading}
+              onFileSelect={handleFileSelect}
+              onCancel={() => setShowUpload(false)}
+              cameraInputRef={cameraInputRef}
+              testIdSuffix={`type-${docType.id}`}
+            />
+          ) : (
+            <Button
+              type="button"
+              variant={isUploaded ? "outline" : "default"}
+              onClick={() => setShowUpload(true)}
+              className={`text-sm min-h-[44px] ${!isUploaded ? "bg-teal-600 hover:bg-teal-700" : ""}`}
+              data-testid={`button-upload-${docType.id}`}
+            >
+              <Upload className={`${iconSize.sm} mr-1.5`} />
+              {isUploaded ? "Erneut hochladen" : "Hochladen"}
+            </Button>
+          )}
+
+          {isUploaded && !showUpload && (
+            <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-md">
+              <FileText className="h-4 w-4 text-blue-500 shrink-0" />
+              <span className="text-xs text-blue-700 truncate flex-1">{uploadedDoc!.fileName}</span>
+              <button
+                type="button"
+                onClick={() => onDocRemoved()}
+                className="text-xs text-gray-400 hover:text-red-500"
+                data-testid={`button-remove-upload-type-${docType.id}`}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
         </div>
       </CardContent>
 
