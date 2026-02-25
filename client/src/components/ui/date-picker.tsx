@@ -3,7 +3,7 @@
 import * as React from "react"
 import { format, parseISO, isValid } from "date-fns"
 import { de } from "date-fns/locale"
-import { CalendarIcon, X, ChevronLeft, ChevronRight } from "lucide-react"
+import { CalendarIcon, X, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -304,11 +304,16 @@ export function DatePicker({
               </button>
               <button
                 type="button"
-                onClick={() => setView("years")}
-                className="text-sm font-medium hover:bg-muted px-3 py-1.5 rounded-md transition-colors cursor-pointer"
+                onClick={() => setView(view === "days" ? "years" : "days")}
+                className="text-sm font-medium bg-muted/50 hover:bg-muted px-3 py-1.5 rounded-md transition-colors cursor-pointer flex items-center gap-1"
                 data-testid="btn-quick-year-month"
               >
                 {MONTH_NAMES_FULL_DE[navMonth.getMonth()]} {navMonth.getFullYear()}
+                {view === "days" ? (
+                  <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                ) : (
+                  <ChevronUp className="h-3 w-3 text-muted-foreground" />
+                )}
               </button>
               <button
                 type="button"
