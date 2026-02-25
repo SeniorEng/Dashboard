@@ -52,6 +52,8 @@ export const customers = pgTable("customers", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
   deletedAt: timestamp("deleted_at"),
+  isAnonymized: boolean("is_anonymized").notNull().default(false),
+  anonymizedAt: timestamp("anonymized_at"),
 }, (table) => [
   index("customers_primary_employee_id_idx").on(table.primaryEmployeeId),
   index("customers_backup_employee_id_idx").on(table.backupEmployeeId),

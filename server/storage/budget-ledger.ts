@@ -21,6 +21,8 @@ import { BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
 import { db } from "../lib/db";
 import { serviceCatalogStorage } from "./service-catalog";
 
+type DbClient = Pick<typeof db, 'select' | 'insert' | 'update' | 'delete' | 'transaction'>;
+
 const DEFAULT_MONTHLY_BUDGET_CENTS = BUDGET_45B_MAX_MONTHLY_CENTS;
 
 export interface BudgetSummary {
@@ -214,8 +216,9 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return await query;
   }
 
-  async getTransactionByAppointmentId(appointmentId: number): Promise<BudgetTransaction | undefined> {
-    const result = await db.select()
+  async getTransactionByAppointmentId(appointmentId: number, _tx?: DbClient): Promise<BudgetTransaction | undefined> {
+    const d = _tx ?? db;
+    const result = await d.select()
       .from(budgetTransactions)
       .where(and(
         eq(budgetTransactions.appointmentId, appointmentId),
@@ -247,8 +250,9 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return reversal[0];
   }
 
-  async getMonthlyBudgetAmountCents(customerId: number): Promise<number> {
-    const customerBudget = await db.select()
+  async getMonthlyBudgetAmountCents(customerId: number, _tx?: DbClient): Promise<number> {
+    const d = _tx ?? db;
+    const customerBudget = await d.select()
       .from(customerBudgets)
       .where(and(
         eq(customerBudgets.customerId, customerId),
@@ -263,8 +267,9 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return DEFAULT_MONTHLY_BUDGET_CENTS;
   }
 
-  async ensureMonthlyAllocations(customerId: number): Promise<BudgetAllocation[]> {
-    const preferences = await this.getBudgetPreferences(customerId);
+  async ensureMonthlyAllocations(customerId: number, _tx?: DbClient): Promise<BudgetAllocation[]> {
+    const d = _tx ?? db;
+    const preferences = await this.getBudgetPreferences(customerId, _tx);
     if (!preferences?.budgetStartDate) {
       return [];
     }
@@ -274,7 +279,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     const currentYear = todayDate.getFullYear();
     const currentMonth = todayDate.getMonth() + 1;
 
-    const existingAllocations = await db.select()
+    const existingAllocations = await d.select()
       .from(budgetAllocations)
       .where(and(
         eq(budgetAllocations.customerId, customerId),
@@ -285,7 +290,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       existingAllocations.map(a => `${a.year}-${a.month}`)
     );
 
-    const monthlyAmount = await this.getMonthlyBudgetAmountCents(customerId);
+    const monthlyAmount = await this.getMonthlyBudgetAmountCents(customerId, _tx);
     const created: BudgetAllocation[] = [];
 
     let year = startDate.getFullYear();
@@ -296,7 +301,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
       if (!existingSet.has(key)) {
         const validFrom = `${year}-${String(month).padStart(2, '0')}-01`;
-        const result = await db.insert(budgetAllocations).values({
+        const result = await d.insert(budgetAllocations).values({
           customerId,
           budgetType: "entlastungsbetrag_45b",
           year,
@@ -401,8 +406,9 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     };
   }
 
-  async getBudgetPreferences(customerId: number): Promise<CustomerBudgetPreferences | undefined> {
-    const result = await db.select()
+  async getBudgetPreferences(customerId: number, _tx?: DbClient): Promise<CustomerBudgetPreferences | undefined> {
+    const d = _tx ?? db;
+    const result = await d.select()
       .from(customerBudgetPreferences)
       .where(eq(customerBudgetPreferences.customerId, customerId))
       .limit(1);
@@ -431,8 +437,9 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return result[0];
   }
 
-  async getBudgetTypeSettings(customerId: number): Promise<CustomerBudgetTypeSetting[]> {
-    return db.select()
+  async getBudgetTypeSettings(customerId: number, _tx?: DbClient): Promise<CustomerBudgetTypeSetting[]> {
+    const d = _tx ?? db;
+    return d.select()
       .from(customerBudgetTypeSettings)
       .where(eq(customerBudgetTypeSettings.customerId, customerId))
       .orderBy(asc(customerBudgetTypeSettings.priority));
@@ -724,8 +731,9 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return cascadeResult.transactions[0];
   }
 
-  async getCustomerBudgetAmounts(customerId: number): Promise<{ pflegesachleistungen36: number; verhinderungspflege39: number }> {
-    const result = await db.select().from(customerBudgets).where(and(eq(customerBudgets.customerId, customerId), isNull(customerBudgets.validTo))).limit(1);
+  async getCustomerBudgetAmounts(customerId: number, _tx?: DbClient): Promise<{ pflegesachleistungen36: number; verhinderungspflege39: number }> {
+    const d = _tx ?? db;
+    const result = await d.select().from(customerBudgets).where(and(eq(customerBudgets.customerId, customerId), isNull(customerBudgets.validTo))).limit(1);
     if (result[0]) {
       return {
         pflegesachleistungen36: result[0].pflegesachleistungen36 ?? 0,
@@ -735,13 +743,14 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return { pflegesachleistungen36: 0, verhinderungspflege39: 0 };
   }
 
-  async ensureAllocations45a(customerId: number): Promise<BudgetAllocation[]> {
-    const preferences = await this.getBudgetPreferences(customerId);
+  async ensureAllocations45a(customerId: number, _tx?: DbClient): Promise<BudgetAllocation[]> {
+    const d = _tx ?? db;
+    const preferences = await this.getBudgetPreferences(customerId, _tx);
     if (!preferences?.budgetStartDate) {
       return [];
     }
 
-    const amounts = await this.getCustomerBudgetAmounts(customerId);
+    const amounts = await this.getCustomerBudgetAmounts(customerId, _tx);
     if (!amounts.pflegesachleistungen36 || amounts.pflegesachleistungen36 === 0) {
       return [];
     }
@@ -752,7 +761,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     const currentYear = todayDate.getFullYear();
     const currentMonth = todayDate.getMonth() + 1;
 
-    const existingAllocations = await db.select()
+    const existingAllocations = await d.select()
       .from(budgetAllocations)
       .where(and(
         eq(budgetAllocations.customerId, customerId),
@@ -775,7 +784,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       if (!existingSet.has(key)) {
         const validFrom = `${year}-${String(month).padStart(2, '0')}-01`;
         const expires = lastDayOfMonth(year, month);
-        const result = await db.insert(budgetAllocations).values({
+        const result = await d.insert(budgetAllocations).values({
           customerId,
           budgetType: "umwandlung_45a",
           year,
@@ -801,13 +810,14 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return created;
   }
 
-  async ensureAllocations39_42a(customerId: number): Promise<BudgetAllocation[]> {
-    const preferences = await this.getBudgetPreferences(customerId);
+  async ensureAllocations39_42a(customerId: number, _tx?: DbClient): Promise<BudgetAllocation[]> {
+    const d = _tx ?? db;
+    const preferences = await this.getBudgetPreferences(customerId, _tx);
     if (!preferences?.budgetStartDate) {
       return [];
     }
 
-    const amounts = await this.getCustomerBudgetAmounts(customerId);
+    const amounts = await this.getCustomerBudgetAmounts(customerId, _tx);
     if (!amounts.verhinderungspflege39 || amounts.verhinderungspflege39 === 0) {
       return [];
     }
@@ -818,7 +828,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     const currentYear = todayDate.getFullYear();
     const startYear = startDate.getFullYear();
 
-    const existingAllocations = await db.select()
+    const existingAllocations = await d.select()
       .from(budgetAllocations)
       .where(and(
         eq(budgetAllocations.customerId, customerId),
@@ -842,7 +852,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         : `${year}-01-01`;
       const expiresAt = `${year}-12-31`;
 
-      const result = await db.insert(budgetAllocations).values({
+      const result = await d.insert(budgetAllocations).values({
         customerId,
         budgetType: "ersatzpflege_39_42a",
         year,
@@ -970,8 +980,9 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return { entlastungsbetrag45b, umwandlung45a, ersatzpflege39_42a };
   }
 
-  async getAvailableCarryoverCents(customerId: number, asOfDate: string): Promise<number> {
-    const carryoverAllocations = await db.select()
+  async getAvailableCarryoverCents(customerId: number, asOfDate: string, _tx?: DbClient): Promise<number> {
+    const d = _tx ?? db;
+    const carryoverAllocations = await d.select()
       .from(budgetAllocations)
       .where(and(
         eq(budgetAllocations.customerId, customerId),
@@ -987,7 +998,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     if (carryoverAllocations.length === 0) return 0;
 
     const allocationIds = carryoverAllocations.map(a => a.id);
-    const consumed = await db.select({
+    const consumed = await d.select({
       allocationId: budgetTransactions.allocationId,
       total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
     })
@@ -1009,10 +1020,11 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return totalAvailable;
   }
 
-  async processExpiredCarryover(customerId: number): Promise<BudgetTransaction[]> {
+  async processExpiredCarryover(customerId: number, _tx?: DbClient): Promise<BudgetTransaction[]> {
+    const d = _tx ?? db;
     const today = todayISO();
 
-    const expiredAllocations = await db.select()
+    const expiredAllocations = await d.select()
       .from(budgetAllocations)
       .where(and(
         eq(budgetAllocations.customerId, customerId),
@@ -1025,7 +1037,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
     if (expiredAllocations.length === 0) return [];
 
-    const existingWriteOffs = await db.select()
+    const existingWriteOffs = await d.select()
       .from(budgetTransactions)
       .where(and(
         eq(budgetTransactions.customerId, customerId),
@@ -1042,7 +1054,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     for (const allocation of expiredAllocations) {
       if (writtenOffAllocationIds.has(allocation.id)) continue;
 
-      const consumedFromAllocation = await db.select({
+      const consumedFromAllocation = await d.select({
         total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
       })
         .from(budgetTransactions)
@@ -1056,7 +1068,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
       if (remaining <= 0) continue;
 
-      const writeOff = await db.insert(budgetTransactions).values({
+      const writeOff = await d.insert(budgetTransactions).values({
         customerId,
         budgetType: "entlastungsbetrag_45b",
         transactionDate: allocation.expiresAt!,
@@ -1089,11 +1101,13 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       travelCents?: number;
       customerKilometers?: number;
       customerKilometersCents?: number;
-    }
+    },
+    _tx?: DbClient
   ): Promise<{ consumedCents: number; transactions: BudgetTransaction[]; remainingCents: number }> {
+    const d = _tx ?? db;
     const today = transactionDate;
 
-    const allocations = await db.select()
+    const allocations = await d.select()
       .from(budgetAllocations)
       .where(and(
         eq(budgetAllocations.customerId, customerId),
@@ -1112,7 +1126,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
     const allocationIds = allocations.map(a => a.id);
     const consumptionByAllocation = allocationIds.length > 0
-      ? await db.select({
+      ? await d.select({
           allocationId: budgetTransactions.allocationId,
           total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
         })
@@ -1164,7 +1178,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         txData.customerKilometersCents = params.customerKilometersCents ?? null;
       }
 
-      const result = await db.insert(budgetTransactions).values(txData).returning();
+      const result = await d.insert(budgetTransactions).values(txData).returning();
       if (result[0]) transactions.push(result[0]);
 
       remaining -= consumeAmount;
@@ -1190,156 +1204,159 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     customerKilometersCents: number;
     userId?: number;
   }): Promise<CascadeResult> {
-    const existingTransaction = await this.getTransactionByAppointmentId(params.appointmentId);
-    if (existingTransaction) {
-      throw new Error(`Für diesen Termin wurde bereits eine Budget-Abbuchung erstellt (Transaktion #${existingTransaction.id})`);
-    }
-
-    await this.ensureMonthlyAllocations(params.customerId);
-    await this.ensureAllocations45a(params.customerId);
-    await this.ensureAllocations39_42a(params.customerId);
-    await this.processExpiredCarryover(params.customerId);
-
-    const typeSettings = await this.getBudgetTypeSettings(params.customerId);
-
-    const defaultPriority: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null }> = [
-      { budgetType: "umwandlung_45a", enabled: true, priority: 1, monthlyLimitCents: null },
-      { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 2, monthlyLimitCents: null },
-      { budgetType: "ersatzpflege_39_42a", enabled: true, priority: 3, monthlyLimitCents: null },
-    ];
-
-    let priorityOrder: Array<{ budgetType: string; enabled: boolean; monthlyLimitCents: number | null; yearlyLimitCents: number | null }>;
-
-    if (typeSettings.length > 0) {
-      const settingsMap = new Map(typeSettings.map(s => [s.budgetType, s]));
-      priorityOrder = defaultPriority.map(d => {
-        const s = settingsMap.get(d.budgetType);
-        return {
-          budgetType: d.budgetType,
-          enabled: s ? s.enabled : d.enabled,
-          monthlyLimitCents: s ? s.monthlyLimitCents : d.monthlyLimitCents,
-          yearlyLimitCents: s?.yearlyLimitCents ?? null,
-        };
-      });
-      priorityOrder.sort((a, b) => {
-        const aPrio = settingsMap.get(a.budgetType)?.priority ?? defaultPriority.find(d => d.budgetType === a.budgetType)!.priority;
-        const bPrio = settingsMap.get(b.budgetType)?.priority ?? defaultPriority.find(d => d.budgetType === b.budgetType)!.priority;
-        return aPrio - bPrio;
-      });
-    } else {
-      const preferences = await this.getBudgetPreferences(params.customerId);
-      priorityOrder = defaultPriority.map(d => ({
-        ...d,
-        monthlyLimitCents: d.budgetType === "entlastungsbetrag_45b" ? (preferences?.monthlyLimitCents ?? null) : null,
-        yearlyLimitCents: null,
-      }));
-    }
-
-    let remaining = params.totalAmountCents;
-    const allTransactions: BudgetTransaction[] = [];
-    const breakdown: Array<{ budgetType: string; consumedCents: number }> = [];
-
-    for (const pot of priorityOrder) {
-      if (remaining <= 0) break;
-      if (!pot.enabled) {
-        breakdown.push({ budgetType: pot.budgetType, consumedCents: 0 });
-        continue;
+    return await db.transaction(async (tx: DbClient) => {
+      const existingTransaction = await this.getTransactionByAppointmentId(params.appointmentId, tx);
+      if (existingTransaction) {
+        throw new Error(`Für diesen Termin wurde bereits eine Budget-Abbuchung erstellt (Transaktion #${existingTransaction.id})`);
       }
 
-      let maxConsumable = remaining;
+      await this.ensureMonthlyAllocations(params.customerId, tx);
+      await this.ensureAllocations45a(params.customerId, tx);
+      await this.ensureAllocations39_42a(params.customerId, tx);
+      await this.processExpiredCarryover(params.customerId, tx);
 
-      const isMonthlyBudget = pot.budgetType === "entlastungsbetrag_45b" || pot.budgetType === "umwandlung_45a";
-      if (isMonthlyBudget && pot.monthlyLimitCents !== null) {
-        const txDate = parseLocalDate(params.transactionDate);
-        const txYear = txDate.getFullYear();
-        const txMonth = txDate.getMonth() + 1;
-        const currentMonthStart = `${txYear}-${String(txMonth).padStart(2, '0')}-01`;
+      const typeSettings = await this.getBudgetTypeSettings(params.customerId, tx);
 
-        const monthTransactions = await db.select({
-          total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-        })
-          .from(budgetTransactions)
-          .where(and(
-            eq(budgetTransactions.customerId, params.customerId),
-            eq(budgetTransactions.budgetType, pot.budgetType),
-            eq(budgetTransactions.transactionType, "consumption"),
-            gte(budgetTransactions.transactionDate, currentMonthStart)
-          ));
+      const defaultPriority: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null }> = [
+        { budgetType: "umwandlung_45a", enabled: true, priority: 1, monthlyLimitCents: null },
+        { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 2, monthlyLimitCents: null },
+        { budgetType: "ersatzpflege_39_42a", enabled: true, priority: 3, monthlyLimitCents: null },
+      ];
 
-        const alreadyUsedThisMonth = Number(monthTransactions[0]?.total ?? 0);
+      let priorityOrder: Array<{ budgetType: string; enabled: boolean; monthlyLimitCents: number | null; yearlyLimitCents: number | null }>;
 
-        let effectiveMonthlyLimit = pot.monthlyLimitCents;
-        if (pot.budgetType === "entlastungsbetrag_45b") {
-          const carryoverAvailable = await this.getAvailableCarryoverCents(params.customerId, params.transactionDate);
-          effectiveMonthlyLimit = pot.monthlyLimitCents + carryoverAvailable;
+      if (typeSettings.length > 0) {
+        const settingsMap = new Map(typeSettings.map(s => [s.budgetType, s]));
+        priorityOrder = defaultPriority.map(d => {
+          const s = settingsMap.get(d.budgetType);
+          return {
+            budgetType: d.budgetType,
+            enabled: s ? s.enabled : d.enabled,
+            monthlyLimitCents: s ? s.monthlyLimitCents : d.monthlyLimitCents,
+            yearlyLimitCents: s?.yearlyLimitCents ?? null,
+          };
+        });
+        priorityOrder.sort((a, b) => {
+          const aPrio = settingsMap.get(a.budgetType)?.priority ?? defaultPriority.find(d => d.budgetType === a.budgetType)!.priority;
+          const bPrio = settingsMap.get(b.budgetType)?.priority ?? defaultPriority.find(d => d.budgetType === b.budgetType)!.priority;
+          return aPrio - bPrio;
+        });
+      } else {
+        const preferences = await this.getBudgetPreferences(params.customerId, tx);
+        priorityOrder = defaultPriority.map(d => ({
+          ...d,
+          monthlyLimitCents: d.budgetType === "entlastungsbetrag_45b" ? (preferences?.monthlyLimitCents ?? null) : null,
+          yearlyLimitCents: null,
+        }));
+      }
+
+      let remaining = params.totalAmountCents;
+      const allTransactions: BudgetTransaction[] = [];
+      const breakdown: Array<{ budgetType: string; consumedCents: number }> = [];
+
+      for (const pot of priorityOrder) {
+        if (remaining <= 0) break;
+        if (!pot.enabled) {
+          breakdown.push({ budgetType: pot.budgetType, consumedCents: 0 });
+          continue;
         }
 
-        const monthlyRemaining = Math.max(0, effectiveMonthlyLimit - alreadyUsedThisMonth);
-        maxConsumable = Math.min(remaining, monthlyRemaining);
-      }
+        let maxConsumable = remaining;
 
-      if (pot.budgetType === "ersatzpflege_39_42a" && pot.yearlyLimitCents !== null) {
-        const txDate = parseLocalDate(params.transactionDate);
-        const txYear = txDate.getFullYear();
-        const yearStart = `${txYear}-01-01`;
-        const yearEnd = `${txYear}-12-31`;
+        const isMonthlyBudget = pot.budgetType === "entlastungsbetrag_45b" || pot.budgetType === "umwandlung_45a";
+        if (isMonthlyBudget && pot.monthlyLimitCents !== null) {
+          const txDate = parseLocalDate(params.transactionDate);
+          const txYear = txDate.getFullYear();
+          const txMonth = txDate.getMonth() + 1;
+          const currentMonthStart = `${txYear}-${String(txMonth).padStart(2, '0')}-01`;
 
-        const yearTransactions = await db.select({
-          total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-        })
-          .from(budgetTransactions)
-          .where(and(
-            eq(budgetTransactions.customerId, params.customerId),
-            eq(budgetTransactions.budgetType, "ersatzpflege_39_42a"),
-            eq(budgetTransactions.transactionType, "consumption"),
-            gte(budgetTransactions.transactionDate, yearStart),
-            lte(budgetTransactions.transactionDate, yearEnd)
-          ));
+          const monthTransactions = await tx.select({
+            total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+          })
+            .from(budgetTransactions)
+            .where(and(
+              eq(budgetTransactions.customerId, params.customerId),
+              eq(budgetTransactions.budgetType, pot.budgetType),
+              eq(budgetTransactions.transactionType, "consumption"),
+              gte(budgetTransactions.transactionDate, currentMonthStart)
+            ));
 
-        const alreadyUsedThisYear = Number(yearTransactions[0]?.total ?? 0);
-        const yearlyRemaining = Math.max(0, pot.yearlyLimitCents - alreadyUsedThisYear);
-        maxConsumable = Math.min(maxConsumable, yearlyRemaining);
-      }
+          const alreadyUsedThisMonth = Number(monthTransactions[0]?.total ?? 0);
 
-      if (maxConsumable <= 0) {
-        breakdown.push({ budgetType: pot.budgetType, consumedCents: 0 });
-        continue;
-      }
+          let effectiveMonthlyLimit = pot.monthlyLimitCents;
+          if (pot.budgetType === "entlastungsbetrag_45b") {
+            const carryoverAvailable = await this.getAvailableCarryoverCents(params.customerId, params.transactionDate, tx);
+            effectiveMonthlyLimit = pot.monthlyLimitCents + carryoverAvailable;
+          }
 
-      const isFirstPot = allTransactions.length === 0;
-      const fifoResult = await this.consumeFifo(
-        params.customerId,
-        pot.budgetType,
-        maxConsumable,
-        params.transactionDate,
-        isFirstPot ? {
-          appointmentId: params.appointmentId,
-          userId: params.userId,
-          hauswirtschaftMinutes: params.hauswirtschaftMinutes,
-          hauswirtschaftCents: params.hauswirtschaftCents,
-          alltagsbegleitungMinutes: params.alltagsbegleitungMinutes,
-          alltagsbegleitungCents: params.alltagsbegleitungCents,
-          travelKilometers: params.travelKilometers,
-          travelCents: params.travelCents,
-          customerKilometers: params.customerKilometers,
-          customerKilometersCents: params.customerKilometersCents,
-        } : {
-          appointmentId: params.appointmentId,
-          userId: params.userId,
+          const monthlyRemaining = Math.max(0, effectiveMonthlyLimit - alreadyUsedThisMonth);
+          maxConsumable = Math.min(remaining, monthlyRemaining);
         }
-      );
 
-      allTransactions.push(...fifoResult.transactions);
-      remaining -= fifoResult.consumedCents;
-      breakdown.push({ budgetType: pot.budgetType, consumedCents: fifoResult.consumedCents });
-    }
+        if (pot.budgetType === "ersatzpflege_39_42a" && pot.yearlyLimitCents !== null) {
+          const txDate = parseLocalDate(params.transactionDate);
+          const txYear = txDate.getFullYear();
+          const yearStart = `${txYear}-01-01`;
+          const yearEnd = `${txYear}-12-31`;
 
-    return {
-      transactions: allTransactions,
-      totalConsumedCents: params.totalAmountCents - remaining,
-      outstandingCents: remaining,
-      breakdown,
-    };
+          const yearTransactions = await tx.select({
+            total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+          })
+            .from(budgetTransactions)
+            .where(and(
+              eq(budgetTransactions.customerId, params.customerId),
+              eq(budgetTransactions.budgetType, "ersatzpflege_39_42a"),
+              eq(budgetTransactions.transactionType, "consumption"),
+              gte(budgetTransactions.transactionDate, yearStart),
+              lte(budgetTransactions.transactionDate, yearEnd)
+            ));
+
+          const alreadyUsedThisYear = Number(yearTransactions[0]?.total ?? 0);
+          const yearlyRemaining = Math.max(0, pot.yearlyLimitCents - alreadyUsedThisYear);
+          maxConsumable = Math.min(maxConsumable, yearlyRemaining);
+        }
+
+        if (maxConsumable <= 0) {
+          breakdown.push({ budgetType: pot.budgetType, consumedCents: 0 });
+          continue;
+        }
+
+        const isFirstPot = allTransactions.length === 0;
+        const fifoResult = await this.consumeFifo(
+          params.customerId,
+          pot.budgetType,
+          maxConsumable,
+          params.transactionDate,
+          isFirstPot ? {
+            appointmentId: params.appointmentId,
+            userId: params.userId,
+            hauswirtschaftMinutes: params.hauswirtschaftMinutes,
+            hauswirtschaftCents: params.hauswirtschaftCents,
+            alltagsbegleitungMinutes: params.alltagsbegleitungMinutes,
+            alltagsbegleitungCents: params.alltagsbegleitungCents,
+            travelKilometers: params.travelKilometers,
+            travelCents: params.travelCents,
+            customerKilometers: params.customerKilometers,
+            customerKilometersCents: params.customerKilometersCents,
+          } : {
+            appointmentId: params.appointmentId,
+            userId: params.userId,
+          },
+          tx
+        );
+
+        allTransactions.push(...fifoResult.transactions);
+        remaining -= fifoResult.consumedCents;
+        breakdown.push({ budgetType: pot.budgetType, consumedCents: fifoResult.consumedCents });
+      }
+
+      return {
+        transactions: allTransactions,
+        totalConsumedCents: params.totalAmountCents - remaining,
+        outstandingCents: remaining,
+        breakdown,
+      };
+    });
   }
 }
 

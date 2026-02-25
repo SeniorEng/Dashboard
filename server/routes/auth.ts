@@ -63,7 +63,7 @@ router.post("/login", asyncHandler("Anmeldung fehlgeschlagen", async (req: Reque
   });
 }));
 
-router.post("/logout", requireAuth, asyncHandler("Abmeldung fehlgeschlagen", async (req: Request, res: Response) => {
+router.post("/logout", requireAuth, csrfProtection, asyncHandler("Abmeldung fehlgeschlagen", async (req: Request, res: Response) => {
   const token = req.cookies?.careconnect_session;
   if (token) {
     await authService.logout(token);
@@ -165,6 +165,7 @@ router.post("/onboarding/reset", requireAuth, csrfProtection, asyncHandler("Onbo
 
 router.post(
   "/password-reset/request",
+  csrfProtection,
   asyncHandler("Passwort-Zurücksetzung fehlgeschlagen", async (req: Request, res: Response) => {
     const result = passwordResetRequestSchema.safeParse(req.body);
     if (!result.success) {
@@ -212,7 +213,7 @@ router.post(
   })
 );
 
-router.post("/password-reset/confirm", asyncHandler("Passwort konnte nicht geändert werden", async (req: Request, res: Response) => {
+router.post("/password-reset/confirm", csrfProtection, asyncHandler("Passwort konnte nicht geändert werden", async (req: Request, res: Response) => {
   const result = passwordResetSchema.safeParse(req.body);
   if (!result.success) {
     res.status(400).json({
@@ -321,7 +322,7 @@ router.get("/setup-required", asyncHandler("Setup-Status konnte nicht überprüf
   res.json({ setupRequired: !hasAdmin });
 }));
 
-router.post("/setup", asyncHandler("Administrator-Konto konnte nicht erstellt werden", async (req: Request, res: Response) => {
+router.post("/setup", csrfProtection, asyncHandler("Administrator-Konto konnte nicht erstellt werden", async (req: Request, res: Response) => {
   const hasAdmin = await authService.hasAnyAdmin();
   if (hasAdmin) {
     res.status(403).json({

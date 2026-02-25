@@ -26,13 +26,13 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **API Design**: RESTful endpoints, Zod validation, structured error responses, modular routing.
 - **Business Logic**: Separated service layer with dependency injection.
 - **Error Handling**: Centralized `asyncHandler` and `AppError` for consistent JSON error responses.
-- **Security**: Role-based access control with SQL-level data filtering, CSRF protection, and session management.
+- **Security**: Role-based access control with SQL-level data filtering, CSRF protection (including auth routes), session management, rate limiting (global API + login + password-reset), helmet security headers.
 - **Access Model**: Two-tiered access for employees.
 
 ### Data Storage
 - **Database**: PostgreSQL via Neon serverless with Drizzle ORM.
 - **Schema**: Tables include `customers`, `appointments`, `insurance_providers`, `employee_time_entries`, with historization (`valid_from`/`valid_to`) and `withTimezone: true` for all timestamps.
-- **Soft-Delete**: `deletedAt` for GoBD compliance.
+- **Soft-Delete**: `deletedAt` for GoBD compliance. Partial indexes on appointments for `deleted_at IS NULL` queries.
 - **Data Layer**: `IStorage` interface abstraction.
 - **Caching**: In-memory cache for assigned customer IDs, sessions, and birthdays.
 - **Performance**: Combined API endpoints, scoped auth middleware, single JOIN for session validation, batch cleanup. Configurable `staleTime` for frontend data stability.
@@ -40,7 +40,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 ### Business Rules & Patterns
 - **Shared Domain Logic**: Single source of truth.
 - **Appointment Workflow**: Status-driven field editing, overlap checking.
-- **Customer Management**: Multi-step creation, detailed views with 6 tabs (Übersicht, Vertrag, Dokumente, Kontakte, Budgets, Versicherung). German-specific validation (`Pflegegrad`) with historization. Deactivation tracking with predefined reasons. Inline editing of customer fields (address, phone, email, Pflegegrad, pet info, medical history, agreed services) directly within tabs, with all changes logged via `auditService`.
+- **Customer Management**: Multi-step creation, detailed views with 6 tabs (Übersicht, Vertrag, Dokumente, Kontakte, Budgets, Versicherung). German-specific validation (`Pflegegrad`) with historization. Deactivation tracking with predefined reasons. Inline editing of customer fields (address, phone, email, Pflegegrad, pet info, medical history, agreed services) directly within tabs, with all changes logged via `auditService`. DSGVO Art. 17 customer anonymization (`POST /admin/customers/:id/anonymize`).
 - **Document Templates**: HTML-based templates with placeholders (`{{input:Feldname}}`, company placeholders) supporting fragments or full HTML documents, billing-type associations, and versioning. Supports `documentTypeId`, `context`, `targetType`, and dual signatures. Digital document flow: select template → fill inputs → preview → sign → generate PDF.
 - **PDF Generation**: Server-side HTML→PDF using Puppeteer/Chromium for GoBD-compliant documents. Digital signature capture, integrity hashing, and visible audit stamps including IP, location, and hash.
 - **Insurance Providers**: Admin management, historized assignment, IK-Nummer validation.

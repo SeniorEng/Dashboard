@@ -24,6 +24,11 @@ export const AUDIT_ACTIONS = [
   "time_entry_deleted",
   "month_closed",
   "month_reopened",
+  "login_success",
+  "login_failed",
+  "password_changed",
+  "customer_created",
+  "customer_anonymized",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];

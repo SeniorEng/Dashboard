@@ -46,7 +46,16 @@ const loginLimiter = rateLimit({
   message: { message: "Zu viele Anmeldeversuche, bitte später erneut versuchen." },
 });
 
+const passwordResetLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Zu viele Passwort-Zurücksetzungen, bitte in einer Stunde erneut versuchen." },
+});
+
 app.post("/api/auth/login", loginLimiter);
+app.use("/api/auth/password-reset/", passwordResetLimiter);
 app.use("/api/", apiLimiter);
 
 export function log(message: string, source = "express") {

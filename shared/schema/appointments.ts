@@ -1,4 +1,5 @@
 import { pgTable, text, integer, serial, time, date, boolean, index } from "drizzle-orm/pg-core";
+import { isNull } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { timestamp } from "./common";
@@ -50,6 +51,9 @@ export const appointments = pgTable("appointments", {
   index("appointments_date_customer_id_idx").on(table.date, table.customerId),
   index("appointments_status_date_idx").on(table.status, table.date),
   index("appointments_employee_date_idx").on(table.assignedEmployeeId, table.date),
+  index("appointments_active_date_idx").on(table.date).where(isNull(table.deletedAt)),
+  index("appointments_active_customer_idx").on(table.customerId).where(isNull(table.deletedAt)),
+  index("appointments_active_employee_date_idx").on(table.assignedEmployeeId, table.date).where(isNull(table.deletedAt)),
 ]);
 
 // ============================================

@@ -118,6 +118,39 @@ class AuditService {
     await this.log(userId, "customer_care_level_changed", "customer", customerId, metadata, ipAddress);
   }
 
+  async loginSuccess(
+    userId: number,
+    metadata: { email: string },
+    ipAddress?: string
+  ): Promise<void> {
+    await this.log(userId, "login_success", "user", userId, metadata, ipAddress);
+  }
+
+  async loginFailed(
+    userId: number,
+    metadata: { email: string; reason: string },
+    ipAddress?: string
+  ): Promise<void> {
+    await this.log(userId, "login_failed", "user", userId, metadata, ipAddress);
+  }
+
+  async passwordChanged(
+    userId: number,
+    metadata: { method: string },
+    ipAddress?: string
+  ): Promise<void> {
+    await this.log(userId, "password_changed", "user", userId, metadata, ipAddress);
+  }
+
+  async customerCreated(
+    userId: number,
+    customerId: number,
+    metadata: { customerName: string; billingType: string },
+    ipAddress?: string
+  ): Promise<void> {
+    await this.log(userId, "customer_created", "customer", customerId, metadata, ipAddress);
+  }
+
   async customerContractUpdated(
     userId: number,
     customerId: number,

@@ -18,6 +18,10 @@ import {
   appointments,
   customerContracts,
   customerInsuranceHistory,
+  customerContacts,
+  customerCareLevelHistory,
+  customerNeedsAssessments,
+  customerPricingHistory,
   budgetTransactions,
 } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
@@ -359,6 +363,11 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
   }
 
   birthdaysCache.invalidateAll();
+
+  auditService.customerCreated(userId, customer.id, {
+    customerName: `${data.vorname} ${data.nachname}`,
+    billingType: data.billingType,
+  }, req.ip).catch(() => {});
   
   res.status(201).json({ ...customer, warnings: warnings.length > 0 ? warnings : undefined });
 }));
@@ -1221,6 +1230,110 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
     skipped,
     errors,
     details: results,
+  });
+}));
+
+router.post("/customers/:id/anonymize", asyncHandler("Kunde konnte nicht anonymisiert werden", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
+    return;
+  }
+
+  const customer = await storage.getCustomer(id);
+  if (!customer) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+    return;
+  }
+
+  if (customer.isAnonymized) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Kunde wurde bereits anonymisiert" });
+    return;
+  }
+
+  if (customer.status === "aktiv") {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Nur inaktive Kunden können anonymisiert werden. Bitte deaktivieren Sie den Kunden zuerst." });
+    return;
+  }
+
+  const openAppts = await db.select({ id: appointments.id })
+    .from(appointments)
+    .where(and(
+      eq(appointments.customerId, id),
+      sql`${appointments.status} NOT IN ('completed', 'cancelled')`,
+      isNull(appointments.deletedAt)
+    ));
+
+  if (openAppts.length > 0) {
+    res.status(400).json({
+      error: "VALIDATION_ERROR",
+      message: `Anonymisierung nicht möglich: ${openAppts.length} offene Termine vorhanden. Alle Termine müssen abgeschlossen oder storniert sein.`,
+    });
+    return;
+  }
+
+  const now = new Date();
+  const anonymizedLabel = `Ehem. Kunde #${id}`;
+
+  await db.transaction(async (tx) => {
+    await tx.update(customers).set({
+      name: anonymizedLabel,
+      vorname: null,
+      nachname: null,
+      email: null,
+      festnetz: null,
+      telefon: null,
+      geburtsdatum: null,
+      address: "Anonymisiert",
+      strasse: null,
+      nr: null,
+      plz: null,
+      stadt: null,
+      vorerkrankungen: null,
+      haustierDetails: null,
+      deactivationNote: null,
+      isAnonymized: true,
+      anonymizedAt: now,
+      updatedAt: now,
+    }).where(eq(customers.id, id));
+
+    await tx.update(customerContacts).set({
+      vorname: "Anonymisiert",
+      nachname: "Anonymisiert",
+      telefon: "0000000000",
+      email: null,
+      notes: null,
+    }).where(eq(customerContacts.customerId, id));
+
+    await tx.update(customerNeedsAssessments).set({
+      anamnese: null,
+      sonstigeLeistungen: null,
+    }).where(eq(customerNeedsAssessments.customerId, id));
+
+    await tx.update(customerInsuranceHistory).set({
+      versichertennummer: "ANONYMISIERT",
+      notes: null,
+    }).where(eq(customerInsuranceHistory.customerId, id));
+  });
+
+  await auditService.log(
+    req.user!.id,
+    "customer_anonymized",
+    "customer",
+    id,
+    {
+      anonymizedBy: req.user!.id,
+      originalName: customer.name,
+      reason: "DSGVO Art. 17 - Recht auf Löschung",
+    },
+    req.ip
+  );
+
+  birthdaysCache.invalidateAll();
+
+  res.json({
+    success: true,
+    message: `Kunde "${customer.name}" wurde DSGVO-konform anonymisiert`,
   });
 }));
 

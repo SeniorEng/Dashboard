@@ -15,6 +15,7 @@ import {
 } from "@shared/schema";
 import { db } from "../lib/db";
 import { sessionCache } from "./cache";
+import { auditService } from "./audit";
 
 const SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes idle timeout
 const SESSION_ABSOLUTE_TIMEOUT_MS = 12 * 60 * 60 * 1000; // 12 hours absolute maximum
@@ -26,8 +27,12 @@ async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, BCRYPT_ROUNDS);
 }
 
+function isSha256Hash(storedHash: string): boolean {
+  return storedHash.includes(":") && storedHash.length === 97;
+}
+
 async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
-  if (storedHash.includes(":") && storedHash.length === 97) {
+  if (isSha256Hash(storedHash)) {
     const [salt, hash] = storedHash.split(":");
     const inputHash = createHash("sha256")
       .update(password + salt)
@@ -130,11 +135,24 @@ export class AuthService {
       .where(eq(users.email, email.toLowerCase()));
 
     if (!user || !user.isActive) {
+      if (user) {
+        auditService.loginFailed(user.id, { email: email.toLowerCase(), reason: "inactive_account" }).catch(() => {});
+      }
       return null;
     }
 
     if (!(await verifyPassword(password, user.passwordHash))) {
+      auditService.loginFailed(user.id, { email: email.toLowerCase(), reason: "invalid_password" }).catch(() => {});
       return null;
+    }
+
+    if (isSha256Hash(user.passwordHash)) {
+      const bcryptHash = await hashPassword(password);
+      await db
+        .update(users)
+        .set({ passwordHash: bcryptHash, updatedAt: new Date() })
+        .where(eq(users.id, user.id));
+      console.warn(`[AUTH] SHA-256 password upgraded to bcrypt for user ${user.id} (${user.email})`);
     }
 
     const roles = await this.getUserRoles(user.id);
@@ -150,6 +168,8 @@ export class AuthService {
       expiresAt,
       lastActivityAt: now,
     });
+
+    auditService.loginSuccess(user.id, { email: email.toLowerCase() }).catch(() => {});
 
     return {
       user: { ...user, roles },
@@ -460,6 +480,7 @@ export class AuthService {
       .returning();
     if (result.length > 0) {
       await this.logoutAllSessions(userId);
+      auditService.passwordChanged(userId, { method: "admin_reset" }).catch(() => {});
       return true;
     }
     return false;
@@ -482,6 +503,7 @@ export class AuthService {
 
     if (result.length > 0) {
       await this.logoutAllSessions(userId);
+      auditService.passwordChanged(userId, { method: "user_change" }).catch(() => {});
       return { success: true };
     }
     return { success: false, error: "Passwort konnte nicht geändert werden" };
@@ -597,6 +619,7 @@ export class AuthService {
       .where(eq(passwordResetTokens.id, resetToken.id));
 
     await this.logoutAllSessions(resetToken.userId);
+    auditService.passwordChanged(resetToken.userId, { method: "token_reset" }).catch(() => {});
 
     return true;
   }
