@@ -112,9 +112,9 @@ async function getMonthlyHoursBatch(
   fromMonth: number,
   toMonth: number
 ): Promise<MonthlyHoursMap> {
-  const employeeIdArray = sql`${sql.raw(employeeIds.join(','))}`;
   const startDate = `${year}-${String(fromMonth).padStart(2, "0")}-01`;
-  const endDate = new Date(year, toMonth, 0).toISOString().split("T")[0];
+  const lastDay = new Date(year, toMonth, 0).getDate();
+  const endDate = `${year}-${String(toMonth).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
 
   const result: MonthlyHoursMap = {};
 
@@ -129,7 +129,7 @@ async function getMonthlyHoursBatch(
       AND deleted_at IS NULL
       AND date >= ${startDate}
       AND date <= ${endDate}
-      AND performed_by_employee_id IN (${employeeIdArray})
+      AND performed_by_employee_id = ANY(${employeeIds})
       AND actual_start IS NOT NULL
       AND actual_end IS NOT NULL
     GROUP BY performed_by_employee_id, service_type, EXTRACT(MONTH FROM date::date)
@@ -196,7 +196,8 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
   }
 
   const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
-  const endDate = new Date(year, month, 0).toISOString().split("T")[0];
+  const lastDay = new Date(year, month, 0).getDate();
+  const endDate = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
 
   const employees = await db.select({
     id: users.id,
@@ -214,7 +215,6 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
   }
 
   const employeeIds = employees.map(e => e.id);
-  const employeeIdArray = sql`${sql.raw(employeeIds.join(','))}`;
 
   const [companySettingsRow] = await db.select({
     minijobEarningsLimitCents: companySettings.minijobEarningsLimitCents,
@@ -285,7 +285,7 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
       AND deleted_at IS NULL
       AND date >= ${startDate}
       AND date <= ${endDate}
-      AND performed_by_employee_id IN (${employeeIdArray})
+      AND performed_by_employee_id = ANY(${employeeIds})
     GROUP BY performed_by_employee_id
   `);
 

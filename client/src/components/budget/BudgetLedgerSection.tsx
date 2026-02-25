@@ -12,8 +12,8 @@ import { Plus, Wallet, History, AlertTriangle, Calendar, Settings, Euro } from "
 import { iconSize, componentStyles } from "@/design-system/tokens";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
-import { formatCurrency, formatDateDisplay } from "@shared/utils/format";
-import { todayISO, parseLocalDate } from "@shared/utils/datetime";
+import { formatCurrency } from "@shared/utils/format";
+import { formatDateForDisplay, todayISO, parseLocalDate } from "@shared/utils/datetime";
 
 interface BudgetSummary {
   customerId: number;
@@ -205,7 +205,7 @@ export function BudgetLedgerSection({ customerId, customerName, initialSummary, 
                   {summary!.carryoverExpiresAt && (
                     <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
                       <Calendar className="w-3 h-3" />
-                      Verfällt am {formatDateDisplay(summary!.carryoverExpiresAt!)}
+                      Verfällt am {formatDateForDisplay(summary!.carryoverExpiresAt!)}
                     </p>
                   )}
                 </CardContent>
@@ -276,7 +276,7 @@ export function BudgetLedgerSection({ customerId, customerName, initialSummary, 
                           <Badge variant={tx.amountCents < 0 ? "destructive" : "secondary"}>
                             {getTransactionTypeLabel(tx.transactionType)}
                           </Badge>
-                          <span className="text-sm text-gray-500">{formatDateDisplay(tx.transactionDate)}</span>
+                          <span className="text-sm text-gray-500">{formatDateForDisplay(tx.transactionDate)}</span>
                         </div>
                         {tx.notes && (
                           <p className="text-xs text-gray-500 mt-1">{tx.notes}</p>

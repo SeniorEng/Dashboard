@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
-import { formatDateDisplay } from "@shared/utils/format";
+import { formatDateForDisplay } from "@shared/utils/datetime";
 import { useUpload } from "@/hooks/use-upload";
 import { ReviewBadge, getReviewStatus } from "./review-badge";
 import { DigitalDocumentFlow } from "./digital-document-flow";
@@ -382,7 +382,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                       <p className="text-xs text-gray-500 truncate">{doc.fileName}</p>
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-xs text-gray-400">
-                          Hochgeladen: {formatDateDisplay(doc.uploadedAt.split("T")[0])}
+                          Hochgeladen: {formatDateForDisplay(doc.uploadedAt.split("T")[0])}
                         </span>
                         <ReviewBadge reviewDueDate={doc.reviewDueDate} />
                       </div>
@@ -427,7 +427,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                         {history.filter(h => !h.isCurrent).map(h => (
                           <div key={h.id} className="flex items-center justify-between text-xs text-gray-500 p-1.5 bg-gray-50 rounded">
                             <span className="truncate flex-1">{h.fileName}</span>
-                            <span className="shrink-0 ml-2">{formatDateDisplay(h.uploadedAt.split("T")[0])}</span>
+                            <span className="shrink-0 ml-2">{formatDateForDisplay(h.uploadedAt.split("T")[0])}</span>
                             <a
                               href={h.objectPath}
                               target="_blank"
@@ -470,7 +470,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                     <div className="ml-6 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-xs text-gray-400">
-                          Erstellt: {formatDateDisplay(doc.generatedAt.split("T")[0])}
+                          Erstellt: {formatDateForDisplay(doc.generatedAt.split("T")[0])}
                         </span>
                         {doc.customerSignatureData && (
                           <span className="text-xs px-1.5 py-0.5 rounded bg-teal-50 text-teal-700">Kd. unterschrieben</span>

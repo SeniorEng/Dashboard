@@ -5,6 +5,8 @@ import { users } from "./users";
 
 // ============================================
 // EMPLOYEE TIME TRACKING
+// Migration SQL:
+// ALTER TABLE employee_time_entries ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 // ============================================
 
 // Time entry types for non-client work
@@ -35,6 +37,7 @@ export const employeeTimeEntries = pgTable("employee_time_entries", {
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at"),
 }, (table) => [
   index("time_entries_user_id_idx").on(table.userId),
   index("time_entries_entry_date_idx").on(table.entryDate),

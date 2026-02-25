@@ -23,7 +23,7 @@ export default function LoginPage() {
   const { data: setupData, isLoading: setupLoading } = useQuery({
     queryKey: ["auth", "setup-required"],
     queryFn: async () => {
-      const result = await api.get("/auth/setup-required");
+      const result = await api.get<{ setupRequired: boolean }>("/auth/setup-required");
       return unwrapResult(result);
     },
   });

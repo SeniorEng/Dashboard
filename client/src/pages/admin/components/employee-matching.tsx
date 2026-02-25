@@ -3,6 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { api, unwrapResult } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 import { Loader2, Check, X, Sparkles, RefreshCw } from "lucide-react";
 import { iconSize } from "@/design-system";
 
@@ -39,6 +40,7 @@ interface EmployeeMatchingProps {
 
 export function EmployeeMatching({ customerId, inlineCriteria, onSelect, selectedLabel }: EmployeeMatchingProps) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const { toast } = useToast();
 
   const existingQuery = useQuery<MatchResult[]>({
     queryKey: ["employee-matching", customerId],
@@ -54,6 +56,13 @@ export function EmployeeMatching({ customerId, inlineCriteria, onSelect, selecte
     mutationFn: async (criteria) => {
       const result = await api.post("/admin/customers/match-employees", criteria);
       return unwrapResult(result) as MatchResult[];
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Fehler",
+        description: error.message || "Ein Fehler ist aufgetreten",
+        variant: "destructive",
+      });
     },
   });
 

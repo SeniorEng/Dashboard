@@ -1,5 +1,5 @@
 import { tasks, users, customers, Task, InsertTask, UpdateTask } from "@shared/schema";
-import { eq, and, desc, asc, ne, sql as sqlBuilder, inArray, count } from "drizzle-orm";
+import { eq, and, desc, asc, ne, sql as sqlBuilder, inArray, count, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../lib/db";
 
@@ -56,15 +56,15 @@ async function enrichTasksWithRelations(taskRows: Task[]): Promise<TaskWithRelat
 }
 
 export async function getTasksForUser(userId: number, includeCompleted: boolean = false): Promise<TaskWithRelations[]> {
-  const baseCondition = eq(tasks.assignedToUserId, userId);
-  const whereCondition = includeCompleted 
-    ? baseCondition 
-    : and(baseCondition, ne(tasks.status, "completed"));
+  const conditions = [eq(tasks.assignedToUserId, userId), isNull(tasks.deletedAt)];
+  if (!includeCompleted) {
+    conditions.push(ne(tasks.status, "completed"));
+  }
 
   const result = await db
     .select()
     .from(tasks)
-    .where(whereCondition)
+    .where(and(...conditions))
     .orderBy(
       asc(tasks.status),
       desc(sqlBuilder`CASE WHEN ${tasks.priority} = 'high' THEN 1 WHEN ${tasks.priority} = 'medium' THEN 2 ELSE 3 END`),
@@ -75,18 +75,20 @@ export async function getTasksForUser(userId: number, includeCompleted: boolean 
 }
 
 export async function getAllTasks(includeCompleted: boolean = false): Promise<TaskWithRelations[]> {
-  let query = db
+  const conditions = [isNull(tasks.deletedAt)];
+  if (!includeCompleted) {
+    conditions.push(ne(tasks.status, "completed"));
+  }
+
+  const result = await db
     .select()
     .from(tasks)
+    .where(and(...conditions))
     .orderBy(
       asc(tasks.status),
       desc(sqlBuilder`CASE WHEN ${tasks.priority} = 'high' THEN 1 WHEN ${tasks.priority} = 'medium' THEN 2 ELSE 3 END`),
       asc(tasks.dueDate)
     );
-
-  const result = includeCompleted 
-    ? await query
-    : await query.where(ne(tasks.status, "completed"));
 
   return enrichTasksWithRelations(result);
 }
@@ -95,7 +97,7 @@ export async function getTaskById(id: number): Promise<TaskWithRelations | null>
   const result = await db
     .select()
     .from(tasks)
-    .where(eq(tasks.id, id))
+    .where(and(eq(tasks.id, id), isNull(tasks.deletedAt)))
     .limit(1);
 
   if (!result[0]) return null;
@@ -136,7 +138,7 @@ export async function updateTask(
   const existing = await db
     .select()
     .from(tasks)
-    .where(eq(tasks.id, id))
+    .where(and(eq(tasks.id, id), isNull(tasks.deletedAt)))
     .limit(1);
 
   if (!existing[0]) return null;
@@ -186,7 +188,7 @@ export async function deleteTask(
   const existing = await db
     .select()
     .from(tasks)
-    .where(eq(tasks.id, id))
+    .where(and(eq(tasks.id, id), isNull(tasks.deletedAt)))
     .limit(1);
 
   if (!existing[0]) return false;
@@ -196,7 +198,7 @@ export async function deleteTask(
     throw new Error("Nur der Ersteller oder ein Admin kann diese Aufgabe löschen");
   }
 
-  await db.delete(tasks).where(eq(tasks.id, id));
+  await db.update(tasks).set({ deletedAt: new Date() }).where(eq(tasks.id, id));
   return true;
 }
 
@@ -207,7 +209,8 @@ export async function getOpenTaskCount(userId: number): Promise<number> {
     .where(
       and(
         eq(tasks.assignedToUserId, userId),
-        ne(tasks.status, "completed")
+        ne(tasks.status, "completed"),
+        isNull(tasks.deletedAt)
       )
     );
 
@@ -245,7 +248,8 @@ export async function findMonthClosingTask(
     .where(
       and(
         eq(tasks.assignedToUserId, userId),
-        eq(tasks.title, title)
+        eq(tasks.title, title),
+        isNull(tasks.deletedAt)
       )
     )
     .limit(1);

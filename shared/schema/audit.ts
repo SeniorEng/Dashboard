@@ -17,6 +17,13 @@ export const AUDIT_ACTIONS = [
   "customer_updated",
   "customer_care_level_changed",
   "customer_contract_updated",
+  "invoice_created",
+  "invoice_cancelled",
+  "time_entry_created",
+  "time_entry_updated",
+  "time_entry_deleted",
+  "month_closed",
+  "month_reopened",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];
@@ -26,6 +33,9 @@ export const AUDIT_ENTITY_TYPES = [
   "service_record",
   "user",
   "customer",
+  "invoice",
+  "time_entry",
+  "month_closing",
 ] as const;
 
 export type AuditEntityType = typeof AUDIT_ENTITY_TYPES[number];

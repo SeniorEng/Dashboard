@@ -1,6 +1,5 @@
 import { AlertTriangle, CalendarClock } from "lucide-react";
-import { formatDateDisplay } from "@shared/utils/format";
-import { parseLocalDate } from "@shared/utils/datetime";
+import { formatDateForDisplay, parseLocalDate } from "@shared/utils/datetime";
 
 export function getReviewStatus(reviewDueDate: string | null): "ok" | "warning" | "overdue" | "none" {
   if (!reviewDueDate) return "none";
@@ -24,9 +23,9 @@ export function ReviewBadge({ reviewDueDate }: { reviewDueDate: string | null })
   };
 
   const labels = {
-    ok: `Prüfung bis ${formatDateDisplay(reviewDueDate!)}`,
-    warning: `Prüfung fällig: ${formatDateDisplay(reviewDueDate!)}`,
-    overdue: `Überfällig: ${formatDateDisplay(reviewDueDate!)}`,
+    ok: `Prüfung bis ${formatDateForDisplay(reviewDueDate!)}`,
+    warning: `Prüfung fällig: ${formatDateForDisplay(reviewDueDate!)}`,
+    overdue: `Überfällig: ${formatDateForDisplay(reviewDueDate!)}`,
   };
 
   return (

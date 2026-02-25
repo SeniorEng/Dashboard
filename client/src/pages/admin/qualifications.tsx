@@ -167,10 +167,10 @@ function QualificationsContent() {
   };
 
   return (
-    <div className="container mx-auto px-4 py-6 max-w-2xl">
+    <div className="max-w-2xl mx-auto">
       <div className="flex items-center gap-3 mb-6">
         <Link href="/admin/settings">
-          <Button variant="ghost" size="icon" data-testid="button-back">
+          <Button variant="ghost" size="icon" aria-label="Zurück" data-testid="button-back">
             <ArrowLeft className={iconSize.md} />
           </Button>
         </Link>
@@ -241,6 +241,7 @@ function QualificationsContent() {
                     <Button
                       variant="ghost"
                       size="icon"
+                      aria-label="Qualifikation bearbeiten"
                       onClick={() => openEdit(qual)}
                       data-testid={`button-edit-qual-${qual.id}`}
                     >
@@ -249,6 +250,7 @@ function QualificationsContent() {
                     <Button
                       variant="ghost"
                       size="icon"
+                      aria-label="Qualifikation löschen"
                       onClick={() => setDeleteId(qual.id)}
                       data-testid={`button-delete-qual-${qual.id}`}
                     >

@@ -58,7 +58,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
   const { data: customerPrices, isLoading: loadingPrices } = useQuery<CustomerPrice[]>({
     queryKey: ["customer-service-prices", customerId],
     queryFn: async () => {
-      const result = await api.get(`/customers/${customerId}/service-prices`);
+      const result = await api.get<CustomerPrice[]>(`/customers/${customerId}/service-prices`);
       return unwrapResult(result);
     },
     staleTime: 30000,

@@ -4,6 +4,11 @@ import { timestamp } from "./common";
 import { users } from "./users";
 import { documentTypes } from "./documents";
 
+// Migration SQL:
+// ALTER TABLE qualifications ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+// ALTER TABLE employee_qualifications ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+// ALTER TABLE employee_document_proofs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
 export const PROOF_STATUSES = ["pending", "uploaded", "approved", "rejected"] as const;
 export type ProofStatus = typeof PROOF_STATUSES[number];
 
@@ -21,6 +26,7 @@ export const qualifications = pgTable("qualifications", {
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at"),
 });
 
 export const qualificationDocuments = pgTable("qualification_documents", {
@@ -41,6 +47,7 @@ export const employeeQualifications = pgTable("employee_qualifications", {
   qualificationId: integer("qualification_id").notNull().references(() => qualifications.id, { onDelete: "cascade" }),
   assignedAt: timestamp("assigned_at").notNull().defaultNow(),
   assignedByUserId: integer("assigned_by_user_id").references(() => users.id),
+  deletedAt: timestamp("deleted_at"),
 }, (table) => [
   index("emp_qual_employee_idx").on(table.employeeId),
   index("emp_qual_qual_idx").on(table.qualificationId),
@@ -61,6 +68,7 @@ export const employeeDocumentProofs = pgTable("employee_document_proofs", {
   rejectionReason: text("rejection_reason"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at"),
 }, (table) => [
   index("edp_employee_idx").on(table.employeeId),
   index("edp_qual_idx").on(table.qualificationId),

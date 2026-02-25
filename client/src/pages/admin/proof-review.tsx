@@ -79,10 +79,10 @@ function ProofReviewContent() {
   }, {});
 
   return (
-    <div className="container mx-auto px-4 py-6 max-w-2xl">
+    <div className="max-w-2xl mx-auto">
       <div className="flex items-center gap-3 mb-6">
         <Link href="/admin/qualifications">
-          <Button variant="ghost" size="icon" data-testid="button-back">
+          <Button variant="ghost" size="icon" aria-label="Zurück" data-testid="button-back">
             <ArrowLeft className={iconSize.md} />
           </Button>
         </Link>
@@ -141,6 +141,7 @@ function ProofReviewContent() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8"
+                            aria-label="Nachweis anzeigen"
                             onClick={() => window.open(`/api/object-storage/download?path=${encodeURIComponent(proof.objectPath!)}`, '_blank')}
                             data-testid={`button-view-proof-${proof.id}`}
                           >
@@ -151,6 +152,7 @@ function ProofReviewContent() {
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
+                          aria-label="Nachweis genehmigen"
                           onClick={() => reviewMutation.mutate({ proofId: proof.id, approved: true })}
                           disabled={reviewMutation.isPending}
                           data-testid={`button-approve-proof-${proof.id}`}
@@ -161,6 +163,7 @@ function ProofReviewContent() {
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50"
+                          aria-label="Nachweis ablehnen"
                           onClick={() => { setRejectingProof(proof); setRejectionReason(""); }}
                           disabled={reviewMutation.isPending}
                           data-testid={`button-reject-proof-${proof.id}`}

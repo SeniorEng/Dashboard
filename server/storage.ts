@@ -122,12 +122,8 @@ export interface PaginationOptions {
   offset?: number;
 }
 
-export interface PaginatedResult<T> {
-  data: T[];
-  total: number;
-  limit: number;
-  offset: number;
-}
+import type { PaginatedResult } from "@shared/types";
+export type { PaginatedResult };
 
 export interface SearchOptions {
   query: string;

@@ -96,7 +96,17 @@ export function useNewAppointmentForm() {
   }>({
     queryKey: ["/api/budget", ktCustomerId, "cost-estimate", budgetEstimateParams],
     queryFn: async () => {
-      const result = await api.get(`/budget/${ktCustomerId}/cost-estimate?${budgetEstimateParams}`);
+      const result = await api.get<{
+        totalCents: number;
+        warning: string | null;
+        noPricing?: boolean;
+        availableCents?: number;
+        currentMonthUsedCents?: number;
+        monthlyLimitCents?: number | null;
+        projectedMonthUsedCents?: number;
+        isHardBlock?: boolean;
+        acceptsPrivatePayment?: boolean;
+      }>(`/budget/${ktCustomerId}/cost-estimate?${budgetEstimateParams}`);
       if (!result.success) return { totalCents: 0, warning: null };
       return result.data;
     },

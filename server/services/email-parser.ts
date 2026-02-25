@@ -124,9 +124,6 @@ function parseBedarfsort(raw: string): { plz?: string; stadt?: string } {
 
 function parsePflegehilfeEmail(body: string, subject?: string): ParsedLead {
   const text = stripHtml(body);
-  console.log("[email-parser] Pflegehilfe format detected, stripped text length:", text.length);
-  console.log("[email-parser] First 800 chars:", text.substring(0, 800));
-
   const kontaktSection = extractSection(text, "Kontaktinformationen des Interessenten", [
     "Informationen zum Senior",
     "Anfragedetails",
@@ -146,11 +143,6 @@ function parsePflegehilfeEmail(body: string, subject?: string): ParsedLead {
   let vorname = "";
   let nachname = "";
   const rawName = extractTableValue(kontaktSection, "Name");
-  console.log("[email-parser] Sections found - kontakt:", kontaktSection.length, "senior:", seniorSection.length, "anfrage:", anfrageSection.length);
-  if (kontaktSection.length > 0) {
-    console.log("[email-parser] Kontakt section:", kontaktSection.substring(0, 400));
-  }
-  console.log("[email-parser] Raw name:", rawName);
   if (rawName) {
     const parsed = parseName(rawName);
     vorname = parsed.vorname;
@@ -248,7 +240,6 @@ function parsePflegehilfeEmail(body: string, subject?: string): ParsedLead {
     quelleDetails: quelleDetails || undefined,
     notizen: notizenParts.length > 0 ? notizenParts.join("\n") : undefined,
   };
-  console.log("[email-parser] Parsed result:", JSON.stringify({ vorname: result.vorname, nachname: result.nachname, telefon: result.telefon, email: result.email, plz: result.plz, stadt: result.stadt, pflegegrad: result.pflegegrad }));
   return result;
 }
 

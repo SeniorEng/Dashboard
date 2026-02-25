@@ -21,7 +21,7 @@ function BackfillBudgetCard() {
 
   const backfillMutation = useMutation({
     mutationFn: async () => {
-      const res = await api.post<{ total: number; created: number; skipped: number; errors: number }>("/admin/budget/backfill-transactions");
+      const res = await api.post<{ total: number; created: number; skipped: number; errors: number }>("/admin/budget/backfill-transactions", {});
       return unwrapResult(res);
     },
     onSuccess: (data) => {

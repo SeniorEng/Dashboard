@@ -6,6 +6,8 @@ import { users } from "./users";
 
 // ============================================
 // TASKS (AUFGABEN) TABLES
+// Migration SQL:
+// ALTER TABLE tasks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 // ============================================
 
 export const TASK_PRIORITIES = ["low", "medium", "high"] as const;
@@ -27,6 +29,7 @@ export const tasks = pgTable("tasks", {
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at"),
 }, (table) => [
   index("tasks_assigned_to_idx").on(table.assignedToUserId),
   index("tasks_created_by_idx").on(table.createdByUserId),

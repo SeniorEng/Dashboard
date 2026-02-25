@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import logo from "@assets/Logo-04_250x250_1764898165379.jpg";
 import { useAuth } from "@/hooks/use-auth";
 import { api, unwrapResult } from "@/lib/api/client";
+import { useToast } from "@/hooks/use-toast";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -155,6 +156,7 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
   const displayLogo = companySettings?.logoUrl || logo;
 
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const resetOnboarding = useMutation({
     mutationFn: async () => {
@@ -164,6 +166,13 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
       window.dispatchEvent(new Event("restart-onboarding"));
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Fehler",
+        description: error.message || "Ein Fehler ist aufgetreten",
+        variant: "destructive",
+      });
     },
   });
 
@@ -309,8 +318,8 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
                     >
                       <Icon className="w-4 h-4" />
                       {item.label}
-                      {'badge' in item && item.badge && (
-                        'badgeType' in item && item.badgeType === "birthday"
+                      {'badge' in item && (item as any).badge && (
+                        'badgeType' in item && (item as any).badgeType === "birthday"
                           ? <Cake className="w-3.5 h-3.5 text-pink-500" />
                           : <span className="w-2 h-2 bg-red-500 rounded-full" />
                       )}

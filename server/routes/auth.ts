@@ -186,8 +186,8 @@ router.post(
           const resetUrl = `${baseUrl}/reset-password?token=${token}`;
 
           const html = buildPasswordResetEmailHtml({
-            vorname: user.vorname,
-            nachname: user.nachname,
+            vorname: user.vorname || "",
+            nachname: user.nachname || "",
             companyName: companySettings.companyName || "SeniorenEngel",
             resetUrl,
             logoUrl: companySettings.logoUrl,
@@ -247,22 +247,30 @@ router.post(
   csrfProtection,
   requireAuth,
   asyncHandler("Passwort konnte nicht geändert werden", async (req: Request, res: Response) => {
-    const { newPassword } = req.body;
+    const { currentPassword, newPassword } = req.body;
     
-    if (!newPassword || newPassword.length < 8) {
+    if (!currentPassword) {
       res.status(400).json({
         error: "VALIDATION_ERROR",
-        message: "Passwort muss mindestens 8 Zeichen haben",
+        message: "Aktuelles Passwort ist erforderlich",
       });
       return;
     }
 
-    const success = await authService.changePassword(req.user!.id, newPassword);
+    if (!newPassword || newPassword.length < 8) {
+      res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "Neues Passwort muss mindestens 8 Zeichen haben",
+      });
+      return;
+    }
 
-    if (!success) {
-      res.status(500).json({
-        error: "SERVER_ERROR",
-        message: "Passwort konnte nicht geändert werden",
+    const result = await authService.changePassword(req.user!.id, currentPassword, newPassword);
+
+    if (!result.success) {
+      res.status(result.error === "Aktuelles Passwort ist falsch" ? 403 : 500).json({
+        error: result.error === "Aktuelles Passwort ist falsch" ? "INVALID_PASSWORD" : "SERVER_ERROR",
+        message: result.error || "Passwort konnte nicht geändert werden",
       });
       return;
     }

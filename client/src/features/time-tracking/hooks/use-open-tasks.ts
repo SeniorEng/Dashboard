@@ -7,17 +7,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
 import { timeEntryKeys } from "./use-time-entries";
+import type { MissingBreakDay, OpenTasksSummary } from "@shared/types";
 
-export interface MissingBreakDay {
-  date: string;
-  totalWorkMinutes: number;
-  requiredBreakMinutes: number;
-  documentedBreakMinutes: number;
-}
+export type { MissingBreakDay };
 
-export interface OpenTasksData {
-  daysWithMissingBreaks: MissingBreakDay[];
-}
+export type OpenTasksData = OpenTasksSummary;
 
 export function useOpenTasks() {
   return useQuery({

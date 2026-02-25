@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api/client";
+import { useToast } from "@/hooks/use-toast";
 
 export interface User {
   id: number;
@@ -64,6 +65,7 @@ async function logoutRequest(): Promise<void> {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["auth", "me"],
@@ -78,6 +80,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
     },
+    onError: (error: Error) => {
+      toast({
+        title: "Fehler",
+        description: error.message || "Ein Fehler ist aufgetreten",
+        variant: "destructive",
+      });
+    },
   });
 
   const logoutMutation = useMutation({
@@ -85,6 +94,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     onSuccess: () => {
       queryClient.setQueryData(["auth", "me"], null);
       queryClient.clear();
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Fehler",
+        description: error.message || "Ein Fehler ist aufgetreten",
+        variant: "destructive",
+      });
     },
   });
 

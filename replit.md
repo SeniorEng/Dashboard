@@ -21,7 +21,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **API Calls**: Central API client (`@/lib/api/client.ts`) for ALL HTTP requests, including CSRF protection. Every frontend file uses `api.get/post/put/patch/delete` with `unwrapResult()` for data extraction. Direct `fetch()` calls are forbidden.
 - **Toast Feedback**: All `useMutation` hooks provide German toast notifications on success and error via `useToast()`.
 - **Phone Number Handling**: `libphonenumber-js/min` for German numbers in E.164 format.
-- **Type Organization**: Hierarchical type structure.
+- **Type Organization**: Hierarchical type structure. Shared types in `@shared/types.ts` (PaginatedResult, MissingBreakDay, OpenTasksSummary, BirthdayEntry). Date formatting: use `formatDateForDisplay` from `@shared/utils/datetime` (NOT deprecated `formatDateDisplay` from format.ts).
 
 ### Backend
 - **Framework**: Express.js with TypeScript.

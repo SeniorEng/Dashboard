@@ -106,7 +106,7 @@ export function useReparseProspect() {
 
   return useMutation({
     mutationFn: async (id: number) => {
-      const result = await api.post<ProspectWithNotes>(`/admin/prospects/${id}/reparse`);
+      const result = await api.post<ProspectWithNotes>(`/admin/prospects/${id}/reparse`, {});
       return unwrapResult(result);
     },
     onSuccess: (_, id) => {

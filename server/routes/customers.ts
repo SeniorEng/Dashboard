@@ -3,8 +3,8 @@ import { z } from "zod";
 import { storage } from "../storage";
 import { insertCustomerSchema, insertCustomerContactSchema } from "@shared/schema";
 import { fromError } from "zod-validation-error";
-import { requireAuth, requireRoles } from "../middleware/auth";
-import { birthdaysCache } from "../services/cache";
+import { requireAuth, requireAdmin, requireRoles } from "../middleware/auth";
+import { birthdaysCache, customerIdsCache } from "../services/cache";
 import { documentStorage } from "../storage/documents";
 import { BILLING_TYPES } from "@shared/domain/customers";
 import { isPflegekasseCustomer } from "@shared/domain/customers";
@@ -17,7 +17,7 @@ import { asyncHandler, forbidden } from "../lib/errors";
 import { todayISO } from "@shared/utils/datetime";
 import { db } from "../lib/db";
 import { sql } from "drizzle-orm";
-import { insertCustomerServicePriceSchema } from "@shared/schema";
+import { insertCustomerServicePriceSchema, customers } from "@shared/schema";
 import { auditService } from "../services/audit";
 
 const billingTypeEnum = z.enum(BILLING_TYPES as unknown as [string, ...string[]]);
@@ -329,6 +329,7 @@ router.post("/:id/contacts", asyncHandler("Kontakt konnte nicht hinzugefügt wer
 
   await auditService.customerUpdated(user.id, id, {
     changedFields: ["notfallkontakt_hinzugefügt"],
+    oldValues: {},
     newValues: { vorname: contact.vorname, nachname: contact.nachname, contactType: contact.contactType },
   }, req.ip);
 
@@ -357,6 +358,7 @@ router.patch("/:id/contacts/:contactId", asyncHandler("Kontakt konnte nicht aktu
 
   await auditService.customerUpdated(user.id, customerId, {
     changedFields: ["notfallkontakt_aktualisiert"],
+    oldValues: {},
     newValues: { contactId, ...result.data },
   }, req.ip);
 
@@ -380,6 +382,7 @@ router.delete("/:id/contacts/:contactId", asyncHandler("Kontakt konnte nicht gel
   await auditService.customerUpdated(user.id, customerId, {
     changedFields: ["notfallkontakt_gelöscht"],
     oldValues: { contactId },
+    newValues: {},
   }, req.ip);
 
   res.json({ success: true });
@@ -388,8 +391,13 @@ router.delete("/:id/contacts/:contactId", asyncHandler("Kontakt konnte nicht gel
 router.post("/", async (req, res) => {
   try {
     const validatedData = insertCustomerSchema.parse(req.body);
-    const customer = await storage.createCustomer(validatedData);
-    
+
+    const customer = await db.transaction(async (tx) => {
+      const result = await tx.insert(customers).values(validatedData).returning();
+      return result[0];
+    });
+
+    customerIdsCache.invalidateForCustomer(customer.primaryEmployeeId, customer.backupEmployeeId);
     birthdaysCache.invalidateAll();
     
     res.status(201).json(customer);
@@ -725,7 +733,7 @@ router.post("/:id/reject", requireRoles("erstberatung"), asyncHandler("Ablehnung
   res.json(updated);
 }));
 
-router.get("/:id/service-prices", requireRoles("admin"), asyncHandler("Kundenpreise konnten nicht geladen werden", async (req, res) => {
+router.get("/:id/service-prices", requireAdmin, asyncHandler("Kundenpreise konnten nicht geladen werden", async (req, res) => {
   const customerId = parseInt(req.params.id);
   const result = await db.execute(sql`
     SELECT csp.id, csp.customer_id AS "customerId", csp.service_id AS "serviceId",
@@ -740,7 +748,7 @@ router.get("/:id/service-prices", requireRoles("admin"), asyncHandler("Kundenpre
   res.json(result.rows);
 }));
 
-router.post("/:id/service-prices", requireRoles("admin"), asyncHandler("Kundenpreis konnte nicht gespeichert werden", async (req, res) => {
+router.post("/:id/service-prices", requireAdmin, asyncHandler("Kundenpreis konnte nicht gespeichert werden", async (req, res) => {
   const customerId = parseInt(req.params.id);
   const parsed = insertCustomerServicePriceSchema.safeParse({ ...req.body, customerId });
   if (!parsed.success) {
@@ -765,7 +773,7 @@ router.post("/:id/service-prices", requireRoles("admin"), asyncHandler("Kundenpr
   res.json(result.rows[0]);
 }));
 
-router.delete("/:id/service-prices/:priceId", requireRoles("admin"), asyncHandler("Kundenpreis konnte nicht gelöscht werden", async (req, res) => {
+router.delete("/:id/service-prices/:priceId", requireAdmin, asyncHandler("Kundenpreis konnte nicht gelöscht werden", async (req, res) => {
   const customerId = parseInt(req.params.id);
   const priceId = parseInt(req.params.priceId);
   await db.execute(sql`

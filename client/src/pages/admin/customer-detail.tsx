@@ -170,7 +170,10 @@ function BackfillSection({ customerId, onRefresh }: { customerId: number; onRefr
   }>({
     queryKey: ["backfill-preview", customerId],
     queryFn: async () => {
-      const res = await api.get(`/admin/budget/backfill-preview?customerId=${customerId}`);
+      const res = await api.get<{
+        totalAppointments: number;
+        customerBreakdown: Record<string, { count: number; missingSignatures: number; dates: string[] }>;
+      }>(`/admin/budget/backfill-preview?customerId=${customerId}`);
       return unwrapResult(res);
     },
     staleTime: 60000,

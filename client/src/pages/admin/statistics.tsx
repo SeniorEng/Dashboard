@@ -90,7 +90,7 @@ export default function AdminStatistics() {
   const { data: topCustomers } = useQuery<any[]>({
     queryKey: ["statistics-top-customers", selectedYear],
     queryFn: async () => {
-      const result = await api.get(`/statistics/top-customers?year=${selectedYear}`);
+      const result = await api.get<any[]>(`/statistics/top-customers?year=${selectedYear}`);
       return unwrapResult(result);
     },
     staleTime: 60000,
@@ -127,7 +127,7 @@ export default function AdminStatistics() {
 
   return (
     <Layout variant="admin">
-      <div className="container mx-auto px-4 py-6 max-w-6xl">
+      <div className="max-w-6xl mx-auto">
         <div className="flex items-center gap-3 mb-6">
           <Link href="/admin" data-testid="link-back-admin">
             <Button variant="ghost" size="sm">

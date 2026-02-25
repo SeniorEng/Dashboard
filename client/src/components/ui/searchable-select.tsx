@@ -131,7 +131,17 @@ export function SearchableSelect({
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={setOpen}>
-        <div onClick={() => !disabled && !isLoading && setOpen(true)}>
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => !disabled && !isLoading && setOpen(true)}
+          onKeyDown={(e) => {
+            if ((e.key === "Enter" || e.key === " ") && !disabled && !isLoading) {
+              e.preventDefault();
+              setOpen(true);
+            }
+          }}
+        >
           {triggerButton}
         </div>
         <DrawerContent className="max-h-[85vh]">

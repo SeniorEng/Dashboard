@@ -381,6 +381,7 @@ export class AuthService {
       employmentType?: string;
       weeklyWorkDays?: number;
       monthlyWorkHours?: number | null;
+      employmentStatus?: string;
       lbnr?: string | null;
       personalnummer?: string | null;
       notfallkontaktName?: string;
@@ -419,11 +420,21 @@ export class AuthService {
     if (updates.employmentType !== undefined) dbUpdates.employmentType = updates.employmentType;
     if (updates.weeklyWorkDays !== undefined) dbUpdates.weeklyWorkDays = updates.weeklyWorkDays;
     if (updates.monthlyWorkHours !== undefined) dbUpdates.monthlyWorkHours = updates.monthlyWorkHours;
+    if (updates.employmentStatus !== undefined) dbUpdates.employmentStatus = updates.employmentStatus;
     if (updates.lbnr !== undefined) dbUpdates.lbnr = updates.lbnr || null;
     if (updates.personalnummer !== undefined) dbUpdates.personalnummer = updates.personalnummer || null;
     if (updates.notfallkontaktName !== undefined) dbUpdates.notfallkontaktName = updates.notfallkontaktName || null;
     if (updates.notfallkontaktTelefon !== undefined) dbUpdates.notfallkontaktTelefon = updates.notfallkontaktTelefon || null;
     if (updates.notfallkontaktBeziehung !== undefined) dbUpdates.notfallkontaktBeziehung = updates.notfallkontaktBeziehung || null;
+
+    if (updates.vorname !== undefined || updates.nachname !== undefined) {
+      const currentUser = await db.select().from(users).where(eq(users.id, id)).limit(1);
+      if (currentUser.length > 0) {
+        const newVorname = updates.vorname ?? currentUser[0].vorname ?? "";
+        const newNachname = updates.nachname ?? currentUser[0].nachname ?? "";
+        dbUpdates.displayName = `${newVorname} ${newNachname}`.trim();
+      }
+    }
 
     const [updatedUser] = await db
       .update(users)
@@ -440,7 +451,27 @@ export class AuthService {
     return { ...updatedUser, roles };
   }
 
-  async changePassword(userId: number, newPassword: string): Promise<boolean> {
+  async adminResetPassword(userId: number, newPassword: string): Promise<boolean> {
+    const passwordHash = await hashPassword(newPassword);
+    const result = await db
+      .update(users)
+      .set({ passwordHash, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning();
+    if (result.length > 0) {
+      await this.logoutAllSessions(userId);
+      return true;
+    }
+    return false;
+  }
+
+  async changePassword(userId: number, currentPassword: string, newPassword: string): Promise<{ success: boolean; error?: string }> {
+    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    if (!user) return { success: false, error: "Benutzer nicht gefunden" };
+
+    const valid = await verifyPassword(currentPassword, user.passwordHash);
+    if (!valid) return { success: false, error: "Aktuelles Passwort ist falsch" };
+
     const passwordHash = await hashPassword(newPassword);
 
     const result = await db
@@ -451,9 +482,9 @@ export class AuthService {
 
     if (result.length > 0) {
       await this.logoutAllSessions(userId);
-      return true;
+      return { success: true };
     }
-    return false;
+    return { success: false, error: "Passwort konnte nicht geändert werden" };
   }
 
   async deactivateUser(id: number): Promise<boolean> {

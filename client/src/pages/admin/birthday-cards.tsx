@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ArrowLeft, Loader2, Gift, Check, Cake } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
+import { useToast } from "@/hooks/use-toast";
 import type { BirthdayEntry } from "@shared/types";
 
 interface CardRecord {
@@ -32,6 +33,7 @@ export default function AdminBirthdayCards() {
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [filter, setFilter] = useState<"all" | "pending" | "sent">("all");
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const { data: birthdays = [], isLoading: loadingBirthdays } = useQuery<BirthdayEntry[]>({
     queryKey: ["birthdays", 365],
@@ -74,6 +76,13 @@ export default function AdminBirthdayCards() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["birthday-cards"] });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Fehler",
+        description: error.message || "Ein Fehler ist aufgetreten",
+        variant: "destructive",
+      });
     },
   });
 
@@ -147,7 +156,7 @@ export default function AdminBirthdayCards() {
 
   return (
     <Layout variant="admin">
-      <div className="container mx-auto px-4 py-6 max-w-4xl">
+      <div className="max-w-4xl mx-auto">
         <div className="flex items-center gap-3 mb-6">
           <Link href="/admin" data-testid="link-back-admin">
             <Button variant="ghost" size="sm">

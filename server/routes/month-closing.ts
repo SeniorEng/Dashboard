@@ -3,6 +3,7 @@ import { requireAuth, requireAdmin } from "../middleware/auth";
 import { asyncHandler, badRequest } from "../lib/errors";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { closeMonthSchema, reopenMonthSchema } from "@shared/schema";
+import { auditService } from "../services/audit";
 import { generateAutoBreaksForMonth, insertAutoBreaks, previewAutoBreaksForMonth, removeAutoBreaksForMonth } from "../services/auto-breaks";
 import { STATUS_LABELS } from "@shared/domain/appointments";
 import { completeMonthClosingTask, reopenMonthClosingTask, ensureMonthClosingTask } from "../storage/tasks";
@@ -105,6 +106,12 @@ router.post("/close-month", asyncHandler("Monatsabschluss fehlgeschlagen", async
   await ensureMonthClosingTask(userId, month, year);
   await completeMonthClosingTask(userId, month, year);
 
+  await auditService.log(req.user!.id, "month_closed", "month_closing", userId, {
+    year,
+    month,
+    autoBreaksInserted: insertedCount,
+  }, req.ip);
+
   res.json({
     message: `Monat ${month}/${year} abgeschlossen`,
     autoBreaksInserted: insertedCount,
@@ -128,6 +135,12 @@ router.post("/reopen-month", requireAdmin, asyncHandler("Monat konnte nicht wied
   await removeAutoBreaksForMonth(targetUserId, year, month);
 
   await reopenMonthClosingTask(targetUserId, month, year);
+
+  await auditService.log(req.user!.id, "month_reopened", "month_closing", targetUserId, {
+    year,
+    month,
+    targetUserId,
+  }, req.ip);
 
   res.json({ message: `Monat ${month}/${year} wieder geöffnet` });
 }));

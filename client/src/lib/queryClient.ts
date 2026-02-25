@@ -2,11 +2,10 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
 
 type UnauthorizedBehavior = "returnNull" | "throw";
-const getQueryFn: <T>(options: {
+function getQueryFn<T>({ on401: unauthorizedBehavior }: {
   on401: UnauthorizedBehavior;
-}) => QueryFunction<T> =
-  ({ on401: unauthorizedBehavior }) =>
-  async ({ queryKey }) => {
+}): QueryFunction<T> {
+  return async ({ queryKey }) => {
     const url = (queryKey.join("/") as string);
     const endpoint = url.startsWith("/api") ? url.slice(4) : url;
     const result = await api.get<T>(endpoint);
@@ -20,6 +19,7 @@ const getQueryFn: <T>(options: {
     }
     return result.data;
   };
+}
 
 export const queryClient = new QueryClient({
   defaultOptions: {

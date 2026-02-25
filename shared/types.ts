@@ -96,8 +96,30 @@ export interface UpdateAppointmentPayload {
 }
 
 // ============================================
-// UTILITY FUNCTIONS
+// PAGINATION
 // ============================================
+
+export interface PaginatedResult<T> {
+  data: T[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+// ============================================
+// LABOR LAW TYPES
+// ============================================
+
+export interface MissingBreakDay {
+  date: string;
+  totalWorkMinutes: number;
+  requiredBreakMinutes: number;
+  documentedBreakMinutes: number;
+}
+
+export interface OpenTasksSummary {
+  daysWithMissingBreaks: MissingBreakDay[];
+}
 
 // ============================================
 // BIRTHDAY TYPES

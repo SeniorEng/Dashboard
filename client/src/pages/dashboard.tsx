@@ -101,7 +101,7 @@ export default function Dashboard() {
   const holidayMap = useMemo(() => {
     const years = new Set(weekDays.map(d => d.getFullYear()));
     const map = new Map<string, string>();
-    for (const year of years) {
+    for (const year of Array.from(years)) {
       const yearMap = getHolidayMap(year);
       yearMap.forEach((v, k) => map.set(k, v));
     }

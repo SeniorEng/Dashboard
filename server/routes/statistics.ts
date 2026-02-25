@@ -8,7 +8,7 @@ const router = Router();
 router.use(requireAuth);
 
 router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden", async (req, res) => {
-  if (!req.user!.isAdmin) throw forbidden("Nur für Administratoren");
+  if (!req.user!.isAdmin) throw forbidden("FORBIDDEN", "Nur für Administratoren");
 
   const year = parseInt(req.query.year as string) || new Date().getFullYear();
   const month = req.query.month ? parseInt(req.query.month as string) : null;
@@ -226,7 +226,7 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
 
 // Top customers by revenue
 router.get("/top-customers", asyncHandler("Top-Kunden konnten nicht geladen werden", async (req, res) => {
-  if (!req.user!.isAdmin) throw forbidden("Nur für Administratoren");
+  if (!req.user!.isAdmin) throw forbidden("FORBIDDEN", "Nur für Administratoren");
 
   const year = parseInt(req.query.year as string) || new Date().getFullYear();
 
@@ -260,7 +260,7 @@ router.get("/top-customers", asyncHandler("Top-Kunden konnten nicht geladen werd
 }));
 
 router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechnet werden", async (req, res) => {
-  if (!req.user!.isAdmin) throw forbidden("Nur für Administratoren");
+  if (!req.user!.isAdmin) throw forbidden("FORBIDDEN", "Nur für Administratoren");
 
   const year = parseInt(req.query.year as string) || new Date().getFullYear();
   const month = req.query.month ? parseInt(req.query.month as string) : null;
@@ -402,8 +402,8 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
     employees: result.rows,
     totals,
     servicePrices: servicePrices.rows,
-    marginPercent: totals.revenueCents > 0
-      ? Math.round((totals.marginCents / totals.revenueCents) * 100)
+    marginPercent: Number(totals.revenueCents) > 0
+      ? Math.round((Number(totals.marginCents) / Number(totals.revenueCents)) * 100)
       : 0,
   });
 }));

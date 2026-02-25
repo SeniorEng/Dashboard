@@ -7,6 +7,7 @@ import {
   insertUserSchema, 
   EMPLOYEE_ROLES,
   EMPLOYMENT_TYPES,
+  EMPLOYMENT_STATUSES,
   users,
   appointments,
   sessions,
@@ -166,6 +167,7 @@ const updateUserSchema = z.object({
   haustierAkzeptiert: z.boolean().optional(),
   isEuRentner: z.boolean().optional(),
   employmentType: z.enum(EMPLOYMENT_TYPES).optional(),
+  employmentStatus: z.enum(EMPLOYMENT_STATUSES).optional(),
   weeklyWorkDays: z.number().int().min(1).max(7).optional(),
   monthlyWorkHours: z.number().min(1).max(300).nullable().optional(),
   lbnr: z.string().nullable().optional(),
@@ -268,7 +270,7 @@ router.post("/users/:id/reset-password", asyncHandler("Passwort konnte nicht zur
     return;
   }
 
-  const success = await authService.changePassword(id, newPassword);
+  const success = await authService.adminResetPassword(id, newPassword);
   if (!success) {
     res.status(404).json({
       error: "NOT_FOUND",
@@ -307,8 +309,8 @@ router.post("/users/:id/resend-welcome", asyncHandler("Willkommens-E-Mail konnte
   const resetUrl = `${baseUrl}/reset-password?token=${welcomeToken}`;
 
   const html = buildWelcomeEmailHtml({
-    vorname: user.vorname,
-    nachname: user.nachname,
+    vorname: user.vorname || "",
+    nachname: user.nachname || "",
     email: user.email,
     companyName: companySettings.companyName || "SeniorenEngel",
     resetUrl,

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api/client";
-import type { User as UserType } from "@shared/schema";
+import type { UserWithRoles as UserType } from "@shared/schema";
 
 export function useActiveEmployees(options?: { enabled?: boolean }) {
   return useQuery<{ id: number; displayName: string }[]>({

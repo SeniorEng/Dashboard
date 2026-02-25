@@ -32,7 +32,7 @@ export default function TasksPage() {
   const { data: undocumentedAppointments } = useQuery({
     queryKey: ["appointments", "undocumented"],
     queryFn: async () => {
-      const result = await api.get("/appointments/undocumented");
+      const result = await api.get<any[]>("/appointments/undocumented");
       return unwrapResult(result);
     },
     staleTime: 60000,
@@ -59,7 +59,7 @@ export default function TasksPage() {
   const { data: pendingServiceRecords } = useQuery({
     queryKey: ["/api/service-records/pending"],
     queryFn: async () => {
-      const result = await api.get("/service-records/pending");
+      const result = await api.get<any[]>("/service-records/pending");
       return unwrapResult(result);
     },
     staleTime: 60000,

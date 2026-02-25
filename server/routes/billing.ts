@@ -21,6 +21,7 @@ import { fromError } from "zod-validation-error";
 import { formatDateForDisplay, formatDateISO, todayISO } from "@shared/utils/datetime";
 import { storage } from "../storage";
 import { db } from "../lib/db";
+import { auditService } from "../services/audit";
 
 const router = Router();
 router.use(requireAuth);
@@ -278,6 +279,18 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
   };
 
   const invoice = await storage.createInvoice(invoiceData, lineItems, req.user!.id);
+
+  await auditService.log(req.user!.id, "invoice_created", "invoice", invoice.id, {
+    invoiceNumber,
+    customerId,
+    billingType,
+    invoiceType: isNachberechnung ? "nachberechnung" : "rechnung",
+    billingMonth,
+    billingYear,
+    grossAmountCents: totalNetCents + totalVatCents,
+    lineItemCount: lineItems.length,
+  }, req.ip);
+
   res.json(invoice);
 }));
 
@@ -500,7 +513,17 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
       appointmentNotes: item.appointmentNotes || null,
     }));
 
-    await storage.createInvoice(stornoData, stornoLineItems, req.user!.id);
+    const stornoInvoice = await storage.createInvoice(stornoData, stornoLineItems, req.user!.id);
+
+    await auditService.log(req.user!.id, "invoice_cancelled", "invoice", id, {
+      originalInvoiceNumber: invoice.invoiceNumber,
+      stornoInvoiceId: stornoInvoice.id,
+      stornoInvoiceNumber: invoiceNumber,
+      customerId: invoice.customerId,
+      grossAmountCents: invoice.grossAmountCents,
+      oldStatus: currentStatus,
+      newStatus: status,
+    }, req.ip);
   }
 
   const updated = await storage.updateInvoiceStatus(id, status, req.user!.id);

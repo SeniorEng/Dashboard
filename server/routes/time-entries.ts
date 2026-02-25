@@ -4,6 +4,7 @@ import { asyncHandler } from "../lib/errors";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { insertTimeEntrySchema, updateTimeEntrySchema } from "@shared/schema";
 import { storage } from "../storage";
+import { auditService } from "../services/audit";
 import { timeToMinutes, isWeekend, parseLocalDate, isPast } from "@shared/utils/datetime";
 import { getEntryTypeLabel, formatTimeShort, timeRangesOverlap, getAppointmentEndMinutes } from "@shared/domain/time-entries";
 import monthClosingRouter from "./month-closing";
@@ -344,6 +345,16 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
       entries.push(entry);
     }
     
+    for (const e of entries) {
+      await auditService.log(req.user!.id, "time_entry_created", "time_entry", e.id, {
+        entryType: validatedData.entryType,
+        entryDate: e.entryDate,
+        isFullDay: validatedData.isFullDay ?? true,
+        multiDay: true,
+        totalEntries: entries.length,
+      }, req.ip);
+    }
+
     // Return first entry for consistency, with count in header
     res.setHeader("X-Entries-Created", entries.length.toString());
     return res.status(201).json({ 
@@ -375,6 +386,15 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
   }
   
   const entry = await timeTrackingStorage.createTimeEntry(userId, validatedData);
+
+  await auditService.log(req.user!.id, "time_entry_created", "time_entry", entry.id, {
+    entryType: validatedData.entryType,
+    entryDate: validatedData.entryDate,
+    startTime: validatedData.startTime || null,
+    endTime: validatedData.endTime || null,
+    isFullDay: validatedData.isFullDay ?? false,
+  }, req.ip);
+
   res.status(201).json(entry);
 }));
 
@@ -435,7 +455,26 @@ router.put("/:id", asyncHandler("Zeiteintrag konnte nicht aktualisiert werden", 
   }
   
   const updated = await timeTrackingStorage.updateTimeEntry(entryId, validatedData);
-  
+
+  const changedFields: string[] = [];
+  const oldValues: Record<string, unknown> = {};
+  const newValues: Record<string, unknown> = {};
+  for (const key of Object.keys(validatedData) as Array<keyof typeof validatedData>) {
+    if (validatedData[key] !== undefined && validatedData[key] !== (existing as any)[key]) {
+      changedFields.push(key);
+      oldValues[key] = (existing as any)[key];
+      newValues[key] = validatedData[key];
+    }
+  }
+
+  await auditService.log(req.user!.id, "time_entry_updated", "time_entry", entryId, {
+    entryType: existing.entryType,
+    entryDate: existing.entryDate,
+    changedFields,
+    oldValues,
+    newValues,
+  }, req.ip);
+
   res.json(updated);
 }));
 
@@ -470,6 +509,15 @@ router.delete("/:id", asyncHandler("Zeiteintrag konnte nicht gelöscht werden", 
   }
   
   await timeTrackingStorage.deleteTimeEntry(entryId);
+
+  await auditService.log(req.user!.id, "time_entry_deleted", "time_entry", entryId, {
+    entryType: existing.entryType,
+    entryDate: existing.entryDate,
+    startTime: existing.startTime,
+    endTime: existing.endTime,
+    isFullDay: existing.isFullDay,
+  }, req.ip);
+
   res.status(204).send();
 }));
 

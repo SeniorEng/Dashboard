@@ -117,6 +117,7 @@ export default function CustomerConvertPage() {
   }, [customer, initialized]);
 
   const [customerSignatures, setCustomerSignatures] = useState<Record<string, string>>({});
+  const [uploadedDocuments, setUploadedDocuments] = useState<import("./admin/components/signatures-step").WizardUploadedDoc[]>([]);
 
   const handleSignatureChange = useCallback((slug: string, signatureData: string) => {
     setCustomerSignatures((prev) => ({ ...prev, [slug]: signatureData }));
@@ -516,6 +517,8 @@ export default function CustomerConvertPage() {
             billingType={formData.billingType}
             customerSignatures={customerSignatures}
             onSignatureChange={handleSignatureChange}
+            uploadedDocuments={uploadedDocuments}
+            onUploadedDocumentsChange={setUploadedDocuments}
             formData={formData}
           />
         );

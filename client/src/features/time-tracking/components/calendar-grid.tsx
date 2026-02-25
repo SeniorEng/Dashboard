@@ -43,7 +43,7 @@ export function CalendarGrid({
     if (selectedMonth === 1) years.add(selectedYear - 1);
     if (selectedMonth === 12) years.add(selectedYear + 1);
     const map = new Map<string, string>();
-    for (const year of years) {
+    for (const year of Array.from(years)) {
       const yearMap = getHolidayMap(year);
       yearMap.forEach((v, k) => map.set(k, v));
     }

@@ -110,16 +110,8 @@ export interface TimeOverviewData {
   otherEntries: EmployeeTimeEntry[];
 }
 
-export interface MissingBreakDay {
-  date: string;
-  totalWorkMinutes: number;
-  requiredBreakMinutes: number;
-  documentedBreakMinutes: number;
-}
-
-export interface OpenTasksSummary {
-  daysWithMissingBreaks: MissingBreakDay[];
-}
+import type { MissingBreakDay, OpenTasksSummary } from "@shared/types";
+export type { MissingBreakDay, OpenTasksSummary };
 
 export interface ITimeTrackingStorage {
   // Time Entries
@@ -148,11 +140,12 @@ export interface ITimeTrackingStorage {
 class TimeTrackingStorage implements ITimeTrackingStorage {
   async getTimeEntries(userId: number, filters?: TimeEntryFilters): Promise<EmployeeTimeEntry[]> {
     const conditions = buildTimeEntryFilterConditions({ ...filters, userId });
+    conditions.push(isNull(employeeTimeEntries.deletedAt));
     
     const results = await db
       .select()
       .from(employeeTimeEntries)
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .where(and(...conditions))
       .orderBy(employeeTimeEntries.entryDate);
     
     return results;
@@ -162,7 +155,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     const results = await db
       .select()
       .from(employeeTimeEntries)
-      .where(eq(employeeTimeEntries.id, id));
+      .where(and(eq(employeeTimeEntries.id, id), isNull(employeeTimeEntries.deletedAt)));
     return results[0];
   }
 
@@ -172,7 +165,8 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       .from(employeeTimeEntries)
       .where(and(
         eq(employeeTimeEntries.userId, userId),
-        eq(employeeTimeEntries.entryDate, date)
+        eq(employeeTimeEntries.entryDate, date),
+        isNull(employeeTimeEntries.deletedAt)
       ))
       .orderBy(employeeTimeEntries.startTime);
     return results;
@@ -219,8 +213,9 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
   
   async deleteTimeEntry(id: number): Promise<boolean> {
     const results = await db
-      .delete(employeeTimeEntries)
-      .where(eq(employeeTimeEntries.id, id))
+      .update(employeeTimeEntries)
+      .set({ deletedAt: new Date() })
+      .where(and(eq(employeeTimeEntries.id, id), isNull(employeeTimeEntries.deletedAt)))
       .returning();
     return results.length > 0;
   }
@@ -290,7 +285,8 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
             eq(employeeTimeEntries.userId, userId),
             inArray(employeeTimeEntries.entryType, ['urlaub', 'krankheit']),
             gte(employeeTimeEntries.entryDate, startDate),
-            lte(employeeTimeEntries.entryDate, endDate)
+            lte(employeeTimeEntries.entryDate, endDate),
+            isNull(employeeTimeEntries.deletedAt)
           )
         ),
       db.select({
@@ -303,7 +299,8 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
             eq(employeeTimeEntries.userId, userId),
             eq(employeeTimeEntries.entryType, 'urlaub'),
             gte(employeeTimeEntries.entryDate, `${year - 1}-01-01`),
-            lte(employeeTimeEntries.entryDate, `${year - 1}-12-31`)
+            lte(employeeTimeEntries.entryDate, `${year - 1}-12-31`),
+            isNull(employeeTimeEntries.deletedAt)
           )
         ),
     ]);
@@ -361,6 +358,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
   
   async getAllTimeEntries(filters?: TimeEntryFilters & { userId?: number }): Promise<(EmployeeTimeEntry & { user: { displayName: string } })[]> {
     const conditions = buildTimeEntryFilterConditions(filters);
+    conditions.push(isNull(employeeTimeEntries.deletedAt));
     
     // Import users table for join
     const { users } = await import("@shared/schema");
@@ -379,13 +377,14 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
         notes: employeeTimeEntries.notes,
         createdAt: employeeTimeEntries.createdAt,
         updatedAt: employeeTimeEntries.updatedAt,
+        deletedAt: employeeTimeEntries.deletedAt,
         user: {
           displayName: users.displayName,
         },
       })
       .from(employeeTimeEntries)
       .leftJoin(users, eq(employeeTimeEntries.userId, users.id))
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .where(and(...conditions))
       .orderBy(employeeTimeEntries.entryDate);
     
     return results.map(r => ({
@@ -642,7 +641,8 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
           and(
             eq(employeeTimeEntries.userId, userId),
             gte(employeeTimeEntries.entryDate, startDateStr),
-            lte(employeeTimeEntries.entryDate, todayStr)
+            lte(employeeTimeEntries.entryDate, todayStr),
+            isNull(employeeTimeEntries.deletedAt)
           )
         ),
     ]);
@@ -767,7 +767,8 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
         and(
           eq(employeeTimeEntries.userId, userId),
           gte(employeeTimeEntries.entryDate, startDate),
-          lte(employeeTimeEntries.entryDate, endDate)
+          lte(employeeTimeEntries.entryDate, endDate),
+          isNull(employeeTimeEntries.deletedAt)
         )
       );
 

@@ -161,10 +161,15 @@ export interface CardServiceInfo extends ServiceInfo {
   borderClass: string;
 }
 
+const ALLOWED_CANCELLATION_SOURCES: AppointmentStatus[] = ["scheduled", "in-progress"];
+
 export function isValidStatusTransition(
   currentStatus: AppointmentStatus,
   targetStatus: AppointmentStatus
 ): boolean {
+  if (targetStatus === "cancelled" && ALLOWED_CANCELLATION_SOURCES.includes(currentStatus)) {
+    return true;
+  }
   const currentIndex = STATUS_ORDER[currentStatus];
   const targetIndex = STATUS_ORDER[targetStatus];
   return targetIndex === currentIndex || targetIndex === currentIndex + 1;
@@ -416,8 +421,8 @@ export function validateServiceDocumentationFromServices(
   }
 
   for (const s of services) {
-    if (s.actualDurationMinutes > 0 && s.details && s.details.length > 55) {
-      errors.push(`${s.serviceName || 'Service'} Details dürfen maximal 55 Zeichen haben`);
+    if (s.actualDurationMinutes > 0 && s.details && s.details.length > 120) {
+      errors.push(`${s.serviceName || 'Service'} Details dürfen maximal 120 Zeichen haben`);
     }
   }
 

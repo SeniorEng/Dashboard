@@ -1,4 +1,4 @@
-import { eq, and, asc, desc, inArray } from "drizzle-orm";
+import { eq, and, asc, desc, inArray, isNull } from "drizzle-orm";
 import {
   qualifications,
   qualificationDocuments,
@@ -18,13 +18,13 @@ import { db } from "../lib/db";
 export class QualificationStorage {
   async getQualifications(activeOnly = true): Promise<Qualification[]> {
     if (activeOnly) {
-      return db.select().from(qualifications).where(eq(qualifications.isActive, true)).orderBy(asc(qualifications.name));
+      return db.select().from(qualifications).where(and(eq(qualifications.isActive, true), isNull(qualifications.deletedAt))).orderBy(asc(qualifications.name));
     }
-    return db.select().from(qualifications).orderBy(asc(qualifications.name));
+    return db.select().from(qualifications).where(isNull(qualifications.deletedAt)).orderBy(asc(qualifications.name));
   }
 
   async getQualification(id: number): Promise<Qualification | null> {
-    const result = await db.select().from(qualifications).where(eq(qualifications.id, id)).limit(1);
+    const result = await db.select().from(qualifications).where(and(eq(qualifications.id, id), isNull(qualifications.deletedAt))).limit(1);
     return result[0] || null;
   }
 
@@ -47,7 +47,11 @@ export class QualificationStorage {
   }
 
   async deleteQualification(id: number): Promise<boolean> {
-    const result = await db.delete(qualifications).where(eq(qualifications.id, id)).returning();
+    const result = await db
+      .update(qualifications)
+      .set({ deletedAt: new Date() })
+      .where(and(eq(qualifications.id, id), isNull(qualifications.deletedAt)))
+      .returning();
     return result.length > 0;
   }
 
@@ -92,11 +96,12 @@ export class QualificationStorage {
         qualificationId: employeeQualifications.qualificationId,
         assignedAt: employeeQualifications.assignedAt,
         assignedByUserId: employeeQualifications.assignedByUserId,
+        deletedAt: employeeQualifications.deletedAt,
         qualification: qualifications,
       })
       .from(employeeQualifications)
       .innerJoin(qualifications, eq(employeeQualifications.qualificationId, qualifications.id))
-      .where(eq(employeeQualifications.employeeId, employeeId))
+      .where(and(eq(employeeQualifications.employeeId, employeeId), isNull(employeeQualifications.deletedAt)))
       .orderBy(asc(qualifications.name));
     return results;
   }
@@ -124,18 +129,24 @@ export class QualificationStorage {
   }
 
   async removeQualification(employeeId: number, qualificationId: number): Promise<void> {
-    await db.delete(employeeQualifications).where(
-      and(
-        eq(employeeQualifications.employeeId, employeeId),
-        eq(employeeQualifications.qualificationId, qualificationId)
-      )
-    );
-    await db.delete(employeeDocumentProofs).where(
-      and(
-        eq(employeeDocumentProofs.employeeId, employeeId),
-        eq(employeeDocumentProofs.qualificationId, qualificationId)
-      )
-    );
+    await db.update(employeeQualifications)
+      .set({ deletedAt: new Date() })
+      .where(
+        and(
+          eq(employeeQualifications.employeeId, employeeId),
+          eq(employeeQualifications.qualificationId, qualificationId),
+          isNull(employeeQualifications.deletedAt)
+        )
+      );
+    await db.update(employeeDocumentProofs)
+      .set({ deletedAt: new Date() })
+      .where(
+        and(
+          eq(employeeDocumentProofs.employeeId, employeeId),
+          eq(employeeDocumentProofs.qualificationId, qualificationId),
+          isNull(employeeDocumentProofs.deletedAt)
+        )
+      );
   }
 
   async getEmployeeProofs(employeeId: number): Promise<(EmployeeDocumentProof & { documentType: { id: number; name: string }; qualification: { id: number; name: string } })[]> {
@@ -154,6 +165,7 @@ export class QualificationStorage {
         rejectionReason: employeeDocumentProofs.rejectionReason,
         createdAt: employeeDocumentProofs.createdAt,
         updatedAt: employeeDocumentProofs.updatedAt,
+        deletedAt: employeeDocumentProofs.deletedAt,
         documentType: {
           id: documentTypes.id,
           name: documentTypes.name,
@@ -166,7 +178,7 @@ export class QualificationStorage {
       .from(employeeDocumentProofs)
       .innerJoin(documentTypes, eq(employeeDocumentProofs.documentTypeId, documentTypes.id))
       .innerJoin(qualifications, eq(employeeDocumentProofs.qualificationId, qualifications.id))
-      .where(eq(employeeDocumentProofs.employeeId, employeeId))
+      .where(and(eq(employeeDocumentProofs.employeeId, employeeId), isNull(employeeDocumentProofs.deletedAt)))
       .orderBy(asc(qualifications.name), asc(documentTypes.name));
     return results;
   }
@@ -218,6 +230,7 @@ export class QualificationStorage {
         rejectionReason: employeeDocumentProofs.rejectionReason,
         createdAt: employeeDocumentProofs.createdAt,
         updatedAt: employeeDocumentProofs.updatedAt,
+        deletedAt: employeeDocumentProofs.deletedAt,
         documentType: {
           id: documentTypes.id,
           name: documentTypes.name,
@@ -235,7 +248,7 @@ export class QualificationStorage {
       .innerJoin(documentTypes, eq(employeeDocumentProofs.documentTypeId, documentTypes.id))
       .innerJoin(qualifications, eq(employeeDocumentProofs.qualificationId, qualifications.id))
       .innerJoin(users, eq(employeeDocumentProofs.employeeId, users.id))
-      .where(eq(employeeDocumentProofs.status, "uploaded"))
+      .where(and(eq(employeeDocumentProofs.status, "uploaded"), isNull(employeeDocumentProofs.deletedAt)))
       .orderBy(desc(employeeDocumentProofs.uploadedAt));
     return results;
   }
@@ -251,7 +264,8 @@ export class QualificationStorage {
       .from(employeeDocumentProofs)
       .where(and(
         eq(employeeDocumentProofs.employeeId, employeeId),
-        inArray(employeeDocumentProofs.status, ["pending", "rejected"])
+        inArray(employeeDocumentProofs.status, ["pending", "rejected"]),
+        isNull(employeeDocumentProofs.deletedAt)
       ));
     return results.length;
   }
@@ -260,7 +274,7 @@ export class QualificationStorage {
     const results = await db
       .select({ id: employeeDocumentProofs.id })
       .from(employeeDocumentProofs)
-      .where(eq(employeeDocumentProofs.status, "uploaded"));
+      .where(and(eq(employeeDocumentProofs.status, "uploaded"), isNull(employeeDocumentProofs.deletedAt)));
     return results.length;
   }
 }

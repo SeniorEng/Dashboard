@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useRoute, Link, useSearch, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
@@ -353,7 +353,7 @@ export default function CustomerDetailPage() {
     setEmergencyContactForm(emptyContactForm);
   }, []);
 
-  const handleSaveContact = useCallback(() => {
+  const handleSaveEmergencyContact = useCallback(() => {
     if (editingContactId) {
       updateContactMutation.mutate({ contactId: editingContactId, data: emergencyContactForm });
     } else {
@@ -367,20 +367,25 @@ export default function CustomerDetailPage() {
 
   const today = todayISO();
   
-  const undocumentedAppointments = appointments.filter(apt => 
-    UNDOCUMENTED_STATUSES.includes(apt.status as typeof UNDOCUMENTED_STATUSES[number])
-  );
+  const undocumentedAppointments = useMemo(() => 
+    appointments.filter(apt => 
+      UNDOCUMENTED_STATUSES.includes(apt.status as typeof UNDOCUMENTED_STATUSES[number])
+    ), [appointments]);
   
   const displayAppointments = filterUndocumented ? undocumentedAppointments : appointments;
   
-  const upcomingAppointments = displayAppointments
-    .filter(apt => apt.date >= today)
-    .sort((a, b) => a.date.localeCompare(b.date));
+  const upcomingAppointments = useMemo(() => 
+    displayAppointments
+      .filter(apt => apt.date >= today)
+      .sort((a, b) => a.date.localeCompare(b.date)),
+    [displayAppointments, today]);
   
-  const pastAppointments = displayAppointments
-    .filter(apt => apt.date < today)
-    .sort((a, b) => b.date.localeCompare(a.date))
-    .slice(0, filterUndocumented ? 50 : 5);
+  const pastAppointments = useMemo(() => 
+    displayAppointments
+      .filter(apt => apt.date < today)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, filterUndocumented ? 50 : 5),
+    [displayAppointments, today, filterUndocumented]);
 
   if (customerLoading) {
     return (
@@ -548,7 +553,7 @@ export default function CustomerDetailPage() {
                     <span className="text-xs text-muted-foreground/60">Kein Pflegegrad</span>
                   )}
                 </div>
-                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => startEditing("pflegegrad")} data-testid="button-edit-pflegegrad">
+                <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => startEditing("pflegegrad")} data-testid="button-edit-pflegegrad">
                   <Pencil className="h-3.5 w-3.5 text-gray-400" />
                 </Button>
               </div>
@@ -609,7 +614,7 @@ export default function CustomerDetailPage() {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-semibold text-gray-700">Kontakt & Adresse</span>
-                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => startEditing("contact")} data-testid="button-edit-contact">
+                  <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => startEditing("contact")} data-testid="button-edit-contact">
                     <Pencil className="h-3.5 w-3.5 text-gray-400" />
                   </Button>
                 </div>
@@ -702,7 +707,7 @@ export default function CustomerDetailPage() {
                     <PawPrint className={`${iconSize.sm} text-amber-600`} />
                     Haustier
                   </h2>
-                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => startEditing("pet")} data-testid="button-edit-pet">
+                  <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => startEditing("pet")} data-testid="button-edit-pet">
                     <Pencil className="h-3.5 w-3.5 text-gray-400" />
                   </Button>
                 </div>
@@ -782,7 +787,7 @@ export default function CustomerDetailPage() {
                         <Label className="text-xs">Primärer Kontakt</Label>
                       </div>
                       <div className="flex gap-2 pt-1">
-                        <Button size="sm" onClick={handleSaveContact} disabled={contactSaving} className="min-h-[36px]" data-testid="button-save-contact">
+                        <Button size="sm" onClick={handleSaveEmergencyContact} disabled={contactSaving} className="min-h-[36px]" data-testid="button-save-contact">
                           {contactSaving ? <Loader2 className={`${iconSize.sm} animate-spin`} /> : <><Save className={`${iconSize.sm} mr-1`} />Speichern</>}
                         </Button>
                         <Button size="sm" variant="outline" onClick={cancelEditContact} disabled={contactSaving} className="min-h-[36px]" data-testid="button-cancel-contact">
@@ -813,10 +818,10 @@ export default function CustomerDetailPage() {
                           <Phone className={iconSize.xs} />
                           {formatPhoneForDisplay(contact.telefon)}
                         </a>
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => startEditContact(contact)} data-testid={`button-edit-contact-${contact.id}`}>
+                        <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => startEditContact(contact)} data-testid={`button-edit-contact-${contact.id}`}>
                           <Pencil className="h-3 w-3 text-gray-400" />
                         </Button>
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => deleteContactMutation.mutate(contact.id)} disabled={contactSaving} data-testid={`button-delete-contact-${contact.id}`}>
+                        <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => deleteContactMutation.mutate(contact.id)} disabled={contactSaving} data-testid={`button-delete-contact-${contact.id}`}>
                           <Trash2 className="h-3 w-3 text-gray-400" />
                         </Button>
                       </div>
@@ -872,7 +877,7 @@ export default function CustomerDetailPage() {
                   <Label className="text-xs">Primärer Kontakt</Label>
                 </div>
                 <div className="flex gap-2 pt-1">
-                  <Button size="sm" onClick={handleSaveContact} disabled={contactSaving || !emergencyContactForm.vorname || !emergencyContactForm.nachname || !emergencyContactForm.telefon} className="min-h-[36px]" data-testid="button-save-new-contact">
+                  <Button size="sm" onClick={handleSaveEmergencyContact} disabled={contactSaving || !emergencyContactForm.vorname || !emergencyContactForm.nachname || !emergencyContactForm.telefon} className="min-h-[36px]" data-testid="button-save-new-contact">
                     {contactSaving ? <Loader2 className={`${iconSize.sm} animate-spin`} /> : <><Save className={`${iconSize.sm} mr-1`} />Speichern</>}
                   </Button>
                   <Button size="sm" variant="outline" onClick={cancelEditContact} disabled={contactSaving} className="min-h-[36px]" data-testid="button-cancel-new-contact">
@@ -946,7 +951,7 @@ export default function CustomerDetailPage() {
                     <Stethoscope className={`${iconSize.sm} text-rose-500`} />
                     Vorerkrankungen
                   </h2>
-                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => startEditing("medical")} data-testid="button-edit-medical">
+                  <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => startEditing("medical")} data-testid="button-edit-medical">
                     <Pencil className="h-3.5 w-3.5 text-gray-400" />
                   </Button>
                 </div>
@@ -990,7 +995,7 @@ export default function CustomerDetailPage() {
                     <ClipboardList className={`${iconSize.sm} text-green-600`} />
                     Vereinbarte Leistungen
                   </h2>
-                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => startEditing("services")} data-testid="button-edit-services">
+                  <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => startEditing("services")} data-testid="button-edit-services">
                     <Pencil className="h-3.5 w-3.5 text-gray-400" />
                   </Button>
                 </div>

@@ -467,14 +467,16 @@ function PetAcceptanceSection({ profile }: { profile: ProfileData }) {
 function PasswordSection() {
   const { toast } = useToast();
   const [isChanging, setIsChanging] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
   const changeMutation = useMutation({
     mutationFn: async () => {
-      if (newPassword.length < 8) throw new Error("Passwort muss mindestens 8 Zeichen haben");
+      if (!currentPassword) throw new Error("Aktuelles Passwort ist erforderlich");
+      if (newPassword.length < 8) throw new Error("Neues Passwort muss mindestens 8 Zeichen haben");
       if (newPassword !== confirmPassword) throw new Error("Passwörter stimmen nicht überein");
-      const result = await api.post("/auth/change-password", { newPassword });
+      const result = await api.post("/auth/change-password", { currentPassword, newPassword });
       return unwrapResult(result);
     },
     onSuccess: () => {
@@ -489,6 +491,7 @@ function PasswordSection() {
   });
 
   const handleCancel = () => {
+    setCurrentPassword("");
     setNewPassword("");
     setConfirmPassword("");
     setIsChanging(false);
@@ -498,6 +501,18 @@ function PasswordSection() {
     <SectionCard title="Passwort" icon={<Lock className={iconSize.sm} />}>
       {isChanging ? (
         <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="current-password">Aktuelles Passwort</Label>
+            <Input
+              id="current-password"
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              placeholder="Aktuelles Passwort eingeben"
+              className="text-base"
+              data-testid="input-current-password"
+            />
+          </div>
           <div className="space-y-2">
             <Label htmlFor="new-password">Neues Passwort</Label>
             <Input
@@ -511,13 +526,13 @@ function PasswordSection() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="confirm-password">Passwort bestätigen</Label>
+            <Label htmlFor="confirm-password">Neues Passwort bestätigen</Label>
             <Input
               id="confirm-password"
               type="password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="Passwort wiederholen"
+              placeholder="Neues Passwort wiederholen"
               className="text-base"
               data-testid="input-confirm-password"
             />
@@ -528,7 +543,7 @@ function PasswordSection() {
           <div className="flex gap-2 pt-2">
             <Button
               onClick={() => changeMutation.mutate()}
-              disabled={changeMutation.isPending || !newPassword || !confirmPassword || newPassword !== confirmPassword}
+              disabled={changeMutation.isPending || !currentPassword || !newPassword || !confirmPassword || newPassword !== confirmPassword}
               className="flex-1"
               data-testid="button-save-password"
             >

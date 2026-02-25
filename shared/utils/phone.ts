@@ -71,41 +71,9 @@ export function formatPhoneForDisplay(e164OrInput: string): string {
   return e164OrInput;
 }
 
-export function formatPhoneInternational(e164OrInput: string): string {
-  if (!e164OrInput) return "";
-
-  try {
-    const phoneNumber = parsePhoneNumber(e164OrInput, "DE");
-    if (phoneNumber && phoneNumber.isValid()) {
-      return phoneNumber.formatInternational();
-    }
-  } catch {
-    // Fall through to return original
-  }
-
-  return e164OrInput;
-}
-
 export function formatPhoneAsYouType(input: string): string {
   if (!input) return "";
   return formatIncompletePhoneNumber(input, "DE");
-}
-
-export function getPhoneType(e164OrInput: string): "mobile" | "landline" | "unknown" {
-  if (!e164OrInput) return "unknown";
-
-  try {
-    const phoneNumber = parsePhoneNumber(e164OrInput, "DE");
-    if (phoneNumber && phoneNumber.isValid()) {
-      const phoneType = phoneNumber.getType();
-      if (phoneType === "MOBILE") return "mobile";
-      if (phoneType === "FIXED_LINE" || phoneType === "FIXED_LINE_OR_MOBILE") return "landline";
-    }
-  } catch {
-    // Fall through
-  }
-
-  return "unknown";
 }
 
 export const phoneValidationSchema = {

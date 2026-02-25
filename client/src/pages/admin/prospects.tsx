@@ -51,8 +51,7 @@ import {
 import { iconSize, componentStyles } from "@/design-system";
 import { useProspects, useProspectStats, useProspect, useCreateProspect, useUpdateProspect, useAddProspectNote, useReparseProspect, useDeleteProspect } from "@/features/prospects";
 import { PROSPECT_STATUS_LABELS, PROSPECT_STATUSES, PROSPECT_NOTE_TYPE_LABELS, type ProspectStatus, type ProspectNoteType } from "@shared/schema";
-import { format } from "date-fns";
-import { de } from "date-fns/locale";
+import { formatDateForDisplay } from "@shared/utils/datetime";
 
 const STATUS_COLORS: Record<ProspectStatus, string> = {
   neu: "bg-blue-100 text-blue-800",
@@ -294,7 +293,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                       <div className="text-xs text-muted-foreground">Quelle: {prospect.quelle}</div>
                     )}
                     <div className="text-xs text-muted-foreground">
-                      Erstellt: {format(new Date(prospect.createdAt), "dd.MM.yyyy HH:mm", { locale: de })}
+                      Erstellt: {formatDateForDisplay(String(prospect.createdAt).substring(0, 10))}
                     </div>
                   </CardContent>
                 </Card>
@@ -397,7 +396,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                                 <div className="text-xs text-muted-foreground mt-0.5">
                                   {PROSPECT_NOTE_TYPE_LABELS[note.noteType as ProspectNoteType] || note.noteType}
                                   {" · "}
-                                  {format(new Date(note.createdAt), "dd.MM.yyyy HH:mm", { locale: de })}
+                                  {formatDateForDisplay(String(note.createdAt).substring(0, 10))}
                                 </div>
                               </div>
                             </div>
@@ -537,12 +536,12 @@ export default function AdminProspects() {
                     {prospect.wiedervorlageDate && prospect.status === "wiedervorlage" && (
                       <div className="flex items-center gap-1 mt-1 text-xs text-purple-600">
                         <CalendarClock className="h-3 w-3" />
-                        Wiedervorlage: {format(new Date(prospect.wiedervorlageDate), "dd.MM.yyyy", { locale: de })}
+                        Wiedervorlage: {formatDateForDisplay(String(prospect.wiedervorlageDate).substring(0, 10))}
                       </div>
                     )}
                   </div>
                   <div className="text-xs text-muted-foreground whitespace-nowrap ml-2">
-                    {format(new Date(prospect.createdAt), "dd.MM.", { locale: de })}
+                    {formatDateForDisplay(String(prospect.createdAt).substring(0, 10), { day: "2-digit", month: "2-digit" })}
                   </div>
                 </div>
               </CardContent>

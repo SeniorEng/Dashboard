@@ -10,7 +10,7 @@ const router = Router();
 router.use(requireAuth);
 
 router.get("/", asyncHandler("Geburtstagskarten konnten nicht geladen werden", async (req, res) => {
-  if (!req.user!.isAdmin) throw forbidden("Nur für Administratoren");
+  if (!req.user!.isAdmin) throw forbidden("FORBIDDEN", "Nur für Administratoren");
 
   const year = parseInt(req.query.year as string) || new Date().getFullYear();
 
@@ -29,7 +29,7 @@ const toggleSchema = z.object({
 });
 
 router.post("/toggle", asyncHandler("Kartenstatus konnte nicht aktualisiert werden", async (req, res) => {
-  if (!req.user!.isAdmin) throw forbidden("Nur für Administratoren");
+  if (!req.user!.isAdmin) throw forbidden("FORBIDDEN", "Nur für Administratoren");
 
   const parsed = toggleSchema.safeParse(req.body);
   if (!parsed.success) throw badRequest("Ungültige Daten");

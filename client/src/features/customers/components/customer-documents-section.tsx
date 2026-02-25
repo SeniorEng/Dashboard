@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
-import { formatDateDisplay } from "@shared/utils/format";
+import { formatDateForDisplay } from "@shared/utils/datetime";
 import { useUpload } from "@/hooks/use-upload";
 import { DigitalDocumentFlow } from "./digital-document-flow";
 
@@ -92,9 +92,9 @@ function ReviewBadge({ reviewDueDate }: { reviewDueDate: string | null }) {
   };
 
   const labels = {
-    ok: `Prüfung bis ${formatDateDisplay(reviewDueDate!)}`,
-    warning: `Prüfung fällig: ${formatDateDisplay(reviewDueDate!)}`,
-    overdue: `Überfällig: ${formatDateDisplay(reviewDueDate!)}`,
+    ok: `Prüfung bis ${formatDateForDisplay(reviewDueDate!)}`,
+    warning: `Prüfung fällig: ${formatDateForDisplay(reviewDueDate!)}`,
+    overdue: `Überfällig: ${formatDateForDisplay(reviewDueDate!)}`,
   };
 
   return (
@@ -343,7 +343,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                       <div className="ml-6 flex flex-wrap items-center gap-2">
                         {latestUpload && (
                           <span className="text-xs text-gray-500">
-                            {formatDateDisplay(latestUpload.uploadedAt.split("T")[0])}
+                            {formatDateForDisplay(latestUpload.uploadedAt.split("T")[0])}
                           </span>
                         )}
                         {latestGenDoc && (
@@ -381,7 +381,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                             <Upload className="h-3.5 w-3.5 text-gray-400 shrink-0" />
                             <span className="text-xs text-gray-700 truncate">{doc.fileName}</span>
                             <span className="text-xs text-gray-400 shrink-0">
-                              {formatDateDisplay(doc.uploadedAt.split("T")[0])}
+                              {formatDateForDisplay(doc.uploadedAt.split("T")[0])}
                             </span>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
@@ -422,7 +422,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                                 {history.filter(h => !h.isCurrent).map(h => (
                                   <div key={h.id} className="flex items-center justify-between text-xs text-gray-500 p-1 bg-white rounded">
                                     <span className="truncate flex-1">{h.fileName}</span>
-                                    <span className="shrink-0 ml-2">{formatDateDisplay(h.uploadedAt.split("T")[0])}</span>
+                                    <span className="shrink-0 ml-2">{formatDateForDisplay(h.uploadedAt.split("T")[0])}</span>
                                     <a href={h.objectPath} target="_blank" rel="noopener noreferrer" className="ml-2 shrink-0">
                                       <Download className="h-3 w-3 text-gray-400 hover:text-gray-600" />
                                     </a>
@@ -443,7 +443,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                           <FilePlus2 className="h-3.5 w-3.5 text-teal-500 shrink-0" />
                           <span className="text-xs text-gray-700 truncate">{gd.fileName}</span>
                           <span className="text-xs text-gray-400 shrink-0">
-                            {formatDateDisplay(gd.generatedAt.split("T")[0])}
+                            {formatDateForDisplay(gd.generatedAt.split("T")[0])}
                           </span>
                           <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${
                             gd.signingStatus === "complete" ? "bg-green-100 text-green-700" :
@@ -480,7 +480,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                     <FileText className={`${iconSize.sm} text-teal-500 shrink-0`} />
                     <span className="text-sm text-gray-900 truncate">{gd.fileName}</span>
                     <span className="text-xs text-gray-400 shrink-0">
-                      {formatDateDisplay(gd.generatedAt.split("T")[0])}
+                      {formatDateForDisplay(gd.generatedAt.split("T")[0])}
                     </span>
                     <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${
                       gd.signingStatus === "complete" ? "bg-green-100 text-green-700" :
