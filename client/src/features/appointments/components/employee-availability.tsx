@@ -40,9 +40,9 @@ function formatEndTime(start: string | null, durationMinutes: number): string | 
 
 export function EmployeeAvailability({ date, selectedEmployeeId, onSelectEmployee }: EmployeeAvailabilityProps) {
   const { data: employees, isLoading } = useQuery({
-    queryKey: ["/api/admin/employees/availability", date],
+    queryKey: ["/admin/employees/availability", date],
     queryFn: async (): Promise<EmployeeAvailabilityData[]> => {
-      return api.get(`/api/admin/employees/availability?date=${date}`).then(unwrapResult) as Promise<EmployeeAvailabilityData[]>;
+      return api.get(`/admin/employees/availability?date=${date}`).then(unwrapResult) as Promise<EmployeeAvailabilityData[]>;
     },
     enabled: !!date,
     staleTime: 30_000,
