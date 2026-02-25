@@ -31,6 +31,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   ArrowLeft,
   Plus,
   Search,
@@ -171,23 +179,47 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
   const [, navigate] = useLocation();
   const [noteText, setNoteText] = useState("");
   const [noteType, setNoteType] = useState<ProspectNoteType>("notiz");
-  const [statusNotiz, setStatusNotiz] = useState("");
-  const [wiedervorlageDate, setWiedervorlageDate] = useState("");
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showWiedervorlageDialog, setShowWiedervorlageDialog] = useState(false);
+  const [showNichtInteressiertDialog, setShowNichtInteressiertDialog] = useState(false);
+  const [dialogWiedervorlageDate, setDialogWiedervorlageDate] = useState("");
+  const [dialogKommentar, setDialogKommentar] = useState("");
 
-  const handleStatusChange = (newStatus: ProspectStatus) => {
-    const data: Record<string, unknown> = { status: newStatus };
-    if (newStatus === "wiedervorlage" && wiedervorlageDate) {
-      data.wiedervorlageDate = wiedervorlageDate;
+  const handleKontaktiert = () => {
+    if (!prospectId) return;
+    updateMutation.mutate({ id: prospectId, data: { status: "kontaktiert" } });
+  };
+
+  const handleWiedervorlageConfirm = () => {
+    if (!prospectId || !dialogWiedervorlageDate) return;
+    const data: Record<string, unknown> = {
+      status: "wiedervorlage",
+      wiedervorlageDate: dialogWiedervorlageDate,
+    };
+    if (dialogKommentar.trim()) {
+      data.statusNotiz = dialogKommentar.trim();
     }
-    if (statusNotiz) {
-      data.statusNotiz = statusNotiz;
+    updateMutation.mutate({ id: prospectId, data }, {
+      onSuccess: () => {
+        setShowWiedervorlageDialog(false);
+        setDialogWiedervorlageDate("");
+        setDialogKommentar("");
+      },
+    });
+  };
+
+  const handleNichtInteressiertConfirm = () => {
+    if (!prospectId) return;
+    const data: Record<string, unknown> = { status: "nicht_interessiert" };
+    if (dialogKommentar.trim()) {
+      data.statusNotiz = dialogKommentar.trim();
     }
-    if (prospectId) {
-      updateMutation.mutate({ id: prospectId, data });
-      setStatusNotiz("");
-      setWiedervorlageDate("");
-    }
+    updateMutation.mutate({ id: prospectId, data }, {
+      onSuccess: () => {
+        setShowNichtInteressiertDialog(false);
+        setDialogKommentar("");
+      },
+    });
   };
 
   const handleAddNote = () => {
@@ -295,6 +327,20 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                     <div className="text-xs text-muted-foreground">
                       Erstellt: {formatDateForDisplay(String(prospect.createdAt).substring(0, 10))}
                     </div>
+                    {prospect.wiedervorlageDate && (
+                      (() => {
+                        const dateStr = String(prospect.wiedervorlageDate).substring(0, 10);
+                        const today = new Date().toISOString().substring(0, 10);
+                        const isOverdue = dateStr < today;
+                        return (
+                          <div className={`flex items-center gap-1.5 mt-2 text-sm font-medium ${isOverdue ? "text-red-600" : "text-purple-700"}`} data-testid="text-wiedervorlage-date">
+                            <CalendarClock className="h-3.5 w-3.5" />
+                            Wiedervorlage am {formatDateForDisplay(dateStr)}
+                            {isOverdue && <Badge variant="outline" className="text-red-600 border-red-300 text-xs ml-1">Überfällig</Badge>}
+                          </div>
+                        );
+                      })()
+                    )}
                   </CardContent>
                 </Card>
 
@@ -306,34 +352,17 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                     <CardContent className="space-y-3">
                       <div className="flex flex-wrap gap-2">
                         {prospect.status === "neu" && (
-                          <Button size="sm" variant="outline" onClick={() => handleStatusChange("kontaktiert")} data-testid="button-status-kontaktiert">
+                          <Button size="sm" variant="outline" onClick={handleKontaktiert} disabled={updateMutation.isPending} data-testid="button-status-kontaktiert">
                             <PhoneCall className="h-3.5 w-3.5 mr-1" /> Kontaktiert
                           </Button>
                         )}
-                        <Button size="sm" variant="outline" onClick={() => handleStatusChange("wiedervorlage")} data-testid="button-status-wiedervorlage">
+                        <Button size="sm" variant="outline" onClick={() => setShowWiedervorlageDialog(true)} data-testid="button-status-wiedervorlage">
                           <CalendarClock className="h-3.5 w-3.5 mr-1" /> Wiedervorlage
                         </Button>
-                        <Button size="sm" variant="outline" className="text-red-600" onClick={() => handleStatusChange("nicht_interessiert")} data-testid="button-status-nicht-interessiert">
+                        <Button size="sm" variant="outline" className="text-red-600" onClick={() => setShowNichtInteressiertDialog(true)} data-testid="button-status-nicht-interessiert">
                           <XCircle className="h-3.5 w-3.5 mr-1" /> Nicht interessiert
                         </Button>
                       </div>
-                      {prospect.status !== "neu" && (
-                        <div className="space-y-2">
-                          <Input
-                            type="date"
-                            value={wiedervorlageDate}
-                            onChange={(e) => setWiedervorlageDate(e.target.value)}
-                            placeholder="Wiedervorlage-Datum"
-                            data-testid="input-wiedervorlage-date"
-                          />
-                          <Input
-                            value={statusNotiz}
-                            onChange={(e) => setStatusNotiz(e.target.value)}
-                            placeholder="Notiz zum Statuswechsel..."
-                            data-testid="input-status-notiz"
-                          />
-                        </div>
-                      )}
                       <Button
                         className="w-full"
                         onClick={handleConvertToErstberatung}
@@ -429,6 +458,80 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
               <AlertDialogCancel data-testid="button-cancel-delete">Abbrechen</AlertDialogCancel>
               <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700" data-testid="button-confirm-delete">
                 Löschen
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={showWiedervorlageDialog} onOpenChange={(v) => { if (!v) { setShowWiedervorlageDialog(false); setDialogWiedervorlageDate(""); setDialogKommentar(""); } }}>
+        <DialogContent className="fixed inset-0 flex items-center justify-center">
+          <div className="bg-background rounded-lg p-6 max-w-md w-full mx-4 shadow-lg border">
+            <DialogHeader>
+              <DialogTitle>Wiedervorlage planen</DialogTitle>
+              <DialogDescription>
+                Wann soll dieser Interessent erneut kontaktiert werden?
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 mt-4">
+              <div>
+                <Label>Datum *</Label>
+                <Input
+                  type="date"
+                  value={dialogWiedervorlageDate}
+                  onChange={(e) => setDialogWiedervorlageDate(e.target.value)}
+                  min={new Date().toISOString().substring(0, 10)}
+                  data-testid="input-wiedervorlage-date"
+                />
+              </div>
+              <div>
+                <Label>Kommentar</Label>
+                <Textarea
+                  value={dialogKommentar}
+                  onChange={(e) => setDialogKommentar(e.target.value)}
+                  placeholder="z.B. nochmal anrufen, Unterlagen schicken..."
+                  className="min-h-[60px]"
+                  data-testid="input-wiedervorlage-kommentar"
+                />
+              </div>
+            </div>
+            <DialogFooter className="mt-4">
+              <Button variant="outline" onClick={() => { setShowWiedervorlageDialog(false); setDialogWiedervorlageDate(""); setDialogKommentar(""); }} data-testid="button-cancel-wiedervorlage">
+                Abbrechen
+              </Button>
+              <Button onClick={handleWiedervorlageConfirm} disabled={!dialogWiedervorlageDate || updateMutation.isPending} data-testid="button-confirm-wiedervorlage">
+                {updateMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Wiedervorlage setzen
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={showNichtInteressiertDialog} onOpenChange={(v) => { if (!v) { setShowNichtInteressiertDialog(false); setDialogKommentar(""); } }}>
+        <AlertDialogContent className="fixed inset-0 flex items-center justify-center">
+          <div className="bg-background rounded-lg p-6 max-w-md w-full mx-4 shadow-lg border">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Nicht interessiert markieren?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Der Interessent wird als „Nicht interessiert" markiert und erscheint nicht mehr in der aktiven Pipeline.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="mt-3">
+              <Label>Grund / Kommentar</Label>
+              <Textarea
+                value={dialogKommentar}
+                onChange={(e) => setDialogKommentar(e.target.value)}
+                placeholder="Warum kein Interesse? (optional)"
+                className="min-h-[60px]"
+                data-testid="input-nicht-interessiert-kommentar"
+              />
+            </div>
+            <AlertDialogFooter className="mt-4">
+              <AlertDialogCancel onClick={() => { setShowNichtInteressiertDialog(false); setDialogKommentar(""); }} data-testid="button-cancel-nicht-interessiert">Abbrechen</AlertDialogCancel>
+              <AlertDialogAction onClick={handleNichtInteressiertConfirm} className="bg-red-600 hover:bg-red-700" disabled={updateMutation.isPending} data-testid="button-confirm-nicht-interessiert">
+                {updateMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Bestätigen
               </AlertDialogAction>
             </AlertDialogFooter>
           </div>
