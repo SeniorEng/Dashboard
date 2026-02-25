@@ -384,6 +384,7 @@ export default function AdminCustomerNew() {
         if (isPflegekasseCustomer(formData.billingType)) {
           if (!formData.geburtsdatum) errors.push("Geburtsdatum fehlt");
           if (!formData.pflegegrad || formData.pflegegrad === "0") errors.push("Pflegegrad auswählen");
+          if (!formData.pflegegradSeit) errors.push("Pflegegrad seit fehlt");
         }
         break;
       case "insurance":

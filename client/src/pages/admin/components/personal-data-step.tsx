@@ -136,7 +136,7 @@ export function PersonalDataStep({ formData, phoneErrors, onChange }: PersonalDa
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>Pflegegrad seit</Label>
+            <Label>Pflegegrad seit *</Label>
             <DatePicker
               value={formData.pflegegradSeit || null}
               onChange={(val) => onChange("pflegegradSeit", val || "")}
