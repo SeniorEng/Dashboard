@@ -324,6 +324,7 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
       FROM appointments a
       WHERE a.deleted_at IS NULL
         AND a.status IN ('completed', 'documented')
+        AND a.appointment_type != 'Erstberatung'
         AND EXTRACT(YEAR FROM a.date::date) = ${year}
         ${monthFilter}
     ),
