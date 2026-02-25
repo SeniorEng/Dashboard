@@ -125,6 +125,10 @@ export default function AdminServices() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/services/all"] });
+      toast({ title: "Erfolg", description: "Leistung wurde erstellt" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 
@@ -135,6 +139,10 @@ export default function AdminServices() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/services/all"] });
+      toast({ title: "Erfolg", description: "Leistung wurde aktualisiert" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 

@@ -15,6 +15,7 @@ This skill defines how the virtual AI development team operates. It coordinates 
 | 📋 | **Business & Compliance** | `.agents/skills/business-logic-audit/` | Workflows, GoBD, domain rules, care terminology | Business Analyst |
 | 🔍 | **Code Quality** | `.agents/skills/code-quality-supervisor/` | DRY, conventions, dead code, documentation | Senior Engineer |
 | 🗄️ | **Database** | `.agents/skills/database-audit/` | Schema, queries, indexing, GDPR, data integrity | DBA |
+| ⚠️ | **Error Handling** | `.agents/skills/error-handling-audit/` | Mutations, onError, toast messages, DB error mapping | Error UX Specialist |
 | ⚡ | **Performance** | `.agents/skills/performance-audit/` | Speed, caching, bundle size, mobile optimization | Performance Engineer |
 | 🛡️ | **Security** | `.agents/skills/security-audit/` | OWASP, auth, CSRF, secrets, DSGVO | Security Officer |
 | 🎨 | **UI/UX & A11y** | `.agents/skills/ui-ux-audit/` | Touch targets, feedback, mobile, German wording, accessibility | UX Designer |
@@ -34,10 +35,11 @@ This skill defines how the virtual AI development team operates. It coordinates 
 | What Changed | Agents to Run |
 |---|---|
 | Database schema, storage queries | Database + Code Quality |
-| API routes, endpoints | Security + Business Logic + Code Quality |
+| API routes, endpoints | Security + Error Handling + Business Logic + Code Quality |
 | Business workflows, status transitions | Business Logic + QA + Code Quality |
 | Frontend components, pages | UI/UX + Performance + Code Quality |
 | Forms, user input handling | Security + UI/UX + QA + Code Quality |
+| Frontend mutations (useMutation) | Error Handling + Code Quality |
 | Authentication, authorization | Security + Code Quality |
 | Dependencies (package.json) | DevOps + Security |
 | Build config, env vars | DevOps |

@@ -9,10 +9,12 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2, AlertCircle, Heart, CheckCircle, ArrowLeft } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
+import { useToast } from "@/hooks/use-toast";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [success, setSuccess] = useState(false);
+  const { toast } = useToast();
 
   const requestResetMutation = useMutation({
     mutationFn: async () => {
@@ -24,6 +26,9 @@ export default function ForgotPasswordPage() {
     },
     onSuccess: () => {
       setSuccess(true);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 

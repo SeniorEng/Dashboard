@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { AppointmentWithCustomer, UpdateAppointmentPayload } from "@shared/types";
 import type { Appointment } from "@shared/schema";
 import { api, unwrapResult } from "@/lib/api/client";
+import { useToast } from "@/hooks/use-toast";
 
 const QUERY_KEY = "appointments";
 
@@ -92,11 +93,16 @@ export function useUpdateAppointment() {
 
 export function useDeleteAppointment() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   
   return useMutation({
     mutationFn: (id: number) => deleteAppointment(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
+      toast({ title: "Erfolg", description: "Termin wurde gelöscht" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }

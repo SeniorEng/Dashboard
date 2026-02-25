@@ -55,8 +55,8 @@ export function useCreateProspect() {
       queryClient.invalidateQueries({ queryKey: ["prospect-stats"] });
       toast({ title: "Interessent erstellt", description: "Der Interessent wurde erfolgreich angelegt." });
     },
-    onError: () => {
-      toast({ title: "Fehler", description: "Der Interessent konnte nicht erstellt werden.", variant: "destructive" });
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }
@@ -75,8 +75,8 @@ export function useUpdateProspect() {
       queryClient.invalidateQueries({ queryKey: ["prospect-stats"] });
       toast({ title: "Gespeichert", description: "Die Änderungen wurden gespeichert." });
     },
-    onError: () => {
-      toast({ title: "Fehler", description: "Die Änderungen konnten nicht gespeichert werden.", variant: "destructive" });
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }
@@ -94,8 +94,8 @@ export function useAddProspectNote() {
       queryClient.invalidateQueries({ queryKey: ["prospect", vars.prospectId] });
       toast({ title: "Notiz hinzugefügt" });
     },
-    onError: () => {
-      toast({ title: "Fehler", description: "Die Notiz konnte nicht gespeichert werden.", variant: "destructive" });
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }
@@ -114,8 +114,8 @@ export function useReparseProspect() {
       queryClient.invalidateQueries({ queryKey: ["prospects"] });
       toast({ title: "Neu geparst", description: "Die Daten wurden aus der E-Mail aktualisiert." });
     },
-    onError: () => {
-      toast({ title: "Fehler", description: "Die E-Mail konnte nicht neu geparst werden.", variant: "destructive" });
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }
@@ -134,8 +134,8 @@ export function useDeleteProspect() {
       queryClient.invalidateQueries({ queryKey: ["prospect-stats"] });
       toast({ title: "Gelöscht", description: "Der Interessent wurde entfernt." });
     },
-    onError: () => {
-      toast({ title: "Fehler", description: "Der Interessent konnte nicht gelöscht werden.", variant: "destructive" });
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }
