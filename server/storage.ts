@@ -66,6 +66,7 @@ const appointmentWithCustomerSelectFields = {
     createdAt: customers.createdAt,
     updatedAt: customers.updatedAt,
     createdByUserId: customers.createdByUserId,
+    status: customers.status,
   }
 };
 
