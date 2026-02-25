@@ -58,7 +58,7 @@ export default function AdminCustomerNew() {
     contacts: [{ ...EMPTY_CONTACT }],
     budgetTypeSettings: BUDGET_TYPES.map((bt) => ({
       budgetType: bt,
-      enabled: true,
+      enabled: bt === "45b",
       monthlyLimitCents: "",
       yearlyLimitCents: "",
     })),
