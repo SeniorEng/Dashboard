@@ -103,6 +103,7 @@ export default function CustomerConvertPage() {
     contractHours: "0",
     contractPeriod: "weekly",
     documentDeliveryMethod: "email" as const,
+    acceptsPrivatePayment: false,
   });
 
   const [appointmentNotesPrefilled, setAppointmentNotesPrefilled] = useState(false);
@@ -322,6 +323,7 @@ export default function CustomerConvertPage() {
       haustierVorhanden: formData.haustierVorhanden,
       haustierDetails: formData.haustierVorhanden ? (formData.haustierDetails.trim() || undefined) : undefined,
       personenbefoerderungGewuenscht: formData.personenbefoerderungGewuenscht,
+      acceptsPrivatePayment: formData.acceptsPrivatePayment,
       insurance: isPflegekasse ? insurance : undefined,
       contacts: contacts.length > 0 ? contacts : undefined,
       budgets: isPflegekasse ? budgets : undefined,

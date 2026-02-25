@@ -52,6 +52,7 @@ export interface CustomerFormData {
   contractHours: string;
   contractPeriod: "weekly" | "monthly";
   documentDeliveryMethod: "email" | "post";
+  acceptsPrivatePayment: boolean;
 }
 
 export interface SelectOption {

@@ -140,6 +140,26 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
           );
         })}
       </div>
+
+      <div className="border-t pt-4">
+        <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-50 border border-amber-100">
+          <Checkbox
+            id="acceptsPrivatePayment"
+            checked={formData.acceptsPrivatePayment}
+            onCheckedChange={(checked) => onChange("acceptsPrivatePayment", !!checked)}
+            className="mt-0.5"
+            data-testid="checkbox-accepts-private-payment"
+          />
+          <div>
+            <Label htmlFor="acceptsPrivatePayment" className="cursor-pointer font-medium text-gray-900">
+              Private Zuzahlung bei Budgetüberschreitung
+            </Label>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Kunde akzeptiert private Zuzahlungen, wenn das Budget aufgebraucht ist
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

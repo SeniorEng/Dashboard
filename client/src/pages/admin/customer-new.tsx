@@ -71,6 +71,7 @@ export default function AdminCustomerNew() {
     contractHours: "0",
     contractPeriod: "weekly",
     documentDeliveryMethod: "email",
+    acceptsPrivatePayment: false,
   });
 
   const [customerSignatures, setCustomerSignatures] = useState<Record<string, string>>({});
@@ -245,6 +246,7 @@ export default function AdminCustomerNew() {
       haustierVorhanden: formData.haustierVorhanden,
       haustierDetails: formData.haustierVorhanden ? (formData.haustierDetails.trim() || undefined) : undefined,
       personenbefoerderungGewuenscht: formData.personenbefoerderungGewuenscht,
+      acceptsPrivatePayment: formData.acceptsPrivatePayment,
       documentDeliveryMethod: formData.documentDeliveryMethod,
       insurance: isPflegekasse ? insurance : undefined,
       contacts: contacts.length > 0 ? contacts : undefined,
