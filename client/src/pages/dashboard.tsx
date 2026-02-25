@@ -20,10 +20,11 @@ interface DayButtonProps {
   isDayToday: boolean;
   appointmentCount: number;
   holidayName?: string;
+  isWeekend: boolean;
   onSelect: (day: Date) => void;
 }
 
-function DayButton({ dayStr, day, index, isSelected, isDayToday, appointmentCount, holidayName, onSelect }: DayButtonProps) {
+function DayButton({ dayStr, day, index, isSelected, isDayToday, appointmentCount, holidayName, isWeekend, onSelect }: DayButtonProps) {
   const hasAppointments = appointmentCount > 0;
 
   let bgClass: string;
@@ -37,6 +38,8 @@ function DayButton({ dayStr, day, index, isSelected, isDayToday, appointmentCoun
     bgClass = hasAppointments ? "bg-primary/15 text-primary ring-1 ring-primary/30" : "bg-primary/10 text-primary hover:bg-primary/20";
   } else if (hasAppointments) {
     bgClass = "bg-primary/8 ring-1 ring-primary/20 hover:bg-primary/15";
+  } else if (isWeekend) {
+    bgClass = "bg-muted/40 text-muted-foreground/50 hover:bg-muted/60";
   } else {
     bgClass = "bg-background hover:bg-muted";
   }
@@ -44,14 +47,14 @@ function DayButton({ dayStr, day, index, isSelected, isDayToday, appointmentCoun
   return (
     <button
       onClick={() => onSelect(day)}
-      className={`relative flex flex-col items-center justify-center flex-1 max-w-[44px] h-14 rounded-lg transition-all ${bgClass}`}
+      className={`relative flex flex-col items-center justify-center flex-1 h-14 rounded-lg transition-all ${isWeekend && !isSelected ? "max-w-[32px]" : "max-w-[44px]"} ${bgClass}`}
       data-testid={`weekday-${dayStr}`}
       title={holidayName || undefined}
     >
-      <span className="text-[10px] font-medium uppercase tracking-wide opacity-70">
+      <span className={`text-[10px] font-medium uppercase tracking-wide ${isWeekend && !isSelected ? "opacity-40" : "opacity-70"}`}>
         {WEEKDAY_NAMES_SHORT[index]}
       </span>
-      <span className={`text-base font-semibold ${isDayToday && !isSelected && !holidayName ? "text-primary" : ""}`}>
+      <span className={`font-semibold ${isWeekend && !isSelected ? "text-sm text-muted-foreground/50" : "text-base"} ${isDayToday && !isSelected && !holidayName ? "text-primary" : ""}`}>
         {format(day, "d")}
       </span>
       <span className={`text-[9px] font-semibold leading-none h-[10px] flex items-center justify-center ${
@@ -169,6 +172,7 @@ export default function Dashboard() {
                   isDayToday={isDayToday}
                   appointmentCount={appointmentCount}
                   holidayName={holidayName}
+                  isWeekend={index >= 5}
                   onSelect={setSelectedDate}
                 />
               );
@@ -203,7 +207,7 @@ export default function Dashboard() {
               </p>
             )}
           </div>
-          <Link href="/new-appointment">
+          <Link href={`/new-appointment?date=${dateString}`}>
             <Button size="sm" className="shadow-lg shadow-primary/20" data-testid="button-new-appointment">
               <Plus className={`${iconSize.sm} mr-1`} /> Neuer Termin
             </Button>

@@ -32,13 +32,14 @@ export function useNewAppointmentForm() {
   });
 
   const [ktCustomerId, setKtCustomerId] = useState<string>("");
-  const [ktDate, setKtDate] = useState<string>(todayISO());
+  const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const initialDate = urlParams.get("date") && /^\d{4}-\d{2}-\d{2}$/.test(urlParams.get("date")!) ? urlParams.get("date")! : todayISO();
+
+  const [ktDate, setKtDate] = useState<string>(initialDate);
   const [ktTime, setKtTime] = useState<string>("09:00");
   const [ktServices, setKtServices] = useState<Array<{ serviceId: number; durationMinutes: number }>>([]);
   const [ktNotes, setKtNotes] = useState<string>("");
   const [ktAssignedEmployeeId, setKtAssignedEmployeeId] = useState<string>("");
-
-  const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
   const fromProspectId = urlParams.get("fromProspect");
 
   const [ebVorname, setEbVorname] = useState<string>(urlParams.get("vorname") || "");
@@ -50,7 +51,7 @@ export function useNewAppointmentForm() {
   const [ebPlz, setEbPlz] = useState<string>(urlParams.get("plz") || "");
   const [ebStadt, setEbStadt] = useState<string>(urlParams.get("stadt") || "");
   const [ebPflegegrad, setEbPflegegrad] = useState<string>(urlParams.get("pflegegrad") || "1");
-  const [ebDate, setEbDate] = useState<string>(todayISO());
+  const [ebDate, setEbDate] = useState<string>(initialDate);
   const [ebStartTime, setEbStartTime] = useState<string>("09:00");
   const [ebErstberatungDauer, setEbErstberatungDauer] = useState<number>(60);
   const [ebNotes, setEbNotes] = useState<string>("");
