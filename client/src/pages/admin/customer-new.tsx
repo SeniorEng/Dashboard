@@ -34,7 +34,7 @@ export default function AdminCustomerNew() {
   const [currentStep, setCurrentStep] = useState(0);
 
   const [formData, setFormData] = useState<CustomerFormData>({
-    billingType: "pflegekasse_gesetzlich",
+    billingType: "" as any,
     vorname: "",
     nachname: "",
     geburtsdatum: "",
