@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { SignaturePad, type SignatureMetadata } from "@/components/ui/signature-pad";
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
-import { FileText, Check, AlertCircle, Loader2, AlertTriangle, Upload, Camera, X, Pen } from "lucide-react";
+import { FileText, Check, AlertCircle, Loader2, AlertTriangle, Upload, Camera, X, Pen, ChevronDown, ChevronUp } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { BILLING_TYPE_LABELS, type BillingType } from "@shared/domain/customers";
 import { useUpload } from "@/hooks/use-upload";
@@ -296,26 +296,11 @@ export function SignaturesStep({
       )}
 
       {uploadOnlyDocTypes.length > 0 && (
-        <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-            <Upload className="w-4 h-4 text-gray-500" />
-            Weitere Dokumente (nur Upload)
-          </h3>
-          {uploadOnlyDocTypes.map((dt) => (
-            <UploadOnlyCard
-              key={dt.id}
-              docType={dt}
-              uploadedDoc={uploadedDocuments.find(u => u.documentTypeId === dt.id)}
-              onDocUploaded={(uploaded) => {
-                const filtered = uploadedDocuments.filter(u => u.documentTypeId !== dt.id);
-                onUploadedDocumentsChange([...filtered, uploaded]);
-              }}
-              onDocRemoved={() => {
-                onUploadedDocumentsChange(uploadedDocuments.filter(u => u.documentTypeId !== dt.id));
-              }}
-            />
-          ))}
-        </div>
+        <OptionalDocsSection
+          uploadOnlyDocTypes={uploadOnlyDocTypes}
+          uploadedDocuments={uploadedDocuments}
+          onUploadedDocumentsChange={onUploadedDocumentsChange}
+        />
       )}
 
       <div className="p-3 bg-teal-50 border border-teal-100 rounded-lg">
@@ -516,6 +501,54 @@ function DocumentSignatureCard({
         data-testid={`input-camera-${doc.slug}`}
       />
     </Card>
+  );
+}
+
+function OptionalDocsSection({
+  uploadOnlyDocTypes,
+  uploadedDocuments,
+  onUploadedDocumentsChange,
+}: {
+  uploadOnlyDocTypes: DocumentTypeWithTemplate[];
+  uploadedDocuments: WizardUploadedDoc[];
+  onUploadedDocumentsChange: (docs: WizardUploadedDoc[]) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const uploadedCount = uploadOnlyDocTypes.filter(dt => uploadedDocuments.some(u => u.documentTypeId === dt.id)).length;
+
+  return (
+    <div className="space-y-3">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between text-sm font-semibold text-gray-700 py-2"
+        data-testid="toggle-optional-docs"
+      >
+        <span className="flex items-center gap-2">
+          <Upload className="w-4 h-4 text-gray-500" />
+          Weitere Dokumente ({uploadedCount}/{uploadOnlyDocTypes.length})
+        </span>
+        {expanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+      </button>
+      {expanded && (
+        <div className="space-y-3">
+          {uploadOnlyDocTypes.map((dt) => (
+            <UploadOnlyCard
+              key={dt.id}
+              docType={dt}
+              uploadedDoc={uploadedDocuments.find(u => u.documentTypeId === dt.id)}
+              onDocUploaded={(uploaded) => {
+                const filtered = uploadedDocuments.filter(u => u.documentTypeId !== dt.id);
+                onUploadedDocumentsChange([...filtered, uploaded]);
+              }}
+              onDocRemoved={() => {
+                onUploadedDocumentsChange(uploadedDocuments.filter(u => u.documentTypeId !== dt.id));
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
