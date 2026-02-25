@@ -364,40 +364,47 @@ export default function AdminCustomerNew() {
     });
   };
 
-  const validateStepById = (stepId: string): boolean => {
+  const getStepErrors = (stepId: string): string[] => {
+    const errors: string[] = [];
     switch (stepId) {
       case "customerType":
-        return !!formData.billingType;
-      case "personal": {
-        const base = !!(
-          formData.vorname &&
-          formData.nachname &&
-          formData.strasse &&
-          formData.nr &&
-          formData.plz &&
-          formData.stadt
-        );
+        if (!formData.billingType) errors.push("Bitte Kundentyp auswählen");
+        break;
+      case "personal":
+        if (!formData.vorname.trim()) errors.push("Vorname fehlt");
+        if (!formData.nachname.trim()) errors.push("Nachname fehlt");
+        if (!formData.strasse.trim()) errors.push("Straße fehlt");
+        if (!formData.nr.trim()) errors.push("Hausnummer fehlt");
+        if (!formData.plz.trim()) {
+          errors.push("PLZ fehlt");
+        } else if (!/^\d{5}$/.test(formData.plz.trim())) {
+          errors.push("PLZ muss genau 5 Ziffern haben");
+        }
+        if (!formData.stadt.trim()) errors.push("Stadt fehlt");
         if (isPflegekasseCustomer(formData.billingType)) {
-          return base && !!formData.geburtsdatum && !!formData.pflegegrad && formData.pflegegrad !== "0";
+          if (!formData.geburtsdatum) errors.push("Geburtsdatum fehlt");
+          if (!formData.pflegegrad || formData.pflegegrad === "0") errors.push("Pflegegrad auswählen");
         }
-        return base;
-      }
+        break;
       case "insurance":
-        if (formData.insuranceProviderId) {
-          return !!formData.versichertennummer;
+        if (formData.insuranceProviderId && !formData.versichertennummer.trim()) {
+          errors.push("Versichertennummer fehlt");
         }
-        return true;
+        break;
       case "contract":
-        return !!(
-          formData.contractDate &&
-          formData.contractStart &&
-          formData.vereinbarteLeistungen.trim()
-        );
+        if (!formData.contractDate) errors.push("Vertragsabschluss-Datum fehlt");
+        if (!formData.contractStart) errors.push("Vertragsbeginn fehlt");
+        if (!formData.vereinbarteLeistungen.trim()) errors.push("Vereinbarte Leistungen ausfüllen");
+        break;
       case "matching":
-        return !!formData.primaryEmployeeId;
-      default:
-        return true;
+        if (!formData.primaryEmployeeId) errors.push("Hauptmitarbeiter zuordnen");
+        break;
     }
+    return errors;
+  };
+
+  const validateStepById = (stepId: string): boolean => {
+    return getStepErrors(stepId).length === 0;
   };
 
   const handleNext = () => {
@@ -418,14 +425,15 @@ export default function AdminCustomerNew() {
         }
       }
     }
-    if (validateStepById(currentStepId)) {
+    const errors = getStepErrors(currentStepId);
+    if (errors.length === 0) {
       if (currentStep < steps.length - 1) {
         setCurrentStep(currentStep + 1);
       }
     } else {
       toast({
-        title: "Pflichtfelder ausfüllen",
-        description: "Bitte füllen Sie alle markierten Felder aus.",
+        title: "Bitte korrigieren",
+        description: errors.join(" · "),
         variant: "destructive",
       });
     }
@@ -440,35 +448,20 @@ export default function AdminCustomerNew() {
   const findStepIndex = (stepId: string) => steps.findIndex((s) => s.id === stepId);
 
   const handleSubmit = () => {
-    const personalIdx = findStepIndex("personal");
-    if (personalIdx >= 0 && !validateStepById("personal")) {
-      setCurrentStep(personalIdx);
-      toast({
-        title: "Pflichtfelder ausfüllen",
-        description: "Bitte füllen Sie die persönlichen Daten vollständig aus.",
-        variant: "destructive",
-      });
-      return;
-    }
-    const contractIdx = findStepIndex("contract");
-    if (contractIdx >= 0 && !validateStepById("contract")) {
-      setCurrentStep(contractIdx);
-      toast({
-        title: "Pflichtfelder ausfüllen",
-        description: "Bitte füllen Sie die Vertragsdaten vollständig aus.",
-        variant: "destructive",
-      });
-      return;
-    }
-    const matchingIdx = findStepIndex("matching");
-    if (matchingIdx >= 0 && !validateStepById("matching")) {
-      setCurrentStep(matchingIdx);
-      toast({
-        title: "Mitarbeiterzuordnung fehlt",
-        description: "Bitte wählen Sie einen Hauptmitarbeiter aus.",
-        variant: "destructive",
-      });
-      return;
+    const stepsToValidate = ["personal", "insurance", "contract", "matching"];
+    for (const stepId of stepsToValidate) {
+      const idx = findStepIndex(stepId);
+      if (idx < 0) continue;
+      const errors = getStepErrors(stepId);
+      if (errors.length > 0) {
+        setCurrentStep(idx);
+        toast({
+          title: "Bitte korrigieren",
+          description: errors.join(" · "),
+          variant: "destructive",
+        });
+        return;
+      }
     }
     handleCreate();
   };
