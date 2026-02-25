@@ -87,6 +87,11 @@ export default function AdminCustomerNew() {
   const steps = useMemo(() => getStepsForBillingType(formData.billingType), [formData.billingType]);
   const currentStepId = steps[currentStep]?.id || "customerType";
 
+  const goToStep = useCallback((step: number) => {
+    setCurrentStep(step);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
   const { data: insuranceProviders } = useInsuranceProviders();
   const createMutation = useCreateCustomer();
 
@@ -429,7 +434,7 @@ export default function AdminCustomerNew() {
     const errors = getStepErrors(currentStepId);
     if (errors.length === 0) {
       if (currentStep < steps.length - 1) {
-        setCurrentStep(currentStep + 1);
+        goToStep(currentStep + 1);
       }
     } else {
       toast({
@@ -442,7 +447,7 @@ export default function AdminCustomerNew() {
 
   const handleBack = () => {
     if (currentStep > 0) {
-      setCurrentStep(currentStep - 1);
+      goToStep(currentStep - 1);
     }
   };
 
@@ -455,7 +460,7 @@ export default function AdminCustomerNew() {
       if (idx < 0) continue;
       const errors = getStepErrors(stepId);
       if (errors.length > 0) {
-        setCurrentStep(idx);
+        goToStep(idx);
         toast({
           title: "Bitte korrigieren",
           description: errors.join(" · "),
@@ -475,6 +480,9 @@ export default function AdminCustomerNew() {
             selectedType={formData.billingType}
             onChange={(type) => {
               setFormData((prev) => ({ ...prev, billingType: type }));
+              if (currentStep < steps.length - 1) {
+                setTimeout(() => goToStep(currentStep + 1), 150);
+              }
             }}
           />
         );
@@ -541,7 +549,12 @@ export default function AdminCustomerNew() {
         return (
           <DeliveryStep
             formData={formData}
-            onChange={handleChange}
+            onChange={(field, value) => {
+              handleChange(field, value);
+              if (currentStep < steps.length - 1) {
+                setTimeout(() => goToStep(currentStep + 1), 150);
+              }
+            }}
           />
         );
       case "matching":
