@@ -550,15 +550,7 @@ export default function AdminCustomerNew() {
         return (
           <DeliveryStep
             formData={formData}
-            onChange={(field, value) => {
-              handleChange(field, value);
-              if (field === "documentDeliveryMethod" && currentStep < steps.length - 1) {
-                const shouldAutoAdvance = value === "post" || formData.email.trim();
-                if (shouldAutoAdvance) {
-                  setTimeout(() => goToStep(currentStep + 1), 150);
-                }
-              }
-            }}
+            onChange={handleChange}
           />
         );
       case "matching":
