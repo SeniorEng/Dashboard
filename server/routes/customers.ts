@@ -2,7 +2,6 @@ import { Router } from "express";
 import { z } from "zod";
 import { storage } from "../storage";
 import { insertCustomerSchema, insertCustomerContactSchema } from "@shared/schema";
-import { fromError } from "zod-validation-error";
 import { requireAuth, requireAdmin, requireRoles } from "../middleware/auth";
 import { birthdaysCache, customerIdsCache } from "../services/cache";
 import { documentStorage } from "../storage/documents";
@@ -62,109 +61,96 @@ router.get("/generated-documents/:docId/download", asyncHandler("PDF konnte nich
   res.send(pdfBuffer);
 }));
 
-router.get("/document-templates/billing-type/:billingType", async (req, res) => {
-  try {
-    const parsed = billingTypeEnum.safeParse(req.params.billingType);
-    if (!parsed.success) {
-      return res.status(400).json({ error: "Ungültiger Kundentyp" });
-    }
-    const templates = await documentStorage.getTemplatesForBillingType(parsed.data);
-    res.json(templates);
-  } catch (error) {
-    console.error("Failed to load templates:", error);
-    res.status(500).json({ error: "Vorlagen konnten nicht geladen werden" });
+router.get("/document-templates/billing-type/:billingType", asyncHandler("Vorlagen konnten nicht geladen werden", async (req, res) => {
+  const parsed = billingTypeEnum.safeParse(req.params.billingType);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Ungültiger Kundentyp" });
+    return;
   }
-});
+  const templates = await documentStorage.getTemplatesForBillingType(parsed.data);
+  res.json(templates);
+}));
 
-router.get("/", async (req, res) => {
-  try {
-    const user = req.user!;
-    const statusFilter = req.query.status as string | undefined;
-    
-    if (user.isAdmin) {
-      let allCustomers = await storage.getCustomers();
-      if (statusFilter) {
-        allCustomers = allCustomers.filter(c => c.status === statusFilter);
-      }
-      return res.json(allCustomers);
-    }
-    
-    let customersWithAccess = await storage.getCustomersForEmployee(user.id);
+router.get("/", asyncHandler("Kunden konnten nicht geladen werden", async (req, res) => {
+  const user = req.user!;
+  const statusFilter = req.query.status as string | undefined;
+  
+  if (user.isAdmin) {
+    let allCustomers = await storage.getCustomers();
     if (statusFilter) {
-      customersWithAccess = customersWithAccess.filter(c => c.status === statusFilter);
+      allCustomers = allCustomers.filter(c => c.status === statusFilter);
     }
-    res.json(customersWithAccess);
-  } catch (error) {
-    console.error("Failed to fetch customers:", error);
-    res.status(500).json({ error: "Kunden konnten nicht geladen werden" });
+    res.json(allCustomers);
+    return;
   }
-});
+  
+  let customersWithAccess = await storage.getCustomersForEmployee(user.id);
+  if (statusFilter) {
+    customersWithAccess = customersWithAccess.filter(c => c.status === statusFilter);
+  }
+  res.json(customersWithAccess);
+}));
 
-router.get("/:id", async (req, res) => {
-  try {
-    const user = req.user!;
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({ error: "Ungültige Kunden-ID" });
-    }
-    
-    if (!user.isAdmin) {
-      const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-      if (!assignedCustomerIds.includes(id)) {
-        return res.status(403).json({ error: "Zugriff verweigert" });
-      }
-    }
-    
-    const customer = await storage.getCustomer(id);
-    if (!customer) {
-      return res.status(404).json({ error: "Kunde nicht gefunden" });
-    }
-    res.json(customer);
-  } catch (error) {
-    console.error("Failed to fetch customer:", error);
-    res.status(500).json({ error: "Kunde konnte nicht geladen werden" });
+router.get("/:id", asyncHandler("Kunde konnte nicht geladen werden", async (req, res) => {
+  const user = req.user!;
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Ungültige Kunden-ID" });
+    return;
   }
-});
+  
+  if (!user.isAdmin) {
+    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
+    if (!assignedCustomerIds.includes(id)) {
+      res.status(403).json({ error: "Zugriff verweigert" });
+      return;
+    }
+  }
+  
+  const customer = await storage.getCustomer(id);
+  if (!customer) {
+    res.status(404).json({ error: "Kunde nicht gefunden" });
+    return;
+  }
+  res.json(customer);
+}));
 
-router.get("/:id/details", async (req, res) => {
-  try {
-    const user = req.user!;
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({ error: "Ungültige Kunden-ID" });
-    }
-    
-    if (!user.isAdmin) {
-      const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-      if (!assignedCustomerIds.includes(id)) {
-        return res.status(403).json({ error: "Zugriff verweigert" });
-      }
-    }
-    
-    const [contacts, insurance, contract] = await Promise.all([
-      customerManagementStorage.getCustomerContacts(id),
-      customerManagementStorage.getCustomerCurrentInsurance(id),
-      customerManagementStorage.getCustomerCurrentContract(id),
-    ]);
-    
-    res.json({
-      contacts,
-      insurance: insurance ? {
-        providerName: insurance.provider?.name || "Unbekannt",
-        ikNummer: insurance.provider?.ikNummer || undefined,
-        versichertennummer: insurance.versichertennummer,
-      } : null,
-      contract: contract ? {
-        vereinbarteLeistungen: contract.vereinbarteLeistungen,
-        contractStart: contract.contractStart,
-        status: contract.status,
-      } : null,
-    });
-  } catch (error) {
-    console.error("Failed to fetch customer details:", error);
-    res.status(500).json({ error: "Kundendetails konnten nicht geladen werden" });
+router.get("/:id/details", asyncHandler("Kundendetails konnten nicht geladen werden", async (req, res) => {
+  const user = req.user!;
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Ungültige Kunden-ID" });
+    return;
   }
-});
+  
+  if (!user.isAdmin) {
+    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
+    if (!assignedCustomerIds.includes(id)) {
+      res.status(403).json({ error: "Zugriff verweigert" });
+      return;
+    }
+  }
+  
+  const [contacts, insurance, contract] = await Promise.all([
+    customerManagementStorage.getCustomerContacts(id),
+    customerManagementStorage.getCustomerCurrentInsurance(id),
+    customerManagementStorage.getCustomerCurrentContract(id),
+  ]);
+  
+  res.json({
+    contacts,
+    insurance: insurance ? {
+      providerName: insurance.provider?.name || "Unbekannt",
+      ikNummer: insurance.provider?.ikNummer || undefined,
+      versichertennummer: insurance.versichertennummer,
+    } : null,
+    contract: contract ? {
+      vereinbarteLeistungen: contract.vereinbarteLeistungen,
+      contractStart: contract.contractStart,
+      status: contract.status,
+    } : null,
+  });
+}));
 
 const employeeUpdateCustomerSchema = z.object({
   strasse: z.string().min(1).max(200).optional(),
@@ -388,27 +374,19 @@ router.delete("/:id/contacts/:contactId", asyncHandler("Kontakt konnte nicht gel
   res.json({ success: true });
 }));
 
-router.post("/", async (req, res) => {
-  try {
-    const validatedData = insertCustomerSchema.parse(req.body);
+router.post("/", asyncHandler("Kunde konnte nicht erstellt werden", async (req, res) => {
+  const validatedData = insertCustomerSchema.parse(req.body);
 
-    const customer = await db.transaction(async (tx) => {
-      const result = await tx.insert(customers).values(validatedData).returning();
-      return result[0];
-    });
+  const customer = await db.transaction(async (tx) => {
+    const result = await tx.insert(customers).values(validatedData).returning();
+    return result[0];
+  });
 
-    customerIdsCache.invalidateForCustomer(customer.primaryEmployeeId, customer.backupEmployeeId);
-    birthdaysCache.invalidateAll();
-    
-    res.status(201).json(customer);
-  } catch (error: any) {
-    if (error.name === "ZodError") {
-      return res.status(400).json({ error: fromError(error).toString() });
-    }
-    console.error("Failed to create customer:", error);
-    res.status(500).json({ error: "Kunde konnte nicht erstellt werden" });
-  }
-});
+  customerIdsCache.invalidateForCustomer(customer.primaryEmployeeId, customer.backupEmployeeId);
+  birthdaysCache.invalidateAll();
+  
+  res.status(201).json(customer);
+}));
 
 const signaturePayloadSchema = z.object({
   signatures: z.array(z.object({
@@ -417,75 +395,75 @@ const signaturePayloadSchema = z.object({
   })),
 });
 
-router.post("/:id/signatures", async (req, res) => {
-  try {
-    const customerId = parseInt(req.params.id);
-    if (isNaN(customerId)) {
-      return res.status(400).json({ error: "Ungültige Kunden-ID" });
-    }
-
-    const user = req.user!;
-    if (!user.isAdmin) {
-      const assignedIds = await storage.getAssignedCustomerIds(user.id);
-      if (!assignedIds.includes(customerId)) {
-        return res.status(403).json({
-          error: "FORBIDDEN",
-          message: "Kein Zugriff auf diesen Kunden",
-        });
-      }
-    }
-
-    const customer = await storage.getCustomer(customerId);
-    if (!customer) {
-      return res.status(404).json({ error: "Kunde nicht gefunden" });
-    }
-
-    const parsed = signaturePayloadSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: "Ungültige Daten", details: parsed.error.issues });
-    }
-
-    const userId = user.id;
-    const results = [];
-    const errors: { slug: string; error: string }[] = [];
-
-    for (const sig of parsed.data.signatures) {
-      try {
-        const rendered = await renderTemplateForCustomer(sig.templateSlug, customerId);
-        const hash = computeDataHash(JSON.stringify({
-          customerId,
-          templateId: rendered.templateId,
-          templateVersion: rendered.templateVersion,
-          customerSignatureData: sig.customerSignatureData,
-        }));
-
-        const doc = await documentStorage.createGeneratedDocument({
-          customerId,
-          templateId: rendered.templateId,
-          templateVersion: rendered.templateVersion,
-          fileName: `${sig.templateSlug}_signed.html`,
-          objectPath: `generated/${customerId}/${sig.templateSlug}_${Date.now()}.html`,
-          customerSignatureData: sig.customerSignatureData,
-          integrityHash: hash,
-          signingStatus: "complete" as const,
-        }, userId);
-        results.push(doc);
-      } catch (err) {
-        errors.push({ slug: sig.templateSlug, error: String(err) });
-        console.error(`Signatur ${sig.templateSlug} fehlgeschlagen:`, err);
-      }
-    }
-
-    if (errors.length > 0 && results.length === 0) {
-      return res.status(500).json({ error: "Alle Unterschriften fehlgeschlagen", details: errors });
-    }
-
-    res.status(results.length === parsed.data.signatures.length ? 201 : 207).json({ results, errors });
-  } catch (error) {
-    console.error("Failed to save signatures:", error);
-    res.status(500).json({ error: "Unterschriften konnten nicht gespeichert werden" });
+router.post("/:id/signatures", asyncHandler("Unterschriften konnten nicht gespeichert werden", async (req, res) => {
+  const customerId = parseInt(req.params.id);
+  if (isNaN(customerId)) {
+    res.status(400).json({ error: "Ungültige Kunden-ID" });
+    return;
   }
-});
+
+  const user = req.user!;
+  if (!user.isAdmin) {
+    const assignedIds = await storage.getAssignedCustomerIds(user.id);
+    if (!assignedIds.includes(customerId)) {
+      res.status(403).json({
+        error: "FORBIDDEN",
+        message: "Kein Zugriff auf diesen Kunden",
+      });
+      return;
+    }
+  }
+
+  const customer = await storage.getCustomer(customerId);
+  if (!customer) {
+    res.status(404).json({ error: "Kunde nicht gefunden" });
+    return;
+  }
+
+  const parsed = signaturePayloadSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Ungültige Daten", details: parsed.error.issues });
+    return;
+  }
+
+  const userId = user.id;
+  const results = [];
+  const errors: { slug: string; error: string }[] = [];
+
+  for (const sig of parsed.data.signatures) {
+    try {
+      const rendered = await renderTemplateForCustomer(sig.templateSlug, customerId);
+      const hash = computeDataHash(JSON.stringify({
+        customerId,
+        templateId: rendered.templateId,
+        templateVersion: rendered.templateVersion,
+        customerSignatureData: sig.customerSignatureData,
+      }));
+
+      const doc = await documentStorage.createGeneratedDocument({
+        customerId,
+        templateId: rendered.templateId,
+        templateVersion: rendered.templateVersion,
+        fileName: `${sig.templateSlug}_signed.html`,
+        objectPath: `generated/${customerId}/${sig.templateSlug}_${Date.now()}.html`,
+        customerSignatureData: sig.customerSignatureData,
+        integrityHash: hash,
+        signingStatus: "complete" as const,
+      }, userId);
+      results.push(doc);
+    } catch (err) {
+      errors.push({ slug: sig.templateSlug, error: String(err) });
+      console.error(`Signatur ${sig.templateSlug} fehlgeschlagen:`, err);
+    }
+  }
+
+  if (errors.length > 0 && results.length === 0) {
+    res.status(500).json({ error: "Alle Unterschriften fehlgeschlagen", details: errors });
+    return;
+  }
+
+  res.status(results.length === parsed.data.signatures.length ? 201 : 207).json({ results, errors });
+}));
 
 const convertCustomerSchema = z.object({
   billingType: z.enum(["pflegekasse_gesetzlich", "pflegekasse_privat", "selbstzahler"]),

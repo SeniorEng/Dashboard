@@ -1,5 +1,4 @@
 import { useState, useCallback } from "react";
-import DOMPurify from "dompurify";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -33,35 +32,8 @@ import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize } from "@/design-system";
 import { SignaturePad } from "@/components/ui/signature-pad";
-
-interface TemplateOption {
-  id: number;
-  slug: string;
-  name: string;
-  description: string | null;
-  context: string;
-  targetType: string;
-  requiresCustomerSignature: boolean;
-  requiresEmployeeSignature: boolean;
-  documentTypeId: number | null;
-  version: number;
-}
-
-interface RenderResult {
-  html: string;
-  printableHtml: string;
-  templateId: number;
-  templateVersion: number;
-}
-
-interface GenerateResult {
-  id: number;
-  fileName: string;
-  objectPath: string;
-  integrityHash: string;
-  signingStatus?: string;
-  signingLink?: string | null;
-}
+import { DocumentPreview } from "@/features/documents/document-preview";
+import type { TemplateOption, RenderResult, GenerateResult } from "@/features/documents/types";
 
 type FlowStep = "select" | "preview" | "sign-customer" | "sign-employee" | "choose-signing-method" | "generating" | "done";
 
@@ -383,13 +355,7 @@ export function DigitalDocumentFlow({
 
         {step === "preview" && renderedHtml && (
           <div className="space-y-4 mt-2">
-            <div className="border rounded-lg p-4 sm:p-6 bg-white max-h-[50vh] overflow-y-auto">
-              <div
-                className="prose prose-sm max-w-none"
-                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(renderedHtml, { ALLOWED_TAGS: ['html','head','body','style','h1','h2','h3','h4','h5','h6','p','br','strong','em','ul','ol','li','table','tr','td','th','thead','tbody','tfoot','caption','colgroup','col','img','div','span','hr','b','i','u','a','header','footer','section','nav','main','article','aside','figure','figcaption','blockquote','pre','code','dl','dt','dd','meta','title','label','input'], ALLOWED_ATTR: ['class','style','src','alt','width','height','colspan','rowspan','href','id','lang','charset','name','content','type','for','value','placeholder','readonly'] }) }}
-                data-testid="preview-rendered-document"
-              />
-            </div>
+            <DocumentPreview html={renderedHtml} />
 
             <div className="flex items-center justify-between gap-2 pt-2">
               <Button variant="outline" onClick={handleBack} data-testid="button-back-to-select">

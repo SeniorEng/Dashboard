@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { requireAuth } from "../middleware/auth";
-import { handleRouteError } from "../lib/errors";
+import { asyncHandler } from "../lib/errors";
 import { storage } from "../storage";
 import { birthdaysCache } from "../services/cache";
 import { parseLocalDate, todayISO } from "@shared/utils/datetime";
@@ -74,44 +74,80 @@ function calculateUpcomingAge(birthDate: string, daysUntil: number): number {
   return daysUntil === 0 ? baseAge : baseAge + 1;
 }
 
-router.get("/", async (req: Request, res: Response) => {
-  try {
-    const user = req.user!;
-    const rawDays = parseInt(req.query.days as string);
-    const horizonDays = isNaN(rawDays)
-      ? DEFAULT_HORIZON_DAYS
-      : Math.min(Math.max(1, rawDays), MAX_HORIZON_DAYS);
+router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const user = req.user!;
+  const rawDays = parseInt(req.query.days as string);
+  const horizonDays = isNaN(rawDays)
+    ? DEFAULT_HORIZON_DAYS
+    : Math.min(Math.max(1, rawDays), MAX_HORIZON_DAYS);
 
-    const cached = birthdaysCache.get(user.id, user.isAdmin, horizonDays);
-    if (cached) {
-      return res.json(cached);
-    }
+  const cached = birthdaysCache.get(user.id, user.isAdmin, horizonDays);
+  if (cached) {
+    res.json(cached);
+    return;
+  }
 
-    const birthdays: BirthdayEntry[] = [];
+  const birthdays: BirthdayEntry[] = [];
 
-    if (user.isAdmin) {
-      const [activeEmployees, activeCustomers] = await Promise.all([
-        storage.getActiveEmployeesWithBirthday(),
-        storage.getActiveCustomersWithBirthday(),
-      ]);
+  if (user.isAdmin) {
+    const [activeEmployees, activeCustomers] = await Promise.all([
+      storage.getActiveEmployeesWithBirthday(),
+      storage.getActiveCustomersWithBirthday(),
+    ]);
 
-      for (const emp of activeEmployees) {
-        if (emp.geburtsdatum) {
-          const daysUntil = calculateDaysUntilBirthday(emp.geburtsdatum);
-          if (daysUntil <= horizonDays) {
-            birthdays.push({
-              id: emp.id,
-              type: "employee",
-              name: emp.displayName,
-              geburtsdatum: emp.geburtsdatum,
-              daysUntil,
-              age: calculateUpcomingAge(emp.geburtsdatum, daysUntil),
-            });
-          }
+    for (const emp of activeEmployees) {
+      if (emp.geburtsdatum) {
+        const daysUntil = calculateDaysUntilBirthday(emp.geburtsdatum);
+        if (daysUntil <= horizonDays) {
+          birthdays.push({
+            id: emp.id,
+            type: "employee",
+            name: emp.displayName,
+            geburtsdatum: emp.geburtsdatum,
+            daysUntil,
+            age: calculateUpcomingAge(emp.geburtsdatum, daysUntil),
+          });
         }
       }
+    }
 
-      for (const cust of activeCustomers) {
+    for (const cust of activeCustomers) {
+      if (cust.geburtsdatum) {
+        const daysUntil = calculateDaysUntilBirthday(cust.geburtsdatum);
+        if (daysUntil <= horizonDays) {
+          birthdays.push({
+            id: cust.id,
+            type: "customer",
+            name: cust.name,
+            geburtsdatum: cust.geburtsdatum,
+            daysUntil,
+            age: calculateUpcomingAge(cust.geburtsdatum, daysUntil),
+          });
+        }
+      }
+    }
+  } else {
+    const myBirthday = user.geburtsdatum;
+    if (myBirthday) {
+      const daysUntil = calculateDaysUntilBirthday(myBirthday);
+      if (daysUntil <= horizonDays) {
+        birthdays.push({
+          id: user.id,
+          type: "employee",
+          name: user.displayName,
+          geburtsdatum: myBirthday,
+          daysUntil,
+          age: calculateUpcomingAge(myBirthday, daysUntil),
+        });
+      }
+    }
+
+    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
+
+    if (assignedCustomerIds.length > 0) {
+      const assignedCustomers = await storage.getCustomersByIds(assignedCustomerIds);
+
+      for (const cust of assignedCustomers) {
         if (cust.geburtsdatum) {
           const daysUntil = calculateDaysUntilBirthday(cust.geburtsdatum);
           if (daysUntil <= horizonDays) {
@@ -126,53 +162,14 @@ router.get("/", async (req: Request, res: Response) => {
           }
         }
       }
-    } else {
-      const myBirthday = user.geburtsdatum;
-      if (myBirthday) {
-        const daysUntil = calculateDaysUntilBirthday(myBirthday);
-        if (daysUntil <= horizonDays) {
-          birthdays.push({
-            id: user.id,
-            type: "employee",
-            name: user.displayName,
-            geburtsdatum: myBirthday,
-            daysUntil,
-            age: calculateUpcomingAge(myBirthday, daysUntil),
-          });
-        }
-      }
-
-      const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-
-      if (assignedCustomerIds.length > 0) {
-        const assignedCustomers = await storage.getCustomersByIds(assignedCustomerIds);
-
-        for (const cust of assignedCustomers) {
-          if (cust.geburtsdatum) {
-            const daysUntil = calculateDaysUntilBirthday(cust.geburtsdatum);
-            if (daysUntil <= horizonDays) {
-              birthdays.push({
-                id: cust.id,
-                type: "customer",
-                name: cust.name,
-                geburtsdatum: cust.geburtsdatum,
-                daysUntil,
-                age: calculateUpcomingAge(cust.geburtsdatum, daysUntil),
-              });
-            }
-          }
-        }
-      }
     }
-
-    birthdays.sort((a, b) => a.daysUntil - b.daysUntil);
-
-    birthdaysCache.set(user.id, user.isAdmin, horizonDays, birthdays);
-
-    res.json(birthdays);
-  } catch (error) {
-    handleRouteError(res, error, "Geburtstage konnten nicht geladen werden");
   }
-});
+
+  birthdays.sort((a, b) => a.daysUntil - b.daysUntil);
+
+  birthdaysCache.set(user.id, user.isAdmin, horizonDays, birthdays);
+
+  res.json(birthdays);
+}));
 
 export default router;

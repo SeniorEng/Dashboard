@@ -1,0 +1,34 @@
+Das ist ein hervorragender Schritt. Wenn du die digitale Unterschrift (Sign-on-Glass) richtig implementierst, sparst du dir nicht nur das Ausdrucken, sondern bist bei einer MDK- oder Kassenprüfung auf der absolut sicheren Seite.
+
+Um in Deutschland als "revisionssicher" (nach GoBD und den Anforderungen der Kostenträger) zu gelten, reicht es nicht, nur das Gekritzel vom Tablet als PNG in ein PDF zu kleben. Das Dokument muss kryptografisch vor nachträglichen Änderungen geschützt werden.
+
+Hier ist der Architektur-Plan, wie du das in deiner Replit-App (vermutlich mit JavaScript/Node.js) exakt aufbaust. Vergleiche das mal mit deiner aktuellen Implementierung:
+
+Die 3 Säulen der revisionssicheren Unterschrift
+1. Frontend: Datenerfassung (Mehr als nur ein Bild)
+Wenn dein Mitarbeiter beim Klienten vor Ort ist und das Tablet hinhält, musst du den sogenannten "Audit-Trail" (Beweispfad) im Hintergrund mit aufzeichnen.
+
+Das Signatur-Feld: Nutze eine Library wie signature_pad (JavaScript). Sie erfasst die Unterschrift flüssig und wandelt sie in einen Base64-String (Data-URL) um.
+
+Die Metadaten (Extrem wichtig!): Im Moment des Klicks auf "Unterschreiben" muss dein Frontend folgende Daten erfassen und ans Backend schicken:
+
+Den genauen Zeitstempel (vom Server, nicht vom manipulierbaren Tablet!).
+
+Die IP-Adresse des Geräts.
+
+Optional, aber von MDK geliebt: Die GPS-Koordinaten (navigator.geolocation), um zu beweisen, dass der Mitarbeiter wirklich an der Adresse des Klienten stand.
+
+2. Backend: Das PDF-Stempeln
+Jetzt kommt das Frontend-Paket an deinem Node.js-Server an.
+
+Du nutzt eine Library wie pdf-lib oder puppeteer, um den Leistungsnachweis als PDF zu generieren.
+
+Sichtbarer Stempel: Unter die Unterschrift des Senioren schreibst du in kleiner Schrift den Audit-Trail direkt aufs PDF.
+
+Beispiel-Text auf dem PDF: Digital signiert am 25.02.2026 um 14:35:12 Uhr. IP: 192.168.x.x. GPS: 50.8278, 12.9213. ID: 8f7d6c5b...
+
+3. Backend: Die Versiegelung (Der "Anti-Betrugs-Schutz")
+Das ist der Teil, der dich vor Regressforderungen schützt. Du musst beweisen können, dass du aus "1 Stunde Hauswirtschaft" im PDF nicht nachträglich "3 Stunden" gemacht hast.
+
+Der einfache, aber wirkungsvolle Weg (Hashing):
+Sobald dein Server das PDF fertig generiert hat (aber bevor er es speichert), berechnest du einen kryptografischen Hash-Wert (SHA-256) der Datei. Ein Hash ist wie ein digitaler Fingerabdruck. Änderst du danach auch nur einen einzigen Buchstaben im PDF, ändert sich der komplette Fingerabdruck.

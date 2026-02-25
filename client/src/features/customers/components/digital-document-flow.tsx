@@ -1,5 +1,4 @@
 import { useState, useCallback, useEffect } from "react";
-import DOMPurify from "dompurify";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -31,41 +30,8 @@ import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize } from "@/design-system";
 import { SignaturePad } from "@/components/ui/signature-pad";
-
-interface InputField {
-  key: string;
-  label: string;
-}
-
-interface TemplateOption {
-  id: number;
-  slug: string;
-  name: string;
-  description: string | null;
-  context: string;
-  targetType: string;
-  requiresCustomerSignature: boolean;
-  requiresEmployeeSignature: boolean;
-  documentTypeId: number | null;
-  version: number;
-  inputFields: InputField[];
-}
-
-interface RenderResult {
-  html: string;
-  printableHtml: string;
-  templateId: number;
-  templateVersion: number;
-}
-
-interface GenerateResult {
-  id: number;
-  fileName: string;
-  objectPath: string;
-  integrityHash: string;
-  signingStatus?: string;
-  signingLink?: string | null;
-}
+import { DocumentPreview } from "@/features/documents/document-preview";
+import type { TemplateOption, RenderResult, GenerateResult } from "@/features/documents/types";
 
 type FlowStep = "select" | "fill-inputs" | "preview" | "sign-customer" | "sign-employee" | "generating" | "done";
 
@@ -107,7 +73,7 @@ export function DigitalDocumentFlow({
   });
 
   const selectedTemplate = templates?.find(t => t.id.toString() === selectedTemplateId);
-  const hasInputFields = selectedTemplate && selectedTemplate.inputFields.length > 0;
+  const hasInputFields = selectedTemplate && (selectedTemplate.inputFields?.length ?? 0) > 0;
 
   const [autoAdvanced, setAutoAdvanced] = useState(false);
 
@@ -138,7 +104,7 @@ export function DigitalDocumentFlow({
     if (!selectedTemplate) return;
     if (hasInputFields) {
       const initial: Record<string, string> = {};
-      selectedTemplate.inputFields.forEach(f => { initial[f.key] = inputValues[f.key] || ""; });
+      selectedTemplate.inputFields?.forEach(f => { initial[f.key] = inputValues[f.key] || ""; });
       setInputValues(initial);
       setStep("fill-inputs");
     } else {
@@ -307,10 +273,10 @@ export function DigitalDocumentFlow({
                       <p className="text-sm text-gray-600">{selectedTemplate.description}</p>
                     )}
                     <div className="flex flex-wrap gap-2 text-xs">
-                      {selectedTemplate.inputFields.length > 0 && (
+                      {(selectedTemplate.inputFields?.length ?? 0) > 0 && (
                         <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 inline-flex items-center gap-1">
                           <ClipboardEdit className="h-3 w-3" />
-                          {selectedTemplate.inputFields.length} Eingabefeld{selectedTemplate.inputFields.length !== 1 ? "er" : ""}
+                          {selectedTemplate.inputFields!.length} Eingabefeld{selectedTemplate.inputFields!.length !== 1 ? "er" : ""}
                         </span>
                       )}
                       {selectedTemplate.requiresCustomerSignature && (
@@ -365,7 +331,7 @@ export function DigitalDocumentFlow({
             </p>
 
             <div className="space-y-3">
-              {selectedTemplate.inputFields.map((field) => (
+              {selectedTemplate.inputFields?.map((field) => (
                 <div key={field.key} className="space-y-1.5">
                   <Label htmlFor={field.key}>{field.label}</Label>
                   <Input
@@ -402,25 +368,7 @@ export function DigitalDocumentFlow({
 
         {step === "preview" && renderedHtml && (
           <div className="space-y-4 mt-2">
-            {renderedHtml.trimStart().startsWith("<!DOCTYPE") || renderedHtml.trimStart().startsWith("<html") ? (
-              <div className="border rounded-lg bg-white overflow-hidden" style={{ height: "50vh" }}>
-                <iframe
-                  srcDoc={renderedHtml}
-                  className="w-full h-full border-0"
-                  sandbox="allow-same-origin"
-                  title="Dokumentenvorschau"
-                  data-testid="preview-rendered-document"
-                />
-              </div>
-            ) : (
-              <div className="border rounded-lg p-4 sm:p-6 bg-white max-h-[50vh] overflow-y-auto">
-                <div
-                  className="prose prose-sm max-w-none"
-                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(renderedHtml, { ALLOWED_TAGS: ['html','head','body','style','h1','h2','h3','h4','h5','h6','p','br','strong','em','ul','ol','li','table','tr','td','th','thead','tbody','tfoot','caption','colgroup','col','img','div','span','hr','b','i','u','a','header','footer','section','nav','main','article','aside','figure','figcaption','blockquote','pre','code','dl','dt','dd','meta','title','label','input'], ALLOWED_ATTR: ['class','style','src','alt','width','height','colspan','rowspan','href','id','lang','charset','name','content','type','for','value','placeholder','readonly'] }) }}
-                  data-testid="preview-rendered-document"
-                />
-              </div>
-            )}
+            <DocumentPreview html={renderedHtml} />
 
             <div className="flex items-center justify-between gap-2 pt-2">
               <Button variant="outline" onClick={handleBack} data-testid="button-back-from-preview">
