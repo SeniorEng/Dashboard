@@ -28,6 +28,7 @@ import { InsuranceStep } from "./admin/components/insurance-step";
 import { ContactsStep } from "./admin/components/contacts-step";
 import { BudgetsStep, ContractStep } from "./admin/components/budgets-contract-step";
 import { SignaturesStep } from "./admin/components/signatures-step";
+import { DeliveryStep } from "./admin/components/delivery-step";
 import { MatchingStep } from "./admin/components/matching-step";
 import { ErrorState } from "@/components/patterns/error-state";
 import type { Customer } from "@shared/schema";
@@ -39,6 +40,10 @@ export default function CustomerConvertPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [currentStep, setCurrentStep] = useState(0);
+  const goToStep = useCallback((step: number) => {
+    setCurrentStep(step);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
   const [initialized, setInitialized] = useState(false);
 
   const fromAppointmentId = useMemo(() => {
@@ -224,10 +229,56 @@ export default function CustomerConvertPage() {
       const result = await api.post(`/customers/${customerId}/convert`, payload);
       return unwrapResult(result);
     },
-    onSuccess: () => {
+    onSuccess: async () => {
+      const warnings: string[] = [];
+
+      const signedSlugs = Object.entries(customerSignatures).filter(([, data]) => data && data.startsWith("data:image/"));
+      if (signedSlugs.length > 0) {
+        try {
+          await api.post(`/customers/${customerId}/signatures`, {
+            signatures: signedSlugs.map(([slug, signatureData]) => ({
+              templateSlug: slug,
+              customerSignatureData: signatureData,
+            })),
+          });
+        } catch (sigError) {
+          console.error("Unterschriften-Speicherung fehlgeschlagen:", sigError);
+          warnings.push("Unterschriften konnten nicht gespeichert werden");
+        }
+      }
+
+      if (uploadedDocuments.length > 0) {
+        try {
+          for (const doc of uploadedDocuments) {
+            await api.post(`/customers/${customerId}/documents`, {
+              documentTypeId: doc.documentTypeId,
+              fileName: doc.fileName,
+              objectPath: doc.objectPath,
+            });
+          }
+        } catch (docError) {
+          console.error("Dokument-Upload-Speicherung fehlgeschlagen:", docError);
+          warnings.push("Hochgeladene Dokumente konnten nicht gespeichert werden");
+        }
+      }
+
+      if (formData.documentDeliveryMethod) {
+        try {
+          await api.post(`/admin/document-delivery/send-for-customer/${customerId}`, {});
+        } catch (deliveryError) {
+          console.error("Dokumentenversand fehlgeschlagen:", deliveryError);
+          warnings.push("Dokumentenversand konnte nicht ausgelöst werden");
+        }
+      }
+
       queryClient.invalidateQueries({ queryKey: ["customer", customerId] });
       queryClient.invalidateQueries({ queryKey: ["customers"] });
-      toast({ title: "Kunde erfolgreich aktiviert" });
+
+      if (warnings.length > 0) {
+        toast({ title: "Kunde aktiviert mit Hinweisen", description: warnings.join("; ") });
+      } else {
+        toast({ title: "Kunde erfolgreich aktiviert" });
+      }
       setLocation(`/customer/${customerId}`);
     },
     onError: (error: Error) => {
@@ -549,6 +600,21 @@ export default function CustomerConvertPage() {
             onSignatureChange={handleSignatureChange}
             uploadedDocuments={uploadedDocuments}
             onUploadedDocumentsChange={setUploadedDocuments}
+          />
+        );
+      case "delivery":
+        return (
+          <DeliveryStep
+            formData={formData}
+            onChange={(field, value) => {
+              handleChange(field, value);
+              if (field === "documentDeliveryMethod" && currentStep < steps.length - 1) {
+                const shouldAutoAdvance = value === "post" || formData.email.trim();
+                if (shouldAutoAdvance) {
+                  setTimeout(() => goToStep(currentStep + 1), 150);
+                }
+              }
+            }}
           />
         );
       case "matching":
