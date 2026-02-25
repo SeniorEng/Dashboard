@@ -1,4 +1,6 @@
-import { Mail, Truck } from "lucide-react";
+import { Mail, Truck, AlertCircle, Check } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import type { CustomerFormData } from "./customer-types";
 
 interface DeliveryStepProps {
@@ -24,6 +26,9 @@ const OPTIONS = [
 ];
 
 export function DeliveryStep({ formData, onChange }: DeliveryStepProps) {
+  const isEmailSelected = formData.documentDeliveryMethod === "email";
+  const hasEmail = !!formData.email.trim();
+
   return (
     <div className="space-y-6">
       <p className="text-sm text-gray-600">
@@ -64,6 +69,38 @@ export function DeliveryStep({ formData, onChange }: DeliveryStepProps) {
           );
         })}
       </div>
+
+      {isEmailSelected && !hasEmail && (
+        <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 space-y-3">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+            <p className="text-sm text-amber-800">
+              Für den E-Mail-Versand wird eine E-Mail-Adresse benötigt. Bitte hier nacherfassen:
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="delivery-email">E-Mail-Adresse *</Label>
+            <Input
+              id="delivery-email"
+              type="email"
+              value={formData.email}
+              onChange={(e) => onChange("email", e.target.value)}
+              placeholder="kunde@beispiel.de"
+              className="bg-white"
+              data-testid="input-delivery-email"
+            />
+          </div>
+        </div>
+      )}
+
+      {isEmailSelected && hasEmail && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-green-50 border border-green-200">
+          <Check className="h-4 w-4 text-green-600 shrink-0" />
+          <p className="text-sm text-green-800">
+            Versand an: <span className="font-medium">{formData.email}</span>
+          </p>
+        </div>
+      )}
     </div>
   );
 }

@@ -552,8 +552,11 @@ export default function AdminCustomerNew() {
             formData={formData}
             onChange={(field, value) => {
               handleChange(field, value);
-              if (currentStep < steps.length - 1) {
-                setTimeout(() => goToStep(currentStep + 1), 150);
+              if (field === "documentDeliveryMethod" && currentStep < steps.length - 1) {
+                const shouldAutoAdvance = value === "post" || formData.email.trim();
+                if (shouldAutoAdvance) {
+                  setTimeout(() => goToStep(currentStep + 1), 150);
+                }
               }
             }}
           />
