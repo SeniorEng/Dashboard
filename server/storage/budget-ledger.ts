@@ -335,63 +335,74 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     const todayDate = parseLocalDate(today);
     const currentYear = todayDate.getFullYear();
     const currentMonth = todayDate.getMonth() + 1;
+    const currentMonthStart = `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`;
 
-    const allocations = await db.select()
-      .from(budgetAllocations)
-      .where(and(
-        eq(budgetAllocations.customerId, customerId),
-        eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
-        lte(budgetAllocations.validFrom, today),
-        or(
-          isNull(budgetAllocations.expiresAt),
-          gte(budgetAllocations.expiresAt, today)
-        )
-      ));
+    const allocBaseWhere = and(
+      eq(budgetAllocations.customerId, customerId),
+      eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
+      lte(budgetAllocations.validFrom, today),
+      or(isNull(budgetAllocations.expiresAt), gte(budgetAllocations.expiresAt, today))
+    );
 
-    const transactions = await db.select()
-      .from(budgetTransactions)
-      .where(and(
+    const [allocResult, txResult, currentYearResult, carryoverResult, currentMonthResult, preferences] = await Promise.all([
+      db.select({
+        total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
+      }).from(budgetAllocations).where(allocBaseWhere),
+
+      db.select({
+        transactionType: budgetTransactions.transactionType,
+        absTotal: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+        rawTotal: sql<number>`COALESCE(SUM(${budgetTransactions.amountCents}), 0)`,
+      }).from(budgetTransactions).where(and(
         eq(budgetTransactions.customerId, customerId),
         eq(budgetTransactions.budgetType, "entlastungsbetrag_45b")
-      ));
+      )).groupBy(budgetTransactions.transactionType),
 
-    const totalAllocatedCents = allocations.reduce((sum, a) => sum + a.amountCents, 0);
-    
-    const consumptionCents = transactions
-      .filter(t => t.transactionType === "consumption")
-      .reduce((sum, t) => sum + Math.abs(t.amountCents), 0);
-    const writeOffCents = transactions
-      .filter(t => t.transactionType === "write_off")
-      .reduce((sum, t) => sum + Math.abs(t.amountCents), 0);
-    const manualAdjustmentCents = transactions
-      .filter(t => t.transactionType === "manual_adjustment")
-      .reduce((sum, t) => sum + Math.abs(t.amountCents), 0);
-    const reversalsCents = transactions
-      .filter(t => t.transactionType === "reversal")
-      .reduce((sum, t) => sum + t.amountCents, 0);
-    
+      db.select({
+        total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
+      }).from(budgetAllocations).where(and(
+        allocBaseWhere,
+        eq(budgetAllocations.year, currentYear),
+        sql`${budgetAllocations.source} != 'carryover'`
+      )),
+
+      db.select({
+        total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
+        expiresAt: sql<string | null>`MIN(${budgetAllocations.expiresAt})`,
+      }).from(budgetAllocations).where(and(
+        allocBaseWhere,
+        eq(budgetAllocations.source, "carryover"),
+        sql`${budgetAllocations.expiresAt} IS NOT NULL`
+      )),
+
+      db.select({
+        total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+      }).from(budgetTransactions).where(and(
+        eq(budgetTransactions.customerId, customerId),
+        eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
+        eq(budgetTransactions.transactionType, "consumption"),
+        gte(budgetTransactions.transactionDate, currentMonthStart)
+      )),
+
+      this.getBudgetPreferences(customerId),
+    ]);
+
+    const totalAllocatedCents = Number(allocResult[0]?.total ?? 0);
+
+    const txMap = new Map<string, { absTotal: number; rawTotal: number }>();
+    for (const row of txResult) {
+      txMap.set(row.transactionType, { absTotal: Number(row.absTotal), rawTotal: Number(row.rawTotal) });
+    }
+    const consumptionCents = txMap.get("consumption")?.absTotal ?? 0;
+    const writeOffCents = txMap.get("write_off")?.absTotal ?? 0;
+    const manualAdjustmentCents = txMap.get("manual_adjustment")?.absTotal ?? 0;
+    const reversalsCents = txMap.get("reversal")?.rawTotal ?? 0;
     const netUsedCents = consumptionCents + writeOffCents + manualAdjustmentCents + reversalsCents;
-    
-    const currentYearAllocations = allocations.filter(a => a.year === currentYear && a.source !== "carryover");
-    const currentYearAllocatedCents = currentYearAllocations.reduce((sum, a) => sum + a.amountCents, 0);
-    
-    const carryoverAllocations = allocations.filter(a => 
-      a.source === "carryover" && 
-      a.expiresAt !== null
-    );
-    const carryoverCents = carryoverAllocations.reduce((sum, a) => sum + a.amountCents, 0);
-    const carryoverExpiresAt = carryoverAllocations.length > 0 
-      ? carryoverAllocations[0].expiresAt 
-      : null;
 
-    const currentMonthStart = `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`;
-    const currentMonthTransactions = transactions.filter(t => 
-      t.transactionDate >= currentMonthStart && 
-      t.transactionType === "consumption"
-    );
-    const currentMonthUsedCents = currentMonthTransactions.reduce((sum, t) => sum + Math.abs(t.amountCents), 0);
-
-    const preferences = await this.getBudgetPreferences(customerId);
+    const currentYearAllocatedCents = Number(currentYearResult[0]?.total ?? 0);
+    const carryoverCents = Number(carryoverResult[0]?.total ?? 0);
+    const carryoverExpiresAt = carryoverCents > 0 ? (carryoverResult[0]?.expiresAt ?? null) : null;
+    const currentMonthUsedCents = Number(currentMonthResult[0]?.total ?? 0);
 
     return {
       customerId,
@@ -878,41 +889,36 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     const todayDate = parseLocalDate(today);
     const currentYear = todayDate.getFullYear();
     const currentMonth = todayDate.getMonth() + 1;
+    const currentMonthStart = `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`;
+    const currentMonthLastDay = lastDayOfMonth(currentYear, currentMonth);
 
-    const allocations = await db.select()
-      .from(budgetAllocations)
-      .where(and(
+    const [allocResult, txResult, amounts] = await Promise.all([
+      db.select({
+        total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
+      }).from(budgetAllocations).where(and(
         eq(budgetAllocations.customerId, customerId),
         eq(budgetAllocations.budgetType, "umwandlung_45a"),
         eq(budgetAllocations.year, currentYear),
         eq(budgetAllocations.month, currentMonth),
         lte(budgetAllocations.validFrom, today),
-        or(
-          isNull(budgetAllocations.expiresAt),
-          gte(budgetAllocations.expiresAt, today)
-        )
-      ));
+        or(isNull(budgetAllocations.expiresAt), gte(budgetAllocations.expiresAt, today))
+      )),
 
-    const currentMonthAllocatedCents = allocations.reduce((sum, a) => sum + a.amountCents, 0);
-
-    const currentMonthStart = `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`;
-    const nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
-    const nextMonthYear = currentMonth === 12 ? currentYear + 1 : currentYear;
-    const currentMonthEnd = `${nextMonthYear}-${String(nextMonth).padStart(2, '0')}-01`;
-
-    const transactions = await db.select()
-      .from(budgetTransactions)
-      .where(and(
+      db.select({
+        total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+      }).from(budgetTransactions).where(and(
         eq(budgetTransactions.customerId, customerId),
         eq(budgetTransactions.budgetType, "umwandlung_45a"),
         eq(budgetTransactions.transactionType, "consumption"),
         gte(budgetTransactions.transactionDate, currentMonthStart),
-        lte(budgetTransactions.transactionDate, lastDayOfMonth(currentYear, currentMonth))
-      ));
+        lte(budgetTransactions.transactionDate, currentMonthLastDay)
+      )),
 
-    const currentMonthUsedCents = transactions.reduce((sum, t) => sum + Math.abs(t.amountCents), 0);
+      this.getCustomerBudgetAmounts(customerId),
+    ]);
 
-    const amounts = await this.getCustomerBudgetAmounts(customerId);
+    const currentMonthAllocatedCents = Number(allocResult[0]?.total ?? 0);
+    const currentMonthUsedCents = Number(txResult[0]?.total ?? 0);
 
     return {
       customerId,
@@ -929,38 +935,35 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     const today = todayISO();
     const todayDate = parseLocalDate(today);
     const currentYear = todayDate.getFullYear();
+    const yearStart = `${currentYear}-01-01`;
+    const yearEnd = `${currentYear}-12-31`;
 
-    const allocations = await db.select()
-      .from(budgetAllocations)
-      .where(and(
+    const [allocResult, txResult, amounts] = await Promise.all([
+      db.select({
+        total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
+      }).from(budgetAllocations).where(and(
         eq(budgetAllocations.customerId, customerId),
         eq(budgetAllocations.budgetType, "ersatzpflege_39_42a"),
         eq(budgetAllocations.year, currentYear),
         lte(budgetAllocations.validFrom, today),
-        or(
-          isNull(budgetAllocations.expiresAt),
-          gte(budgetAllocations.expiresAt, today)
-        )
-      ));
+        or(isNull(budgetAllocations.expiresAt), gte(budgetAllocations.expiresAt, today))
+      )),
 
-    const currentYearAllocatedCents = allocations.reduce((sum, a) => sum + a.amountCents, 0);
-
-    const yearStart = `${currentYear}-01-01`;
-    const yearEnd = `${currentYear}-12-31`;
-
-    const transactions = await db.select()
-      .from(budgetTransactions)
-      .where(and(
+      db.select({
+        total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+      }).from(budgetTransactions).where(and(
         eq(budgetTransactions.customerId, customerId),
         eq(budgetTransactions.budgetType, "ersatzpflege_39_42a"),
         eq(budgetTransactions.transactionType, "consumption"),
         gte(budgetTransactions.transactionDate, yearStart),
         lte(budgetTransactions.transactionDate, yearEnd)
-      ));
+      )),
 
-    const currentYearUsedCents = transactions.reduce((sum, t) => sum + Math.abs(t.amountCents), 0);
+      this.getCustomerBudgetAmounts(customerId),
+    ]);
 
-    const amounts = await this.getCustomerBudgetAmounts(customerId);
+    const currentYearAllocatedCents = Number(allocResult[0]?.total ?? 0);
+    const currentYearUsedCents = Number(txResult[0]?.total ?? 0);
 
     return {
       customerId,

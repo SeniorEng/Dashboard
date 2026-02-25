@@ -1,0 +1,557 @@
+{
+  "generatedAt": "2026-02-25T08:42:50.443Z",
+  "version": "js-aggregation",
+  "scenarios": [
+    {
+      "scenario": "S01: Neuer Kunde, erster Monat, einfacher Verbrauch",
+      "summary45b": {
+        "customerId": 116,
+        "totalAllocatedCents": 13100,
+        "totalUsedCents": 5000,
+        "availableCents": 8100,
+        "carryoverCents": 0,
+        "carryoverExpiresAt": null,
+        "currentYearAllocatedCents": 13100,
+        "monthlyLimitCents": null,
+        "currentMonthUsedCents": 5000
+      },
+      "summary45a": {
+        "customerId": 116,
+        "monthlyBudgetCents": 59880,
+        "currentMonthAllocatedCents": 59880,
+        "currentMonthUsedCents": 0,
+        "currentMonthAvailableCents": 59880
+      },
+      "summary39_42a": {
+        "customerId": 116,
+        "yearlyBudgetCents": 353900,
+        "currentYearAllocatedCents": 353900,
+        "currentYearUsedCents": 0,
+        "currentYearAvailableCents": 353900
+      },
+      "timing_ms": 49
+    },
+    {
+      "scenario": "S02: Mehrere Monate aufgefüllt, Teilverbrauch",
+      "summary45b": {
+        "customerId": 117,
+        "totalAllocatedCents": 26200,
+        "totalUsedCents": 8000,
+        "availableCents": 18200,
+        "carryoverCents": 0,
+        "carryoverExpiresAt": null,
+        "currentYearAllocatedCents": 26200,
+        "monthlyLimitCents": null,
+        "currentMonthUsedCents": 0
+      },
+      "summary45a": {
+        "customerId": 117,
+        "monthlyBudgetCents": 59880,
+        "currentMonthAllocatedCents": 59880,
+        "currentMonthUsedCents": 0,
+        "currentMonthAvailableCents": 59880
+      },
+      "summary39_42a": {
+        "customerId": 117,
+        "yearlyBudgetCents": 353900,
+        "currentYearAllocatedCents": 353900,
+        "currentYearUsedCents": 0,
+        "currentYearAvailableCents": 353900
+      },
+      "timing_ms": 23
+    },
+    {
+      "scenario": "S03: Exakt aufgebrauchter Monat (0€ übrig)",
+      "summary45b": {
+        "customerId": 118,
+        "totalAllocatedCents": 13100,
+        "totalUsedCents": 13100,
+        "availableCents": 0,
+        "carryoverCents": 0,
+        "carryoverExpiresAt": null,
+        "currentYearAllocatedCents": 13100,
+        "monthlyLimitCents": null,
+        "currentMonthUsedCents": 13100
+      },
+      "summary45a": {
+        "customerId": 118,
+        "monthlyBudgetCents": 59880,
+        "currentMonthAllocatedCents": 59880,
+        "currentMonthUsedCents": 0,
+        "currentMonthAvailableCents": 59880
+      },
+      "summary39_42a": {
+        "customerId": 118,
+        "yearlyBudgetCents": 353900,
+        "currentYearAllocatedCents": 353900,
+        "currentYearUsedCents": 0,
+        "currentYearAvailableCents": 353900
+      },
+      "timing_ms": 22
+    },
+    {
+      "scenario": "S04: Vorjahresrest wird übertragen",
+      "summary45b": {
+        "customerId": 119,
+        "totalAllocatedCents": 233400,
+        "totalUsedCents": 0,
+        "availableCents": 233400,
+        "carryoverCents": 50000,
+        "carryoverExpiresAt": "2026-06-30",
+        "currentYearAllocatedCents": 26200,
+        "monthlyLimitCents": null,
+        "currentMonthUsedCents": 0
+      },
+      "summary45a": {
+        "customerId": 119,
+        "monthlyBudgetCents": 59880,
+        "currentMonthAllocatedCents": 59880,
+        "currentMonthUsedCents": 0,
+        "currentMonthAvailableCents": 59880
+      },
+      "summary39_42a": {
+        "customerId": 119,
+        "yearlyBudgetCents": 353900,
+        "currentYearAllocatedCents": 353900,
+        "currentYearUsedCents": 0,
+        "currentYearAvailableCents": 353900
+      },
+      "timing_ms": 75
+    },
+    {
+      "scenario": "S05: Übertrag verfällt am 30.06.",
+      "summary45b": {
+        "customerId": 120,
+        "totalAllocatedCents": 183400,
+        "totalUsedCents": 30000,
+        "availableCents": 153400,
+        "carryoverCents": 0,
+        "carryoverExpiresAt": null,
+        "currentYearAllocatedCents": 26200,
+        "monthlyLimitCents": null,
+        "currentMonthUsedCents": 0
+      },
+      "summary45a": {
+        "customerId": 120,
+        "monthlyBudgetCents": 59880,
+        "currentMonthAllocatedCents": 59880,
+        "currentMonthUsedCents": 0,
+        "currentMonthAvailableCents": 59880
+      },
+      "summary39_42a": {
+        "customerId": 120,
+        "yearlyBudgetCents": 353900,
+        "currentYearAllocatedCents": 353900,
+        "currentYearUsedCents": 0,
+        "currentYearAvailableCents": 353900
+      },
+      "timing_ms": 81
+    },
+    {
+      "scenario": "S06: Teilweise verbrauchter Übertrag + Verfall",
+      "summary45b": {
+        "customerId": 121,
+        "totalAllocatedCents": 183400,
+        "totalUsedCents": 40000,
+        "availableCents": 143400,
+        "carryoverCents": 0,
+        "carryoverExpiresAt": null,
+        "currentYearAllocatedCents": 26200,
+        "monthlyLimitCents": null,
+        "currentMonthUsedCents": 0
+      },
+      "summary45a": {
+        "customerId": 121,
+        "monthlyBudgetCents": 59880,
+        "currentMonthAllocatedCents": 59880,
+        "currentMonthUsedCents": 0,
+        "currentMonthAvailableCents": 59880
+      },
+      "summary39_42a": {
+        "customerId": 121,
+        "yearlyBudgetCents": 353900,
+        "currentYearAllocatedCents": 353900,
+        "currentYearUsedCents": 0,
+        "currentYearAvailableCents": 353900
+      },
+      "timing_ms": 75
+    },
+    {
+      "scenario": "S07: FIFO - ältestes Geld zuerst verbraucht",
+      "summary45b": {
+        "customerId": 122,
+        "totalAllocatedCents": 26200,
+        "totalUsedCents": 18100,
+        "availableCents": 8100,
+        "carryoverCents": 0,
+        "carryoverExpiresAt": null,
+        "currentYearAllocatedCents": 26200,
+        "monthlyLimitCents": null,
+        "currentMonthUsedCents": 18100
+      },
+      "summary45a": {
+        "customerId": 122,
+        "monthlyBudgetCents": 59880,
+        "currentMonthAllocatedCents": 59880,
+        "currentMonthUsedCents": 0,
+        "currentMonthAvailableCents": 59880
+      },
+      "summary39_42a": {
+        "customerId": 122,
+        "yearlyBudgetCents": 353900,
+        "currentYearAllocatedCents": 353900,
+        "currentYearUsedCents": 0,
+        "currentYearAvailableCents": 353900
+      },
+      "timing_ms": 21
+    },
+    {
+      "scenario": "S08: Verbrauch über mehrere Allokationen (Splitting)",
+      "summary45b": {
+        "customerId": 123,
+        "totalAllocatedCents": 26200,
+        "totalUsedCents": 18000,
+        "availableCents": 8200,
+        "carryoverCents": 0,
+        "carryoverExpiresAt": null,
+        "currentYearAllocatedCents": 26200,
+        "monthlyLimitCents": null,
+        "currentMonthUsedCents": 18000
+      },
+      "summary45a": {
+        "customerId": 123,
+        "monthlyBudgetCents": 59880,
+        "currentMonthAllocatedCents": 59880,
+        "currentMonthUsedCents": 0,
+        "currentMonthAvailableCents": 59880
+      },
+      "summary39_42a": {
+        "customerId": 123,
+        "yearlyBudgetCents": 353900,
+        "currentYearAllocatedCents": 353900,
+        "currentYearUsedCents": 0,
+        "currentYearAvailableCents": 353900
+      },
+      "timing_ms": 22
+    },
+    {
+      "scenario": "S09: 45a aufgebraucht → fällt auf 45b",
+      "summary45b": {
+        "customerId": 124,
+        "totalAllocatedCents": 26200,
+        "totalUsedCents": 5000,
+        "availableCents": 21200,
+        "carryoverCents": 0,
+        "carryoverExpiresAt": null,
+        "currentYearAllocatedCents": 26200,
+        "monthlyLimitCents": null,
+        "currentMonthUsedCents": 5000
+      },
+      "summary45a": {
+        "customerId": 124,
+        "monthlyBudgetCents": 59880,
+        "currentMonthAllocatedCents": 59880,
+        "currentMonthUsedCents": 59880,
+        "currentMonthAvailableCents": 0
+      },
+      "summary39_42a": {
+        "customerId": 124,
+        "yearlyBudgetCents": 353900,
+        "currentYearAllocatedCents": 353900,
+        "currentYearUsedCents": 0,
+        "currentYearAvailableCents": 353900
+      },
+      "timing_ms": 20
+    },
+    {
+      "scenario": "S10: Alle 3 Töpfe nacheinander verbraucht",
+      "summary45b": {
+        "customerId": 125,
+        "totalAllocatedCents": 26200,
+        "totalUsedCents": 13100,
+        "availableCents": 13100,
+        "carryoverCents": 0,
+        "carryoverExpiresAt": null,
+        "currentYearAllocatedCents": 26200,
+        "monthlyLimitCents": null,
+        "currentMonthUsedCents": 13100
+      },
+      "summary45a": {
+        "customerId": 125,
+        "monthlyBudgetCents": 59880,
+        "currentMonthAllocatedCents": 59880,
+        "currentMonthUsedCents": 59880,
+        "currentMonthAvailableCents": 0
+      },
+      "summary39_42a": {
+        "customerId": 125,
+        "yearlyBudgetCents": 353900,
+        "currentYearAllocatedCents": 353900,
+        "currentYearUsedCents": 20000,
+        "currentYearAvailableCents": 333900
+      },
+      "timing_ms": 17
+    },
+    {
+      "scenario": "S11: Leerer Monat (keine Termine)",
+      "summary45b": {
+        "customerId": 126,
+        "totalAllocatedCents": 26200,
+        "totalUsedCents": 0,
+        "availableCents": 26200,
+        "carryoverCents": 0,
+        "carryoverExpiresAt": null,
+        "currentYearAllocatedCents": 26200,
+        "monthlyLimitCents": null,
+        "currentMonthUsedCents": 0
+      },
+      "summary45a": {
+        "customerId": 126,
+        "monthlyBudgetCents": 59880,
+        "currentMonthAllocatedCents": 59880,
+        "currentMonthUsedCents": 0,
+        "currentMonthAvailableCents": 59880
+      },
+      "summary39_42a": {
+        "customerId": 126,
+        "yearlyBudgetCents": 353900,
+        "currentYearAllocatedCents": 353900,
+        "currentYearUsedCents": 0,
+        "currentYearAvailableCents": 353900
+      },
+      "timing_ms": 20
+    },
+    {
+      "scenario": "S12: Storno → Budget wieder verfügbar",
+      "summary45b": {
+        "customerId": 127,
+        "totalAllocatedCents": 13100,
+        "totalUsedCents": 15000,
+        "availableCents": -1900,
+        "carryoverCents": 0,
+        "carryoverExpiresAt": null,
+        "currentYearAllocatedCents": 13100,
+        "monthlyLimitCents": null,
+        "currentMonthUsedCents": 7500
+      },
+      "summary45a": {
+        "customerId": 127,
+        "monthlyBudgetCents": 59880,
+        "currentMonthAllocatedCents": 59880,
+        "currentMonthUsedCents": 0,
+        "currentMonthAvailableCents": 59880
+      },
+      "summary39_42a": {
+        "customerId": 127,
+        "yearlyBudgetCents": 353900,
+        "currentYearAllocatedCents": 353900,
+        "currentYearUsedCents": 0,
+        "currentYearAvailableCents": 353900
+      },
+      "timing_ms": 17
+    },
+    {
+      "scenario": "S13: Manual adjustment (positive + negative)",
+      "summary45b": {
+        "customerId": 128,
+        "totalAllocatedCents": 13100,
+        "totalUsedCents": 12000,
+        "availableCents": 1100,
+        "carryoverCents": 0,
+        "carryoverExpiresAt": null,
+        "currentYearAllocatedCents": 13100,
+        "monthlyLimitCents": null,
+        "currentMonthUsedCents": 10000
+      },
+      "summary45a": {
+        "customerId": 128,
+        "monthlyBudgetCents": 59880,
+        "currentMonthAllocatedCents": 59880,
+        "currentMonthUsedCents": 0,
+        "currentMonthAvailableCents": 59880
+      },
+      "summary39_42a": {
+        "customerId": 128,
+        "yearlyBudgetCents": 353900,
+        "currentYearAllocatedCents": 353900,
+        "currentYearUsedCents": 0,
+        "currentYearAvailableCents": 353900
+      },
+      "timing_ms": 19
+    },
+    {
+      "scenario": "S14: Monatslimit bei 45b mit Übertrag",
+      "summary45b": {
+        "customerId": 129,
+        "totalAllocatedCents": 213400,
+        "totalUsedCents": 6000,
+        "availableCents": 207400,
+        "carryoverCents": 30000,
+        "carryoverExpiresAt": "2026-06-30",
+        "currentYearAllocatedCents": 26200,
+        "monthlyLimitCents": 8000,
+        "currentMonthUsedCents": 6000
+      },
+      "summary45a": {
+        "customerId": 129,
+        "monthlyBudgetCents": 59880,
+        "currentMonthAllocatedCents": 59880,
+        "currentMonthUsedCents": 0,
+        "currentMonthAvailableCents": 59880
+      },
+      "summary39_42a": {
+        "customerId": 129,
+        "yearlyBudgetCents": 353900,
+        "currentYearAllocatedCents": 353900,
+        "currentYearUsedCents": 0,
+        "currentYearAvailableCents": 353900
+      },
+      "timing_ms": 73
+    },
+    {
+      "scenario": "S15: 45a - nur aktueller Monat zählt",
+      "summary45b": {
+        "customerId": 130,
+        "totalAllocatedCents": 0,
+        "totalUsedCents": 0,
+        "availableCents": 0,
+        "carryoverCents": 0,
+        "carryoverExpiresAt": null,
+        "currentYearAllocatedCents": 0,
+        "monthlyLimitCents": null,
+        "currentMonthUsedCents": 0
+      },
+      "summary45a": {
+        "customerId": 130,
+        "monthlyBudgetCents": 59880,
+        "currentMonthAllocatedCents": 59880,
+        "currentMonthUsedCents": 20000,
+        "currentMonthAvailableCents": 39880
+      },
+      "summary39_42a": {
+        "customerId": 130,
+        "yearlyBudgetCents": 353900,
+        "currentYearAllocatedCents": 353900,
+        "currentYearUsedCents": 0,
+        "currentYearAvailableCents": 353900
+      },
+      "timing_ms": 15
+    },
+    {
+      "scenario": "S16: §39/42a Jahresbudget Teilverbrauch",
+      "summary45b": {
+        "customerId": 131,
+        "totalAllocatedCents": 26200,
+        "totalUsedCents": 0,
+        "availableCents": 26200,
+        "carryoverCents": 0,
+        "carryoverExpiresAt": null,
+        "currentYearAllocatedCents": 26200,
+        "monthlyLimitCents": null,
+        "currentMonthUsedCents": 0
+      },
+      "summary45a": {
+        "customerId": 131,
+        "monthlyBudgetCents": 59880,
+        "currentMonthAllocatedCents": 59880,
+        "currentMonthUsedCents": 0,
+        "currentMonthAvailableCents": 59880
+      },
+      "summary39_42a": {
+        "customerId": 131,
+        "yearlyBudgetCents": 353900,
+        "currentYearAllocatedCents": 353900,
+        "currentYearUsedCents": 150000,
+        "currentYearAvailableCents": 203900
+      },
+      "timing_ms": 22
+    },
+    {
+      "scenario": "S17: Gemischte Transaktionstypen (consumption + write_off + reversal + manual)",
+      "summary45b": {
+        "customerId": 132,
+        "totalAllocatedCents": 26200,
+        "totalUsedCents": 17000,
+        "availableCents": 9200,
+        "carryoverCents": 0,
+        "carryoverExpiresAt": null,
+        "currentYearAllocatedCents": 26200,
+        "monthlyLimitCents": null,
+        "currentMonthUsedCents": 4000
+      },
+      "summary45a": {
+        "customerId": 132,
+        "monthlyBudgetCents": 59880,
+        "currentMonthAllocatedCents": 59880,
+        "currentMonthUsedCents": 0,
+        "currentMonthAvailableCents": 59880
+      },
+      "summary39_42a": {
+        "customerId": 132,
+        "yearlyBudgetCents": 353900,
+        "currentYearAllocatedCents": 353900,
+        "currentYearUsedCents": 0,
+        "currentYearAvailableCents": 353900
+      },
+      "timing_ms": 24
+    },
+    {
+      "scenario": "S18: Pflegegrad 1 (keine 45a)",
+      "summary45b": {
+        "customerId": 133,
+        "totalAllocatedCents": 13100,
+        "totalUsedCents": 3000,
+        "availableCents": 10100,
+        "carryoverCents": 0,
+        "carryoverExpiresAt": null,
+        "currentYearAllocatedCents": 13100,
+        "monthlyLimitCents": null,
+        "currentMonthUsedCents": 3000
+      },
+      "summary45a": {
+        "customerId": 133,
+        "monthlyBudgetCents": 0,
+        "currentMonthAllocatedCents": 0,
+        "currentMonthUsedCents": 0,
+        "currentMonthAvailableCents": 0
+      },
+      "summary39_42a": {
+        "customerId": 133,
+        "yearlyBudgetCents": 0,
+        "currentYearAllocatedCents": 0,
+        "currentYearUsedCents": 0,
+        "currentYearAvailableCents": 0
+      },
+      "timing_ms": 15
+    },
+    {
+      "scenario": "S19: Volumen-Test (36 Monate × 20 Buchungen = 720 Transaktionen)",
+      "summary45b": {
+        "customerId": 134,
+        "totalAllocatedCents": 340600,
+        "totalUsedCents": 471600,
+        "availableCents": -131000,
+        "carryoverCents": 0,
+        "carryoverExpiresAt": null,
+        "currentYearAllocatedCents": 26200,
+        "monthlyLimitCents": null,
+        "currentMonthUsedCents": 144100
+      },
+      "summary45a": {
+        "customerId": 134,
+        "monthlyBudgetCents": 59880,
+        "currentMonthAllocatedCents": 59880,
+        "currentMonthUsedCents": 0,
+        "currentMonthAvailableCents": 59880
+      },
+      "summary39_42a": {
+        "customerId": 134,
+        "yearlyBudgetCents": 353900,
+        "currentYearAllocatedCents": 353900,
+        "currentYearUsedCents": 0,
+        "currentYearAvailableCents": 353900
+      },
+      "timing_ms": 116
+    }
+  ]
+}
