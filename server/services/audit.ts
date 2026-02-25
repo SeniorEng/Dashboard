@@ -100,6 +100,33 @@ class AuditService {
     await this.log(userId, "appointment_deleted", "appointment", appointmentId, metadata, ipAddress);
   }
 
+  async customerUpdated(
+    userId: number,
+    customerId: number,
+    metadata: { changedFields: string[]; oldValues: Record<string, unknown>; newValues: Record<string, unknown> },
+    ipAddress?: string
+  ): Promise<void> {
+    await this.log(userId, "customer_updated", "customer", customerId, metadata, ipAddress);
+  }
+
+  async customerCareLevelChanged(
+    userId: number,
+    customerId: number,
+    metadata: { oldPflegegrad: number | null; newPflegegrad: number; seitDatum: string },
+    ipAddress?: string
+  ): Promise<void> {
+    await this.log(userId, "customer_care_level_changed", "customer", customerId, metadata, ipAddress);
+  }
+
+  async customerContractUpdated(
+    userId: number,
+    customerId: number,
+    metadata: { changedFields: string[]; oldValues: Record<string, unknown>; newValues: Record<string, unknown> },
+    ipAddress?: string
+  ): Promise<void> {
+    await this.log(userId, "customer_contract_updated", "customer", customerId, metadata, ipAddress);
+  }
+
   async getEntries(filter: AuditLogFilter): Promise<{ entries: Array<{
     id: number;
     userId: number;

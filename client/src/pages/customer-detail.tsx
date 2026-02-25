@@ -1,8 +1,14 @@
+import { useState, useCallback } from "react";
 import { useRoute, Link, useSearch, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { AppointmentCard } from "@/features/appointments/components/appointment-card";
 import { useAuth } from "@/hooks/use-auth";
@@ -12,7 +18,7 @@ import {
   ArrowLeft, MapPin, Phone, Mail,
   Calendar, Loader2, AlertCircle, FileSignature, ChevronRight, X, Wallet,
   Cake, PhoneCall, Shield, PawPrint, ClipboardList, Stethoscope, Users, UserSearch,
-  UserCheck, XCircle,
+  UserCheck, XCircle, Pencil, Check, Save,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { ErrorState } from "@/components/patterns/error-state";
@@ -147,6 +153,137 @@ export default function CustomerDetailPage() {
     },
   });
 
+  type EditSection = "contact" | "pflegegrad" | "pet" | "medical" | "services" | null;
+  const [editingSection, setEditingSection] = useState<EditSection>(null);
+
+  const [contactForm, setContactForm] = useState({
+    strasse: "", nr: "", plz: "", stadt: "",
+    telefon: "", festnetz: "", email: "",
+  });
+
+  const [pflegegradForm, setPflegegradForm] = useState({ pflegegrad: "1", seitDatum: todayISO() });
+
+  const [petForm, setPetForm] = useState({ haustierVorhanden: false, haustierDetails: "" });
+
+  const [medicalForm, setMedicalForm] = useState("");
+
+  const [servicesForm, setServicesForm] = useState("");
+
+  const startEditing = useCallback((section: EditSection) => {
+    if (!customer) return;
+    if (section === "contact") {
+      setContactForm({
+        strasse: customer.strasse || "",
+        nr: customer.nr || "",
+        plz: customer.plz || "",
+        stadt: customer.stadt || "",
+        telefon: customer.telefon || "",
+        festnetz: customer.festnetz || "",
+        email: customer.email || "",
+      });
+    } else if (section === "pflegegrad") {
+      setPflegegradForm({
+        pflegegrad: String(customer.pflegegrad || 1),
+        seitDatum: todayISO(),
+      });
+    } else if (section === "pet") {
+      setPetForm({
+        haustierVorhanden: customer.haustierVorhanden ?? false,
+        haustierDetails: customer.haustierDetails || "",
+      });
+    } else if (section === "medical") {
+      setMedicalForm(customer.vorerkrankungen || "");
+    } else if (section === "services") {
+      setServicesForm(details?.contract?.vereinbarteLeistungen || "");
+    }
+    setEditingSection(section);
+  }, [customer, details]);
+
+  const cancelEditing = useCallback(() => setEditingSection(null), []);
+
+  const updateCustomerMutation = useMutation({
+    mutationFn: async (data: Record<string, unknown>) => {
+      const result = await api.patch(`/customers/${customerId}`, data);
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["customer", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      setEditingSection(null);
+      toast({ title: "Kundendaten aktualisiert" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const updateCareLevelMutation = useMutation({
+    mutationFn: async (data: { pflegegrad: number; seitDatum: string }) => {
+      const result = await api.post(`/customers/${customerId}/care-level`, data);
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["customer", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      setEditingSection(null);
+      toast({ title: "Pflegegrad aktualisiert" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const updateContractMutation = useMutation({
+    mutationFn: async (data: { vereinbarteLeistungen: string | null }) => {
+      const result = await api.patch(`/customers/${customerId}/contract`, data);
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["customer-details", customerId] });
+      setEditingSection(null);
+      toast({ title: "Vereinbarte Leistungen aktualisiert" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleSaveContact = useCallback(() => {
+    updateCustomerMutation.mutate({
+      strasse: contactForm.strasse || undefined,
+      nr: contactForm.nr || undefined,
+      plz: contactForm.plz || undefined,
+      stadt: contactForm.stadt || undefined,
+      telefon: contactForm.telefon || null,
+      festnetz: contactForm.festnetz || null,
+      email: contactForm.email || null,
+    });
+  }, [contactForm, updateCustomerMutation]);
+
+  const handleSavePflegegrad = useCallback(() => {
+    updateCareLevelMutation.mutate({
+      pflegegrad: parseInt(pflegegradForm.pflegegrad),
+      seitDatum: pflegegradForm.seitDatum,
+    });
+  }, [pflegegradForm, updateCareLevelMutation]);
+
+  const handleSavePet = useCallback(() => {
+    updateCustomerMutation.mutate({
+      haustierVorhanden: petForm.haustierVorhanden,
+      haustierDetails: petForm.haustierVorhanden ? (petForm.haustierDetails || null) : null,
+    });
+  }, [petForm, updateCustomerMutation]);
+
+  const handleSaveMedical = useCallback(() => {
+    updateCustomerMutation.mutate({ vorerkrankungen: medicalForm || null });
+  }, [medicalForm, updateCustomerMutation]);
+
+  const handleSaveServices = useCallback(() => {
+    updateContractMutation.mutate({ vereinbarteLeistungen: servicesForm || null });
+  }, [servicesForm, updateContractMutation]);
+
+  const isSaving = updateCustomerMutation.isPending || updateCareLevelMutation.isPending || updateContractMutation.isPending;
+
   const today = todayISO();
   
   const undocumentedAppointments = appointments.filter(apt => 
@@ -279,10 +416,50 @@ export default function CustomerDetailPage() {
           </Card>
         )}
 
-        {/* Persönliche Daten & Kontakt */}
-        <Card className="mb-4" data-testid="card-personal-info">
+        {/* Pflegegrad */}
+        <Card className="mb-4" data-testid="card-pflegegrad">
           <CardContent className="p-4">
-            <div className="space-y-2.5">
+            {editingSection === "pflegegrad" ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-semibold">Pflegegrad ändern</h2>
+                </div>
+                <p className="text-xs text-amber-600">Änderungen werden mit Datum historisiert und sind abrechnungsrelevant.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label>Pflegegrad</Label>
+                    <Select value={pflegegradForm.pflegegrad} onValueChange={(v) => setPflegegradForm(f => ({ ...f, pflegegrad: v }))}>
+                      <SelectTrigger data-testid="select-pflegegrad">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[1,2,3,4,5].map(g => (
+                          <SelectItem key={g} value={String(g)}>Pflegegrad {g}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Gültig seit</Label>
+                    <Input
+                      type="date"
+                      value={pflegegradForm.seitDatum}
+                      onChange={(e) => setPflegegradForm(f => ({ ...f, seitDatum: e.target.value }))}
+                      data-testid="input-pflegegrad-seit"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <Button size="sm" onClick={handleSavePflegegrad} disabled={isSaving} className="min-h-[36px]" data-testid="button-save-pflegegrad">
+                    {isSaving ? <Loader2 className={`${iconSize.sm} animate-spin`} /> : <><Save className={`${iconSize.sm} mr-1`} />Speichern</>}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={cancelEditing} disabled={isSaving} className="min-h-[36px]" data-testid="button-cancel-pflegegrad">
+                    Abbrechen
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 flex-wrap">
                   {hasPflegegrad ? (
                     <StatusBadge type="pflegegrad" value={customer.pflegegrad!} data-testid="badge-pflegegrad" />
@@ -290,65 +467,171 @@ export default function CustomerDetailPage() {
                     <span className="text-xs text-muted-foreground/60">Kein Pflegegrad</span>
                   )}
                 </div>
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => startEditing("pflegegrad")} data-testid="button-edit-pflegegrad">
+                  <Pencil className="h-3.5 w-3.5 text-gray-400" />
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
-                <div className="flex items-center gap-2 text-sm" data-testid="text-geburtsdatum">
-                  <Cake className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
-                  <span className="text-muted-foreground">{geburtsdatum || "Kein Geburtsdatum"}</span>
+        {/* Persönliche Daten & Kontakt */}
+        <Card className="mb-4" data-testid="card-personal-info">
+          <CardContent className="p-4">
+            {editingSection === "contact" ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-semibold">Kontaktdaten bearbeiten</h2>
                 </div>
-
-                <div className="flex items-start gap-2 text-sm">
-                  <MapPin className={`${iconSize.sm} mt-0.5 flex-shrink-0 text-primary/60`} />
-                  <span className="text-muted-foreground" data-testid="text-address">{address || "Keine Adresse"}</span>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="col-span-2">
+                    <Label>Straße</Label>
+                    <Input value={contactForm.strasse} onChange={(e) => setContactForm(f => ({ ...f, strasse: e.target.value }))} data-testid="input-strasse" />
+                  </div>
+                  <div>
+                    <Label>Nr.</Label>
+                    <Input value={contactForm.nr} onChange={(e) => setContactForm(f => ({ ...f, nr: e.target.value }))} data-testid="input-nr" />
+                  </div>
                 </div>
-
-                <div className="flex items-center gap-2 text-sm">
-                  <Phone className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
-                  {phoneMobil ? (
-                    <a href={`tel:${customer.telefon}`} className="text-primary hover:underline" data-testid="link-phone-mobil">
-                      {phoneMobil}
-                    </a>
-                  ) : (
-                    <span className="text-muted-foreground/60">Kein Mobiltelefon</span>
-                  )}
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <Label>PLZ</Label>
+                    <Input value={contactForm.plz} onChange={(e) => setContactForm(f => ({ ...f, plz: e.target.value }))} maxLength={5} data-testid="input-plz" />
+                  </div>
+                  <div className="col-span-2">
+                    <Label>Stadt</Label>
+                    <Input value={contactForm.stadt} onChange={(e) => setContactForm(f => ({ ...f, stadt: e.target.value }))} data-testid="input-stadt" />
+                  </div>
                 </div>
-
-                <div className="flex items-center gap-2 text-sm">
-                  <PhoneCall className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
-                  {phoneFestnetz ? (
-                    <a href={`tel:${customer.festnetz}`} className="text-primary hover:underline" data-testid="link-phone-festnetz">
-                      {phoneFestnetz}
-                    </a>
-                  ) : (
-                    <span className="text-muted-foreground/60">Kein Festnetz</span>
-                  )}
+                <div>
+                  <Label>Mobilnummer</Label>
+                  <Input value={contactForm.telefon} onChange={(e) => setContactForm(f => ({ ...f, telefon: e.target.value }))} placeholder="+49 151 ..." data-testid="input-telefon" />
                 </div>
-
-                <div className="flex items-center gap-2 text-sm">
-                  <Mail className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
-                  {customer.email ? (
-                    <a href={`mailto:${customer.email}`} className="text-primary hover:underline" data-testid="link-email">
-                      {customer.email}
-                    </a>
-                  ) : (
-                    <span className="text-muted-foreground/60">Keine E-Mail</span>
-                  )}
+                <div>
+                  <Label>Festnetz</Label>
+                  <Input value={contactForm.festnetz} onChange={(e) => setContactForm(f => ({ ...f, festnetz: e.target.value }))} placeholder="+49 351 ..." data-testid="input-festnetz" />
                 </div>
-            </div>
+                <div>
+                  <Label>E-Mail</Label>
+                  <Input type="email" value={contactForm.email} onChange={(e) => setContactForm(f => ({ ...f, email: e.target.value }))} data-testid="input-email" />
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <Button size="sm" onClick={handleSaveContact} disabled={isSaving} className="min-h-[36px]" data-testid="button-save-contact">
+                    {isSaving ? <Loader2 className={`${iconSize.sm} animate-spin`} /> : <><Save className={`${iconSize.sm} mr-1`} />Speichern</>}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={cancelEditing} disabled={isSaving} className="min-h-[36px]" data-testid="button-cancel-contact">
+                    Abbrechen
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-semibold text-gray-700">Kontakt & Adresse</span>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => startEditing("contact")} data-testid="button-edit-contact">
+                    <Pencil className="h-3.5 w-3.5 text-gray-400" />
+                  </Button>
+                </div>
+                <div className="space-y-2.5">
+                  <div className="flex items-center gap-2 text-sm" data-testid="text-geburtsdatum">
+                    <Cake className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
+                    <span className="text-muted-foreground">{geburtsdatum || "Kein Geburtsdatum"}</span>
+                  </div>
+                  <div className="flex items-start gap-2 text-sm">
+                    <MapPin className={`${iconSize.sm} mt-0.5 flex-shrink-0 text-primary/60`} />
+                    <span className="text-muted-foreground" data-testid="text-address">{address || "Keine Adresse"}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Phone className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
+                    {phoneMobil ? (
+                      <a href={`tel:${customer.telefon}`} className="text-primary hover:underline" data-testid="link-phone-mobil">
+                        {phoneMobil}
+                      </a>
+                    ) : (
+                      <span className="text-muted-foreground/60">Kein Mobiltelefon</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <PhoneCall className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
+                    {phoneFestnetz ? (
+                      <a href={`tel:${customer.festnetz}`} className="text-primary hover:underline" data-testid="link-phone-festnetz">
+                        {phoneFestnetz}
+                      </a>
+                    ) : (
+                      <span className="text-muted-foreground/60">Kein Festnetz</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Mail className={`${iconSize.sm} flex-shrink-0 text-primary/60`} />
+                    {customer.email ? (
+                      <a href={`mailto:${customer.email}`} className="text-primary hover:underline" data-testid="link-email">
+                        {customer.email}
+                      </a>
+                    ) : (
+                      <span className="text-muted-foreground/60">Keine E-Mail</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
         {/* Haustier */}
         <Card className="mb-4" data-testid="card-pet">
           <CardContent className="p-4">
-            <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
-              <PawPrint className={`${iconSize.sm} text-amber-600`} />
-              Haustier
-            </h2>
-            <p className="text-sm text-muted-foreground" data-testid="text-pet-details">
-              {customer.haustierVorhanden
-                ? (customer.haustierDetails || "Ja, keine weiteren Details")
-                : "Kein Haustier"}
-            </p>
+            {editingSection === "pet" ? (
+              <div className="space-y-3">
+                <h2 className="text-sm font-semibold flex items-center gap-2">
+                  <PawPrint className={`${iconSize.sm} text-amber-600`} />
+                  Haustier bearbeiten
+                </h2>
+                <div className="flex items-center gap-3">
+                  <Switch
+                    checked={petForm.haustierVorhanden}
+                    onCheckedChange={(checked) => setPetForm(f => ({ ...f, haustierVorhanden: checked }))}
+                    data-testid="switch-pet"
+                  />
+                  <Label>{petForm.haustierVorhanden ? "Haustier vorhanden" : "Kein Haustier"}</Label>
+                </div>
+                {petForm.haustierVorhanden && (
+                  <div>
+                    <Label>Details (Art, Name, Hinweise)</Label>
+                    <Input
+                      value={petForm.haustierDetails}
+                      onChange={(e) => setPetForm(f => ({ ...f, haustierDetails: e.target.value }))}
+                      placeholder="z.B. Hund, freundlich"
+                      data-testid="input-pet-details"
+                    />
+                  </div>
+                )}
+                <div className="flex gap-2 pt-1">
+                  <Button size="sm" onClick={handleSavePet} disabled={isSaving} className="min-h-[36px]" data-testid="button-save-pet">
+                    {isSaving ? <Loader2 className={`${iconSize.sm} animate-spin`} /> : <><Save className={`${iconSize.sm} mr-1`} />Speichern</>}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={cancelEditing} disabled={isSaving} className="min-h-[36px]" data-testid="button-cancel-pet">
+                    Abbrechen
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-sm font-semibold flex items-center gap-2">
+                    <PawPrint className={`${iconSize.sm} text-amber-600`} />
+                    Haustier
+                  </h2>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => startEditing("pet")} data-testid="button-edit-pet">
+                    <Pencil className="h-3.5 w-3.5 text-gray-400" />
+                  </Button>
+                </div>
+                <p className="text-sm text-muted-foreground" data-testid="text-pet-details">
+                  {customer.haustierVorhanden
+                    ? (customer.haustierDetails || "Ja, keine weiteren Details")
+                    : "Kein Haustier"}
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -424,26 +707,88 @@ export default function CustomerDetailPage() {
         {/* Vorerkrankungen */}
         <Card className="mb-4" data-testid="card-medical-history">
           <CardContent className="p-4">
-            <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
-              <Stethoscope className={`${iconSize.sm} text-rose-500`} />
-              Vorerkrankungen
-            </h2>
-            <p className="text-sm text-muted-foreground whitespace-pre-line" data-testid="text-medical-history">
-              {customer.vorerkrankungen || "Keine Angabe"}
-            </p>
+            {editingSection === "medical" ? (
+              <div className="space-y-3">
+                <h2 className="text-sm font-semibold flex items-center gap-2">
+                  <Stethoscope className={`${iconSize.sm} text-rose-500`} />
+                  Vorerkrankungen bearbeiten
+                </h2>
+                <Textarea
+                  value={medicalForm}
+                  onChange={(e) => setMedicalForm(e.target.value)}
+                  placeholder="Bekannte Vorerkrankungen..."
+                  rows={4}
+                  data-testid="textarea-medical"
+                />
+                <div className="flex gap-2 pt-1">
+                  <Button size="sm" onClick={handleSaveMedical} disabled={isSaving} className="min-h-[36px]" data-testid="button-save-medical">
+                    {isSaving ? <Loader2 className={`${iconSize.sm} animate-spin`} /> : <><Save className={`${iconSize.sm} mr-1`} />Speichern</>}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={cancelEditing} disabled={isSaving} className="min-h-[36px]" data-testid="button-cancel-medical">
+                    Abbrechen
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-sm font-semibold flex items-center gap-2">
+                    <Stethoscope className={`${iconSize.sm} text-rose-500`} />
+                    Vorerkrankungen
+                  </h2>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => startEditing("medical")} data-testid="button-edit-medical">
+                    <Pencil className="h-3.5 w-3.5 text-gray-400" />
+                  </Button>
+                </div>
+                <p className="text-sm text-muted-foreground whitespace-pre-line" data-testid="text-medical-history">
+                  {customer.vorerkrankungen || "Keine Angabe"}
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
 
         {/* Vereinbarte Leistungen */}
         <Card className="mb-4" data-testid="card-agreed-services">
           <CardContent className="p-4">
-            <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
-              <ClipboardList className={`${iconSize.sm} text-green-600`} />
-              Vereinbarte Leistungen
-            </h2>
-            <p className="text-sm text-muted-foreground whitespace-pre-line" data-testid="text-agreed-services">
-              {details?.contract?.vereinbarteLeistungen || "Keine Angabe"}
-            </p>
+            {editingSection === "services" ? (
+              <div className="space-y-3">
+                <h2 className="text-sm font-semibold flex items-center gap-2">
+                  <ClipboardList className={`${iconSize.sm} text-green-600`} />
+                  Vereinbarte Leistungen bearbeiten
+                </h2>
+                <Textarea
+                  value={servicesForm}
+                  onChange={(e) => setServicesForm(e.target.value)}
+                  placeholder="Vereinbarte Leistungen..."
+                  rows={4}
+                  data-testid="textarea-services"
+                />
+                <div className="flex gap-2 pt-1">
+                  <Button size="sm" onClick={handleSaveServices} disabled={isSaving} className="min-h-[36px]" data-testid="button-save-services">
+                    {isSaving ? <Loader2 className={`${iconSize.sm} animate-spin`} /> : <><Save className={`${iconSize.sm} mr-1`} />Speichern</>}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={cancelEditing} disabled={isSaving} className="min-h-[36px]" data-testid="button-cancel-services">
+                    Abbrechen
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-sm font-semibold flex items-center gap-2">
+                    <ClipboardList className={`${iconSize.sm} text-green-600`} />
+                    Vereinbarte Leistungen
+                  </h2>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => startEditing("services")} data-testid="button-edit-services">
+                    <Pencil className="h-3.5 w-3.5 text-gray-400" />
+                  </Button>
+                </div>
+                <p className="text-sm text-muted-foreground whitespace-pre-line" data-testid="text-agreed-services">
+                  {details?.contract?.vereinbarteLeistungen || "Keine Angabe"}
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
 

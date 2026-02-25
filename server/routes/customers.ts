@@ -18,6 +18,7 @@ import { todayISO } from "@shared/utils/datetime";
 import { db } from "../lib/db";
 import { sql } from "drizzle-orm";
 import { insertCustomerServicePriceSchema } from "@shared/schema";
+import { auditService } from "../services/audit";
 
 const billingTypeEnum = z.enum(BILLING_TYPES as unknown as [string, ...string[]]);
 
@@ -164,6 +165,136 @@ router.get("/:id/details", async (req, res) => {
     res.status(500).json({ error: "Kundendetails konnten nicht geladen werden" });
   }
 });
+
+const employeeUpdateCustomerSchema = z.object({
+  strasse: z.string().min(1).max(200).optional(),
+  nr: z.string().min(1).max(20).optional(),
+  plz: z.string().regex(/^\d{5}$/, "PLZ muss 5-stellig sein").optional(),
+  stadt: z.string().min(1).max(100).optional(),
+  telefon: z.string().max(30).nullable().optional(),
+  festnetz: z.string().max(30).nullable().optional(),
+  email: z.string().email("Ungültige E-Mail-Adresse").nullable().optional(),
+  haustierVorhanden: z.boolean().optional(),
+  haustierDetails: z.string().max(500).nullable().optional(),
+  vorerkrankungen: z.string().max(2000).nullable().optional(),
+});
+
+router.patch("/:id", asyncHandler("Kundendaten konnten nicht aktualisiert werden", async (req, res) => {
+  const user = req.user!;
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" }); return; }
+
+  const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
+  if (!user.isAdmin && !assignedCustomerIds.includes(id)) {
+    res.status(403).json({ error: "Zugriff verweigert" });
+    return;
+  }
+
+  const customer = await storage.getCustomer(id);
+  if (!customer) { res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" }); return; }
+
+  const data = employeeUpdateCustomerSchema.parse(req.body);
+
+  const changedFields: string[] = [];
+  const oldValues: Record<string, unknown> = {};
+  const newValues: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(data)) {
+    const oldVal = (customer as Record<string, unknown>)[key];
+    if (oldVal !== value) {
+      changedFields.push(key);
+      oldValues[key] = oldVal;
+      newValues[key] = value;
+    }
+  }
+
+  if (changedFields.length === 0) {
+    res.json(customer);
+    return;
+  }
+
+  const updated = await customerManagementStorage.updateCustomer(id, data);
+
+  await auditService.customerUpdated(user.id, id, { changedFields, oldValues, newValues }, req.ip);
+
+  res.json(updated);
+}));
+
+const employeeCareLevelSchema = z.object({
+  pflegegrad: z.number().int().min(1).max(5),
+  seitDatum: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Datum muss im Format YYYY-MM-DD sein"),
+});
+
+router.post("/:id/care-level", asyncHandler("Pflegegrad konnte nicht aktualisiert werden", async (req, res) => {
+  const user = req.user!;
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" }); return; }
+
+  const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
+  if (!user.isAdmin && !assignedCustomerIds.includes(id)) {
+    res.status(403).json({ error: "Zugriff verweigert" });
+    return;
+  }
+
+  const customer = await storage.getCustomer(id);
+  if (!customer) { res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" }); return; }
+
+  const { pflegegrad, seitDatum } = employeeCareLevelSchema.parse(req.body);
+
+  const oldPflegegrad = customer.pflegegrad;
+
+  await customerManagementStorage.addCareLevelHistory({
+    customerId: id,
+    pflegegrad,
+    validFrom: seitDatum,
+  }, user.id);
+
+  await auditService.customerCareLevelChanged(user.id, id, {
+    oldPflegegrad,
+    newPflegegrad: pflegegrad,
+    seitDatum,
+  }, req.ip);
+
+  const updated = await storage.getCustomer(id);
+  res.json(updated);
+}));
+
+const employeeContractUpdateSchema = z.object({
+  vereinbarteLeistungen: z.string().max(2000).nullable(),
+});
+
+router.patch("/:id/contract", asyncHandler("Vertragsdaten konnten nicht aktualisiert werden", async (req, res) => {
+  const user = req.user!;
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" }); return; }
+
+  const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
+  if (!user.isAdmin && !assignedCustomerIds.includes(id)) {
+    res.status(403).json({ error: "Zugriff verweigert" });
+    return;
+  }
+
+  const contract = await customerManagementStorage.getCustomerCurrentContract(id);
+  if (!contract) { res.status(404).json({ error: "NOT_FOUND", message: "Kein aktiver Vertrag gefunden" }); return; }
+
+  const { vereinbarteLeistungen } = employeeContractUpdateSchema.parse(req.body);
+
+  const oldValue = contract.vereinbarteLeistungen;
+  if (oldValue === vereinbarteLeistungen) {
+    res.json({ vereinbarteLeistungen: contract.vereinbarteLeistungen });
+    return;
+  }
+
+  await customerManagementStorage.updateCustomerContract(contract.id, { vereinbarteLeistungen });
+
+  await auditService.customerContractUpdated(user.id, id, {
+    changedFields: ["vereinbarteLeistungen"],
+    oldValues: { vereinbarteLeistungen: oldValue },
+    newValues: { vereinbarteLeistungen },
+  }, req.ip);
+
+  res.json({ vereinbarteLeistungen });
+}));
 
 router.post("/", async (req, res) => {
   try {
