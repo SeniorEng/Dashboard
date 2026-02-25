@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { authMiddleware, requireAuth } from "../../middleware/auth";
 import { csrfProtection } from "../../middleware/csrf";
+import { requireObjectAccess } from "../../middleware/object-storage-auth";
 
 export function registerObjectStorageRoutes(app: Express): void {
   const objectStorageService = new ObjectStorageService();
@@ -30,7 +31,7 @@ export function registerObjectStorageRoutes(app: Express): void {
     }
   });
 
-  app.get("/objects/:objectPath(*)", authMiddleware, requireAuth, async (req, res) => {
+  app.get("/objects/:objectPath(*)", authMiddleware, requireAuth, requireObjectAccess, async (req, res) => {
     try {
       const objectFile = await objectStorageService.getObjectEntityFile(req.path);
       await objectStorageService.downloadObject(objectFile, res);
