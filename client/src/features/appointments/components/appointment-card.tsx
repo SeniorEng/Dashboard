@@ -128,7 +128,9 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
   return (
     <>
       <div 
-        className="relative overflow-hidden rounded-xl group"
+        className={`relative overflow-hidden rounded-xl group transition-opacity duration-200 ${
+          appointment.status === "completed" ? "opacity-60 hover:opacity-100" : ""
+        }`}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
