@@ -324,7 +324,7 @@ function InitialBudgetForm({ customerId, onSuccess }: { customerId: number; onSu
       onSuccess();
     },
     onError: (error) => {
-      toast({ variant: "destructive", title: "Fehler", description: "Fehler beim Erfassen des Startbudgets" });
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
       console.error(error);
     },
   });
@@ -407,7 +407,7 @@ function ManualAdjustmentForm({ customerId, onSuccess }: { customerId: number; o
       onSuccess();
     },
     onError: (error) => {
-      toast({ variant: "destructive", title: "Fehler", description: "Fehler bei der Korrektur" });
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
       console.error(error);
     },
   });
@@ -491,7 +491,7 @@ function PreferencesForm({ customerId, currentLimit, onSuccess }: { customerId: 
       onSuccess();
     },
     onError: (error) => {
-      toast({ variant: "destructive", title: "Fehler", description: "Fehler beim Speichern" });
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
       console.error(error);
     },
   });
