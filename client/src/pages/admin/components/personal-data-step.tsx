@@ -188,15 +188,6 @@ export function PersonalDataStep({ formData, phoneErrors, onChange }: PersonalDa
           )}
         </div>
 
-        <div className="flex items-center space-x-2">
-          <Checkbox
-            id="personenbefoerderungGewuenscht"
-            checked={formData.personenbefoerderungGewuenscht}
-            onCheckedChange={(checked) => onChange("personenbefoerderungGewuenscht", !!checked)}
-            data-testid="checkbox-personenbefoerderung"
-          />
-          <Label htmlFor="personenbefoerderungGewuenscht">Personenbeförderung gewünscht?</Label>
-        </div>
       </div>
     </div>
   );

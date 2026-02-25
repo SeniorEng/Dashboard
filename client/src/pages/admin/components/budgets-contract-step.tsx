@@ -202,7 +202,17 @@ export function ContractStep({ formData, onChange, showGrossPrices = false }: Co
         </div>
       </div>
 
-      <div className="border-t pt-4">
+      <div className="border-t pt-4 space-y-4">
+        <div className="flex items-center space-x-2">
+          <Checkbox
+            id="personenbefoerderungGewuenscht"
+            checked={formData.personenbefoerderungGewuenscht}
+            onCheckedChange={(checked) => onChange("personenbefoerderungGewuenscht", !!checked)}
+            data-testid="checkbox-personenbefoerderung"
+          />
+          <Label htmlFor="personenbefoerderungGewuenscht">Personenbeförderung gewünscht?</Label>
+        </div>
+
         <div className="space-y-2">
           <Label htmlFor="vereinbarteLeistungen">Vereinbarte Leistungen *</Label>
           <Textarea
