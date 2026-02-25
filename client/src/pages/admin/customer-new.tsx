@@ -542,7 +542,6 @@ export default function AdminCustomerNew() {
             onSignatureChange={handleSignatureChange}
             uploadedDocuments={uploadedDocuments}
             onUploadedDocumentsChange={setUploadedDocuments}
-            formData={formData}
           />
         );
       case "delivery":

@@ -8,10 +8,9 @@ import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
 import { FileText, Check, AlertCircle, Loader2, AlertTriangle, Upload, Camera, X, Pen, ChevronDown, ChevronUp } from "lucide-react";
 import { iconSize } from "@/design-system";
-import { BILLING_TYPE_LABELS, type BillingType } from "@shared/domain/customers";
+import { type BillingType } from "@shared/domain/customers";
 import { useUpload } from "@/hooks/use-upload";
 import { useToast } from "@/hooks/use-toast";
-import type { CustomerFormData, ContactFormData } from "./customer-types";
 
 interface TemplateWithRequirement {
   id: number;
@@ -40,125 +39,12 @@ export interface WizardUploadedDoc {
   objectPath: string;
 }
 
-type CustomerFormDataForPreview = CustomerFormData;
-
 interface SignaturesStepProps {
   billingType: BillingType;
   customerSignatures: Record<string, string>;
   onSignatureChange: (slug: string, signatureData: string, location?: string | null) => void;
   uploadedDocuments: WizardUploadedDoc[];
   onUploadedDocumentsChange: (docs: WizardUploadedDoc[]) => void;
-  formData?: CustomerFormDataForPreview;
-}
-
-function formatDateDE(dateStr: string): string {
-  if (!dateStr) return "";
-  const parts = dateStr.split("-");
-  if (parts.length !== 3) return dateStr;
-  return `${parts[2]}.${parts[1]}.${parts[0]}`;
-}
-
-function getPrimaryContact(contacts: ContactFormData[]): ContactFormData | undefined {
-  return contacts.find(c => c.isPrimary) || contacts[0];
-}
-
-function renderClientSide(htmlContent: string, formData: CustomerFormDataForPreview, signatureData?: string): string {
-  const today = new Date();
-  const todayDE = `${today.getDate().toString().padStart(2, "0")}.${(today.getMonth() + 1).toString().padStart(2, "0")}.${today.getFullYear()}`;
-  const primaryContact = getPrimaryContact(formData.contacts || []);
-  const periodLabel = formData.contractPeriod === "monthly" ? "pro Monat" : "pro Woche";
-
-  const placeholders: Record<string, string> = {
-    customer_name: `${formData.vorname} ${formData.nachname}`.trim(),
-    customer_vorname: formData.vorname || "",
-    customer_nachname: formData.nachname || "",
-    customer_address: [`${formData.strasse} ${formData.nr}`.trim(), `${formData.plz} ${formData.stadt}`.trim()].filter(Boolean).join(", "),
-    customer_strasse: formData.strasse || "",
-    customer_hausnummer: formData.nr || "",
-    customer_plz: formData.plz || "",
-    customer_stadt: formData.stadt || "",
-    customer_birthdate: formatDateDE(formData.geburtsdatum),
-    customer_phone: formData.telefon || "",
-    customer_festnetz: formData.festnetz || "",
-    customer_email: formData.email || "",
-    pflegegrad: formData.pflegegrad && formData.pflegegrad !== "0" ? `Pflegegrad ${formData.pflegegrad}` : "",
-    pflegegrad_nummer: formData.pflegegrad && formData.pflegegrad !== "0" ? formData.pflegegrad : "",
-    pflegegrad_seit: formatDateDE(formData.pflegegradSeit),
-    abrechnungsart: BILLING_TYPE_LABELS[formData.billingType] || formData.billingType,
-    versichertennummer: formData.versichertennummer || "",
-    vorerkrankungen: formData.vorerkrankungen || "",
-    haustier: formData.haustierVorhanden ? "Ja" : "Nein",
-    haustier_details: formData.haustierDetails || "",
-    personenbefoerderung: formData.personenbefoerderungGewuenscht ? "Ja" : "Nein",
-    vertragsdatum: formatDateDE(formData.contractDate),
-    vertragsbeginn: formatDateDE(formData.contractStart),
-    vereinbarte_leistungen: formData.vereinbarteLeistungen || "",
-    vertragsstunden: formData.contractHours || "",
-    vertragsperiode: periodLabel,
-    kontaktperson_name: primaryContact ? `${primaryContact.vorname} ${primaryContact.nachname}`.trim() : "",
-    kontaktperson_telefon: primaryContact?.telefon || "",
-    kontaktperson_email: primaryContact?.email || "",
-    kontaktperson_typ: primaryContact?.contactType || "",
-    mandatsreferenz: `SE-[wird nach Speicherung ergänzt]-${today.getFullYear()}`,
-    current_date: todayDE,
-    heute: todayDE,
-    company_name: "SeniorenEngel GmbH",
-    customer_signature: signatureData ? `<img src="${signatureData}" style="max-height:60px;" />` : "",
-    employee_signature: "",
-  };
-
-  let rendered = htmlContent;
-  for (const [key, value] of Object.entries(placeholders)) {
-    rendered = rendered.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), value);
-  }
-  rendered = rendered.replace(/\{\{[a-z_]+\}\}/g, "");
-  return rendered;
-}
-
-function openPrintPreview(html: string, title: string) {
-  const isFullDocument = html.trimStart().startsWith("<!DOCTYPE") || html.trimStart().startsWith("<html");
-
-  if (isFullDocument) {
-    const win = window.open("", "_blank");
-    if (win) {
-      win.document.write(html);
-      win.document.close();
-    }
-    return;
-  }
-
-  const fullHtml = `<!DOCTYPE html>
-<html lang="de">
-<head>
-<meta charset="UTF-8">
-<title>${title}</title>
-<style>
-  @page { margin: 2cm; size: A4; }
-  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; font-size: 12pt; line-height: 1.6; color: #1a1a1a; max-width: 800px; margin: 0 auto; padding: 2cm; }
-  h1 { font-size: 18pt; margin-bottom: 0.5em; }
-  h2 { font-size: 14pt; margin-top: 1.5em; margin-bottom: 0.5em; }
-  hr { border: none; border-top: 1px solid #ccc; margin: 1em 0; }
-  .signatures { display: flex; gap: 2cm; margin-top: 3em; page-break-inside: avoid; }
-  .signature-block { flex: 1; }
-  .signature-area { border-bottom: 1px solid #333; min-height: 60px; margin-top: 0.5em; display: flex; align-items: flex-end; }
-  .signature-area img { max-height: 60px; }
-  @media print { body { padding: 0; } .no-print { display: none !important; } }
-</style>
-</head>
-<body>
-<div class="no-print" style="text-align:center; padding:12px; margin-bottom:20px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;">
-  <button onclick="window.print()" style="padding:10px 24px; font-size:14px; background:#0d9488; color:white; border:none; border-radius:6px; cursor:pointer; margin-right:8px;">Als PDF drucken / speichern</button>
-  <button onclick="window.close()" style="padding:10px 24px; font-size:14px; background:#e5e7eb; color:#374151; border:none; border-radius:6px; cursor:pointer;">Schließen</button>
-</div>
-${html}
-</body>
-</html>`;
-
-  const win = window.open("", "_blank");
-  if (win) {
-    win.document.write(fullHtml);
-    win.document.close();
-  }
 }
 
 
@@ -168,7 +54,6 @@ export function SignaturesStep({
   onSignatureChange,
   uploadedDocuments,
   onUploadedDocumentsChange,
-  formData,
 }: SignaturesStepProps) {
   const { data: templates, isLoading: templatesLoading, isError, refetch } = useQuery({
     queryKey: ["/api/customers/document-templates/billing-type", billingType],
@@ -256,7 +141,6 @@ export function SignaturesStep({
                 if (!matchingType) return;
                 onUploadedDocumentsChange(uploadedDocuments.filter(u => u.documentTypeId !== matchingType.id));
               }}
-              formData={formData}
             />
           ))}
         </div>
@@ -289,7 +173,6 @@ export function SignaturesStep({
                 if (!matchingType) return;
                 onUploadedDocumentsChange(uploadedDocuments.filter(u => u.documentTypeId !== matchingType.id));
               }}
-              formData={formData}
             />
           ))}
         </div>
@@ -321,7 +204,6 @@ function DocumentSignatureCard({
   documentTypeId,
   onDocUploaded,
   onDocRemoved,
-  formData,
 }: {
   doc: TemplateWithRequirement;
   signature?: string;
@@ -330,7 +212,6 @@ function DocumentSignatureCard({
   documentTypeId?: number;
   onDocUploaded: (doc: WizardUploadedDoc) => void;
   onDocRemoved: () => void;
-  formData?: CustomerFormDataForPreview;
 }) {
   const { toast } = useToast();
   const [showSignaturePad, setShowSignaturePad] = useState(false);
@@ -358,12 +239,6 @@ function DocumentSignatureCard({
       setShowUpload(false);
     }
   }, [documentTypeId, uploadFile, onDocUploaded]);
-
-  const handlePreview = useCallback(() => {
-    if (!formData || !doc.htmlContent) return;
-    const rendered = renderClientSide(doc.htmlContent, formData, signature);
-    openPrintPreview(rendered, doc.name);
-  }, [doc, formData, signature]);
 
   const handleSignatureSave = useCallback((signatureData: string, metadata?: SignatureMetadata) => {
     const location = metadata?.location ? `${metadata.location.lat},${metadata.location.lng}` : null;
@@ -470,20 +345,6 @@ function DocumentSignatureCard({
             </div>
           )}
 
-          {isSigned && formData && doc.htmlContent && (
-            <div className="pt-1">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handlePreview}
-                className="text-sm min-h-[44px] w-full justify-center text-teal-700 border-teal-300 bg-teal-50 hover:bg-teal-100"
-                data-testid={`button-preview-${doc.slug}`}
-              >
-                <FileText className={`${iconSize.sm} mr-1.5`} />
-                Vorschau & Drucken
-              </Button>
-            </div>
-          )}
         </div>
       </CardContent>
 

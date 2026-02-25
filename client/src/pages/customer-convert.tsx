@@ -547,7 +547,6 @@ export default function CustomerConvertPage() {
             onSignatureChange={handleSignatureChange}
             uploadedDocuments={uploadedDocuments}
             onUploadedDocumentsChange={setUploadedDocuments}
-            formData={formData}
           />
         );
       case "matching":
