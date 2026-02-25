@@ -70,6 +70,32 @@ export function conflict(error: string, message: string): AppError {
 
 type AsyncRouteHandler = (req: Request, res: Response, next: NextFunction) => Promise<any>;
 
+function extractUserFriendlyDbError(error: unknown): string | null {
+  if (error && typeof error === "object" && "code" in error) {
+    const dbError = error as { code: string; message?: string; detail?: string; column?: string; where?: string };
+    switch (dbError.code) {
+      case "22P02": {
+        const match = dbError.where?.match(/parameter \$\d+ = '(.+?)'/);
+        const value = match?.[1];
+        return value
+          ? `Ungültiger Wert "${value}" — bitte prüfen Sie Ihre Eingaben (z.B. Dezimalzahlen mit Punkt statt Komma).`
+          : "Ungültiger Datentyp — bitte prüfen Sie Ihre Eingaben.";
+      }
+      case "23505":
+        return "Ein Eintrag mit diesen Daten existiert bereits.";
+      case "23503":
+        return "Ein referenzierter Datensatz wurde nicht gefunden. Bitte laden Sie die Seite neu.";
+      case "23502":
+        return "Ein Pflichtfeld wurde nicht ausgefüllt.";
+      case "22003":
+        return "Ein eingegebener Wert ist zu groß oder zu klein.";
+      default:
+        return null;
+    }
+  }
+  return null;
+}
+
 export function asyncHandler(defaultMessage: string, handler: AsyncRouteHandler) {
   return (req: Request, res: Response, next: NextFunction) => {
     handler(req, res, next).catch((error: unknown) => {
@@ -80,6 +106,10 @@ export function asyncHandler(defaultMessage: string, handler: AsyncRouteHandler)
         return next(new AppError(400, ErrorCodes.VALIDATION_ERROR, fromError(error).toString()));
       }
       console.error(`Route error [${req.method} ${req.path}]:`, error);
+      const friendlyMessage = extractUserFriendlyDbError(error);
+      if (friendlyMessage) {
+        return next(new AppError(400, ErrorCodes.VALIDATION_ERROR, friendlyMessage));
+      }
       next(new AppError(500, ErrorCodes.SERVER_ERROR, defaultMessage, "Serverfehler"));
     });
   };
