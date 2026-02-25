@@ -27,6 +27,9 @@ import {
 import { asyncHandler } from "../../lib/errors";
 import { z } from "zod";
 import { validate45aAmount, validate45bAmount, validate39_42aAmount } from "@shared/domain/budgets";
+import { prospectStorage } from "../../storage/prospects";
+import { prospects } from "@shared/schema";
+import { todayISO } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
 import { eq, and, sql, gte, isNull, or, count, notInArray, isNotNull } from "drizzle-orm";
 
@@ -1231,6 +1234,71 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
     errors,
     details: results,
   });
+}));
+
+const declineErstberatungSchema = z.object({
+  note: z.string().max(500).optional(),
+});
+
+router.post("/customers/:id/decline-erstberatung", asyncHandler("Erstberatung konnte nicht abgelehnt werden", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
+    return;
+  }
+
+  const customer = await storage.getCustomer(id);
+  if (!customer) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+    return;
+  }
+
+  if (customer.status !== "erstberatung") {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Nur Erstberatungskunden können abgelehnt werden" });
+    return;
+  }
+
+  const { note } = declineErstberatungSchema.parse(req.body);
+  const today = todayISO();
+
+  const updated = await db.transaction(async (tx) => {
+    const [result] = await tx.update(customers)
+      .set({
+        status: "inaktiv",
+        inaktivAb: today,
+        deactivationReason: "kein_interesse",
+        deactivationNote: note || "Kein Interesse nach Erstberatung",
+        updatedAt: new Date(),
+      })
+      .where(eq(customers.id, id))
+      .returning();
+
+    const [linkedProspect] = await tx
+      .select()
+      .from(prospects)
+      .where(and(eq(prospects.convertedCustomerId, id), isNull(prospects.deletedAt)));
+
+    if (linkedProspect) {
+      await tx.update(prospects)
+        .set({
+          status: "nicht_interessiert",
+          statusNotiz: "Automatisch: Kein Interesse nach Erstberatung",
+          updatedAt: new Date(),
+        })
+        .where(eq(prospects.id, linkedProspect.id));
+    }
+
+    return result;
+  });
+
+  await auditService.log(req.user!.id, "customer_updated", "customer", id, {
+    action: "decline_erstberatung",
+    note: note || null,
+    previousStatus: "erstberatung",
+    newStatus: "inaktiv",
+  });
+
+  res.json(updated);
 }));
 
 router.post("/customers/:id/anonymize", asyncHandler("Kunde konnte nicht anonymisiert werden", async (req: Request, res: Response) => {

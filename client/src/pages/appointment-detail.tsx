@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRoute, useLocation } from "wouter";
 import { Layout } from "@/components/layout";
 import { useAppointment } from "@/features/appointments";
@@ -20,8 +20,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { 
   MapPin, Calendar, FileText, ChevronLeft, Loader2, 
-  Pencil, Trash2, AlertTriangle, Phone, Car, Home, ArrowRight, UserCheck, UserPlus, CheckCircle2
+  Pencil, Trash2, AlertTriangle, Phone, Car, Home, ArrowRight, UserCheck, UserPlus, CheckCircle2, XCircle, Clock
 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
@@ -40,8 +42,28 @@ export default function AppointmentDetail() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const id = params?.id ? parseInt(params.id) : 0;
   const canConvert = user?.isAdmin || user?.roles?.includes("erstberatung");
+  const [showDeclineDialog, setShowDeclineDialog] = useState(false);
+  const [declineNote, setDeclineNote] = useState("");
+
+  const declineMutation = useMutation({
+    mutationFn: async ({ customerId, note }: { customerId: number; note?: string }) => {
+      const result = await api.post(`/admin/customers/${customerId}/decline-erstberatung`, { note: note || undefined });
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}`] });
+      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      toast({ title: "Erstberatung abgelehnt", description: "Der Kunde wurde als 'Kein Interesse' markiert." });
+      setShowDeclineDialog(false);
+      setDeclineNote("");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
   
   const { data: appointment, isLoading } = useAppointment(id);
   const { data: appointmentServices } = useQuery<Array<{ 
@@ -160,9 +182,12 @@ export default function AppointmentDetail() {
         {isErstberatung && appointment.customerId && appointment.customer && (() => {
           const customerStatus = (appointment.customer as any).status;
           const isStillErstberatung = customerStatus === "erstberatung";
-          if (isStillErstberatung && canConvert) {
+          const isDocumentedOrCompleted = appointment.status === "completed" || appointment.status === "documenting";
+
+          if (isStillErstberatung && canConvert && isDocumentedOrCompleted) {
             return (
-              <div className="mt-4" data-testid="card-convert-hint">
+              <div className="mt-4 p-4 bg-white border-2 border-teal-200 rounded-lg space-y-3" data-testid="card-convert-decision">
+                <p className="text-sm font-medium text-center text-gray-700">Wie möchten Sie fortfahren?</p>
                 <Link href={`/customer/${appointment.customerId}/convert?fromAppointment=${appointment.id}`}>
                   <Button className="w-full bg-teal-600 hover:bg-teal-700 h-12 text-base" data-testid="button-convert-from-appointment">
                     <UserPlus className="h-5 w-5 mr-2" />
@@ -170,13 +195,31 @@ export default function AppointmentDetail() {
                     <ArrowRight className="h-5 w-5 ml-2" />
                   </Button>
                 </Link>
-                <p className="text-xs text-muted-foreground text-center mt-1.5">
-                  Alle Daten aus der Erstberatung werden übernommen
-                </p>
+                <Button
+                  variant="outline"
+                  className="w-full text-red-600 border-red-200 hover:bg-red-50"
+                  onClick={() => setShowDeclineDialog(true)}
+                  data-testid="button-decline-erstberatung"
+                >
+                  <XCircle className="h-4 w-4 mr-2" />
+                  Kein Interesse
+                </Button>
               </div>
             );
           }
-          if (!isStillErstberatung) {
+
+          if (isStillErstberatung && canConvert && !isDocumentedOrCompleted) {
+            return (
+              <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-lg" data-testid="card-convert-pending">
+                <div className="flex items-center gap-2">
+                  <Clock className={`${iconSize.sm} text-gray-500`} />
+                  <span className="text-sm text-gray-600">Nach der Erstberatung können Sie den Kunden hier übernehmen.</span>
+                </div>
+              </div>
+            );
+          }
+
+          if (customerStatus === "aktiv") {
             return (
               <div className="mt-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg" data-testid="card-already-converted">
                 <div className="flex items-center justify-between gap-3">
@@ -194,6 +237,18 @@ export default function AppointmentDetail() {
               </div>
             );
           }
+
+          if (customerStatus === "inaktiv") {
+            return (
+              <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-lg" data-testid="card-declined">
+                <div className="flex items-center gap-2">
+                  <XCircle className={`${iconSize.sm} text-gray-500`} />
+                  <span className="text-sm text-gray-600">Kein Interesse — Kunde wurde nicht übernommen</span>
+                </div>
+              </div>
+            );
+          }
+
           return null;
         })()}
       </div>
@@ -421,6 +476,43 @@ export default function AppointmentDetail() {
               Löschen
             </AlertDialogAction>
           </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showDeclineDialog} onOpenChange={(v) => { if (!v) { setShowDeclineDialog(false); setDeclineNote(""); } }}>
+        <AlertDialogContent className="fixed inset-0 flex items-center justify-center">
+          <div className="bg-background rounded-lg p-6 max-w-md w-full mx-4 shadow-lg border">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Kein Interesse bestätigen?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Der Erstberatungskunde wird als „Kein Interesse" markiert und aus der aktiven Kundenliste entfernt.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="mt-3">
+              <Label>Grund / Kommentar</Label>
+              <Textarea
+                value={declineNote}
+                onChange={(e) => setDeclineNote(e.target.value)}
+                placeholder="z.B. Preisvorstellungen zu hoch, anderer Anbieter gewählt..."
+                className="min-h-[60px]"
+                data-testid="input-decline-note"
+              />
+            </div>
+            <AlertDialogFooter className="mt-4">
+              <AlertDialogCancel onClick={() => { setShowDeclineDialog(false); setDeclineNote(""); }} data-testid="button-cancel-decline">
+                Abbrechen
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => appointment?.customerId && declineMutation.mutate({ customerId: appointment.customerId, note: declineNote })}
+                className="bg-red-600 hover:bg-red-700"
+                disabled={declineMutation.isPending}
+                data-testid="button-confirm-decline"
+              >
+                {declineMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Kein Interesse bestätigen
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </div>
         </AlertDialogContent>
       </AlertDialog>
     </Layout>
