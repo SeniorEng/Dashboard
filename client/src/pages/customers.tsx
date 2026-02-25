@@ -157,6 +157,7 @@ export default function CustomersPage() {
           }`}
           data-testid="tab-geburtstage"
         >
+          <Cake className="w-3.5 h-3.5 text-pink-500 inline mr-1" />
           Geburtstage
         </button>
       </div>

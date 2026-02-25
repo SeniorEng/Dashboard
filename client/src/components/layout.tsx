@@ -181,8 +181,8 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
 
   const employeeNavItems = [
     { href: "/", label: "Termine", icon: Calendar, testId: "appointments", match: (loc: string) => loc === "/" },
-    { href: "/customers", label: "Kunden", icon: Users, testId: "customers", match: (loc: string) => loc === "/customers", badge: hasBirthdayBadge },
-    { href: "/tasks", label: "Aufgaben", icon: CheckSquare, testId: "tasks", match: (loc: string) => loc === "/tasks", badge: hasBadge },
+    { href: "/customers", label: "Kunden", icon: Users, testId: "customers", match: (loc: string) => loc === "/customers", badge: hasBirthdayBadge, badgeType: "birthday" as const },
+    { href: "/tasks", label: "Aufgaben", icon: CheckSquare, testId: "tasks", match: (loc: string) => loc === "/tasks", badge: hasBadge, badgeType: "task" as const },
     { href: "/service-records", label: "Nachweise", icon: FileSignature, testId: "service-records", match: (loc: string) => loc.startsWith("/service-records") },
     { href: "/my-times", label: "Zeiten", icon: Clock, testId: "my-times", match: (loc: string) => loc === "/my-times" },
   ];
@@ -310,7 +310,9 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
                       <Icon className="w-4 h-4" />
                       {item.label}
                       {'badge' in item && item.badge && (
-                        <Cake className="w-3.5 h-3.5 text-pink-500" />
+                        'badgeType' in item && item.badgeType === "birthday"
+                          ? <Cake className="w-3.5 h-3.5 text-pink-500" />
+                          : <span className="w-2 h-2 bg-red-500 rounded-full" />
                       )}
                       {isActive && (
                         <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-primary rounded-full" />
