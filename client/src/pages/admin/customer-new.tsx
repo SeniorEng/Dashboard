@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -75,9 +75,13 @@ export default function AdminCustomerNew() {
 
   const [customerSignatures, setCustomerSignatures] = useState<Record<string, string>>({});
   const [uploadedDocuments, setUploadedDocuments] = useState<WizardUploadedDoc[]>([]);
+  const signingLocationRef = useRef<string | null>(null);
 
-  const handleSignatureChange = useCallback((slug: string, signatureData: string) => {
+  const handleSignatureChange = useCallback((slug: string, signatureData: string, location?: string | null) => {
     setCustomerSignatures((prev) => ({ ...prev, [slug]: signatureData }));
+    if (location) {
+      signingLocationRef.current = location;
+    }
   }, []);
 
   const steps = useMemo(() => getStepsForBillingType(formData.billingType), [formData.billingType]);
@@ -268,6 +272,7 @@ export default function AdminCustomerNew() {
                 templateSlug: slug,
                 customerSignatureData: signatureData,
               })),
+              signingLocation: signingLocationRef.current,
             });
           } catch (sigError) {
             console.error("Unterschriften-Speicherung fehlgeschlagen:", sigError);

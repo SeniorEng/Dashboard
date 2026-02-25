@@ -296,10 +296,11 @@ router.post("/:id/sign", requireAuth, asyncHandler("Unterschrift konnte nicht ge
     });
   }
   
-  const { signatureData, signerType } = parsed.data;
+  const { signatureData, signerType, signingLocation } = parsed.data;
+  const signingIp = req.ip || req.socket.remoteAddress || null;
   
   try {
-    const record = await storage.signServiceRecord(id, signatureData, signerType, req.user!.id);
+    const record = await storage.signServiceRecord(id, signatureData, signerType, req.user!.id, signingIp, signingLocation);
     if (!record) {
       return res.status(404).json({ message: "Leistungsnachweis nicht gefunden" });
     }

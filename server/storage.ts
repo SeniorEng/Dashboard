@@ -186,7 +186,7 @@ export interface IStorage {
   getServiceRecord(id: number): Promise<MonthlyServiceRecord | undefined>;
   getServiceRecordByPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<MonthlyServiceRecord | undefined>;
   createServiceRecord(record: InsertServiceRecord): Promise<MonthlyServiceRecord>;
-  signServiceRecord(id: number, signatureData: string, signerType: 'employee' | 'customer', userId?: number): Promise<MonthlyServiceRecord | undefined>;
+  signServiceRecord(id: number, signatureData: string, signerType: 'employee' | 'customer', userId?: number, signingIp?: string | null, signingLocation?: string | null): Promise<MonthlyServiceRecord | undefined>;
   updateServiceRecord(id: number, data: Record<string, unknown>): Promise<MonthlyServiceRecord | undefined>;
   getAppointmentsForServiceRecord(serviceRecordId: number): Promise<AppointmentWithCustomer[]>;
   addAppointmentsToServiceRecord(serviceRecordId: number, appointmentIds: number[]): Promise<void>;
@@ -688,7 +688,7 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async signServiceRecord(id: number, signatureData: string, signerType: 'employee' | 'customer', userId?: number): Promise<MonthlyServiceRecord | undefined> {
+  async signServiceRecord(id: number, signatureData: string, signerType: 'employee' | 'customer', userId?: number, signingIp?: string | null, signingLocation?: string | null): Promise<MonthlyServiceRecord | undefined> {
     const existing = await this.getServiceRecord(id);
     if (!existing) return undefined;
 
@@ -706,6 +706,8 @@ export class DatabaseStorage implements IStorage {
         employeeSignatureHash: hash,
         employeeSignedAt: now,
         employeeSignedByUserId: userId ?? null,
+        employeeSigningIp: signingIp ?? null,
+        employeeSigningLocation: signingLocation ?? null,
         status: 'employee_signed' as ServiceRecordStatus,
       };
     } else if (signerType === 'customer') {
@@ -718,6 +720,8 @@ export class DatabaseStorage implements IStorage {
         customerSignatureHash: hash,
         customerSignedAt: now,
         customerSignedByUserId: userId ?? null,
+        customerSigningIp: signingIp ?? null,
+        customerSigningLocation: signingLocation ?? null,
         status: 'completed' as ServiceRecordStatus,
       };
     }

@@ -19,6 +19,25 @@ function getPrivateDir(): string {
   return dir;
 }
 
+function buildAuditStamp(options: {
+  signingIp?: string | null;
+  signingLocation?: string | null;
+  integrityHash: string;
+  signedAt: Date;
+}): string {
+  const { signingIp, signingLocation, integrityHash, signedAt } = options;
+  const dateStr = signedAt.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
+  const timeStr = signedAt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const hashShort = integrityHash.substring(0, 16);
+
+  const parts = [`Digital signiert am ${dateStr} um ${timeStr} Uhr`];
+  if (signingIp) parts.push(`IP: ${signingIp}`);
+  if (signingLocation) parts.push(`Standort: ${signingLocation}`);
+  parts.push(`Hash: ${hashShort}...`);
+
+  return `<div style="margin-top:40px;padding-top:12px;border-top:1px solid #e0e0e0;font-size:8px;color:#999;font-family:monospace;line-height:1.4;">${parts.join(" | ")}</div>`;
+}
+
 async function storePdfToObjectStorage(pdfBuffer: Buffer, fileName: string, metadata: Record<string, string>): Promise<string> {
   const privateDir = getPrivateDir();
   const objectFullPath = `${privateDir}/documents/${fileName}`;
@@ -43,6 +62,8 @@ export async function generateAndStorePdf(options: {
   placeholderOverrides?: Record<string, string>;
   generatedByUserId: number;
   signingStatus?: "complete" | "pending_employee_signature";
+  signingIp?: string | null;
+  signingLocation?: string | null;
 }): Promise<{
   objectPath: string;
   fileName: string;
@@ -50,7 +71,7 @@ export async function generateAndStorePdf(options: {
   renderedHtml: string;
   generatedDocId: number;
 }> {
-  const { template, customerId, employeeId, customerSignatureData, employeeSignatureData, placeholderOverrides, generatedByUserId, signingStatus = "complete" } = options;
+  const { template, customerId, employeeId, customerSignatureData, employeeSignatureData, placeholderOverrides, generatedByUserId, signingStatus = "complete", signingIp, signingLocation } = options;
 
   const overrides: Record<string, string> = { ...placeholderOverrides };
   if (customerSignatureData) {
@@ -69,7 +90,35 @@ export async function generateAndStorePdf(options: {
 
   const renderedHtml = renderTemplate(template.htmlContent, placeholders);
 
-  const { pdfBuffer, integrityHash } = await generatePdfFromHtml(renderedHtml, template.name);
+  const hasSigning = !!(customerSignatureData || employeeSignatureData);
+  const now = new Date();
+
+  const combinedHashForStamp = computeDataHash(
+    JSON.stringify({
+      customerSignature: customerSignatureData ? computeDataHash(customerSignatureData) : null,
+      employeeSignature: employeeSignatureData ? computeDataHash(employeeSignatureData) : null,
+      templateId: template.id,
+      templateVersion: template.version,
+    })
+  );
+
+  let htmlForPdf = renderedHtml;
+  if (hasSigning) {
+    const auditStamp = buildAuditStamp({
+      signingIp,
+      signingLocation,
+      integrityHash: combinedHashForStamp,
+      signedAt: now,
+    });
+    const isFullHtml = htmlForPdf.trim().toLowerCase().startsWith("<!doctype") || htmlForPdf.trim().toLowerCase().startsWith("<html");
+    if (isFullHtml) {
+      htmlForPdf = htmlForPdf.replace(/<\/body>/i, `${auditStamp}</body>`);
+    } else {
+      htmlForPdf = htmlForPdf + auditStamp;
+    }
+  }
+
+  const { pdfBuffer, integrityHash } = await generatePdfFromHtml(htmlForPdf, template.name);
 
   const dateStr = todayISO();
   const slug = template.slug.replace(/[^a-z0-9_-]/gi, "_");
@@ -105,6 +154,8 @@ export async function generateAndStorePdf(options: {
     employeeSignatureData: employeeSignatureData ?? null,
     signingStatus,
     integrityHash: combinedHash,
+    signingIp: signingIp ?? null,
+    signingLocation: signingLocation ?? null,
   }, generatedByUserId);
 
   return {
@@ -119,6 +170,8 @@ export async function generateAndStorePdf(options: {
 export async function regeneratePdfWithSignature(
   doc: import("@shared/schema").GeneratedDocument,
   employeeSignatureData: string,
+  signingIp?: string | null,
+  signingLocation?: string | null,
 ): Promise<{ objectPath: string; fileName: string; integrityHash: string }> {
   if (!doc.renderedHtml) throw new Error("Kein gerendertetes HTML vorhanden");
 
@@ -128,6 +181,27 @@ export async function regeneratePdfWithSignature(
     updatedHtml = updatedHtml.replace(/\{\{employee_signature\}\}/g, sigHtml);
   } else {
     updatedHtml += `<div style="margin-top:40px;"><p><strong>Unterschrift Mitarbeiter:</strong></p>${sigHtml}<p style="font-size:10px;color:#666;">Datum: ${formatDateForDisplay(todayISO())}</p></div>`;
+  }
+
+  const stampHash = computeDataHash(
+    JSON.stringify({
+      customerSignature: doc.customerSignatureData ? computeDataHash(doc.customerSignatureData) : null,
+      employeeSignature: computeDataHash(employeeSignatureData),
+      templateId: doc.templateId,
+      templateVersion: doc.templateVersion,
+    })
+  );
+  const auditStamp = buildAuditStamp({
+    signingIp,
+    signingLocation,
+    integrityHash: stampHash,
+    signedAt: new Date(),
+  });
+  const isFullHtml = updatedHtml.trim().toLowerCase().startsWith("<!doctype") || updatedHtml.trim().toLowerCase().startsWith("<html");
+  if (isFullHtml) {
+    updatedHtml = updatedHtml.replace(/<\/body>/i, `${auditStamp}</body>`);
+  } else {
+    updatedHtml = updatedHtml + auditStamp;
   }
 
   const { pdfBuffer, integrityHash: pdfHash } = await generatePdfFromHtml(updatedHtml, doc.fileName);

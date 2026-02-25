@@ -410,6 +410,8 @@ export class DocumentStorage implements IDocumentStorage {
       employeeSignatureData: data.employeeSignatureData || null,
       signingStatus: data.signingStatus ?? "complete",
       integrityHash: data.integrityHash || null,
+      signingIp: data.signingIp ?? null,
+      signingLocation: data.signingLocation ?? null,
       generatedByUserId,
     }).returning();
     return result;
@@ -542,6 +544,8 @@ export class DocumentStorage implements IDocumentStorage {
     integrityHash: string,
     objectPath: string,
     fileName: string,
+    signingIp?: string | null,
+    signingLocation?: string | null,
   ): Promise<GeneratedDocument | null> {
     const [result] = await db
       .update(generatedDocuments)
@@ -552,6 +556,8 @@ export class DocumentStorage implements IDocumentStorage {
         integrityHash,
         objectPath,
         fileName,
+        ...(signingIp ? { signingIp } : {}),
+        ...(signingLocation ? { signingLocation } : {}),
       })
       .where(eq(generatedDocuments.id, id))
       .returning();

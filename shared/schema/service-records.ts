@@ -29,11 +29,15 @@ export const monthlyServiceRecords = pgTable("monthly_service_records", {
   employeeSignatureHash: text("employee_signature_hash"),
   employeeSignedAt: timestamp("employee_signed_at"),
   employeeSignedByUserId: integer("employee_signed_by_user_id").references(() => users.id),
+  employeeSigningIp: text("employee_signing_ip"),
+  employeeSigningLocation: text("employee_signing_location"),
   // Customer signature
   customerSignatureData: text("customer_signature_data"),
   customerSignatureHash: text("customer_signature_hash"),
   customerSignedAt: timestamp("customer_signed_at"),
   customerSignedByUserId: integer("customer_signed_by_user_id").references(() => users.id),
+  customerSigningIp: text("customer_signing_ip"),
+  customerSigningLocation: text("customer_signing_location"),
   // Metadata
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -68,6 +72,7 @@ export const insertServiceRecordSchema = z.object({
 export const signServiceRecordSchema = z.object({
   signatureData: z.string().min(1, "Unterschrift ist erforderlich"),
   signerType: z.enum(["employee", "customer"]),
+  signingLocation: z.string().nullable().optional(),
 });
 
 export type MonthlyServiceRecord = typeof monthlyServiceRecords.$inferSelect;

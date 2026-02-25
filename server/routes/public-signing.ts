@@ -48,6 +48,7 @@ router.get("/sign/:token", asyncHandler("Unterschrifts-Link konnte nicht geladen
 
 const signDocumentSchema = z.object({
   signatureData: z.string().min(1, "Unterschrift ist erforderlich"),
+  signingLocation: z.string().nullable().optional(),
 });
 
 router.post("/sign/:token", asyncHandler("Unterschrift konnte nicht gespeichert werden", async (req: Request, res: Response) => {
@@ -76,7 +77,8 @@ router.post("/sign/:token", asyncHandler("Unterschrift konnte nicht gespeichert 
     return;
   }
 
-  const { signatureData } = parsed.data;
+  const { signatureData, signingLocation } = parsed.data;
+  const signingIp = req.ip || req.socket.remoteAddress || null;
   const doc = tokenData.document;
 
   const claimed = await documentStorage.markSigningTokenUsed(tokenData.id);
@@ -85,7 +87,7 @@ router.post("/sign/:token", asyncHandler("Unterschrift konnte nicht gespeichert 
     return;
   }
 
-  const { objectPath, fileName, integrityHash } = await regeneratePdfWithSignature(doc, signatureData);
+  const { objectPath, fileName, integrityHash } = await regeneratePdfWithSignature(doc, signatureData, signingIp, signingLocation);
 
   await documentStorage.updateGeneratedDocumentAfterSigning(
     doc.id,
@@ -93,6 +95,8 @@ router.post("/sign/:token", asyncHandler("Unterschrift konnte nicht gespeichert 
     integrityHash,
     objectPath,
     fileName,
+    signingIp,
+    signingLocation,
   );
 
   if (doc.generatedByUserId) {

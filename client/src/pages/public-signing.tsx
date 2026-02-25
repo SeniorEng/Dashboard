@@ -3,7 +3,7 @@ import DOMPurify from "dompurify";
 import { useParams } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { SignaturePad } from "@/components/ui/signature-pad";
+import { SignaturePad, type SignatureMetadata } from "@/components/ui/signature-pad";
 import { Loader2, FileText, Check, AlertTriangle, Clock, ShieldCheck } from "lucide-react";
 import { componentStyles } from "@/design-system";
 import { api } from "@/lib/api/client";
@@ -57,10 +57,11 @@ export default function PublicSigningPage() {
       });
   }, [token]);
 
-  const handleSign = useCallback(async (signatureData: string) => {
+  const handleSign = useCallback(async (signatureData: string, metadata?: SignatureMetadata) => {
     setPageState("submitting");
     try {
-      const result = await api.post(`/public/sign/${token}`, { signatureData });
+      const signingLocation = metadata?.location ? `${metadata.location.lat},${metadata.location.lng}` : null;
+      const result = await api.post(`/public/sign/${token}`, { signatureData, signingLocation });
       if (!result.success) {
         setErrorMessage(result.error.message || "Fehler beim Speichern der Unterschrift.");
         setPageState("ready");

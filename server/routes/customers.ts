@@ -393,6 +393,7 @@ const signaturePayloadSchema = z.object({
     templateSlug: z.string().min(1),
     customerSignatureData: z.string().regex(/^data:image\/(png|jpeg);base64,/, "Ungültiges Signaturformat"),
   })),
+  signingLocation: z.string().nullable().optional(),
 });
 
 router.post("/:id/signatures", asyncHandler("Unterschriften konnten nicht gespeichert werden", async (req, res) => {
@@ -427,6 +428,8 @@ router.post("/:id/signatures", asyncHandler("Unterschriften konnten nicht gespei
   }
 
   const userId = user.id;
+  const signingIp = req.ip || req.socket.remoteAddress || null;
+  const signingLocation = parsed.data.signingLocation || null;
   const results = [];
   const errors: { slug: string; error: string }[] = [];
 
@@ -449,6 +452,8 @@ router.post("/:id/signatures", asyncHandler("Unterschriften konnten nicht gespei
         customerSignatureData: sig.customerSignatureData,
         integrityHash: hash,
         signingStatus: "complete" as const,
+        signingIp,
+        signingLocation,
       }, userId);
       results.push(doc);
     } catch (err) {
@@ -879,6 +884,7 @@ const generatePdfSchema = z.object({
   employeeSignatureData: z.string().nullable().optional(),
   placeholderOverrides: z.record(z.string()).optional(),
   deferEmployeeSignature: z.boolean().optional().default(false),
+  signingLocation: z.string().nullable().optional(),
 });
 
 router.post("/:id/documents/generate-pdf", asyncHandler("PDF konnte nicht erstellt werden", async (req, res) => {
@@ -899,7 +905,8 @@ router.post("/:id/documents/generate-pdf", asyncHandler("PDF konnte nicht erstel
     return;
   }
 
-  const { templateId, customerSignatureData, employeeSignatureData, placeholderOverrides, deferEmployeeSignature } = parsed.data;
+  const { templateId, customerSignatureData, employeeSignatureData, placeholderOverrides, deferEmployeeSignature, signingLocation } = parsed.data;
+  const signingIp = req.ip || req.socket.remoteAddress || null;
 
   const template = await documentStorage.getDocumentTemplate(templateId);
   if (!template) {
@@ -917,6 +924,8 @@ router.post("/:id/documents/generate-pdf", asyncHandler("PDF konnte nicht erstel
     placeholderOverrides,
     generatedByUserId: user.id,
     signingStatus,
+    signingIp,
+    signingLocation,
   });
 
   let signingLink: string | null = null;

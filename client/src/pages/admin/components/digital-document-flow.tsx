@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -31,7 +31,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize } from "@/design-system";
-import { SignaturePad } from "@/components/ui/signature-pad";
+import { SignaturePad, type SignatureMetadata } from "@/components/ui/signature-pad";
 import { DocumentPreview } from "@/features/documents/document-preview";
 import type { TemplateOption, RenderResult, GenerateResult } from "@/features/documents/types";
 
@@ -79,6 +79,13 @@ export function DigitalDocumentFlow({
 
   const selectedTemplate = templates?.find(t => t.id.toString() === selectedTemplateId);
 
+  const signingLocationRef = useRef<string | null>(null);
+
+  const formatLocation = (metadata?: SignatureMetadata): string | null => {
+    if (!metadata?.location) return null;
+    return `${metadata.location.lat},${metadata.location.lng}`;
+  };
+
   const generateMutation = useMutation({
     mutationFn: async (data: {
       templateId: number;
@@ -87,6 +94,7 @@ export function DigitalDocumentFlow({
       customerSignatureData?: string | null;
       employeeSignatureData?: string | null;
       deferEmployeeSignature?: boolean;
+      signingLocation?: string | null;
     }) => {
       const result = await api.post("/admin/documents/generate-pdf", data);
       return unwrapResult(result) as GenerateResult;
@@ -150,8 +158,9 @@ export function DigitalDocumentFlow({
     }
   }, [selectedTemplate, targetType, employeeId]);
 
-  const handleCustomerSigned = useCallback((signatureData: string) => {
+  const handleCustomerSigned = useCallback((signatureData: string, metadata?: SignatureMetadata) => {
     setCustomerSignature(signatureData);
+    signingLocationRef.current = formatLocation(metadata);
     if (selectedTemplate?.requiresEmployeeSignature) {
       if (targetType === "employee" && employeeId) {
         setStep("choose-signing-method");
@@ -163,8 +172,11 @@ export function DigitalDocumentFlow({
     }
   }, [selectedTemplate, targetType, employeeId]);
 
-  const handleEmployeeSigned = useCallback((signatureData: string) => {
+  const handleEmployeeSigned = useCallback((signatureData: string, metadata?: SignatureMetadata) => {
     setEmployeeSignature(signatureData);
+    if (!signingLocationRef.current) {
+      signingLocationRef.current = formatLocation(metadata);
+    }
     handleGenerateWithSignatures(customerSignature, signatureData, false);
   }, [customerSignature]);
 
@@ -178,6 +190,7 @@ export function DigitalDocumentFlow({
       customerSignatureData: customerSignature,
       employeeSignatureData: null,
       deferEmployeeSignature: true,
+      signingLocation: signingLocationRef.current,
     });
   }, [selectedTemplate, customerId, employeeId, customerSignature, generateMutation]);
 
@@ -190,6 +203,7 @@ export function DigitalDocumentFlow({
       employeeId: employeeId || null,
       customerSignatureData: customerSignature,
       employeeSignatureData: employeeSignature,
+      signingLocation: signingLocationRef.current,
     });
   }, [selectedTemplate, customerId, employeeId, customerSignature, employeeSignature, generateMutation]);
 
@@ -203,6 +217,7 @@ export function DigitalDocumentFlow({
       customerSignatureData: custSig,
       employeeSignatureData: defer ? null : empSig,
       deferEmployeeSignature: defer,
+      signingLocation: signingLocationRef.current,
     });
   }, [selectedTemplate, customerId, employeeId, generateMutation]);
 

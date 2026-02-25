@@ -5,8 +5,12 @@ import { Card, CardContent } from "./card";
 import { Eraser, Check, X, Pen } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+export interface SignatureMetadata {
+  location?: { lat: number; lng: number };
+}
+
 interface SignaturePadProps {
-  onSave: (signatureData: string) => void;
+  onSave: (signatureData: string, metadata?: SignatureMetadata) => void;
   onCancel?: () => void;
   title?: string;
   description?: string;
@@ -27,6 +31,7 @@ export function SignaturePad({
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const [isEmpty, setIsEmpty] = useState(true);
   const [canvasSize, setCanvasSize] = useState({ width: 300, height: 300 });
+  const locationRef = useRef<{ lat: number; lng: number } | undefined>(undefined);
 
   const updateCanvasSize = useCallback(() => {
     if (!isFullscreen || !canvasContainerRef.current) return;
@@ -77,7 +82,11 @@ export function SignaturePad({
       const canvas = signatureRef.current.getCanvas();
       const dataUrl = canvas.toDataURL("image/png");
       setIsFullscreen(false);
-      onSave(dataUrl);
+      const metadata: SignatureMetadata = {};
+      if (locationRef.current) {
+        metadata.location = locationRef.current;
+      }
+      onSave(dataUrl, Object.keys(metadata).length > 0 ? metadata : undefined);
     }
   };
 
@@ -95,7 +104,20 @@ export function SignaturePad({
   const openFullscreen = () => {
     if (!disabled) {
       setIsEmpty(true);
+      locationRef.current = undefined;
       setIsFullscreen(true);
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            locationRef.current = {
+              lat: Math.round(pos.coords.latitude * 10000) / 10000,
+              lng: Math.round(pos.coords.longitude * 10000) / 10000,
+            };
+          },
+          () => {},
+          { timeout: 10000, enableHighAccuracy: false }
+        );
+      }
     }
   };
 

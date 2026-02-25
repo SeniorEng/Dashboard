@@ -247,6 +247,7 @@ const generateDocumentSchema = z.object({
   employeeSignatureData: z.string().nullable().optional(),
   placeholderOverrides: z.record(z.string()).optional(),
   deferEmployeeSignature: z.boolean().optional().default(false),
+  signingLocation: z.string().nullable().optional(),
 });
 
 function generateSigningToken(): string {
@@ -264,7 +265,8 @@ router.post("/documents/generate-pdf", asyncHandler("PDF konnte nicht erstellt w
     return;
   }
 
-  const { templateId, customerId, employeeId, customerSignatureData, employeeSignatureData, placeholderOverrides, deferEmployeeSignature } = parsed.data;
+  const { templateId, customerId, employeeId, customerSignatureData, employeeSignatureData, placeholderOverrides, deferEmployeeSignature, signingLocation } = parsed.data;
+  const signingIp = req.ip || req.socket.remoteAddress || null;
 
   if (!customerId && !employeeId) {
     res.status(400).json({ error: "VALIDATION_ERROR", message: "Entweder customerId oder employeeId ist erforderlich" });
@@ -288,6 +290,8 @@ router.post("/documents/generate-pdf", asyncHandler("PDF konnte nicht erstellt w
     placeholderOverrides,
     generatedByUserId: req.user!.id,
     signingStatus,
+    signingIp,
+    signingLocation,
   });
 
   let signingLink: string | null = null;

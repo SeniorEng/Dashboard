@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { SignaturePad } from "@/components/ui/signature-pad";
+import { SignaturePad, type SignatureMetadata } from "@/components/ui/signature-pad";
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
 import { FileText, Check, AlertCircle, Loader2, AlertTriangle, Upload, Camera, X, Pen } from "lucide-react";
@@ -45,7 +45,7 @@ type CustomerFormDataForPreview = CustomerFormData;
 interface SignaturesStepProps {
   billingType: BillingType;
   customerSignatures: Record<string, string>;
-  onSignatureChange: (slug: string, signatureData: string) => void;
+  onSignatureChange: (slug: string, signatureData: string, location?: string | null) => void;
   uploadedDocuments: WizardUploadedDoc[];
   onUploadedDocumentsChange: (docs: WizardUploadedDoc[]) => void;
   formData?: CustomerFormDataForPreview;
@@ -239,7 +239,7 @@ export function SignaturesStep({
               key={doc.slug}
               doc={doc}
               signature={customerSignatures[doc.slug]}
-              onSignatureChange={(data) => onSignatureChange(doc.slug, data)}
+              onSignatureChange={(data, location) => onSignatureChange(doc.slug, data, location)}
               uploadedDoc={uploadedDocuments.find(u => {
                 const matchingType = (docTypes || []).find(dt => dt.templateSlug === doc.slug);
                 return matchingType && u.documentTypeId === matchingType.id;
@@ -272,7 +272,7 @@ export function SignaturesStep({
               key={doc.slug}
               doc={doc}
               signature={customerSignatures[doc.slug]}
-              onSignatureChange={(data) => onSignatureChange(doc.slug, data)}
+              onSignatureChange={(data, location) => onSignatureChange(doc.slug, data, location)}
               uploadedDoc={uploadedDocuments.find(u => {
                 const matchingType = (docTypes || []).find(dt => dt.templateSlug === doc.slug);
                 return matchingType && u.documentTypeId === matchingType.id;
@@ -340,7 +340,7 @@ function DocumentSignatureCard({
 }: {
   doc: TemplateWithRequirement;
   signature?: string;
-  onSignatureChange: (data: string) => void;
+  onSignatureChange: (data: string, location?: string | null) => void;
   uploadedDoc?: WizardUploadedDoc;
   documentTypeId?: number;
   onDocUploaded: (doc: WizardUploadedDoc) => void;
@@ -380,8 +380,9 @@ function DocumentSignatureCard({
     openPrintPreview(rendered, doc.name);
   }, [doc, formData, signature]);
 
-  const handleSignatureSave = useCallback((signatureData: string) => {
-    onSignatureChange(signatureData);
+  const handleSignatureSave = useCallback((signatureData: string, metadata?: SignatureMetadata) => {
+    const location = metadata?.location ? `${metadata.location.lat},${metadata.location.lng}` : null;
+    onSignatureChange(signatureData, location);
     setShowSignaturePad(false);
     if (isUploaded) onDocRemoved();
   }, [onSignatureChange, isUploaded, onDocRemoved]);

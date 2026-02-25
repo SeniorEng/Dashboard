@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { SignaturePad, SignatureDisplay } from "@/components/ui/signature-pad";
+import { SignaturePad, SignatureDisplay, type SignatureMetadata } from "@/components/ui/signature-pad";
 import { ErrorState } from "@/components/patterns/error-state";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { 
@@ -96,8 +96,8 @@ export default function ServiceRecordDetailPage() {
   });
 
   const signMutation = useMutation({
-    mutationFn: async ({ signatureData, signerType }: { signatureData: string; signerType: "employee" | "customer" }) => {
-      const result = await api.post<MonthlyServiceRecord>(`/service-records/${recordId}/sign`, { signatureData, signerType });
+    mutationFn: async ({ signatureData, signerType, signingLocation }: { signatureData: string; signerType: "employee" | "customer"; signingLocation?: string | null }) => {
+      const result = await api.post<MonthlyServiceRecord>(`/service-records/${recordId}/sign`, { signatureData, signerType, signingLocation });
       if (!result.success) {
         throw new Error(result.error.message || "Unterschrift konnte nicht gespeichert werden");
       }
@@ -145,12 +145,17 @@ export default function ServiceRecordDetailPage() {
   const customerName = customer ? `${customer.vorname} ${customer.nachname}` : "Kunde";
   const periodLabel = `${MONTH_NAMES[record.month - 1]} ${record.year}`;
 
-  const handleEmployeeSign = (signatureData: string) => {
-    signMutation.mutate({ signatureData, signerType: "employee" });
+  const formatLocation = (metadata?: SignatureMetadata): string | null => {
+    if (!metadata?.location) return null;
+    return `${metadata.location.lat},${metadata.location.lng}`;
   };
 
-  const handleCustomerSign = (signatureData: string) => {
-    signMutation.mutate({ signatureData, signerType: "customer" });
+  const handleEmployeeSign = (signatureData: string, metadata?: SignatureMetadata) => {
+    signMutation.mutate({ signatureData, signerType: "employee", signingLocation: formatLocation(metadata) });
+  };
+
+  const handleCustomerSign = (signatureData: string, metadata?: SignatureMetadata) => {
+    signMutation.mutate({ signatureData, signerType: "customer", signingLocation: formatLocation(metadata) });
   };
 
   const totalMinutes = appointments.reduce((sum, apt) => {

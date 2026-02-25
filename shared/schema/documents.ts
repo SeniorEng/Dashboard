@@ -120,6 +120,8 @@ export const generatedDocuments = pgTable("generated_documents", {
   signedAt: timestamp("signed_at"),
   signedByEmployeeId: integer("signed_by_employee_id").references(() => users.id),
   integrityHash: text("integrity_hash"),
+  signingIp: text("signing_ip"),
+  signingLocation: text("signing_location"),
   generatedAt: timestamp("generated_at").notNull().defaultNow(),
   generatedByUserId: integer("generated_by_user_id").references(() => users.id),
 }, (table) => [
@@ -199,6 +201,8 @@ export const insertGeneratedDocumentSchema = z.object({
   employeeSignatureData: z.string().nullable().optional(),
   signingStatus: z.enum(SIGNING_STATUSES).optional().default("complete"),
   integrityHash: z.string().nullable().optional(),
+  signingIp: z.string().nullable().optional(),
+  signingLocation: z.string().nullable().optional(),
 });
 
 export type DocumentTemplate = typeof documentTemplates.$inferSelect;
