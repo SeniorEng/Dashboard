@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, time, date, boolean, index } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, time, date, boolean, index, real } from "drizzle-orm/pg-core";
 import { isNull } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -31,10 +31,10 @@ export const appointments = pgTable("appointments", {
   // Travel documentation
   travelOriginType: text("travel_origin_type"), // "home" | "appointment"
   travelFromAppointmentId: integer("travel_from_appointment_id"),
-  travelKilometers: integer("travel_kilometers"),
+  travelKilometers: real("travel_kilometers"),
   travelMinutes: integer("travel_minutes"),
   // Customer kilometers (for Alltagsbegleitung - trips with/for customer)
-  customerKilometers: integer("customer_kilometers"),
+  customerKilometers: real("customer_kilometers"),
   notes: text("notes"),
   servicesDone: text("services_done").array().default([]), // Legacy: replaced by appointment_services junction table
   signatureData: text("signature_data"),

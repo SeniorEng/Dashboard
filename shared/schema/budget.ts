@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, date, boolean, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, date, boolean, index, uniqueIndex, real } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { timestamp } from "./common";
@@ -89,9 +89,9 @@ export const budgetTransactions = pgTable("budget_transactions", {
   hauswirtschaftCents: integer("hauswirtschaft_cents"),
   alltagsbegleitungMinutes: integer("alltagsbegleitung_minutes"),
   alltagsbegleitungCents: integer("alltagsbegleitung_cents"),
-  travelKilometers: integer("travel_kilometers"),
+  travelKilometers: real("travel_kilometers"),
   travelCents: integer("travel_cents"),
-  customerKilometers: integer("customer_kilometers"),
+  customerKilometers: real("customer_kilometers"),
   customerKilometersCents: integer("customer_kilometers_cents"),
   // Reference to source
   appointmentId: integer("appointment_id").references(() => appointments.id),
