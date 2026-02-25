@@ -16,6 +16,7 @@ import {
   ChevronLeft,
   Check,
   UserCheck,
+  FileText,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { CustomerFormData, ContactFormData, BudgetTypeSettingForm, getStepsForBillingType, DEFAULT_BUDGETS, EMPTY_CONTACT, MAX_CONTACTS } from "./admin/components/customer-types";
@@ -40,6 +41,12 @@ export default function CustomerConvertPage() {
   const [currentStep, setCurrentStep] = useState(0);
   const [initialized, setInitialized] = useState(false);
 
+  const fromAppointmentId = useMemo(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const val = urlParams.get("fromAppointment");
+    return val ? parseInt(val, 10) : null;
+  }, []);
+
   const { data: customer, isLoading, error, refetch } = useQuery<Customer>({
     queryKey: ["customer", customerId],
     queryFn: async () => {
@@ -47,6 +54,15 @@ export default function CustomerConvertPage() {
       return unwrapResult(result);
     },
     enabled: !!customerId,
+  });
+
+  const { data: sourceAppointment } = useQuery<{ id: number; notes: string | null; date: string; scheduledStart: string | null; scheduledEnd: string | null }>({
+    queryKey: ["appointment", fromAppointmentId],
+    queryFn: async () => {
+      const result = await api.get<any>(`/appointments/${fromAppointmentId}`);
+      return unwrapResult(result);
+    },
+    enabled: !!fromAppointmentId,
   });
 
   const [formData, setFormData] = useState<CustomerFormData>({
@@ -89,6 +105,8 @@ export default function CustomerConvertPage() {
     documentDeliveryMethod: "email" as const,
   });
 
+  const [appointmentNotesPrefilled, setAppointmentNotesPrefilled] = useState(false);
+
   useEffect(() => {
     if (customer && !initialized) {
       setFormData((prev) => ({
@@ -115,6 +133,16 @@ export default function CustomerConvertPage() {
       setInitialized(true);
     }
   }, [customer, initialized]);
+
+  useEffect(() => {
+    if (sourceAppointment?.notes && !appointmentNotesPrefilled) {
+      setFormData((prev) => ({
+        ...prev,
+        vereinbarteLeistungen: prev.vereinbarteLeistungen || sourceAppointment.notes || "",
+      }));
+      setAppointmentNotesPrefilled(true);
+    }
+  }, [sourceAppointment, appointmentNotesPrefilled]);
 
   const [customerSignatures, setCustomerSignatures] = useState<Record<string, string>>({});
   const [uploadedDocuments, setUploadedDocuments] = useState<import("./admin/components/signatures-step").WizardUploadedDoc[]>([]);
@@ -599,6 +627,20 @@ export default function CustomerConvertPage() {
               </div>
             </CardContent>
           </Card>
+
+          {sourceAppointment?.notes && (
+            <Card className="mb-4 border-amber-200 bg-amber-50/50">
+              <CardContent className="py-3 px-4">
+                <div className="flex items-start gap-2">
+                  <FileText className={`${iconSize.sm} text-amber-600 mt-0.5 shrink-0`} />
+                  <div>
+                    <span className="text-sm font-medium text-amber-800">Notizen aus der Erstberatung</span>
+                    <p className="text-sm text-amber-700 mt-1 whitespace-pre-wrap">{sourceAppointment.notes}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           <div className="mb-6">
             <div className="flex items-center gap-2 mb-3 justify-center">

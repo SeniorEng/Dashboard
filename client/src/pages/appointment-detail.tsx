@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { 
   MapPin, Calendar, FileText, ChevronLeft, Loader2, 
-  Pencil, Trash2, AlertTriangle, Phone, Car, Home, ArrowRight, UserCheck
+  Pencil, Trash2, AlertTriangle, Phone, Car, Home, ArrowRight, UserCheck, UserPlus, CheckCircle2
 } from "lucide-react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
@@ -157,22 +157,45 @@ export default function AppointmentDetail() {
           </div>
         )}
 
-        {isErstberatung && canConvert && appointment.customerId && appointment.customer && (appointment.customer as any).status === "erstberatung" && (
-          <div className="mt-4 p-3 bg-teal-50 border border-teal-200 rounded-lg" data-testid="card-convert-hint">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <UserCheck className={`${iconSize.sm} text-teal-600`} />
-                <span className="text-sm font-medium text-teal-700">Kunde als aktiven Kunden übernehmen?</span>
+        {isErstberatung && appointment.customerId && appointment.customer && (() => {
+          const customerStatus = (appointment.customer as any).status;
+          const isStillErstberatung = customerStatus === "erstberatung";
+          if (isStillErstberatung && canConvert) {
+            return (
+              <div className="mt-4" data-testid="card-convert-hint">
+                <Link href={`/customer/${appointment.customerId}/convert?fromAppointment=${appointment.id}`}>
+                  <Button className="w-full bg-teal-600 hover:bg-teal-700 h-12 text-base" data-testid="button-convert-from-appointment">
+                    <UserPlus className="h-5 w-5 mr-2" />
+                    Neukunden-Anlage starten
+                    <ArrowRight className="h-5 w-5 ml-2" />
+                  </Button>
+                </Link>
+                <p className="text-xs text-muted-foreground text-center mt-1.5">
+                  Alle Daten aus der Erstberatung werden übernommen
+                </p>
               </div>
-              <Link href={`/customer/${appointment.customerId}/convert`}>
-                <Button size="sm" className="bg-teal-600 hover:bg-teal-700" data-testid="button-convert-from-appointment">
-                  Übernehmen
-                  <ArrowRight className={`${iconSize.sm} ml-1`} />
-                </Button>
-              </Link>
-            </div>
-          </div>
-        )}
+            );
+          }
+          if (!isStillErstberatung) {
+            return (
+              <div className="mt-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg" data-testid="card-already-converted">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className={`${iconSize.sm} text-emerald-600`} />
+                    <span className="text-sm font-medium text-emerald-700">Kunde wurde bereits übernommen</span>
+                  </div>
+                  <Link href={`/customer/${appointment.customerId}`}>
+                    <Button size="sm" variant="outline" className="text-emerald-700 border-emerald-300" data-testid="button-view-customer">
+                      Zum Kunden
+                      <ArrowRight className={`${iconSize.sm} ml-1`} />
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            );
+          }
+          return null;
+        })()}
       </div>
 
       <SectionCard
