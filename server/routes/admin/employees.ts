@@ -9,14 +9,17 @@ import {
   EMPLOYMENT_TYPES,
   EMPLOYMENT_STATUSES,
   users,
+  userRoles,
   appointments,
   sessions,
   passwordResetTokens,
+  customers,
+  employeeTimeEntries,
 } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
 import { auditService } from "../../services/audit";
 import { db } from "../../lib/db";
-import { eq, and, ne, or, isNull } from "drizzle-orm";
+import { eq, and, ne, or, isNull, inArray, gte, lte, sql, asc } from "drizzle-orm";
 import { z } from "zod";
 import { sendEmail, buildWelcomeEmailHtml } from "../../services/email-service";
 
@@ -551,6 +554,118 @@ router.get("/employees", asyncHandler("Mitarbeiter konnten nicht geladen werden"
   usersCache.setActiveEmployees(safeEmployees);
   
   res.json(safeEmployees);
+}));
+
+router.get("/employees/availability", asyncHandler("Verfügbarkeiten konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const { date } = req.query;
+  if (!date || typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ error: "Gültiges Datum im Format YYYY-MM-DD erforderlich" });
+  }
+
+  const erstberatungEmployeeIds = await db
+    .select({ userId: userRoles.userId })
+    .from(userRoles)
+    .where(eq(userRoles.role, "erstberatung"));
+
+  const employeeIds = erstberatungEmployeeIds.map(e => e.userId);
+  if (employeeIds.length === 0) {
+    return res.json([]);
+  }
+
+  const [employeeData, availabilityEntries, absenceEntries, dayAppointments] = await Promise.all([
+    db.select({
+      id: users.id,
+      displayName: users.displayName,
+      vorname: users.vorname,
+      nachname: users.nachname,
+    })
+    .from(users)
+    .where(and(
+      inArray(users.id, employeeIds),
+      eq(users.isActive, true)
+    )),
+
+    db.select({
+      userId: employeeTimeEntries.userId,
+      startTime: employeeTimeEntries.startTime,
+      endTime: employeeTimeEntries.endTime,
+    })
+    .from(employeeTimeEntries)
+    .where(and(
+      inArray(employeeTimeEntries.userId, employeeIds),
+      eq(employeeTimeEntries.entryDate, date),
+      eq(employeeTimeEntries.entryType, "verfuegbar"),
+      isNull(employeeTimeEntries.deletedAt)
+    ))
+    .orderBy(asc(employeeTimeEntries.startTime)),
+
+    db.select({
+      userId: employeeTimeEntries.userId,
+      entryType: employeeTimeEntries.entryType,
+    })
+    .from(employeeTimeEntries)
+    .where(and(
+      inArray(employeeTimeEntries.userId, employeeIds),
+      eq(employeeTimeEntries.entryDate, date),
+      inArray(employeeTimeEntries.entryType, ["urlaub", "krankheit"]),
+      isNull(employeeTimeEntries.deletedAt)
+    )),
+
+    db.select({
+      assignedEmployeeId: appointments.assignedEmployeeId,
+      scheduledStart: appointments.scheduledStart,
+      scheduledEnd: appointments.scheduledEnd,
+      durationPromised: appointments.durationPromised,
+      customerName: sql`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as("customer_name"),
+    })
+    .from(appointments)
+    .innerJoin(customers, eq(appointments.customerId, customers.id))
+    .where(and(
+      inArray(appointments.assignedEmployeeId, employeeIds),
+      eq(appointments.date, date),
+      isNull(appointments.deletedAt),
+      sql`${appointments.status} != 'cancelled'`
+    ))
+    .orderBy(asc(appointments.scheduledStart)),
+  ]);
+
+  const result = employeeData.map(emp => {
+    const availability = availabilityEntries
+      .filter(a => a.userId === emp.id)
+      .map(a => ({
+        startTime: a.startTime?.slice(0, 5) || null,
+        endTime: a.endTime?.slice(0, 5) || null,
+      }));
+
+    const existingAppointments = dayAppointments
+      .filter(a => a.assignedEmployeeId === emp.id)
+      .map(a => ({
+        scheduledStart: a.scheduledStart?.slice(0, 5) || null,
+        scheduledEnd: a.scheduledEnd?.slice(0, 5) || null,
+        durationMinutes: a.durationPromised,
+        customerName: String(a.customerName),
+      }));
+
+    const absence = absenceEntries.find(a => a.userId === emp.id);
+
+    return {
+      id: emp.id,
+      displayName: emp.displayName || `${emp.vorname || ""} ${emp.nachname || ""}`.trim(),
+      availability,
+      appointments: existingAppointments,
+      absence: absence ? absence.entryType as "urlaub" | "krankheit" : null,
+    };
+  });
+
+  result.sort((a, b) => {
+    if (a.absence && !b.absence) return 1;
+    if (!a.absence && b.absence) return -1;
+    if (a.availability.length > 0 && b.availability.length === 0) return -1;
+    if (a.availability.length === 0 && b.availability.length > 0) return 1;
+    return a.displayName.localeCompare(b.displayName);
+  });
+
+  res.json(result);
 }));
 
 export default router;

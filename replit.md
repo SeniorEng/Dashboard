@@ -62,6 +62,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Hours Overview (Stundenübersicht)**: Admin page for monthly employee summaries (hours by category, kilometers, vacation, sick days), including holiday hours calculation for Minijobbers and Minijob-Stundenübertrag (carryover for Minijobbers).
 - **Public Holidays**: Shared utility for German public holidays.
 - **Employee Clustering**: Dimensions for `isEuRentner`, `employmentType`, `weeklyWorkDays`, `monthlyWorkHours` for vacation entitlement and warnings for EU-Rentner hour limits.
+- **Employee Availability (Verfügbarkeit)**: Employees can log availability slots (type `verfuegbar`) in the Zeiten tab — these are organizational only and do NOT count as work hours. Admins see employee availability in the Erstberatung form via `GET /api/admin/employees/availability?date=YYYY-MM-DD`. CalendarGrid shows green dots for availability days. DayDetailPanel separates availability from work entries.
 - **Prospect/Lead Management (Interessenten)**: Pre-customer pipeline with statuses, email webhook ingestion, activity timeline, and conversion to Erstberatung.
 
 ## External Dependencies

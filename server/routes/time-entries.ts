@@ -19,8 +19,13 @@ async function checkTimeConflicts(
   startTime: string | null | undefined,
   endTime: string | null | undefined,
   isFullDay: boolean,
-  excludeEntryId?: number
+  excludeEntryId?: number,
+  entryType?: string
 ): Promise<string | null> {
+  if (entryType === "verfuegbar") {
+    return null;
+  }
+
   // Get appointments for this date
   const appointments = await storage.getAppointmentsForDay(userId, date);
   
@@ -30,10 +35,10 @@ async function checkTimeConflicts(
   // Get time entries for this date
   const timeEntries = await timeTrackingStorage.getTimeEntriesForDate(userId, date);
   
-  // Filter out the entry we're updating (if any)
-  const otherEntries = excludeEntryId 
-    ? timeEntries.filter(e => e.id !== excludeEntryId)
-    : timeEntries;
+  // Filter out the entry we're updating (if any) and verfuegbar entries (organizational only)
+  const otherEntries = timeEntries
+    .filter(e => e.id !== excludeEntryId)
+    .filter(e => e.entryType !== "verfuegbar");
   
   // For full-day entries, check if there are any other active appointments or entries
   if (isFullDay) {
@@ -327,7 +332,9 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
         dateStr,
         validatedData.startTime,
         validatedData.endTime,
-        validatedData.isFullDay ?? true
+        validatedData.isFullDay ?? true,
+        undefined,
+        validatedData.entryType
       );
       if (conflict) {
         return res.status(400).json({ 
@@ -379,7 +386,9 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
     validatedData.entryDate,
     validatedData.startTime,
     validatedData.endTime,
-    validatedData.isFullDay ?? false
+    validatedData.isFullDay ?? false,
+    undefined,
+    validatedData.entryType
   );
   if (conflict) {
     return res.status(400).json({ error: conflict });
@@ -442,13 +451,15 @@ router.put("/:id", asyncHandler("Zeiteintrag konnte nicht aktualisiert werden", 
   const newEndTime = validatedData.endTime !== undefined ? validatedData.endTime : existing.endTime;
   const newIsFullDay = validatedData.isFullDay !== undefined ? validatedData.isFullDay : existing.isFullDay;
   
+  const newEntryType = validatedData.entryType ?? existing.entryType;
   const conflict = await checkTimeConflicts(
     existing.userId,
     newDate,
     newStartTime,
     newEndTime,
     newIsFullDay,
-    entryId // Exclude the entry being updated
+    entryId,
+    newEntryType
   );
   if (conflict) {
     return res.status(400).json({ error: conflict });

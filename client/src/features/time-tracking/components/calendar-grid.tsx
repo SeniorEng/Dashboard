@@ -122,7 +122,9 @@ export function CalendarGrid({
             <div className="grid grid-cols-7 gap-1">
               {calendarDays.map(({ date, day, isCurrentMonth, isToday, isWeekend, holidayName }) => {
                 const hasAppointments = (appointmentsByDate[date]?.length || 0) > 0;
-                const hasOtherEntries = (entriesByDate[date]?.length || 0) > 0;
+                const dateEntries = entriesByDate[date] as Array<{ entryType?: string }> | undefined;
+                const hasOtherEntries = dateEntries ? dateEntries.some(e => e.entryType !== "verfuegbar") : false;
+                const hasAvailability = dateEntries ? dateEntries.some(e => e.entryType === "verfuegbar") : false;
                 const isSelected = date === selectedDate;
                 const hasMissingBreak = missingBreakDates.has(date);
                 const isHoliday = !!holidayName && isCurrentMonth;
@@ -160,13 +162,16 @@ export function CalendarGrid({
                         <div className="w-1.5 h-1.5 rounded-full bg-red-400" />
                       </div>
                     )}
-                    {!isHoliday && (hasAppointments || hasOtherEntries) && (
+                    {!isHoliday && (hasAppointments || hasOtherEntries || hasAvailability) && (
                       <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 flex gap-0.5">
                         {hasAppointments && (
                           <div className="w-1.5 h-1.5 rounded-full bg-teal-500" title="Kundentermine" />
                         )}
                         {hasOtherEntries && (
                           <div className="w-1.5 h-1.5 rounded-full bg-amber-500" title="Andere Einträge" />
+                        )}
+                        {hasAvailability && (
+                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" title="Verfügbar" />
                         )}
                       </div>
                     )}

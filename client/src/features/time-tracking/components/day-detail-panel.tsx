@@ -92,6 +92,9 @@ export function DayDetailPanel({
   const hasDayItems = entries.length > 0 || appointments.length > 0;
   const holidayInfo = selectedDate ? checkHoliday(selectedDate) : null;
 
+  const workEntries = entries.filter(e => e.entryType !== "verfuegbar");
+  const availabilityEntries = entries.filter(e => e.entryType === "verfuegbar");
+
   const euRentnerDailyWarning = (() => {
     if (!isEuRentner || !hasDayItems) return null;
     let totalMinutes = 0;
@@ -99,7 +102,7 @@ export function DayDetailPanel({
       const services = getAppointmentServices(appt);
       totalMinutes += services.reduce((sum, s) => sum + s.minutes, 0);
     }
-    for (const entry of entries) {
+    for (const entry of workEntries) {
       if (entry.startTime && entry.endTime) {
         const [sh, sm] = entry.startTime.split(":").map(Number);
         const [eh, em] = entry.endTime.split(":").map(Number);
@@ -208,7 +211,7 @@ export function DayDetailPanel({
               );
             })}
 
-            {entries.map((entry) => {
+            {workEntries.map((entry) => {
               const config = TIME_ENTRY_TYPE_CONFIG[entry.entryType as TimeEntryType];
               const Icon = config.icon;
               const locked = isMonthLocked || isEntryLocked(entry.entryDate, entry.entryType);
@@ -277,6 +280,69 @@ export function DayDetailPanel({
                 </div>
               );
             })}
+
+            {availabilityEntries.length > 0 && (
+              <>
+                {(appointments.length > 0 || workEntries.length > 0) && (
+                  <div className="border-t border-emerald-200 pt-2 mt-1">
+                    <span className="text-xs font-medium text-emerald-700 uppercase tracking-wide">Verfügbarkeit (keine Arbeitszeit)</span>
+                  </div>
+                )}
+                {availabilityEntries.map((entry) => {
+                  const config = TIME_ENTRY_TYPE_CONFIG[entry.entryType as TimeEntryType];
+                  const Icon = config.icon;
+                  return (
+                    <div
+                      key={entry.id}
+                      className="p-3 rounded-lg bg-emerald-50 border border-dashed border-emerald-300 flex items-start justify-between"
+                      data-testid={`time-entry-${entry.id}`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <Icon className={`${iconSize.md} mt-0.5 text-emerald-600`} />
+                        <div>
+                          <div className="font-medium text-emerald-700">Verfügbar</div>
+                          {entry.startTime && entry.endTime && (
+                            <div className="text-sm text-gray-600">
+                              {entry.startTime.slice(0, 5)} - {entry.endTime.slice(0, 5)}
+                            </div>
+                          )}
+                          {entry.notes && (
+                            <div className="text-sm text-gray-600 mt-1">{entry.notes}</div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {!isMonthLocked && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-gray-400 hover:text-teal-600"
+                              onClick={() => onEditEntry(entry)}
+                              data-testid={`button-edit-entry-${entry.id}`}
+                              aria-label="Eintrag bearbeiten"
+                            >
+                              <Pencil className={iconSize.sm} />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-gray-400 hover:text-red-600"
+                              onClick={() => onDeleteEntry(entry.id)}
+                              disabled={isDeleting}
+                              data-testid={`button-delete-entry-${entry.id}`}
+                              aria-label="Eintrag löschen"
+                            >
+                              <Trash2 className={iconSize.sm} />
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </>
+            )}
             {!isMonthLocked && (
               <Button
                 variant="outline"

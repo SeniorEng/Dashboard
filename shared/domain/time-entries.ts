@@ -9,6 +9,7 @@ export const ENTRY_TYPE_LABELS: Record<string, string> = {
   schulung: "Schulung",
   besprechung: "Besprechung",
   sonstiges: "Sonstiges",
+  verfuegbar: "Verfügbar",
 };
 
 export function getEntryTypeLabel(entryType: string): string {

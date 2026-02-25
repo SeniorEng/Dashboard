@@ -4,6 +4,7 @@ import {
   Coffee,
   Briefcase,
   FileText,
+  CalendarCheck,
 } from "lucide-react";
 import type { TimeEntryType } from "@/lib/api/types";
 import { parseLocalDate } from "@shared/utils/datetime";
@@ -17,6 +18,7 @@ export const TIME_ENTRY_TYPE_CONFIG: Record<TimeEntryType, { label: string; icon
   schulung: { label: "Schulung", icon: FileText, color: "text-indigo-700", bgColor: "bg-indigo-100" },
   besprechung: { label: "Besprechung", icon: FileText, color: "text-teal-700", bgColor: "bg-teal-100" },
   sonstiges: { label: "Sonstiges", icon: FileText, color: "text-gray-700", bgColor: "bg-gray-100" },
+  verfuegbar: { label: "Verfügbar", icon: CalendarCheck, color: "text-emerald-700", bgColor: "bg-emerald-100" },
 };
 
 export const FULL_DAY_TYPES: TimeEntryType[] = ["urlaub", "krankheit"];

@@ -11,6 +11,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { ChevronLeft, Loader2, Calendar, Clock, User, Home, Plus, Users, AlertTriangle, XCircle } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { useNewAppointmentForm, ServiceSelector, AppointmentSummary } from "@/features/appointments";
+import { EmployeeAvailability } from "@/features/appointments/components/employee-availability";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS, formatDuration } from "@shared/types";
 import { useLocation } from "wouter";
 
@@ -375,6 +376,14 @@ export default function NewAppointment() {
                   />
                 </div>
               </div>
+
+              {form.isAdmin && form.ebDate && (
+                <EmployeeAvailability
+                  date={form.ebDate}
+                  selectedEmployeeId={form.ebAssignedEmployeeId}
+                  onSelectEmployee={form.setEbAssignedEmployeeId}
+                />
+              )}
 
               {/* Service (Erstberatung) */}
               <div className="space-y-4">

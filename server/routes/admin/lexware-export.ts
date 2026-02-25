@@ -173,7 +173,7 @@ async function getMonthlyHoursBatch(
     const m = parseLocalDate(entry.entryDate).getMonth() + 1;
     if (!result[m]) result[m] = {};
     if (!result[m][empId]) result[m][empId] = { hauswirtschaft: 0, alltagsbegleitung: 0, erstberatung: 0, sonstiges: 0 };
-    if (entry.entryType !== "kundentermin" && entry.entryType !== "urlaub" && entry.entryType !== "krankheit") {
+    if (entry.entryType !== "kundentermin" && entry.entryType !== "urlaub" && entry.entryType !== "krankheit" && entry.entryType !== "verfuegbar") {
       let minutes = entry.durationMinutes || 0;
       if (!minutes && entry.startTime && entry.endTime) {
         const [sh, sm] = entry.startTime.split(":").map(Number);

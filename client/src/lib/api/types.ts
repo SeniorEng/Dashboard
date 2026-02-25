@@ -342,7 +342,8 @@ export type TimeEntryType =
   | "vertrieb"
   | "schulung"
   | "besprechung"
-  | "sonstiges";
+  | "sonstiges"
+  | "verfuegbar";
 
 export interface TimeEntry {
   id: number;
