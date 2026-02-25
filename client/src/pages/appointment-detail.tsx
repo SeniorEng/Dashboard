@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { 
   MapPin, Calendar, FileText, ChevronLeft, Loader2, 
-  Pencil, Trash2, AlertTriangle, Phone, Car, Home, ArrowRight, UserCheck, UserPlus, CheckCircle2, XCircle, Clock
+  Pencil, Trash2, AlertTriangle, Phone, Car, Home, ArrowRight, UserCheck, UserPlus, CheckCircle2, XCircle
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -182,9 +182,7 @@ export default function AppointmentDetail() {
         {isErstberatung && appointment.customerId && appointment.customer && (() => {
           const customerStatus = (appointment.customer as any).status;
           const isStillErstberatung = customerStatus === "erstberatung";
-          const isDocumentedOrCompleted = appointment.status === "completed" || appointment.status === "documenting";
-
-          if (isStillErstberatung && canConvert && isDocumentedOrCompleted) {
+          if (isStillErstberatung && canConvert) {
             return (
               <div className="mt-4 p-4 bg-white border-2 border-teal-200 rounded-lg space-y-3" data-testid="card-convert-decision">
                 <p className="text-sm font-medium text-center text-gray-700">Wie möchten Sie fortfahren?</p>
@@ -204,17 +202,6 @@ export default function AppointmentDetail() {
                   <XCircle className="h-4 w-4 mr-2" />
                   Kein Interesse
                 </Button>
-              </div>
-            );
-          }
-
-          if (isStillErstberatung && canConvert && !isDocumentedOrCompleted) {
-            return (
-              <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-lg" data-testid="card-convert-pending">
-                <div className="flex items-center gap-2">
-                  <Clock className={`${iconSize.sm} text-gray-500`} />
-                  <span className="text-sm text-gray-600">Nach der Erstberatung können Sie den Kunden hier übernehmen.</span>
-                </div>
               </div>
             );
           }
