@@ -397,7 +397,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     const writeOffCents = txMap.get("write_off")?.absTotal ?? 0;
     const manualAdjustmentCents = txMap.get("manual_adjustment")?.absTotal ?? 0;
     const reversalsCents = txMap.get("reversal")?.rawTotal ?? 0;
-    const netUsedCents = consumptionCents + writeOffCents + manualAdjustmentCents + reversalsCents;
+    const netUsedCents = consumptionCents + writeOffCents + manualAdjustmentCents - reversalsCents;
 
     const currentYearAllocatedCents = Number(currentYearResult[0]?.total ?? 0);
     const carryoverCents = Number(carryoverResult[0]?.total ?? 0);
