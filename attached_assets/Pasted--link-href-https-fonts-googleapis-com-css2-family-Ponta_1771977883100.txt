@@ -1,0 +1,62 @@
+<link href="https://fonts.googleapis.com/css2?family=Pontano+Sans&display=swap" rel="stylesheet">
+
+<div style="font-family: 'Pontano Sans', Arial, sans-serif; color: #000000; line-height: 1.5; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #ffffff;">
+
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #000000; padding-bottom: 10px; margin-bottom: 20px;">
+        <div>
+            <img src="https://via.placeholder.com/150x60?text=Dein+Logo" alt="Senioren Engel Logo" style="height: 60px;">
+        </div>
+        <div style="text-align: right;">
+            <h1 style="margin: 0; font-size: 24px; color: #000000; font-weight: normal;">Senioren Engel</h1>
+            <p style="margin: 0; font-size: 14px; color: #333333; letter-spacing: 1px; text-transform: uppercase;">Alltagsbegleitung</p>
+        </div>
+    </div>
+
+    <h2 style="font-size: 22px; margin-bottom: 20px; font-weight: bold;">Abtretungserklärung</h2>
+
+    <div style="font-size: 14px; font-weight: bold; color: #000000; margin-bottom: 5px;">Leistungserbringer</div>
+    <div style="border: 1px solid #000000; padding: 15px; margin-bottom: 25px; font-size: 13px;">
+        <strong>Senioren Engel Alltagsbegleitung UG</strong> | Zwickauer Straße 145 | 09116 Chemnitz<br>
+        Telefon: +49 371 24359408 | E-Mail: kontakt@seniorenengel-alltagsbegleitung.de<br>
+        Institutskennzeichen (IK): 461438852 | Steuernummer: 215/118/00053
+    </div>
+
+    <div style="font-size: 14px; font-weight: bold; color: #000000; margin-bottom: 5px;">Leistungsempfänger/Leistungsempfängerin</div>
+    <div style="border: 1px solid #000000; padding: 15px; margin-bottom: 25px; font-size: 13px;">
+        <div style="margin-bottom: 8px;"><strong>Vorname, Name:</strong> <span style="border-bottom: 1px dotted #000000; display: inline-block; width: 60%;"></span></div>
+        <div style="margin-bottom: 8px;"><strong>Anschrift:</strong> <span style="border-bottom: 1px dotted #000000; display: inline-block; width: 70%;"></span></div>
+        <div style="margin-bottom: 8px;"><strong>Geburtsdatum:</strong> <span style="border-bottom: 1px dotted #000000; display: inline-block; width: 65%;"></span></div>
+        <div style="margin-bottom: 8px;"><strong>Versicherten-Nummer:</strong> <span style="border-bottom: 1px dotted #000000; display: inline-block; width: 55%;"></span></div>
+        <div style="margin-bottom: 8px;"><strong>Pflegekasse:</strong> <span style="border-bottom: 1px dotted #000000; display: inline-block; width: 68%;"></span></div>
+        <div style="margin-bottom: 8px;"><strong>Institutskennzeichen (IK):</strong> <span style="border-bottom: 1px dotted #000000; display: inline-block; width: 52%;"></span></div>
+    </div>
+
+    <div style="font-size: 14px;">
+        <p>Sehr geehrte Damen und Herren,</p>
+        <p>mit diesem Brief erteile ich eine Abtretungserklärung und gebe mein Einverständnis, dass der oben genannte Leistungserbringer folgende Positionen direkt mit ihnen abrechnen darf:</p>
+        
+        <ul style="list-style-type: none; padding-left: 0; margin-top: 15px;">
+            <li style="margin-bottom: 8px;">&#9744; Entlastungsbetrag nach § 45b SGB XI</li>
+            <li style="margin-bottom: 8px;">&#9744; Umwandlungsanspruch nach § 45a SGB XI</li>
+            <li style="margin-bottom: 8px;">&#9744; Verhinderungspflege § 39 SGB XI</li>
+            <li style="margin-bottom: 8px;">&#9744; Kurzzeitpflege § 42 SGB XI</li>
+        </ul>
+
+        <p style="margin-top: 40px;">Mit freundlichen Grüßen</p>
+    </div>
+
+    <table style="width: 100%; margin-top: 60px; font-size: 13px; border-collapse: collapse; font-family: 'Pontano Sans', Arial, sans-serif;">
+        <tr>
+            <td style="width: 45%; border-top: 1px solid #000000; padding-top: 5px; vertical-align: top;">Ort, Datum</td>
+            <td style="width: 10%;"></td>
+            <td style="width: 45%; border-top: 1px solid #000000; padding-top: 5px; vertical-align: top;">Unterschrift Antragsteller/in oder Bevollmächtigte/r</td>
+        </tr>
+    </table>
+
+    <div style="margin-top: 50px; font-size: 11px; color: #666666; text-align: center; line-height: 1.4;">
+        Senioren Engel Alltagsbegleitung UG | Zwickauer Straße 145 | 09116 Chemnitz<br>
+        E-Mail: kontakt@seniorenengel-alltagsbegleitung.de<br>
+        Seite 15
+    </div>
+
+</div>
