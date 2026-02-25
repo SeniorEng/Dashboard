@@ -1,0 +1,912 @@
+# Code Review Report: SeniorenEngel / CareConnect
+ 
+**Datum:** 2026-02-25
+**Methode:** 6 spezialisierte Review-Agenten (Frontend, Backend, Datenbank, Security, UX, Performance)
+**Codebase:** ~40.000+ Zeilen TypeScript | React 19 + Express + PostgreSQL (Neon)
+**Zweck:** Pflege-Management SaaS fuer ambulante Altenpflege in Deutschland
+ 
+---
+ 
+## Inhaltsverzeichnis
+ 
+1. [Zusammenfassung](#zusammenfassung)
+2. [Kritische Findings (sofort handeln)](#kritische-findings)
+3. [Security & DSGVO](#security--dsgvo)
+4. [Backend & API](#backend--api)
+5. [Datenbank & Datenintegritaet](#datenbank--datenintegritaet)
+6. [Frontend & TypeScript](#frontend--typescript)
+7. [UX & Accessibility](#ux--accessibility)
+8. [Performance](#performance)
+9. [Positive Aspekte](#positive-aspekte)
+10. [Priorisierter Aktionsplan](#priorisierter-aktionsplan)
+ 
+---
+ 
+## Zusammenfassung
+ 
+| Bereich | Critical | High | Medium | Low | Gesamt |
+|---------|----------|------|--------|-----|--------|
+| Security & DSGVO | 3 | 7 | 9 | 4 | 23 |
+| Backend & API | 2 | 4 | 10 | 4 | 20 |
+| Datenbank | 2 | 5 | 14 | 4 | 25 |
+| Frontend | 1 | 4 | 10 | 4 | 19 |
+| UX & Accessibility | 3 | 6 | 14 | 5 | 28 |
+| Performance | 1 | 4 | 7 | 5 | 17 |
+| **Gesamt (roh)** | **12** | **30** | **64** | **26** | **132** |
+| **Nach Deduplizierung** | **~10** | **~25** | **~45** | **~20** | **~95** |
+ 
+---
+ 
+## Kritische Findings
+ 
+Die folgenden Findings erfordern sofortige Bearbeitung, da sie Sicherheitsluecken, Datenintegritaet oder Patientensicherheit betreffen.
+ 
+### CRIT-01: Fehlende Datenbank-Transaktionen bei Multi-Table-Operationen
+ 
+- **Gefunden von:** Datenbank-Experte, Backend-Architekt
+- **Dateien:**
+  - `server/storage/customer-management.ts` Zeilen 270-384 (`createFullCustomer`)
+  - `server/storage/budget-ledger.ts` Zeilen 1135-1293 (`createCascadeConsumption`)
+  - `server/storage.ts` Zeilen 543-564 (`createErstberatungWithCustomer`)
+- **Problem:** Multi-Table-Operationen (6+ Tabellen bei Kundenerstellung, Budget-Kaskade) werden OHNE `db.transaction()` ausgefuehrt. Bei Fehler mitten in der Operation bleiben inkonsistente Daten zurueck. Der manuelle Rollback in `createFullCustomer` (Zeile 380) ist nicht atomar -- wenn der Cleanup fehlschlaegt, bleiben Waisen-Datensaetze.
+- **Auswirkung:** Datenkorruption bei Finanzdaten (Budget), verwaiste Kundendaten bei Erstellungsfehlern.
+- **Loesung:**
+  ```typescript
+  async createFullCustomer(data: CreateFullCustomer, userId: number): Promise<Customer> {
+    return db.transaction(async (tx) => {
+      const [customer] = await tx.insert(customers).values(customerData).returning();
+      await tx.insert(customerInsuranceHistory).values({...});
+      await tx.insert(customerContacts).values({...});
+      // alle weiteren Inserts mit tx statt db
+      return customer;
+    });
+  }
+  ```
+  Fuer Budget-Operationen `isolationLevel: 'serializable'` verwenden.
+ 
+### CRIT-02: SHA-256 Legacy-Passwort-Fallback
+ 
+- **Gefunden von:** Security-Spezialist
+- **Datei:** `server/services/auth.ts` Zeilen 27-36
+- **Problem:** Die `verifyPassword`-Funktion akzeptiert noch Passwoerter im Format `salt:sha256hash`. SHA-256 ohne Key-Stretching ist mit modernen GPUs in Minuten knackbar. Eine Datenbank-Kompromittierung wuerde diese Passwoerter sofort offenlegen.
+- **Loesung:**
+  ```typescript
+  // Bei erfolgreichem SHA-256 Login: sofort auf bcrypt upgraden
+  if (hash === inputHash) {
+    const bcryptHash = await hashPassword(password);
+    await db.update(users).set({ passwordHash: bcryptHash }).where(eq(users.id, user.id));
+    console.warn(`[SECURITY] Upgraded legacy SHA-256 hash for user ${user.id}`);
+    return true;
+  }
+  ```
+  Nach einer Grace Period den SHA-256-Pfad komplett entfernen und betroffene Accounts zum Passwort-Reset zwingen.
+ 
+### CRIT-03: Keine Kunden-Anonymisierung (DSGVO Art. 17)
+ 
+- **Gefunden von:** Security-Spezialist
+- **Datei:** Fehlendes Feature -- Mitarbeiter-Anonymisierung existiert in `server/routes/admin/employees.ts` Zeilen 351-445, aber kein Aequivalent fuer Kunden.
+- **Problem:** Kundendaten (Name, Adresse, Telefon, Geburtsdatum, Pflegegrad, Vorerkrankungen, Anamnese, Notfallkontakte, Versicherungsdaten) bleiben fuer immer in der DB. Unter DSGVO Art. 17 haben Betroffene ein Recht auf Loeschung. Unter Art. 5(1)(e) duerfen Daten nicht laenger als noetig aufbewahrt werden.
+- **Loesung:** `anonymizeCustomer()`-Funktion analog zu `anonymizeEmployee()` implementieren, die PII in allen verknuepften Tabellen ersetzt (customers, customer_contacts, customer_needs_assessments, customer_care_level_history, customer_pricing_history, customer_insurance_history). Terminaufzeichnungen mit anonymisierter Kundenreferenz fuer Abrechnungszwecke beibehalten.
+ 
+### CRIT-04: Notfall-/Gesundheitsinfos nicht auf Termin-Ansicht sichtbar
+ 
+- **Gefunden von:** UX-Experte
+- **Dateien:**
+  - `client/src/features/appointments/components/appointment-card.tsx`
+  - `client/src/pages/appointment-detail.tsx`
+- **Problem:** Pflegekraefte sehen auf der Terminseite NICHT: Allergien/Vorerkrankungen, Notfallkontakte, Haustierinformationen, Pflegegrad. Diese Daten existieren im System, sind aber nur auf der Admin-Kundendetailseite erreichbar. Fuer eine Pflegekraft, die beim Patienten ankommt, ist das ein Sicherheitsrisiko.
+- **Loesung:** "Wichtige Hinweise"-Sektion auf der Termin-Detailseite hinzufuegen: Pflegegrad-Badge, Vorerkrankungen (mit Warn-Icon), Haustierinformationen, primaerer Notfallkontakt mit Click-to-Call.
+ 
+### CRIT-05: Kein Rate Limiting
+ 
+- **Gefunden von:** Backend-Architekt, Security-Spezialist
+- **Datei:** `server/index.ts` (komplett fehlend)
+- **Problem:** Kein einziger Endpoint hat Rate Limiting. Login, Passwort-Reset, API-Endpunkte sind ungeschuetzt gegen Brute-Force, Credential Stuffing, und DoS.
+- **Loesung:**
+  ```typescript
+  import rateLimit from "express-rate-limit";
+  // Global: 200 Requests/min pro IP
+  app.use("/api", rateLimit({ windowMs: 60000, max: 200, standardHeaders: true }));
+  // Login: 5 Versuche/15 min pro IP
+  router.post("/login", rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), ...);
+  // Passwort-Reset: 3 Versuche/Stunde pro IP
+  router.post("/password-reset/request", rateLimit({ windowMs: 3600000, max: 3 }), ...);
+  ```
+ 
+### CRIT-06: Bundle 559 kB ohne Vendor-Splitting
+ 
+- **Gefunden von:** Performance-Ingenieur, Frontend-Architekt
+- **Datei:** `vite.config.ts` Zeilen 39-42 -- kein `rollupOptions.output.manualChunks`
+- **Problem:** Alle Vendor-Libraries in einem einzigen Chunk. Jede Code-Aenderung invalidiert den gesamten Browser-Cache fuer alle Nutzer.
+- **Loesung:**
+  ```typescript
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'wouter'],
+          'vendor-radix': ['@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu',
+            '@radix-ui/react-popover', '@radix-ui/react-select', '@radix-ui/react-tabs',
+            '@radix-ui/react-tooltip', '@radix-ui/react-alert-dialog', '@radix-ui/react-checkbox',
+            '@radix-ui/react-label', '@radix-ui/react-switch', '@radix-ui/react-accordion',
+            '@radix-ui/react-collapsible', '@radix-ui/react-radio-group', '@radix-ui/react-separator',
+            '@radix-ui/react-toast', '@radix-ui/react-toggle', '@radix-ui/react-toggle-group'],
+          'vendor-utils': ['date-fns', 'zod', 'clsx', 'tailwind-merge', 'class-variance-authority'],
+          'vendor-query': ['@tanstack/react-query'],
+        }
+      }
+    }
+  }
+  ```
+  **Erwarteter Impact:** Main-Chunk von ~559 kB auf ~180 kB. Vendor-Chunks werden separat gecacht.
+ 
+### CRIT-07: Dualer API-Client mit 50+ rohen fetch()-Calls
+ 
+- **Gefunden von:** Frontend-Architekt
+- **Dateien:**
+  - Legacy: `client/src/lib/queryClient.ts` Zeilen 3-31, 40-67
+  - Neu: `client/src/lib/api/client.ts` Zeilen 10-42, 138-257
+  - 50+ rohe `fetch()` Calls verteilt ueber: `pages/service-records.tsx`, `pages/service-record-detail.tsx`, `pages/tasks.tsx`, `pages/admin/components/customer-documents-section.tsx`, `pages/admin/components/employee-documents-section.tsx`, `features/appointments/hooks/use-appointments.ts`, `features/tasks/use-tasks.ts`, `components/layout.tsx`, `pages/customer-detail.tsx`, und 20+ weitere
+- **Problem:** Zwei separate API-Abstraktionen mit unterschiedlicher CSRF-Cookie-Parsing-Logik. Der Legacy-Client parsed Cookies mit `.split("=")` (fehlerhaft bei Cookies mit `=` im Wert), der neue mit `indexOf("=")` (korrekt). 50+ Stellen umgehen beide Clients komplett -- ohne Retry-Logik, mit inkonsistenter Fehlerbehandlung, teilweise ohne `credentials: "include"`.
+- **Loesung:** Legacy-Funktionen aus `queryClient.ts` entfernen (nur QueryClient-Instanz behalten). Alle fetch()-Calls systematisch auf `api.get/post/patch/delete` aus `lib/api/client.ts` migrieren. Fuer React Query `createQueryFn` verwenden.
+ 
+---
+ 
+## Security & DSGVO
+ 
+### SEC-01: Fehlende HTTP Security Headers [HIGH]
+ 
+- **Datei:** `server/index.ts` (fehlend)
+- **Problem:** Kein CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy.
+- **Loesung:** `npm install helmet` und konfigurieren:
+  ```typescript
+  import helmet from "helmet";
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "https://storage.googleapis.com"],
+      },
+    },
+    hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+  }));
+  ```
+ 
+### SEC-02: CSRF-Schutz fehlt auf Auth-Routes [HIGH]
+ 
+- **Datei:** `server/routes/index.ts` Zeilen 26-28
+- **Problem:** Auth-Router wird VOR dem CSRF-Middleware gemountet. `/api/auth/logout`, `/api/auth/password-reset/request`, `/api/auth/password-reset/confirm`, `/api/auth/setup` haben keinen CSRF-Schutz.
+- **Loesung:** Auth-Router nach CSRF-Middleware mounten, oder CSRF individuell auf state-changing Auth-Endpoints anwenden (ausser `/auth/login`).
+ 
+### SEC-03: Keine Account-Lockout-Mechanik [HIGH]
+ 
+- **Datei:** `server/services/auth.ts` Zeilen 113-128
+- **Problem:** Unbegrenzte Login-Versuche ohne Counter, Lockout oder progressive Verzoegerung.
+- **Loesung:** `failedLoginAttempts` und `lockedUntil` Spalten in `users`-Tabelle. Nach 5 Fehlversuchen 15 min Sperre. Reset bei erfolgreichem Login.
+ 
+### SEC-04: .gitignore fehlt .env-Schutz [HIGH]
+ 
+- **Datei:** `.gitignore`
+- **Problem:** Keine `.env`, `.env.*`, `*.pem`, `*.key` Eintraege. Ein versehentliches `git add .` wuerde Secrets committen.
+- **Loesung:** Sofort ergaenzen:
+  ```
+  .env
+  .env.*
+  .env.local
+  .env.production
+  .env.development
+  *.pem
+  *.key
+  ```
+ 
+### SEC-05: Unvollstaendiger Audit-Trail [HIGH]
+ 
+- **Datei:** `shared/schema/audit.ts` Zeilen 6-17
+- **Problem:** Audit deckt nur Termine und Leistungsnachweise ab. Fehlend: Login/Logout, fehlgeschlagene Logins, Passwortwechsel, Kundendaten-CRUD, Zugriff auf Gesundheitsdaten, Rollenänderungen, Admin-Aktionen, Systemeinstellungen.
+- **Loesung:** `AUDIT_ACTIONS` erweitern um mindestens: `login_success`, `login_failed`, `password_changed`, `customer_created`, `customer_updated`, `customer_viewed`, `customer_anonymized`, `role_changed`, `settings_updated`.
+ 
+### SEC-06: Keine Datenaufbewahrungsfristen [HIGH]
+ 
+- **Datei:** `server/services/auth.ts` Zeilen 474-490; `server/index.ts` Zeilen 62-70
+- **Problem:** `cleanupExpiredSessions()` und `cleanupExpiredResetTokens()` existieren, werden aber nie aufgerufen. Kein Scheduler fuer Cleanup. Sessions und Reset-Tokens akkumulieren unbegrenzt.
+- **Loesung:** Cleanup in `setInterval` einbinden (stuendlich).
+ 
+### SEC-07: Kein Consent-Management [HIGH]
+ 
+- **Problem:** Kein System zur Einwilligungserfassung fuer Gesundheitsdaten (DSGVO Art. 9). Keine Aufzeichnung wann/wozu Einwilligung erteilt wurde.
+- **Loesung:** `customer_consents`-Tabelle mit: Einwilligungstyp, Datum, Rechtsgrundlage, Umfang, Widerrufsereignisse. Integration in Erstberatungs-Workflow.
+ 
+### SEC-08: Keine Verschluesselung fuer Gesundheitsdaten [MEDIUM]
+ 
+- **Datei:** `server/lib/db.ts` Zeilen 7-14
+- **Problem:** DB-Verbindung erzwingt kein TLS. Gesundheitsdaten (Pflegegrad, Vorerkrankungen, Anamnese) liegen unverschluesselt in der DB.
+- **Loesung:** TLS fuer DB-Verbindung erzwingen. Langfristig: Column-Level Encryption fuer medizinische Felder.
+ 
+### SEC-09: Session ohne Rotation [MEDIUM]
+ 
+- **Datei:** `server/services/auth.ts` Zeilen 113-146; `server/middleware/auth.ts` Zeilen 27-35
+- **Problem:** Session-Token wird bei Login erstellt und fuer 7 Tage nie rotiert. Kein Sliding Expiry.
+- **Loesung:** Sliding Expiry + periodische Token-Rotation.
+ 
+### SEC-10: Schwache Passwort-Policy [MEDIUM]
+ 
+- **Datei:** `shared/schema/users.ts` Zeile 108; `server/routes/auth.ts` Zeilen 215-223
+- **Problem:** Minimum nur 8 Zeichen, keine Komplexitaetsanforderungen, Passwortaenderung benoetigt kein aktuelles Passwort.
+- **Loesung:** Minimum 12 Zeichen, aktuelles Passwort bei Aenderung verlangen, Breached-Password-Check.
+ 
+### SEC-11: Passwort-Reset nicht funktional [MEDIUM]
+ 
+- **Datei:** `server/routes/auth.ts` Zeilen 152-178
+- **Problem:** Token wird erstellt und gehasht gespeichert, aber nie per E-Mail versandt. Kommentar sagt "In Produktion wurde hier eine E-Mail gesendet".
+- **Loesung:** Transactional E-Mail Service integrieren (SES, Mailgun). Alte Tokens bei neuem Request invalidieren.
+ 
+### SEC-12: CSRF-Token nicht an Session gebunden [MEDIUM]
+ 
+- **Datei:** `server/middleware/csrf.ts` Zeilen 21-55
+- **Problem:** CSRF-Token ist ein standalone Random Value, nicht kryptographisch an die Session gebunden. Bei Cookie-Injection (Subdomain XSS) umgehbar.
+- **Loesung:** HMAC-Signatur mit Server-Secret + Session-Token-Hash.
+ 
+### SEC-13: Object Storage ohne Customer-Level Auth [MEDIUM]
+ 
+- **Datei:** `server/replit_integrations/object_storage/routes.ts` Zeilen 33-44
+- **Problem:** Download-Route prueft Authentifizierung, aber nicht ob der User auf das spezifische Objekt zugreifen darf. `canAccessObjectEntity` existiert, wird aber nicht aufgerufen.
+- **Loesung:** Authorization-Check vor Download einfuegen.
+ 
+### SEC-14: Template Engine XSS [MEDIUM]
+ 
+- **Datei:** `server/services/template-engine.ts` Zeilen 122-130
+- **Problem:** Kundendaten werden per Regex in HTML-Templates eingefuegt OHNE HTML-Escaping. `escapeHtml`-Funktion existiert (Zeile 150), wird aber nur fuer Dokumenttitel verwendet.
+- **Loesung:** `escapeHtml()` auf alle Placeholder-Werte anwenden.
+ 
+### SEC-15: Setup-Endpoint Race Condition [MEDIUM]
+ 
+- **Datei:** `server/routes/auth.ts` Zeilen 248-301
+- **Problem:** `/auth/setup` prueft `hasAnyAdmin()`, dann erstellt Admin. TOCTOU: Zwei gleichzeitige Requests koennten beide die Pruefung passieren.
+- **Loesung:** Serializable Transaction mit Check + Insert.
+ 
+### SEC-16: JSON Body ohne Size Limit [MEDIUM]
+ 
+- **Datei:** `server/index.ts` Zeile 13
+- **Problem:** `express.json()` ohne `limit`. Oversized Payloads (Base64 Signaturen) koennen Server-Memory verbrauchen.
+- **Loesung:** `express.json({ limit: "2mb" })`.
+ 
+### SEC-17: Signatur-Daten ohne Max-Laenge [MEDIUM]
+ 
+- **Dateien:** `shared/schema/service-records.ts` Zeile 69; `shared/schema/appointments.ts` Zeile 39; `shared/schema/documents.ts` Zeilen 87-88
+- **Problem:** Signature-Data (Base64 PNG) hat nur `min(1)` Validierung, kein Maximum. Beliebig grosse Strings moeglich.
+- **Loesung:** `.max(500000)` und Regex-Validierung fuer Base64-Image-Format.
+ 
+### SEC-18: Admin Self-Protection mit unvalidiertem Input [MEDIUM]
+ 
+- **Datei:** `server/routes/admin/employees.ts` Zeilen 141-155
+- **Problem:** Self-Protection-Checks nutzen `req.body` statt Zod-validierte Daten. Kein "letzter Admin"-Schutz.
+- **Loesung:** Checks nach Zod-Validierung verschieben. `count()` auf aktive Admins bevor `isAdmin: false` erlaubt wird.
+ 
+### SEC-19: Signatur-Integritaet ohne HMAC [LOW]
+ 
+- **Datei:** `server/services/signature-integrity.ts` Zeilen 1-5
+- **Problem:** Plain SHA-256 statt HMAC. Bei DB-Zugriff koennten Signatur und Hash gleichzeitig manipuliert werden.
+- **Loesung:** HMAC-SHA-256 mit Server-seitigem Secret.
+ 
+### SEC-20: Batch-Services ohne Customer-Access-Check [LOW]
+ 
+- **Datei:** `server/routes/appointments.ts` Zeilen 110-123
+- **Problem:** `GET /appointments/batch-services` prueft nicht ob der User auf die Kunden der Termine zugreifen darf.
+- **Loesung:** Ergebnisse durch zugewiesene Kunden-IDs filtern.
+ 
+### SEC-21: Session Cookie sameSite=lax statt strict [LOW]
+ 
+- **Datei:** `server/middleware/auth.ts` Zeilen 27-35
+- **Problem:** Session-Cookie nutzt `sameSite: "lax"`, CSRF-Cookie nutzt `"strict"` -- Inkonsistenz.
+- **Loesung:** Session-Cookie auf `sameSite: "strict"` aendern.
+ 
+---
+ 
+## Backend & API
+ 
+### BE-01: Fat Route Handlers mit Business-Logik [HIGH]
+ 
+- **Dateien:**
+  - `server/routes/admin/customers.ts` (871 Zeilen)
+  - `server/routes/appointments.ts` (500+ Zeilen)
+  - `server/routes/budget.ts` (500+ Zeilen)
+  - `server/routes/time-entries.ts` (450+ Zeilen)
+- **Problem:** Route-Handler enthalten Business-Logik (z.B. Employee-Matching-Algorithmus in admin/customers.ts). Keine Service-Layer-Trennung.
+- **Loesung:** Business-Logik in dedizierte Service-Dateien extrahieren. Routes nur fuer Request-Parsing, Validation, Response.
+ 
+### BE-02: Direkter DB-Zugriff aus Route-Handlern [HIGH]
+ 
+- **Dateien:**
+  - `server/routes/admin/employees.ts` Zeilen 379-420 (`POST /users/:id/anonymize`)
+  - `server/routes/admin/customers.ts` Zeilen 619-675 (`matchEmployees`)
+- **Problem:** Diese Handler umgehen das IStorage-Interface und importieren `db` direkt. Untergräbt die Storage-Abstraktion.
+- **Loesung:** Alle DB-Operationen in Storage- oder Service-Layer verschieben.
+ 
+### BE-03: Inkonsistente Fehler-Response-Formate [MEDIUM]
+ 
+- **Problem:** Manche Endpoints nutzen `{ error: "CODE", message: "..." }`, andere `{ message: "..." }` ohne Error-Code, manche geben Plain-Text zurueck. `asyncHandler` + throw-Muster ist nicht durchgaengig.
+- **Loesung:** Einheitliches Error-Response-Format definieren und durchsetzen.
+ 
+### BE-04: Auth Middleware schluckt ungueltige Tokens [MEDIUM]
+ 
+- **Datei:** `server/middleware/auth.ts`
+- **Problem:** Bei ungueltigen/abgelaufenen Tokens wird `req.user` auf `null` gesetzt statt einen Fehler zu werfen. Der Request geht als "nicht authentifiziert" weiter statt sofort abgelehnt zu werden.
+- **Loesung:** Bei vorhandenem aber ungueltigem Token: 401 zurueckgeben.
+ 
+### BE-05: Kein API-Versioning [MEDIUM]
+ 
+- **Problem:** Alle Endpunkte unter `/api/` ohne Versions-Praefix. Breaking Changes sind nicht isolierbar.
+- **Loesung:** `/api/v1/` Praefix einfuehren fuer zukuenftige Kompatibilitaet.
+ 
+### BE-06: Inkonsistente Pagination [MEDIUM]
+ 
+- **Problem:** Manche Endpoints haben Pagination, manche geben alle Datensaetze zurueck (z.B. `getCustomers()`).
+- **Loesung:** Einheitliches Pagination-Pattern mit `page`, `limit`, `total` Response-Envelope.
+ 
+### BE-07: Passwortaenderung invalidiert nicht andere Sessions [MEDIUM]
+ 
+- **Datei:** `server/routes/auth.ts` Zeilen 210-241
+- **Problem:** Bei Passwortaenderung werden andere aktive Sessions des Users nicht beendet.
+- **Loesung:** `logoutAllSessions(userId)` aufrufen (existiert bereits in auth.ts).
+ 
+### BE-08: Environment Variables ohne Validierung [MEDIUM]
+ 
+- **Datei:** `server/lib/db.ts` Zeile 8
+- **Problem:** `process.env.DATABASE_URL!` mit Non-Null-Assertion. Fehlende Env-Var verursacht kryptischen Runtime-Error.
+- **Loesung:** Env-Vars bei Startup validieren (z.B. mit `envalid`).
+ 
+### BE-09: `any`-Types im Storage Interface [MEDIUM]
+ 
+- **Problem:** Einige Storage-Methoden nutzen `any` als Rueckgabetyp statt typisierter Interfaces.
+- **Loesung:** Alle `any`-Types durch konkrete Typen ersetzen.
+ 
+### BE-10: Error-Matching per String [MEDIUM]
+ 
+- **Problem:** Error-Handler vergleichen Fehlermeldungen als Strings statt Error-Klassen zu nutzen.
+- **Loesung:** Dedizierte Error-Klassen (`NotFoundError`, `ValidationError`, etc.) konsequent nutzen.
+ 
+### BE-11: Tote Code in Error-Modul [LOW]
+ 
+- **Datei:** `server/lib/errors.ts` Zeilen 121-178
+- **Problem:** Legacy Error-Helper-Funktionen (`sendNotFound`, `sendBadRequest`, etc.) sind seit Einfuehrung von `asyncHandler` vermutlich ungenutzt.
+- **Loesung:** Nutzung pruefen, falls ungenutzt entfernen.
+ 
+---
+ 
+## Datenbank & Datenintegritaet
+ 
+### DB-01: Fehlende CHECK Constraints auf Enum-Spalten [HIGH]
+ 
+- **Dateien:** Nahezu alle Schema-Dateien mit `text()`-Spalten fuer Enums (status, appointmentType, role, entryType, billingType, contactType, budgetType, transactionType, etc.)
+- **Problem:** Keine DB-Level-Erzwingung fuer gueltige Werte. Nur Zod validiert, aber direkter DB-Zugriff, Migration-Scripts oder ORM-Bugs koennen ungueltige Werte einfuegen.
+- **Loesung:** PostgreSQL CHECK Constraints oder `pgEnum` fuer alle Enum-Spalten:
+  ```sql
+  ALTER TABLE appointments ADD CONSTRAINT appointments_status_check
+    CHECK (status IN ('scheduled', 'in-progress', 'documenting', 'completed', 'cancelled'));
+  ```
+ 
+### DB-02: Fehlende NOT NULL Constraints auf kritischen Feldern [HIGH]
+ 
+- **Datei:** `shared/schema/customers.ts` Zeilen 16-27
+- **Problem:** `vorname`, `nachname`, `strasse`, `nr`, `plz`, `stadt` sind nullable, obwohl sie fuer aktive Kunden erforderlich sein sollten (Patientenidentifikation).
+- **Loesung:** NOT NULL Constraints mit Backfill-Migration, oder CHECK Constraint konditioniert auf Status.
+ 
+### DB-03: Fehlender Soft-Delete-Index [HIGH]
+ 
+- **Datei:** `shared/schema/appointments.ts` Zeilen 45-53
+- **Problem:** Fast jede Appointment-Query filtert auf `isNull(appointments.deletedAt)`, aber kein Index deckt `deletedAt` ab. Geloeschte Zeilen werden bei jeder Abfrage durchgescannt.
+- **Loesung:** Partial Index: `CREATE INDEX appointments_active_idx ON appointments (date) WHERE deleted_at IS NULL;`
+ 
+### DB-04: N+1 Query in `createFullCustomer` [HIGH]
+ 
+- **Datei:** `server/storage/customer-management.ts` Zeilen 270-384
+- **Problem:** 8+ sequentielle DB-Queries ohne Transaction. Jeder ist ein separater Round-Trip zur Neon Serverless DB.
+- **Loesung:** Alles in einer `db.transaction()` buendeln (loest gleichzeitig CRIT-01).
+ 
+### DB-05: Budget-Summary holt alle Zeilen client-seitig [HIGH]
+ 
+- **Datei:** `server/storage/budget-ledger.ts` Zeilen 325-402
+- **Problem:** `getBudgetSummary` holt ALLE Allocations und Transactions fuer einen Kunden, aggregiert dann in JavaScript mit `.reduce()`. Bei Langzeit-Kunden tausende Zeilen.
+- **Loesung:** SQL-Aggregation statt JavaScript:
+  ```sql
+  SELECT COALESCE(SUM(amount_cents), 0) as total_allocated
+  FROM budget_allocations WHERE customer_id = $1 AND budget_type = $2
+    AND valid_from <= $3 AND (expires_at IS NULL OR expires_at >= $3);
+  ```
+ 
+### DB-06: Denormalisierte Daten in Customers-Tabelle [MEDIUM]
+ 
+- **Datei:** `shared/schema/customers.ts` Zeilen 14-27
+- **Problem:** Sowohl `name` als auch `vorname`/`nachname`, sowohl `address` als auch `strasse`/`nr`/`plz`/`stadt`. Manuelle Sync in `customer-management.ts`.
+- **Loesung:** Composite-Spalten entfernen, Generated Columns oder Application-Level Formatting nutzen.
+ 
+### DB-07: `updatedAt` nicht automatisch aktualisiert [MEDIUM]
+ 
+- **Problem:** `updatedAt` wird nur bei INSERT auf `defaultNow()` gesetzt, nicht bei UPDATE. Einige Update-Pfade vergessen `updatedAt: new Date()`.
+- **Loesung:** PostgreSQL Trigger:
+  ```sql
+  CREATE OR REPLACE FUNCTION update_updated_at() RETURNS TRIGGER AS $$
+  BEGIN NEW.updated_at = now(); RETURN NEW; END; $$ LANGUAGE plpgsql;
+  ```
+ 
+### DB-08: Pagination ohne ORDER BY [MEDIUM]
+ 
+- **Datei:** `server/storage.ts` Zeilen 495-509
+- **Problem:** `getAppointmentsWithCustomersPaginated` nutzt `LIMIT`/`OFFSET` ohne `ORDER BY`. Ergebnisse koennen zwischen Seiten dupliziert/uebersprungen werden.
+- **Loesung:** `.orderBy(appointments.date, appointments.scheduledStart)` vor `.limit()`.
+ 
+### DB-09: `getCustomers()` ohne Pagination [MEDIUM]
+ 
+- **Datei:** `server/storage.ts` Zeilen 215-217
+- **Problem:** `db.select().from(customers)` ohne WHERE und ohne LIMIT. Unbegrenztes Result Set bei wachsender Kundenzahl.
+- **Loesung:** Pagination oder Deprecation zugunsten `getCustomersPaginated`.
+ 
+### DB-10: Race Condition bei `addCustomerBudget` [HIGH]
+ 
+- **Datei:** `server/storage/customer-mgmt/budgets.ts` Zeilen 30-47
+- **Problem:** Update des alten Records + Insert des neuen ohne Transaction. Gleichzeitige Requests koennen zwei "aktuelle" Budget-Records erzeugen.
+- **Loesung:** Transaction mit `SELECT ... FOR UPDATE`.
+ 
+### DB-11: Inkonsistente Loeschstrategie [MEDIUM]
+ 
+- **Problem:** Appointments nutzen Soft Delete (`deletedAt`), Customers nutzen Hard Delete, Tasks nutzen Hard Delete. Fuer Healthcare mit 10-Jahres-Aufbewahrungspflicht problematisch.
+- **Loesung:** Einheitlich Soft Delete, besonders fuer Customers und Tasks.
+ 
+### DB-12: Keine Migrations-Dateien vorhanden [HIGH]
+ 
+- **Datei:** `migrations/` Verzeichnis (leer)
+- **Problem:** Schema-Sync vermutlich ueber `drizzle-kit push` (direkt). Keine versionierten Migrations fuer Reproduzierbarkeit, Rollback, Audit.
+- **Loesung:** Auf `drizzle-kit generate` wechseln, Migrations committen.
+ 
+### DB-13: Historisierte Records ohne Overlap-Constraint [MEDIUM]
+ 
+- **Dateien:** Alle History-Tabellen (care_level, pricing, compensation, insurance, assignment)
+- **Problem:** Kein DB-Constraint verhindert ueberlappende Gueltigkeitszeitraeume fuer dieselbe Entitaet. Gleichzeitige Updates koennen ueberlappende Perioden erzeugen.
+- **Loesung:** PostgreSQL Exclusion Constraint mit `daterange`.
+ 
+### DB-14: Fehlende ON DELETE Klauseln [MEDIUM]
+ 
+- **Datei:** `shared/schema/appointments.ts` Zeilen 15-18
+- **Problem:** FK-Referenzen ohne explizites `onDelete`-Verhalten. PostgreSQL Default ist `NO ACTION`.
+- **Loesung:** Explizit `onDelete: "restrict"` fuer Datenintegritaet.
+ 
+### DB-15: Keine Connection-Retry-Logik [MEDIUM]
+ 
+- **Datei:** `server/lib/db.ts`
+- **Problem:** Neon Serverless Connections koennen bei Cold Starts oder Netzwerkproblemen getrennt werden. Kein Retry-Mechanismus.
+- **Loesung:** Connection-Retry-Logik oder Neon Built-in Retry nutzen.
+ 
+---
+ 
+## Frontend & TypeScript
+ 
+### FE-01: `Record<string, unknown>` als Mutation-Payload [HIGH]
+ 
+- **Dateien:**
+  - `client/src/features/appointments/hooks/use-appointment-mutations.ts` Zeilen 15, 30, 45
+  - `client/src/features/appointments/hooks/use-documentation-form.ts` Zeile 225
+  - `client/src/pages/edit-appointment.tsx` Zeile 111
+  - `client/src/pages/admin/customer-edit.tsx` Zeile 180
+- **Problem:** Mutation-Funktionen akzeptieren `Record<string, unknown>` statt typisierter Interfaces. Typisierte Interfaces existieren in `lib/api/types.ts`, werden aber nicht genutzt.
+- **Loesung:** `Record<string, unknown>` durch spezifische Request-Types ersetzen.
+ 
+### FE-02: Globales staleTime: Infinity [HIGH]
+ 
+- **Datei:** `client/src/lib/queryClient.ts` Zeile 93
+- **Problem:** `staleTime: Infinity` und `refetchOnWindowFocus: false` als Default. Queries die keinen eigenen `staleTime` setzen, refetchen nie. Nutzer sehen veraltete Termindaten.
+- **Loesung:** Default auf `staleTime: 60_000` und `refetchOnWindowFocus: true`.
+ 
+### FE-03: Hardcoded Farb-Strings statt Design-System Tokens [HIGH]
+ 
+- **Dateien:** 25+ Dateien mit `bg-teal-600 hover:bg-teal-700`
+- **Problem:** Design-System Token `btnPrimary` existiert in `design-system/tokens.ts`, wird aber in 25+ Dateien nicht genutzt. Markenwechsel erfordert 25+ Dateien aendern.
+- **Loesung:** Button `variant="default"` oder `componentStyles.btnPrimary` verwenden.
+ 
+### FE-04: Inkonsistente Query Key Strategien [MEDIUM]
+ 
+- **Problem:** Manche Features nutzen Query Key Factories (customers, time-tracking -- gut), andere Ad-hoc-Strings oder API-URLs als Keys (appointments, tasks, service-records -- schlecht).
+- **Loesung:** Einheitliche Query Key Factory pro Feature-Modul.
+ 
+### FE-05: Zod nicht fuer Client-Side Form Validation genutzt [MEDIUM]
+ 
+- **Problem:** `@hookform/resolvers` ist installiert, 15 Zod-Schemas existieren, aber kein einziges Frontend-Form nutzt `zodResolver`. Alle Validierung imperativ in Submit-Handlern mit Toast-Benachrichtigungen.
+- **Loesung:** Zod-Schemas mit `zodResolver` in React Hook Form integrieren.
+ 
+### FE-06: God-Components ueber 500 Zeilen [MEDIUM]
+ 
+- **Dateien:**
+  - `client/src/pages/admin/document-templates.tsx` (696 Zeilen)
+  - `client/src/pages/admin/customer-edit.tsx` (630+ Zeilen)
+  - `client/src/pages/admin/services.tsx` (550+ Zeilen)
+  - `client/src/components/budget/BudgetLedgerSection.tsx` (550+ Zeilen)
+- **Loesung:** Data-Fetching in Hooks extrahieren, Form-Sektionen in Sub-Komponenten aufteilen.
+ 
+### FE-07: Duplizierte Document-Section-Komponenten [MEDIUM]
+ 
+- **Dateien:**
+  - `client/src/pages/admin/components/customer-documents-section.tsx` (431 Zeilen)
+  - `client/src/pages/admin/components/employee-documents-section.tsx` (319 Zeilen)
+- **Problem:** Fast identische Struktur, nur Entity-Typ und API-Pfad unterscheiden sich. ~300 Zeilen Duplikation.
+- **Loesung:** Generische `DocumentsSection<TEntity>` Komponente.
+ 
+### FE-08: Duplizierte User-Type-Definition [MEDIUM]
+ 
+- **Dateien:**
+  - `client/src/hooks/use-auth.tsx` Zeilen 12-21 (`User` mit `roles: string[]`)
+  - `client/src/lib/api/types.ts` Zeilen 42-51 (`AuthUser` mit `roles: EmployeeRole[]`)
+- **Loesung:** Einen einzigen `AuthUser`-Type definieren und ueberall verwenden.
+ 
+### FE-09: `as any` Type Assertion [MEDIUM]
+ 
+- **Datei:** `client/src/pages/admin/services.tsx` Zeile 208
+- **Problem:** `unitType: form.unitType as any` umgeht Type-Safety.
+- **Loesung:** Form-State korrekt typen.
+ 
+### FE-10: Hardcoded Page Background Gradient (30+ Duplikate) [MEDIUM]
+ 
+- **Problem:** `bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]` in 30+ Dateien, obwohl `PageShell`-Komponente und Design-Token existieren.
+- **Loesung:** Alle Seiten auf `<PageShell>` migrieren.
+ 
+### FE-11: `window.confirm()` statt Design-System Dialog [MEDIUM]
+ 
+- **Datei:** `client/src/pages/document-appointment.tsx` Zeile 206
+- **Loesung:** Durch `AlertDialog` ersetzen (Pattern existiert in `appointment-card.tsx`).
+ 
+### FE-12: Inkonsistente Feature-Modul-Struktur [LOW]
+ 
+- **Problem:** `appointments/` hat vollstaendige Struktur, `tasks/` hat flache Dateien, `customers/` hat nur Hooks.
+- **Loesung:** Einheitliche Konvention: `feature/hooks/`, `feature/components/`, `feature/utils.ts`, `feature/index.ts`.
+ 
+### FE-13: Dashboard eagerly loaded [LOW]
+ 
+- **Datei:** `client/src/App.tsx` Zeile 12
+- **Problem:** Dashboard wird eager importiert, obwohl es hinter ProtectedRoute liegt.
+- **Loesung:** `const Dashboard = lazy(() => import("@/pages/dashboard"));`
+ 
+### FE-14: Inline Component Factory in Routes [LOW]
+ 
+- **Datei:** `client/src/App.tsx` Zeilen 115, 133, 136, 142, 145, 163, 166
+- **Problem:** `{() => <ProtectedRoute component={() => <CustomerDetail />} />}` erzeugt bei jedem Render eine neue Komponenten-Referenz. Kann Suspense-Fallback-Flicker verursachen.
+- **Loesung:** Stabile Wrapper-Komponenten oder `children`-Pattern.
+ 
+---
+ 
+## UX & Accessibility
+ 
+### UX-01: Kein Skip-to-Content Link [CRITICAL]
+ 
+- **Datei:** `client/src/components/layout.tsx`
+- **Problem:** Keine Moeglichkeit fuer Keyboard/Screenreader-Nutzer, direkt zum Hauptinhalt zu springen.
+- **Loesung:**
+  ```tsx
+  <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-[999] focus:p-4">
+    Zum Hauptinhalt springen
+  </a>
+  ```
+ 
+### UX-02: Globale Suche nicht Keyboard-zugaenglich [CRITICAL]
+ 
+- **Datei:** `client/src/components/layout.tsx` Zeilen 32-133
+- **Problem:** Keine `role="combobox"`, kein `aria-activedescendant`, keine Pfeiltasten-Navigation, kein Escape zum Schliessen, kein Keyboard-Shortcut (Ctrl+K).
+- **Loesung:** Existierende `Command`-Komponente (cmdk-basiert) verwenden oder ARIA Combobox Pattern implementieren.
+ 
+### UX-03: Keine Breadcrumbs trotz vorhandener Komponente [HIGH]
+ 
+- **Datei:** `client/src/components/ui/breadcrumb.tsx` existiert (115 Zeilen), wird aber nirgends importiert.
+- **Problem:** 3-4 Ebenen tiefe Hierarchie ohne kontextuelle Navigation. Pflegekraefte verlieren die Orientierung.
+- **Loesung:** Breadcrumbs auf allen Unterseiten aktivieren.
+ 
+### UX-04: Forms nutzen nicht React Hook Form [HIGH]
+ 
+- **Dateien:** `pages/new-appointment.tsx`, `pages/admin/customer-new.tsx`, `pages/login.tsx`
+- **Problem:** Trotz vollstaendig implementierter `Form`/`FormField`/`FormControl`/`FormMessage`-Komponenten nutzen Seiten manuelles `useState`. Kein `aria-invalid`, keine Inline-Validierung.
+- **Loesung:** Forms auf `useForm` + `zodResolver` migrieren.
+ 
+### UX-05: Multi-Step Form ohne Feld-Level Fehler-Feedback [HIGH]
+ 
+- **Datei:** `client/src/pages/admin/customer-new.tsx` Zeilen 359-371
+- **Problem:** Bei Validierungsfehler nur Toast "Pflichtfelder ausfuellen". Felder werden nicht hervorgehoben, kein Auto-Scroll zum ersten Fehler.
+- **Loesung:** Fehlerhafte Felder rot markieren, Inline-Fehlermeldungen, Auto-Scroll.
+ 
+### UX-06: Fehlende ARIA Labels auf Navigation [HIGH]
+ 
+- **Datei:** `client/src/components/layout.tsx` Zeilen 216-247
+- **Problem:** Bottom Nav ohne `<nav>`, ohne `role="navigation"`, ohne `aria-label`. Inline SVGs ohne zugaengliche Labels.
+- **Loesung:** `<nav aria-label="Hauptnavigation">`, `aria-label` auf Links, `aria-current="page"`.
+ 
+### UX-07: DayButton ohne zugaenglichen Namen [HIGH]
+ 
+- **Datei:** `client/src/pages/dashboard.tsx` Zeilen 38-56
+- **Problem:** Tagesbuttons zeigen nur "Mo 24" ohne vollen Datums-Label, ohne `aria-pressed`/`aria-selected`.
+- **Loesung:** `aria-label` mit vollstaendigem Datum, `aria-pressed` fuer Selektion.
+ 
+### UX-08: Keine `aria-live` Regionen [HIGH]
+ 
+- **Problem:** Null `aria-live` Regionen im gesamten Code. Dynamische Inhaltsupdates (Terminliste, Suchergebnisse, Toasts, Validierungsfehler) werden Screenreader-Nutzern nicht angekuendigt.
+- **Loesung:** `aria-live="polite"` fuer Terminlisten, Suchergebnisse, Fehler-Zusammenfassungen.
+ 
+### UX-09: Keine Skeleton Loading States [MEDIUM]
+ 
+- **Problem:** Trotz vorhandener `Skeleton`-Komponente nur Spinner-Loading. Layout-Shifts und keine Inhaltsvorschau.
+- **Loesung:** Skeleton Screens fuer Dashboard, Kundendetail, Termindetail.
+ 
+### UX-10: Keine Desktop-Navigation [MEDIUM]
+ 
+- **Datei:** `client/src/components/layout.tsx` Zeile 216
+- **Problem:** Bottom Nav per `md:hidden` auf Desktop versteckt, aber keine Desktop-Alternative (Sidebar/Top-Nav). Desktop-Nutzer erreichen Sektionen nur ueber User-Dropdown oder URL.
+- **Loesung:** Desktop Sidebar oder horizontale Sub-Navigation.
+ 
+### UX-11: 404-Seite auf Englisch [MEDIUM]
+ 
+- **Datei:** `client/src/pages/not-found.tsx`
+- **Problem:** "404 Page Not Found" mit Entwickler-Text in einer ansonsten komplett deutschen App.
+- **Loesung:** Ins Deutsche uebersetzen mit User-freundlicher Nachricht.
+ 
+### UX-12: Kein Unsaved-Changes-Warning [MEDIUM]
+ 
+- **Problem:** Keine Formulare tracken Dirty-State oder warnen bei Navigation mit ungespeicherten Aenderungen.
+- **Loesung:** `beforeunload` Event + Wouter Navigation-Blocker.
+ 
+### UX-13: Service-Details auf 55 Zeichen limitiert [MEDIUM]
+ 
+- **Datei:** `client/src/pages/document-appointment.tsx` Zeile 252
+- **Problem:** Fuer Pflegedokumentation sehr restriktiv. Keine Erklaerung warum.
+- **Loesung:** Limit erhoehen oder erklaeren falls regulatorisch bedingt.
+ 
+### UX-14: Wochenansicht nur Mo-Fr [MEDIUM]
+ 
+- **Datei:** `client/src/pages/dashboard.tsx` Zeile 81
+- **Problem:** Nur 5 Tage generiert. Wochenend-Termine nicht erreichbar.
+- **Loesung:** Sa/So anzeigen (mindestens wenn Termine vorhanden), oder Datumswahl ermoeglichen.
+ 
+### UX-15: Keine Bestaetigungs-Dialog bei Zeiteintrag-Loeschung [MEDIUM]
+ 
+- **Datei:** `client/src/pages/my-times.tsx` Zeilen 181-186
+- **Problem:** `handleDeleteEntry` ohne Bestaetigungsdialog (im Gegensatz zu Terminen mit AlertDialog).
+- **Loesung:** AlertDialog hinzufuegen.
+ 
+### UX-16: Kein Success-Feedback bei Dokumentation [HIGH]
+ 
+- **Datei:** `client/src/pages/document-appointment.tsx` Zeilen 358-377
+- **Problem:** Nach erfolgreicher Dokumentation kein sichtbarer Success-Toast. Navigiert sofort weg.
+- **Loesung:** Success-Toast sicherstellen bevor Navigation erfolgt.
+ 
+### UX-17: Inkonsistente Error/Loading States [MEDIUM]
+ 
+- **Problem:** Manche Seiten nutzen `ErrorState`/`EmptyState` Pattern-Komponenten, manche Plain-Text mit generischem Spinner.
+- **Loesung:** Einheitlichen `AsyncContent`-Wrapper erstellen.
+ 
+### UX-18: Color Contrast unter WCAG AA [MEDIUM]
+ 
+- **Datei:** `client/src/index.css` Zeile 68
+- **Problem:** `--muted-foreground: 215 20% 45%` ergibt ~4.2:1 Kontrast gegen den Hintergrund. WCAG AA verlangt 4.5:1.
+- **Loesung:** Auf mindestens HSL 215 20% 38% abdunkeln.
+ 
+### UX-19: Doppelte Container/Background auf mehreren Seiten [MEDIUM]
+ 
+- **Dateien:** `pages/my-times.tsx`, `pages/admin/customer-new.tsx`, `pages/admin/dashboard.tsx`
+- **Problem:** Seiten in Layout gerendert (max-w-2xl), fuegen dann eigenen Container (max-w-6xl) hinzu. Doppeltes Padding, geclippter Inhalt.
+- **Loesung:** `PageShell` nutzen oder Layout-MaxWidth konfigurierbar machen.
+ 
+### UX-20: Bottom Nav ueberlappt Inhalt auf iOS [MEDIUM]
+ 
+- **Datei:** `client/src/components/layout.tsx` Zeile 153
+- **Problem:** `pb-20` beruecksichtigt nicht `env(safe-area-inset-bottom)` auf iPhones mit Dynamic Island.
+- **Loesung:** `pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0`.
+ 
+---
+ 
+## Performance
+ 
+### PERF-01: Kein Vendor Chunk Splitting [CRITICAL]
+ 
+Siehe CRIT-06 oben. `manualChunks` in `vite.config.ts` fehlt. Impact: 559 kB -> ~180 kB.
+ 
+### PERF-02: `vitest` in Production Dependencies [HIGH]
+ 
+- **Datei:** `package.json` Zeile 66
+- **Problem:** Test-Framework in `dependencies` statt `devDependencies`.
+- **Loesung:** `npm uninstall vitest && npm install --save-dev vitest`
+ 
+### PERF-03: N+1 in `updateAppointmentServiceDocumentation` [HIGH]
+ 
+- **Datei:** `server/storage.ts` Zeilen 974-991
+- **Problem:** Separates UPDATE pro Service in einer Schleife. Bei 5 Services = 5 Round-Trips.
+- **Loesung:** `Promise.all` innerhalb einer Transaction:
+  ```typescript
+  await db.transaction(async (tx) => {
+    await Promise.all(serviceUpdates.map(su =>
+      tx.update(appointmentServices).set({...}).where(and(...))
+    ));
+  });
+  ```
+  Impact: ~100ms -> ~25ms auf Documentation Save.
+ 
+### PERF-04: `matchEmployees` sequentielle Queries [HIGH]
+ 
+- **Datei:** `server/routes/admin/customers.ts` Zeilen 618-680
+- **Problem:** 4 unabhaengige DB-Queries sequentiell statt parallel.
+- **Loesung:** `Promise.all([...])`. Impact: ~100ms -> ~30ms.
+ 
+### PERF-05: Keine Static Asset Cache Headers [HIGH]
+ 
+- **Datei:** `server/static.ts` Zeilen 13-18
+- **Problem:** `express.static(distPath)` ohne `maxAge`. Vite-generierte Dateien mit Content-Hash koennten unbegrenzt gecacht werden.
+- **Loesung:** `express.static(distPath, { maxAge: '1y', immutable: true })`.
+ 
+### PERF-06: `signatureData` in Listen-Responses [LOW]
+ 
+- **Datei:** `server/storage.ts` Zeile 43
+- **Problem:** Base64 Signatur-Daten (10-50 kB pro Termin) werden bei Listenabfragen mitgeladen. 10 Termine = 100-500 kB unnoetige Daten.
+- **Loesung:** `signatureData` aus den List-Select-Fields entfernen.
+ 
+### PERF-07: `libphonenumber-js` im Main Bundle [MEDIUM]
+ 
+- **Datei:** `shared/schema/common.ts` Zeile 3
+- **Problem:** ~60 kB Library wird global importiert, obwohl Telefon-Validierung nur in wenigen Forms noetig ist.
+- **Loesung:** Server-seitig validieren oder dynamisch importieren.
+ 
+### PERF-08: Breite Cache-Invalidierung bei Mutations [MEDIUM]
+ 
+- **Datei:** `client/src/features/appointments/hooks/use-appointments.ts` Zeilen 97-100
+- **Problem:** `useUpdateAppointment` invalidiert ALLE Appointment-Queries statt nur die betroffenen.
+- **Loesung:** Praezise Invalidierung nach Appointment-ID und Datum.
+ 
+### PERF-09: `getCustomers()` holt alle Spalten [MEDIUM]
+ 
+- **Datei:** `server/storage.ts` Zeile 216
+- **Problem:** `SELECT *` fuer Listendarstellung, die nur Name und Status braucht.
+- **Loesung:** `getCustomersList()` mit reduzierten Spalten. Impact: 30-50% kleinere Response.
+ 
+### PERF-10: Dynamic Imports in Storage-Methoden [LOW]
+ 
+- **Datei:** `server/storage.ts` Zeilen 900-916, 918-943
+- **Problem:** `await import("@shared/schema")` und `await import("drizzle-orm")` bei jedem Aufruf statt statischem Import.
+- **Loesung:** Imports an den Dateianfang verschieben.
+ 
+### PERF-11: `@types/*` in Production Dependencies [MEDIUM]
+ 
+- **Datei:** `package.json` Zeilen 38-40
+- **Problem:** `@types/bcrypt`, `@types/compression`, `@types/cookie-parser` in `dependencies`.
+- **Loesung:** Nach `devDependencies` verschieben.
+ 
+### PERF-12: Kein Navigation Prefetching [LOW]
+ 
+- **Datei:** `client/src/components/layout.tsx`
+- **Problem:** Keine Route-Chunk oder Daten-Prefetch bei Hover/Touchstart auf Navigation.
+- **Loesung:** `onMouseEnter`/`onTouchStart` Handler fuer Chunk + Query Prefetch. Impact: 200-500ms gefuehlte Navigation.
+ 
+---
+ 
+## Positive Aspekte
+ 
+Die folgenden Aspekte des Codes sind gut umgesetzt und sollten beibehalten werden:
+ 
+### Security
+- Bcrypt mit 12 Rounds fuer Passwort-Hashing
+- Session-Tokens werden vor DB-Speicherung gehasht (SHA-256)
+- Drizzle ORM verhindert SQL-Injection konsistent
+- Zod-Validierung auf fast allen Endpoints
+- Password-Hash wird aus allen API-Responses entfernt
+- Rollen-basierte Zugriffskontrolle mit Customer-Assignment-Isolation
+- Generische Login-Fehlermeldungen (kein User-Enumeration)
+- Korrekte Cache-Headers (`private, no-store` auf Auth)
+- Mitarbeiter-Anonymisierung mit Audit-Trail (DSGVO-konform)
+ 
+### Frontend
+- 29/32 Routes lazy-loaded mit React.lazy() und Suspense
+- Design-System Token Architektur (tokens.ts) -- gut entworfen, Adoption muss steigen
+- React.memo auf AppointmentCard und AppointmentList
+- Mobile-First Responsive Design (SearchableSelect: Popover/Drawer Wechsel, Touch Swipe)
+- CSRF-Schutz im neueren API-Client
+- ErrorBoundary mit deutscher Fehlermeldung und Retry
+- Barrel Exports fuer Feature-Module
+ 
+### Backend
+- Saubere Storage-Layer-Abstraktion (IStorage Interface)
+- Compression Middleware korrekt platziert
+- Cache-Header Middleware mit Tier-System (stable/semi-stable/volatile)
+- Session-Caching (2min TTL) und Customer-IDs-Caching (10min TTL)
+ 
+### Datenbank
+- Umfassende Indizierung (7 Indexes auf Appointments-Tabelle)
+- Budget-Ledger Double-Entry Pattern fachlich korrekt (45b, 45a, 39/42a SGB XI)
+- FIFO-Verbrauch mit Carryover-Expiration domain-appropriate
+- Finanzbetraege in Cents (Integer) -- keine Floating-Point-Fehler
+- Korrekte Timestamp-Behandlung mit `withTimezone: true`
+- DB Connection Pooling mit sinnvollen Neon-Settings
+ 
+### Performance
+- Event-Listener-Cleanup: Alle 5 `addEventListener` haben korrespondierendes `removeEventListener`
+- Batch-Endpoint (`/appointments/batch-services`) verhindert N+1 auf Client-Seite
+- Date-fns Tree-Shaking funktioniert korrekt
+ 
+---
+ 
+## Priorisierter Aktionsplan
+ 
+### Phase 1: Sofort -- Woche 1 (Security & Integritaet)
+ 
+| # | Aufgabe | Aufwand | Bereich |
+|---|---------|---------|---------|
+| 1 | SHA-256 Passwort-Fallback Auto-Upgrade + Deadline zum Entfernen | 2h | Security |
+| 2 | `.gitignore` um `.env*`, `*.pem`, `*.key` erweitern | 5min | Security |
+| 3 | `helmet` installieren und konfigurieren | 30min | Security |
+| 4 | `express-rate-limit` auf Login + Passwort-Reset | 1h | Security |
+| 5 | CSRF auf Auth-Routes anwenden (Route-Reihenfolge in index.ts) | 30min | Security |
+| 6 | `db.transaction()` fuer createFullCustomer, createCascadeConsumption, createErstberatungWithCustomer | 3h | DB |
+| 7 | `manualChunks` in vite.config.ts | 30min | Performance |
+| 8 | Static Asset Cache Headers `maxAge: '1y'` | 15min | Performance |
+| 9 | `vitest` und `@types/*` nach devDependencies verschieben | 10min | Build |
+ 
+### Phase 2: Kurzfristig -- Woche 2-4 (Compliance, UX-Safety, Code-Qualitaet)
+ 
+| # | Aufgabe | Aufwand | Bereich |
+|---|---------|---------|---------|
+| 10 | Kunden-Anonymisierung implementieren (DSGVO Art. 17) | 8h | Compliance |
+| 11 | Notfall-/Gesundheitsinfos auf Termin-Detail anzeigen | 4h | UX/Safety |
+| 12 | Audit-Trail erweitern (Login, CRUD, Datenzugriffe) | 6h | Compliance |
+| 13 | Session/Token-Cleanup schedulen | 1h | Security |
+| 14 | Account-Lockout nach fehlgeschlagenen Logins | 3h | Security |
+| 15 | Legacy API-Client entfernen, fetch()-Migration starten | 8h | Frontend |
+| 16 | `staleTime` Default auf 60s korrigieren | 15min | Frontend |
+| 17 | Skip-to-Content Link + Navigation ARIA Labels | 2h | Accessibility |
+| 18 | Breadcrumbs auf allen Unterseiten aktivieren | 4h | UX |
+| 19 | DB CHECK Constraints auf Enum-Spalten | 4h | DB |
+| 20 | Soft-Delete Partial Index fuer Appointments | 1h | DB/Perf |
+| 21 | Budget-Summary SQL-Aggregation statt JS | 3h | DB/Perf |
+ 
+### Phase 3: Mittelfristig -- Monat 2 (Qualitaet & Performance)
+ 
+| # | Aufgabe | Aufwand | Bereich |
+|---|---------|---------|---------|
+| 22 | Consent-Management System | 12h | Compliance |
+| 23 | Mutation-Payloads typen (Record -> Interfaces) | 4h | TypeScript |
+| 24 | Zod-Validation auf Frontend-Forms (zodResolver) | 12h | Frontend/UX |
+| 25 | Hardcoded Colors -> Design-System Tokens | 3h | Frontend |
+| 26 | God-Components aufteilen (>500 Zeilen) | 8h | Frontend |
+| 27 | Skeleton Loading States | 6h | UX |
+| 28 | Desktop-Navigation hinzufuegen | 6h | UX |
+| 29 | Template-Engine HTML-Escaping | 1h | Security |
+| 30 | Object Storage Authorization | 3h | Security |
+| 31 | N+1 Fix: updateAppointmentServiceDocumentation | 1h | Performance |
+| 32 | matchEmployees Queries parallelisieren | 1h | Performance |
+| 33 | `libphonenumber-js` lazy laden | 1h | Performance |
+| 34 | signatureData aus Listen-Responses entfernen | 1h | Performance |
+ 
+### Phase 4: Langfristig -- Quartal 2 (Hardening)
+ 
+| # | Aufgabe | Aufwand | Bereich |
+|---|---------|---------|---------|
+| 35 | Passwort-Policy verstaerken (12+ Zeichen, breached-check) | 4h | Security |
+| 36 | Session-Rotation + Concurrent Session Limits | 6h | Security |
+| 37 | CSRF-Token an Session binden (HMAC) | 3h | Security |
+| 38 | Signatur-Integritaet auf HMAC upgraden | 2h | Security |
+| 39 | Structured Logging mit PII-Redaction | 6h | Security |
+| 40 | DB TLS erzwingen + Column-Level Encryption evaluieren | 8h | Security |
+| 41 | Migrations-System einfuehren (drizzle-kit generate) | 4h | DB |
+| 42 | Wochenend-Termine im Dashboard | 3h | UX |
+| 43 | Offline-Handling fuer Pflegekraefte | 12h | UX |
+| 44 | Navigation Prefetching | 3h | Performance |
+| 45 | Query Key Factories vereinheitlichen | 4h | Frontend |
+ 
+---
+ 
+## Anhang: Tech Stack Referenz
+ 
+| Komponente | Technologie | Version |
+|-----------|-------------|---------|
+| Frontend Framework | React | 19.2 |
+| Build Tool | Vite | - |
+| Routing | Wouter | - |
+| State/Data | TanStack React Query | v5 |
+| UI Components | Radix UI + Tailwind CSS v4 | - |
+| Forms | React Hook Form + Zod | - |
+| Backend | Express.js (TypeScript) | - |
+| ORM | Drizzle ORM | - |
+| Database | PostgreSQL (Neon Serverless) | - |
+| File Storage | Google Cloud Storage (Uppy) | - |
+| Auth | bcrypt + custom sessions | - |
+| Testing | Vitest | v4 |
