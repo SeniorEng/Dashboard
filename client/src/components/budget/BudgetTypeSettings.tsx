@@ -288,7 +288,7 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
                         data-testid={`input-monthly-limit-${setting.budgetType}`}
                       />
                       {getMaxHint(setting.budgetType) && (
-                        <p className="text-[11px] text-gray-400 mt-0.5">{getMaxHint(setting.budgetType)}</p>
+                        <p className="text-[11px] text-gray-500 mt-0.5">{getMaxHint(setting.budgetType)}</p>
                       )}
                     </div>
                   )}
@@ -306,7 +306,7 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
                         data-testid={`input-yearly-limit-${setting.budgetType}`}
                       />
                       {getMaxHint(setting.budgetType) && (
-                        <p className="text-[11px] text-gray-400 mt-0.5">{getMaxHint(setting.budgetType)}</p>
+                        <p className="text-[11px] text-gray-500 mt-0.5">{getMaxHint(setting.budgetType)}</p>
                       )}
                     </div>
                   )}
@@ -400,7 +400,7 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
         </Label>
         <div className="space-y-2">
           <div>
-            <Label className="text-[11px] text-gray-400">Betrag (€)</Label>
+            <Label className="text-[11px] text-gray-500">Betrag (€)</Label>
             <Input
               type="text"
               inputMode="decimal"
@@ -417,7 +417,7 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <Label className="text-[11px] text-gray-400">Ab Monat</Label>
+              <Label className="text-[11px] text-gray-500">Ab Monat</Label>
               <select
                 value={(newBal?.month || getCurrentYearMonth()).split("-")[1]}
                 onChange={(e) => {
@@ -433,7 +433,7 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
               </select>
             </div>
             <div>
-              <Label className="text-[11px] text-gray-400">Jahr</Label>
+              <Label className="text-[11px] text-gray-500">Jahr</Label>
               <select
                 value={(newBal?.month || getCurrentYearMonth()).split("-")[0]}
                 onChange={(e) => {
@@ -477,7 +477,7 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
             <div key={alloc.id} className="flex items-center justify-between py-1.5 px-2 rounded bg-gray-50 text-xs">
               <div className="flex items-center gap-2">
                 <StatusBadge type="info" value={`ab ${formatMonthYear(alloc.validFrom)}`} size="sm" />
-                {alloc.notes && <span className="text-gray-400">{alloc.notes}</span>}
+                {alloc.notes && <span className="text-gray-500">{alloc.notes}</span>}
               </div>
               <span className="font-medium text-gray-700">{formatCurrency(alloc.amountCents)}</span>
             </div>
@@ -485,7 +485,7 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
         </div>
       )}
 
-      {isLoading && <p className="text-xs text-gray-400 mt-2">Laden...</p>}
+      {isLoading && <p className="text-xs text-gray-500 mt-2">Laden...</p>}
     </div>
   );
 }

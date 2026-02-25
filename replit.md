@@ -44,7 +44,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Document Templates**: HTML-based templates with placeholders (`{{input:Feldname}}`, company placeholders) supporting fragments or full HTML documents, billing-type associations, and versioning. Supports `documentTypeId`, `context`, `targetType`, and dual signatures. Digital document flow: select template → fill inputs → preview → sign → generate PDF.
 - **PDF Generation**: Server-side HTML→PDF using Puppeteer/Chromium for GoBD-compliant documents. Digital signature capture, integrity hashing, and visible audit stamps including IP, location, and hash.
 - **Insurance Providers**: Admin management, historized assignment, IK-Nummer validation.
-- **Budgeting & Pricing**: Three-pot budget ledger system based on German care law, cascading allocation, FIFO for §45b, carryover budgets.
+- **Budgeting & Pricing**: Three-pot budget ledger system based on German care law, cascading allocation, FIFO for §45b, carryover budgets. Budget mutations (manual adjustments, reversals, type settings, preferences, initial setup) are fully audit-logged for GoBD compliance. Concurrent budget consumption is serialized per customer via `pg_advisory_xact_lock` to prevent race conditions.
 - **Service Catalog**: Central management of services with code, name, unit type, price, VAT, `isBillable` flag, `employeeRateCents`.
 - **Employee Time Tracking**: Comprehensive tracking for client/non-client work, vacation. Past entries locked for non-admins. German labor law compliance (e.g., missing break documentation).
 - **Month-Closing Workflow**: Employee-initiated month closing locks CRUD operations.
@@ -69,3 +69,4 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Frontend Libraries**: React, TypeScript, Vite, Wouter, `shadcn/ui`, Radix UI, Tailwind CSS v4, TanStack Query, Zod.
 - **Backend Libraries**: Express.js, TypeScript, Zod, Drizzle ORM.
 - **Utilities**: `libphonenumber-js/min`, Puppeteer (for PDF generation).
+- **Monitoring**: `GET /api/health` endpoint (unauthenticated) for load balancer health checks, returns DB connectivity status.

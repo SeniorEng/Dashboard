@@ -10,6 +10,7 @@ import {
 import { z } from "zod";
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";
 import { BUDGET_TYPES } from "@shared/domain/budgets";
+import { auditService } from "../services/audit";
 
 const router = Router();
 
@@ -290,9 +291,9 @@ router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
     return;
   }
 
+  const userId = req.user?.id;
   const saved = await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, result.data.settings);
 
-  const userId = req.user?.id;
   for (const s of result.data.settings) {
     if (s.initialBalanceCents != null && s.initialBalanceCents > 0 && s.initialBalanceMonth) {
       const [yearStr, monthStr] = s.initialBalanceMonth.split("-");
@@ -312,6 +313,21 @@ router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
         notes: `Startwert ab ${monthStr}/${yearStr}`,
       }, userId);
     }
+  }
+
+  if (userId) {
+    const ip = req.ip || req.socket.remoteAddress;
+    await auditService.log(userId, "budget_type_settings_updated", "budget", customerId, {
+      customerId,
+      settings: result.data.settings.map(s => ({
+        budgetType: s.budgetType,
+        enabled: s.enabled,
+        priority: s.priority,
+        monthlyLimitCents: s.monthlyLimitCents ?? null,
+        yearlyLimitCents: s.yearlyLimitCents ?? null,
+        initialBalanceCents: s.initialBalanceCents ?? null,
+      })),
+    }, ip);
   }
 
   res.json(saved);
@@ -412,6 +428,18 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
     budgetStartDate,
   }, userId);
 
+  if (userId) {
+    const ip = req.ip || req.socket.remoteAddress;
+    await auditService.log(userId, "budget_initial_setup", "budget", customerId, {
+      customerId,
+      budgetType,
+      currentYearAmountCents,
+      carryoverAmountCents,
+      budgetStartDate,
+      allocationIds: allocations.map(a => a.id),
+    }, ip);
+  }
+
   res.status(201).json({
     message: "Startbudget erfolgreich erfasst",
     allocations,
@@ -440,6 +468,17 @@ router.put("/:customerId/preferences", asyncHandler("Budget-Einstellungen konnte
 
   const userId = req.user?.id;
   const preferences = await budgetLedgerStorage.upsertBudgetPreferences(result.data, userId);
+
+  if (userId) {
+    const ip = req.ip || req.socket.remoteAddress;
+    await auditService.log(userId, "budget_preferences_updated", "budget", customerId, {
+      customerId,
+      monthlyLimitCents: result.data.monthlyLimitCents ?? null,
+      budgetStartDate: result.data.budgetStartDate ?? null,
+      notes: result.data.notes ?? null,
+    }, ip);
+  }
+
   res.json(preferences);
 }));
 
@@ -488,6 +527,19 @@ router.post("/:customerId/manual-adjustment", asyncHandler("Manuelle Korrektur k
       expiresAt,
       notes,
     }, userId);
+
+    if (userId) {
+      const ip = req.ip || req.socket.remoteAddress;
+      await auditService.log(userId, "budget_manual_adjustment", "budget", customerId, {
+        customerId,
+        budgetType,
+        amountCents,
+        type: "allocation",
+        allocationId: allocation.id,
+        notes,
+      }, ip);
+    }
+
     res.status(201).json({ type: "allocation", data: allocation });
   } else {
     const transaction = await budgetLedgerStorage.createBudgetTransaction({
@@ -498,6 +550,19 @@ router.post("/:customerId/manual-adjustment", asyncHandler("Manuelle Korrektur k
       amountCents,
       notes,
     }, userId);
+
+    if (userId) {
+      const ip = req.ip || req.socket.remoteAddress;
+      await auditService.log(userId, "budget_manual_adjustment", "budget", customerId, {
+        customerId,
+        budgetType,
+        amountCents,
+        type: "transaction",
+        transactionId: transaction.id,
+        notes,
+      }, ip);
+    }
+
     res.status(201).json({ type: "transaction", data: transaction });
   }
 }));
@@ -521,6 +586,17 @@ router.post("/transactions/:transactionId/reverse", asyncHandler("Storno konnte 
       message: "Transaktion nicht gefunden",
     });
     return;
+  }
+
+  if (userId) {
+    const ip = req.ip || req.socket.remoteAddress;
+    await auditService.log(userId, "budget_reversal", "budget", reversal.customerId, {
+      customerId: reversal.customerId,
+      originalTransactionId: transactionId,
+      reversalTransactionId: reversal.id,
+      amountCents: reversal.amountCents,
+      budgetType: reversal.budgetType,
+    }, ip);
   }
 
   res.status(201).json(reversal);

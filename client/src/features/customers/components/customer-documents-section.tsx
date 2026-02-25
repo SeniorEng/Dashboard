@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
-import { formatDateForDisplay } from "@shared/utils/datetime";
+import { formatDateForDisplay, parseLocalDate } from "@shared/utils/datetime";
 import { useUpload } from "@/hooks/use-upload";
 import { DigitalDocumentFlow } from "./digital-document-flow";
 
@@ -74,7 +74,7 @@ function getReviewStatus(reviewDueDate: string | null): "ok" | "warning" | "over
   if (!reviewDueDate) return "none";
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const due = new Date(reviewDueDate + "T00:00:00");
+  const due = parseLocalDate(reviewDueDate);
   const diffDays = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
   if (diffDays < 0) return "overdue";
   if (diffDays <= 30) return "warning";

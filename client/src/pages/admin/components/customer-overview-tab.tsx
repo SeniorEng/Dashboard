@@ -448,23 +448,23 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
         ) : (
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-gray-700">
-              <Calendar className={`${iconSize.sm} text-gray-400`} />
+              <Calendar className={`${iconSize.sm} text-gray-500`} />
               Geb.: {customer.geburtsdatum ? formatDateForDisplay(customer.geburtsdatum) : "Nicht angegeben"}
             </div>
             <div className="flex items-center gap-2 text-gray-700">
-              <MapPin className={`${iconSize.sm} text-gray-400`} />
+              <MapPin className={`${iconSize.sm} text-gray-500`} />
               {formatAddress(customer) || "Keine Adresse"}
             </div>
             <div className="flex items-center gap-2 text-gray-700">
-              <Phone className={`${iconSize.sm} text-gray-400`} />
+              <Phone className={`${iconSize.sm} text-gray-500`} />
               Mobil: {customer.telefon ? formatPhoneForDisplay(customer.telefon) : "Nicht angegeben"}
             </div>
             <div className="flex items-center gap-2 text-gray-700">
-              <Phone className={`${iconSize.sm} text-gray-400`} />
+              <Phone className={`${iconSize.sm} text-gray-500`} />
               Festnetz: {customer.festnetz ? formatPhoneForDisplay(customer.festnetz) : "Kein Festnetz"}
             </div>
             <div className="flex items-center gap-2 text-gray-700">
-              <Mail className={`${iconSize.sm} text-gray-400`} />
+              <Mail className={`${iconSize.sm} text-gray-500`} />
               {customer.email || "Keine E-Mail"}
             </div>
           </div>
@@ -551,7 +551,7 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
                   )}
                 </>
               ) : (
-                <span className="text-sm text-gray-400">Nicht festgelegt</span>
+                <span className="text-sm text-gray-500">Nicht festgelegt</span>
               )}
             </div>
 
@@ -631,7 +631,7 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
                 )}
               </>
             ) : (
-              <p className="text-sm text-gray-400" data-testid="text-pflegegrad-empty">Nicht festgelegt</p>
+              <p className="text-sm text-gray-500" data-testid="text-pflegegrad-empty">Nicht festgelegt</p>
             )}
           </div>
         )}
@@ -669,7 +669,7 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
             </div>
           </div>
         ) : (
-          <p className="text-sm text-gray-400" data-testid="text-care-history-empty">Kein Verlauf vorhanden</p>
+          <p className="text-sm text-gray-500" data-testid="text-care-history-empty">Kein Verlauf vorhanden</p>
         )}
       </SectionCard>
 
@@ -746,18 +746,18 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
         ) : (
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-gray-700" data-testid="text-haustier">
-              <PawPrint className={`${iconSize.sm} text-gray-400`} />
+              <PawPrint className={`${iconSize.sm} text-gray-500`} />
               Haustier: {customer.haustierVorhanden ? "Ja" : "Nein"}
               {customer.haustierVorhanden && customer.haustierDetails && (
                 <span className="text-gray-500">({customer.haustierDetails})</span>
               )}
             </div>
             <div className="flex items-center gap-2 text-gray-700" data-testid="text-personenbefoerderung">
-              <Car className={`${iconSize.sm} text-gray-400`} />
+              <Car className={`${iconSize.sm} text-gray-500`} />
               Personenbeförderung: {customer.personenbefoerderungGewuenscht ? "Ja" : "Nein"}
             </div>
             <div className="flex items-center gap-2 text-gray-700" data-testid="text-inaktiv-ab">
-              <Calendar className={`${iconSize.sm} text-gray-400`} />
+              <Calendar className={`${iconSize.sm} text-gray-500`} />
               Inaktiv ab: {customer.inaktivAb ? formatDateForDisplay(customer.inaktivAb) : "Nicht festgelegt"}
             </div>
           </div>

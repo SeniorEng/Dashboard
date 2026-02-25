@@ -29,6 +29,11 @@ export const AUDIT_ACTIONS = [
   "password_changed",
   "customer_created",
   "customer_anonymized",
+  "budget_manual_adjustment",
+  "budget_reversal",
+  "budget_type_settings_updated",
+  "budget_preferences_updated",
+  "budget_initial_setup",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];
@@ -41,6 +46,7 @@ export const AUDIT_ENTITY_TYPES = [
   "invoice",
   "time_entry",
   "month_closing",
+  "budget",
 ] as const;
 
 export type AuditEntityType = typeof AUDIT_ENTITY_TYPES[number];

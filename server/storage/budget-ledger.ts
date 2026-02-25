@@ -115,7 +115,6 @@ export interface BudgetLedgerStorage {
   upsertBudgetTypeSettings(customerId: number, settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null; initialBalanceCents?: number | null; initialBalanceMonth?: string | null }>): Promise<CustomerBudgetTypeSetting[]>;
   upsertInitialBalanceAllocation(params: { customerId: number; budgetType: string; year: number; month: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string }, userId?: number): Promise<void>;
   getInitialBalanceAllocations(customerId: number, budgetType: string): Promise<BudgetAllocation[]>;
-  deleteInitialBalanceAllocations(customerId: number, budgetType: string): Promise<void>;
   
   processExpiredCarryover(customerId: number): Promise<BudgetTransaction[]>;
   
@@ -543,15 +542,6 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       .orderBy(desc(budgetAllocations.validFrom));
   }
 
-  async deleteInitialBalanceAllocations(customerId: number, budgetType: string): Promise<void> {
-    await db.delete(budgetAllocations)
-      .where(and(
-        eq(budgetAllocations.customerId, customerId),
-        eq(budgetAllocations.budgetType, budgetType),
-        eq(budgetAllocations.source, "initial_balance"),
-      ));
-  }
-
   async getCurrentPricing(customerId: number, date?: string): Promise<CustomerPricing | undefined> {
     const targetDate = date || todayISO();
     
@@ -640,106 +630,130 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       .from(customers).where(eq(customers.id, params.customerId)).limit(1);
     const acceptsPrivatePayment = customer?.acceptsPrivatePayment ?? false;
 
-    if (!acceptsPrivatePayment && costs.totalCents > 0) {
-      const summaries = await this.getAllBudgetSummaries(params.customerId);
-      const typeSettings = await this.getBudgetTypeSettings(params.customerId);
+    const hasUsage = costs.totalCents > 0;
+    if (!hasUsage) {
+      const cascadeResult = await this.createCascadeConsumption({
+        customerId: params.customerId,
+        appointmentId: params.appointmentId,
+        transactionDate: params.transactionDate,
+        totalAmountCents: 0,
+        hauswirtschaftMinutes: params.hauswirtschaftMinutes,
+        hauswirtschaftCents: 0,
+        alltagsbegleitungMinutes: params.alltagsbegleitungMinutes,
+        alltagsbegleitungCents: 0,
+        travelKilometers: 0,
+        travelCents: 0,
+        customerKilometers: 0,
+        customerKilometersCents: 0,
+        userId: params.userId,
+      });
+      return cascadeResult.transactions[0];
+    }
 
-      let effective45b = summaries.entlastungsbetrag45b.availableCents;
-      let effective45a = summaries.umwandlung45a.currentMonthAvailableCents;
-      let effective39_42a = summaries.ersatzpflege39_42a.currentYearAvailableCents;
+    return await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(${sql.raw(String(params.customerId))})`);
 
-      if (typeSettings.length > 0) {
-        const settingsMap = new Map(typeSettings.map(s => [s.budgetType, s]));
+      if (!acceptsPrivatePayment) {
+        const summaries = await this.getAllBudgetSummaries(params.customerId);
+        const typeSettings = await this.getBudgetTypeSettings(params.customerId);
 
-        const s45b = settingsMap.get("entlastungsbetrag_45b");
-        if (s45b && !s45b.enabled) effective45b = 0;
-        if (s45b?.monthlyLimitCents !== null && s45b?.monthlyLimitCents !== undefined) {
-          const carryoverAvailable = await this.getAvailableCarryoverCents(params.customerId, params.transactionDate);
-          const effectiveLimit = s45b.monthlyLimitCents + carryoverAvailable;
-          const monthlyRemaining45b = Math.max(0, effectiveLimit - summaries.entlastungsbetrag45b.currentMonthUsedCents);
-          effective45b = Math.min(effective45b, monthlyRemaining45b);
+        let effective45b = summaries.entlastungsbetrag45b.availableCents;
+        let effective45a = summaries.umwandlung45a.currentMonthAvailableCents;
+        let effective39_42a = summaries.ersatzpflege39_42a.currentYearAvailableCents;
+
+        if (typeSettings.length > 0) {
+          const settingsMap = new Map(typeSettings.map(s => [s.budgetType, s]));
+
+          const s45b = settingsMap.get("entlastungsbetrag_45b");
+          if (s45b && !s45b.enabled) effective45b = 0;
+          if (s45b?.monthlyLimitCents !== null && s45b?.monthlyLimitCents !== undefined) {
+            const carryoverAvailable = await this.getAvailableCarryoverCents(params.customerId, params.transactionDate);
+            const effectiveLimit = s45b.monthlyLimitCents + carryoverAvailable;
+            const monthlyRemaining45b = Math.max(0, effectiveLimit - summaries.entlastungsbetrag45b.currentMonthUsedCents);
+            effective45b = Math.min(effective45b, monthlyRemaining45b);
+          }
+
+          const s45a = settingsMap.get("umwandlung_45a");
+          if (s45a && !s45a.enabled) effective45a = 0;
+          if (s45a?.monthlyLimitCents !== null && s45a?.monthlyLimitCents !== undefined) {
+            const monthlyRemaining45a = Math.max(0, s45a.monthlyLimitCents - summaries.umwandlung45a.currentMonthUsedCents);
+            effective45a = Math.min(effective45a, monthlyRemaining45a);
+          }
+
+          const s39 = settingsMap.get("ersatzpflege_39_42a");
+          if (s39 && !s39.enabled) effective39_42a = 0;
+          if (s39?.yearlyLimitCents !== null && s39?.yearlyLimitCents !== undefined) {
+            const yearlyRemaining = Math.max(0, s39.yearlyLimitCents - summaries.ersatzpflege39_42a.currentYearUsedCents);
+            effective39_42a = Math.min(effective39_42a, yearlyRemaining);
+          }
+        } else {
+          const preferences = await this.getBudgetPreferences(params.customerId);
+          if (preferences?.monthlyLimitCents !== null && preferences?.monthlyLimitCents !== undefined) {
+            const carryoverAvailable = await this.getAvailableCarryoverCents(params.customerId, params.transactionDate);
+            const effectiveLimit = preferences.monthlyLimitCents + carryoverAvailable;
+            const monthlyRemaining45b = Math.max(0, effectiveLimit - summaries.entlastungsbetrag45b.currentMonthUsedCents);
+            effective45b = Math.min(effective45b, monthlyRemaining45b);
+          }
         }
 
-        const s45a = settingsMap.get("umwandlung_45a");
-        if (s45a && !s45a.enabled) effective45a = 0;
-        if (s45a?.monthlyLimitCents !== null && s45a?.monthlyLimitCents !== undefined) {
-          const monthlyRemaining45a = Math.max(0, s45a.monthlyLimitCents - summaries.umwandlung45a.currentMonthUsedCents);
-          effective45a = Math.min(effective45a, monthlyRemaining45a);
-        }
+        const totalAvailable = effective45a + effective45b + effective39_42a;
 
-        const s39 = settingsMap.get("ersatzpflege_39_42a");
-        if (s39 && !s39.enabled) effective39_42a = 0;
-        if (s39?.yearlyLimitCents !== null && s39?.yearlyLimitCents !== undefined) {
-          const yearlyRemaining = Math.max(0, s39.yearlyLimitCents - summaries.ersatzpflege39_42a.currentYearUsedCents);
-          effective39_42a = Math.min(effective39_42a, yearlyRemaining);
-        }
-      } else {
-        const preferences = await this.getBudgetPreferences(params.customerId);
-        if (preferences?.monthlyLimitCents !== null && preferences?.monthlyLimitCents !== undefined) {
-          const carryoverAvailable = await this.getAvailableCarryoverCents(params.customerId, params.transactionDate);
-          const effectiveLimit = preferences.monthlyLimitCents + carryoverAvailable;
-          const monthlyRemaining45b = Math.max(0, effectiveLimit - summaries.entlastungsbetrag45b.currentMonthUsedCents);
-          effective45b = Math.min(effective45b, monthlyRemaining45b);
+        if (costs.totalCents > totalAvailable) {
+          throw new Error(
+            `Budget reicht nicht aus. Kosten: ${(costs.totalCents / 100).toFixed(2)} €, ` +
+            `verfügbar: ${(totalAvailable / 100).toFixed(2)} €. ` +
+            `Kunde akzeptiert keine Privatzahlung.`
+          );
         }
       }
 
-      const totalAvailable = effective45a + effective45b + effective39_42a;
+      const cascadeResult = await this.createCascadeConsumption({
+        customerId: params.customerId,
+        appointmentId: params.appointmentId,
+        transactionDate: params.transactionDate,
+        totalAmountCents: costs.totalCents,
+        hauswirtschaftMinutes: params.hauswirtschaftMinutes,
+        hauswirtschaftCents: costs.hauswirtschaftCents,
+        alltagsbegleitungMinutes: params.alltagsbegleitungMinutes,
+        alltagsbegleitungCents: costs.alltagsbegleitungCents,
+        travelKilometers: Math.round(params.travelKilometers * 10),
+        travelCents: costs.travelCents,
+        customerKilometers: Math.round(params.customerKilometers * 10),
+        customerKilometersCents: costs.customerKilometersCents,
+        userId: params.userId,
+      });
 
-      if (costs.totalCents > totalAvailable) {
+      if (cascadeResult.outstandingCents > 0) {
+        if (acceptsPrivatePayment) {
+          const privateRatio = costs.totalCents > 0 ? cascadeResult.outstandingCents / costs.totalCents : 1;
+          const [privateTransaction] = await tx.insert(budgetTransactions).values({
+            customerId: params.customerId,
+            budgetType: "private",
+            transactionDate: params.transactionDate,
+            transactionType: "consumption",
+            amountCents: -cascadeResult.outstandingCents,
+            appointmentId: params.appointmentId,
+            hauswirtschaftMinutes: Math.round(params.hauswirtschaftMinutes * privateRatio),
+            hauswirtschaftCents: Math.round(costs.hauswirtschaftCents * privateRatio),
+            alltagsbegleitungMinutes: Math.round(params.alltagsbegleitungMinutes * privateRatio),
+            alltagsbegleitungCents: Math.round(costs.alltagsbegleitungCents * privateRatio),
+            travelKilometers: Math.round(Math.round(params.travelKilometers * 10) * privateRatio),
+            travelCents: Math.round(costs.travelCents * privateRatio),
+            customerKilometers: Math.round(Math.round(params.customerKilometers * 10) * privateRatio),
+            customerKilometersCents: Math.round(costs.customerKilometersCents * privateRatio),
+            createdByUserId: params.userId,
+            notes: `Privatzahlung: ${(cascadeResult.outstandingCents / 100).toFixed(2)} €`,
+          }).returning();
+          return cascadeResult.transactions[0] ?? privateTransaction;
+        }
         throw new Error(
-          `Budget reicht nicht aus. Kosten: ${(costs.totalCents / 100).toFixed(2)} €, ` +
-          `verfügbar: ${(totalAvailable / 100).toFixed(2)} €. ` +
+          `Budget reicht nicht aus. Fehlbetrag: ${(cascadeResult.outstandingCents / 100).toFixed(2)} €. ` +
           `Kunde akzeptiert keine Privatzahlung.`
         );
       }
-    }
 
-    const cascadeResult = await this.createCascadeConsumption({
-      customerId: params.customerId,
-      appointmentId: params.appointmentId,
-      transactionDate: params.transactionDate,
-      totalAmountCents: costs.totalCents,
-      hauswirtschaftMinutes: params.hauswirtschaftMinutes,
-      hauswirtschaftCents: costs.hauswirtschaftCents,
-      alltagsbegleitungMinutes: params.alltagsbegleitungMinutes,
-      alltagsbegleitungCents: costs.alltagsbegleitungCents,
-      travelKilometers: Math.round(params.travelKilometers * 10),
-      travelCents: costs.travelCents,
-      customerKilometers: Math.round(params.customerKilometers * 10),
-      customerKilometersCents: costs.customerKilometersCents,
-      userId: params.userId,
+      return cascadeResult.transactions[0];
     });
-
-    if (cascadeResult.outstandingCents > 0) {
-      if (acceptsPrivatePayment) {
-        const privateRatio = costs.totalCents > 0 ? cascadeResult.outstandingCents / costs.totalCents : 1;
-        const [privateTransaction] = await db.insert(budgetTransactions).values({
-          customerId: params.customerId,
-          budgetType: "private",
-          transactionDate: params.transactionDate,
-          transactionType: "consumption",
-          amountCents: -cascadeResult.outstandingCents,
-          appointmentId: params.appointmentId,
-          hauswirtschaftMinutes: Math.round(params.hauswirtschaftMinutes * privateRatio),
-          hauswirtschaftCents: Math.round(costs.hauswirtschaftCents * privateRatio),
-          alltagsbegleitungMinutes: Math.round(params.alltagsbegleitungMinutes * privateRatio),
-          alltagsbegleitungCents: Math.round(costs.alltagsbegleitungCents * privateRatio),
-          travelKilometers: Math.round(Math.round(params.travelKilometers * 10) * privateRatio),
-          travelCents: Math.round(costs.travelCents * privateRatio),
-          customerKilometers: Math.round(Math.round(params.customerKilometers * 10) * privateRatio),
-          customerKilometersCents: Math.round(costs.customerKilometersCents * privateRatio),
-          createdByUserId: params.userId,
-          notes: `Privatzahlung: ${(cascadeResult.outstandingCents / 100).toFixed(2)} €`,
-        }).returning();
-        return cascadeResult.transactions[0] ?? privateTransaction;
-      }
-      throw new Error(
-        `Budget reicht nicht aus. Fehlbetrag: ${(cascadeResult.outstandingCents / 100).toFixed(2)} €. ` +
-        `Kunde akzeptiert keine Privatzahlung.`
-      );
-    }
-
-    return cascadeResult.transactions[0];
   }
 
   async getCustomerBudgetAmounts(customerId: number, _tx?: DbClient): Promise<{ pflegesachleistungen36: number; verhinderungspflege39: number }> {

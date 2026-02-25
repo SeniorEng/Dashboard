@@ -6,6 +6,7 @@ import { employeeTimeEntries } from "@shared/schema/time-tracking";
 import { and, gte, lte, sql, inArray, eq, isNull } from "drizzle-orm";
 import { asyncHandler } from "../../lib/errors";
 import { getHolidays } from "@shared/utils/holidays";
+import { parseLocalDate } from "@shared/utils/datetime";
 
 const router = Router();
 
@@ -49,7 +50,7 @@ function calculateHolidayHours(
   let totalHours = 0;
 
   for (const holiday of monthHolidays) {
-    const date = new Date(holiday.date);
+    const date = parseLocalDate(holiday.date);
     const dayOfWeek = date.getDay();
 
     if (dayOfWeek === 0 || dayOfWeek === 6) continue;
@@ -169,7 +170,7 @@ async function getMonthlyHoursBatch(
 
   for (const entry of timeEntries) {
     const empId = entry.userId;
-    const m = new Date(entry.entryDate).getMonth() + 1;
+    const m = parseLocalDate(entry.entryDate).getMonth() + 1;
     if (!result[m]) result[m] = {};
     if (!result[m][empId]) result[m][empId] = { hauswirtschaft: 0, alltagsbegleitung: 0, erstberatung: 0, sonstiges: 0 };
     if (entry.entryType !== "kundentermin" && entry.entryType !== "urlaub" && entry.entryType !== "krankheit") {
