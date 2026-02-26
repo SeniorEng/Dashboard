@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { formatKm } from "@/lib/utils";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRoute, useLocation } from "wouter";
 import { Layout } from "@/components/layout";
@@ -370,7 +371,7 @@ export default function AppointmentDetail() {
                 <Car className={`${iconSize.xs} text-muted-foreground`} />
                 <span className="text-muted-foreground">Anfahrt</span>
               </div>
-              <span>{appointment.travelKilometers || 0} km</span>
+              <span>{formatKm(appointment.travelKilometers)} km</span>
             </div>
             
             {appointment.customerKilometers != null && appointment.customerKilometers > 0 && (
@@ -379,7 +380,7 @@ export default function AppointmentDetail() {
                   <Car className={`${iconSize.xs} text-muted-foreground`} />
                   <span className="text-muted-foreground">Km für/mit Kunde</span>
                 </div>
-                <span>{appointment.customerKilometers} km</span>
+                <span>{formatKm(appointment.customerKilometers)} km</span>
               </div>
             )}
             
@@ -387,7 +388,7 @@ export default function AppointmentDetail() {
               <div className="flex items-center justify-between pt-2 border-t border-border/50">
                 <span className="font-medium">Gesamt</span>
                 <span className="font-medium">
-                  {(appointment.travelKilometers || 0) + (appointment.customerKilometers || 0)} km
+                  {formatKm((appointment.travelKilometers || 0) + (appointment.customerKilometers || 0))} km
                 </span>
               </div>
             )}

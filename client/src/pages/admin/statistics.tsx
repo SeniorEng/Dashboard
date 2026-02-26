@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { Link } from "wouter";
+import { formatKm } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -245,8 +246,8 @@ export default function AdminStatistics() {
                 />
                 <StatCard
                   label="Gesamt-KM"
-                  value={`${(efficiency.totalTravelKm || 0) + (efficiency.totalCustomerKm || 0)} km`}
-                  sub={`${efficiency.totalTravelKm || 0} Anfahrt + ${efficiency.totalCustomerKm || 0} Kunden`}
+                  value={`${formatKm((efficiency.totalTravelKm || 0) + (efficiency.totalCustomerKm || 0))} km`}
+                  sub={`${formatKm(efficiency.totalTravelKm)} Anfahrt + ${formatKm(efficiency.totalCustomerKm)} Kunden`}
                   icon={<Car className="w-5 h-5" />}
                   color="text-orange-600"
                   testId="stat-km"
@@ -368,11 +369,11 @@ export default function AdminStatistics() {
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                         <div>
                           <div className="text-muted-foreground text-xs">Anfahrt-KM</div>
-                          <div className="font-medium">{emp.travelKm} km</div>
+                          <div className="font-medium">{formatKm(emp.travelKm)} km</div>
                         </div>
                         <div>
                           <div className="text-muted-foreground text-xs">Kunden-KM</div>
-                          <div className="font-medium">{emp.customerKm} km</div>
+                          <div className="font-medium">{formatKm(emp.customerKm)} km</div>
                         </div>
                         <div>
                           <div className="text-muted-foreground text-xs">Kranktage</div>
@@ -554,7 +555,7 @@ export default function AdminStatistics() {
                                   </div>
                                   <div>
                                     <span className="text-muted-foreground">KM: </span>
-                                    <span className="font-medium">{emp.totalTravelKm}+{emp.totalCustomerKm} km</span>
+                                    <span className="font-medium">{formatKm(emp.totalTravelKm)}+{formatKm(emp.totalCustomerKm)} km</span>
                                   </div>
                                 </div>
                               </div>

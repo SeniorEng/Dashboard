@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatKm } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Users, Car, Palmtree, ChevronDown, AlertTriangle } from "lucide-react";
 import { iconSize } from "@/design-system";
@@ -162,16 +163,16 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
         title={`Kilometer ${MONTH_NAMES[selectedMonth - 1]}`}
         icon={<Car className={iconSize.sm} />}
         defaultOpen={true}
-        summaryText={`${totalKm} km`}
+        summaryText={`${formatKm(totalKm)} km`}
         testId="card-km-summary"
       >
         <div className="space-y-2">
-          <SummaryRow label="Anfahrt" value={`${timeOverview?.travel?.totalKilometers || 0} km`} color="text-amber-700" testId="text-anfahrt-km" />
-          <SummaryRow label="Kundenfahrten" value={`${timeOverview?.travel?.customerKilometers || 0} km`} color="text-teal-700" testId="text-customer-km" />
+          <SummaryRow label="Anfahrt" value={`${formatKm(timeOverview?.travel?.totalKilometers)} km`} color="text-amber-700" testId="text-anfahrt-km" />
+          <SummaryRow label="Kundenfahrten" value={`${formatKm(timeOverview?.travel?.customerKilometers)} km`} color="text-teal-700" testId="text-customer-km" />
           <div className="border-t pt-2 mt-2 flex justify-between items-center">
             <span className="text-sm font-medium text-gray-700">Gesamt</span>
             <span className="font-bold text-gray-900" data-testid="text-total-km">
-              {totalKm} km
+              {formatKm(totalKm)} km
             </span>
           </div>
         </div>

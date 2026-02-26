@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { formatKm } from "@/lib/utils";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { Calendar, Plus, Car, Users, Pencil, Trash2, AlertTriangle } from "lucide-react";
 import { iconSize } from "@/design-system";
@@ -193,7 +194,7 @@ export function DayDetailPanel({
                         <div className="flex items-center gap-2 mt-1 text-xs text-amber-700">
                           <Car className={iconSize.xs} />
                           <span>
-                            Anfahrt: {appt.travelKilometers ? `${appt.travelKilometers} km` : ""}
+                            Anfahrt: {appt.travelKilometers ? `${formatKm(appt.travelKilometers)} km` : ""}
                             {appt.travelKilometers && appt.travelMinutes ? " • " : ""}
                             {appt.travelMinutes ? `${appt.travelMinutes} Min.` : ""}
                           </span>
@@ -202,7 +203,7 @@ export function DayDetailPanel({
                       {appt.customerKilometers && appt.customerKilometers > 0 && (
                         <div className="flex items-center gap-2 mt-1 text-xs text-teal-700">
                           <Car className={iconSize.xs} />
-                          <span>Km für/mit Kunde: {appt.customerKilometers} km</span>
+                          <span>Km für/mit Kunde: {formatKm(appt.customerKilometers)} km</span>
                         </div>
                       )}
                     </div>

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useRoute, Link } from "wouter";
+import { formatKm } from "@/lib/utils";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -205,11 +206,11 @@ export default function ServiceRecordDetailPage() {
               </div>
               <div className="flex items-center gap-2">
                 <Car className={`${iconSize.sm} text-muted-foreground`} />
-                <span>{totalTravelKm} km Anfahrt</span>
+                <span>{formatKm(totalTravelKm)} km Anfahrt</span>
               </div>
               <div className="flex items-center gap-2">
                 <MapPin className={`${iconSize.sm} text-muted-foreground`} />
-                <span>{totalCustomerKm} km mit Kunde</span>
+                <span>{formatKm(totalCustomerKm)} km mit Kunde</span>
               </div>
             </div>
           </CardContent>
@@ -371,10 +372,10 @@ function AppointmentSummaryRow({ appointment, employeeMap, services: aptServices
       {(appointment.travelKilometers || appointment.customerKilometers) && (
         <div className="mt-2 pt-2 border-t flex gap-4 text-xs text-muted-foreground">
           {appointment.travelKilometers && (
-            <span>Anfahrt: {appointment.travelKilometers} km</span>
+            <span>Anfahrt: {formatKm(appointment.travelKilometers)} km</span>
           )}
           {appointment.customerKilometers && (
-            <span>Km mit Kunde: {appointment.customerKilometers} km</span>
+            <span>Km mit Kunde: {formatKm(appointment.customerKilometers)} km</span>
           )}
         </div>
       )}
