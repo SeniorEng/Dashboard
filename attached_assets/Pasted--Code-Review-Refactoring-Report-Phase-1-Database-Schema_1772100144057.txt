@@ -1,0 +1,34 @@
+# 🎯 Code Review & Refactoring Report: Phase 1 (Database & Schema)
+
+Hallo! Bitte setze die folgenden architektonischen und sicherheitsrelevanten Verbesserungen in unserem Drizzle-ORM Setup um. Gehe die Punkte nacheinander durch und passe die Dateien entsprechend an.
+
+## 🛠️ Task 1: Drizzle Relations API implementieren (Architektur)
+**Kontext:** Aktuell haben wir zwar saubere Foreign Keys (z.B. `userId: integer("user_id").references(...)`), aber wir nutzen noch nicht die `relations()` API von Drizzle. Diese ist wichtig, um später komplexe Abfragen (z.B. `db.query.users.findFirst({ with: { roles: true } })`) typsicher und performant durchführen zu können.
+
+**To-Do:**
+1. Öffne `shared/schema/users.ts`. Füge die `relations` für `users`, `userRoles`, `sessions` und `employeeCompensationHistory` hinzu. (Ein User hat viele Rollen, viele Sessions, etc.).
+2. Öffne `shared/schema/customers.ts`. Definiere die Relations für `customers` (Ein Customer hat viele Contacts, CareLevelHistories, NeedsAssessments, etc.). Achte darauf, `primaryEmployee` und `backupEmployee` korrekt auf die `users` Tabelle zu mappen.
+3. Öffne `shared/schema/appointments.ts`. Definiere die Relations für `appointments` (Ein Appointment hat einen Customer, einen AssignedEmployee und viele `appointmentServices`).
+
+## 🔒 Task 2: Zod Validierung härten (Security & Datenqualität)
+**Kontext:** Einige Zod-Schemas sind noch zu generisch und könnten ungültige Daten durchlassen.
+
+**To-Do:**
+1. **Passwort-Sicherheit (`shared/schema/users.ts`):** Passe das `insertUserSchema` und `passwordResetSchema` an. Ändere `z.string().min(8)` in eine strengere Validierung (mindestens 8 Zeichen, ein Großbuchstabe, eine Zahl).
+   *Beispiel:* `.regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d\w\W]{8,}$/, "Passwort muss Groß-/Kleinbuchstaben und eine Zahl enthalten")`
+2. **Zeit-Validierung (`shared/schema/appointments.ts`):** Im `insertKundenterminSchema` und `insertErstberatungSchema` ist `scheduledStart` aktuell nur `z.string()`. Bitte füge hier denselben Regex-Check hinzu, der bereits im `documentAppointmentSchema` für `actualStart` verwendet wird: `.regex(/^\d{2}:\d{2}(:\d{2})?$/, "Ungültiges Zeitformat (HH:MM erwartet)")`.
+
+## 🛡️ Task 3: Passwort-Hashes absichern (Security Pitfall)
+**Kontext:** In `shared/schema/users.ts` liegt `passwordHash` direkt in der `users` Tabelle. Das Risiko ist hoch, dass bei einem `SELECT * FROM users` (oder `db.select().from(users)`) der Hash ans Frontend geleitet wird, wenn Entwickler vergessen, ihn manuell auszuschließen.
+
+**To-Do:**
+1. Erstelle in `shared/schema/users.ts` ein sicheres Zod-Schema für den Frontend-Export: `export const safeUserSchema = createSelectSchema(users).omit({ passwordHash: true });`
+2. Lege den Typen an: `export type SafeUser = z.infer<typeof safeUserSchema>;`
+3. Durchsuche das Backend (insbesondere `server/services/auth.ts`, falls vorhanden, oder API-Routen) und stelle sicher, dass bei API-Antworten, die User-Objekte zurückgeben, der `passwordHash` immer via Code (z.B. Destructuring `const { passwordHash, ...safeUser } = user;`) entfernt wird. Nutze dafür eine Hilfsfunktion `sanitizeUser`.
+
+## ⚙️ Task 4: API-Konsistenz (Appointments)
+**Kontext:** In `shared/schema/appointments.ts` haben wir die Junction-Tabelle `appointmentServices` eingeführt, aber die Tabelle `appointments` hat noch die Legacy-Felder `serviceType: text("service_type")` und `servicesDone: text("services_done").array()`.
+
+**To-Do:**
+1. Kommentiere diese beiden Felder in der `appointments` Tabelle als `@deprecated` aus oder markiere sie deutlich als Legacy, falls wir sie noch für eine Migration brauchen. 
+2. Falls sie nicht mehr gebraucht werden, lösche sie, um eine saubere "Single Source of Truth" (die `appointment_services` Tabelle) zu erzwingen.
