@@ -368,7 +368,8 @@ export function DocumentTemplatesContent() {
     }
   };
 
-  const handlePreview = async () => {
+  const loadPreview = useCallback(async () => {
+    if (!formData.htmlContent.trim()) return;
     setIsPreviewLoading(true);
     try {
       const result = await api.post("/admin/document-templates/render", {
@@ -392,7 +393,6 @@ export function DocumentTemplatesContent() {
       });
       const data = unwrapResult(result) as { html: string };
       setPreviewHtml(data.html);
-      setActiveTab("preview");
     } catch {
       const rawHtml = formData.htmlContent
         .replace(/\{\{customer_name\}\}/g, "Max Mustermann")
@@ -402,11 +402,17 @@ export function DocumentTemplatesContent() {
         .replace(/\{\{company_name\}\}/g, "SeniorenEngel GmbH")
         .replace(/\{\{[a-z_]+\}\}/g, "[...]");
       setPreviewHtml(rawHtml);
-      setActiveTab("preview");
     } finally {
       setIsPreviewLoading(false);
     }
-  };
+  }, [formData.htmlContent, formData.slug, editingTemplate?.slug]);
+
+  const handleTabChange = useCallback((tab: string) => {
+    setActiveTab(tab);
+    if (tab === "preview") {
+      loadPreview();
+    }
+  }, [loadPreview]);
 
   const isPending = createMutation.isPending || updateMutation.isPending;
   const isDialogOpen = isCreateMode || !!editingTemplate;
@@ -524,7 +530,7 @@ export function DocumentTemplatesContent() {
             <DialogTitle>{isCreateMode ? "Neue Vorlage erstellen" : `Vorlage bearbeiten: ${editingTemplate?.name}`}</DialogTitle>
           </DialogHeader>
 
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-2">
+          <Tabs value={activeTab} onValueChange={handleTabChange} className="mt-2">
             <TabsList className="bg-white h-auto p-1 gap-1">
               <TabsTrigger value="editor" className="text-sm gap-1.5" data-testid="tab-editor">
                 <Code className="h-3.5 w-3.5" />
@@ -835,7 +841,12 @@ export function DocumentTemplatesContent() {
             </TabsContent>
 
             <TabsContent value="preview" className="mt-4">
-              {previewHtml ? (
+              {isPreviewLoading ? (
+                <div className="flex items-center justify-center py-20 text-muted-foreground gap-2">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <span>Vorschau wird generiert...</span>
+                </div>
+              ) : previewHtml ? (
                 (previewHtml.trimStart().startsWith("<!DOCTYPE") || previewHtml.trimStart().startsWith("<html")) ? (
                   <div className="border rounded-lg bg-white overflow-hidden" style={{ height: "70vh" }}>
                     <iframe
@@ -858,7 +869,7 @@ export function DocumentTemplatesContent() {
               ) : (
                 <div className="text-center py-12 text-gray-500">
                   <Eye className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                  <p>Klicken Sie auf "Vorschau" im Editor-Tab, um eine Vorschau mit Beispieldaten zu generieren.</p>
+                  <p>Kein HTML-Inhalt vorhanden. Geben Sie im Editor-Tab HTML ein.</p>
                 </div>
               )}
             </TabsContent>
