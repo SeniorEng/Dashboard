@@ -22,10 +22,14 @@ export function SessionTimeoutWarning() {
   const [remainingSeconds, setRemainingSeconds] = useState(0);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const checkRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const expiredRef = useRef(false);
 
   const handleExpired = useCallback(async () => {
+    if (expiredRef.current) return;
+    expiredRef.current = true;
     setShowWarning(false);
     if (countdownRef.current) clearInterval(countdownRef.current);
+    if (checkRef.current) clearInterval(checkRef.current);
     try {
       await logout();
     } catch {}
@@ -65,9 +69,11 @@ export function SessionTimeoutWarning() {
   useEffect(() => {
     if (!isAuthenticated) {
       setShowWarning(false);
+      expiredRef.current = false;
       return;
     }
 
+    expiredRef.current = false;
     checkSession();
     checkRef.current = setInterval(checkSession, CHECK_INTERVAL_MS);
 

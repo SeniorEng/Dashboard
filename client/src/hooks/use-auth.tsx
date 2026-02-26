@@ -60,7 +60,9 @@ async function loginRequest(email: string, password: string): Promise<{ user: Us
 
 async function logoutRequest(): Promise<void> {
   const result = await api.post("/auth/logout", {});
-  unwrapResult(result);
+  if (!result.success && result.error.code !== 'UNAUTHORIZED') {
+    unwrapResult(result);
+  }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -95,12 +97,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       queryClient.setQueryData(["auth", "me"], null);
       queryClient.clear();
     },
-    onError: (error: Error) => {
-      toast({
-        title: "Fehler",
-        description: error.message || "Ein Fehler ist aufgetreten",
-        variant: "destructive",
-      });
+    onError: () => {
+      queryClient.setQueryData(["auth", "me"], null);
+      queryClient.clear();
     },
   });
 
