@@ -16,6 +16,7 @@ export interface TimeEntryFormData {
   endTime?: string | null;
   isFullDay?: boolean;
   excludeEntryId?: number;
+  targetUserId?: number;
 }
 
 interface ConflictCheckResult {
@@ -74,6 +75,7 @@ export function useTimeEntryConflict(
           endTime: formData.endTime || null,
           isFullDay: effectiveIsFullDay,
           excludeEntryId: formData.excludeEntryId,
+          ...(formData.targetUserId ? { targetUserId: formData.targetUserId } : {}),
         });
         if (result.success) {
           setConflict(result.data.conflict);
@@ -99,6 +101,7 @@ export function useTimeEntryConflict(
     formData?.entryType,
     formData?.isFullDay,
     formData?.excludeEntryId,
+    formData?.targetUserId,
     timeError,
     effectiveIsFullDay,
   ]);

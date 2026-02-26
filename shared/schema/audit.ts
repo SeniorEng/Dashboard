@@ -34,6 +34,10 @@ export const AUDIT_ACTIONS = [
   "budget_type_settings_updated",
   "budget_preferences_updated",
   "budget_initial_setup",
+  "admin_time_entry_created",
+  "admin_time_entry_updated",
+  "admin_time_entry_deleted",
+  "admin_month_closed",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];

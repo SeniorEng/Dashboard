@@ -374,6 +374,7 @@ export interface CreateTimeEntryRequest {
   isFullDay?: boolean;
   durationMinutes?: number | null;
   notes?: string | null;
+  targetUserId?: number;
 }
 
 export interface UpdateTimeEntryRequest extends Partial<CreateTimeEntryRequest> {}

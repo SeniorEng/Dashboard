@@ -210,8 +210,12 @@ router.get("/open-tasks", asyncHandler("Offene Aufgaben konnten nicht geladen we
  * Real-time check for time conflicts (for validation while typing)
  */
 router.post("/check-conflicts", asyncHandler("Konfliktprüfung fehlgeschlagen", async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const { date, startTime, endTime, isFullDay, excludeEntryId } = req.body;
+  const { date, startTime, endTime, isFullDay, excludeEntryId, targetUserId } = req.body;
+
+  let userId = req.user!.id;
+  if (req.user!.isAdmin && targetUserId && targetUserId !== req.user!.id) {
+    userId = targetUserId;
+  }
   
   if (!date || typeof date !== "string") {
     return res.status(400).json({ error: "Datum erforderlich" });
@@ -275,8 +279,18 @@ function isEntryLocked(entry: { entryType: string; entryDate: string }): boolean
  * Create a new time entry (or multiple for date ranges)
  */
 router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const { endDate, ...entryData } = req.body;
+  const { endDate, targetUserId, ...entryData } = req.body;
+  
+  let userId = req.user!.id;
+  const isAdminActingForOther = req.user!.isAdmin && targetUserId && targetUserId !== req.user!.id;
+  
+  if (isAdminActingForOther) {
+    const targetUser = await storage.getUser(targetUserId);
+    if (!targetUser) {
+      return res.status(400).json({ error: "Mitarbeiter nicht gefunden" });
+    }
+    userId = targetUserId;
+  }
   const validatedData = insertTimeEntrySchema.parse(entryData);
   
   // For urlaub and krankheit with date range, create entries for each day
@@ -353,12 +367,13 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
     }
     
     for (const e of entries) {
-      await auditService.log(req.user!.id, "time_entry_created", "time_entry", e.id, {
+      await auditService.log(req.user!.id, isAdminActingForOther ? "admin_time_entry_created" : "time_entry_created", "time_entry", e.id, {
         entryType: validatedData.entryType,
         entryDate: e.entryDate,
         isFullDay: validatedData.isFullDay ?? true,
         multiDay: true,
         totalEntries: entries.length,
+        ...(isAdminActingForOther ? { adminUserId: req.user!.id, targetUserId: userId } : {}),
       }, req.ip);
     }
 
@@ -396,12 +411,13 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
   
   const entry = await timeTrackingStorage.createTimeEntry(userId, validatedData);
 
-  await auditService.log(req.user!.id, "time_entry_created", "time_entry", entry.id, {
+  await auditService.log(req.user!.id, isAdminActingForOther ? "admin_time_entry_created" : "time_entry_created", "time_entry", entry.id, {
     entryType: validatedData.entryType,
     entryDate: validatedData.entryDate,
     startTime: validatedData.startTime || null,
     endTime: validatedData.endTime || null,
     isFullDay: validatedData.isFullDay ?? false,
+    ...(isAdminActingForOther ? { adminUserId: req.user!.id, targetUserId: userId } : {}),
   }, req.ip);
 
   res.status(201).json(entry);
@@ -478,12 +494,14 @@ router.put("/:id", asyncHandler("Zeiteintrag konnte nicht aktualisiert werden", 
     }
   }
 
-  await auditService.log(req.user!.id, "time_entry_updated", "time_entry", entryId, {
+  const isAdminEditingOther = req.user!.isAdmin && existing.userId !== req.user!.id;
+  await auditService.log(req.user!.id, isAdminEditingOther ? "admin_time_entry_updated" : "time_entry_updated", "time_entry", entryId, {
     entryType: existing.entryType,
     entryDate: existing.entryDate,
     changedFields,
     oldValues,
     newValues,
+    ...(isAdminEditingOther ? { adminUserId: req.user!.id, targetUserId: existing.userId } : {}),
   }, req.ip);
 
   res.json(updated);
@@ -521,12 +539,14 @@ router.delete("/:id", asyncHandler("Zeiteintrag konnte nicht gelöscht werden", 
   
   await timeTrackingStorage.deleteTimeEntry(entryId);
 
-  await auditService.log(req.user!.id, "time_entry_deleted", "time_entry", entryId, {
+  const isAdminDeletingOther = req.user!.isAdmin && existing.userId !== req.user!.id;
+  await auditService.log(req.user!.id, isAdminDeletingOther ? "admin_time_entry_deleted" : "time_entry_deleted", "time_entry", entryId, {
     entryType: existing.entryType,
     entryDate: existing.entryDate,
     startTime: existing.startTime,
     endTime: existing.endTime,
     isFullDay: existing.isFullDay,
+    ...(isAdminDeletingOther ? { adminUserId: req.user!.id, targetUserId: existing.userId } : {}),
   }, req.ip);
 
   res.status(204).send();

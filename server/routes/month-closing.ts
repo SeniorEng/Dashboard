@@ -121,6 +121,65 @@ router.post("/close-month", asyncHandler("Monatsabschluss fehlgeschlagen", async
   });
 }));
 
+router.post("/admin/close-month", requireAdmin, asyncHandler("Admin-Monatsabschluss fehlgeschlagen", async (req, res) => {
+  const parsed = reopenMonthSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw badRequest("Ungültige Eingabe: year, month und userId erforderlich");
+  }
+
+  const { year, month, userId: targetUserId } = parsed.data;
+
+  const existing = await timeTrackingStorage.getMonthClosing(targetUserId, year, month);
+  if (existing && !existing.reopenedAt) {
+    throw badRequest("Dieser Monat ist bereits abgeschlossen.");
+  }
+
+  const readiness = await timeTrackingStorage.getMonthClosingReadiness(targetUserId, year, month);
+
+  if (!readiness.hasTimeEntries) {
+    throw badRequest("Der Monat kann nicht abgeschlossen werden: Es sind keine Zeiteinträge oder abgeschlossene Termine vorhanden.");
+  }
+
+  if (readiness.openAppointments.length > 0) {
+    const appointmentList = readiness.openAppointments
+      .slice(0, 5)
+      .map(a => {
+        const statusLabel = STATUS_LABELS[a.status as keyof typeof STATUS_LABELS] ?? a.status;
+        return `${a.date} ${a.scheduledStart} – ${a.customerName} (${statusLabel})`;
+      })
+      .join(", ");
+    const more = readiness.openAppointments.length > 5
+      ? ` und ${readiness.openAppointments.length - 5} weitere`
+      : "";
+    throw badRequest(
+      `Der Monat kann nicht abgeschlossen werden: ${readiness.openAppointments.length} offene(r) Termin(e) vorhanden. ${appointmentList}${more}`
+    );
+  }
+
+  const autoBreaks = await generateAutoBreaksForMonth(targetUserId, year, month);
+
+  const insertedCount = await db.transaction(async (tx) => {
+    const count = await insertAutoBreaks(targetUserId, autoBreaks, tx);
+    await timeTrackingStorage.closeMonth(targetUserId, year, month, req.user!.id, existing?.id, tx);
+    await ensureMonthClosingTask(targetUserId, month, year, tx);
+    await completeMonthClosingTask(targetUserId, month, year, tx);
+    return count;
+  });
+
+  await auditService.log(req.user!.id, "admin_month_closed", "month_closing", targetUserId, {
+    year,
+    month,
+    adminUserId: req.user!.id,
+    targetUserId,
+    autoBreaksInserted: insertedCount,
+  }, req.ip);
+
+  res.json({
+    message: `Monat ${month}/${year} für Mitarbeiter abgeschlossen`,
+    autoBreaksInserted: insertedCount,
+  });
+}));
+
 router.post("/reopen-month", requireAdmin, asyncHandler("Monat konnte nicht wieder geöffnet werden", async (req, res) => {
   const parsed = reopenMonthSchema.safeParse(req.body);
   if (!parsed.success) {
