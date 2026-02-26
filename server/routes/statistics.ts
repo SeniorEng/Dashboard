@@ -156,6 +156,8 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
         COALESCE(inv.invoice_count, 0)::int AS "invoiceCount",
         COALESCE(apt.appointment_count, 0)::int AS "appointmentCount",
         COALESCE(apt.completed_count, 0)::int AS "completedCount",
+        COALESCE(apt.completed_kundentermine, 0)::int AS "completedKundentermine",
+        COALESCE(apt.completed_erstberatungen, 0)::int AS "completedErstberatungen",
         COALESCE(apt.cancelled_count, 0)::int AS "cancelledCount",
         COALESCE(apt.unique_customers, 0)::int AS "activeCustomers"
       FROM generate_series(1, 12) AS m(month)
@@ -173,6 +175,8 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
           EXTRACT(MONTH FROM a.date::date)::int AS m,
           COUNT(*) AS appointment_count,
           COUNT(*) FILTER (WHERE a.status IN ('completed', 'documented')) AS completed_count,
+          COUNT(*) FILTER (WHERE a.status IN ('completed', 'documented') AND a.appointment_type = 'Kundentermin') AS completed_kundentermine,
+          COUNT(*) FILTER (WHERE a.status IN ('completed', 'documented') AND a.appointment_type = 'Erstberatung') AS completed_erstberatungen,
           COUNT(*) FILTER (WHERE a.status = 'cancelled') AS cancelled_count,
           COUNT(DISTINCT a.customer_id) FILTER (WHERE a.status IN ('completed', 'documented')) AS unique_customers
         FROM appointments a
