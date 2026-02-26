@@ -583,7 +583,7 @@ export default function AdminStatistics() {
                 <StatCard label="Gekündigt" value={customerStats.terminated || 0} color="text-red-600" testId="cust-terminated" />
                 <StatCard
                   label="Ø Termine/Kunde"
-                  value={Number(customerStats.avgAppointmentsPerCustomer || 0).toFixed(1)}
+                  value={Number(customerStats.avgAppointmentsPerCustomer || 0).toFixed(1).replace(".", ",")}
                   color="text-teal-600"
                   testId="cust-avg-appts"
                 />

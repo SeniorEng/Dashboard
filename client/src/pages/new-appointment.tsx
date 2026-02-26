@@ -133,11 +133,11 @@ export default function NewAppointment() {
               {form.costEstimate && !form.costEstimate.noPricing && form.costEstimate.totalCents > 0 && (
                 <div className="rounded-lg border bg-blue-50 border-blue-200 p-3 text-sm" data-testid="budget-cost-estimate">
                   <p className="font-medium text-blue-800">
-                    Geschätzte Kosten: {(form.costEstimate.totalCents / 100).toFixed(2)} €
+                    Geschätzte Kosten: {(form.costEstimate.totalCents / 100).toFixed(2).replace(".", ",")} €
                   </p>
                   {form.costEstimate.availableCents !== undefined && (
                     <p className="text-blue-600 text-xs mt-1">
-                      Verfügbares Budget: {(form.costEstimate.availableCents / 100).toFixed(2)} €
+                      Verfügbares Budget: {(form.costEstimate.availableCents / 100).toFixed(2).replace(".", ",")} €
                     </p>
                   )}
                 </div>

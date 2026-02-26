@@ -114,7 +114,7 @@ export function DayDetailPanel({
     }
     const totalHours = totalMinutes / 60;
     if (totalHours >= 3) {
-      return `${(totalHours).toFixed(1)}h an diesem Tag (EU-Rentner: max. 3h/Tag)`;
+      return `${(totalHours).toFixed(1).replace(".", ",")}h an diesem Tag (EU-Rentner: max. 3h/Tag)`;
     }
     return null;
   })();

@@ -6,5 +6,5 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatKm(km: number | string | null | undefined): string {
-  return Number(km ?? 0).toFixed(1);
+  return Number(km ?? 0).toFixed(1).replace(".", ",");
 }

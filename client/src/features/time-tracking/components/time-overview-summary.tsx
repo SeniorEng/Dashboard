@@ -152,7 +152,7 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
             <div className="flex items-start gap-1.5 mt-3 p-2 rounded bg-red-50 border border-red-200" data-testid="text-eu-rentner-monthly-warning">
               <AlertTriangle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
               <span className="text-xs text-red-700 font-medium">
-                EU-Rentner-Grenze erreicht: {euRentnerMonthWarning.totalHours.toFixed(1)}h / max. {euRentnerMonthWarning.maxMonthlyHours.toFixed(1)}h (15h/Woche)
+                EU-Rentner-Grenze erreicht: {euRentnerMonthWarning.totalHours.toFixed(1).replace(".", ",")}h / max. {euRentnerMonthWarning.maxMonthlyHours.toFixed(1).replace(".", ",")}h (15h/Woche)
               </span>
             </div>
           )}

@@ -21,7 +21,7 @@ const UNIT_LABELS: Record<string, string> = {
 };
 
 function formatCurrency(cents: number): string {
-  return `${(cents / 100).toFixed(2)} €`;
+  return `${(cents / 100).toFixed(2).replace(".", ",")} €`;
 }
 
 export function EmployeeServiceRates() {

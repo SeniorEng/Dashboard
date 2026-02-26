@@ -285,8 +285,8 @@ export function BudgetLedgerSection({ customerId, customerName, initialSummary, 
                           <p className="text-xs text-gray-500 mt-1">
                             {tx.hauswirtschaftMinutes ? `HW: ${tx.hauswirtschaftMinutes}min ` : ""}
                             {tx.alltagsbegleitungMinutes ? `AB: ${tx.alltagsbegleitungMinutes}min ` : ""}
-                            {tx.travelKilometers ? `Anfahrt: ${(tx.travelKilometers / 10).toFixed(1)}km ` : ""}
-                            {tx.customerKilometers ? `Kunde: ${(tx.customerKilometers / 10).toFixed(1)}km` : ""}
+                            {tx.travelKilometers ? `Anfahrt: ${(tx.travelKilometers / 10).toFixed(1).replace(".", ",")}km ` : ""}
+                            {tx.customerKilometers ? `Kunde: ${(tx.customerKilometers / 10).toFixed(1).replace(".", ",")}km` : ""}
                           </p>
                         )}
                       </div>

@@ -55,7 +55,7 @@ function formatEuro(cents: number): string {
 
 function formatKm(km: number): string {
   if (km === 0) return "–";
-  return km.toFixed(1);
+  return km.toFixed(1).replace(".", ",");
 }
 
 function formatDays(days: number): string {

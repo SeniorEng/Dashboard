@@ -1028,7 +1028,7 @@ export default function CustomerDetailPage() {
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm font-medium">§45b Entlastungsbetrag</span>
                         <span className="text-sm text-muted-foreground">
-                          {(b.availableCents / 100).toFixed(2)} € verfügbar
+                          {(b.availableCents / 100).toFixed(2).replace(".", ",")} € verfügbar
                         </span>
                       </div>
                       <div className="w-full bg-muted rounded-full h-2 mb-1">
@@ -1038,8 +1038,8 @@ export default function CustomerDetailPage() {
                         />
                       </div>
                       <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span>{(b.totalUsedCents / 100).toFixed(2)} € von {(b.totalAllocatedCents / 100).toFixed(2)} € verbraucht</span>
-                        <span>Monat: {(b.currentMonthUsedCents / 100).toFixed(2)} €</span>
+                        <span>{(b.totalUsedCents / 100).toFixed(2).replace(".", ",")} € von {(b.totalAllocatedCents / 100).toFixed(2).replace(".", ",")} € verbraucht</span>
+                        <span>Monat: {(b.currentMonthUsedCents / 100).toFixed(2).replace(".", ",")} €</span>
                       </div>
                     </div>
                   );
@@ -1053,7 +1053,7 @@ export default function CustomerDetailPage() {
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm font-medium">§45a Umwandlungsanspruch</span>
                         <span className="text-sm text-muted-foreground">
-                          {(b.currentMonthAvailableCents / 100).toFixed(2)} € verfügbar
+                          {(b.currentMonthAvailableCents / 100).toFixed(2).replace(".", ",")} € verfügbar
                         </span>
                       </div>
                       <div className="w-full bg-muted rounded-full h-2 mb-1">
@@ -1063,7 +1063,7 @@ export default function CustomerDetailPage() {
                         />
                       </div>
                       <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span>{(b.currentMonthUsedCents / 100).toFixed(2)} € von {(b.currentMonthAllocatedCents / 100).toFixed(2)} € verbraucht</span>
+                        <span>{(b.currentMonthUsedCents / 100).toFixed(2).replace(".", ",")} € von {(b.currentMonthAllocatedCents / 100).toFixed(2).replace(".", ",")} € verbraucht</span>
                         <span>nur aktueller Monat</span>
                       </div>
                     </div>
