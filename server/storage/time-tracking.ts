@@ -834,9 +834,9 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       );
   }
 
-  async closeMonth(userId: number, year: number, month: number, closedByUserId: number, existingId?: number) {
+  async closeMonth(userId: number, year: number, month: number, closedByUserId: number, existingId?: number, txOrDb: typeof db = db) {
     if (existingId) {
-      await db
+      await txOrDb
         .update(employeeMonthClosings)
         .set({
           closedAt: new Date(),
@@ -846,7 +846,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
         })
         .where(eq(employeeMonthClosings.id, existingId));
     } else {
-      await db.insert(employeeMonthClosings).values({
+      await txOrDb.insert(employeeMonthClosings).values({
         userId,
         year,
         month,

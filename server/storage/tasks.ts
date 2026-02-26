@@ -239,10 +239,11 @@ Hinweis: Alle Termine des Monats müssen dokumentiert sein, bevor der Abschluss 
 export async function findMonthClosingTask(
   userId: number,
   month: number,
-  year: number
+  year: number,
+  txOrDb: typeof db = db
 ): Promise<Task | null> {
   const title = getMonthClosingTaskTitle(month, year);
-  const result = await db
+  const result = await txOrDb
     .select()
     .from(tasks)
     .where(
@@ -259,16 +260,17 @@ export async function findMonthClosingTask(
 export async function ensureMonthClosingTask(
   userId: number,
   month: number,
-  year: number
+  year: number,
+  txOrDb: typeof db = db
 ): Promise<Task> {
-  const existing = await findMonthClosingTask(userId, month, year);
+  const existing = await findMonthClosingTask(userId, month, year, txOrDb);
   if (existing) return existing;
 
   const nextMonth = month === 12 ? 1 : month + 1;
   const nextYear = month === 12 ? year + 1 : year;
   const dueDate = `${nextYear}-${nextMonth.toString().padStart(2, "0")}-05`;
 
-  const result = await db
+  const result = await txOrDb
     .insert(tasks)
     .values({
       title: getMonthClosingTaskTitle(month, year),
@@ -288,11 +290,12 @@ export async function ensureMonthClosingTask(
 export async function completeMonthClosingTask(
   userId: number,
   month: number,
-  year: number
+  year: number,
+  txOrDb: typeof db = db
 ): Promise<void> {
-  const existing = await findMonthClosingTask(userId, month, year);
+  const existing = await findMonthClosingTask(userId, month, year, txOrDb);
   if (existing && existing.status !== "completed") {
-    await db
+    await txOrDb
       .update(tasks)
       .set({
         status: "completed",

@@ -1286,6 +1286,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           const txYear = txDate.getFullYear();
           const txMonth = txDate.getMonth() + 1;
           const currentMonthStart = `${txYear}-${String(txMonth).padStart(2, '0')}-01`;
+          const lastDay = new Date(txYear, txMonth, 0).getDate();
+          const currentMonthEnd = `${txYear}-${String(txMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
           const monthTransactions = await tx.select({
             total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
@@ -1295,7 +1297,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
               eq(budgetTransactions.customerId, params.customerId),
               eq(budgetTransactions.budgetType, pot.budgetType),
               eq(budgetTransactions.transactionType, "consumption"),
-              gte(budgetTransactions.transactionDate, currentMonthStart)
+              gte(budgetTransactions.transactionDate, currentMonthStart),
+              lte(budgetTransactions.transactionDate, currentMonthEnd)
             ));
 
           const alreadyUsedThisMonth = Number(monthTransactions[0]?.total ?? 0);

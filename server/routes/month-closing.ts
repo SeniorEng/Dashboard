@@ -7,6 +7,7 @@ import { auditService } from "../services/audit";
 import { generateAutoBreaksForMonth, insertAutoBreaks, previewAutoBreaksForMonth, removeAutoBreaksForMonth } from "../services/auto-breaks";
 import { STATUS_LABELS } from "@shared/domain/appointments";
 import { completeMonthClosingTask, reopenMonthClosingTask, ensureMonthClosingTask } from "../storage/tasks";
+import { db } from "../lib/db";
 
 const router = Router();
 router.use(requireAuth);
@@ -99,12 +100,14 @@ router.post("/close-month", asyncHandler("Monatsabschluss fehlgeschlagen", async
   }
 
   const autoBreaks = await generateAutoBreaksForMonth(userId, year, month);
-  const insertedCount = await insertAutoBreaks(userId, autoBreaks);
 
-  await timeTrackingStorage.closeMonth(userId, year, month, userId, existing?.id);
-
-  await ensureMonthClosingTask(userId, month, year);
-  await completeMonthClosingTask(userId, month, year);
+  const insertedCount = await db.transaction(async (tx) => {
+    const count = await insertAutoBreaks(userId, autoBreaks, tx);
+    await timeTrackingStorage.closeMonth(userId, year, month, userId, existing?.id, tx);
+    await ensureMonthClosingTask(userId, month, year, tx);
+    await completeMonthClosingTask(userId, month, year, tx);
+    return count;
+  });
 
   await auditService.log(req.user!.id, "month_closed", "month_closing", userId, {
     year,

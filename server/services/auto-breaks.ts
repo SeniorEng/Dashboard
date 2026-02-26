@@ -130,12 +130,13 @@ export async function generateAutoBreaksForMonth(
 
 export async function insertAutoBreaks(
   userId: number,
-  breaks: AutoBreakResult[]
+  breaks: AutoBreakResult[],
+  txOrDb: typeof db = db
 ): Promise<number> {
   if (breaks.length === 0) return 0;
 
   const allDates = breaks.map((b) => b.date);
-  const existingAutoBreaks = await db
+  const existingAutoBreaks = await txOrDb
     .select({ entryDate: employeeTimeEntries.entryDate })
     .from(employeeTimeEntries)
     .where(
@@ -152,7 +153,7 @@ export async function insertAutoBreaks(
   const toInsert = breaks.filter((b) => !existingDates.has(b.date));
   if (toInsert.length === 0) return 0;
 
-  await db.insert(employeeTimeEntries).values(
+  await txOrDb.insert(employeeTimeEntries).values(
     toInsert.map((b) => ({
       userId,
       entryType: "pause" as const,
