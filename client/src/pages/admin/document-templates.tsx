@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import DOMPurify from "dompurify";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -38,7 +38,23 @@ import {
   Circle,
   Info,
   Copy,
+  ChevronDown,
+  FormInput,
+  User,
+  Building2,
+  Shield,
+  FileSignature,
+  Calendar,
+  Phone,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+} from "@/components/ui/dropdown-menu";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -147,6 +163,37 @@ export function DocumentTemplatesContent() {
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [billingAssignments, setBillingAssignments] = useState<Record<string, { enabled: boolean; requirement: string; sortOrder: number }>>({});
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const insertAtCursor = useCallback((text: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      setFormData(p => ({ ...p, htmlContent: p.htmlContent + text }));
+      return;
+    }
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const before = formData.htmlContent.substring(0, start);
+    const after = formData.htmlContent.substring(end);
+    const newContent = before + text + after;
+    setFormData(p => ({ ...p, htmlContent: newContent }));
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const newPos = start + text.length;
+      textarea.setSelectionRange(newPos, newPos);
+    });
+  }, [formData.htmlContent]);
+
+  const groupedPlaceholders = useMemo(() => {
+    if (!placeholders) return {};
+    const groups: Record<string, PlaceholderInfo[]> = {};
+    for (const p of placeholders) {
+      const source = p.source;
+      if (!groups[source]) groups[source] = [];
+      groups[source].push(p);
+    }
+    return groups;
+  }, [placeholders]);
 
   const { data: templates, isLoading } = useQuery<TemplateData[]>({
     queryKey: ["admin", "document-templates"],
@@ -630,15 +677,104 @@ export function DocumentTemplatesContent() {
                     Vorschau
                   </Button>
                 </div>
+
+                <div className="flex flex-wrap gap-1.5 p-2 bg-gray-50 border rounded-t-lg" data-testid="placeholder-toolbar">
+                  {Object.entries(groupedPlaceholders).map(([source, items]) => {
+                    const sourceLabels: Record<string, { label: string; icon: typeof User }> = {
+                      customer: { label: "Kunde", icon: User },
+                      insurance: { label: "Versicherung", icon: Shield },
+                      company: { label: "Firma", icon: Building2 },
+                      contract: { label: "Vertrag", icon: FileText },
+                      contact: { label: "Kontakt", icon: Phone },
+                      system: { label: "System", icon: Calendar },
+                      signature: { label: "Unterschrift", icon: FileSignature },
+                    };
+                    const config = sourceLabels[source] || { label: source, icon: Tag };
+                    const Icon = config.icon;
+                    return (
+                      <DropdownMenu key={source}>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs gap-1 px-2"
+                            data-testid={`dropdown-placeholder-${source}`}
+                          >
+                            <Icon className="h-3 w-3" />
+                            {config.label}
+                            <ChevronDown className="h-3 w-3 opacity-50" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="max-h-64 overflow-y-auto">
+                          <DropdownMenuLabel className="text-xs">{config.label}-Felder</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          {items.map((p) => (
+                            <DropdownMenuItem
+                              key={p.key}
+                              onClick={() => insertAtCursor(p.key)}
+                              className="text-xs gap-2 cursor-pointer"
+                              data-testid={`insert-${p.key}`}
+                            >
+                              <code className="font-mono text-teal-700 bg-teal-50 px-1 rounded text-[10px]">{p.key}</code>
+                              <span className="text-gray-600 truncate">{p.label}</span>
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    );
+                  })}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs gap-1 px-2 border-amber-300 text-amber-700 hover:bg-amber-50"
+                        data-testid="dropdown-input-field"
+                      >
+                        <FormInput className="h-3 w-3" />
+                        Eingabefeld
+                        <ChevronDown className="h-3 w-3 opacity-50" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuLabel className="text-xs">Eingabefeld einfügen</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {["Bemerkung", "Anzahl Schlüssel", "Sonstiges", "Datum", "Betrag"].map((label) => (
+                        <DropdownMenuItem
+                          key={label}
+                          onClick={() => insertAtCursor(`{{input:${label}}}`)}
+                          className="text-xs gap-2 cursor-pointer"
+                          data-testid={`insert-input-${label}`}
+                        >
+                          <code className="font-mono text-amber-700 bg-amber-50 px-1 rounded text-[10px]">{`{{input:${label}}}`}</code>
+                        </DropdownMenuItem>
+                      ))}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={() => {
+                          const label = prompt("Bezeichnung des Eingabefelds:");
+                          if (label?.trim()) insertAtCursor(`{{input:${label.trim()}}}`);
+                        }}
+                        className="text-xs gap-2 cursor-pointer font-medium"
+                        data-testid="insert-input-custom"
+                      >
+                        <Plus className="h-3 w-3" />
+                        Eigenes Feld...
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+
                 <Textarea
+                  ref={textareaRef}
                   value={formData.htmlContent}
                   onChange={(e) => setFormData(p => ({ ...p, htmlContent: e.target.value }))}
                   placeholder="<h1>Vertragsvorlage</h1>&#10;<p>Zwischen {{company_name}} und {{customer_name}}...</p>"
-                  className="font-mono text-sm min-h-[300px] leading-relaxed"
+                  className="font-mono text-sm min-h-[300px] leading-relaxed rounded-t-none border-t-0"
                   data-testid="textarea-html-content"
                 />
                 <p className="text-xs text-gray-500">
-                  Verwenden Sie {"{{platzhalter}}"} für dynamische Werte. Siehe Tab "Platzhalter" für alle verfügbaren Variablen.
+                  Klicken Sie auf die Buttons oben, um Platzhalter an der Cursor-Position einzufügen. Weitere Details im Tab "Platzhalter".
                 </p>
               </div>
               <div className="flex items-center gap-3 pt-2">
