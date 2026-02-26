@@ -163,7 +163,13 @@ export default function AppointmentDetail() {
         {appointment.customer && (
           <div className="mb-6">
             <h1 className={componentStyles.pageTitle} data-testid="text-customer-name">
-              {appointment.customer.name}
+              <Link
+                href={user?.isAdmin ? `/admin/customers/${appointment.customerId}` : `/customer/${appointment.customerId}`}
+                className="underline decoration-primary/30 underline-offset-4 hover:decoration-primary transition-colors"
+                data-testid="link-customer-detail"
+              >
+                {appointment.customer.name}
+              </Link>
             </h1>
             <div className="flex items-center text-muted-foreground text-sm mt-2">
               <MapPin className={`${iconSize.sm} mr-1.5 text-primary shrink-0`} />
