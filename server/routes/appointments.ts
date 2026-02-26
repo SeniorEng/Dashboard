@@ -235,7 +235,8 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
   const overlapResult = await appointmentService.checkOverlap(
     validatedData.date, 
     validatedData.scheduledStart, 
-    scheduledEnd
+    scheduledEnd,
+    assignedEmployeeId
   );
   
   if (overlapResult.hasUnreliableData) {
@@ -289,7 +290,8 @@ router.post("/erstberatung", asyncHandler(ErrorMessages.createErstberatungFailed
   const overlapResult = await appointmentService.checkOverlap(
     validatedData.date, 
     validatedData.scheduledStart, 
-    scheduledEnd
+    scheduledEnd,
+    assignedEmployeeId
   );
   
   if (overlapResult.hasUnreliableData) {

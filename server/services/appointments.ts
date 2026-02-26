@@ -102,12 +102,14 @@ export class AppointmentService {
     date: string, 
     startTime: string, 
     endTime: string, 
+    employeeId: number,
     excludeId?: number
   ): Promise<OverlapCheckResult> {
     const existingAppointments = await this.storage.getAppointmentsByDate(date);
     
     for (const apt of existingAppointments) {
       if (excludeId && apt.id === excludeId) continue;
+      if (apt.assignedEmployeeId !== employeeId) continue;
       
       if (apt.status === "completed") {
         if (apt.actualEnd) {
