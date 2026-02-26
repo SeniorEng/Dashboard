@@ -34,10 +34,6 @@ import {
   Eye,
   Code,
   Tag,
-  CheckCircle2,
-  Circle,
-  Info,
-  Copy,
   ChevronDown,
   FormInput,
   User,
@@ -412,15 +408,6 @@ export function DocumentTemplatesContent() {
     }
   };
 
-  const handleCopyPlaceholder = (key: string) => {
-    const wrapped = `{{${key}}}`;
-    navigator.clipboard.writeText(wrapped).then(() => {
-      toast({ title: "Kopiert", description: `${wrapped} in die Zwischenablage kopiert` });
-    }).catch(() => {
-      toast({ title: "Kopieren fehlgeschlagen", variant: "destructive" });
-    });
-  };
-
   const isPending = createMutation.isPending || updateMutation.isPending;
   const isDialogOpen = isCreateMode || !!editingTemplate;
 
@@ -538,157 +525,135 @@ export function DocumentTemplatesContent() {
           </DialogHeader>
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-2">
-            <TabsList className="bg-white h-auto p-1 flex-wrap gap-1">
+            <TabsList className="bg-white h-auto p-1 gap-1">
               <TabsTrigger value="editor" className="text-sm gap-1.5" data-testid="tab-editor">
                 <Code className="h-3.5 w-3.5" />
                 Editor
+              </TabsTrigger>
+              <TabsTrigger value="settings" className="text-sm gap-1.5" data-testid="tab-settings">
+                <Tag className="h-3.5 w-3.5" />
+                Einstellungen
               </TabsTrigger>
               <TabsTrigger value="preview" className="text-sm gap-1.5" data-testid="tab-preview">
                 <Eye className="h-3.5 w-3.5" />
                 Vorschau
               </TabsTrigger>
-              <TabsTrigger value="placeholders" className="text-sm gap-1.5" data-testid="tab-placeholders">
-                <Info className="h-3.5 w-3.5" />
-                Platzhalter
-              </TabsTrigger>
-              <TabsTrigger value="billing" className="text-sm gap-1.5" data-testid="tab-billing">
-                <Tag className="h-3.5 w-3.5" />
-                Zuordnung
-              </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="editor" className="mt-4">
-              <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6">
-                <div className="space-y-2 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <Label>HTML-Inhalt *</Label>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 gap-1.5"
-                      onClick={handlePreview}
-                      disabled={!formData.htmlContent || isPreviewLoading}
-                      data-testid="button-preview"
-                    >
-                      {isPreviewLoading ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Eye className="h-3.5 w-3.5" />
-                      )}
-                      Vorschau
-                    </Button>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5 p-2 bg-gray-50 border rounded-t-lg" data-testid="placeholder-toolbar">
-                    {Object.entries(groupedPlaceholders).map(([source, items]) => {
-                      const sourceLabels: Record<string, { label: string; icon: typeof User }> = {
-                        customer: { label: "Kunde", icon: User },
-                        insurance: { label: "Versicherung", icon: Shield },
-                        company: { label: "Firma", icon: Building2 },
-                        contract: { label: "Vertrag", icon: FileText },
-                        contact: { label: "Kontakt", icon: Phone },
-                        system: { label: "System", icon: Calendar },
-                        signature: { label: "Unterschrift", icon: FileSignature },
-                      };
-                      const config = sourceLabels[source] || { label: source, icon: Tag };
-                      const Icon = config.icon;
-                      return (
-                        <DropdownMenu key={source}>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 text-xs gap-1 px-2"
-                              data-testid={`dropdown-placeholder-${source}`}
-                            >
-                              <Icon className="h-3 w-3" />
-                              {config.label}
-                              <ChevronDown className="h-3 w-3 opacity-50" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="start" className="max-h-64 overflow-y-auto">
-                            <DropdownMenuLabel className="text-xs">{config.label}-Felder</DropdownMenuLabel>
-                            <DropdownMenuSeparator />
-                            {items.map((p) => (
-                              <DropdownMenuItem
-                                key={p.key}
-                                onClick={() => insertAtCursor(p.key)}
-                                className="text-xs gap-2 cursor-pointer"
-                                data-testid={`insert-${p.key}`}
-                              >
-                                <code className="font-mono text-teal-700 bg-teal-50 px-1 rounded text-[10px]">{p.key}</code>
-                                <span className="text-gray-600 truncate">{p.label}</span>
-                              </DropdownMenuItem>
-                            ))}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      );
-                    })}
-                    <DropdownMenu>
+            <TabsContent value="editor" className="mt-4 space-y-2">
+              <div className="flex flex-wrap gap-1.5 p-2 bg-gray-50 border rounded-t-lg" data-testid="placeholder-toolbar">
+                {Object.entries(groupedPlaceholders).map(([source, items]) => {
+                  const sourceLabels: Record<string, { label: string; icon: typeof User }> = {
+                    customer: { label: "Kunde", icon: User },
+                    insurance: { label: "Versicherung", icon: Shield },
+                    company: { label: "Firma", icon: Building2 },
+                    contract: { label: "Vertrag", icon: FileText },
+                    contact: { label: "Kontakt", icon: Phone },
+                    system: { label: "System", icon: Calendar },
+                    signature: { label: "Unterschrift", icon: FileSignature },
+                  };
+                  const config = sourceLabels[source] || { label: source, icon: Tag };
+                  const Icon = config.icon;
+                  return (
+                    <DropdownMenu key={source}>
                       <DropdownMenuTrigger asChild>
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-7 text-xs gap-1 px-2 border-amber-300 text-amber-700 hover:bg-amber-50"
-                          data-testid="dropdown-input-field"
+                          className="h-7 text-xs gap-1 px-2"
+                          data-testid={`dropdown-placeholder-${source}`}
                         >
-                          <FormInput className="h-3 w-3" />
-                          Eingabefeld
+                          <Icon className="h-3 w-3" />
+                          {config.label}
                           <ChevronDown className="h-3 w-3 opacity-50" />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="start">
-                        <DropdownMenuLabel className="text-xs">Eingabefeld einfügen</DropdownMenuLabel>
+                      <DropdownMenuContent align="start" className="max-h-64 overflow-y-auto">
+                        <DropdownMenuLabel className="text-xs">{config.label}-Felder</DropdownMenuLabel>
                         <DropdownMenuSeparator />
-                        {["Bemerkung", "Anzahl Schlüssel", "Sonstiges", "Datum", "Betrag"].map((label) => (
+                        {items.map((p) => (
                           <DropdownMenuItem
-                            key={label}
-                            onClick={() => insertAtCursor(`{{input:${label}}}`)}
+                            key={p.key}
+                            onClick={() => insertAtCursor(p.key)}
                             className="text-xs gap-2 cursor-pointer"
-                            data-testid={`insert-input-${label}`}
+                            data-testid={`insert-${p.key}`}
                           >
-                            <code className="font-mono text-amber-700 bg-amber-50 px-1 rounded text-[10px]">{`{{input:${label}}}`}</code>
+                            <code className="font-mono text-teal-700 bg-teal-50 px-1 rounded text-[10px]">{p.key}</code>
+                            <span className="text-gray-600 truncate">{p.label}</span>
                           </DropdownMenuItem>
                         ))}
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onClick={() => {
-                            const label = prompt("Bezeichnung des Eingabefelds:");
-                            if (label?.trim()) insertAtCursor(`{{input:${label.trim()}}}`);
-                          }}
-                          className="text-xs gap-2 cursor-pointer font-medium"
-                          data-testid="insert-input-custom"
-                        >
-                          <Plus className="h-3 w-3" />
-                          Eigenes Feld...
-                        </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
-                    {companySettings?.pdfLogoUrl && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-xs gap-1 px-2 border-blue-300 text-blue-700 hover:bg-blue-50"
-                        onClick={() => insertAtCursor(`<img src="/api/public/logo/pdf" alt="Logo" style="max-height: 80px;" />`)}
-                        data-testid="insert-pdf-logo"
+                  );
+                })}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs gap-1 px-2 border-amber-300 text-amber-700 hover:bg-amber-50"
+                      data-testid="dropdown-input-field"
+                    >
+                      <FormInput className="h-3 w-3" />
+                      Eingabefeld
+                      <ChevronDown className="h-3 w-3 opacity-50" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuLabel className="text-xs">Eingabefeld einfügen</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {["Bemerkung", "Anzahl Schlüssel", "Sonstiges", "Datum", "Betrag"].map((label) => (
+                      <DropdownMenuItem
+                        key={label}
+                        onClick={() => insertAtCursor(`{{input:${label}}}`)}
+                        className="text-xs gap-2 cursor-pointer"
+                        data-testid={`insert-input-${label}`}
                       >
-                        <Image className="h-3 w-3" />
-                        PDF-Logo
-                      </Button>
-                    )}
-                  </div>
-                  <Textarea
-                    ref={textareaRef}
-                    value={formData.htmlContent}
-                    onChange={(e) => setFormData(p => ({ ...p, htmlContent: e.target.value }))}
-                    placeholder="<h1>Vertragsvorlage</h1>&#10;<p>Zwischen {{company_name}} und {{customer_name}}...</p>"
-                    className="font-mono text-sm min-h-[50vh] leading-relaxed rounded-t-none border-t-0 resize-y"
-                    data-testid="textarea-html-content"
-                  />
-                </div>
+                        <code className="font-mono text-amber-700 bg-amber-50 px-1 rounded text-[10px]">{`{{input:${label}}}`}</code>
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => {
+                        const label = prompt("Bezeichnung des Eingabefelds:");
+                        if (label?.trim()) insertAtCursor(`{{input:${label.trim()}}}`);
+                      }}
+                      className="text-xs gap-2 cursor-pointer font-medium"
+                      data-testid="insert-input-custom"
+                    >
+                      <Plus className="h-3 w-3" />
+                      Eigenes Feld...
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                {companySettings?.pdfLogoUrl && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs gap-1 px-2 border-blue-300 text-blue-700 hover:bg-blue-50"
+                    onClick={() => insertAtCursor(`<img src="/api/public/logo/pdf" alt="Logo" style="max-height: 80px;" />`)}
+                    data-testid="insert-pdf-logo"
+                  >
+                    <Image className="h-3 w-3" />
+                    PDF-Logo
+                  </Button>
+                )}
+              </div>
+              <Textarea
+                ref={textareaRef}
+                value={formData.htmlContent}
+                onChange={(e) => setFormData(p => ({ ...p, htmlContent: e.target.value }))}
+                placeholder="<h1>Vertragsvorlage</h1>&#10;<p>Zwischen {{company_name}} und {{customer_name}}...</p>"
+                className="font-mono text-sm min-h-[60vh] leading-relaxed rounded-t-none border-t-0 resize-y"
+                data-testid="textarea-html-content"
+              />
+            </TabsContent>
 
+            <TabsContent value="settings" className="mt-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div className="space-y-4">
-                  <div className="space-y-3">
-                    <Label className="text-sm font-semibold">Name *</Label>
+                  <div className="space-y-2">
+                    <Label>Name *</Label>
                     <Input
                       value={formData.name}
                       onChange={(e) => {
@@ -703,28 +668,28 @@ export function DocumentTemplatesContent() {
                       data-testid="input-template-name"
                     />
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Slug {isCreateMode && "(auto)"}</Label>
+                  <div className="space-y-2">
+                    <Label>Slug {isCreateMode && "(wird automatisch generiert)"}</Label>
                     <Input
                       value={formData.slug}
                       onChange={(e) => setFormData(p => ({ ...p, slug: e.target.value }))}
-                      className="font-mono text-xs"
+                      placeholder="betreuungsvertrag_pflegekasse"
+                      className="font-mono text-sm"
                       disabled={!isCreateMode}
                       data-testid="input-template-slug"
                     />
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Beschreibung</Label>
+                  <div className="space-y-2">
+                    <Label>Beschreibung</Label>
                     <Input
                       value={formData.description}
                       onChange={(e) => setFormData(p => ({ ...p, description: e.target.value }))}
-                      placeholder="Kurze Beschreibung"
+                      placeholder="Kurze Beschreibung der Vorlage"
                       data-testid="input-template-description"
                     />
                   </div>
-                  <hr />
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Dokumentenkategorie</Label>
+                  <div className="space-y-2">
+                    <Label>Dokumentenkategorie</Label>
                     <Select
                       value={formData.documentTypeId?.toString() || "none"}
                       onValueChange={(v) => setFormData(p => ({ ...p, documentTypeId: v === "none" ? null : parseInt(v) }))}
@@ -740,9 +705,9 @@ export function DocumentTemplatesContent() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Kontext</Label>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Kontext</Label>
                       <Select
                         value={formData.context}
                         onValueChange={(v) => setFormData(p => ({ ...p, context: v }))}
@@ -751,14 +716,14 @@ export function DocumentTemplatesContent() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="beide">Immer</SelectItem>
-                          <SelectItem value="vertragsabschluss">Vertrag</SelectItem>
-                          <SelectItem value="bestandskunde">Bestand</SelectItem>
+                          <SelectItem value="beide">Immer verfügbar</SelectItem>
+                          <SelectItem value="vertragsabschluss">Nur bei Vertragsabschluss</SelectItem>
+                          <SelectItem value="bestandskunde">Nur bei Bestandskunden</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Zielgruppe</Label>
+                    <div className="space-y-2">
+                      <Label>Zielgruppe</Label>
                       <Select
                         value={formData.targetType}
                         onValueChange={(v) => setFormData(p => ({ ...p, targetType: v }))}
@@ -774,10 +739,9 @@ export function DocumentTemplatesContent() {
                       </Select>
                     </div>
                   </div>
-                  <hr />
-                  <div className="space-y-3">
+                  <div className="space-y-3 pt-2">
                     <div className="flex items-center justify-between">
-                      <Label className="text-sm">Aktiv</Label>
+                      <Label>Aktiv</Label>
                       <Switch
                         checked={formData.isActive}
                         onCheckedChange={(v) => setFormData(p => ({ ...p, isActive: v }))}
@@ -785,7 +749,7 @@ export function DocumentTemplatesContent() {
                       />
                     </div>
                     <div className="flex items-center justify-between">
-                      <Label className="text-sm">Kundenunterschrift</Label>
+                      <Label>Kundenunterschrift erforderlich</Label>
                       <Switch
                         checked={formData.requiresCustomerSignature}
                         onCheckedChange={(v) => setFormData(p => ({ ...p, requiresCustomerSignature: v }))}
@@ -793,7 +757,7 @@ export function DocumentTemplatesContent() {
                       />
                     </div>
                     <div className="flex items-center justify-between">
-                      <Label className="text-sm">MA-Unterschrift</Label>
+                      <Label>Mitarbeiterunterschrift erforderlich</Label>
                       <Switch
                         checked={formData.requiresEmployeeSignature}
                         onCheckedChange={(v) => setFormData(p => ({ ...p, requiresEmployeeSignature: v }))}
@@ -802,14 +766,81 @@ export function DocumentTemplatesContent() {
                     </div>
                   </div>
                   {editingTemplate && (
-                    <>
-                      <hr />
-                      <p className="text-xs text-muted-foreground">
-                        Version {editingTemplate.version} · {formatDateForDisplay(editingTemplate.updatedAt.split("T")[0])}
-                        {editingTemplate.isSystem && " · System"}
-                      </p>
-                    </>
+                    <p className="text-xs text-muted-foreground pt-2">
+                      Version {editingTemplate.version} · Zuletzt aktualisiert: {formatDateForDisplay(editingTemplate.updatedAt.split("T")[0])}
+                      {editingTemplate.isSystem && " · System-Vorlage"}
+                    </p>
                   )}
+                </div>
+
+                <div className="space-y-4">
+                  <Label className="text-sm font-semibold">Zuordnung zu Abrechnungsarten</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Legen Sie fest, für welche Abrechnungsarten diese Vorlage im Kundenanlage-Flow angezeigt wird.
+                  </p>
+                  <div className="space-y-3">
+                    {BILLING_TYPES.map((bt) => {
+                      const assignment = billingAssignments[bt] || { enabled: false, requirement: "pflicht", sortOrder: 0 };
+                      return (
+                        <Card key={bt} className={assignment.enabled ? "border-teal-200 bg-teal-50/30" : ""}>
+                          <CardContent className="p-3">
+                            <div className="flex items-center gap-3">
+                              <Switch
+                                checked={assignment.enabled}
+                                onCheckedChange={(enabled) => {
+                                  setBillingAssignments(prev => ({
+                                    ...prev,
+                                    [bt]: { ...prev[bt], enabled },
+                                  }));
+                                }}
+                                data-testid={`switch-billing-${bt}`}
+                              />
+                              <div className="flex-1">
+                                <span className="text-sm font-medium">{BILLING_TYPE_LABELS[bt]}</span>
+                              </div>
+                            </div>
+                            {assignment.enabled && (
+                              <div className="flex items-center gap-3 mt-2 ml-11">
+                                <Select
+                                  value={assignment.requirement}
+                                  onValueChange={(v) => {
+                                    setBillingAssignments(prev => ({
+                                      ...prev,
+                                      [bt]: { ...prev[bt], requirement: v },
+                                    }));
+                                  }}
+                                >
+                                  <SelectTrigger className="w-28 h-8 text-xs" data-testid={`select-requirement-${bt}`}>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="pflicht">Pflicht</SelectItem>
+                                    <SelectItem value="optional">Optional</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                <div className="flex items-center gap-1.5">
+                                  <Label className="text-xs text-muted-foreground">Pos.</Label>
+                                  <Input
+                                    type="number"
+                                    min="1"
+                                    className="w-14 h-8 text-center text-xs"
+                                    value={assignment.sortOrder}
+                                    onChange={(e) => {
+                                      setBillingAssignments(prev => ({
+                                        ...prev,
+                                        [bt]: { ...prev[bt], sortOrder: parseInt(e.target.value) || 0 },
+                                      }));
+                                    }}
+                                    data-testid={`input-sort-${bt}`}
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </TabsContent>
@@ -841,133 +872,6 @@ export function DocumentTemplatesContent() {
                   <p>Klicken Sie auf "Vorschau" im Editor-Tab, um eine Vorschau mit Beispieldaten zu generieren.</p>
                 </div>
               )}
-            </TabsContent>
-
-            <TabsContent value="placeholders" className="mt-4">
-              <div className="space-y-1">
-                <p className="text-sm text-gray-600 mb-3">
-                  Diese Platzhalter können im HTML-Inhalt verwendet werden. Sie werden beim Generieren automatisch mit den Kundendaten ersetzt.
-                </p>
-
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg mb-4" data-testid="hint-input-placeholders">
-                  <p className="text-sm font-medium text-amber-800 mb-1">Eingabefelder</p>
-                  <p className="text-sm text-amber-700">
-                    Verwenden Sie <code className="bg-amber-100 px-1 rounded font-mono text-xs">{"{{input:Bezeichnung}}"}</code> für Felder, die der Mitarbeiter vor Ort ausfüllt.
-                  </p>
-                  <p className="text-xs text-amber-600 mt-1">
-                    Beispiel: <code className="bg-amber-100 px-1 rounded font-mono">{"{{input:Anzahl Schlüssel}}"}</code>, <code className="bg-amber-100 px-1 rounded font-mono">{"{{input:Bemerkung}}"}</code>
-                  </p>
-                </div>
-
-                <div className="grid gap-2">
-                  {placeholders?.map((p) => (
-                    <div
-                      key={p.key}
-                      className="flex items-center justify-between p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors"
-                      data-testid={`placeholder-${p.key}`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <code className="text-sm font-mono bg-white px-2 py-1 rounded border text-teal-700">{p.key}</code>
-                        <span className="text-sm text-gray-700">{p.label}</span>
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">{p.source}</span>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-9 w-9 p-0"
-                        onClick={() => handleCopyPlaceholder(p.key)}
-                        aria-label={`${p.key} kopieren`}
-                        data-testid={`button-copy-${p.key}`}
-                      >
-                        <Copy className="h-3.5 w-3.5 text-gray-400" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="billing" className="mt-4">
-              <p className="text-sm text-gray-600 mb-4">
-                Legen Sie fest, für welche Abrechnungsarten diese Vorlage im Kundenanlage-Flow angezeigt wird und ob sie verpflichtend oder optional ist.
-              </p>
-              <div className="space-y-3">
-                {BILLING_TYPES.map((bt) => {
-                  const assignment = billingAssignments[bt] || { enabled: false, requirement: "pflicht", sortOrder: 0 };
-                  return (
-                    <Card key={bt} className={assignment.enabled ? "border-teal-200 bg-teal-50/30" : ""}>
-                      <CardContent className="p-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-3 flex-1">
-                            <Switch
-                              checked={assignment.enabled}
-                              onCheckedChange={(enabled) => {
-                                setBillingAssignments(prev => ({
-                                  ...prev,
-                                  [bt]: { ...prev[bt], enabled },
-                                }));
-                              }}
-                              data-testid={`switch-billing-${bt}`}
-                            />
-                            <div>
-                              <span className="font-medium text-gray-900">{BILLING_TYPE_LABELS[bt]}</span>
-                              {assignment.enabled && (
-                                <div className="flex items-center gap-1 mt-0.5">
-                                  {assignment.requirement === "pflicht" ? (
-                                    <CheckCircle2 className="h-3.5 w-3.5 text-amber-600" />
-                                  ) : (
-                                    <Circle className="h-3.5 w-3.5 text-gray-400" />
-                                  )}
-                                  <span className="text-xs text-gray-500">
-                                    {assignment.requirement === "pflicht" ? "Pflichtdokument" : "Optionales Dokument"}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                          {assignment.enabled && (
-                            <div className="flex items-center gap-3">
-                              <Select
-                                value={assignment.requirement}
-                                onValueChange={(v) => {
-                                  setBillingAssignments(prev => ({
-                                    ...prev,
-                                    [bt]: { ...prev[bt], requirement: v },
-                                  }));
-                                }}
-                              >
-                                <SelectTrigger className="w-32 h-9" data-testid={`select-requirement-${bt}`}>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="pflicht">Pflicht</SelectItem>
-                                  <SelectItem value="optional">Optional</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              <div className="flex items-center gap-1.5">
-                                <Label className="text-xs text-gray-500 whitespace-nowrap">Pos.</Label>
-                                <Input
-                                  type="number"
-                                  min="1"
-                                  className="w-16 h-9 text-center text-sm"
-                                  value={assignment.sortOrder}
-                                  onChange={(e) => {
-                                    setBillingAssignments(prev => ({
-                                      ...prev,
-                                      [bt]: { ...prev[bt], sortOrder: parseInt(e.target.value) || 0 },
-                                    }));
-                                  }}
-                                  data-testid={`input-sort-${bt}`}
-                                />
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
             </TabsContent>
           </Tabs>
 
