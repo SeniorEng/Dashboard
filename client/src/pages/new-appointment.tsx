@@ -84,9 +84,6 @@ export default function NewAppointment() {
                     data-testid="select-kt-employee"
                   />
                   {form.errors.ktAssignedEmployeeId && <p className="text-destructive text-sm">{form.errors.ktAssignedEmployeeId}</p>}
-                  <p className="text-xs text-muted-foreground">
-                    Der Mitarbeiter muss dem Kunden zugeordnet sein (Haupt- oder Vertretungsmitarbeiter)
-                  </p>
                 </div>
               )}
 
