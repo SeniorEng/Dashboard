@@ -46,6 +46,7 @@ import {
   FileSignature,
   Calendar,
   Phone,
+  Image,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -165,36 +166,6 @@ export function DocumentTemplatesContent() {
   const [billingAssignments, setBillingAssignments] = useState<Record<string, { enabled: boolean; requirement: string; sortOrder: number }>>({});
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const insertAtCursor = useCallback((text: string) => {
-    const textarea = textareaRef.current;
-    if (!textarea) {
-      setFormData(p => ({ ...p, htmlContent: p.htmlContent + text }));
-      return;
-    }
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const before = formData.htmlContent.substring(0, start);
-    const after = formData.htmlContent.substring(end);
-    const newContent = before + text + after;
-    setFormData(p => ({ ...p, htmlContent: newContent }));
-    requestAnimationFrame(() => {
-      textarea.focus();
-      const newPos = start + text.length;
-      textarea.setSelectionRange(newPos, newPos);
-    });
-  }, [formData.htmlContent]);
-
-  const groupedPlaceholders = useMemo(() => {
-    if (!placeholders) return {};
-    const groups: Record<string, PlaceholderInfo[]> = {};
-    for (const p of placeholders) {
-      const source = p.source;
-      if (!groups[source]) groups[source] = [];
-      groups[source].push(p);
-    }
-    return groups;
-  }, [placeholders]);
-
   const { data: templates, isLoading } = useQuery<TemplateData[]>({
     queryKey: ["admin", "document-templates"],
     queryFn: async () => {
@@ -226,6 +197,44 @@ export function DocumentTemplatesContent() {
       return unwrapResult(result);
     },
   });
+
+  const { data: companySettings } = useQuery<{ pdfLogoUrl?: string | null }>({
+    queryKey: ["company-settings"],
+    queryFn: async () => {
+      const result = await api.get<{ pdfLogoUrl?: string | null }>("/company-settings");
+      return unwrapResult(result);
+    },
+  });
+
+  const insertAtCursor = useCallback((text: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      setFormData(p => ({ ...p, htmlContent: p.htmlContent + text }));
+      return;
+    }
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const before = formData.htmlContent.substring(0, start);
+    const after = formData.htmlContent.substring(end);
+    const newContent = before + text + after;
+    setFormData(p => ({ ...p, htmlContent: newContent }));
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const newPos = start + text.length;
+      textarea.setSelectionRange(newPos, newPos);
+    });
+  }, [formData.htmlContent]);
+
+  const groupedPlaceholders = useMemo(() => {
+    if (!placeholders) return {};
+    const groups: Record<string, PlaceholderInfo[]> = {};
+    for (const p of placeholders) {
+      const source = p.source;
+      if (!groups[source]) groups[source] = [];
+      groups[source].push(p);
+    }
+    return groups;
+  }, [placeholders]);
 
   const billingTypesByTemplate = useMemo(() => {
     const map: Record<number, BillingTypeAssignment[]> = {};
@@ -763,6 +772,18 @@ export function DocumentTemplatesContent() {
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
+                  {companySettings?.pdfLogoUrl && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs gap-1 px-2 border-blue-300 text-blue-700 hover:bg-blue-50"
+                      onClick={() => insertAtCursor(`<img src="/api/public/logo/pdf" alt="Logo" style="max-height: 80px;" />`)}
+                      data-testid="insert-pdf-logo"
+                    >
+                      <Image className="h-3 w-3" />
+                      PDF-Logo
+                    </Button>
+                  )}
                 </div>
 
                 <Textarea
