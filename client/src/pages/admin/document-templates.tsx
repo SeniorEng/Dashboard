@@ -650,198 +650,187 @@ export function DocumentTemplatesContent() {
             </TabsContent>
 
             <TabsContent value="settings" className="mt-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div className="space-y-4">
+              <div className="max-w-lg space-y-4">
+                <div className="space-y-2">
+                  <Label>Name *</Label>
+                  <Input
+                    value={formData.name}
+                    onChange={(e) => {
+                      const name = e.target.value;
+                      setFormData(p => ({
+                        ...p,
+                        name,
+                        ...(isCreateMode ? { slug: generateSlug(name) } : {}),
+                      }));
+                    }}
+                    placeholder="z.B. Betreuungsvertrag Pflegekasse"
+                    data-testid="input-template-name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Beschreibung</Label>
+                  <Input
+                    value={formData.description}
+                    onChange={(e) => setFormData(p => ({ ...p, description: e.target.value }))}
+                    placeholder="Kurze Beschreibung der Vorlage"
+                    data-testid="input-template-description"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Dokumentenkategorie</Label>
+                  <Select
+                    value={formData.documentTypeId?.toString() || "none"}
+                    onValueChange={(v) => setFormData(p => ({ ...p, documentTypeId: v === "none" ? null : parseInt(v) }))}
+                  >
+                    <SelectTrigger data-testid="select-document-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Keine Zuordnung</SelectItem>
+                      {documentTypes?.map((dt) => (
+                        <SelectItem key={dt.id} value={dt.id.toString()}>{dt.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>Name *</Label>
-                    <Input
-                      value={formData.name}
-                      onChange={(e) => {
-                        const name = e.target.value;
-                        setFormData(p => ({
-                          ...p,
-                          name,
-                          ...(isCreateMode ? { slug: generateSlug(name) } : {}),
-                        }));
-                      }}
-                      placeholder="z.B. Betreuungsvertrag Pflegekasse"
-                      data-testid="input-template-name"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Slug {isCreateMode && "(wird automatisch generiert)"}</Label>
-                    <Input
-                      value={formData.slug}
-                      onChange={(e) => setFormData(p => ({ ...p, slug: e.target.value }))}
-                      placeholder="betreuungsvertrag_pflegekasse"
-                      className="font-mono text-sm"
-                      disabled={!isCreateMode}
-                      data-testid="input-template-slug"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Beschreibung</Label>
-                    <Input
-                      value={formData.description}
-                      onChange={(e) => setFormData(p => ({ ...p, description: e.target.value }))}
-                      placeholder="Kurze Beschreibung der Vorlage"
-                      data-testid="input-template-description"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Dokumentenkategorie</Label>
+                    <Label>Kontext</Label>
                     <Select
-                      value={formData.documentTypeId?.toString() || "none"}
-                      onValueChange={(v) => setFormData(p => ({ ...p, documentTypeId: v === "none" ? null : parseInt(v) }))}
+                      value={formData.context}
+                      onValueChange={(v) => setFormData(p => ({ ...p, context: v }))}
                     >
-                      <SelectTrigger data-testid="select-document-type">
+                      <SelectTrigger data-testid="select-context">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="none">Keine Zuordnung</SelectItem>
-                        {documentTypes?.map((dt) => (
-                          <SelectItem key={dt.id} value={dt.id.toString()}>{dt.name}</SelectItem>
-                        ))}
+                        <SelectItem value="beide">Immer verfügbar</SelectItem>
+                        <SelectItem value="vertragsabschluss">Nur bei Vertragsabschluss</SelectItem>
+                        <SelectItem value="bestandskunde">Nur bei Bestandskunden</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Kontext</Label>
-                      <Select
-                        value={formData.context}
-                        onValueChange={(v) => setFormData(p => ({ ...p, context: v }))}
-                      >
-                        <SelectTrigger data-testid="select-context">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="beide">Immer verfügbar</SelectItem>
-                          <SelectItem value="vertragsabschluss">Nur bei Vertragsabschluss</SelectItem>
-                          <SelectItem value="bestandskunde">Nur bei Bestandskunden</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Zielgruppe</Label>
-                      <Select
-                        value={formData.targetType}
-                        onValueChange={(v) => setFormData(p => ({ ...p, targetType: v }))}
-                      >
-                        <SelectTrigger data-testid="select-target-type">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="customer">Kunden</SelectItem>
-                          <SelectItem value="employee">Mitarbeiter</SelectItem>
-                          <SelectItem value="beide">Beide</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+                  <div className="space-y-2">
+                    <Label>Zielgruppe</Label>
+                    <Select
+                      value={formData.targetType}
+                      onValueChange={(v) => setFormData(p => ({ ...p, targetType: v }))}
+                    >
+                      <SelectTrigger data-testid="select-target-type">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="customer">Kunden</SelectItem>
+                        <SelectItem value="employee">Mitarbeiter</SelectItem>
+                        <SelectItem value="beide">Beide</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
-                  <div className="space-y-3 pt-2">
-                    <div className="flex items-center justify-between">
-                      <Label>Aktiv</Label>
-                      <Switch
-                        checked={formData.isActive}
-                        onCheckedChange={(v) => setFormData(p => ({ ...p, isActive: v }))}
-                        data-testid="switch-template-active"
-                      />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <Label>Kundenunterschrift erforderlich</Label>
-                      <Switch
-                        checked={formData.requiresCustomerSignature}
-                        onCheckedChange={(v) => setFormData(p => ({ ...p, requiresCustomerSignature: v }))}
-                        data-testid="switch-requires-customer-signature"
-                      />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <Label>Mitarbeiterunterschrift erforderlich</Label>
-                      <Switch
-                        checked={formData.requiresEmployeeSignature}
-                        onCheckedChange={(v) => setFormData(p => ({ ...p, requiresEmployeeSignature: v }))}
-                        data-testid="switch-requires-employee-signature"
-                      />
-                    </div>
-                  </div>
-                  {editingTemplate && (
-                    <p className="text-xs text-muted-foreground pt-2">
-                      Version {editingTemplate.version} · Zuletzt aktualisiert: {formatDateForDisplay(editingTemplate.updatedAt.split("T")[0])}
-                      {editingTemplate.isSystem && " · System-Vorlage"}
-                    </p>
-                  )}
                 </div>
-
-                <div className="space-y-4">
-                  <Label className="text-sm font-semibold">Zuordnung zu Abrechnungsarten</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Legen Sie fest, für welche Abrechnungsarten diese Vorlage im Kundenanlage-Flow angezeigt wird.
-                  </p>
-                  <div className="space-y-3">
-                    {BILLING_TYPES.map((bt) => {
-                      const assignment = billingAssignments[bt] || { enabled: false, requirement: "pflicht", sortOrder: 0 };
-                      return (
-                        <Card key={bt} className={assignment.enabled ? "border-teal-200 bg-teal-50/30" : ""}>
-                          <CardContent className="p-3">
-                            <div className="flex items-center gap-3">
-                              <Switch
-                                checked={assignment.enabled}
-                                onCheckedChange={(enabled) => {
-                                  setBillingAssignments(prev => ({
-                                    ...prev,
-                                    [bt]: { ...prev[bt], enabled },
-                                  }));
-                                }}
-                                data-testid={`switch-billing-${bt}`}
-                              />
-                              <div className="flex-1">
-                                <span className="text-sm font-medium">{BILLING_TYPE_LABELS[bt]}</span>
-                              </div>
-                            </div>
-                            {assignment.enabled && (
-                              <div className="flex items-center gap-3 mt-2 ml-11">
-                                <Select
-                                  value={assignment.requirement}
-                                  onValueChange={(v) => {
+                <div className="space-y-3 pt-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Aktiv</Label>
+                    <Switch
+                      checked={formData.isActive}
+                      onCheckedChange={(v) => setFormData(p => ({ ...p, isActive: v }))}
+                      data-testid="switch-template-active"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-muted-foreground">Kundenunterschrift erforderlich</Label>
+                    <Switch
+                      checked={formData.requiresCustomerSignature}
+                      onCheckedChange={(v) => setFormData(p => ({ ...p, requiresCustomerSignature: v }))}
+                      data-testid="switch-requires-customer-signature"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-muted-foreground">Mitarbeiterunterschrift erforderlich</Label>
+                    <Switch
+                      checked={formData.requiresEmployeeSignature}
+                      onCheckedChange={(v) => setFormData(p => ({ ...p, requiresEmployeeSignature: v }))}
+                      data-testid="switch-requires-employee-signature"
+                    />
+                  </div>
+                </div>
+                {formData.targetType === "customer" && (
+                  <>
+                    <hr className="my-4" />
+                    <div className="space-y-3">
+                      <Label className="text-sm font-semibold">Zuordnung zu Abrechnungsarten</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Für welche Abrechnungsarten wird diese Vorlage im Kundenanlage-Flow angezeigt?
+                      </p>
+                      {BILLING_TYPES.map((bt) => {
+                        const assignment = billingAssignments[bt] || { enabled: false, requirement: "pflicht", sortOrder: 0 };
+                        return (
+                          <Card key={bt} className={assignment.enabled ? "border-teal-200 bg-teal-50/30" : ""}>
+                            <CardContent className="p-3">
+                              <div className="flex items-center gap-3">
+                                <Switch
+                                  checked={assignment.enabled}
+                                  onCheckedChange={(enabled) => {
                                     setBillingAssignments(prev => ({
                                       ...prev,
-                                      [bt]: { ...prev[bt], requirement: v },
+                                      [bt]: { ...prev[bt], enabled },
                                     }));
                                   }}
-                                >
-                                  <SelectTrigger className="w-28 h-8 text-xs" data-testid={`select-requirement-${bt}`}>
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="pflicht">Pflicht</SelectItem>
-                                    <SelectItem value="optional">Optional</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                                <div className="flex items-center gap-1.5">
-                                  <Label className="text-xs text-muted-foreground">Pos.</Label>
-                                  <Input
-                                    type="number"
-                                    min="1"
-                                    className="w-14 h-8 text-center text-xs"
-                                    value={assignment.sortOrder}
-                                    onChange={(e) => {
-                                      setBillingAssignments(prev => ({
-                                        ...prev,
-                                        [bt]: { ...prev[bt], sortOrder: parseInt(e.target.value) || 0 },
-                                      }));
-                                    }}
-                                    data-testid={`input-sort-${bt}`}
-                                  />
+                                  data-testid={`switch-billing-${bt}`}
+                                />
+                                <div className="flex-1">
+                                  <span className="text-sm font-medium">{BILLING_TYPE_LABELS[bt]}</span>
                                 </div>
                               </div>
-                            )}
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
-                  </div>
-                </div>
+                              {assignment.enabled && (
+                                <div className="flex items-center gap-3 mt-2 ml-11">
+                                  <Select
+                                    value={assignment.requirement}
+                                    onValueChange={(v) => {
+                                      setBillingAssignments(prev => ({
+                                        ...prev,
+                                        [bt]: { ...prev[bt], requirement: v },
+                                      }));
+                                    }}
+                                  >
+                                    <SelectTrigger className="w-28 h-8 text-xs" data-testid={`select-requirement-${bt}`}>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="pflicht">Pflicht</SelectItem>
+                                      <SelectItem value="optional">Optional</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                  <div className="flex items-center gap-1.5">
+                                    <Label className="text-xs text-muted-foreground">Pos.</Label>
+                                    <Input
+                                      type="number"
+                                      min="1"
+                                      className="w-14 h-8 text-center text-xs"
+                                      value={assignment.sortOrder}
+                                      onChange={(e) => {
+                                        setBillingAssignments(prev => ({
+                                          ...prev,
+                                          [bt]: { ...prev[bt], sortOrder: parseInt(e.target.value) || 0 },
+                                        }));
+                                      }}
+                                      data-testid={`input-sort-${bt}`}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+                {editingTemplate && (
+                  <p className="text-xs text-muted-foreground pt-4">
+                    Version {editingTemplate.version} · Zuletzt aktualisiert: {formatDateForDisplay(editingTemplate.updatedAt.split("T")[0])}
+                    {editingTemplate.isSystem && " · System-Vorlage"}
+                  </p>
+                )}
               </div>
             </TabsContent>
 
