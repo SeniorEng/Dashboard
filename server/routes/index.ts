@@ -58,6 +58,7 @@ router.get("/public/logo/:type", async (req, res) => {
     if (!logoPath) {
       return res.status(404).json({ error: "Logo not found" });
     }
+    res.setHeader("Cache-Control", "public, max-age=300");
     const { ObjectStorageService } = await import("../replit_integrations/object_storage/objectStorage");
     const objectStorageService = new ObjectStorageService();
     const objectFile = await objectStorageService.getObjectEntityFile(logoPath);
