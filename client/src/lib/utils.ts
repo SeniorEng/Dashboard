@@ -5,6 +5,6 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function formatKm(km: number | null | undefined): string {
-  return (km ?? 0).toFixed(1);
+export function formatKm(km: number | string | null | undefined): string {
+  return Number(km ?? 0).toFixed(1);
 }
