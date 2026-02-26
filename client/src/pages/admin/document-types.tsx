@@ -220,7 +220,7 @@ export function DocumentTypesContent() {
             ))}
           </SelectContent>
         </Select>
-        <p className="text-[11px] text-gray-400">Wann wird dieses Dokument benötigt?</p>
+        <p className="text-[11px] text-gray-500">Wann wird dieses Dokument benötigt?</p>
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
@@ -237,7 +237,7 @@ export function DocumentTypesContent() {
             className="text-base"
             data-testid="input-doctype-interval"
           />
-          <p className="text-[11px] text-gray-400">Leer lassen wenn keine regelmäßige Prüfung nötig</p>
+          <p className="text-[11px] text-gray-500">Leer lassen wenn keine regelmäßige Prüfung nötig</p>
         </div>
         <div className="space-y-2">
           <Label className="flex items-center gap-1">
@@ -254,7 +254,7 @@ export function DocumentTypesContent() {
             className="text-base"
             data-testid="input-doctype-leadtime"
           />
-          <p className="text-[11px] text-gray-400">Tage vorher erinnern</p>
+          <p className="text-[11px] text-gray-500">Tage vorher erinnern</p>
         </div>
       </div>
       <div className="flex items-center gap-3 pt-2">
@@ -361,7 +361,7 @@ export function DocumentTypesContent() {
                               Digitale Vorlage: {dt.templateName}
                             </span>
                           ) : (
-                            <span className="text-xs text-gray-400 flex items-center gap-1">
+                            <span className="text-xs text-gray-500 flex items-center gap-1">
                               <FileText className="h-3 w-3" />
                               Nur Upload
                             </span>
@@ -377,7 +377,7 @@ export function DocumentTypesContent() {
                               Prüfung alle {dt.reviewIntervalMonths} Monate
                             </span>
                           ) : (
-                            <span className="text-xs text-gray-400">Keine Prüffrist</span>
+                            <span className="text-xs text-gray-500">Keine Prüffrist</span>
                           )}
                           {dt.reviewIntervalMonths && dt.reminderLeadTimeDays && (
                             <span className="text-xs text-gray-500 flex items-center gap-1">

@@ -156,7 +156,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
                 )}
               </div>
               {isCustom && (
-                <div className="text-[11px] text-gray-400 mt-0.5">
+                <div className="text-[11px] text-gray-500 mt-0.5">
                   Katalog: {formatCurrency(service.defaultPriceCents)} {unitLabel}
                 </div>
               )}
@@ -234,7 +234,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
           </div>
         );
       })}
-      <p className="text-[11px] text-gray-400 px-2 pt-2">
+      <p className="text-[11px] text-gray-500 px-2 pt-2">
         Preise zzgl. MwSt. Klicken Sie auf den Stift, um einen kundenindividuellen Preis zu setzen. {hasCustomPrices ? "Der Pfeil setzt den Preis auf den Katalogpreis zurück." : ""}
       </p>
     </div>

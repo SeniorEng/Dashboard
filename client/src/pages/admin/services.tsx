@@ -345,7 +345,7 @@ export default function AdminServices() {
                           )}
                         </div>
                         {service.description && (
-                          <p className="text-xs text-gray-400 mt-1 truncate" data-testid={`text-description-${service.id}`}>{service.description}</p>
+                          <p className="text-xs text-gray-500 mt-1 truncate" data-testid={`text-description-${service.id}`}>{service.description}</p>
                         )}
                       </div>
                       <Pencil className={`${iconSize.sm} text-gray-400 shrink-0`} />

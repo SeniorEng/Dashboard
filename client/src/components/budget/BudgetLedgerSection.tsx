@@ -282,7 +282,7 @@ export function BudgetLedgerSection({ customerId, customerName, initialSummary, 
                           <p className="text-xs text-gray-500 mt-1">{tx.notes}</p>
                         )}
                         {tx.transactionType === "consumption" && (
-                          <p className="text-xs text-gray-400 mt-1">
+                          <p className="text-xs text-gray-500 mt-1">
                             {tx.hauswirtschaftMinutes ? `HW: ${tx.hauswirtschaftMinutes}min ` : ""}
                             {tx.alltagsbegleitungMinutes ? `AB: ${tx.alltagsbegleitungMinutes}min ` : ""}
                             {tx.travelKilometers ? `Anfahrt: ${(tx.travelKilometers / 10).toFixed(1)}km ` : ""}

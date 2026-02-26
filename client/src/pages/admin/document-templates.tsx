@@ -637,7 +637,7 @@ export function DocumentTemplatesContent() {
                   className="font-mono text-sm min-h-[300px] leading-relaxed"
                   data-testid="textarea-html-content"
                 />
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-gray-500">
                   Verwenden Sie {"{{platzhalter}}"} für dynamische Werte. Siehe Tab "Platzhalter" für alle verfügbaren Variablen.
                 </p>
               </div>
@@ -650,7 +650,7 @@ export function DocumentTemplatesContent() {
                 <Label>Aktiv</Label>
               </div>
               {editingTemplate && (
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-gray-500">
                   Version {editingTemplate.version} · Zuletzt aktualisiert: {formatDateForDisplay(editingTemplate.updatedAt.split("T")[0])}
                   {editingTemplate.isSystem && " · System-Vorlage (Slug nicht änderbar)"}
                 </p>
@@ -679,7 +679,7 @@ export function DocumentTemplatesContent() {
                   </div>
                 )
               ) : (
-                <div className="text-center py-12 text-gray-400">
+                <div className="text-center py-12 text-gray-500">
                   <Eye className="h-12 w-12 mx-auto mb-3 opacity-30" />
                   <p>Klicken Sie auf "Vorschau" im Editor-Tab, um eine Vorschau mit Beispieldaten zu generieren.</p>
                 </div>

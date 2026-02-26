@@ -59,7 +59,7 @@ import {
 import { iconSize, componentStyles } from "@/design-system";
 import { useProspects, useProspectStats, useProspect, useCreateProspect, useUpdateProspect, useAddProspectNote, useReparseProspect, useDeleteProspect } from "@/features/prospects";
 import { PROSPECT_STATUS_LABELS, PROSPECT_STATUSES, PROSPECT_NOTE_TYPE_LABELS, type ProspectStatus, type ProspectNoteType } from "@shared/schema";
-import { formatDateForDisplay } from "@shared/utils/datetime";
+import { formatDateForDisplay, todayISO } from "@shared/utils/datetime";
 
 const STATUS_COLORS: Record<ProspectStatus, string> = {
   neu: "bg-blue-100 text-blue-800",
@@ -330,7 +330,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                     {prospect.wiedervorlageDate && (
                       (() => {
                         const dateStr = String(prospect.wiedervorlageDate).substring(0, 10);
-                        const today = new Date().toISOString().substring(0, 10);
+                        const today = todayISO();
                         const isOverdue = dateStr < today;
                         return (
                           <div className={`flex items-center gap-1.5 mt-2 text-sm font-medium ${isOverdue ? "text-red-600" : "text-purple-700"}`} data-testid="text-wiedervorlage-date">
@@ -480,7 +480,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                   type="date"
                   value={dialogWiedervorlageDate}
                   onChange={(e) => setDialogWiedervorlageDate(e.target.value)}
-                  min={new Date().toISOString().substring(0, 10)}
+                  min={todayISO()}
                   data-testid="input-wiedervorlage-date"
                 />
               </div>

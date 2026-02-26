@@ -380,7 +380,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                           <div className="flex items-center gap-2 min-w-0 flex-1">
                             <Upload className="h-3.5 w-3.5 text-gray-400 shrink-0" />
                             <span className="text-xs text-gray-700 truncate">{doc.fileName}</span>
-                            <span className="text-xs text-gray-400 shrink-0">
+                            <span className="text-xs text-gray-500 shrink-0">
                               {formatDateForDisplay(doc.uploadedAt.split("T")[0])}
                             </span>
                           </div>
@@ -430,7 +430,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                                 ))}
                               </div>
                             ) : (
-                              <p className="text-xs text-gray-400">Keine älteren Versionen</p>
+                              <p className="text-xs text-gray-500">Keine älteren Versionen</p>
                             )}
                           </div>
                         )}
@@ -442,7 +442,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                         <div className="flex items-center gap-2 min-w-0 flex-1">
                           <FilePlus2 className="h-3.5 w-3.5 text-teal-500 shrink-0" />
                           <span className="text-xs text-gray-700 truncate">{gd.fileName}</span>
-                          <span className="text-xs text-gray-400 shrink-0">
+                          <span className="text-xs text-gray-500 shrink-0">
                             {formatDateForDisplay(gd.generatedAt.split("T")[0])}
                           </span>
                           <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${
@@ -479,7 +479,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                   <div className="flex items-center gap-2 min-w-0 flex-1">
                     <FileText className={`${iconSize.sm} text-teal-500 shrink-0`} />
                     <span className="text-sm text-gray-900 truncate">{gd.fileName}</span>
-                    <span className="text-xs text-gray-400 shrink-0">
+                    <span className="text-xs text-gray-500 shrink-0">
                       {formatDateForDisplay(gd.generatedAt.split("T")[0])}
                     </span>
                     <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${
@@ -600,7 +600,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                       Foto
                     </Button>
                   </div>
-                  <p className="text-[11px] text-gray-400">PDF, Bild oder Word-Dokument (max. 10 MB)</p>
+                  <p className="text-[11px] text-gray-500">PDF, Bild oder Word-Dokument (max. 10 MB)</p>
 
                   {filePreviews.length > 0 && (
                     <div className="space-y-2">

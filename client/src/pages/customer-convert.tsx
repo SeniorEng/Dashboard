@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
@@ -152,9 +152,13 @@ export default function CustomerConvertPage() {
 
   const [customerSignatures, setCustomerSignatures] = useState<Record<string, string>>({});
   const [uploadedDocuments, setUploadedDocuments] = useState<import("./admin/components/signatures-step").WizardUploadedDoc[]>([]);
+  const signingLocationRef = useRef<string | null>(null);
 
-  const handleSignatureChange = useCallback((slug: string, signatureData: string) => {
+  const handleSignatureChange = useCallback((slug: string, signatureData: string, location?: string | null) => {
     setCustomerSignatures((prev) => ({ ...prev, [slug]: signatureData }));
+    if (location) {
+      signingLocationRef.current = location;
+    }
   }, []);
 
   const steps = useMemo(() => getStepsForBillingType(formData.billingType), [formData.billingType]);
@@ -240,6 +244,7 @@ export default function CustomerConvertPage() {
               templateSlug: slug,
               customerSignatureData: signatureData,
             })),
+            signingLocation: signingLocationRef.current,
           });
         } catch (sigError) {
           console.error("Unterschriften-Speicherung fehlgeschlagen:", sigError);
@@ -706,7 +711,7 @@ export default function CustomerConvertPage() {
               <span className="text-sm font-semibold text-teal-700">
                 {steps[currentStep].title}
               </span>
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-gray-500">
                 ({currentStep + 1}/{steps.length})
               </span>
             </div>

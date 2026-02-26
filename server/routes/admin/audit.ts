@@ -1,9 +1,19 @@
 import { Router } from "express";
+import { z } from "zod";
 import { asyncHandler, notFound, badRequest } from "../../lib/errors";
 import { auditService } from "../../services/audit";
 import { auditLogFilterSchema } from "@shared/schema";
 import { storage } from "../../storage";
 import { computeDataHash } from "../../services/signature-integrity";
+
+const revokeSignatureSchema = z.object({
+  reason: z.string().min(3, "Ein Stornierungsgrund mit mindestens 3 Zeichen ist erforderlich.").max(500, "Der Stornierungsgrund darf maximal 500 Zeichen lang sein."),
+  signerType: z.string().optional(),
+});
+
+const entityTypeParamSchema = z.enum(["appointment", "service_record"], {
+  errorMap: () => ({ message: "Ungültiger Entity-Typ. Erlaubt: appointment, service_record" }),
+});
 
 const router = Router();
 
@@ -114,17 +124,12 @@ router.get("/verify-signature/:entityType/:entityId", asyncHandler("Integritäts
 }));
 
 router.post("/revoke-signature/:entityType/:entityId", asyncHandler("Stornierung fehlgeschlagen", async (req, res) => {
-  const { entityType, entityId: entityIdStr } = req.params;
+  const { entityId: entityIdStr } = req.params;
+  const entityType = entityTypeParamSchema.parse(req.params.entityType);
   const entityId = parseInt(entityIdStr);
-  const { reason, signerType } = req.body;
+  const { reason, signerType } = revokeSignatureSchema.parse(req.body);
 
   if (isNaN(entityId)) throw badRequest("Ungültige Entity-ID");
-  if (!reason || typeof reason !== "string" || reason.trim().length < 3) {
-    throw badRequest("Ein Stornierungsgrund mit mindestens 3 Zeichen ist erforderlich.");
-  }
-  if (reason.trim().length > 500) {
-    throw badRequest("Der Stornierungsgrund darf maximal 500 Zeichen lang sein.");
-  }
 
   const ip = req.ip || req.socket.remoteAddress;
   const userId = (req as any).user!.id;

@@ -284,7 +284,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                 data-testid="input-camera-capture"
               />
             </div>
-            <p className="text-[11px] text-gray-400">PDF, Bild oder Word-Dokument (max. 10 MB je Datei). Mehrere Fotos/Dateien möglich.</p>
+            <p className="text-[11px] text-gray-500">PDF, Bild oder Word-Dokument (max. 10 MB je Datei). Mehrere Fotos/Dateien möglich.</p>
 
             {filePreviews.length > 0 && (
               <div className="space-y-2">
@@ -381,7 +381,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                     <div className="ml-6 space-y-1">
                       <p className="text-xs text-gray-500 truncate">{doc.fileName}</p>
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs text-gray-400">
+                        <span className="text-xs text-gray-500">
                           Hochgeladen: {formatDateForDisplay(doc.uploadedAt.split("T")[0])}
                         </span>
                         <ReviewBadge reviewDueDate={doc.reviewDueDate} />
@@ -440,7 +440,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                         ))}
                       </div>
                     ) : (
-                      <p className="text-xs text-gray-400">Keine älteren Versionen</p>
+                      <p className="text-xs text-gray-500">Keine älteren Versionen</p>
                     )}
                   </div>
                 )}
@@ -469,7 +469,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                     </div>
                     <div className="ml-6 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs text-gray-400">
+                        <span className="text-xs text-gray-500">
                           Erstellt: {formatDateForDisplay(doc.generatedAt.split("T")[0])}
                         </span>
                         {doc.customerSignatureData && (

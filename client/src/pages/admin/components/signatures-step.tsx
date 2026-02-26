@@ -337,7 +337,8 @@ function DocumentSignatureCard({
               <button
                 type="button"
                 onClick={() => onDocRemoved()}
-                className="text-xs text-gray-400 hover:text-red-500"
+                className="p-2 text-gray-400 hover:text-red-500 rounded-md"
+                aria-label="Upload entfernen"
                 data-testid={`button-remove-upload-${doc.slug}`}
               >
                 <X className="h-4 w-4" />
@@ -508,7 +509,8 @@ function UploadOnlyCard({
               <button
                 type="button"
                 onClick={() => onDocRemoved()}
-                className="text-xs text-gray-400 hover:text-red-500"
+                className="p-2 text-gray-400 hover:text-red-500 rounded-md"
+                aria-label="Upload entfernen"
                 data-testid={`button-remove-upload-type-${docType.id}`}
               >
                 <X className="h-4 w-4" />
@@ -585,7 +587,7 @@ function UploadArea({
           Foto
         </Button>
       </div>
-      <p className="text-[11px] text-gray-400">PDF, Bild oder Word-Dokument (max. 10 MB)</p>
+      <p className="text-[11px] text-gray-500">PDF, Bild oder Word-Dokument (max. 10 MB)</p>
       <Button type="button" variant="ghost" size="sm" onClick={onCancel} data-testid={`button-cancel-upload-${testIdSuffix}`}>
         Abbrechen
       </Button>

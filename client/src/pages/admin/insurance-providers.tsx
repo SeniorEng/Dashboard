@@ -248,7 +248,7 @@ export default function AdminInsuranceProviders() {
                           )}
                         </div>
                         {provider.zahlungsbedingungen && (
-                          <div className="text-xs text-gray-400 mt-1">
+                          <div className="text-xs text-gray-500 mt-1">
                             {ZAHLUNGSBEDINGUNGEN_LABELS[provider.zahlungsbedingungen] || provider.zahlungsbedingungen}
                             {provider.zahlungsart && ` · ${ZAHLUNGSARTEN_LABELS[provider.zahlungsart] || provider.zahlungsart}`}
                           </div>

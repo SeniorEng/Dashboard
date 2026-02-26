@@ -1134,8 +1134,11 @@ router.get("/budget/backfill-preview", asyncHandler("Vorschau fehlgeschlagen", a
   });
 }));
 
+const backfillSchema = z.object({ customerId: z.number().int().optional() });
+
 router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fehlgeschlagen", async (req: Request, res: Response) => {
-  const customerIdFilter = req.body.customerId ? parseInt(req.body.customerId) : null;
+  const data = backfillSchema.parse(req.body);
+  const customerIdFilter = data.customerId ?? null;
 
   const conditions = [
     eq(appointments.status, "completed"),

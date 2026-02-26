@@ -581,7 +581,7 @@ export default function AdminCustomerNew() {
               <span className="text-sm font-semibold text-teal-700">
                 {steps[currentStep].title}
               </span>
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-gray-500">
                 ({currentStep + 1}/{steps.length})
               </span>
             </div>

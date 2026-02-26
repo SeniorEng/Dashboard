@@ -331,7 +331,7 @@ export default function AdminUsers() {
                                 </span>
                               ))}
                               {user.roles.length === 0 && (
-                                <span className="text-sm text-gray-400 italic">Keine zugewiesen</span>
+                                <span className="text-sm text-gray-500 italic">Keine zugewiesen</span>
                               )}
                             </div>
                             {user.lbnr && (

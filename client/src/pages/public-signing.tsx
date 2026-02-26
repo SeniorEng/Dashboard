@@ -104,7 +104,7 @@ export default function PublicSigningPage() {
             </h2>
             <p className="text-sm text-gray-600">{errorMessage}</p>
             {errorType === "expired" && (
-              <p className="text-xs text-gray-400">Bitte kontaktieren Sie Ihren Arbeitgeber für einen neuen Unterschrifts-Link.</p>
+              <p className="text-xs text-gray-500">Bitte kontaktieren Sie Ihren Arbeitgeber für einen neuen Unterschrifts-Link.</p>
             )}
           </CardContent>
         </Card>
@@ -124,7 +124,7 @@ export default function PublicSigningPage() {
             <p className="text-sm text-gray-600">
               Ihre Unterschrift wurde erfolgreich gespeichert. Das Dokument wurde aktualisiert und Ihr Arbeitgeber wurde benachrichtigt.
             </p>
-            <p className="text-xs text-gray-400">Sie können diese Seite jetzt schließen.</p>
+            <p className="text-xs text-gray-500">Sie können diese Seite jetzt schließen.</p>
           </CardContent>
         </Card>
       </div>
@@ -152,7 +152,7 @@ export default function PublicSigningPage() {
                 </div>
 
                 {docData.expiresAt && (
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-gray-500">
                     Gültig bis: {new Date(docData.expiresAt).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })}
                   </p>
                 )}

@@ -53,7 +53,7 @@ export function EmployeeServiceRates() {
             <div key={s.id} className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded text-sm" data-testid={`service-rate-${s.id}`}>
               <div className="flex items-center gap-2 min-w-0">
                 <span className="text-gray-900 truncate">{s.name}</span>
-                {s.code && <span className="text-xs text-gray-400 shrink-0">({s.code})</span>}
+                {s.code && <span className="text-xs text-gray-500 shrink-0">({s.code})</span>}
               </div>
               <span className="text-teal-700 font-medium shrink-0 ml-2">
                 {formatCurrency(s.employeeRateCents)}{UNIT_LABELS[s.unitType] || ""}
@@ -65,7 +65,7 @@ export function EmployeeServiceRates() {
         <p className="text-sm text-gray-500 py-4 text-center">Keine Dienstleistungen mit Mitarbeitervergütung definiert</p>
       )}
 
-      <p className="text-[11px] text-gray-400 mt-2">
+      <p className="text-[11px] text-gray-500 mt-2">
         Die Vergütungssätze werden im Dienstleistungskatalog global festgelegt und gelten für alle Mitarbeiter.
       </p>
     </div>

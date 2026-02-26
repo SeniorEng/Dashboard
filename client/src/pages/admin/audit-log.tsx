@@ -190,7 +190,7 @@ export default function AdminAuditLog() {
                             <div className="text-sm text-gray-700">
                               <span className="font-medium">{entry.userName}</span>
                               {entry.ipAddress && (
-                                <span className="text-xs text-gray-400 ml-2">({entry.ipAddress})</span>
+                                <span className="text-xs text-gray-500 ml-2">({entry.ipAddress})</span>
                               )}
                             </div>
                             {metaDisplay && (
@@ -199,7 +199,7 @@ export default function AdminAuditLog() {
                               </div>
                             )}
                           </div>
-                          <div className="text-xs text-gray-400 whitespace-nowrap">
+                          <div className="text-xs text-gray-500 whitespace-nowrap">
                             {formatDate(entry.createdAt)}
                           </div>
                         </div>

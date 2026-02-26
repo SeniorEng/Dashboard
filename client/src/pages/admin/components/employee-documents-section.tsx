@@ -216,7 +216,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
               className="text-base"
               data-testid="input-document-file"
             />
-            <p className="text-[11px] text-gray-400">PDF, Bild oder Word-Dokument (max. 10 MB je Datei). Mehrere Dateien möglich.</p>
+            <p className="text-[11px] text-gray-500">PDF, Bild oder Word-Dokument (max. 10 MB je Datei). Mehrere Dateien möglich.</p>
             {selectedFiles.length > 1 && (
               <p className="text-xs text-teal-600">{selectedFiles.length} Dateien ausgewählt</p>
             )}
@@ -271,7 +271,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
                     <div className="ml-6 space-y-1">
                       <p className="text-xs text-gray-500 truncate">{doc.fileName}</p>
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs text-gray-400">
+                        <span className="text-xs text-gray-500">
                           Hochgeladen: {formatDateForDisplay(doc.uploadedAt.split("T")[0])}
                         </span>
                         <ReviewBadge reviewDueDate={doc.reviewDueDate} />
@@ -330,7 +330,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
                         ))}
                       </div>
                     ) : (
-                      <p className="text-xs text-gray-400">Keine älteren Versionen</p>
+                      <p className="text-xs text-gray-500">Keine älteren Versionen</p>
                     )}
                   </div>
                 )}
@@ -359,7 +359,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
                     </div>
                     <div className="ml-6 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs text-gray-400">
+                        <span className="text-xs text-gray-500">
                           Erstellt: {formatDateForDisplay(doc.generatedAt.split("T")[0])}
                         </span>
                         {doc.signingStatus === "pending_employee_signature" ? (

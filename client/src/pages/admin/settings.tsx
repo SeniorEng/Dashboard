@@ -562,7 +562,7 @@ export default function AdminSettings() {
                       </div>
                     </div>
                   </div>
-                  <p className="text-xs text-gray-400 mt-4">
+                  <p className="text-xs text-gray-500 mt-4">
                     PNG, JPG, SVG oder WebP. Max. 2 MB pro Logo.
                   </p>
                 </CardContent>
