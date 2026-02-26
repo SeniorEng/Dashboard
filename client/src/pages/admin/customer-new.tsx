@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,11 +14,23 @@ import {
   ChevronRight,
   ChevronLeft,
   Check,
+  FileText,
+  Trash2,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { CustomerFormData, ContactFormData, BudgetTypeSettingForm, getStepsForBillingType, DEFAULT_BUDGETS, EMPTY_CONTACT, MAX_CONTACTS } from "./components/customer-types";
 import { BUDGET_45A_MAX_BY_PFLEGEGRAD, BUDGET_TYPES, type BudgetType } from "@shared/domain/budgets";
 import { isPflegekasseCustomer, type BillingType } from "@shared/domain/customers";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 import { CustomerTypeStep } from "./components/customer-type-step";
 import { PersonalDataStep } from "./components/personal-data-step";
 import { InsuranceStep } from "./components/insurance-step";
@@ -27,6 +39,31 @@ import { BudgetsStep, ContractStep } from "./components/budgets-contract-step";
 import { SignaturesStep, type WizardUploadedDoc } from "./components/signatures-step";
 import { MatchingStep } from "./components/matching-step";
 import { DeliveryStep } from "./components/delivery-step";
+
+const DRAFT_KEY = "careconnect_customer_draft";
+const DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function loadDraft(): { formData: CustomerFormData; currentStep: number; timestamp: string } | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.timestamp) return null;
+    const age = Date.now() - new Date(parsed.timestamp).getTime();
+    if (age > DRAFT_MAX_AGE_MS) {
+      localStorage.removeItem(DRAFT_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    localStorage.removeItem(DRAFT_KEY);
+    return null;
+  }
+}
+
+function clearDraft() {
+  localStorage.removeItem(DRAFT_KEY);
+}
 
 export default function AdminCustomerNew() {
   const [, setLocation] = useLocation();
@@ -77,6 +114,66 @@ export default function AdminCustomerNew() {
   const [customerSignatures, setCustomerSignatures] = useState<Record<string, string>>({});
   const [uploadedDocuments, setUploadedDocuments] = useState<WizardUploadedDoc[]>([]);
   const signingLocationRef = useRef<string | null>(null);
+  const [draftDialog, setDraftDialog] = useState<{ timestamp: string } | null>(null);
+  const createdRef = useRef(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const draft = loadDraft();
+    if (draft) {
+      setDraftDialog({ timestamp: draft.timestamp });
+    }
+  }, []);
+
+  const restoreDraft = useCallback(() => {
+    const draft = loadDraft();
+    if (draft) {
+      setFormData(draft.formData);
+      const restoredSteps = getStepsForBillingType(draft.formData.billingType);
+      const clampedStep = Math.min(draft.currentStep, restoredSteps.length - 1);
+      setCurrentStep(Math.max(0, clampedStep));
+      toast({ title: "Entwurf wiederhergestellt" });
+    }
+    setDraftDialog(null);
+  }, [toast]);
+
+  const discardDraft = useCallback(() => {
+    clearDraft();
+    setDraftDialog(null);
+  }, []);
+
+  useEffect(() => {
+    if (createdRef.current) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      const hasData = formData.vorname.trim() || formData.nachname.trim() || formData.billingType;
+      if (hasData) {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify({
+          formData,
+          currentStep,
+          timestamp: new Date().toISOString(),
+        }));
+      } else {
+        localStorage.removeItem(DRAFT_KEY);
+      }
+    }, 500);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [formData, currentStep]);
+
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (createdRef.current) return;
+      const hasData = formData.vorname.trim() || formData.nachname.trim();
+      if (hasData) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [formData]);
 
   const handleSignatureChange = useCallback((slug: string, signatureData: string, location?: string | null) => {
     setCustomerSignatures((prev) => ({ ...prev, [slug]: signatureData }));
@@ -257,6 +354,8 @@ export default function AdminCustomerNew() {
     const warnings: string[] = [];
     createMutation.mutate(payload, {
       onSuccess: async (customer) => {
+        createdRef.current = true;
+        clearDraft();
         const primaryId = formData.primaryEmployeeId ? parseInt(formData.primaryEmployeeId) : null;
         const backupId = formData.backupEmployeeId ? parseInt(formData.backupEmployeeId) : null;
         if (primaryId || backupId) {
@@ -567,6 +666,41 @@ export default function AdminCustomerNew() {
 
   return (
     <Layout variant="admin">
+          <AlertDialog open={!!draftDialog} onOpenChange={(open) => { if (!open) discardDraft(); }}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle className="flex items-center gap-2">
+                  <FileText className={iconSize.md} />
+                  Entwurf vorhanden
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {draftDialog && (
+                    <>
+                      Du hast einen Entwurf vom{" "}
+                      <strong>
+                        {new Date(draftDialog.timestamp).toLocaleDateString("de-DE", {
+                          day: "2-digit", month: "2-digit", year: "numeric",
+                          hour: "2-digit", minute: "2-digit",
+                        })}
+                      </strong>
+                      . Möchtest du ihn fortsetzen?
+                    </>
+                  )}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={discardDraft} data-testid="button-discard-draft">
+                  <Trash2 className="w-4 h-4 mr-1" />
+                  Verwerfen
+                </AlertDialogCancel>
+                <AlertDialogAction onClick={restoreDraft} data-testid="button-restore-draft">
+                  <FileText className="w-4 h-4 mr-1" />
+                  Entwurf laden
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
           <div className="flex items-center gap-4 mb-6">
             <Link href="/admin/customers">
               <Button variant="ghost" size="icon" aria-label="Zurück" data-testid="button-back">
