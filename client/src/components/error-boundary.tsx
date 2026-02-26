@@ -12,6 +12,15 @@ interface State {
   error?: Error;
 }
 
+function isChunkLoadError(error: Error): boolean {
+  return (
+    error.name === "ChunkLoadError" ||
+    error.message.includes("Failed to fetch dynamically imported module") ||
+    error.message.includes("Loading chunk") ||
+    error.message.includes("Loading CSS chunk")
+  );
+}
+
 export class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
@@ -24,6 +33,10 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error("Error caught by boundary:", error, errorInfo);
+
+    if (isChunkLoadError(error)) {
+      window.location.reload();
+    }
   }
 
   handleReset = () => {
