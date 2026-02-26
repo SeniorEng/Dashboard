@@ -161,16 +161,16 @@ export interface IStorage {
   getAppointmentsByDate(date: string): Promise<Appointment[]>;
   
   // Appointments - Counts
-  getAppointmentCountsByDates(dates: string[], customerIds?: number[]): Promise<Record<string, number>>;
+  getAppointmentCountsByDates(dates: string[], customerIds?: number[], employeeId?: number): Promise<Record<string, number>>;
 
   // Appointments - With Customer (optimized)
-  getAppointmentsWithCustomers(date?: string, customerIds?: number[]): Promise<AppointmentWithCustomer[]>;
+  getAppointmentsWithCustomers(date?: string, customerIds?: number[], employeeId?: number): Promise<AppointmentWithCustomer[]>;
   getAppointmentsWithCustomersPaginated(
     date?: string, 
     options?: PaginationOptions
   ): Promise<PaginatedResult<AppointmentWithCustomer>>;
   getAppointmentWithCustomer(id: number): Promise<AppointmentWithCustomer | undefined>;
-  getUndocumentedAppointments(beforeDate: string, customerIds?: number[]): Promise<AppointmentWithCustomer[]>;
+  getUndocumentedAppointments(beforeDate: string, customerIds?: number[], employeeId?: number): Promise<AppointmentWithCustomer[]>;
   
   // Atomic operations (with application-level rollback)
   createErstberatungWithCustomer(
@@ -452,13 +452,21 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(appointments).where(and(eq(appointments.date, date), isNull(appointments.deletedAt)));
   }
 
-  async getAppointmentCountsByDates(dates: string[], customerIds?: number[]): Promise<Record<string, number>> {
+  async getAppointmentCountsByDates(dates: string[], customerIds?: number[], employeeId?: number): Promise<Record<string, number>> {
     if (dates.length === 0) return {};
     if (customerIds && customerIds.length === 0) return {};
     
     const conditions = [inArray(appointments.date, dates), isNull(appointments.deletedAt)];
     if (customerIds) {
       conditions.push(inArray(appointments.customerId, customerIds));
+    }
+    if (employeeId) {
+      conditions.push(
+        or(
+          eq(appointments.assignedEmployeeId, employeeId),
+          eq(appointments.performedByEmployeeId, employeeId)
+        )!
+      );
     }
     
     const results = await db
@@ -505,7 +513,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Appointments - With Customer (single query with LEFT JOIN for performance)
-  async getAppointmentsWithCustomers(date?: string, customerIds?: number[]): Promise<AppointmentWithCustomer[]> {
+  async getAppointmentsWithCustomers(date?: string, customerIds?: number[], employeeId?: number): Promise<AppointmentWithCustomer[]> {
     if (customerIds && customerIds.length === 0) {
       return [];
     }
@@ -515,6 +523,14 @@ export class DatabaseStorage implements IStorage {
     }
     if (customerIds) {
       conditions.push(inArray(appointments.customerId, customerIds));
+    }
+    if (employeeId) {
+      conditions.push(
+        or(
+          eq(appointments.assignedEmployeeId, employeeId),
+          eq(appointments.performedByEmployeeId, employeeId)
+        )!
+      );
     }
     
     const query = db
@@ -570,7 +586,7 @@ export class DatabaseStorage implements IStorage {
     return mapAppointmentRow(results[0]);
   }
 
-  async getUndocumentedAppointments(beforeDate: string, customerIds?: number[]): Promise<AppointmentWithCustomer[]> {
+  async getUndocumentedAppointments(beforeDate: string, customerIds?: number[], employeeId?: number): Promise<AppointmentWithCustomer[]> {
     if (customerIds && customerIds.length === 0) {
       return [];
     }
@@ -582,6 +598,14 @@ export class DatabaseStorage implements IStorage {
     
     if (customerIds) {
       conditions.push(inArray(appointments.customerId, customerIds));
+    }
+    if (employeeId) {
+      conditions.push(
+        or(
+          eq(appointments.assignedEmployeeId, employeeId),
+          eq(appointments.performedByEmployeeId, employeeId)
+        )!
+      );
     }
     
     const results = await db

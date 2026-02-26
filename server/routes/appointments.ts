@@ -73,7 +73,8 @@ router.get("/", asyncHandler(ErrorMessages.fetchAppointmentsFailed, async (req, 
     }
   }
   
-  const appointments = await storage.getAppointmentsWithCustomers(date, customerIds);
+  const employeeId = user.isAdmin ? undefined : user.id;
+  const appointments = await storage.getAppointmentsWithCustomers(date, customerIds, employeeId);
   
   res.json(appointments);
 }));
@@ -97,7 +98,8 @@ router.get("/counts", asyncHandler("Fehler beim Laden der Terminzähler", async 
     return res.json({});
   }
 
-  const counts = await storage.getAppointmentCountsByDates(dates, customerIds);
+  const employeeId = user.isAdmin ? undefined : user.id;
+  const counts = await storage.getAppointmentCountsByDates(dates, customerIds, employeeId);
   res.json(counts);
 }));
 
@@ -113,7 +115,8 @@ router.get("/undocumented", asyncHandler("Fehler beim Laden der offenen Dokument
     return res.json([]);
   }
 
-  const appointments = await storage.getUndocumentedAppointments(today, customerIds);
+  const employeeId = user.isAdmin ? undefined : user.id;
+  const appointments = await storage.getUndocumentedAppointments(today, customerIds, employeeId);
   
   res.json(appointments);
 }));
@@ -466,7 +469,9 @@ router.get("/:id/travel-suggestion", asyncHandler("Fehler beim Laden der Fahrvor
     return sendNotFound(res, ErrorMessages.appointmentNotFound);
   }
   
-  const sameDayAppointments = await storage.getAppointmentsWithCustomers(appointment.date);
+  const user = req.user!;
+  const employeeId = user.isAdmin ? undefined : user.id;
+  const sameDayAppointments = await storage.getAppointmentsWithCustomers(appointment.date, undefined, employeeId);
   
   const appointmentsWithNames = sameDayAppointments.map(apt => ({
     ...apt,
