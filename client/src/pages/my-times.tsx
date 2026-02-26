@@ -135,6 +135,12 @@ export default function MyTimes() {
     setShowCreateDialog(true);
   }, [createForm, selectedDate, todayStr, isMonthLocked]);
 
+  const handleAddBreak = useCallback((date: string) => {
+    if (isMonthLocked) return;
+    createForm.reset({ entryDate: date, entryType: "pause" as any });
+    setShowCreateDialog(true);
+  }, [createForm, isMonthLocked]);
+
   const handleCreateDialogChange = useCallback((open: boolean) => {
     if (open && isMonthLocked) return;
     setShowCreateDialog(open);
@@ -225,6 +231,7 @@ export default function MyTimes() {
             <MissingBreaksBanner
               daysWithMissingBreaks={daysWithMissingBreaks}
               onSelectDate={handleSelectMissingBreakDate}
+              onAddBreak={handleAddBreak}
             />
           </div>
 

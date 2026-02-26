@@ -46,7 +46,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Insurance Providers**: Admin management, historized assignment, IK-Nummer validation.
 - **Budgeting & Pricing**: Three-pot budget ledger system based on German care law, cascading allocation, FIFO for §45b, carryover budgets. Budget mutations (manual adjustments, reversals, type settings, preferences, initial setup) are fully audit-logged for GoBD compliance. Concurrent budget consumption is serialized per customer via `pg_advisory_xact_lock` to prevent race conditions.
 - **Service Catalog**: Central management of services with code, name, unit type, price, VAT, `isBillable` flag, `employeeRateCents`.
-- **Employee Time Tracking**: Comprehensive tracking for client/non-client work, vacation. Past entries locked for non-admins. German labor law compliance (e.g., missing break documentation).
+- **Employee Time Tracking**: Comprehensive tracking for client/non-client work, vacation. Past entries locked for non-admins. German labor law compliance (e.g., missing break documentation with "Nachtragen" CTA). TimeEntryDialog uses Drawer on mobile, Dialog on desktop. CalendarGrid uses memoized DayCell for render performance.
 - **Month-Closing Workflow**: Employee-initiated month closing locks CRUD operations.
 - **Task System**: Centralized page for system notices and personal tasks.
 - **Customer Kilometers**: Separate tracking for travel with/for the customer.
