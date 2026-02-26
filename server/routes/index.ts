@@ -41,12 +41,29 @@ router.get("/public/branding", async (_req, res) => {
     const { storage } = await import("../storage");
     const settings = await storage.getCompanySettings();
     res.json({
-      logoUrl: settings?.logoUrl || null,
-      pdfLogoUrl: settings?.pdfLogoUrl || null,
+      logoUrl: settings?.logoUrl ? "/api/public/logo/main" : null,
+      pdfLogoUrl: settings?.pdfLogoUrl ? "/api/public/logo/pdf" : null,
       companyName: settings?.companyName || null,
     });
   } catch {
     res.json({ logoUrl: null, pdfLogoUrl: null, companyName: null });
+  }
+});
+
+router.get("/public/logo/:type", async (req, res) => {
+  try {
+    const { storage } = await import("../storage");
+    const settings = await storage.getCompanySettings();
+    const logoPath = req.params.type === "pdf" ? settings?.pdfLogoUrl : settings?.logoUrl;
+    if (!logoPath) {
+      return res.status(404).json({ error: "Logo not found" });
+    }
+    const { ObjectStorageService } = await import("../replit_integrations/object_storage/objectStorage");
+    const objectStorageService = new ObjectStorageService();
+    const objectFile = await objectStorageService.getObjectEntityFile(logoPath);
+    await objectStorageService.downloadObject(objectFile, res);
+  } catch {
+    res.status(404).json({ error: "Logo not found" });
   }
 });
 

@@ -1078,7 +1078,7 @@ export default function CustomerDetailPage() {
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm font-medium">§39/§42a Gemeinsamer Jahresbetrag</span>
                         <span className="text-sm text-muted-foreground">
-                          {(b.currentYearAvailableCents / 100).toFixed(2)} € verfügbar
+                          {(b.currentYearAvailableCents / 100).toFixed(2).replace(".", ",")} € verfügbar
                         </span>
                       </div>
                       <div className="w-full bg-muted rounded-full h-2 mb-1">
@@ -1088,7 +1088,7 @@ export default function CustomerDetailPage() {
                         />
                       </div>
                       <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span>{(b.currentYearUsedCents / 100).toFixed(2)} € von {(b.currentYearAllocatedCents / 100).toFixed(2)} € verbraucht</span>
+                        <span>{(b.currentYearUsedCents / 100).toFixed(2).replace(".", ",")} € von {(b.currentYearAllocatedCents / 100).toFixed(2).replace(".", ",")} € verbraucht</span>
                         <span>Jahresbudget</span>
                       </div>
                     </div>
