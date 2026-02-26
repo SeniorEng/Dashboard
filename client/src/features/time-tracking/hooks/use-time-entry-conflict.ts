@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { api } from "@/lib/api";
+import { FULL_DAY_ENTRY_TYPES } from "@shared/domain/time-entries";
 
 export interface TimeEntryFormData {
   entryDate: string;
@@ -30,8 +31,6 @@ export interface UseTimeEntryConflictResult {
   hasError: boolean;
 }
 
-const FULL_DAY_TYPES = ["urlaub", "krankheit"];
-
 export function useTimeEntryConflict(
   formData: TimeEntryFormData | null,
   isDialogOpen: boolean
@@ -40,7 +39,7 @@ export function useTimeEntryConflict(
   const [isChecking, setIsChecking] = useState(false);
 
   // Derive isFullDay from entry type - full-day types always have isFullDay=true
-  const isFullDayType = formData ? FULL_DAY_TYPES.includes(formData.entryType) : false;
+  const isFullDayType = formData ? (FULL_DAY_ENTRY_TYPES as readonly string[]).includes(formData.entryType) : false;
   const effectiveIsFullDay = isFullDayType || (formData?.isFullDay ?? false);
 
   const timeError = useMemo(() => {

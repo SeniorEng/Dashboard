@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import type { TimeEntryType } from "@/lib/api/types";
 import { parseLocalDate } from "@shared/utils/datetime";
+import { FULL_DAY_ENTRY_TYPES } from "@shared/domain/time-entries";
 
 export const TIME_ENTRY_TYPE_CONFIG: Record<TimeEntryType, { label: string; icon: React.ElementType; color: string; bgColor: string }> = {
   urlaub: { label: "Urlaub", icon: Palmtree, color: "text-green-700", bgColor: "bg-green-100" },
@@ -21,7 +22,7 @@ export const TIME_ENTRY_TYPE_CONFIG: Record<TimeEntryType, { label: string; icon
   verfuegbar: { label: "Verfügbar", icon: CalendarCheck, color: "text-emerald-700", bgColor: "bg-emerald-100" },
 };
 
-export const FULL_DAY_TYPES: TimeEntryType[] = ["urlaub", "krankheit"];
+export const FULL_DAY_TYPES = FULL_DAY_ENTRY_TYPES as unknown as TimeEntryType[];
 
 export const WEEKDAY_NAMES = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 

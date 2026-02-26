@@ -10,6 +10,7 @@
 import { useState, useCallback } from "react";
 import type { TimeEntryType, CreateTimeEntryRequest } from "@/lib/api/types";
 import { todayISO, currentTimeHHMM } from "@shared/utils/datetime";
+import { FULL_DAY_ENTRY_TYPES } from "@shared/domain/time-entries";
 
 function getCurrentTimeRounded(): string {
   const time = currentTimeHHMM();
@@ -35,7 +36,7 @@ export interface TimeEntryFormState {
   notes?: string | null;
 }
 
-const FULL_DAY_TYPES: TimeEntryType[] = ["urlaub", "krankheit"];
+const FULL_DAY_TYPES = FULL_DAY_ENTRY_TYPES as readonly string[];
 
 function getDefaultFormState(): TimeEntryFormState {
   return {

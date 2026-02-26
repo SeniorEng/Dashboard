@@ -1,20 +1,15 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/layout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatDateForDisplay } from "@shared/utils/datetime";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
 import { useEmployees } from "@/features/customers";
 import { iconSize, componentStyles } from "@/design-system";
-import { StatusBadge } from "@/components/patterns/status-badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,23 +20,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  ArrowLeft,
-  Calendar,
-  Loader2,
-  Users,
-  Settings,
-  Unlock,
-  Plus,
-  Pencil,
-  Trash2,
-  Lock,
-} from "lucide-react";
+import { ArrowLeft, Calendar, Loader2, Unlock, Trash2, Lock } from "lucide-react";
 import type { TimeEntryType, TimeEntryWithUser, VacationSummary, TimeEntry } from "@/lib/api/types";
 import { TIME_ENTRY_TYPE_CONFIG } from "@/features/time-tracking/constants";
 import { TimeEntryDialog } from "@/features/time-tracking/components/time-entry-dialog";
 import { useTimeEntryForm } from "@/features/time-tracking/hooks/use-time-entry-form";
 import { useTimeEntryConflict } from "@/features/time-tracking/hooks/use-time-entry-conflict";
+import { EmployeeTimeCard } from "./components/employee-time-card";
+import { VacationDialog } from "./components/vacation-dialog";
 
 const MONTH_NAMES = [
   "Januar", "Februar", "März", "April", "Mai", "Juni",
@@ -102,6 +88,7 @@ export default function AdminTimeEntries() {
       const result = await api.get<TimeEntryWithUser[]>(`/admin/time-entries?${params.toString()}`, signal);
       return unwrapResult(result);
     },
+    staleTime: 30_000,
   });
 
   const { data: selectedUserVacation, isLoading: vacationLoading } = useQuery({
@@ -115,6 +102,7 @@ export default function AdminTimeEntries() {
       return unwrapResult(result);
     },
     enabled: !!vacationEditUser,
+    staleTime: 30_000,
   });
 
   const invalidateAll = useCallback(() => {
@@ -158,6 +146,7 @@ export default function AdminTimeEntries() {
       );
       return unwrapResult(result);
     },
+    staleTime: 30_000,
   });
 
   const closedUserIds = useMemo(() => {
@@ -276,12 +265,12 @@ export default function AdminTimeEntries() {
     return Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
   }, []);
 
-  const handleEditVacation = (userId: number, userName: string) => {
+  const handleEditVacation = useCallback((userId: number, userName: string) => {
     setVacationEditUser({ id: userId, name: userName });
     setShowVacationDialog(true);
-  };
+  }, []);
 
-  const handleSaveVacation = () => {
+  const handleSaveVacation = useCallback(() => {
     if (!vacationEditUser) return;
     updateVacationMutation.mutate({
       userId: vacationEditUser.id,
@@ -289,7 +278,7 @@ export default function AdminTimeEntries() {
       totalDays: parseInt(vacationDays) || 30,
       carryOverDays: parseInt(carryOverDays) || 0,
     });
-  };
+  }, [vacationEditUser, selectedYear, vacationDays, carryOverDays, updateVacationMutation]);
 
   const handleOpenCreate = useCallback((userId: number, userName: string) => {
     const monthStr = String(selectedMonth).padStart(2, "0");
@@ -323,154 +312,16 @@ export default function AdminTimeEntries() {
     updateMutation.mutate({ id: editEntry.id, data: req });
   }, [editForm, editEntry, updateMutation]);
 
+  const handleDeleteEntry = useCallback((id: number, label: string) => {
+    setDeleteTarget({ id, label });
+  }, []);
+
   useEffect(() => {
     if (selectedUserVacation) {
       setVacationDays(selectedUserVacation.totalDays.toString());
       setCarryOverDays(selectedUserVacation.carryOverDays.toString());
     }
   }, [selectedUserVacation]);
-
-  const renderEmployeeCard = (employeeName: string, employeeEntries: TimeEntryWithUser[], employeeId?: number) => {
-    const isClosed = employeeId ? closedUserIds.has(employeeId) : false;
-
-    return (
-      <Card key={employeeName}>
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Users className={iconSize.md} />
-              {employeeName}
-              {isClosed && <StatusBadge type="month" value="closed" size="sm" />}
-            </CardTitle>
-            <div className="flex items-center gap-1 flex-wrap">
-              {employeeId && !isClosed && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-teal-700 hover:text-teal-800 hover:bg-teal-50"
-                  onClick={() => setCloseMonthTarget({ userId: employeeId, userName: employeeName })}
-                  data-testid={`button-close-month-${employeeId}`}
-                >
-                  <Lock className={`${iconSize.sm} mr-1`} />
-                  Abschließen
-                </Button>
-              )}
-              {employeeId && isClosed && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-amber-700 hover:text-amber-800 hover:bg-amber-50"
-                  onClick={() => setReopenTarget({ userId: employeeId, userName: employeeName })}
-                  data-testid={`button-reopen-month-${employeeId}`}
-                >
-                  <Unlock className={`${iconSize.sm} mr-1`} />
-                  Wiedereröffnen
-                </Button>
-              )}
-              {employeeId && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-blue-700 hover:text-blue-800 hover:bg-blue-50"
-                  onClick={() => handleOpenCreate(employeeId, employeeName)}
-                  data-testid={`button-add-entry-${employeeId}`}
-                >
-                  <Plus className={`${iconSize.sm} mr-1`} />
-                  Eintrag
-                </Button>
-              )}
-              {employeeId && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleEditVacation(employeeId, employeeName)}
-                  data-testid={`button-edit-vacation-${employeeId}`}
-                >
-                  <Settings className={`${iconSize.sm} mr-1`} />
-                  Urlaubskontingent
-                </Button>
-              )}
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {employeeEntries.length === 0 ? (
-            <p className="text-sm text-gray-500">Keine Zeiteinträge in diesem Monat.</p>
-          ) : (
-            <div className="space-y-2">
-              {employeeEntries
-                .sort((a, b) => a.entryDate.localeCompare(b.entryDate))
-                .map((entry) => {
-                  const config = TIME_ENTRY_TYPE_CONFIG[entry.entryType as TimeEntryType];
-                  const Icon = config.icon;
-                  const isAutoGenerated = (entry as any).isAutoGenerated;
-                  return (
-                    <div
-                      key={entry.id}
-                      className={`p-3 rounded-lg ${config.bgColor} flex items-center justify-between group`}
-                      data-testid={`time-entry-${entry.id}`}
-                    >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <Icon className={`${iconSize.md} ${config.color} shrink-0`} />
-                        <div className="min-w-0">
-                          <div className={`font-medium ${config.color} flex items-center gap-2`}>
-                            {config.label}
-                            {isAutoGenerated && (
-                              <span className="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded">Auto</span>
-                            )}
-                          </div>
-                          <div className="text-sm text-gray-600">
-                            {formatDateForDisplay(entry.entryDate, { weekday: "short", day: "numeric", month: "short" })}
-                            {entry.startTime && entry.endTime && (
-                              <span className="ml-2">
-                                {entry.startTime.slice(0, 5)} - {entry.endTime.slice(0, 5)}
-                              </span>
-                            )}
-                            {entry.isFullDay && <span className="ml-2">(Ganztägig)</span>}
-                          </div>
-                          {entry.notes && (
-                            <div className="text-xs text-gray-500 truncate mt-0.5">{entry.notes}</div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity shrink-0">
-                        {!isAutoGenerated && (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => handleOpenEdit(entry)}
-                              aria-label="Bearbeiten"
-                              data-testid={`button-edit-entry-${entry.id}`}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                              onClick={() => setDeleteTarget({
-                                id: entry.id,
-                                label: `${config.label} am ${formatDateForDisplay(entry.entryDate, { day: "numeric", month: "short" })}`,
-                              })}
-                              aria-label="Löschen"
-                              data-testid={`button-delete-entry-${entry.id}`}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    );
-  };
 
   return (
     <Layout variant="wide">
@@ -551,7 +402,21 @@ export default function AdminTimeEntries() {
             <div className="flex flex-col gap-3">
               {Object.entries(entriesByEmployee).map(([employeeName, employeeEntries]) => {
                 const employee = employees?.find(e => e.displayName === employeeName);
-                return renderEmployeeCard(employeeName, employeeEntries, employee?.id);
+                return (
+                  <EmployeeTimeCard
+                    key={employeeName}
+                    employeeName={employeeName}
+                    employeeEntries={employeeEntries}
+                    employeeId={employee?.id}
+                    isClosed={employee ? closedUserIds.has(employee.id) : false}
+                    onCloseMonth={(id, name) => setCloseMonthTarget({ userId: id, userName: name })}
+                    onReopenMonth={(id, name) => setReopenTarget({ userId: id, userName: name })}
+                    onAddEntry={handleOpenCreate}
+                    onEditVacation={handleEditVacation}
+                    onEditEntry={handleOpenEdit}
+                    onDeleteEntry={handleDeleteEntry}
+                  />
+                );
               })}
             </div>
           ) : (
@@ -578,7 +443,21 @@ export default function AdminTimeEntries() {
                 {closedWithoutEntries.map((closing) => {
                   const emp = employees?.find((e) => e.id === closing.userId);
                   if (!emp) return null;
-                  return renderEmployeeCard(emp.displayName, [], emp.id);
+                  return (
+                    <EmployeeTimeCard
+                      key={closing.id}
+                      employeeName={emp.displayName}
+                      employeeEntries={[]}
+                      employeeId={emp.id}
+                      isClosed={true}
+                      onCloseMonth={(id, name) => setCloseMonthTarget({ userId: id, userName: name })}
+                      onReopenMonth={(id, name) => setReopenTarget({ userId: id, userName: name })}
+                      onAddEntry={handleOpenCreate}
+                      onEditVacation={handleEditVacation}
+                      onEditEntry={handleOpenEdit}
+                      onDeleteEntry={handleDeleteEntry}
+                    />
+                  );
                 })}
               </div>
             );
@@ -723,94 +602,24 @@ export default function AdminTimeEntries() {
             </AlertDialogContent>
           </AlertDialog>
 
-          <Dialog open={showVacationDialog} onOpenChange={setShowVacationDialog}>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>
-                  Urlaubskontingent {selectedYear} - {vacationEditUser?.name}
-                </DialogTitle>
-              </DialogHeader>
-              {vacationLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className={`${iconSize.lg} animate-spin`} />
-                </div>
-              ) : (
-                <div className="space-y-4 pt-4">
-                  {selectedUserVacation && (
-                    <div className="p-4 rounded-lg bg-gray-50 space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span>Genommen:</span>
-                        <span className="font-medium text-green-700">{selectedUserVacation.usedDays} {selectedUserVacation.usedDays === 1 ? 'Tag' : 'Tage'}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span>Geplant:</span>
-                        <span className="font-medium text-blue-700">{selectedUserVacation.plannedDays} {selectedUserVacation.plannedDays === 1 ? 'Tag' : 'Tage'}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span>Verfügbar:</span>
-                        <span className="font-medium text-teal-700">{selectedUserVacation.remainingDays} {selectedUserVacation.remainingDays === 1 ? 'Tag' : 'Tage'}</span>
-                      </div>
-                      <div className="flex justify-between text-sm border-t pt-2">
-                        <span>Krankheitstage:</span>
-                        <span className="font-medium text-red-700">{selectedUserVacation.sickDays} {selectedUserVacation.sickDays === 1 ? 'Tag' : 'Tage'}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="totalDays">Jahresurlaub (Tage)</Label>
-                      <Input
-                        id="totalDays"
-                        type="number"
-                        value={vacationDays}
-                        onChange={(e) => setVacationDays(e.target.value)}
-                        min={0}
-                        max={365}
-                        data-testid="input-total-days"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="carryOverDays">Resturlaub Vorjahr</Label>
-                      <Input
-                        id="carryOverDays"
-                        type="number"
-                        value={carryOverDays}
-                        onChange={(e) => setCarryOverDays(e.target.value)}
-                        min={0}
-                        max={365}
-                        data-testid="input-carry-over"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end gap-2 pt-4">
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setShowVacationDialog(false);
-                        setVacationEditUser(null);
-                      }}
-                    >
-                      Abbrechen
-                    </Button>
-                    <Button
-                      className="bg-teal-600 hover:bg-teal-700"
-                      onClick={handleSaveVacation}
-                      disabled={updateVacationMutation.isPending}
-                      data-testid="button-save-vacation"
-                    >
-                      {updateVacationMutation.isPending ? (
-                        <><Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />Speichern...</>
-                      ) : (
-                        "Speichern"
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </DialogContent>
-          </Dialog>
+          <VacationDialog
+            open={showVacationDialog}
+            onOpenChange={setShowVacationDialog}
+            year={selectedYear}
+            userName={vacationEditUser?.name}
+            vacation={selectedUserVacation}
+            vacationLoading={vacationLoading}
+            vacationDays={vacationDays}
+            onVacationDaysChange={setVacationDays}
+            carryOverDays={carryOverDays}
+            onCarryOverDaysChange={setCarryOverDays}
+            onSave={handleSaveVacation}
+            onCancel={() => {
+              setShowVacationDialog(false);
+              setVacationEditUser(null);
+            }}
+            isSaving={updateVacationMutation.isPending}
+          />
     </Layout>
   );
 }

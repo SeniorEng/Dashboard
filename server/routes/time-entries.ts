@@ -5,7 +5,7 @@ import { timeTrackingStorage } from "../storage/time-tracking";
 import { insertTimeEntrySchema, updateTimeEntrySchema } from "@shared/schema";
 import { storage } from "../storage";
 import { auditService } from "../services/audit";
-import { timeToMinutes, isWeekend, parseLocalDate, isPast } from "@shared/utils/datetime";
+import { timeToMinutes, isWeekend, parseLocalDate, isPast, formatDateISO } from "@shared/utils/datetime";
 import { getEntryTypeLabel, formatTimeShort, timeRangesOverlap, getAppointmentEndMinutes } from "@shared/domain/time-entries";
 import monthClosingRouter from "./month-closing";
 
@@ -213,8 +213,9 @@ router.post("/check-conflicts", asyncHandler("Konfliktprüfung fehlgeschlagen", 
   const { date, startTime, endTime, isFullDay, excludeEntryId, targetUserId } = req.body;
 
   let userId = req.user!.id;
-  if (req.user!.isAdmin && targetUserId && targetUserId !== req.user!.id) {
-    userId = targetUserId;
+  const parsedTarget = targetUserId != null ? Number(targetUserId) : undefined;
+  if (req.user!.isAdmin && parsedTarget != null && Number.isInteger(parsedTarget) && parsedTarget !== req.user!.id) {
+    userId = parsedTarget;
   }
   
   if (!date || typeof date !== "string") {
@@ -255,15 +256,6 @@ router.get("/:id", asyncHandler("Zeiteintrag konnte nicht geladen werden", async
   res.json(entry);
 }));
 
-/**
- * Helper to format date as YYYY-MM-DD without timezone issues
- */
-function formatLocalDate(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
 /**
  * Check if a time entry is locked (past urlaub/krankheit entries are immutable for non-admins)
@@ -282,14 +274,15 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
   const { endDate, targetUserId, ...entryData } = req.body;
   
   let userId = req.user!.id;
-  const isAdminActingForOther = req.user!.isAdmin && targetUserId && targetUserId !== req.user!.id;
+  const parsedTargetUserId = targetUserId != null ? Number(targetUserId) : undefined;
+  const isAdminActingForOther = req.user!.isAdmin && parsedTargetUserId != null && Number.isInteger(parsedTargetUserId) && parsedTargetUserId !== req.user!.id;
   
   if (isAdminActingForOther) {
-    const targetUser = await storage.getUser(targetUserId);
+    const targetUser = await storage.getUser(parsedTargetUserId);
     if (!targetUser) {
       return res.status(400).json({ error: "Mitarbeiter nicht gefunden" });
     }
-    userId = targetUserId;
+    userId = parsedTargetUserId;
   }
   const validatedData = insertTimeEntrySchema.parse(entryData);
   
@@ -313,7 +306,7 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
     const weekdayDates: string[] = [];
     const collectDate = new Date(startDate);
     while (collectDate <= end) {
-      const dateStr = formatLocalDate(collectDate);
+      const dateStr = formatDateISO(collectDate);
       if (!isWeekend(dateStr)) {
         weekdayDates.push(dateStr);
       }
