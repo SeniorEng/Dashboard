@@ -557,126 +557,11 @@ export function DocumentTemplatesContent() {
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="editor" className="space-y-4 mt-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label>Name *</Label>
-                  <Input
-                    value={formData.name}
-                    onChange={(e) => {
-                      const name = e.target.value;
-                      setFormData(p => ({
-                        ...p,
-                        name,
-                        ...(isCreateMode ? { slug: generateSlug(name) } : {}),
-                      }));
-                    }}
-                    placeholder="z.B. Betreuungsvertrag Pflegekasse"
-                    className="text-base"
-                    data-testid="input-template-name"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Slug {isCreateMode && "(auto)"}</Label>
-                  <Input
-                    value={formData.slug}
-                    onChange={(e) => setFormData(p => ({ ...p, slug: e.target.value }))}
-                    placeholder="betreuungsvertrag_pflegekasse"
-                    className="text-base font-mono"
-                    disabled={!isCreateMode}
-                    data-testid="input-template-slug"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Beschreibung</Label>
-                  <Input
-                    value={formData.description}
-                    onChange={(e) => setFormData(p => ({ ...p, description: e.target.value }))}
-                    placeholder="Kurze Beschreibung"
-                    className="text-base"
-                    data-testid="input-template-description"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                <div className="space-y-2">
-                  <Label>Dokumentenkategorie</Label>
-                  <Select
-                    value={formData.documentTypeId?.toString() || "none"}
-                    onValueChange={(v) => setFormData(p => ({ ...p, documentTypeId: v === "none" ? null : parseInt(v) }))}
-                  >
-                    <SelectTrigger data-testid="select-document-type">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Keine Zuordnung</SelectItem>
-                      {documentTypes?.map((dt) => (
-                        <SelectItem key={dt.id} value={dt.id.toString()}>{dt.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Kontext</Label>
-                  <Select
-                    value={formData.context}
-                    onValueChange={(v) => setFormData(p => ({ ...p, context: v }))}
-                  >
-                    <SelectTrigger data-testid="select-context">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="beide">Immer verfügbar</SelectItem>
-                      <SelectItem value="vertragsabschluss">Nur bei Vertragsabschluss</SelectItem>
-                      <SelectItem value="bestandskunde">Nur bei Bestandskunden</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Zielgruppe</Label>
-                  <Select
-                    value={formData.targetType}
-                    onValueChange={(v) => setFormData(p => ({ ...p, targetType: v }))}
-                  >
-                    <SelectTrigger data-testid="select-target-type">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="customer">Kunden</SelectItem>
-                      <SelectItem value="employee">Mitarbeiter</SelectItem>
-                      <SelectItem value="beide">Beide</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex items-center gap-3 pt-6">
-                  <Switch
-                    checked={formData.requiresCustomerSignature}
-                    onCheckedChange={(v) => setFormData(p => ({ ...p, requiresCustomerSignature: v }))}
-                    data-testid="switch-requires-customer-signature"
-                  />
-                  <Label className="text-xs">Kundenunterschrift</Label>
-                </div>
-                <div className="flex items-center gap-3 pt-6">
-                  <Switch
-                    checked={formData.requiresEmployeeSignature}
-                    onCheckedChange={(v) => setFormData(p => ({ ...p, requiresEmployeeSignature: v }))}
-                    data-testid="switch-requires-employee-signature"
-                  />
-                  <Label className="text-xs">MA-Unterschrift</Label>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>HTML-Inhalt *</Label>
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        checked={formData.isActive}
-                        onCheckedChange={(v) => setFormData(p => ({ ...p, isActive: v }))}
-                        data-testid="switch-template-active"
-                      />
-                      <Label className="text-xs">Aktiv</Label>
-                    </div>
+            <TabsContent value="editor" className="mt-4">
+              <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6">
+                <div className="space-y-2 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <Label>HTML-Inhalt *</Label>
                     <Button
                       variant="outline"
                       size="sm"
@@ -693,125 +578,240 @@ export function DocumentTemplatesContent() {
                       Vorschau
                     </Button>
                   </div>
-                </div>
-
-                <div className="flex flex-wrap gap-1.5 p-2 bg-gray-50 border rounded-t-lg" data-testid="placeholder-toolbar">
-                  {Object.entries(groupedPlaceholders).map(([source, items]) => {
-                    const sourceLabels: Record<string, { label: string; icon: typeof User }> = {
-                      customer: { label: "Kunde", icon: User },
-                      insurance: { label: "Versicherung", icon: Shield },
-                      company: { label: "Firma", icon: Building2 },
-                      contract: { label: "Vertrag", icon: FileText },
-                      contact: { label: "Kontakt", icon: Phone },
-                      system: { label: "System", icon: Calendar },
-                      signature: { label: "Unterschrift", icon: FileSignature },
-                    };
-                    const config = sourceLabels[source] || { label: source, icon: Tag };
-                    const Icon = config.icon;
-                    return (
-                      <DropdownMenu key={source}>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 text-xs gap-1 px-2"
-                            data-testid={`dropdown-placeholder-${source}`}
-                          >
-                            <Icon className="h-3 w-3" />
-                            {config.label}
-                            <ChevronDown className="h-3 w-3 opacity-50" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start" className="max-h-64 overflow-y-auto">
-                          <DropdownMenuLabel className="text-xs">{config.label}-Felder</DropdownMenuLabel>
-                          <DropdownMenuSeparator />
-                          {items.map((p) => (
-                            <DropdownMenuItem
-                              key={p.key}
-                              onClick={() => insertAtCursor(p.key)}
-                              className="text-xs gap-2 cursor-pointer"
-                              data-testid={`insert-${p.key}`}
+                  <div className="flex flex-wrap gap-1.5 p-2 bg-gray-50 border rounded-t-lg" data-testid="placeholder-toolbar">
+                    {Object.entries(groupedPlaceholders).map(([source, items]) => {
+                      const sourceLabels: Record<string, { label: string; icon: typeof User }> = {
+                        customer: { label: "Kunde", icon: User },
+                        insurance: { label: "Versicherung", icon: Shield },
+                        company: { label: "Firma", icon: Building2 },
+                        contract: { label: "Vertrag", icon: FileText },
+                        contact: { label: "Kontakt", icon: Phone },
+                        system: { label: "System", icon: Calendar },
+                        signature: { label: "Unterschrift", icon: FileSignature },
+                      };
+                      const config = sourceLabels[source] || { label: source, icon: Tag };
+                      const Icon = config.icon;
+                      return (
+                        <DropdownMenu key={source}>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs gap-1 px-2"
+                              data-testid={`dropdown-placeholder-${source}`}
                             >
-                              <code className="font-mono text-teal-700 bg-teal-50 px-1 rounded text-[10px]">{p.key}</code>
-                              <span className="text-gray-600 truncate">{p.label}</span>
-                            </DropdownMenuItem>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    );
-                  })}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
+                              <Icon className="h-3 w-3" />
+                              {config.label}
+                              <ChevronDown className="h-3 w-3 opacity-50" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" className="max-h-64 overflow-y-auto">
+                            <DropdownMenuLabel className="text-xs">{config.label}-Felder</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {items.map((p) => (
+                              <DropdownMenuItem
+                                key={p.key}
+                                onClick={() => insertAtCursor(p.key)}
+                                className="text-xs gap-2 cursor-pointer"
+                                data-testid={`insert-${p.key}`}
+                              >
+                                <code className="font-mono text-teal-700 bg-teal-50 px-1 rounded text-[10px]">{p.key}</code>
+                                <span className="text-gray-600 truncate">{p.label}</span>
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      );
+                    })}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs gap-1 px-2 border-amber-300 text-amber-700 hover:bg-amber-50"
+                          data-testid="dropdown-input-field"
+                        >
+                          <FormInput className="h-3 w-3" />
+                          Eingabefeld
+                          <ChevronDown className="h-3 w-3 opacity-50" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start">
+                        <DropdownMenuLabel className="text-xs">Eingabefeld einfügen</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        {["Bemerkung", "Anzahl Schlüssel", "Sonstiges", "Datum", "Betrag"].map((label) => (
+                          <DropdownMenuItem
+                            key={label}
+                            onClick={() => insertAtCursor(`{{input:${label}}}`)}
+                            className="text-xs gap-2 cursor-pointer"
+                            data-testid={`insert-input-${label}`}
+                          >
+                            <code className="font-mono text-amber-700 bg-amber-50 px-1 rounded text-[10px]">{`{{input:${label}}}`}</code>
+                          </DropdownMenuItem>
+                        ))}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onClick={() => {
+                            const label = prompt("Bezeichnung des Eingabefelds:");
+                            if (label?.trim()) insertAtCursor(`{{input:${label.trim()}}}`);
+                          }}
+                          className="text-xs gap-2 cursor-pointer font-medium"
+                          data-testid="insert-input-custom"
+                        >
+                          <Plus className="h-3 w-3" />
+                          Eigenes Feld...
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    {companySettings?.pdfLogoUrl && (
                       <Button
                         variant="outline"
                         size="sm"
-                        className="h-7 text-xs gap-1 px-2 border-amber-300 text-amber-700 hover:bg-amber-50"
-                        data-testid="dropdown-input-field"
+                        className="h-7 text-xs gap-1 px-2 border-blue-300 text-blue-700 hover:bg-blue-50"
+                        onClick={() => insertAtCursor(`<img src="/api/public/logo/pdf" alt="Logo" style="max-height: 80px;" />`)}
+                        data-testid="insert-pdf-logo"
                       >
-                        <FormInput className="h-3 w-3" />
-                        Eingabefeld
-                        <ChevronDown className="h-3 w-3 opacity-50" />
+                        <Image className="h-3 w-3" />
+                        PDF-Logo
                       </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start">
-                      <DropdownMenuLabel className="text-xs">Eingabefeld einfügen</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      {["Bemerkung", "Anzahl Schlüssel", "Sonstiges", "Datum", "Betrag"].map((label) => (
-                        <DropdownMenuItem
-                          key={label}
-                          onClick={() => insertAtCursor(`{{input:${label}}}`)}
-                          className="text-xs gap-2 cursor-pointer"
-                          data-testid={`insert-input-${label}`}
-                        >
-                          <code className="font-mono text-amber-700 bg-amber-50 px-1 rounded text-[10px]">{`{{input:${label}}}`}</code>
-                        </DropdownMenuItem>
-                      ))}
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onClick={() => {
-                          const label = prompt("Bezeichnung des Eingabefelds:");
-                          if (label?.trim()) insertAtCursor(`{{input:${label.trim()}}}`);
-                        }}
-                        className="text-xs gap-2 cursor-pointer font-medium"
-                        data-testid="insert-input-custom"
-                      >
-                        <Plus className="h-3 w-3" />
-                        Eigenes Feld...
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                  {companySettings?.pdfLogoUrl && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-xs gap-1 px-2 border-blue-300 text-blue-700 hover:bg-blue-50"
-                      onClick={() => insertAtCursor(`<img src="/api/public/logo/pdf" alt="Logo" style="max-height: 80px;" />`)}
-                      data-testid="insert-pdf-logo"
-                    >
-                      <Image className="h-3 w-3" />
-                      PDF-Logo
-                    </Button>
-                  )}
+                    )}
+                  </div>
+                  <Textarea
+                    ref={textareaRef}
+                    value={formData.htmlContent}
+                    onChange={(e) => setFormData(p => ({ ...p, htmlContent: e.target.value }))}
+                    placeholder="<h1>Vertragsvorlage</h1>&#10;<p>Zwischen {{company_name}} und {{customer_name}}...</p>"
+                    className="font-mono text-sm min-h-[50vh] leading-relaxed rounded-t-none border-t-0 resize-y"
+                    data-testid="textarea-html-content"
+                  />
                 </div>
 
-                <Textarea
-                  ref={textareaRef}
-                  value={formData.htmlContent}
-                  onChange={(e) => setFormData(p => ({ ...p, htmlContent: e.target.value }))}
-                  placeholder="<h1>Vertragsvorlage</h1>&#10;<p>Zwischen {{company_name}} und {{customer_name}}...</p>"
-                  className="font-mono text-sm min-h-[50vh] leading-relaxed rounded-t-none border-t-0 resize-y"
-                  data-testid="textarea-html-content"
-                />
-                <p className="text-xs text-gray-500">
-                  Klicken Sie auf die Buttons oben, um Platzhalter an der Cursor-Position einzufügen. Weitere Details im Tab "Platzhalter".
-                </p>
+                <div className="space-y-4">
+                  <div className="space-y-3">
+                    <Label className="text-sm font-semibold">Name *</Label>
+                    <Input
+                      value={formData.name}
+                      onChange={(e) => {
+                        const name = e.target.value;
+                        setFormData(p => ({
+                          ...p,
+                          name,
+                          ...(isCreateMode ? { slug: generateSlug(name) } : {}),
+                        }));
+                      }}
+                      placeholder="z.B. Betreuungsvertrag Pflegekasse"
+                      data-testid="input-template-name"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Slug {isCreateMode && "(auto)"}</Label>
+                    <Input
+                      value={formData.slug}
+                      onChange={(e) => setFormData(p => ({ ...p, slug: e.target.value }))}
+                      className="font-mono text-xs"
+                      disabled={!isCreateMode}
+                      data-testid="input-template-slug"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Beschreibung</Label>
+                    <Input
+                      value={formData.description}
+                      onChange={(e) => setFormData(p => ({ ...p, description: e.target.value }))}
+                      placeholder="Kurze Beschreibung"
+                      data-testid="input-template-description"
+                    />
+                  </div>
+                  <hr />
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Dokumentenkategorie</Label>
+                    <Select
+                      value={formData.documentTypeId?.toString() || "none"}
+                      onValueChange={(v) => setFormData(p => ({ ...p, documentTypeId: v === "none" ? null : parseInt(v) }))}
+                    >
+                      <SelectTrigger data-testid="select-document-type">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Keine Zuordnung</SelectItem>
+                        {documentTypes?.map((dt) => (
+                          <SelectItem key={dt.id} value={dt.id.toString()}>{dt.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Kontext</Label>
+                      <Select
+                        value={formData.context}
+                        onValueChange={(v) => setFormData(p => ({ ...p, context: v }))}
+                      >
+                        <SelectTrigger data-testid="select-context">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="beide">Immer</SelectItem>
+                          <SelectItem value="vertragsabschluss">Vertrag</SelectItem>
+                          <SelectItem value="bestandskunde">Bestand</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Zielgruppe</Label>
+                      <Select
+                        value={formData.targetType}
+                        onValueChange={(v) => setFormData(p => ({ ...p, targetType: v }))}
+                      >
+                        <SelectTrigger data-testid="select-target-type">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="customer">Kunden</SelectItem>
+                          <SelectItem value="employee">Mitarbeiter</SelectItem>
+                          <SelectItem value="beide">Beide</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <hr />
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm">Aktiv</Label>
+                      <Switch
+                        checked={formData.isActive}
+                        onCheckedChange={(v) => setFormData(p => ({ ...p, isActive: v }))}
+                        data-testid="switch-template-active"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm">Kundenunterschrift</Label>
+                      <Switch
+                        checked={formData.requiresCustomerSignature}
+                        onCheckedChange={(v) => setFormData(p => ({ ...p, requiresCustomerSignature: v }))}
+                        data-testid="switch-requires-customer-signature"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm">MA-Unterschrift</Label>
+                      <Switch
+                        checked={formData.requiresEmployeeSignature}
+                        onCheckedChange={(v) => setFormData(p => ({ ...p, requiresEmployeeSignature: v }))}
+                        data-testid="switch-requires-employee-signature"
+                      />
+                    </div>
+                  </div>
+                  {editingTemplate && (
+                    <>
+                      <hr />
+                      <p className="text-xs text-muted-foreground">
+                        Version {editingTemplate.version} · {formatDateForDisplay(editingTemplate.updatedAt.split("T")[0])}
+                        {editingTemplate.isSystem && " · System"}
+                      </p>
+                    </>
+                  )}
+                </div>
               </div>
-              {editingTemplate && (
-                <p className="text-xs text-gray-500">
-                  Version {editingTemplate.version} · Zuletzt aktualisiert: {formatDateForDisplay(editingTemplate.updatedAt.split("T")[0])}
-                  {editingTemplate.isSystem && " · System-Vorlage (Slug nicht änderbar)"}
-                </p>
-              )}
             </TabsContent>
 
             <TabsContent value="preview" className="mt-4">
