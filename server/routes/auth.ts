@@ -8,6 +8,7 @@ import {
   EMPLOYEE_ROLES,
   type EmployeeRole,
 } from "@shared/schema";
+import { sanitizeUser } from "../utils/sanitize-user";
 import {
   requireAuth,
   requireAdmin,
@@ -53,9 +54,8 @@ router.post("/login", asyncHandler("Anmeldung fehlgeschlagen", async (req: Reque
   setSessionCookie(res, loginResult.token);
   setCsrfCookie(res, generateCsrfToken());
 
-  const { passwordHash, ...userWithoutPassword } = loginResult.user;
   res.json({
-    user: userWithoutPassword,
+    user: sanitizeUser(loginResult.user),
     availableServices: getAvailableServiceTypes(
       loginResult.user.roles,
       loginResult.user.isAdmin
@@ -86,7 +86,7 @@ router.get("/me", asyncHandler("Benutzerinformationen konnten nicht geladen werd
     setCsrfCookie(res, generateCsrfToken());
   }
 
-  const { passwordHash, ...userWithoutPassword } = req.user;
+  const userWithoutPassword = sanitizeUser(req.user);
 
   const userId = req.user.id;
   const isAdmin = req.user.isAdmin;
@@ -370,9 +370,8 @@ router.post("/setup", csrfProtection, asyncHandler("Administrator-Konto konnte n
     setSessionCookie(res, loginResult.token);
   }
 
-  const { passwordHash, ...userWithoutPassword } = user;
   res.status(201).json({
-    user: userWithoutPassword,
+    user: sanitizeUser(user),
     message: "Administrator-Konto wurde erstellt",
   });
 }));

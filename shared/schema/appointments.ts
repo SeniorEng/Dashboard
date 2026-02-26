@@ -93,7 +93,7 @@ export type AppointmentServiceEntry = z.infer<typeof appointmentServiceEntrySche
 export const insertKundenterminSchema = z.object({
   customerId: z.number(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat (YYYY-MM-DD erwartet)"),
-  scheduledStart: z.string(),
+  scheduledStart: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Ungültiges Zeitformat (HH:MM erwartet)"),
   services: z.array(appointmentServiceEntrySchema).min(1, "Mindestens ein Service muss ausgewählt werden"),
   notes: z.string().max(255).optional(),
   assignedEmployeeId: z.number().nullable().optional(),
@@ -103,7 +103,7 @@ export const insertKundenterminSchema = z.object({
 export const insertErstberatungSchema = z.object({
   customer: insertErstberatungCustomerSchema,
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat (YYYY-MM-DD erwartet)"),
-  scheduledStart: z.string(),
+  scheduledStart: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Ungültiges Zeitformat (HH:MM erwartet)"),
   erstberatungDauer: z.number().min(15).multipleOf(15),
   notes: z.string().max(255).optional(),
   assignedEmployeeId: z.number().nullable().optional(), // Admin can assign employee

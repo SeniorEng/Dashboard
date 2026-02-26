@@ -41,9 +41,9 @@ router.use(requireAuth);
 
 router.get("/active-employees", asyncHandler("Mitarbeiter konnten nicht geladen werden", async (_req, res) => {
   const employees = await authService.getActiveEmployees();
-  const safeEmployees = employees.map(({ passwordHash, ...employee }) => ({
-    id: employee.id,
-    displayName: employee.displayName,
+  const safeEmployees = employees.map((e) => ({
+    id: e.id,
+    displayName: e.displayName,
   }));
   res.json(safeEmployees);
 }));

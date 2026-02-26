@@ -131,7 +131,7 @@ export type EmployeeRole = typeof EMPLOYEE_ROLES[number];
 // User schemas
 export const insertUserSchema = z.object({
   email: z.string().email("Ungültige E-Mail-Adresse"),
-  password: z.string().min(8, "Passwort muss mindestens 8 Zeichen haben"),
+  password: z.string().min(8, "Passwort muss mindestens 8 Zeichen haben").regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d\w\W]{8,}$/, "Passwort muss Groß-/Kleinbuchstaben und eine Zahl enthalten"),
   vorname: z.string().min(1, "Vorname ist erforderlich"),
   nachname: z.string().min(1, "Nachname ist erforderlich"),
   telefon: z.string().optional(),
@@ -165,10 +165,11 @@ export const passwordResetRequestSchema = z.object({
 
 export const passwordResetSchema = z.object({
   token: z.string().min(1, "Token ist erforderlich"),
-  newPassword: z.string().min(8, "Passwort muss mindestens 8 Zeichen haben"),
+  newPassword: z.string().min(8, "Passwort muss mindestens 8 Zeichen haben").regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d\w\W]{8,}$/, "Passwort muss Groß-/Kleinbuchstaben und eine Zahl enthalten"),
 });
 
 export type User = typeof users.$inferSelect;
+export type SafeUser = Omit<User, "passwordHash">;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type UserRole = typeof userRoles.$inferSelect;
 export type Session = typeof sessions.$inferSelect;

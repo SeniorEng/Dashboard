@@ -3,6 +3,7 @@ import { randomBytes } from "crypto";
 import { authService } from "../../services/auth";
 import { storage } from "../../storage";
 import { usersCache, birthdaysCache } from "../../services/cache";
+import { sanitizeUser } from "../../utils/sanitize-user";
 import { 
   insertUserSchema, 
   EMPLOYEE_ROLES,
@@ -33,7 +34,7 @@ router.get("/users", asyncHandler("Benutzer konnten nicht geladen werden", async
   }
 
   const users = await authService.getAllUsers();
-  const safeUsers = users.map(({ passwordHash, ...user }) => user);
+  const safeUsers = users.map(sanitizeUser);
   
   // Store in cache
   usersCache.setAllUsers(safeUsers);
@@ -60,8 +61,7 @@ router.get("/users/:id", asyncHandler("Benutzer konnte nicht geladen werden", as
     return;
   }
 
-  const { passwordHash, ...safeUser } = user;
-  res.json(safeUser);
+  res.json(sanitizeUser(user));
 }));
 
 router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", async (req: Request, res: Response) => {
@@ -148,8 +148,7 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
     console.error("[email] Stack:", emailError?.stack);
   }
 
-  const { passwordHash, ...safeUser } = user;
-  res.status(201).json(safeUser);
+  res.status(201).json(sanitizeUser(user));
 }));
 
 const updateUserSchema = z.object({
@@ -250,8 +249,7 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
   birthdaysCache.invalidateAll();
 
   const finalUser = await authService.getUser(id);
-  const { passwordHash, ...safeUser } = finalUser!;
-  res.json(safeUser);
+  res.json(sanitizeUser(finalUser!));
 }));
 
 router.post("/users/:id/reset-password", asyncHandler("Passwort konnte nicht zurückgesetzt werden", async (req: Request, res: Response) => {
@@ -548,7 +546,7 @@ router.get("/employees", asyncHandler("Mitarbeiter konnten nicht geladen werden"
   }
 
   const employees = await authService.getActiveEmployees();
-  const safeEmployees = employees.map(({ passwordHash, ...employee }) => employee);
+  const safeEmployees = employees.map(sanitizeUser);
   
   // Store in cache
   usersCache.setActiveEmployees(safeEmployees);

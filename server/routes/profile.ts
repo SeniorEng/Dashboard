@@ -6,6 +6,7 @@ import { authService } from "../services/auth";
 import { documentStorage } from "../storage/documents";
 import { qualificationStorage } from "../storage/qualifications";
 import { usersCache, birthdaysCache } from "../services/cache";
+import { sanitizeUser } from "../utils/sanitize-user";
 
 const router = Router();
 
@@ -26,9 +27,8 @@ const updateProfileSchema = z.object({
 
 router.get("/", asyncHandler("Profil konnte nicht geladen werden", async (req: Request, res: Response) => {
   const user = req.user!;
-  const { passwordHash, ...safeUser } = user;
   const roles = await authService.getUserRoles(user.id);
-  res.json({ ...safeUser, roles });
+  res.json({ ...sanitizeUser(user), roles });
 }));
 
 router.patch("/", asyncHandler("Profil konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
@@ -67,8 +67,7 @@ router.patch("/", asyncHandler("Profil konnte nicht aktualisiert werden", async 
   usersCache.invalidateAll();
   birthdaysCache.invalidateAll();
 
-  const { passwordHash, ...safeUser } = updatedUser;
-  res.json(safeUser);
+  res.json(sanitizeUser(updatedUser));
 }));
 
 router.get("/document-types", asyncHandler("Dokumententypen konnten nicht geladen werden", async (_req: Request, res: Response) => {

@@ -1,0 +1,40 @@
+# 🎨 Code Review & Refactoring Report: Phase 2 (UI/UX & Performance)
+
+Hallo! Bitte setze die folgenden UI/UX- und Performance-Optimierungen im Zeiterfassungs-Modul (Time Tracking) um. Das Ziel ist eine perfekte Mobile-First-Experience für Pflegekräfte und flüssiges Rendering.
+
+## 📱 Task 1: Mobile-First Dialoge (UX & Ergonomie)
+**Kontext:** Pflegekräfte nutzen die App meist auf dem Smartphone. Normale Modal-Dialoge (`<Dialog>`) sind auf kleinen Bildschirmen oft schwer zu bedienen (Tipp-Ziele, Tastatur verdeckt Eingabefelder). Wir haben bereits eine `<Drawer>`-Komponente und einen `useIsMobile`-Hook im Projekt.
+
+**To-Do:**
+1. Öffne `client/src/features/time-tracking/components/time-entry-dialog.tsx`.
+2. Importiere den Hook aus `client/src/hooks/use-mobile.tsx` (oder `use-media-query.ts`).
+3. Baue die Komponente so um, dass sie responsiv rendert: 
+   - `if (isMobile)` -> Nutze den `<Drawer>` (Bottom Sheet) aus `client/src/components/ui/drawer.tsx` für die Formular-Eingabe.
+   - `else` -> Nutze den regulären `<Dialog>` aus `client/src/components/ui/dialog.tsx`.
+4. Achte darauf, dass die Touch-Targets (Buttons im Formular) mindestens 44x44px groß sind (Tailwind: `min-h-[44px]`).
+
+## ⚡ Task 2: Render-Performance im Kalender (React Performance)
+**Kontext:** Kalender-Grids sind in React berüchtigt für Performance-Probleme. Wenn sich der Zustand eines Tages ändert (z.B. ein Eintrag wird hinzugefügt), darf nicht das gesamte Grid (30+ Tage) neu rendern.
+
+**To-Do:**
+1. Öffne `client/src/features/time-tracking/components/calendar-grid.tsx`.
+2. Extrahiere die Logik für einen einzelnen Tag in eine eigene Sub-Komponente (z.B. `<DayCell date={date} entries={entriesForDay} />`).
+3. Umschließe diese `<DayCell>` mit `React.memo`, damit sie nur neu rendert, wenn sich ihre spezifischen `entries` ändern.
+4. Stelle sicher, dass komplexe Datumsberechnungen (z.B. das Generieren der Monats-Tage) mit `useMemo` gewrappt sind.
+
+## ♿ Task 3: Barrierefreiheit & Action-Driven Feedback (A11y/UX)
+**Kontext:** Der Banner für fehlende Pausen muss sofort ins Auge springen und Screenreadern korrekt vorgelesen werden. Außerdem sollte er nicht nur informieren, sondern direkt eine Lösung anbieten.
+
+**To-Do:**
+1. Öffne `client/src/features/time-tracking/components/missing-breaks-banner.tsx`.
+2. Füge dem Root-Element des Banners die Attribute `role="alert"` und `aria-live="polite"` hinzu.
+3. Ergänze einen "Call to Action"-Button (z.B. "Pause jetzt nachtragen"). Wenn dieser geklickt wird, soll sich der `time-entry-dialog` direkt mit vorausgefüllten Daten (Typ: Pause) öffnen.
+
+## 🚀 Task 4: Optimistic Updates für flüssiges Feeling (Perceived Performance)
+**Kontext:** Wenn eine Pflegekraft beim Kunden auf "Speichern" drückt, darf die App nicht durch Lade-Spinner blockiert werden, besonders bei schlechtem Empfang im Treppenhaus.
+
+**To-Do:**
+1. Öffne `client/src/features/time-tracking/hooks/use-time-entries.ts` (oder wo immer die Mutation zum Speichern liegt).
+2. Implementiere `onMutate` in der React Query Mutation. 
+3. Führe ein "Optimistic Update" durch: Trage die neue Zeitbuchung sofort in den lokalen React Query Cache (`queryClient.setQueryData`) ein.
+4. Sorge im `onError`-Callback dafür, dass der Cache bei einem Fehlschlag zurückgerollt wird, und im `onSettled`-Callback für ein finales Refetching.

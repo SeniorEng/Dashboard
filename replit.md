@@ -26,7 +26,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **API Design**: RESTful endpoints, Zod validation, structured error responses, modular routing.
 - **Business Logic**: Separated service layer with dependency injection.
 - **Error Handling**: Centralized `asyncHandler` and `AppError` for consistent JSON error responses. `extractUserFriendlyDbError()` translates PostgreSQL error codes (22P02, 23505, 23503, 23502, 22003) into German user messages. Every `useMutation` MUST have `onError` with `toast({ title: "Fehler", description: error.message, variant: "destructive" })`. See `.agents/skills/error-handling-audit/SKILL.md` for full conventions.
-- **Security**: Role-based access control with SQL-level data filtering, CSRF protection (including auth routes), session management, rate limiting (global API + login + password-reset), helmet security headers. Object Storage downloads authorized per-user via DB lookup (`server/middleware/object-storage-auth.ts`): admins unrestricted, employees only own docs + assigned customer docs.
+- **Security**: Role-based access control with SQL-level data filtering, CSRF protection (including auth routes), session management, rate limiting (global API + login + password-reset), helmet security headers. Object Storage downloads authorized per-user via DB lookup (`server/middleware/object-storage-auth.ts`): admins unrestricted, employees only own docs + assigned customer docs. Centralized `sanitizeUser()` helper (`server/utils/sanitize-user.ts`) strips `passwordHash` from all API responses; `SafeUser` type exported from schema. Password validation enforces uppercase, lowercase, and digit requirements.
 - **Access Model**: Two-tiered access for employees.
 
 ### Data Storage
