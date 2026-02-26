@@ -532,7 +532,7 @@ export function DocumentTemplatesContent() {
           )}
 
       <Dialog open={isDialogOpen} onOpenChange={(open) => { if (!open) handleClose(); }}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-[95vw] w-[1200px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{isCreateMode ? "Neue Vorlage erstellen" : `Vorlage bearbeiten: ${editingTemplate?.name}`}</DialogTitle>
           </DialogHeader>
@@ -558,7 +558,7 @@ export function DocumentTemplatesContent() {
             </TabsList>
 
             <TabsContent value="editor" className="space-y-4 mt-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label>Name *</Label>
                   <Input
@@ -577,7 +577,7 @@ export function DocumentTemplatesContent() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Slug {isCreateMode && "(wird automatisch generiert)"}</Label>
+                  <Label>Slug {isCreateMode && "(auto)"}</Label>
                   <Input
                     value={formData.slug}
                     onChange={(e) => setFormData(p => ({ ...p, slug: e.target.value }))}
@@ -587,18 +587,18 @@ export function DocumentTemplatesContent() {
                     data-testid="input-template-slug"
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label>Beschreibung</Label>
+                  <Input
+                    value={formData.description}
+                    onChange={(e) => setFormData(p => ({ ...p, description: e.target.value }))}
+                    placeholder="Kurze Beschreibung"
+                    className="text-base"
+                    data-testid="input-template-description"
+                  />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>Beschreibung</Label>
-                <Input
-                  value={formData.description}
-                  onChange={(e) => setFormData(p => ({ ...p, description: e.target.value }))}
-                  placeholder="Kurze Beschreibung der Vorlage"
-                  className="text-base"
-                  data-testid="input-template-description"
-                />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                 <div className="space-y-2">
                   <Label>Dokumentenkategorie</Label>
                   <Select
@@ -632,8 +632,6 @@ export function DocumentTemplatesContent() {
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label>Zielgruppe</Label>
                   <Select
@@ -656,7 +654,7 @@ export function DocumentTemplatesContent() {
                     onCheckedChange={(v) => setFormData(p => ({ ...p, requiresCustomerSignature: v }))}
                     data-testid="switch-requires-customer-signature"
                   />
-                  <Label>Kundenunterschrift erforderlich</Label>
+                  <Label className="text-xs">Kundenunterschrift</Label>
                 </div>
                 <div className="flex items-center gap-3 pt-6">
                   <Switch
@@ -664,27 +662,37 @@ export function DocumentTemplatesContent() {
                     onCheckedChange={(v) => setFormData(p => ({ ...p, requiresEmployeeSignature: v }))}
                     data-testid="switch-requires-employee-signature"
                   />
-                  <Label>Mitarbeiterunterschrift erforderlich</Label>
+                  <Label className="text-xs">MA-Unterschrift</Label>
                 </div>
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label>HTML-Inhalt *</Label>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 gap-1.5"
-                    onClick={handlePreview}
-                    disabled={!formData.htmlContent || isPreviewLoading}
-                    data-testid="button-preview"
-                  >
-                    {isPreviewLoading ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Eye className="h-3.5 w-3.5" />
-                    )}
-                    Vorschau
-                  </Button>
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={formData.isActive}
+                        onCheckedChange={(v) => setFormData(p => ({ ...p, isActive: v }))}
+                        data-testid="switch-template-active"
+                      />
+                      <Label className="text-xs">Aktiv</Label>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 gap-1.5"
+                      onClick={handlePreview}
+                      disabled={!formData.htmlContent || isPreviewLoading}
+                      data-testid="button-preview"
+                    >
+                      {isPreviewLoading ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Eye className="h-3.5 w-3.5" />
+                      )}
+                      Vorschau
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap gap-1.5 p-2 bg-gray-50 border rounded-t-lg" data-testid="placeholder-toolbar">
@@ -791,20 +799,12 @@ export function DocumentTemplatesContent() {
                   value={formData.htmlContent}
                   onChange={(e) => setFormData(p => ({ ...p, htmlContent: e.target.value }))}
                   placeholder="<h1>Vertragsvorlage</h1>&#10;<p>Zwischen {{company_name}} und {{customer_name}}...</p>"
-                  className="font-mono text-sm min-h-[300px] leading-relaxed rounded-t-none border-t-0"
+                  className="font-mono text-sm min-h-[50vh] leading-relaxed rounded-t-none border-t-0 resize-y"
                   data-testid="textarea-html-content"
                 />
                 <p className="text-xs text-gray-500">
                   Klicken Sie auf die Buttons oben, um Platzhalter an der Cursor-Position einzufügen. Weitere Details im Tab "Platzhalter".
                 </p>
-              </div>
-              <div className="flex items-center gap-3 pt-2">
-                <Switch
-                  checked={formData.isActive}
-                  onCheckedChange={(v) => setFormData(p => ({ ...p, isActive: v }))}
-                  data-testid="switch-template-active"
-                />
-                <Label>Aktiv</Label>
               </div>
               {editingTemplate && (
                 <p className="text-xs text-gray-500">
