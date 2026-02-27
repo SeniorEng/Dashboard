@@ -64,7 +64,8 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Public Holidays**: Shared utility for German public holidays.
 - **Employee Clustering**: Dimensions for `isEuRentner`, `employmentType`, `weeklyWorkDays`, `monthlyWorkHours` for vacation entitlement and warnings for EU-Rentner hour limits.
 - **Employee Availability (Verfügbarkeit)**: Employees can log availability slots (type `verfuegbar`) in the Zeiten tab — these are organizational only and do NOT count as work hours. Admins see employee availability in the Erstberatung form via `GET /api/admin/employees/availability?date=YYYY-MM-DD`. CalendarGrid shows green dots for availability days. DayDetailPanel separates availability from work entries.
-- **Prospect/Lead Management (Interessenten)**: Pre-customer pipeline with statuses, email webhook ingestion, activity timeline, and conversion to Erstberatung.
+- **Prospect/Lead Management (Interessenten)**: Pre-customer pipeline with statuses (neu, kontaktiert, wiedervorlage, nicht_interessiert, absage, erstberatung, gewonnen), email webhook ingestion, activity timeline, and conversion to Erstberatung.
+- **Erstberatung Merge**: Erstberatungskunden can be merged with existing active customers via `POST /api/admin/customers/:id/merge-erstberatung`. Sets source to inaktiv with reason `zusammengefuehrt`, stores `mergedIntoCustomerId` reference, updates linked prospect to `gewonnen`. Green banner with link to target customer shown on merged customer detail page. Audit-logged.
 
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)

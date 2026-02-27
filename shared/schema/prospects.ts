@@ -12,6 +12,7 @@ export const PROSPECT_STATUSES = [
   "nicht_interessiert",
   "absage",
   "erstberatung",
+  "gewonnen",
 ] as const;
 
 export type ProspectStatus = (typeof PROSPECT_STATUSES)[number];
@@ -23,6 +24,7 @@ export const PROSPECT_STATUS_LABELS: Record<ProspectStatus, string> = {
   nicht_interessiert: "Nicht interessiert",
   absage: "Absage",
   erstberatung: "In Erstberatung",
+  gewonnen: "Erfolgreich gewonnen",
 };
 
 export const PROSPECT_NOTE_TYPES = [

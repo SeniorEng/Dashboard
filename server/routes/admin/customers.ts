@@ -1316,6 +1316,102 @@ router.post("/customers/:id/decline-erstberatung", asyncHandler("Erstberatung ko
   res.json(updated);
 }));
 
+const mergeErstberatungSchema = z.object({
+  targetCustomerId: z.number().int().positive(),
+  note: z.string().max(500).optional(),
+});
+
+router.post("/customers/:id/merge-erstberatung", asyncHandler("Erstberatung konnte nicht zusammengeführt werden", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
+    return;
+  }
+
+  const { targetCustomerId, note } = mergeErstberatungSchema.parse(req.body);
+
+  if (id === targetCustomerId) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Der Erstberatungskunde kann nicht mit sich selbst zusammengeführt werden" });
+    return;
+  }
+
+  const sourceCustomer = await storage.getCustomer(id);
+  if (!sourceCustomer) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Erstberatungskunde nicht gefunden" });
+    return;
+  }
+
+  if (sourceCustomer.status !== "erstberatung") {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Nur Erstberatungskunden können zusammengeführt werden" });
+    return;
+  }
+
+  if (sourceCustomer.mergedIntoCustomerId) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Dieser Kunde wurde bereits zusammengeführt" });
+    return;
+  }
+
+  const targetCustomer = await storage.getCustomer(targetCustomerId);
+  if (!targetCustomer) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Zielkunde nicht gefunden" });
+    return;
+  }
+
+  if (targetCustomer.status !== "aktiv") {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Der Zielkunde muss aktiv sein" });
+    return;
+  }
+
+  const today = todayISO();
+
+  const updated = await db.transaction(async (tx) => {
+    const [result] = await tx.update(customers)
+      .set({
+        status: "inaktiv",
+        inaktivAb: today,
+        deactivationReason: "zusammengefuehrt",
+        deactivationNote: note || `Zusammengeführt mit ${targetCustomer.name} (ID: ${targetCustomerId})`,
+        mergedIntoCustomerId: targetCustomerId,
+        updatedAt: new Date(),
+      })
+      .where(eq(customers.id, id))
+      .returning();
+
+    const [linkedProspect] = await tx
+      .select()
+      .from(prospects)
+      .where(and(eq(prospects.convertedCustomerId, id), isNull(prospects.deletedAt)));
+
+    if (linkedProspect) {
+      await tx.update(prospects)
+        .set({
+          status: "gewonnen",
+          statusNotiz: `Automatisch: Erstberatung zusammengeführt mit ${targetCustomer.name}`,
+          convertedCustomerId: targetCustomerId,
+          updatedAt: new Date(),
+        })
+        .where(eq(prospects.id, linkedProspect.id));
+    }
+
+    return result;
+  });
+
+  await auditService.log(req.user!.id, "customer_updated", "customer", id, {
+    action: "merge_erstberatung",
+    sourceCustomerId: id,
+    sourceCustomerName: sourceCustomer.name,
+    targetCustomerId,
+    targetCustomerName: targetCustomer.name,
+    note: note || null,
+    previousStatus: "erstberatung",
+    newStatus: "inaktiv",
+  });
+
+  birthdaysCache.clear();
+
+  res.json(updated);
+}));
+
 router.post("/customers/:id/anonymize", asyncHandler("Kunde konnte nicht anonymisiert werden", async (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) {

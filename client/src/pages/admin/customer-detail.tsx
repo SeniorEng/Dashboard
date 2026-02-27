@@ -27,6 +27,7 @@ import { useCustomer, customerKeys } from "@/features/customers";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api";
 import { iconSize, componentStyles } from "@/design-system";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Loader2,
   Wallet,
@@ -39,6 +40,7 @@ import {
   CheckCircle2,
   XCircle,
   Ban,
+  Merge,
 } from "lucide-react";
 import { BudgetLedgerSection } from "@/components/budget/BudgetLedgerSection";
 import { BudgetTypeSettings } from "@/components/budget/BudgetTypeSettings";
@@ -57,16 +59,27 @@ const MISSING_LABELS: Record<string, string> = {
   contract: "Aktiver Vertrag",
 };
 
+interface CustomerListItem {
+  id: number;
+  name: string;
+  status: string;
+  address: string;
+}
+
 function ErstberatungConversionSection({
   customerId,
   onActivate,
   onReject,
+  onMerge,
   isUpdating,
+  isMerging,
 }: {
   customerId: number;
   onActivate: () => void;
   onReject: () => void;
+  onMerge: () => void;
   isUpdating: boolean;
+  isMerging: boolean;
 }) {
   const { data: readiness, isLoading } = useQuery<{
     ready: boolean;
@@ -118,10 +131,10 @@ function ErstberatungConversionSection({
               })}
             </div>
 
-            <div className="flex items-center gap-2 pt-1">
+            <div className="flex flex-wrap items-center gap-2 pt-1">
               <Button
                 onClick={onActivate}
-                disabled={isUpdating || !readiness.ready}
+                disabled={isUpdating || isMerging || !readiness.ready}
                 className={componentStyles.btnPrimary}
                 data-testid="button-activate-customer"
               >
@@ -134,8 +147,22 @@ function ErstberatungConversionSection({
               </Button>
               <Button
                 variant="outline"
+                onClick={onMerge}
+                disabled={isUpdating || isMerging}
+                className="text-teal-700 border-teal-200 hover:bg-teal-100"
+                data-testid="button-merge-customer"
+              >
+                {isMerging ? (
+                  <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                ) : (
+                  <Merge className={`${iconSize.sm} mr-2`} />
+                )}
+                Zusammenführen
+              </Button>
+              <Button
+                variant="outline"
                 onClick={onReject}
-                disabled={isUpdating}
+                disabled={isUpdating || isMerging}
                 className="text-red-700 border-red-200 hover:bg-red-50"
                 data-testid="button-reject-customer"
               >
@@ -329,6 +356,50 @@ export default function AdminCustomerDetail() {
   const [deactivationNote, setDeactivationNote] = useState<string>("");
   const [deactivationMode, setDeactivationMode] = useState<"sofort" | "datum">("sofort");
   const [inaktivAbDate, setInaktivAbDate] = useState<string>("");
+  const [showMergeDialog, setShowMergeDialog] = useState(false);
+  const [mergeTargetId, setMergeTargetId] = useState<string>("");
+  const [mergeNote, setMergeNote] = useState<string>("");
+
+  const { data: activeCustomersData } = useQuery<{ data: CustomerListItem[] }>({
+    queryKey: customerKeys.list({ status: "aktiv", limit: 500 }),
+    queryFn: async () => {
+      const result = await api.get<{ data: CustomerListItem[] }>("/admin/customers?status=aktiv&limit=500");
+      return unwrapResult(result);
+    },
+    enabled: showMergeDialog,
+  });
+
+  const mergeCustomerOptions = useMemo(() => {
+    if (!activeCustomersData?.data) return [];
+    return activeCustomersData.data
+      .filter((c) => c.id !== customerId)
+      .map((c) => ({
+        value: c.id.toString(),
+        label: c.name,
+        sublabel: c.address,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, "de"));
+  }, [activeCustomersData, customerId]);
+
+  const mergeErstberatung = useMutation({
+    mutationFn: async (payload: { targetCustomerId: number; note?: string }) => {
+      const result = await api.post(`/admin/customers/${customerId}/merge-erstberatung`, payload);
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: customerKeys.detail(customerId) });
+      queryClient.invalidateQueries({ queryKey: customerKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      queryClient.invalidateQueries({ queryKey: ["conversion-readiness", customerId] });
+      toast({ title: "Erfolgreich zusammengeführt", description: "Der Erstberatungskunde wurde mit dem bestehenden Kunden zusammengeführt." });
+      setShowMergeDialog(false);
+      setMergeTargetId("");
+      setMergeNote("");
+    },
+    onError: (err: Error) => {
+      toast({ title: "Fehler", description: err.message, variant: "destructive" });
+    },
+  });
 
   const updateStatus = useMutation({
     mutationFn: async (payload: { status: string; deactivationReason?: string; deactivationNote?: string; inaktivAb?: string | null }) => {
@@ -456,7 +527,9 @@ export default function AdminCustomerDetail() {
                 setDeactivationNote("");
                 setShowDeactivateDialog(true);
               }}
+              onMerge={() => setShowMergeDialog(true)}
               isUpdating={updateStatus.isPending}
+              isMerging={mergeErstberatung.isPending}
             />
           )}
 
@@ -472,16 +545,32 @@ export default function AdminCustomerDetail() {
           )}
 
           {customer.status === "inaktiv" && (
-            <SectionCard className="mb-4 border-amber-200 bg-amber-50">
+            <SectionCard className={`mb-4 ${customer.deactivationReason === "zusammengefuehrt" ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50"}`}>
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="font-medium text-amber-900">Inaktiver Kunde</p>
-                  <p className="text-sm text-amber-700 mt-0.5">
-                    {customer.inaktivAb
-                      ? `Inaktiv ab ${formatDateForDisplay(customer.inaktivAb)}. Keine neuen Termine ab diesem Datum.`
-                      : "Dieser Kunde ist deaktiviert und kann keine neuen Termine erhalten."}
+                  <p className={`font-medium ${customer.deactivationReason === "zusammengefuehrt" ? "text-green-900" : "text-amber-900"}`}>
+                    {customer.deactivationReason === "zusammengefuehrt" ? "Erfolgreich übernommen" : "Inaktiver Kunde"}
                   </p>
-                  {customer.deactivationReason && (
+                  <p className={`text-sm mt-0.5 ${customer.deactivationReason === "zusammengefuehrt" ? "text-green-700" : "text-amber-700"}`}>
+                    {customer.deactivationReason === "zusammengefuehrt"
+                      ? "Dieser Erstberatungskunde wurde mit einem bestehenden Kunden zusammengeführt."
+                      : customer.inaktivAb
+                        ? `Inaktiv ab ${formatDateForDisplay(customer.inaktivAb)}. Keine neuen Termine ab diesem Datum.`
+                        : "Dieser Kunde ist deaktiviert und kann keine neuen Termine erhalten."}
+                  </p>
+                  {customer.deactivationReason === "zusammengefuehrt" && customer.mergedIntoCustomerId && (
+                    <p className="text-sm text-green-700 mt-1" data-testid="text-merged-into">
+                      <span className="font-medium">Zusammengeführt mit:</span>{" "}
+                      <a
+                        href={`/admin/customers/${customer.mergedIntoCustomerId}`}
+                        className="underline hover:text-green-900"
+                        data-testid="link-merged-customer"
+                      >
+                        Kunde #{customer.mergedIntoCustomerId} anzeigen
+                      </a>
+                    </p>
+                  )}
+                  {customer.deactivationReason && customer.deactivationReason !== "zusammengefuehrt" && (
                     <p className="text-sm text-amber-700 mt-1" data-testid="text-deactivation-reason">
                       <span className="font-medium">Grund:</span>{" "}
                       {DEACTIVATION_REASON_LABELS[customer.deactivationReason as DeactivationReason] || customer.deactivationReason}
@@ -490,25 +579,32 @@ export default function AdminCustomerDetail() {
                       )}
                     </p>
                   )}
-                  {customer.deactivationReason !== "sonstiges" && customer.deactivationNote && (
+                  {customer.deactivationReason !== "sonstiges" && customer.deactivationReason !== "zusammengefuehrt" && customer.deactivationNote && (
                     <p className="text-sm text-amber-700 mt-0.5" data-testid="text-deactivation-note">
                       <span className="font-medium">Anmerkung:</span> {customer.deactivationNote}
                     </p>
                   )}
-                </div>
-                <Button
-                  variant="outline"
-                  onClick={() => updateStatus.mutate({ status: "aktiv", deactivationReason: null as any, deactivationNote: null as any })}
-                  disabled={updateStatus.isPending}
-                  data-testid="button-reactivate-customer"
-                >
-                  {updateStatus.isPending ? (
-                    <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
-                  ) : (
-                    <UserCheck className={`${iconSize.sm} mr-2`} />
+                  {customer.deactivationReason === "zusammengefuehrt" && customer.deactivationNote && (
+                    <p className="text-sm text-green-700 mt-0.5" data-testid="text-merge-note">
+                      <span className="font-medium">Anmerkung:</span> {customer.deactivationNote}
+                    </p>
                   )}
-                  Reaktivieren
-                </Button>
+                </div>
+                {customer.deactivationReason !== "zusammengefuehrt" && (
+                  <Button
+                    variant="outline"
+                    onClick={() => updateStatus.mutate({ status: "aktiv", deactivationReason: null as any, deactivationNote: null as any })}
+                    disabled={updateStatus.isPending}
+                    data-testid="button-reactivate-customer"
+                  >
+                    {updateStatus.isPending ? (
+                      <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                    ) : (
+                      <UserCheck className={`${iconSize.sm} mr-2`} />
+                    )}
+                    Reaktivieren
+                  </Button>
+                )}
               </div>
             </SectionCard>
           )}
@@ -570,6 +666,80 @@ export default function AdminCustomerDetail() {
               />
             </TabsContent>
           </ResponsiveTabs>
+
+          <Dialog open={showMergeDialog} onOpenChange={(open) => {
+            if (!open) {
+              setShowMergeDialog(false);
+              setMergeTargetId("");
+              setMergeNote("");
+            }
+          }}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Mit bestehendem Kunden zusammenführen</DialogTitle>
+                <DialogDescription>
+                  Wählen Sie den aktiven Kunden aus, mit dem dieser Erstberatungskunde zusammengeführt werden soll. Der Erstberatungskunde wird als erfolgreich übernommen markiert.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-2">
+                <div className="space-y-2">
+                  <Label>Bestehender Kunde *</Label>
+                  <SearchableSelect
+                    options={mergeCustomerOptions}
+                    value={mergeTargetId}
+                    onValueChange={setMergeTargetId}
+                    placeholder="Kunde auswählen..."
+                    searchPlaceholder="Kunde suchen..."
+                    emptyText="Keine aktiven Kunden gefunden."
+                    data-testid="select-merge-target"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="merge-note">Anmerkung (optional)</Label>
+                  <Textarea
+                    id="merge-note"
+                    value={mergeNote}
+                    onChange={(e) => setMergeNote(e.target.value)}
+                    placeholder="z.B. Bereits bestehender Kunde aus früherer Betreuung..."
+                    maxLength={500}
+                    rows={2}
+                    data-testid="textarea-merge-note"
+                  />
+                </div>
+              </div>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowMergeDialog(false);
+                    setMergeTargetId("");
+                    setMergeNote("");
+                  }}
+                  data-testid="button-cancel-merge"
+                >
+                  Abbrechen
+                </Button>
+                <Button
+                  onClick={() => {
+                    mergeErstberatung.mutate({
+                      targetCustomerId: parseInt(mergeTargetId),
+                      note: mergeNote.trim() || undefined,
+                    });
+                  }}
+                  disabled={!mergeTargetId || mergeErstberatung.isPending}
+                  className={componentStyles.btnPrimary}
+                  data-testid="button-confirm-merge"
+                >
+                  {mergeErstberatung.isPending ? (
+                    <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                  ) : (
+                    <Merge className={`${iconSize.sm} mr-2`} />
+                  )}
+                  Zusammenführen
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           <Dialog open={showDeactivateDialog} onOpenChange={(open) => {
             if (!open) {

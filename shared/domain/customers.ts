@@ -64,6 +64,7 @@ export const DEACTIVATION_REASONS = [
   "finanzielle_gruende",
   "wunsch_des_kunden",
   "kein_interesse",
+  "zusammengefuehrt",
   "sonstiges",
 ] as const;
 
@@ -80,6 +81,7 @@ export const DEACTIVATION_REASON_LABELS: Record<DeactivationReason, string> = {
   finanzielle_gruende: "Finanzielle Gründe",
   wunsch_des_kunden: "Wunsch des Kunden (ohne Angabe)",
   kein_interesse: "Kein Interesse (Erstberatung)",
+  zusammengefuehrt: "Mit bestehendem Kunden zusammengeführt",
   sonstiges: "Sonstiges",
 };
 

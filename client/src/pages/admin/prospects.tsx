@@ -68,6 +68,7 @@ const STATUS_COLORS: Record<ProspectStatus, string> = {
   nicht_interessiert: "bg-gray-100 text-gray-800",
   absage: "bg-red-100 text-red-800",
   erstberatung: "bg-emerald-100 text-emerald-800",
+  gewonnen: "bg-green-100 text-green-800",
 };
 
 const NOTE_TYPE_ICONS: Record<ProspectNoteType, typeof Phone> = {
@@ -86,7 +87,7 @@ function StatusBadge({ status }: { status: string }) {
 function PipelineStats({ stats }: { stats: Record<string, number> }) {
   const total = Object.values(stats).reduce((a, b) => a + b, 0);
   return (
-    <div className="grid grid-cols-3 md:grid-cols-6 gap-2 mb-4" data-testid="pipeline-stats">
+    <div className="grid grid-cols-3 md:grid-cols-7 gap-2 mb-4" data-testid="pipeline-stats">
       {PROSPECT_STATUSES.map((status) => (
         <div key={status} className="text-center p-2 rounded-lg bg-white/60 border">
           <div className="text-lg font-bold" data-testid={`stat-count-${status}`}>
