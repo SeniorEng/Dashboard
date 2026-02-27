@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { StatusBadge } from "@/components/patterns/status-badge";
 import { iconSize } from "@/design-system";
 import {
   Select,
@@ -150,9 +149,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
     toast({ title: selectedFiles.length > 1 ? `${selectedFiles.length} Dokumente hinzugefügt` : "Dokument hinzugefügt" });
   }, [selectedFiles, selectedDocTypeId, notes, uploadFile, saveMutation, queryClient, employeeId, toast]);
 
-  const uploadedDocTypeIds = new Set(documents?.map(d => d.documentTypeId) || []);
   const availableDocTypes = (docTypes?.filter(dt => dt.isActive) || []).sort((a, b) => a.name.localeCompare(b.name, "de"));
-  const missingDocTypes = availableDocTypes.filter(dt => !uploadedDocTypeIds.has(dt.id));
 
   const isSubmitting = isUploading || saveMutation.isPending;
 
@@ -392,16 +389,6 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
         </div>
       )}
 
-      {missingDocTypes.length > 0 && documents && documents.length > 0 && (
-        <div className="mt-3 p-3 bg-amber-50 border border-amber-100 rounded-lg">
-          <p className="text-xs font-medium text-amber-700 mb-1">Fehlende Dokumente:</p>
-          <div className="flex flex-wrap gap-1">
-            {missingDocTypes.map(dt => (
-              <StatusBadge key={dt.id} type="warning" value={dt.name} size="sm" />
-            ))}
-          </div>
-        </div>
-      )}
 
       <DigitalDocumentFlow
         open={isDigitalFlowOpen}
