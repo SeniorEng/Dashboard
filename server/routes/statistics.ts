@@ -134,7 +134,8 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
     // 4. Efficiency Stats
     db.execute(sql`
       SELECT
-        COUNT(*) FILTER (WHERE a.status IN ('completed', 'documented'))::int AS "completedAppointments",
+        COUNT(*) FILTER (WHERE a.status = 'completed')::int AS "completedAppointments",
+        COUNT(*) FILTER (WHERE a.status = 'documented')::int AS "documentedAppointments",
         COUNT(*) FILTER (WHERE a.status = 'cancelled')::int AS "cancelledAppointments",
         COUNT(*) FILTER (WHERE a.status = 'scheduled')::int AS "scheduledAppointments",
         COUNT(*)::int AS "totalAppointments",
@@ -514,8 +515,9 @@ router.get("/planning", asyncHandler("Planungsdaten konnten nicht geladen werden
       u.id AS "employeeId",
       u.display_name AS "employeeName",
       COUNT(pa.id)::int AS appointments,
-      COUNT(pa.id) FILTER (WHERE pa.status IN ('scheduled'))::int AS "scheduledCount",
-      COUNT(pa.id) FILTER (WHERE pa.status IN ('completed', 'documented'))::int AS "completedCount",
+      COUNT(pa.id) FILTER (WHERE pa.status = 'scheduled')::int AS "scheduledCount",
+      COUNT(pa.id) FILTER (WHERE pa.status = 'completed')::int AS "completedCount",
+      COUNT(pa.id) FILTER (WHERE pa.status = 'documented')::int AS "documentedCount",
       COUNT(DISTINCT pa.customer_id)::int AS customers,
       COALESCE(SUM(pa.duration_promised), 0)::int AS "totalMinutes",
       COALESCE(SUM(pa.travel_km), 0)::numeric(10,1) AS "totalTravelKm",
@@ -542,6 +544,7 @@ router.get("/planning", asyncHandler("Planungsdaten konnten nicht geladen werden
     appointments: number;
     scheduledCount: number;
     completedCount: number;
+    documentedCount: number;
     customers: number;
     totalMinutes: number;
     revenueCents: number;
@@ -557,6 +560,7 @@ router.get("/planning", asyncHandler("Planungsdaten konnten nicht geladen werden
     appointments: acc.appointments + Number(r.appointments),
     scheduledCount: acc.scheduledCount + Number(r.scheduledCount),
     completedCount: acc.completedCount + Number(r.completedCount),
+    documentedCount: acc.documentedCount + Number(r.documentedCount),
     customers: acc.customers + Number(r.customers),
     totalMinutes: acc.totalMinutes + Number(r.totalMinutes),
     revenueCents: acc.revenueCents + Number(r.revenueCents),
@@ -567,7 +571,7 @@ router.get("/planning", asyncHandler("Planungsdaten konnten nicht geladen werden
     costServiceCents: acc.costServiceCents + Number(r.costServiceCents),
     costKmCents: acc.costKmCents + Number(r.costKmCents),
   }), {
-    appointments: 0, scheduledCount: 0, completedCount: 0, customers: 0, totalMinutes: 0,
+    appointments: 0, scheduledCount: 0, completedCount: 0, documentedCount: 0, customers: 0, totalMinutes: 0,
     revenueCents: 0, costCents: 0, marginCents: 0,
     revenueServiceCents: 0, revenueKmCents: 0, costServiceCents: 0, costKmCents: 0,
   });

@@ -226,13 +226,6 @@ export default function AdminStatistics() {
                   testId="stat-revenue"
                 />
                 <StatCard
-                  label="Termine abgeschlossen"
-                  value={efficiency.completedAppointments || 0}
-                  icon={<CalendarDays className="w-5 h-5" />}
-                  color="text-blue-600"
-                  testId="stat-appointments"
-                />
-                <StatCard
                   label="Aktive Kunden"
                   value={customerStats.activeCustomers || 0}
                   icon={<Users className="w-5 h-5" />}
@@ -249,6 +242,30 @@ export default function AdminStatistics() {
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                <StatCard
+                  label="Geplant"
+                  value={efficiency.scheduledAppointments || 0}
+                  sub="offene Termine"
+                  icon={<CalendarDays className="w-5 h-5" />}
+                  color="text-blue-600"
+                  testId="stat-scheduled"
+                />
+                <StatCard
+                  label="Abgeschlossen"
+                  value={efficiency.completedAppointments || 0}
+                  sub="ohne Leistungsnachweis"
+                  icon={<CalendarCheck className="w-5 h-5" />}
+                  color="text-amber-600"
+                  testId="stat-completed"
+                />
+                <StatCard
+                  label="Dokumentiert"
+                  value={efficiency.documentedAppointments || 0}
+                  sub="mit Leistungsnachweis"
+                  icon={<Activity className="w-5 h-5" />}
+                  color="text-emerald-600"
+                  testId="stat-documented"
+                />
                 <StatCard
                   label="Stornoquote"
                   value={pct(efficiency.cancelledAppointments || 0, efficiency.totalAppointments || 1)}
@@ -267,7 +284,7 @@ export default function AdminStatistics() {
                 <StatCard
                   label="Einsatzzeit"
                   value={hours(efficiency.totalServiceMinutes || 0)}
-                  sub={`${efficiency.completedAppointments || 0} Termine`}
+                  sub={`${(efficiency.completedAppointments || 0) + (efficiency.documentedAppointments || 0)} Termine`}
                   icon={<Clock className="w-5 h-5" />}
                   color="text-amber-600"
                   testId="stat-service-time"
@@ -752,7 +769,7 @@ export default function AdminStatistics() {
                             <div className={`text-xl font-bold ${planning.marginPercent >= 50 ? 'text-emerald-600' : planning.marginPercent >= 30 ? 'text-amber-600' : 'text-red-600'}`} data-testid="planning-margin-pct">
                               {planning.marginPercent}% DB
                             </div>
-                            <div className="text-xs text-muted-foreground">{t.scheduledCount} offen · {t.completedCount} erledigt</div>
+                            <div className="text-xs text-muted-foreground">{t.scheduledCount} geplant · {t.completedCount} abgeschl. · {t.documentedCount} dokumentiert</div>
                           </div>
                         </div>
                       </CardContent>
@@ -823,7 +840,7 @@ export default function AdminStatistics() {
                                   <div>
                                     <span className="text-muted-foreground">Termine: </span>
                                     <span className="font-medium">{emp.appointments}</span>
-                                    <span className="text-muted-foreground ml-1">({emp.scheduledCount} offen)</span>
+                                    <span className="text-muted-foreground ml-1">({emp.scheduledCount} gepl. · {emp.completedCount} abg. · {emp.documentedCount} dok.)</span>
                                   </div>
                                   <div>
                                     <span className="text-muted-foreground">Umsatz: </span>
