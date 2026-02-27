@@ -16,6 +16,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SectionCard } from "@/components/patterns/section-card";
@@ -325,9 +327,11 @@ export default function AdminCustomerDetail() {
   const [showDeactivateDialog, setShowDeactivateDialog] = useState(false);
   const [deactivationReason, setDeactivationReason] = useState<string>("");
   const [deactivationNote, setDeactivationNote] = useState<string>("");
+  const [deactivationMode, setDeactivationMode] = useState<"sofort" | "datum">("sofort");
+  const [inaktivAbDate, setInaktivAbDate] = useState<string>("");
 
   const updateStatus = useMutation({
-    mutationFn: async (payload: { status: string; deactivationReason?: string; deactivationNote?: string }) => {
+    mutationFn: async (payload: { status: string; deactivationReason?: string; deactivationNote?: string; inaktivAb?: string | null }) => {
       const result = await api.patch(`/admin/customers/${customerId}`, payload);
       return unwrapResult(result);
     },
@@ -340,6 +344,8 @@ export default function AdminCustomerDetail() {
       setShowDeactivateDialog(false);
       setDeactivationReason("");
       setDeactivationNote("");
+      setDeactivationMode("sofort");
+      setInaktivAbDate("");
     },
     onError: (err: Error) => {
       toast({ title: "Fehler", description: err.message, variant: "destructive" });
@@ -570,6 +576,8 @@ export default function AdminCustomerDetail() {
               setShowDeactivateDialog(false);
               setDeactivationReason("");
               setDeactivationNote("");
+              setDeactivationMode("sofort");
+              setInaktivAbDate("");
             }
           }}>
             <DialogContent className="sm:max-w-md">
@@ -595,6 +603,32 @@ export default function AdminCustomerDetail() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="space-y-3">
+                  <Label>Zeitpunkt</Label>
+                  <RadioGroup value={deactivationMode} onValueChange={(v) => setDeactivationMode(v as "sofort" | "datum")} className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <RadioGroupItem value="sofort" id="mode-sofort" data-testid="radio-deactivation-sofort" />
+                      <Label htmlFor="mode-sofort" className="font-normal cursor-pointer">Sofort deaktivieren</Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <RadioGroupItem value="datum" id="mode-datum" data-testid="radio-deactivation-datum" />
+                      <Label htmlFor="mode-datum" className="font-normal cursor-pointer">Ab einem bestimmten Datum</Label>
+                    </div>
+                  </RadioGroup>
+                  {deactivationMode === "datum" && (
+                    <div className="pl-6 space-y-2">
+                      <Label htmlFor="inaktiv-ab-date">Inaktiv ab *</Label>
+                      <DatePicker
+                        value={inaktivAbDate || null}
+                        onChange={(val) => setInaktivAbDate(val || "")}
+                        data-testid="input-inaktiv-ab-date"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Der Kunde bleibt aktiv, aber ab diesem Datum können keine neuen Termine erstellt werden.
+                      </p>
+                    </div>
+                  )}
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="deactivation-note">
                     {deactivationReason === "sonstiges" ? "Beschreibung *" : "Anmerkung (optional)"}
@@ -617,6 +651,8 @@ export default function AdminCustomerDetail() {
                     setShowDeactivateDialog(false);
                     setDeactivationReason("");
                     setDeactivationNote("");
+                    setDeactivationMode("sofort");
+                    setInaktivAbDate("");
                   }}
                   data-testid="button-cancel-deactivation"
                 >
@@ -625,15 +661,25 @@ export default function AdminCustomerDetail() {
                 <Button
                   variant="destructive"
                   onClick={() => {
-                    updateStatus.mutate({
-                      status: "inaktiv",
-                      deactivationReason: deactivationReason || undefined,
-                      deactivationNote: deactivationNote.trim() || undefined,
-                    });
+                    if (deactivationMode === "datum") {
+                      updateStatus.mutate({
+                        status: "aktiv",
+                        inaktivAb: inaktivAbDate,
+                        deactivationReason: deactivationReason || undefined,
+                        deactivationNote: deactivationNote.trim() || undefined,
+                      });
+                    } else {
+                      updateStatus.mutate({
+                        status: "inaktiv",
+                        deactivationReason: deactivationReason || undefined,
+                        deactivationNote: deactivationNote.trim() || undefined,
+                      });
+                    }
                   }}
                   disabled={
                     !deactivationReason ||
                     (deactivationReason === "sonstiges" && !deactivationNote.trim()) ||
+                    (deactivationMode === "datum" && !inaktivAbDate) ||
                     updateStatus.isPending
                   }
                   data-testid="button-confirm-deactivation"
@@ -643,7 +689,7 @@ export default function AdminCustomerDetail() {
                   ) : (
                     <UserX className={`${iconSize.sm} mr-2`} />
                   )}
-                  Deaktivieren
+                  {deactivationMode === "datum" ? "Datum setzen" : "Deaktivieren"}
                 </Button>
               </DialogFooter>
             </DialogContent>
