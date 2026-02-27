@@ -151,7 +151,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
   }, [selectedFiles, selectedDocTypeId, notes, uploadFile, saveMutation, queryClient, employeeId, toast]);
 
   const uploadedDocTypeIds = new Set(documents?.map(d => d.documentTypeId) || []);
-  const availableDocTypes = docTypes?.filter(dt => dt.isActive) || [];
+  const availableDocTypes = (docTypes?.filter(dt => dt.isActive) || []).sort((a, b) => a.name.localeCompare(b.name, "de"));
   const missingDocTypes = availableDocTypes.filter(dt => !uploadedDocTypeIds.has(dt.id));
 
   const isSubmitting = isUploading || saveMutation.isPending;

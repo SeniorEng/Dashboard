@@ -516,7 +516,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
           {!selectedTypeForUpload ? (
             <div className="space-y-1">
               <p className="text-sm text-gray-500 mb-3">Welchen Dokumententyp möchten Sie hinzufügen?</p>
-              {(docTypes || []).map(dt => (
+              {[...(docTypes || [])].sort((a, b) => a.name.localeCompare(b.name, "de")).map(dt => (
                 <div
                   key={dt.id}
                   className="p-3 rounded-lg border border-gray-200 hover:border-teal-300 hover:bg-teal-50/50 cursor-pointer transition-colors"

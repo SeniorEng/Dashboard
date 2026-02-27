@@ -192,7 +192,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
   }, [selectedFiles, selectedDocTypeId, notes, uploadFile, saveMutation, queryClient, customerId, toast, clearAllFiles]);
 
   const uploadedDocTypeIds = new Set(documents?.map(d => d.documentTypeId) || []);
-  const availableDocTypes = docTypes?.filter(dt => dt.isActive) || [];
+  const availableDocTypes = (docTypes?.filter(dt => dt.isActive) || []).sort((a, b) => a.name.localeCompare(b.name, "de"));
   const missingDocTypes = availableDocTypes.filter(dt => !uploadedDocTypeIds.has(dt.id));
 
   const isSubmitting = isUploading || saveMutation.isPending;

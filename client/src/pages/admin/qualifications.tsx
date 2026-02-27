@@ -108,7 +108,7 @@ function QualificationsContent() {
     queryFn: async () => unwrapResult(await api.get<DocumentType[]>("/admin/document-types?includeInactive=false")),
   });
 
-  const employeeDocTypes = docTypes?.filter((dt) => dt.targetType === "employee" && dt.isActive) || [];
+  const employeeDocTypes = (docTypes?.filter((dt) => dt.targetType === "employee" && dt.isActive) || []).sort((a, b) => a.name.localeCompare(b.name, "de"));
 
   const createMutation = useMutation({
     mutationFn: async (data: QualFormData) => unwrapResult(await api.post<Qualification>("/admin/qualifications", data)),
