@@ -504,7 +504,6 @@ export default function AdminCustomerNew() {
         if (!formData.vereinbarteLeistungen.trim()) errors.push("Vereinbarte Leistungen ausfüllen");
         break;
       case "matching":
-        if (!formData.primaryEmployeeId) errors.push("Hauptmitarbeiter zuordnen");
         break;
     }
     return errors;
