@@ -13,6 +13,11 @@ router.use(requireAuth);
 const MAX_HORIZON_DAYS = 365;
 const DEFAULT_HORIZON_DAYS = 30;
 
+function buildAddress(strasse: string | null, plz: string | null, stadt: string | null): string | undefined {
+  const parts = [strasse, [plz, stadt].filter(Boolean).join(" ")].filter(Boolean);
+  return parts.length > 0 ? parts.join(", ") : undefined;
+}
+
 export function calculateDaysUntilBirthday(birthDate: string): number {
   const todayStr = todayISO();
   const today = parseLocalDate(todayStr);
@@ -106,6 +111,7 @@ router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (
             geburtsdatum: emp.geburtsdatum,
             daysUntil,
             age: calculateUpcomingAge(emp.geburtsdatum, daysUntil),
+            address: buildAddress(emp.strasse, emp.plz, emp.stadt),
           });
         }
       }
@@ -122,6 +128,7 @@ router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (
             geburtsdatum: cust.geburtsdatum,
             daysUntil,
             age: calculateUpcomingAge(cust.geburtsdatum, daysUntil),
+            address: buildAddress(cust.strasse, cust.plz, cust.stadt),
           });
         }
       }
@@ -158,6 +165,7 @@ router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (
               geburtsdatum: cust.geburtsdatum,
               daysUntil,
               age: calculateUpcomingAge(cust.geburtsdatum, daysUntil),
+              address: buildAddress(cust.strasse, cust.plz, cust.stadt),
             });
           }
         }

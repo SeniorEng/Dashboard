@@ -280,6 +280,11 @@ export default function AdminBirthdayCards() {
                         {getDaysLabel(entry.daysUntil)}
                       </span>
                     </div>
+                    {entry.address && (
+                      <div className="text-xs text-muted-foreground mt-0.5" data-testid={`address-${entry.type}-${entry.id}`}>
+                        {entry.address}
+                      </div>
+                    )}
                   </div>
 
                   <Button

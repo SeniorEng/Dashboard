@@ -134,6 +134,18 @@ process.on("uncaughtException", (error) => {
   runDocumentReviewIfDue();
   const reviewInterval = setInterval(runDocumentReviewIfDue, 6 * 60 * 60 * 1000);
 
+  const { checkUpcomingBirthdays } = await import("./services/birthday-notification-checker");
+  const runBirthdayCheck = async () => {
+    try {
+      const created = await checkUpcomingBirthdays();
+      if (created > 0) log(`${created} Geburtstags-Benachrichtigungen erstellt`);
+    } catch (e) {
+      console.error("Fehler bei Geburtstags-Prüfung:", e);
+    }
+  };
+  setTimeout(runBirthdayCheck, 5 * 60 * 1000);
+  const birthdayInterval = setInterval(runBirthdayCheck, 6 * 60 * 60 * 1000);
+
   app.use(errorMiddleware);
 
   if (process.env.NODE_ENV === "production") {

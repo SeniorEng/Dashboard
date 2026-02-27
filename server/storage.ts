@@ -144,8 +144,9 @@ export interface IStorage {
   getCurrentlyAssignedCustomerIds(employeeId: number): Promise<number[]>;
 
   // Birthday queries
-  getActiveEmployeesWithBirthday(): Promise<{ id: number; displayName: string; geburtsdatum: string | null }[]>;
-  getActiveCustomersWithBirthday(): Promise<{ id: number; name: string; geburtsdatum: string | null }[]>;
+  getActiveEmployeesWithBirthday(): Promise<{ id: number; displayName: string; geburtsdatum: string | null; strasse: string | null; plz: string | null; stadt: string | null }[]>;
+  getActiveCustomersWithBirthday(): Promise<{ id: number; name: string; geburtsdatum: string | null; strasse: string | null; plz: string | null; stadt: string | null; primaryEmployeeId: number | null; backupEmployeeId: number | null }[]>;
+  getAdminUserIds(): Promise<number[]>;
   
   // Optimized search
   searchCustomers(options: SearchOptions): Promise<Customer[]>;
@@ -351,12 +352,15 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(customers).where(inArray(customers.id, ids));
   }
 
-  async getActiveEmployeesWithBirthday(): Promise<{ id: number; displayName: string; geburtsdatum: string | null }[]> {
+  async getActiveEmployeesWithBirthday(): Promise<{ id: number; displayName: string; geburtsdatum: string | null; strasse: string | null; plz: string | null; stadt: string | null }[]> {
     return await db
       .select({
         id: users.id,
         displayName: users.displayName,
         geburtsdatum: users.geburtsdatum,
+        strasse: users.strasse,
+        plz: users.plz,
+        stadt: users.stadt,
       })
       .from(users)
       .where(and(
@@ -365,15 +369,28 @@ export class DatabaseStorage implements IStorage {
       ));
   }
 
-  async getActiveCustomersWithBirthday(): Promise<{ id: number; name: string; geburtsdatum: string | null }[]> {
+  async getActiveCustomersWithBirthday(): Promise<{ id: number; name: string; geburtsdatum: string | null; strasse: string | null; plz: string | null; stadt: string | null; primaryEmployeeId: number | null; backupEmployeeId: number | null }[]> {
     return await db
       .select({
         id: customers.id,
         name: customers.name,
         geburtsdatum: customers.geburtsdatum,
+        strasse: customers.strasse,
+        plz: customers.plz,
+        stadt: customers.stadt,
+        primaryEmployeeId: customers.primaryEmployeeId,
+        backupEmployeeId: customers.backupEmployeeId,
       })
       .from(customers)
       .where(isNotNull(customers.geburtsdatum));
+  }
+
+  async getAdminUserIds(): Promise<number[]> {
+    const result = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.isAdmin, true), eq(users.isActive, true)));
+    return result.map(r => r.id);
   }
 
   async searchCustomers(options: SearchOptions): Promise<Customer[]> {

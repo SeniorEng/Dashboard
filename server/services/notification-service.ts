@@ -63,4 +63,25 @@ export const notificationService = {
       });
     });
   },
+
+  async notifyUpcomingBirthday(
+    employeeId: number,
+    birthdayPersonName: string,
+    personType: "employee" | "customer",
+    birthdayDate: string,
+    age: number,
+    referenceId: number
+  ) {
+    const [year, month, day] = birthdayDate.split("-");
+    const formatted = `${day}.${month}.${year}`;
+    const typeLabel = personType === "customer" ? "Kunde" : "Mitarbeiter/in";
+    await createNotification({
+      userId: employeeId,
+      type: "birthday_reminder",
+      title: "Geburtstag in 7 Tagen",
+      message: `${typeLabel} ${birthdayPersonName} wird am ${formatted} ${age} Jahre alt.`,
+      referenceId,
+      referenceType: personType === "customer" ? "customer" : "task",
+    });
+  },
 };

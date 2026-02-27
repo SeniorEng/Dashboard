@@ -1,5 +1,5 @@
 import { useLocation } from "wouter";
-import { Users, Calendar, CheckSquare, CheckCheck, Bell } from "lucide-react";
+import { Users, Calendar, CheckSquare, CheckCheck, Bell, Cake } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useNotifications, useMarkAsRead, useMarkAllAsRead } from "./use-notifications";
@@ -14,6 +14,8 @@ function getIcon(type: string) {
       return <Calendar className="h-4 w-4 text-green-600 shrink-0" />;
     case "task_assigned":
       return <CheckSquare className="h-4 w-4 text-purple-600 shrink-0" />;
+    case "birthday_reminder":
+      return <Cake className="h-4 w-4 text-pink-600 shrink-0" />;
     default:
       return <Bell className="h-4 w-4 text-gray-600 shrink-0" />;
   }
