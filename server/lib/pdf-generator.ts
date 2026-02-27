@@ -1,7 +1,5 @@
-import puppeteer from "puppeteer-core";
 import crypto from "crypto";
-
-const CHROMIUM_PATH = "/nix/store/zi4f80l169xlmivz8vja8wlphq74qqk0-chromium-125.0.6422.141/bin/chromium";
+import { getBrowser } from "../services/pdf-generator";
 
 export interface InvoicePdfData {
   // Company data
@@ -519,14 +517,10 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
 }
 
 export async function generatePdf(html: string): Promise<{ buffer: Buffer; hash: string }> {
-  const browser = await puppeteer.launch({
-    executablePath: CHROMIUM_PATH,
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-  });
+  const browser = await getBrowser();
+  const page = await browser.newPage();
 
   try {
-    const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
     const pdfBuffer = await page.pdf({
       format: "A4",
@@ -537,6 +531,6 @@ export async function generatePdf(html: string): Promise<{ buffer: Buffer; hash:
     const hash = crypto.createHash("sha256").update(buffer).digest("hex");
     return { buffer, hash };
   } finally {
-    await browser.close();
+    await page.close();
   }
 }

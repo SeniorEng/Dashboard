@@ -369,7 +369,22 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
     ORDER BY "marginCents" DESC
   `);
 
-  const totals = result.rows.reduce((acc: any, r: any) => ({
+  interface ProfitabilityTotals {
+    appointments: number;
+    customers: number;
+    totalMinutes: number;
+    totalTravelKm: number;
+    totalCustomerKm: number;
+    revenueCents: number;
+    costCents: number;
+    marginCents: number;
+    revenueServiceCents: number;
+    revenueKmCents: number;
+    costServiceCents: number;
+    costKmCents: number;
+  }
+
+  const totals = result.rows.reduce<ProfitabilityTotals>((acc, r: Record<string, unknown>) => ({
     appointments: acc.appointments + Number(r.appointments),
     customers: acc.customers + Number(r.customers),
     totalMinutes: acc.totalMinutes + Number(r.totalMinutes),

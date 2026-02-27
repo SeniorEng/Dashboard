@@ -97,8 +97,8 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
         }
       } catch {
       }
-    } catch (budgetError: any) {
-      const errorMessage = budgetError?.message || "Budget-Abbuchung fehlgeschlagen";
+    } catch (budgetError: unknown) {
+      const errorMessage = budgetError instanceof Error ? budgetError.message : "Budget-Abbuchung fehlgeschlagen";
       if (errorMessage.includes("Preisvereinbarung")) {
         throw badRequest(`${errorMessage}. Bitte hinterlegen Sie zuerst eine Preisvereinbarung für diesen Kunden.`);
       }

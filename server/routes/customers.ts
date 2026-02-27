@@ -555,7 +555,7 @@ router.post("/:id/convert", requireRoles("erstberatung"), asyncHandler("Konverti
   const today = todayISO();
   const warnings: string[] = [];
 
-  const updateData: any = {
+  const updateData: Record<string, unknown> = {
     name: `${data.nachname}, ${data.vorname}`,
     vorname: data.vorname,
     nachname: data.nachname,

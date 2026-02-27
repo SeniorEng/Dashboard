@@ -254,7 +254,7 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
   const data = simpleCreateCustomerSchema.parse(req.body);
   const userId = req.user!.id;
 
-  const customerData: any = {
+  const customerData: Record<string, unknown> = {
     name: `${data.nachname}, ${data.vorname}`,
     vorname: data.vorname,
     nachname: data.nachname,
@@ -1233,8 +1233,8 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
       );
 
       results.push({ appointmentId: appt.id, customerId: appt.customerId, date: String(appt.date), status: "created" });
-    } catch (err: any) {
-      results.push({ appointmentId: appt.id, customerId: appt.customerId, date: String(appt.date), status: "error", error: err.message });
+    } catch (err: unknown) {
+      results.push({ appointmentId: appt.id, customerId: appt.customerId, date: String(appt.date), status: "error", error: err instanceof Error ? err.message : "Unbekannter Fehler" });
     }
   }
 

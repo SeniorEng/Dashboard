@@ -6,6 +6,7 @@ import { asyncHandler } from "../lib/errors";
 import { 
   insertBudgetAllocationSchema, 
   insertBudgetPreferencesSchema,
+  type BudgetAllocation,
 } from "@shared/schema";
 import { z } from "zod";
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";
@@ -109,8 +110,8 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
       if (abService && alltagsbegleitungMinutes > 0) costDetails.push({ serviceId: abService.id, costCents: costs.alltagsbegleitungCents, vatRate: abService.vatRate });
       if (kmService && (travelKilometers > 0 || customerKilometers > 0)) costDetails.push({ serviceId: kmService.id, costCents: costs.travelCents + costs.customerKilometersCents, vatRate: kmService.vatRate });
     }
-  } catch (error: any) {
-    if (error?.message?.includes("Preisvereinbarung")) {
+  } catch (error: unknown) {
+    if (error instanceof Error && error.message.includes("Preisvereinbarung")) {
       res.json({
         hauswirtschaftCents: 0,
         alltagsbegleitungCents: 0,
@@ -390,7 +391,7 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
   const startDate = parseLocalDate(budgetStartDate);
   const year = startDate.getFullYear();
 
-  const allocations: any[] = [];
+  const allocations: BudgetAllocation[] = [];
 
   if (currentYearAmountCents > 0) {
     const expiresAt = budgetType === "ersatzpflege_39_42a" ? `${year}-12-31` : null;

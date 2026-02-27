@@ -143,9 +143,11 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
     } else {
       console.log("[email] SMTP nicht konfiguriert, keine Willkommens-E-Mail gesendet");
     }
-  } catch (emailError: any) {
-    console.error("[email] Willkommens-E-Mail fehlgeschlagen:", emailError?.message || emailError);
-    console.error("[email] Stack:", emailError?.stack);
+  } catch (emailError: unknown) {
+    const emailErrMsg = emailError instanceof Error ? emailError.message : String(emailError);
+    const emailErrStack = emailError instanceof Error ? emailError.stack : undefined;
+    console.error("[email] Willkommens-E-Mail fehlgeschlagen:", emailErrMsg);
+    console.error("[email] Stack:", emailErrStack);
   }
 
   res.status(201).json(sanitizeUser(user));

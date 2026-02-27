@@ -15,6 +15,7 @@ import {
   monthlyServiceRecords,
   serviceRecordAppointments,
 } from "@shared/schema";
+import type { Invoice, InvoiceLineItem, CompanySettings } from "@shared/schema";
 import { eq, and, gte, lte, isNull, inArray, ne, notInArray } from "drizzle-orm";
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
@@ -22,6 +23,22 @@ import { formatDateForDisplay, formatDateISO, todayISO } from "@shared/utils/dat
 import { storage } from "../storage";
 import { db } from "../lib/db";
 import { auditService } from "../services/audit";
+import type { InvoicePdfData } from "../lib/pdf-generator";
+
+interface BuildLineItem extends Record<string, unknown> {
+  appointmentId: number;
+  appointmentDate: string;
+  serviceDescription: string;
+  serviceCode: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  durationMinutes: number;
+  unitPriceCents: number;
+  totalCents: number;
+  employeeName: string;
+  employeeLbnr: string;
+  appointmentNotes: string | null;
+}
 
 const router = Router();
 router.use(requireAuth);
@@ -79,7 +96,7 @@ async function buildLineItemsFromAppointments(apptIds: number[]) {
   .innerJoin(servicesTable, eq(appointmentServicesTable.serviceId, servicesTable.id))
   .where(inArray(appointmentServicesTable.appointmentId, apptIds));
 
-  const lineItems: any[] = [];
+  const lineItems: BuildLineItem[] = [];
   let totalNetCents = 0;
   let totalVatCents = 0;
 
@@ -128,7 +145,7 @@ async function buildLineItemsFromAppointments(apptIds: number[]) {
 }
 
 router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (req, res) => {
-  const filters: any = {};
+  const filters: { year?: number; month?: number; customerId?: number; status?: string } = {};
   if (req.query.year) filters.year = Number(req.query.year);
   if (req.query.month) filters.month = Number(req.query.month);
   if (req.query.customerId) filters.customerId = Number(req.query.customerId);
@@ -156,8 +173,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
   const customer = await storage.getCustomer(customerId);
   if (!customer) throw notFound("Kunde nicht gefunden");
 
-  const customerStatus = (customer as any).status;
-  if (customerStatus === "erstberatung") {
+  if (customer.status === "erstberatung") {
     throw badRequest("Kunden in Erstberatung können nicht abgerechnet werden.");
   }
 
@@ -193,18 +209,18 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
 
   const { lineItems, totalNetCents, totalVatCents } = await buildLineItemsFromAppointments(apptIds);
 
-  const billingType = (customer as any).billingType || "selbstzahler";
+  const billingType = customer.billingType || "selbstzahler";
   let recipientName = "";
   let recipientAddress = "";
   let insuranceProviderName = "";
   let insuranceIkNummer = "";
   let versichertennummer = "";
 
-  const customerName = (customer as any).vorname && (customer as any).nachname
-    ? `${(customer as any).vorname} ${(customer as any).nachname}`
-    : (customer as any).name || "Unbekannt";
-  const customerAddress = [(customer as any).strasse, (customer as any).nr].filter(Boolean).join(" ") +
-    ((customer as any).plz || (customer as any).stadt ? `\n${(customer as any).plz || ""} ${(customer as any).stadt || ""}` : "");
+  const customerName = customer.vorname && customer.nachname
+    ? `${customer.vorname} ${customer.nachname}`
+    : customer.name || "Unbekannt";
+  const customerAddress = [customer.strasse, customer.nr].filter(Boolean).join(" ") +
+    (customer.plz || customer.stadt ? `\n${customer.plz || ""} ${customer.stadt || ""}` : "");
 
   if (billingType === "pflegekasse_gesetzlich") {
     const insuranceData = await db.select({
@@ -270,7 +286,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
     insuranceProviderName: insuranceProviderName || null,
     insuranceIkNummer: insuranceIkNummer || null,
     versichertennummer: versichertennummer || null,
-    pflegegrad: (customer as any).pflegegrad || null,
+    pflegegrad: customer.pflegegrad || null,
     netAmountCents: totalNetCents,
     vatAmountCents: totalVatCents,
     grossAmountCents: totalNetCents + totalVatCents,
@@ -278,7 +294,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
     status: "entwurf",
   };
 
-  const invoice = await storage.createInvoice(invoiceData, lineItems, req.user!.id);
+  const invoice = await storage.createInvoice(invoiceData, lineItems as Record<string, unknown>[], req.user!.id);
 
   await auditService.log(req.user!.id, "invoice_created", "invoice", invoice.id, {
     invoiceNumber,
@@ -328,15 +344,14 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
   for (const customerId of uniqueCustomerIds) {
     try {
       const customer = await storage.getCustomer(customerId);
-      const custName = customer ? ((customer as any).vorname && (customer as any).nachname ? `${(customer as any).vorname} ${(customer as any).nachname}` : (customer as any).name) : `Kunde #${customerId}`;
+      const custName = customer ? (customer.vorname && customer.nachname ? `${customer.vorname} ${customer.nachname}` : customer.name) : `Kunde #${customerId}`;
 
       if (!customer) {
         results.skipped.push({ customerName: custName, reason: "Kunde nicht gefunden" });
         continue;
       }
 
-      const customerStatus = (customer as any).status;
-      if (customerStatus === "erstberatung") {
+      if (customer.status === "erstberatung") {
         results.skipped.push({ customerName: custName, reason: "Erstberatung (nicht abrechenbar)" });
         continue;
       }
@@ -373,12 +388,12 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
 
       const { lineItems, totalNetCents, totalVatCents } = await buildLineItemsFromAppointments(apptIds);
 
-      const billingType = (customer as any).billingType || "selbstzahler";
-      const customerName = (customer as any).vorname && (customer as any).nachname
-        ? `${(customer as any).vorname} ${(customer as any).nachname}`
-        : (customer as any).name || "Unbekannt";
-      const customerAddress = [(customer as any).strasse, (customer as any).nr].filter(Boolean).join(" ") +
-        ((customer as any).plz || (customer as any).stadt ? `\n${(customer as any).plz || ""} ${(customer as any).stadt || ""}` : "");
+      const billingType = customer.billingType || "selbstzahler";
+      const customerName = customer.vorname && customer.nachname
+        ? `${customer.vorname} ${customer.nachname}`
+        : customer.name || "Unbekannt";
+      const customerAddress = [customer.strasse, customer.nr].filter(Boolean).join(" ") +
+        (customer.plz || customer.stadt ? `\n${customer.plz || ""} ${customer.stadt || ""}` : "");
 
       let recipientName = customerName;
       let recipientAddress = customerAddress;
@@ -425,7 +440,7 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
         insuranceProviderName: insuranceProviderName || null,
         insuranceIkNummer: insuranceIkNummer || null,
         versichertennummer: versichertennummer || null,
-        pflegegrad: (customer as any).pflegegrad || null,
+        pflegegrad: customer.pflegegrad || null,
         netAmountCents: totalNetCents,
         vatAmountCents: totalVatCents,
         grossAmountCents: totalNetCents + totalVatCents,
@@ -433,12 +448,12 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
         status: "entwurf",
       };
 
-      await storage.createInvoice(invoiceData, lineItems, req.user!.id);
+      await storage.createInvoice(invoiceData, lineItems as Record<string, unknown>[], req.user!.id);
       results.created++;
-    } catch (err: any) {
+    } catch (err: unknown) {
       const customer = await storage.getCustomer(customerId);
-      const name = customer ? ((customer as any).vorname && (customer as any).nachname ? `${(customer as any).vorname} ${(customer as any).nachname}` : (customer as any).name) : `ID ${customerId}`;
-      results.errors.push({ customerId, customerName: name || `ID ${customerId}`, reason: err.message || "Unbekannter Fehler" });
+      const name = customer ? (customer.vorname && customer.nachname ? `${customer.vorname} ${customer.nachname}` : customer.name) : `ID ${customerId}`;
+      results.errors.push({ customerId, customerName: name || `ID ${customerId}`, reason: err instanceof Error ? err.message : "Unbekannter Fehler" });
     }
   }
 
@@ -498,7 +513,7 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
       stornierteRechnungId: id,
     };
 
-    const stornoLineItems = lineItems.map((item: any) => ({
+    const stornoLineItems = lineItems.map((item: InvoiceLineItem) => ({
       appointmentId: item.appointmentId,
       appointmentDate: item.appointmentDate,
       serviceDescription: item.serviceDescription,
@@ -530,7 +545,7 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
   res.json(updated);
 }));
 
-function buildPdfData(invoice: any, lineItems: any[], companySettings: any) {
+function buildPdfData(invoice: Invoice, lineItems: InvoiceLineItem[], companySettings: CompanySettings): InvoicePdfData {
   return {
     companyName: companySettings.companyName || "",
     companyAddress: [
@@ -539,16 +554,16 @@ function buildPdfData(invoice: any, lineItems: any[], companySettings: any) {
     ].filter(Boolean).join(", "),
     companyPhone: companySettings.telefon || "",
     companyEmail: companySettings.email || "",
-    companyWebsite: companySettings.website,
-    steuernummer: companySettings.steuernummer,
-    ustId: companySettings.ustId,
+    companyWebsite: companySettings.website ?? null,
+    steuernummer: companySettings.steuernummer ?? null,
+    ustId: companySettings.ustId ?? null,
     iban: companySettings.iban || "",
     bic: companySettings.bic || "",
     bankName: companySettings.bankName || "",
-    ikNummer: companySettings.ikNummer,
-    anerkennungsnummer45a: companySettings.anerkennungsnummer45a,
-    anerkennungsBundesland: companySettings.anerkennungsBundesland,
-    geschaeftsfuehrer: companySettings.geschaeftsfuehrer,
+    ikNummer: companySettings.ikNummer ?? null,
+    anerkennungsnummer45a: companySettings.anerkennungsnummer45a ?? null,
+    anerkennungsBundesland: companySettings.anerkennungsBundesland ?? null,
+    geschaeftsfuehrer: companySettings.geschaeftsfuehrer ?? null,
     invoiceNumber: invoice.invoiceNumber,
     invoiceDate: invoice.sentAt ? formatDateForDisplay(formatDateISO(invoice.sentAt)) : formatDateForDisplay(todayISO()),
     invoiceType: invoice.invoiceType,
@@ -556,31 +571,31 @@ function buildPdfData(invoice: any, lineItems: any[], companySettings: any) {
     billingMonth: invoice.billingMonth,
     billingYear: invoice.billingYear,
     recipientName: invoice.recipientName,
-    recipientAddress: invoice.recipientAddress,
-    insuranceProviderName: invoice.insuranceProviderName,
-    insuranceIkNummer: invoice.insuranceIkNummer,
-    versichertennummer: invoice.versichertennummer,
-    pflegegrad: invoice.pflegegrad,
+    recipientAddress: invoice.recipientAddress ?? null,
+    insuranceProviderName: invoice.insuranceProviderName ?? null,
+    insuranceIkNummer: invoice.insuranceIkNummer ?? null,
+    versichertennummer: invoice.versichertennummer ?? null,
+    pflegegrad: invoice.pflegegrad ?? null,
     customerName: invoice.customerName || invoice.recipientName,
     customerAddress: invoice.recipientAddress || "",
-    lineItems: lineItems.map((item: any) => ({
+    lineItems: lineItems.map((item: InvoiceLineItem) => ({
       appointmentDate: item.appointmentDate,
-      startTime: item.startTime,
-      endTime: item.endTime,
+      startTime: item.startTime ?? null,
+      endTime: item.endTime ?? null,
       serviceDescription: item.serviceDescription,
       serviceCode: item.serviceCode || null,
       durationMinutes: item.durationMinutes,
       unitPriceCents: item.unitPriceCents,
       totalCents: item.totalCents,
-      employeeName: item.employeeName,
-      employeeLbnr: item.employeeLbnr,
+      employeeName: item.employeeName ?? null,
+      employeeLbnr: item.employeeLbnr ?? null,
       appointmentNotes: item.appointmentNotes || null,
     })),
     netAmountCents: invoice.netAmountCents,
     vatAmountCents: invoice.vatAmountCents,
     grossAmountCents: invoice.grossAmountCents,
     vatRate: invoice.vatRate || 0,
-    notes: invoice.notes,
+    notes: invoice.notes ?? null,
   };
 }
 
@@ -639,7 +654,7 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
       .where(inArray(users.id, employeeIds));
     const employeeMap = new Map(employeeRows.map(e => [e.id, e.displayName]));
 
-    (pdfData as any).signatures = signedRecords.map(r => ({
+    pdfData.signatures = signedRecords.map(r => ({
       employeeSignatureData: r.employeeSignatureData,
       employeeSignedAt: r.employeeSignedAt ? formatDateForDisplay(formatDateISO(r.employeeSignedAt instanceof Date ? r.employeeSignedAt : new Date(r.employeeSignedAt))) : null,
       employeeName: employeeMap.get(r.employeeId) || null,

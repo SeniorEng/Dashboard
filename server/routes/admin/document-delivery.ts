@@ -80,7 +80,7 @@ router.post("/document-delivery/send-for-customer/:customerId", asyncHandler("Ve
 
   const { documentStorage } = await import("../../storage/documents");
   const generatedDocs = await documentStorage.getGeneratedDocuments(customerId);
-  const pdfDocs = generatedDocs.filter((d: any) => d.objectPath && d.objectPath.endsWith(".pdf"));
+  const pdfDocs = generatedDocs.filter((d) => d.objectPath && d.objectPath.endsWith(".pdf"));
 
   if (pdfDocs.length === 0) {
     res.json({ skipped: true, message: "Keine PDF-Dokumente zum Versenden vorhanden" });
@@ -89,7 +89,7 @@ router.post("/document-delivery/send-for-customer/:customerId", asyncHandler("Ve
 
   const result = await deliverDocuments({
     customerId,
-    generatedDocumentIds: pdfDocs.map((d: any) => d.id),
+    generatedDocumentIds: pdfDocs.map((d) => d.id),
     deliveryMethod,
     userId: req.user!.id,
   });
