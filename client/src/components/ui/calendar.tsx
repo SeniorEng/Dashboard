@@ -124,6 +124,10 @@ function Calendar({
         hidden: cn("invisible", defaultClassNames.hidden),
         ...classNames,
       }}
+      labels={{
+        labelPrevious: () => "Vorheriger Monat",
+        labelNext: () => "Nächster Monat",
+      }}
       components={{
         Root: ({ className, rootRef, ...props }) => {
           return (

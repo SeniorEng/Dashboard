@@ -173,7 +173,6 @@ export function EmployeeQualificationsSection({ employeeId }: { employeeId: numb
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-7 w-7"
                       aria-label="Qualifikation entfernen"
                       onClick={() => removeMutation.mutate(eq.qualificationId)}
                       data-testid={`button-remove-qual-${eq.qualificationId}`}

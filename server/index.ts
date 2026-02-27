@@ -12,8 +12,18 @@ const app = express();
 app.set("trust proxy", 1);
 const httpServer = createServer(app);
 
+const isDev = process.env.NODE_ENV !== "production";
 app.use(helmet({
-  contentSecurityPolicy: false,
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", ...(isDev ? ["'unsafe-inline'", "'unsafe-eval'"] : [])],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:", "blob:", "https:"],
+      connectSrc: ["'self'", ...(isDev ? ["ws:", "wss:"] : [])],
+    },
+  },
   crossOriginEmbedderPolicy: false,
 }));
 

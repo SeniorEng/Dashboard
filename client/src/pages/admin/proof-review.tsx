@@ -140,7 +140,6 @@ function ProofReviewContent() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8"
                             aria-label="Nachweis anzeigen"
                             onClick={() => window.open(`/api/object-storage/download?path=${encodeURIComponent(proof.objectPath!)}`, '_blank')}
                             data-testid={`button-view-proof-${proof.id}`}
@@ -151,7 +150,7 @@ function ProofReviewContent() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
+                          className="text-green-600 hover:text-green-700 hover:bg-green-50"
                           aria-label="Nachweis genehmigen"
                           onClick={() => reviewMutation.mutate({ proofId: proof.id, approved: true })}
                           disabled={reviewMutation.isPending}
@@ -162,7 +161,7 @@ function ProofReviewContent() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50"
+                          className="text-red-500 hover:text-red-600 hover:bg-red-50"
                           aria-label="Nachweis ablehnen"
                           onClick={() => { setRejectingProof(proof); setRejectionReason(""); }}
                           disabled={reviewMutation.isPending}

@@ -72,19 +72,6 @@ export const DOCUMENTED_STATUSES: AppointmentStatus[] = ["completed"];
  */
 export const UNDOCUMENTED_STATUSES: AppointmentStatus[] = ["scheduled", "in-progress", "documenting"];
 
-/**
- * Prüft, ob ein Termin als dokumentiert für Leistungsnachweise gilt.
- */
-export function isAppointmentDocumented(status: AppointmentStatus): boolean {
-  return DOCUMENTED_STATUSES.includes(status);
-}
-
-/**
- * Prüft, ob ein Termin einen Leistungsnachweis blockiert.
- */
-export function isAppointmentBlockingServiceRecord(status: AppointmentStatus): boolean {
-  return UNDOCUMENTED_STATUSES.includes(status);
-}
 
 export const PFLEGEGRAD_OPTIONS = [1, 2, 3, 4, 5] as const;
 export type Pflegegrad = typeof PFLEGEGRAD_OPTIONS[number];
@@ -128,11 +115,6 @@ export function doTimesOverlap(
   return s1 < e2 && s2 < e1;
 }
 
-export function calculateTotalDurationFromServices(
-  services: Array<{ plannedDurationMinutes: number; actualDurationMinutes?: number | null }>
-): number {
-  return services.reduce((sum, s) => sum + (s.actualDurationMinutes ?? s.plannedDurationMinutes), 0);
-}
 
 export function getEndTime(
   scheduledStart: string,
@@ -179,16 +161,6 @@ export function canModifyAppointment(status: AppointmentStatus): boolean {
   return status !== "completed";
 }
 
-export function canEditSchedulingFields(
-  currentStatus: AppointmentStatus,
-  targetStatus: AppointmentStatus
-): boolean {
-  return currentStatus === "scheduled" && targetStatus === "scheduled";
-}
-
-export function canEditDocumentationFields(status: AppointmentStatus): boolean {
-  return status === "documenting";
-}
 
 export function canEditNotes(status: AppointmentStatus): boolean {
   return status === "scheduled" || status === "documenting";
@@ -213,11 +185,6 @@ export const SERVICE_TYPE_COLORS: Record<ServiceType, string> = {
   "Erstberatung": "bg-purple-50 text-purple-700 border-purple-200",
 };
 
-export const SERVICE_BORDER_COLORS: Record<ServiceType, string> = {
-  "Hauswirtschaft": "border-amber-400",
-  "Alltagsbegleitung": "border-sky-400",
-  "Erstberatung": "border-purple-400",
-};
 
 export function getStatusColor(status: string): string {
   return STATUS_COLORS[status as AppointmentStatus] ?? STATUS_COLORS.scheduled;
@@ -236,9 +203,6 @@ export function getServiceColor(serviceType: string | null): string {
   return SERVICE_TYPE_COLORS[serviceType as ServiceType] ?? "bg-gray-100 text-gray-600 border-gray-200";
 }
 
-export function getServiceBorderColor(serviceType: ServiceType): string {
-  return SERVICE_BORDER_COLORS[serviceType];
-}
 
 export const STATUS_PRIORITY: Record<AppointmentStatus, number> = {
   "in-progress": 0,
@@ -248,44 +212,6 @@ export const STATUS_PRIORITY: Record<AppointmentStatus, number> = {
   "cancelled": 4,
 };
 
-export function getServiceInfoFromServices(
-  appointmentType: string,
-  services: Array<{ serviceCode?: string | null; plannedDurationMinutes: number; actualDurationMinutes?: number | null }>
-): ServiceInfo {
-  if (appointmentType === "Erstberatung") {
-    return {
-      hasHauswirtschaft: false,
-      hasAlltagsbegleitung: false,
-      hasErstberatung: services.some(s => s.serviceCode === 'erstberatung' && s.plannedDurationMinutes > 0),
-      hasBoth: false,
-      label: "Erstberatung",
-      primaryType: "Erstberatung",
-    };
-  }
-
-  const hasHauswirtschaft = services.some(s => s.serviceCode === 'hauswirtschaft' && s.plannedDurationMinutes > 0);
-  const hasAlltagsbegleitung = services.some(s => s.serviceCode === 'alltagsbegleitung' && s.plannedDurationMinutes > 0);
-  const hasBoth = hasHauswirtschaft && hasAlltagsbegleitung;
-
-  let label: string;
-  let primaryType: ServiceType | null = null;
-
-  if (hasBoth) {
-    label = "Hauswirtschaft & Alltagsbegleitung";
-    primaryType = "Hauswirtschaft";
-  } else if (hasHauswirtschaft) {
-    label = "Hauswirtschaft";
-    primaryType = "Hauswirtschaft";
-  } else if (hasAlltagsbegleitung) {
-    label = "Alltagsbegleitung";
-    primaryType = "Alltagsbegleitung";
-  } else {
-    label = services.length > 0 ? services.map(s => s.serviceCode || 'Service').join(' & ') : "Kundentermin";
-    primaryType = null;
-  }
-
-  return { hasHauswirtschaft, hasAlltagsbegleitung, hasErstberatung: false, hasBoth, label, primaryType };
-}
 
 export function getCardServiceInfoFromAppointment(appointment: {
   appointmentType: string;
@@ -336,27 +262,6 @@ export function getCardServiceInfoFromAppointment(appointment: {
   return { hasHauswirtschaft, hasAlltagsbegleitung, hasErstberatung: false, hasBoth, label, primaryType, borderClass };
 }
 
-export function getCardServiceInfoFromServices(
-  appointmentType: string,
-  services: Array<{ serviceCode?: string | null; plannedDurationMinutes: number; actualDurationMinutes?: number | null }>
-): CardServiceInfo {
-  const info = getServiceInfoFromServices(appointmentType, services);
-  
-  let borderClass: string;
-  if (appointmentType === "Erstberatung") {
-    borderClass = "bg-purple-500";
-  } else if (info.hasBoth) {
-    borderClass = "";
-  } else if (info.primaryType === "Hauswirtschaft") {
-    borderClass = "bg-amber-500";
-  } else if (info.primaryType === "Alltagsbegleitung") {
-    borderClass = "bg-sky-500";
-  } else {
-    borderClass = "bg-teal-500";
-  }
-  
-  return { ...info, borderClass };
-}
 
 export interface TravelOriginSuggestion {
   suggestedOrigin: TravelOriginType;
@@ -364,7 +269,7 @@ export interface TravelOriginSuggestion {
   previousCustomerName?: string;
 }
 
-export function getScheduledEndMinutes(apt: Appointment): number {
+function getScheduledEndMinutes(apt: Appointment): number {
   if (apt.scheduledEnd) {
     return timeToMinutes(apt.scheduledEnd);
   }

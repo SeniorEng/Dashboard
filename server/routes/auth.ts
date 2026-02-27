@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { z } from "zod";
 import { authService } from "../services/auth";
 import {
   loginSchema,
@@ -248,23 +249,26 @@ router.post(
   csrfProtection,
   requireAuth,
   asyncHandler("Passwort konnte nicht geändert werden", async (req: Request, res: Response) => {
-    const { currentPassword, newPassword } = req.body;
-    
-    if (!currentPassword) {
+    const changePasswordSchema = z.object({
+      currentPassword: z.string().min(1, "Aktuelles Passwort ist erforderlich"),
+      newPassword: z.string()
+        .min(8, "Neues Passwort muss mindestens 8 Zeichen haben")
+        .regex(/[A-Z]/, "Mindestens ein Großbuchstabe")
+        .regex(/[a-z]/, "Mindestens ein Kleinbuchstabe")
+        .regex(/[0-9]/, "Mindestens eine Ziffer"),
+    });
+
+    const parsed = changePasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
       res.status(400).json({
         error: "VALIDATION_ERROR",
-        message: "Aktuelles Passwort ist erforderlich",
+        message: parsed.error.issues[0]?.message || "Ungültige Daten",
+        details: parsed.error.issues,
       });
       return;
     }
 
-    if (!newPassword || newPassword.length < 8) {
-      res.status(400).json({
-        error: "VALIDATION_ERROR",
-        message: "Neues Passwort muss mindestens 8 Zeichen haben",
-      });
-      return;
-    }
+    const { currentPassword, newPassword } = parsed.data;
 
     const result = await authService.changePassword(req.user!.id, currentPassword, newPassword);
 

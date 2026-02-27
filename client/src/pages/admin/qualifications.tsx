@@ -118,7 +118,7 @@ function QualificationsContent() {
       setIsCreateOpen(false);
       setFormData(emptyForm);
     },
-    onError: () => toast({ title: "Fehler", description: "Qualifikation konnte nicht erstellt werden", variant: "destructive" }),
+    onError: (error: Error) => toast({ title: "Fehler", description: error.message, variant: "destructive" }),
   });
 
   const updateMutation = useMutation({
@@ -129,7 +129,7 @@ function QualificationsContent() {
       setEditingQual(null);
       setFormData(emptyForm);
     },
-    onError: () => toast({ title: "Fehler", description: "Qualifikation konnte nicht aktualisiert werden", variant: "destructive" }),
+    onError: (error: Error) => toast({ title: "Fehler", description: error.message, variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({
@@ -139,7 +139,7 @@ function QualificationsContent() {
       toast({ title: "Qualifikation gelöscht" });
       setDeleteId(null);
     },
-    onError: () => toast({ title: "Fehler", description: "Qualifikation konnte nicht gelöscht werden", variant: "destructive" }),
+    onError: (error: Error) => toast({ title: "Fehler", description: error.message, variant: "destructive" }),
   });
 
   const openEdit = async (qual: Qualification) => {

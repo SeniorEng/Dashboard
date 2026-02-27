@@ -76,12 +76,3 @@ export function formatPhoneAsYouType(input: string): string {
   return formatIncompletePhoneNumber(input, "DE");
 }
 
-export const phoneValidationSchema = {
-  validate: (value: string) => {
-    const result = validateGermanPhone(value);
-    if (!result.valid) {
-      return result.error;
-    }
-    return true;
-  },
-};

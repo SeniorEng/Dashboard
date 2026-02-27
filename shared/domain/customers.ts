@@ -16,11 +16,6 @@ export const BILLING_TYPE_LABELS: Record<BillingType, string> = {
   selbstzahler: "Selbstzahler",
 };
 
-export const BILLING_TYPE_SHORT_LABELS: Record<BillingType, string> = {
-  pflegekasse_gesetzlich: "Gesetzlich",
-  pflegekasse_privat: "Privat",
-  selbstzahler: "Selbstzahler",
-};
 
 export const BILLING_TYPE_SELECT_OPTIONS = BILLING_TYPES.map((v) => ({
   value: v,
@@ -37,9 +32,6 @@ export function isPflegekasseCustomer(billingType: BillingType): boolean {
   return billingType === "pflegekasse_gesetzlich" || billingType === "pflegekasse_privat";
 }
 
-export function needsInsuranceData(billingType: BillingType): boolean {
-  return isPflegekasseCustomer(billingType);
-}
 
 export function needsBudgetData(billingType: BillingType): boolean {
   return isPflegekasseCustomer(billingType);

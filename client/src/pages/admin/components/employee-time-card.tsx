@@ -138,7 +138,6 @@ export function EmployeeTimeCard({
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-9 w-9"
                             onClick={() => onEditEntry(entry)}
                             aria-label="Bearbeiten"
                             data-testid={`button-edit-entry-${entry.id}`}
@@ -148,7 +147,7 @@ export function EmployeeTimeCard({
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-9 w-9 text-red-600 hover:text-red-700 hover:bg-red-50"
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
                             onClick={() => onDeleteEntry(
                               entry.id,
                               `${config.label} am ${formatDateForDisplay(entry.entryDate, { day: "numeric", month: "short" })}`,

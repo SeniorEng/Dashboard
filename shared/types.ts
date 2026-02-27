@@ -43,30 +43,23 @@ export {
   STATUS_PRIORITY,
   APPOINTMENT_TYPE_COLORS,
   SERVICE_TYPE_COLORS,
-  SERVICE_BORDER_COLORS,
   // Time formatting utilities
   formatTimeSlot,
   formatDuration,
   // Time comparison
   doTimesOverlap,
-  calculateTotalDurationFromServices,
   getEndTime,
   // Service helpers
-  getServiceInfoFromServices,
   getCardServiceInfoFromAppointment,
-  getCardServiceInfoFromServices,
   validateServiceDocumentationFromServices,
   // Status helpers
   isValidStatusTransition,
   canModifyAppointment,
-  canEditSchedulingFields,
-  canEditDocumentationFields,
   canEditNotes,
   getStatusColor,
   getStatusLabel,
   getAppointmentTypeColor,
   getServiceColor,
-  getServiceBorderColor,
   // Travel helpers
   suggestTravelOrigin,
 } from "./domain/appointments";
