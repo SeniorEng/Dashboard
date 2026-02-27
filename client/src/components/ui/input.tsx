@@ -3,11 +3,11 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 
 const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
-  ({ className, type, ...props }, ref) => {
+  ({ className, type, autoComplete, ...props }, ref) => {
     return (
       <input
         type={type}
-        autoComplete="off"
+        autoComplete={autoComplete ?? "off"}
         className={cn(
           // min-h-[44px] ensures WCAG touch target compliance on mobile
           // text-base (16px) on mobile prevents iOS Safari zoom on focus

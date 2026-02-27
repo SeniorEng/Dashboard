@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +19,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
 
   const { data: setupData, isLoading: setupLoading } = useQuery({
     queryKey: ["auth", "setup-required"],
@@ -41,8 +42,8 @@ export default function LoginPage() {
   const displayLogo = branding?.pdfLogoUrl || branding?.logoUrl || fallbackLogo;
 
   const loginMutation = useMutation({
-    mutationFn: async () => {
-      await login(email, password);
+    mutationFn: async ({ loginEmail, loginPassword }: { loginEmail: string; loginPassword: string }) => {
+      await login(loginEmail, loginPassword);
     },
     onSuccess: () => {
       navigate("/");
@@ -81,7 +82,14 @@ export default function LoginPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    loginMutation.mutate();
+    const form = formRef.current;
+    const loginEmail = (form?.querySelector("#email") as HTMLInputElement)?.value || email;
+    const loginPassword = (form?.querySelector("#password") as HTMLInputElement)?.value || password;
+    if (!loginEmail || !loginPassword) {
+      setError("Bitte E-Mail und Passwort eingeben.");
+      return;
+    }
+    loginMutation.mutate({ loginEmail, loginPassword });
   };
 
   return (
@@ -96,7 +104,7 @@ export default function LoginPage() {
           />
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form ref={formRef} onSubmit={handleSubmit} className="space-y-4" autoComplete="on">
             {error && (
               <Alert variant="destructive">
                 <AlertCircle className={iconSize.sm} />
@@ -108,7 +116,9 @@ export default function LoginPage() {
               <Label htmlFor="email">E-Mail-Adresse</Label>
               <Input
                 id="email"
+                name="email"
                 type="email"
+                autoComplete="username"
                 placeholder="name@beispiel.de"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -122,7 +132,9 @@ export default function LoginPage() {
               <div className="relative">
                 <Input
                   id="password"
+                  name="password"
                   type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -132,7 +144,16 @@ export default function LoginPage() {
                 />
                 <button
                   type="button"
-                  onClick={() => setShowPassword(!showPassword)}
+                  onClick={() => {
+                    const form = formRef.current;
+                    if (form) {
+                      const emailInput = form.querySelector("#email") as HTMLInputElement;
+                      const passwordInput = form.querySelector("#password") as HTMLInputElement;
+                      if (emailInput?.value) setEmail(emailInput.value);
+                      if (passwordInput?.value) setPassword(passwordInput.value);
+                    }
+                    setShowPassword(!showPassword);
+                  }}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                   aria-label={showPassword ? "Passwort verbergen" : "Passwort anzeigen"}
                   data-testid="button-toggle-password"
