@@ -18,6 +18,7 @@ import billingRouter from "./billing";
 import holidaysRouter from "./holidays";
 import statisticsRouter from "./statistics";
 import webhookRouter from "./webhook";
+import notificationsRouter from "./notifications";
 import { csrfProtection, csrfTokenHandler } from "../middleware/csrf";
 import { authMiddleware } from "../middleware/auth";
 import { cacheHeaders } from "../middleware/cache-headers";
@@ -95,5 +96,6 @@ router.use("/company-settings", companyRouter);
 router.use("/billing", billingRouter);
 router.use("/holidays", holidaysRouter);
 router.use("/statistics", statisticsRouter);
+router.use("/notifications", notificationsRouter);
 
 export default router;

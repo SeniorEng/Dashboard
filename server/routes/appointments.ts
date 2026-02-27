@@ -22,6 +22,7 @@ import {
   sendServerError
 } from "../lib/errors";
 import { requireAuth } from "../middleware/auth";
+import { notificationService } from "../services/notification-service";
 import type { Response } from "express";
 import appointmentDocumentationRouter from "./appointment-documentation";
 
@@ -260,6 +261,11 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     await storage.createAppointmentServices(appointment.id, serviceEntries);
   }
 
+  if (assignedEmployeeId !== user.id) {
+    const customerName = `${customer.vorname} ${customer.nachname}`;
+    notificationService.notifyAppointmentCreated(appointment.id, customerName, validatedData.date, assignedEmployeeId);
+  }
+
   res.status(201).json(appointment);
 }));
 
@@ -325,6 +331,11 @@ router.post("/erstberatung", asyncHandler(ErrorMessages.createErstberatungFailed
       serviceId: erstberatungService.id,
       plannedDurationMinutes: validatedData.erstberatungDauer,
     }]);
+  }
+
+  if (assignedEmployeeId !== user.id) {
+    const customerName = `${validatedData.customer.vorname} ${validatedData.customer.nachname}`;
+    notificationService.notifyAppointmentCreated(appointment.id, customerName, validatedData.date, assignedEmployeeId);
   }
   
   res.status(201).json({ appointment, customer });

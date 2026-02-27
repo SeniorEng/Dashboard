@@ -15,6 +15,7 @@ import { storage } from "../storage";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { todayISO } from "@shared/utils/datetime";
 import { asyncHandler } from "../lib/errors";
+import { notificationService } from "../services/notification-service";
 
 const router = Router();
 
@@ -138,6 +139,15 @@ router.post("/", requireAuth, asyncHandler("Aufgabe konnte nicht erstellt werden
   }
 
   const task = await createTask(data, userId);
+
+  const assignedTo = data.assignedToUserId || userId;
+  if (assignedTo !== userId) {
+    const { authService: authSvc } = await import("../services/auth");
+    const creator = await authSvc.getUser(userId);
+    const creatorName = creator?.displayName || "Jemand";
+    notificationService.notifyTaskAssigned(task.id, data.title, assignedTo, creatorName);
+  }
+
   res.status(201).json(task);
 }));
 

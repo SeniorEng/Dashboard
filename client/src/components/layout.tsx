@@ -12,8 +12,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, ClipboardList, Building2, Receipt, FileText, UserCog, Stethoscope, BookOpen, ScrollText, GraduationCap, Gift, Cake } from "lucide-react";
+import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, ClipboardList, Building2, Receipt, FileText, UserCog, Stethoscope, BookOpen, ScrollText, GraduationCap, Gift, Cake, Bell } from "lucide-react";
 import { type LayoutVariant, layoutVariants, colors } from "@/design-system";
+import { useUnreadCount } from "@/features/notifications/use-notifications";
 
 interface SearchResult {
   type: "customer" | "appointment";
@@ -138,9 +139,24 @@ function GlobalSearch() {
 export function Layout({ children, variant = 'default' }: { children: React.ReactNode; variant?: LayoutVariant }) {
   const [location, navigate] = useLocation();
   const { user, logout, isAuthenticated, badgeCount, birthdayCount } = useAuth();
+  const { data: notificationUnreadCount = 0 } = useUnreadCount();
+  const { toast } = useToast();
 
-  const hasBadge = badgeCount > 0;
+  const hasBadge = badgeCount > 0 || notificationUnreadCount > 0;
   const hasBirthdayBadge = birthdayCount > 0;
+
+  useEffect(() => {
+    if (notificationUnreadCount > 0 && isAuthenticated) {
+      const key = "careconnect_notification_shown";
+      if (!sessionStorage.getItem(key)) {
+        sessionStorage.setItem(key, "1");
+        toast({
+          title: `${notificationUnreadCount} neue Benachrichtigung${notificationUnreadCount > 1 ? "en" : ""}`,
+          description: "Tippe auf Aufgaben, um sie zu sehen.",
+        });
+      }
+    }
+  }, [notificationUnreadCount, isAuthenticated]);
 
   const { data: companySettings } = useQuery<{ logoUrl?: string | null }>({
     queryKey: ["company-settings"],
@@ -156,7 +172,6 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
   const displayLogo = companySettings?.logoUrl || logo;
 
   const queryClient = useQueryClient();
-  const { toast } = useToast();
 
   const resetOnboarding = useMutation({
     mutationFn: async () => {

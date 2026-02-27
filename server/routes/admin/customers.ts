@@ -3,6 +3,7 @@ import { storage } from "../../storage";
 import { customerManagementStorage } from "../../storage/customer-management";
 import { authService } from "../../services/auth";
 import { birthdaysCache } from "../../services/cache";
+import { notificationService } from "../../services/notification-service";
 import { budgetLedgerStorage } from "../../storage/budget-ledger";
 import { computeDataHash } from "../../services/signature-integrity";
 import { auditService } from "../../services/audit";
@@ -101,10 +102,21 @@ router.patch("/customers/:id/assign", asyncHandler("Zuordnung konnte nicht aktua
     }
   }
 
+  const oldPrimary = customer.primaryEmployeeId;
+  const oldBackup = customer.backupEmployeeId;
+
   const updatedCustomer = await customerManagementStorage.updateCustomerAssignment(id, primaryEmployeeId, backupEmployeeId, req.user?.id);
   
   // Invalidate birthday cache (employee assignments affect which customers appear for each user)
   birthdaysCache.invalidateAll();
+
+  const customerName = `${customer.vorname} ${customer.nachname}`;
+  if (primaryEmployeeId && primaryEmployeeId !== oldPrimary) {
+    notificationService.notifyCustomerAssigned(id, customerName, primaryEmployeeId, "primary");
+  }
+  if (backupEmployeeId && backupEmployeeId !== oldBackup) {
+    notificationService.notifyCustomerAssigned(id, customerName, backupEmployeeId, "backup");
+  }
   
   res.json(updatedCustomer);
 }));

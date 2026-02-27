@@ -49,6 +49,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Employee Time Tracking**: Comprehensive tracking for client/non-client work, vacation. Past entries locked for non-admins. German labor law compliance (e.g., missing break documentation with "Nachtragen" CTA). TimeEntryDialog uses Drawer on mobile, Dialog on desktop. CalendarGrid uses memoized DayCell for render performance.
 - **Month-Closing Workflow**: Employee-initiated month closing locks CRUD operations.
 - **Task System**: Centralized page for system notices and personal tasks.
+- **In-App Notifications**: `notifications` table with events: `customer_assigned`, `appointment_created`, `task_assigned`. Fire-and-forget creation via `notificationService`. Frontend: `NotificationList` component on Aufgaben page, `useUnreadCount` hook with 60s polling, badge in navigation, one-time startup toast per session. Routes: `GET /api/notifications`, `GET /api/notifications/unread-count`, `PATCH /api/notifications/:id/read`, `POST /api/notifications/mark-all-read`. Notifications only for actions done by others (no self-notifications).
 - **Customer Kilometers**: Separate tracking for travel with/for the customer.
 - **Birthdays**: Integrated tab showing upcoming birthdays.
 - **Employee Self-Service Profile**: Employees manage contact data, emergency contact, pet acceptance, password, and document uploads.

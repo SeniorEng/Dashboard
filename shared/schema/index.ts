@@ -18,3 +18,4 @@ export * from "./billing";
 export * from "./qualifications";
 export * from "./birthday-cards";
 export * from "./prospects";
+export * from "./notifications";
