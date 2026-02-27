@@ -5,7 +5,7 @@ import {
   appointments,
 } from "@shared/schema";
 import { timeTrackingStorage } from "../storage/time-tracking";
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 
 export interface AutoBreakResult {
   date: string;
@@ -131,7 +131,7 @@ export async function generateAutoBreaksForMonth(
 export async function insertAutoBreaks(
   userId: number,
   breaks: AutoBreakResult[],
-  txOrDb: typeof db = db
+  txOrDb: DbOrTx = db
 ): Promise<number> {
   if (breaks.length === 0) return 0;
 

@@ -81,7 +81,7 @@ export const notificationService = {
       title: "Geburtstag in 7 Tagen",
       message: `${typeLabel} ${birthdayPersonName} wird am ${formatted} ${age} Jahre alt.`,
       referenceId,
-      referenceType: personType === "customer" ? "customer" : "task",
+      referenceType: personType === "customer" ? "customer" : "employee",
     });
   },
 };

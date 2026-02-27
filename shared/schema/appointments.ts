@@ -84,7 +84,7 @@ const baseAppointmentSchema = createInsertSchema(appointments).omit({
 // Service entry for dynamic appointment service selection
 export const appointmentServiceEntrySchema = z.object({
   serviceId: z.number(),
-  durationMinutes: z.number().min(15).multipleOf(15),
+  durationMinutes: z.number().min(15, "Mindestens 15 Minuten").multipleOf(15),
 });
 
 export type AppointmentServiceEntry = z.infer<typeof appointmentServiceEntrySchema>;
@@ -95,7 +95,7 @@ export const insertKundenterminSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat (YYYY-MM-DD erwartet)"),
   scheduledStart: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Ungültiges Zeitformat (HH:MM erwartet)"),
   services: z.array(appointmentServiceEntrySchema).min(1, "Mindestens ein Service muss ausgewählt werden"),
-  notes: z.string().max(255).optional(),
+  notes: z.string().max(255, "Maximal 255 Zeichen").optional(),
   assignedEmployeeId: z.number().nullable().optional(),
 });
 
@@ -104,8 +104,8 @@ export const insertErstberatungSchema = z.object({
   customer: insertErstberatungCustomerSchema,
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat (YYYY-MM-DD erwartet)"),
   scheduledStart: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Ungültiges Zeitformat (HH:MM erwartet)"),
-  erstberatungDauer: z.number().min(15).multipleOf(15),
-  notes: z.string().max(255).optional(),
+  erstberatungDauer: z.number().min(15, "Mindestens 15 Minuten").multipleOf(15),
+  notes: z.string().max(255, "Maximal 255 Zeichen").optional(),
   assignedEmployeeId: z.number().nullable().optional(), // Admin can assign employee
 });
 
@@ -113,7 +113,7 @@ export const updateAppointmentSchema = baseAppointmentSchema.partial();
 
 export const documentServiceEntrySchema = z.object({
   serviceId: z.number(),
-  actualDurationMinutes: z.number().min(1).max(1440),
+  actualDurationMinutes: z.number().min(1, "Mindestens 1 Minute").max(1440, "Maximal 1440 Minuten"),
   details: z.string().min(1, "Servicedetails sind erforderlich").max(120, "Maximal 120 Zeichen"),
 });
 
@@ -126,9 +126,9 @@ export const documentAppointmentSchema = z.object({
   travelOriginType: z.enum(["home", "appointment"]),
   travelFromAppointmentId: z.number().nullable().optional(),
   travelKilometers: z.number().min(0, "Kilometer müssen positiv sein").max(500, "Maximal 500 km Anfahrt"),
-  travelMinutes: z.number().min(0).max(480, "Maximal 8 Stunden Fahrzeit").nullable().optional(),
-  customerKilometers: z.number().min(0).max(500, "Maximal 500 km Kundenkilometer").nullable().optional(),
-  notes: z.string().max(255).nullable().optional(),
+  travelMinutes: z.number().min(0, "Fahrzeit darf nicht negativ sein").max(480, "Maximal 8 Stunden Fahrzeit").nullable().optional(),
+  customerKilometers: z.number().min(0, "Kilometer dürfen nicht negativ sein").max(500, "Maximal 500 km Kundenkilometer").nullable().optional(),
+  notes: z.string().max(255, "Maximal 255 Zeichen").nullable().optional(),
   services: z.array(documentServiceEntrySchema).min(1, "Mindestens ein Service muss dokumentiert werden"),
 }).refine(
   (data) => {

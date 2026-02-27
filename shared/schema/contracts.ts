@@ -78,14 +78,14 @@ export const insertCustomerContractSchema = z.object({
   contractDate: z.string().optional().nullable(),
   contractStart: z.string(),
   contractEnd: z.string().optional().nullable(),
-  vereinbarteLeistungen: z.string().max(2000).optional().nullable(),
-  hoursPerPeriod: z.number().min(0).optional().default(0),
+  vereinbarteLeistungen: z.string().max(2000, "Maximal 2000 Zeichen").optional().nullable(),
+  hoursPerPeriod: z.number().min(0, "Stunden dürfen nicht negativ sein").optional().default(0),
   periodType: z.enum(CONTRACT_PERIOD_TYPES).optional().default("month"),
-  hauswirtschaftRateCents: z.number().min(0).optional().default(0),
-  alltagsbegleitungRateCents: z.number().min(0).optional().default(0),
-  kilometerRateCents: z.number().min(0).optional().default(0),
+  hauswirtschaftRateCents: z.number().min(0, "Betrag darf nicht negativ sein").optional().default(0),
+  alltagsbegleitungRateCents: z.number().min(0, "Betrag darf nicht negativ sein").optional().default(0),
+  kilometerRateCents: z.number().min(0, "Betrag darf nicht negativ sein").optional().default(0),
   status: z.enum(CONTRACT_STATUS).optional().default("active"),
-  notes: z.string().max(500).optional().nullable(),
+  notes: z.string().max(500, "Maximal 500 Zeichen").optional().nullable(),
 });
 
 export type CustomerContract = typeof customerContracts.$inferSelect;
@@ -94,7 +94,7 @@ export type InsertCustomerContract = z.infer<typeof insertCustomerContractSchema
 // Service Rate schemas
 export const insertServiceRateSchema = z.object({
   serviceCategory: z.enum(SERVICE_CATEGORIES),
-  hourlyRateCents: z.number().min(0), // Rate in cents
+  hourlyRateCents: z.number().min(0, "Betrag darf nicht negativ sein"), // Rate in cents
   validFrom: z.string(),
   validTo: z.string().optional().nullable(),
 });
@@ -106,7 +106,7 @@ export type InsertServiceRate = z.infer<typeof insertServiceRateSchema>;
 export const insertContractRateSchema = z.object({
   contractId: z.number(),
   serviceCategory: z.enum(SERVICE_CATEGORIES),
-  hourlyRateCents: z.number().min(0),
+  hourlyRateCents: z.number().min(0, "Betrag darf nicht negativ sein"),
   validFrom: z.string(),
   validTo: z.string().optional().nullable(),
 });

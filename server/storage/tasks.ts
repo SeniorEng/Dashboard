@@ -1,7 +1,7 @@
 import { tasks, users, customers, Task, InsertTask, UpdateTask } from "@shared/schema";
 import { eq, and, desc, asc, ne, sql as sqlBuilder, inArray, count, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 
 const creatorUsers = alias(users, "creator_users");
 const assigneeUsers = alias(users, "assignee_users");
@@ -240,7 +240,7 @@ export async function findMonthClosingTask(
   userId: number,
   month: number,
   year: number,
-  txOrDb: typeof db = db
+  txOrDb: DbOrTx = db
 ): Promise<Task | null> {
   const title = getMonthClosingTaskTitle(month, year);
   const result = await txOrDb
@@ -261,7 +261,7 @@ export async function ensureMonthClosingTask(
   userId: number,
   month: number,
   year: number,
-  txOrDb: typeof db = db
+  txOrDb: DbOrTx = db
 ): Promise<Task> {
   const existing = await findMonthClosingTask(userId, month, year, txOrDb);
   if (existing) return existing;
@@ -291,7 +291,7 @@ export async function completeMonthClosingTask(
   userId: number,
   month: number,
   year: number,
-  txOrDb: typeof db = db
+  txOrDb: DbOrTx = db
 ): Promise<void> {
   const existing = await findMonthClosingTask(userId, month, year, txOrDb);
   if (existing && existing.status !== "completed") {

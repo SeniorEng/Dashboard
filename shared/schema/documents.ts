@@ -163,10 +163,10 @@ export const TEMPLATE_TARGET_TYPE_LABELS: Record<TemplateTargetType, string> = {
 };
 
 export const insertDocumentTemplateSchema = z.object({
-  slug: z.string().min(1).max(100),
-  name: z.string().min(1).max(200),
-  description: z.string().max(1000).nullable().optional(),
-  htmlContent: z.string().min(1).max(500000),
+  slug: z.string().min(1, "Slug ist erforderlich").max(100, "Maximal 100 Zeichen"),
+  name: z.string().min(1, "Name ist erforderlich").max(200, "Maximal 200 Zeichen"),
+  description: z.string().max(1000, "Maximal 1000 Zeichen").nullable().optional(),
+  htmlContent: z.string().min(1, "HTML-Inhalt ist erforderlich").max(500000, "Maximal 500000 Zeichen"),
   isSystem: z.boolean().default(false),
   isActive: z.boolean().default(true),
   documentTypeId: z.number().int().nullable().optional(),
@@ -177,9 +177,9 @@ export const insertDocumentTemplateSchema = z.object({
 });
 
 export const updateDocumentTemplateSchema = z.object({
-  name: z.string().min(1).max(200).optional(),
-  description: z.string().max(1000).nullable().optional(),
-  htmlContent: z.string().min(1).max(500000).optional(),
+  name: z.string().min(1, "Name ist erforderlich").max(200, "Maximal 200 Zeichen").optional(),
+  description: z.string().max(1000, "Maximal 1000 Zeichen").nullable().optional(),
+  htmlContent: z.string().min(1, "HTML-Inhalt ist erforderlich").max(500000, "Maximal 500000 Zeichen").optional(),
   isActive: z.boolean().optional(),
   documentTypeId: z.number().int().nullable().optional(),
   context: z.enum(TEMPLATE_CONTEXTS).optional(),
@@ -194,8 +194,8 @@ export const insertGeneratedDocumentSchema = z.object({
   templateId: z.number().int(),
   templateVersion: z.number().int(),
   documentTypeId: z.number().int().nullable().optional(),
-  fileName: z.string().min(1),
-  objectPath: z.string().min(1),
+  fileName: z.string().min(1, "Dateiname ist erforderlich"),
+  objectPath: z.string().min(1, "Dateipfad ist erforderlich"),
   renderedHtml: z.string().nullable().optional(),
   customerSignatureData: z.string().nullable().optional(),
   employeeSignatureData: z.string().nullable().optional(),
@@ -214,12 +214,12 @@ export type InsertGeneratedDocument = z.infer<typeof insertGeneratedDocumentSche
 export type DocumentSigningToken = typeof documentSigningTokens.$inferSelect;
 
 export const insertDocumentTypeSchema = z.object({
-  name: z.string().min(1, "Name ist erforderlich").max(100),
-  description: z.string().max(500).nullable().optional(),
+  name: z.string().min(1, "Name ist erforderlich").max(100, "Maximal 100 Zeichen"),
+  description: z.string().max(500, "Maximal 500 Zeichen").nullable().optional(),
   targetType: z.enum(["employee", "customer"]).default("employee"),
   context: z.enum(DOCUMENT_TYPE_CONTEXTS).default("beide"),
-  reviewIntervalMonths: z.number().int().min(1).nullable().optional(),
-  reminderLeadTimeDays: z.number().int().min(1).max(365).default(14),
+  reviewIntervalMonths: z.number().int().min(1, "Prüfintervall muss mindestens 1 Monat sein").nullable().optional(),
+  reminderLeadTimeDays: z.number().int().min(1, "Vorlaufzeit muss mindestens 1 Tag sein").max(365, "Vorlaufzeit darf maximal 365 Tage sein").default(14),
   isActive: z.boolean().default(true),
 });
 
@@ -228,17 +228,17 @@ export const updateDocumentTypeSchema = insertDocumentTypeSchema.partial();
 export const insertEmployeeDocumentSchema = z.object({
   employeeId: z.number().int(),
   documentTypeId: z.number().int(),
-  fileName: z.string().min(1),
-  objectPath: z.string().min(1),
-  notes: z.string().max(500).nullable().optional(),
+  fileName: z.string().min(1, "Dateiname ist erforderlich"),
+  objectPath: z.string().min(1, "Dateipfad ist erforderlich"),
+  notes: z.string().max(500, "Maximal 500 Zeichen").nullable().optional(),
 });
 
 export const insertCustomerDocumentSchema = z.object({
   customerId: z.number().int(),
   documentTypeId: z.number().int(),
-  fileName: z.string().min(1),
-  objectPath: z.string().min(1),
-  notes: z.string().max(500).nullable().optional(),
+  fileName: z.string().min(1, "Dateiname ist erforderlich"),
+  objectPath: z.string().min(1, "Dateipfad ist erforderlich"),
+  notes: z.string().max(500, "Maximal 500 Zeichen").nullable().optional(),
 });
 
 export type DocumentType = typeof documentTypes.$inferSelect;

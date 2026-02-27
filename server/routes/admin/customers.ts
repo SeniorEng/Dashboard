@@ -1407,7 +1407,7 @@ router.post("/customers/:id/merge-erstberatung", asyncHandler("Erstberatung konn
     newStatus: "inaktiv",
   });
 
-  birthdaysCache.clear();
+  birthdaysCache.invalidateAll();
 
   res.json(updated);
 }));

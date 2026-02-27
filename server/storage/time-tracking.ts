@@ -17,7 +17,7 @@ import { getVacationEntitlement, calculateCarryOverDays } from "@shared/domain/v
 import { appointmentServices as appointmentServicesTable } from "@shared/schema/appointments";
 import { services as servicesTable } from "@shared/schema/services";
 import { todayISO, formatDateISO } from "@shared/utils/datetime";
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 
 export interface TimeEntryFilters {
   year?: number;
@@ -834,7 +834,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       );
   }
 
-  async closeMonth(userId: number, year: number, month: number, closedByUserId: number, existingId?: number, txOrDb: typeof db = db) {
+  async closeMonth(userId: number, year: number, month: number, closedByUserId: number, existingId?: number, txOrDb: DbOrTx = db) {
     if (existingId) {
       await txOrDb
         .update(employeeMonthClosings)

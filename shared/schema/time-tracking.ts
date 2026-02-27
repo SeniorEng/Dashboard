@@ -67,17 +67,17 @@ export const insertTimeEntrySchema = z.object({
   endTime: z.string().optional().nullable(),
   isFullDay: z.boolean().optional().default(false),
   durationMinutes: z.number().optional().nullable(),
-  notes: z.string().max(500).optional().nullable(),
+  notes: z.string().max(500, "Maximal 500 Zeichen").optional().nullable(),
 });
 
 export const updateTimeEntrySchema = insertTimeEntrySchema.partial();
 
 export const insertVacationAllowanceSchema = z.object({
   userId: z.number(),
-  year: z.number().min(2020).max(2100),
-  totalDays: z.number().min(0).max(365).default(30),
-  carryOverDays: z.number().min(0).max(365).default(0),
-  notes: z.string().max(500).optional().nullable(),
+  year: z.number().min(2020, "Jahr muss zwischen 2020 und 2100 liegen").max(2100, "Jahr muss zwischen 2020 und 2100 liegen"),
+  totalDays: z.number().min(0, "Urlaubstage dürfen nicht negativ sein").max(365, "Maximal 365 Tage").default(30),
+  carryOverDays: z.number().min(0, "Übertragstage dürfen nicht negativ sein").max(365, "Maximal 365 Tage").default(0),
+  notes: z.string().max(500, "Maximal 500 Zeichen").optional().nullable(),
 });
 
 export type EmployeeTimeEntry = typeof employeeTimeEntries.$inferSelect;

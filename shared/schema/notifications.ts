@@ -16,6 +16,7 @@ export const NOTIFICATION_REFERENCE_TYPES = [
   "customer",
   "appointment",
   "task",
+  "employee",
 ] as const;
 export type NotificationReferenceType = typeof NOTIFICATION_REFERENCE_TYPES[number];
 
@@ -38,8 +39,8 @@ export const notifications = pgTable("notifications", {
 export const insertNotificationSchema = z.object({
   userId: z.number(),
   type: z.enum(NOTIFICATION_TYPES),
-  title: z.string().min(1).max(200),
-  message: z.string().min(1).max(1000),
+  title: z.string().min(1, "Titel ist erforderlich").max(200, "Maximal 200 Zeichen"),
+  message: z.string().min(1, "Nachricht ist erforderlich").max(1000, "Maximal 1000 Zeichen"),
   referenceId: z.number().optional(),
   referenceType: z.enum(NOTIFICATION_REFERENCE_TYPES).optional(),
 });

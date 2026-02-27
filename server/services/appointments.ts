@@ -317,6 +317,7 @@ export class AppointmentService {
       nachname: string;
       telefon: string;
       email?: string | null;
+      status: string;
       address: string;
       strasse: string;
       nr: string;

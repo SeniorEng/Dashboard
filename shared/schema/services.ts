@@ -61,17 +61,17 @@ export type CustomerServicePrice = typeof customerServicePrices.$inferSelect;
 export type InsertCustomerServicePrice = z.infer<typeof insertCustomerServicePriceSchema>;
 
 export const insertServiceSchema = z.object({
-  code: z.string().max(50).nullable().optional(),
-  name: z.string().min(1, "Name ist erforderlich").max(100),
-  description: z.string().max(250).nullable().optional(),
+  code: z.string().max(50, "Maximal 50 Zeichen").nullable().optional(),
+  name: z.string().min(1, "Name ist erforderlich").max(100, "Maximal 100 Zeichen"),
+  description: z.string().max(250, "Maximal 250 Zeichen").nullable().optional(),
   unitType: z.enum(SERVICE_UNIT_TYPES),
   defaultPriceCents: z.number().int().min(0, "Preis muss positiv sein"),
-  vatRate: z.number().int().min(0).max(100).default(19),
-  minDurationMinutes: z.number().int().min(1).nullable().optional(),
+  vatRate: z.number().int().min(0, "MwSt-Satz darf nicht negativ sein").max(100, "MwSt-Satz darf maximal 100% sein").default(19),
+  minDurationMinutes: z.number().int().min(1, "Mindestdauer muss mindestens 1 Minute sein").nullable().optional(),
   isActive: z.boolean().default(true),
   isDefault: z.boolean().default(false),
   isBillable: z.boolean().default(true),
-  employeeRateCents: z.number().int().min(0).default(0),
+  employeeRateCents: z.number().int().min(0, "Betrag darf nicht negativ sein").default(0),
   lohnartKategorie: z.enum(["alltagsbegleitung", "hauswirtschaft"]).default("hauswirtschaft"),
   sortOrder: z.number().int().default(0),
   budgetPots: z.array(z.enum(["entlastungsbetrag_45b", "umwandlung_45a", "ersatzpflege_39_42a"])).default([]),

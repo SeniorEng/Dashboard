@@ -78,8 +78,8 @@ export const employeeDocumentProofs = pgTable("employee_document_proofs", {
 ]);
 
 export const insertQualificationSchema = z.object({
-  name: z.string().min(1, "Name ist erforderlich").max(100),
-  description: z.string().max(500).nullable().optional(),
+  name: z.string().min(1, "Name ist erforderlich").max(100, "Maximal 100 Zeichen"),
+  description: z.string().max(500, "Maximal 500 Zeichen").nullable().optional(),
   isActive: z.boolean().default(true),
 });
 

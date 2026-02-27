@@ -4,6 +4,7 @@ import { asyncHandler } from "../lib/errors";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { insertTimeEntrySchema, updateTimeEntrySchema } from "@shared/schema";
 import { storage } from "../storage";
+import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
 import { timeToMinutes, isWeekend, parseLocalDate, isPast, formatDateISO } from "@shared/utils/datetime";
 import { getEntryTypeLabel, formatTimeShort, timeRangesOverlap, getAppointmentEndMinutes } from "@shared/domain/time-entries";
@@ -278,7 +279,7 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
   const isAdminActingForOther = req.user!.isAdmin && parsedTargetUserId != null && Number.isInteger(parsedTargetUserId) && parsedTargetUserId !== req.user!.id;
   
   if (isAdminActingForOther) {
-    const targetUser = await storage.getUser(parsedTargetUserId);
+    const targetUser = await authService.getUser(parsedTargetUserId);
     if (!targetUser) {
       return res.status(400).json({ error: "Mitarbeiter nicht gefunden" });
     }

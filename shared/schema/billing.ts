@@ -88,8 +88,8 @@ export const invoiceLineItems = pgTable("invoice_line_items", {
 
 export const createInvoiceSchema = z.object({
   customerId: z.number().int().positive(),
-  billingMonth: z.number().int().min(1).max(12),
-  billingYear: z.number().int().min(2020).max(2100),
+  billingMonth: z.number().int().min(1, "Monat muss zwischen 1 und 12 liegen").max(12, "Monat muss zwischen 1 und 12 liegen"),
+  billingYear: z.number().int().min(2020, "Jahr muss zwischen 2020 und 2100 liegen").max(2100, "Jahr muss zwischen 2020 und 2100 liegen"),
 });
 
 export const updateInvoiceStatusSchema = z.object({

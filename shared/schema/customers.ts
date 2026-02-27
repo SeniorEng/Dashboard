@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, date, boolean, index } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, date, boolean, index, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { timestamp, germanPhoneTransformSchema, optionalGermanPhoneSchema } from "./common";
@@ -47,7 +47,7 @@ export const customers = pgTable("customers", {
   documentDeliveryMethod: text("document_delivery_method").notNull().default("email"),
   deactivationReason: text("deactivation_reason"),
   deactivationNote: text("deactivation_note"),
-  mergedIntoCustomerId: integer("merged_into_customer_id").references(() => customers.id),
+  mergedIntoCustomerId: integer("merged_into_customer_id").references((): AnyPgColumn => customers.id),
   // Audit fields
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -218,7 +218,7 @@ export const insertErstberatungCustomerSchema = z.object({
   nr: z.string().min(1, "Hausnummer ist erforderlich"),
   plz: z.string().regex(/^\d{5}$/, "PLZ muss 5 Ziffern haben"),
   stadt: z.string().min(1, "Stadt ist erforderlich"),
-  pflegegrad: z.number().min(1).max(5).optional().nullable(),
+  pflegegrad: z.number().min(1, "Pflegegrad muss zwischen 1 und 5 liegen").max(5, "Pflegegrad muss zwischen 1 und 5 liegen").optional().nullable(),
   billingType: z.enum(["pflegekasse_gesetzlich", "pflegekasse_privat", "selbstzahler"]).default("pflegekasse_gesetzlich"),
 });
 
@@ -235,7 +235,7 @@ export const insertCustomerContactSchema = z.object({
   nachname: z.string().min(1, "Nachname ist erforderlich"),
   telefon: germanPhoneTransformSchema,
   email: z.string().email("Ungültige E-Mail-Adresse").optional().nullable(),
-  notes: z.string().max(255).optional().nullable(),
+  notes: z.string().max(255, "Maximal 255 Zeichen").optional().nullable(),
   sortOrder: z.number().optional().default(0),
 });
 
@@ -245,11 +245,11 @@ export type InsertCustomerContact = z.infer<typeof insertCustomerContactSchema>;
 // Care Level History schemas
 export const insertCareLevelHistorySchema = z.object({
   customerId: z.number(),
-  pflegegrad: z.number().min(1).max(5),
-  pflegegradBeantragt: z.number().min(1).max(5).optional().nullable(),
+  pflegegrad: z.number().min(1, "Pflegegrad muss zwischen 1 und 5 liegen").max(5, "Pflegegrad muss zwischen 1 und 5 liegen"),
+  pflegegradBeantragt: z.number().min(1, "Pflegegrad muss zwischen 1 und 5 liegen").max(5, "Pflegegrad muss zwischen 1 und 5 liegen").optional().nullable(),
   validFrom: z.string(), // Date string
   validTo: z.string().optional().nullable(),
-  notes: z.string().max(500).optional().nullable(),
+  notes: z.string().max(500, "Maximal 500 Zeichen").optional().nullable(),
 });
 
 export type CustomerCareLevelHistory = typeof customerCareLevelHistory.$inferSelect;
@@ -259,9 +259,9 @@ export type InsertCareLevelHistory = z.infer<typeof insertCareLevelHistorySchema
 export const insertNeedsAssessmentSchema = z.object({
   customerId: z.number(),
   assessmentDate: z.string(),
-  householdSize: z.number().min(1).default(1),
+  householdSize: z.number().min(1, "Haushaltsgröße muss mindestens 1 sein").default(1),
   pflegedienstBeauftragt: z.boolean().default(false),
-  anamnese: z.string().max(2000).optional().nullable(),
+  anamnese: z.string().max(2000, "Maximal 2000 Zeichen").optional().nullable(),
   // Haushaltsnahe Dienstleistungen
   serviceHaushaltHilfe: z.boolean().optional().default(false),
   serviceMahlzeiten: z.boolean().optional().default(false),
@@ -282,7 +282,7 @@ export const insertNeedsAssessmentSchema = z.object({
   serviceFreizeitgestaltung: z.boolean().optional().default(false),
   serviceKreativ: z.boolean().optional().default(false),
   // Other
-  sonstigeLeistungen: z.string().max(250).optional().nullable(),
+  sonstigeLeistungen: z.string().max(250, "Maximal 250 Zeichen").optional().nullable(),
 });
 
 export type CustomerNeedsAssessment = typeof customerNeedsAssessments.$inferSelect;
@@ -291,9 +291,9 @@ export type InsertNeedsAssessment = z.infer<typeof insertNeedsAssessmentSchema>;
 // Customer Pricing schemas
 export const insertCustomerPricingSchema = z.object({
   customerId: z.number(),
-  hauswirtschaftRateCents: z.number().min(0).nullable().optional(),
-  alltagsbegleitungRateCents: z.number().min(0).nullable().optional(),
-  kilometerRateCents: z.number().min(0).nullable().optional(),
+  hauswirtschaftRateCents: z.number().min(0, "Betrag darf nicht negativ sein").nullable().optional(),
+  alltagsbegleitungRateCents: z.number().min(0, "Betrag darf nicht negativ sein").nullable().optional(),
+  kilometerRateCents: z.number().min(0, "Betrag darf nicht negativ sein").nullable().optional(),
   validFrom: z.string(), // ISO date string
 });
 

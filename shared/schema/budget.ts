@@ -141,12 +141,12 @@ export const customerBudgetTypeSettings = pgTable("customer_budget_type_settings
 // Budget schemas
 export const insertCustomerBudgetSchema = z.object({
   customerId: z.number(),
-  entlastungsbetrag45b: z.number().min(0).max(BUDGET_45B_MAX_MONTHLY_CENTS).default(0),
-  verhinderungspflege39: z.number().min(0).max(BUDGET_39_42A_MAX_YEARLY_CENTS).default(0),
-  pflegesachleistungen36: z.number().min(0).default(0), // Max depends on Pflegegrad, validated in route
+  entlastungsbetrag45b: z.number().min(0, "Wert darf nicht negativ sein").max(BUDGET_45B_MAX_MONTHLY_CENTS, "Maximaler Entlastungsbetrag überschritten").default(0),
+  verhinderungspflege39: z.number().min(0, "Wert darf nicht negativ sein").max(BUDGET_39_42A_MAX_YEARLY_CENTS, "Maximaler Verhinderungspflege-Betrag überschritten").default(0),
+  pflegesachleistungen36: z.number().min(0, "Wert darf nicht negativ sein").default(0), // Max depends on Pflegegrad, validated in route
   validFrom: z.string(),
   validTo: z.string().optional().nullable(),
-  notes: z.string().max(500).optional().nullable(),
+  notes: z.string().max(500, "Maximal 500 Zeichen").optional().nullable(),
 });
 
 export type CustomerBudget = typeof customerBudgets.$inferSelect;
@@ -156,13 +156,13 @@ export type InsertCustomerBudget = z.infer<typeof insertCustomerBudgetSchema>;
 export const insertBudgetAllocationSchema = z.object({
   customerId: z.number(),
   budgetType: z.string().default("entlastungsbetrag_45b"),
-  year: z.number().min(2020).max(2100),
-  month: z.number().min(1).max(12).nullable().optional(),
-  amountCents: z.number().min(0),
+  year: z.number().min(2020, "Jahr muss zwischen 2020 und 2100 liegen").max(2100, "Jahr muss zwischen 2020 und 2100 liegen"),
+  month: z.number().min(1, "Monat muss zwischen 1 und 12 liegen").max(12, "Monat muss zwischen 1 und 12 liegen").nullable().optional(),
+  amountCents: z.number().min(0, "Betrag darf nicht negativ sein"),
   source: z.enum(BUDGET_ALLOCATION_SOURCES),
   validFrom: z.string(),
   expiresAt: z.string().nullable().optional(),
-  notes: z.string().max(500).nullable().optional(),
+  notes: z.string().max(500, "Maximal 500 Zeichen").nullable().optional(),
 });
 
 export type BudgetAllocation = typeof budgetAllocations.$inferSelect;
@@ -185,7 +185,7 @@ export const insertBudgetTransactionSchema = z.object({
   customerKilometersCents: z.number().nullable().optional(),
   appointmentId: z.number().nullable().optional(),
   allocationId: z.number().nullable().optional(),
-  notes: z.string().max(500).nullable().optional(),
+  notes: z.string().max(500, "Maximal 500 Zeichen").nullable().optional(),
 });
 
 export type BudgetTransaction = typeof budgetTransactions.$inferSelect;
@@ -194,9 +194,9 @@ export type InsertBudgetTransaction = z.infer<typeof insertBudgetTransactionSche
 // Customer Budget Preferences schemas
 export const insertBudgetPreferencesSchema = z.object({
   customerId: z.number(),
-  monthlyLimitCents: z.number().min(0).nullable().optional(),
+  monthlyLimitCents: z.number().min(0, "Wert darf nicht negativ sein").nullable().optional(),
   budgetStartDate: z.string().nullable().optional(),
-  notes: z.string().max(500).nullable().optional(),
+  notes: z.string().max(500, "Maximal 500 Zeichen").nullable().optional(),
 });
 
 export const updateBudgetPreferencesSchema = insertBudgetPreferencesSchema.partial().omit({ customerId: true });
@@ -209,8 +209,8 @@ export const insertBudgetTypeSettingsSchema = createInsertSchema(customerBudgetT
   id: true,
 }).extend({
   budgetType: z.enum(["entlastungsbetrag_45b", "umwandlung_45a", "ersatzpflege_39_42a"]),
-  priority: z.number().min(1).max(3),
-  monthlyLimitCents: z.number().min(0).nullable().optional(),
+  priority: z.number().min(1, "Priorität muss zwischen 1 und 3 liegen").max(3, "Priorität muss zwischen 1 und 3 liegen"),
+  monthlyLimitCents: z.number().min(0, "Wert darf nicht negativ sein").nullable().optional(),
 });
 
 export type CustomerBudgetTypeSetting = typeof customerBudgetTypeSettings.$inferSelect;

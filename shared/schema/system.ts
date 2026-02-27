@@ -45,15 +45,15 @@ export const employeeMonthClosings = pgTable("employee_month_closings", {
 export type EmployeeMonthClosing = typeof employeeMonthClosings.$inferSelect;
 
 export const closeMonthSchema = z.object({
-  year: z.number().min(2020).max(2100),
-  month: z.number().min(1).max(12),
+  year: z.number().min(2020, "Jahr muss zwischen 2020 und 2100 liegen").max(2100, "Jahr muss zwischen 2020 und 2100 liegen"),
+  month: z.number().min(1, "Monat muss zwischen 1 und 12 liegen").max(12, "Monat muss zwischen 1 und 12 liegen"),
 });
 
 export type CloseMonthInput = z.infer<typeof closeMonthSchema>;
 
 export const reopenMonthSchema = z.object({
-  year: z.number().min(2020).max(2100),
-  month: z.number().min(1).max(12),
+  year: z.number().min(2020, "Jahr muss zwischen 2020 und 2100 liegen").max(2100, "Jahr muss zwischen 2020 und 2100 liegen"),
+  month: z.number().min(1, "Monat muss zwischen 1 und 12 liegen").max(12, "Monat muss zwischen 1 und 12 liegen"),
   userId: z.number().int().positive(),
 });
 

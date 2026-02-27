@@ -12,3 +12,5 @@ export const pool = new Pool({
 });
 
 export const db = drizzle(pool);
+
+export type DbOrTx = Pick<typeof db, "select" | "insert" | "update" | "delete">;
