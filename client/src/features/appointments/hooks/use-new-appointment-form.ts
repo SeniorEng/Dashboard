@@ -253,7 +253,7 @@ export function useNewAppointmentForm() {
       value: c.id.toString(),
       label: c.name,
       sublabel: c.address,
-    }));
+    })).sort((a, b) => a.label.localeCompare(b.label, "de"));
   }, [customers, isAdmin]);
 
   const selectedCustomer = useMemo(() => {
@@ -288,13 +288,14 @@ export function useNewAppointmentForm() {
           .map((e) => ({
             value: e.id.toString(),
             label: e.displayName + (e.id === selectedCustomer.primaryEmployeeId ? " (Haupt)" : " (Vertretung)"),
-          }));
+          }))
+          .sort((a, b) => a.label.localeCompare(b.label, "de"));
       }
     }
     return active.map((e) => ({
       value: e.id.toString(),
       label: e.displayName,
-    }));
+    })).sort((a, b) => a.label.localeCompare(b.label, "de"));
   }, [employees, selectedCustomer]);
 
   const ebEmployeeOptions = useMemo(() => {
@@ -303,7 +304,8 @@ export function useNewAppointmentForm() {
       .map((e) => ({
         value: e.id.toString(),
         label: e.displayName,
-      }));
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, "de"));
   }, [employees]);
 
   const isPending = createKundenterminMutation.isPending || createErstberatungMutation.isPending;

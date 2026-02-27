@@ -63,8 +63,8 @@ interface DocTypeFormData {
 
 const CONTEXT_OPTIONS = [
   { value: "beide", label: "Immer verfügbar" },
-  { value: "vertragsabschluss", label: "Nur bei Vertragsabschluss" },
   { value: "bestandskunde", label: "Nur bei Bestandskunden" },
+  { value: "vertragsabschluss", label: "Nur bei Vertragsabschluss" },
 ];
 
 const emptyForm: DocTypeFormData = {

@@ -144,7 +144,7 @@ export function CustomerInsuranceTab({ customerId, currentInsurance }: CustomerI
   const providerOptions = (providers || []).map((p) => ({
     value: p.id.toString(),
     label: `${p.name} (IK: ${p.ikNummer})`,
-  }));
+  })).sort((a, b) => a.label.localeCompare(b.label, "de"));
 
   return (
     <>

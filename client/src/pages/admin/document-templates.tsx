@@ -693,7 +693,7 @@ export function DocumentTemplatesContent() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Keine Zuordnung</SelectItem>
-                      {documentTypes?.map((dt) => (
+                      {[...(documentTypes || [])].sort((a, b) => a.name.localeCompare(b.name, "de")).map((dt) => (
                         <SelectItem key={dt.id} value={dt.id.toString()}>{dt.name}</SelectItem>
                       ))}
                     </SelectContent>

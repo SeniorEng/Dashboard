@@ -73,7 +73,7 @@ export default function AdminTimeEntries() {
     ...(employees?.map((emp) => ({
       value: emp.id.toString(),
       label: emp.displayName,
-    })) || []),
+    })).sort((a, b) => a.label.localeCompare(b.label, "de")) || []),
   ], [employees]);
 
   const { data: entries, isLoading } = useQuery({

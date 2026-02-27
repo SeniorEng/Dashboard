@@ -25,7 +25,7 @@ export const BILLING_TYPE_SHORT_LABELS: Record<BillingType, string> = {
 export const BILLING_TYPE_SELECT_OPTIONS = BILLING_TYPES.map((v) => ({
   value: v,
   label: BILLING_TYPE_LABELS[v],
-}));
+})).sort((a, b) => a.label.localeCompare(b.label, "de"));
 
 export const BILLING_TYPE_DESCRIPTIONS: Record<BillingType, string> = {
   pflegekasse_gesetzlich: "Abrechnung über gesetzliche Pflegekasse inkl. Forderungsabtretung",
@@ -86,7 +86,7 @@ export const DEACTIVATION_REASON_LABELS: Record<DeactivationReason, string> = {
 export const DEACTIVATION_REASON_SELECT_OPTIONS = DEACTIVATION_REASONS.map((v) => ({
   value: v,
   label: DEACTIVATION_REASON_LABELS[v],
-}));
+})).sort((a, b) => a.label.localeCompare(b.label, "de"));
 
 export const PFLEGEGRAD_VALUES = [1, 2, 3, 4, 5] as const;
 
@@ -107,4 +107,4 @@ export const CONTACT_TYPE_LABELS: Record<string, string> = {
 export const CONTACT_TYPE_SELECT_OPTIONS = CONTACT_TYPE_VALUES.map((v) => ({
   value: v,
   label: CONTACT_TYPE_LABELS[v] ?? v,
-}));
+})).sort((a, b) => a.label.localeCompare(b.label, "de"));

@@ -167,11 +167,11 @@ export default function CustomerConvertPage() {
   const { data: insuranceProviders } = useInsuranceProviders();
 
   const insuranceOptions = useMemo(() =>
-    insuranceProviders?.map((p) => ({
+    (insuranceProviders?.map((p) => ({
       value: p.id.toString(),
       label: p.name,
       sublabel: `IK: ${p.ikNummer}`,
-    })) || [],
+    })) || []).sort((a, b) => a.label.localeCompare(b.label, "de")),
     [insuranceProviders]
   );
 

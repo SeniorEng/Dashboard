@@ -307,7 +307,7 @@ export function DigitalDocumentFlow({
                       <SelectValue placeholder="Vorlage auswählen..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {templates.map(t => (
+                      {[...templates].sort((a, b) => a.name.localeCompare(b.name, "de")).map(t => (
                         <SelectItem key={t.id} value={t.id.toString()}>
                           {t.name}
                         </SelectItem>

@@ -12,7 +12,7 @@ export function PerformedBySelector({ value, onChange }: PerformedBySelectorProp
   const options = employees.map(e => ({
     value: String(e.id),
     label: e.displayName,
-  }));
+  })).sort((a, b) => a.label.localeCompare(b.label, "de"));
 
   return (
     <SearchableSelect

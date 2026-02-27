@@ -194,11 +194,11 @@ export default function AdminCustomerNew() {
   const createMutation = useCreateCustomer();
 
   const insuranceOptions = useMemo(() =>
-    insuranceProviders?.map((p) => ({
+    (insuranceProviders?.map((p) => ({
       value: p.id.toString(),
       label: p.name,
       sublabel: `IK: ${p.ikNummer}`,
-    })) || [],
+    })) || []).sort((a, b) => a.label.localeCompare(b.label, "de")),
     [insuranceProviders]
   );
 
