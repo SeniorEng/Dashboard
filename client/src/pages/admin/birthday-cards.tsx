@@ -5,7 +5,7 @@ import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Loader2, Gift, Check, Cake } from "lucide-react";
+import { ArrowLeft, Loader2, Gift, Check } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useToast } from "@/hooks/use-toast";
@@ -255,10 +255,10 @@ export default function AdminBirthdayCards() {
                 data-testid={`card-${entry.type}-${entry.id}`}
               >
                 <CardContent className="p-4 flex items-center gap-4">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-                    entry.type === "customer" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
-                  }`}>
-                    <Cake className="w-5 h-5" />
+                  <div className="relative shrink-0">
+                    <span className={`block w-2.5 h-2.5 rounded-full ${
+                      entry.cardSent ? "bg-green-500" : entry.daysUntil <= 7 ? "bg-red-500" : "bg-orange-400"
+                    }`} />
                   </div>
 
                   <div className="flex-1 min-w-0">

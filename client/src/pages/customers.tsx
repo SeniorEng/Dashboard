@@ -75,7 +75,6 @@ export default function CustomersPage() {
   const { data: birthdays = [], isLoading: birthdaysLoading, error: birthdaysError, refetch: refetchBirthdays } = useQuery<BirthdayEntry[]>({
     queryKey: ["/api/birthdays"],
     staleTime: 5 * 60 * 1000,
-    enabled: activeTab === "geburtstage",
   });
 
   const filteredCustomers = useMemo(() => {
@@ -152,13 +151,16 @@ export default function CustomersPage() {
         </button>
         <button
           onClick={() => setActiveTab("geburtstage")}
-          className={`flex-1 px-3 py-1.5 text-sm font-medium rounded-md transition-all ${
+          className={`relative flex-1 px-3 py-1.5 text-sm font-medium rounded-md transition-all ${
             activeTab === "geburtstage" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
           }`}
           data-testid="tab-geburtstage"
         >
           <Cake className="w-3.5 h-3.5 text-pink-500 inline mr-1" />
           Geburtstage
+          {birthdays.length > 0 && (
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full" />
+          )}
         </button>
       </div>
 
