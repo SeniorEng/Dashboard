@@ -275,57 +275,19 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
     : sql``;
 
   const result = await db.execute(sql`
-    WITH service_prices AS (
-      SELECT id, code, default_price_cents, employee_rate_cents FROM services
-    ),
-    active_customer_prices AS (
+    WITH active_customer_prices AS (
       SELECT csp.customer_id, csp.service_id, csp.price_cents
       FROM customer_service_prices csp
       WHERE csp.valid_to IS NULL
     ),
-    appointment_calc AS (
+    filtered_appointments AS (
       SELECT
         a.id,
         a.customer_id,
         COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
-        a.service_type,
         a.duration_promised,
         COALESCE(a.travel_kilometers, 0) AS travel_km,
-        COALESCE(a.customer_kilometers, 0) AS customer_km,
-        CASE
-          WHEN a.service_type = 'hauswirtschaft' THEN COALESCE(
-            (SELECT acp.price_cents FROM active_customer_prices acp
-             JOIN service_prices sp ON sp.id = acp.service_id AND sp.code = 'hauswirtschaft'
-             WHERE acp.customer_id = a.customer_id),
-            (SELECT default_price_cents FROM service_prices WHERE code = 'hauswirtschaft')
-          )
-          WHEN a.service_type = 'alltagsbegleitung' THEN COALESCE(
-            (SELECT acp.price_cents FROM active_customer_prices acp
-             JOIN service_prices sp ON sp.id = acp.service_id AND sp.code = 'alltagsbegleitung'
-             WHERE acp.customer_id = a.customer_id),
-            (SELECT default_price_cents FROM service_prices WHERE code = 'alltagsbegleitung')
-          )
-          ELSE 0
-        END AS hourly_price,
-        CASE
-          WHEN a.service_type = 'hauswirtschaft' THEN (SELECT employee_rate_cents FROM service_prices WHERE code = 'hauswirtschaft')
-          WHEN a.service_type = 'alltagsbegleitung' THEN (SELECT employee_rate_cents FROM service_prices WHERE code = 'alltagsbegleitung')
-          ELSE 0
-        END AS hourly_cost,
-        COALESCE(
-          (SELECT acp.price_cents FROM active_customer_prices acp
-           JOIN service_prices sp ON sp.id = acp.service_id AND sp.code = 'travel_km'
-           WHERE acp.customer_id = a.customer_id),
-          (SELECT default_price_cents FROM service_prices WHERE code = 'travel_km')
-        ) AS km_price,
-        (SELECT employee_rate_cents FROM service_prices WHERE code = 'travel_km') AS km_cost,
-        COALESCE(
-          (SELECT acp.price_cents FROM active_customer_prices acp
-           JOIN service_prices sp ON sp.id = acp.service_id AND sp.code = 'customer_km'
-           WHERE acp.customer_id = a.customer_id),
-          (SELECT default_price_cents FROM service_prices WHERE code = 'customer_km')
-        ) AS ckm_price,
-        (SELECT employee_rate_cents FROM service_prices WHERE code = 'customer_km') AS ckm_cost
+        COALESCE(a.customer_kilometers, 0) AS customer_km
       FROM appointments a
       WHERE a.deleted_at IS NULL
         AND a.status IN ('completed', 'documented')
@@ -333,23 +295,65 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
         AND EXTRACT(YEAR FROM a.date::date) = ${year}
         ${monthFilter}
     ),
+    service_line_calc AS (
+      SELECT
+        fa.id AS appointment_id,
+        fa.employee_id,
+        fa.customer_id,
+        COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) AS duration_minutes,
+        COALESCE(acp.price_cents, s.default_price_cents) AS hourly_price,
+        s.employee_rate_cents AS hourly_cost
+      FROM filtered_appointments fa
+      JOIN appointment_services asvc ON asvc.appointment_id = fa.id
+      JOIN services s ON s.id = asvc.service_id
+      LEFT JOIN active_customer_prices acp ON acp.customer_id = fa.customer_id AND acp.service_id = s.id
+      WHERE s.unit_type = 'hours'
+    ),
+    service_totals AS (
+      SELECT
+        slc.appointment_id,
+        slc.employee_id,
+        slc.customer_id,
+        SUM(slc.duration_minutes)::int AS total_service_minutes,
+        SUM(ROUND(slc.duration_minutes / 60.0 * slc.hourly_price))::bigint AS revenue_service_cents,
+        SUM(ROUND(slc.duration_minutes / 60.0 * slc.hourly_cost))::bigint AS cost_service_cents
+      FROM service_line_calc slc
+      GROUP BY slc.appointment_id, slc.employee_id, slc.customer_id
+    ),
     per_appointment AS (
       SELECT
-        ac.*,
-        ROUND(ac.duration_promised / 60.0 * ac.hourly_price) AS revenue_service_cents,
-        ROUND(ac.duration_promised / 60.0 * ac.hourly_cost) AS cost_service_cents,
-        ROUND(ac.travel_km * ac.km_price) AS revenue_km_cents,
-        ROUND(ac.travel_km * ac.km_cost) AS cost_km_cents,
-        ROUND(ac.customer_km * ac.ckm_price) AS revenue_ckm_cents,
-        ROUND(ac.customer_km * ac.ckm_cost) AS cost_ckm_cents
-      FROM appointment_calc ac
+        fa.id,
+        fa.customer_id,
+        fa.employee_id,
+        fa.duration_promised,
+        fa.travel_km,
+        fa.customer_km,
+        COALESCE(st.total_service_minutes, fa.duration_promised) AS service_minutes,
+        COALESCE(st.revenue_service_cents, 0) AS revenue_service_cents,
+        COALESCE(st.cost_service_cents, 0) AS cost_service_cents,
+        ROUND(fa.travel_km * COALESCE(
+          (SELECT acp.price_cents FROM active_customer_prices acp
+           JOIN services sp ON sp.id = acp.service_id AND sp.code = 'travel_km'
+           WHERE acp.customer_id = fa.customer_id),
+          (SELECT default_price_cents FROM services WHERE code = 'travel_km')
+        )) AS revenue_km_cents,
+        ROUND(fa.travel_km * (SELECT employee_rate_cents FROM services WHERE code = 'travel_km')) AS cost_km_cents,
+        ROUND(fa.customer_km * COALESCE(
+          (SELECT acp.price_cents FROM active_customer_prices acp
+           JOIN services sp ON sp.id = acp.service_id AND sp.code = 'customer_km'
+           WHERE acp.customer_id = fa.customer_id),
+          (SELECT default_price_cents FROM services WHERE code = 'customer_km')
+        )) AS revenue_ckm_cents,
+        ROUND(fa.customer_km * (SELECT employee_rate_cents FROM services WHERE code = 'customer_km')) AS cost_ckm_cents
+      FROM filtered_appointments fa
+      LEFT JOIN service_totals st ON st.appointment_id = fa.id
     )
     SELECT
       u.id AS "employeeId",
       u.display_name AS "employeeName",
       COUNT(pa.id)::int AS appointments,
       COUNT(DISTINCT pa.customer_id)::int AS customers,
-      COALESCE(SUM(pa.duration_promised), 0)::int AS "totalMinutes",
+      COALESCE(SUM(pa.service_minutes), 0)::int AS "totalMinutes",
       COALESCE(SUM(pa.travel_km), 0)::numeric(10,1) AS "totalTravelKm",
       COALESCE(SUM(pa.customer_km), 0)::numeric(10,1) AS "totalCustomerKm",
       COALESCE(SUM(pa.revenue_service_cents + pa.revenue_km_cents + pa.revenue_ckm_cents), 0)::bigint AS "revenueCents",
@@ -441,58 +445,20 @@ router.get("/planning", asyncHandler("Planungsdaten konnten nicht geladen werden
     : sql``;
 
   const result = await db.execute(sql`
-    WITH service_prices AS (
-      SELECT id, code, default_price_cents, employee_rate_cents FROM services
-    ),
-    active_customer_prices AS (
+    WITH active_customer_prices AS (
       SELECT csp.customer_id, csp.service_id, csp.price_cents
       FROM customer_service_prices csp
       WHERE csp.valid_to IS NULL
     ),
-    appointment_calc AS (
+    filtered_appointments AS (
       SELECT
         a.id,
         a.customer_id,
         COALESCE(a.assigned_employee_id, a.performed_by_employee_id) AS employee_id,
-        a.service_type,
-        a.duration_promised,
         a.status,
+        a.duration_promised,
         COALESCE(a.travel_kilometers, 0) AS travel_km,
-        COALESCE(a.customer_kilometers, 0) AS customer_km,
-        CASE
-          WHEN a.service_type = 'hauswirtschaft' THEN COALESCE(
-            (SELECT acp.price_cents FROM active_customer_prices acp
-             JOIN service_prices sp ON sp.id = acp.service_id AND sp.code = 'hauswirtschaft'
-             WHERE acp.customer_id = a.customer_id),
-            (SELECT default_price_cents FROM service_prices WHERE code = 'hauswirtschaft')
-          )
-          WHEN a.service_type = 'alltagsbegleitung' THEN COALESCE(
-            (SELECT acp.price_cents FROM active_customer_prices acp
-             JOIN service_prices sp ON sp.id = acp.service_id AND sp.code = 'alltagsbegleitung'
-             WHERE acp.customer_id = a.customer_id),
-            (SELECT default_price_cents FROM service_prices WHERE code = 'alltagsbegleitung')
-          )
-          ELSE 0
-        END AS hourly_price,
-        CASE
-          WHEN a.service_type = 'hauswirtschaft' THEN (SELECT employee_rate_cents FROM service_prices WHERE code = 'hauswirtschaft')
-          WHEN a.service_type = 'alltagsbegleitung' THEN (SELECT employee_rate_cents FROM service_prices WHERE code = 'alltagsbegleitung')
-          ELSE 0
-        END AS hourly_cost,
-        COALESCE(
-          (SELECT acp.price_cents FROM active_customer_prices acp
-           JOIN service_prices sp ON sp.id = acp.service_id AND sp.code = 'travel_km'
-           WHERE acp.customer_id = a.customer_id),
-          (SELECT default_price_cents FROM service_prices WHERE code = 'travel_km')
-        ) AS km_price,
-        (SELECT employee_rate_cents FROM service_prices WHERE code = 'travel_km') AS km_cost,
-        COALESCE(
-          (SELECT acp.price_cents FROM active_customer_prices acp
-           JOIN service_prices sp ON sp.id = acp.service_id AND sp.code = 'customer_km'
-           WHERE acp.customer_id = a.customer_id),
-          (SELECT default_price_cents FROM service_prices WHERE code = 'customer_km')
-        ) AS ckm_price,
-        (SELECT employee_rate_cents FROM service_prices WHERE code = 'customer_km') AS ckm_cost
+        COALESCE(a.customer_kilometers, 0) AS customer_km
       FROM appointments a
       WHERE a.deleted_at IS NULL
         AND a.status != 'cancelled'
@@ -500,16 +466,59 @@ router.get("/planning", asyncHandler("Planungsdaten konnten nicht geladen werden
         AND EXTRACT(YEAR FROM a.date::date) = ${year}
         ${monthFilter}
     ),
+    service_line_calc AS (
+      SELECT
+        fa.id AS appointment_id,
+        fa.employee_id,
+        fa.customer_id,
+        COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) AS duration_minutes,
+        COALESCE(acp.price_cents, s.default_price_cents) AS hourly_price,
+        s.employee_rate_cents AS hourly_cost
+      FROM filtered_appointments fa
+      JOIN appointment_services asvc ON asvc.appointment_id = fa.id
+      JOIN services s ON s.id = asvc.service_id
+      LEFT JOIN active_customer_prices acp ON acp.customer_id = fa.customer_id AND acp.service_id = s.id
+      WHERE s.unit_type = 'hours'
+    ),
+    service_totals AS (
+      SELECT
+        slc.appointment_id,
+        slc.employee_id,
+        slc.customer_id,
+        SUM(slc.duration_minutes)::int AS total_service_minutes,
+        SUM(ROUND(slc.duration_minutes / 60.0 * slc.hourly_price))::bigint AS revenue_service_cents,
+        SUM(ROUND(slc.duration_minutes / 60.0 * slc.hourly_cost))::bigint AS cost_service_cents
+      FROM service_line_calc slc
+      GROUP BY slc.appointment_id, slc.employee_id, slc.customer_id
+    ),
     per_appointment AS (
       SELECT
-        ac.*,
-        ROUND(ac.duration_promised / 60.0 * ac.hourly_price) AS revenue_service_cents,
-        ROUND(ac.duration_promised / 60.0 * ac.hourly_cost) AS cost_service_cents,
-        ROUND(ac.travel_km * ac.km_price) AS revenue_km_cents,
-        ROUND(ac.travel_km * ac.km_cost) AS cost_km_cents,
-        ROUND(ac.customer_km * ac.ckm_price) AS revenue_ckm_cents,
-        ROUND(ac.customer_km * ac.ckm_cost) AS cost_ckm_cents
-      FROM appointment_calc ac
+        fa.id,
+        fa.customer_id,
+        fa.employee_id,
+        fa.status,
+        fa.duration_promised,
+        fa.travel_km,
+        fa.customer_km,
+        COALESCE(st.total_service_minutes, fa.duration_promised) AS service_minutes,
+        COALESCE(st.revenue_service_cents, 0) AS revenue_service_cents,
+        COALESCE(st.cost_service_cents, 0) AS cost_service_cents,
+        ROUND(fa.travel_km * COALESCE(
+          (SELECT acp.price_cents FROM active_customer_prices acp
+           JOIN services sp ON sp.id = acp.service_id AND sp.code = 'travel_km'
+           WHERE acp.customer_id = fa.customer_id),
+          (SELECT default_price_cents FROM services WHERE code = 'travel_km')
+        )) AS revenue_km_cents,
+        ROUND(fa.travel_km * (SELECT employee_rate_cents FROM services WHERE code = 'travel_km')) AS cost_km_cents,
+        ROUND(fa.customer_km * COALESCE(
+          (SELECT acp.price_cents FROM active_customer_prices acp
+           JOIN services sp ON sp.id = acp.service_id AND sp.code = 'customer_km'
+           WHERE acp.customer_id = fa.customer_id),
+          (SELECT default_price_cents FROM services WHERE code = 'customer_km')
+        )) AS revenue_ckm_cents,
+        ROUND(fa.customer_km * (SELECT employee_rate_cents FROM services WHERE code = 'customer_km')) AS cost_ckm_cents
+      FROM filtered_appointments fa
+      LEFT JOIN service_totals st ON st.appointment_id = fa.id
     )
     SELECT
       u.id AS "employeeId",
@@ -519,7 +528,7 @@ router.get("/planning", asyncHandler("Planungsdaten konnten nicht geladen werden
       COUNT(pa.id) FILTER (WHERE pa.status = 'completed')::int AS "completedCount",
       COUNT(pa.id) FILTER (WHERE pa.status = 'documented')::int AS "documentedCount",
       COUNT(DISTINCT pa.customer_id)::int AS customers,
-      COALESCE(SUM(pa.duration_promised), 0)::int AS "totalMinutes",
+      COALESCE(SUM(pa.service_minutes), 0)::int AS "totalMinutes",
       COALESCE(SUM(pa.travel_km), 0)::numeric(10,1) AS "totalTravelKm",
       COALESCE(SUM(pa.customer_km), 0)::numeric(10,1) AS "totalCustomerKm",
       COALESCE(SUM(pa.revenue_service_cents + pa.revenue_km_cents + pa.revenue_ckm_cents), 0)::bigint AS "revenueCents",
