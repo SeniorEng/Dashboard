@@ -500,17 +500,6 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
         </div>
       )}
 
-      {missingDocTypes.length > 0 && documents && documents.length > 0 && (
-        <div className="mt-3 p-3 bg-amber-50 border border-amber-100 rounded-lg">
-          <p className="text-xs font-medium text-amber-700 mb-1">Fehlende Dokumente:</p>
-          <div className="flex flex-wrap gap-1">
-            {missingDocTypes.map(dt => (
-              <StatusBadge key={dt.id} type="warning" value={dt.name} size="sm" />
-            ))}
-          </div>
-        </div>
-      )}
-
       <DigitalDocumentFlow
         open={isDigitalFlowOpen}
         onOpenChange={setIsDigitalFlowOpen}
