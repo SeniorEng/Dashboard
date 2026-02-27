@@ -1,6 +1,7 @@
 import { pgTable, text, integer, serial, boolean, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp } from "./common";
+import { customers } from "./customers";
 
 export const SERVICE_UNIT_TYPES = ["hours", "kilometers", "flat"] as const;
 export type ServiceUnitType = typeof SERVICE_UNIT_TYPES[number];
@@ -40,7 +41,7 @@ export const serviceBudgetPots = pgTable("service_budget_pots", {
 
 export const customerServicePrices = pgTable("customer_service_prices", {
   id: serial("id").primaryKey(),
-  customerId: integer("customer_id").notNull(),
+  customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
   serviceId: integer("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
   priceCents: integer("price_cents").notNull(),
   validFrom: timestamp("valid_from").notNull().defaultNow(),

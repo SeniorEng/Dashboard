@@ -60,8 +60,8 @@ export async function testSmtpConnection(settings: CompanySettings): Promise<{ s
     const transporter = createTransporter(settings);
     await transporter.verify();
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Verbindung fehlgeschlagen" };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : "Verbindung fehlgeschlagen" };
   }
 }
 

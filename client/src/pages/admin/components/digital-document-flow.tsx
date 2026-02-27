@@ -136,8 +136,8 @@ export function DigitalDocumentFlow({
       const data = unwrapResult(result) as RenderResult;
       setRenderedHtml(data.html);
       setStep("preview");
-    } catch (error: any) {
-      toast({ title: "Vorschau-Fehler", description: error.message || "Vorlage konnte nicht gerendert werden", variant: "destructive" });
+    } catch (error: unknown) {
+      toast({ title: "Vorschau-Fehler", description: error instanceof Error ? error.message : "Vorlage konnte nicht gerendert werden", variant: "destructive" });
     } finally {
       setIsRendering(false);
     }

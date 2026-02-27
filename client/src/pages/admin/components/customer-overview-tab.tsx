@@ -194,8 +194,8 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
       toast({ title: "Kontaktdaten gespeichert" });
       invalidateCustomer();
       setEditingSection(null);
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message || "Speichern fehlgeschlagen." });
+    } catch (error: unknown) {
+      toast({ variant: "destructive", title: "Fehler", description: error instanceof Error ? error.message : "Speichern fehlgeschlagen." });
     } finally {
       setSaving(false);
     }
@@ -218,8 +218,8 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
       toast({ title: "Mitarbeiterzuordnung gespeichert" });
       invalidateCustomer();
       setEditingSection(null);
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message || "Speichern fehlgeschlagen." });
+    } catch (error: unknown) {
+      toast({ variant: "destructive", title: "Fehler", description: error instanceof Error ? error.message : "Speichern fehlgeschlagen." });
     } finally {
       setSaving(false);
     }
@@ -250,8 +250,8 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
       toast({ title: "Vorerkrankungen gespeichert" });
       invalidateCustomer();
       setEditingSection(null);
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message || "Speichern fehlgeschlagen." });
+    } catch (error: unknown) {
+      toast({ variant: "destructive", title: "Fehler", description: error instanceof Error ? error.message : "Speichern fehlgeschlagen." });
     } finally {
       setSaving(false);
     }
@@ -270,8 +270,8 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
       toast({ title: "Besonderheiten gespeichert" });
       invalidateCustomer();
       setEditingSection(null);
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message || "Speichern fehlgeschlagen." });
+    } catch (error: unknown) {
+      toast({ variant: "destructive", title: "Fehler", description: error instanceof Error ? error.message : "Speichern fehlgeschlagen." });
     } finally {
       setSaving(false);
     }
@@ -287,8 +287,8 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
       toast({ title: "Versandart gespeichert" });
       invalidateCustomer();
       setEditingSection(null);
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message || "Speichern fehlgeschlagen." });
+    } catch (error: unknown) {
+      toast({ variant: "destructive", title: "Fehler", description: error instanceof Error ? error.message : "Speichern fehlgeschlagen." });
     } finally {
       setSaving(false);
     }

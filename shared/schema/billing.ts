@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, index, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, index, unique, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp } from "./common";
 import { customers } from "./customers";
@@ -47,7 +47,7 @@ export const invoices = pgTable("invoices", {
   grossAmountCents: integer("gross_amount_cents").notNull().default(0),
   vatRate: integer("vat_rate"),
   status: text("status").notNull().default("entwurf"),
-  stornierteRechnungId: integer("stornierte_rechnung_id"),
+  stornierteRechnungId: integer("stornierte_rechnung_id").references((): AnyPgColumn => invoices.id),
   pdfPath: text("pdf_path"),
   pdfHash: text("pdf_hash"),
   leistungsnachweisPath: text("leistungsnachweis_path"),

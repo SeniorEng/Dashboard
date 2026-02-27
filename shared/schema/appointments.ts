@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, time, date, boolean, index, real } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, time, date, boolean, index, real, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { isNull } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -30,7 +30,7 @@ export const appointments = pgTable("appointments", {
   actualEnd: time("actual_end"),
   // Travel documentation
   travelOriginType: text("travel_origin_type"), // "home" | "appointment"
-  travelFromAppointmentId: integer("travel_from_appointment_id"),
+  travelFromAppointmentId: integer("travel_from_appointment_id").references((): AnyPgColumn => appointments.id),
   travelKilometers: real("travel_kilometers"),
   travelMinutes: integer("travel_minutes"),
   // Customer kilometers (for Alltagsbegleitung - trips with/for customer)

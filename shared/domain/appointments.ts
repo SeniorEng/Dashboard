@@ -17,8 +17,6 @@ export type TravelOriginType = "home" | "appointment";
 export const APPOINTMENT_STATUSES: AppointmentStatus[] = ["scheduled", "in-progress", "documenting", "completed", "cancelled"];
 export const APPOINTMENT_TYPES: AppointmentType[] = ["Erstberatung", "Kundentermin"];
 export const SERVICE_TYPES: ServiceType[] = ["Hauswirtschaft", "Alltagsbegleitung", "Erstberatung"];
-export const KUNDENTERMIN_SERVICE_TYPES: ServiceType[] = ["Hauswirtschaft", "Alltagsbegleitung"];
-export const ERSTBERATUNG_SERVICE_TYPES: ServiceType[] = ["Erstberatung"];
 export const TRAVEL_ORIGIN_TYPES: TravelOriginType[] = ["home", "appointment"];
 
 export const STATUS_ORDER: Record<AppointmentStatus, number> = {
@@ -78,16 +76,6 @@ export type Pflegegrad = typeof PFLEGEGRAD_OPTIONS[number];
 
 export const DURATION_OPTIONS = [15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180, 195, 210, 225, 240] as const;
 export type DurationOption = typeof DURATION_OPTIONS[number];
-
-export const SERVICE_OPTIONS = [
-  "Vitalzeichen prüfen",
-  "Medikamente verabreicht",
-  "Körperpflege",
-  "Mahlzeit zubereitet",
-  "Haushaltsarbeiten",
-  "Soziale Aktivität"
-] as const;
-export type ServiceOption = typeof SERVICE_OPTIONS[number];
 
 // ============================================
 // TIME FORMATTING UTILITIES

@@ -90,13 +90,14 @@ export async function deliverDocuments(options: DeliveryOptions): Promise<Delive
     });
 
     return { deliveryId: delivery.id, status: "sent" };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unbekannter Fehler";
     await deliveryStorage.updateDeliveryStatus(delivery.id, {
       status: "error",
-      errorMessage: error.message || "Unbekannter Fehler",
+      errorMessage: message,
     });
 
-    return { deliveryId: delivery.id, status: "error", error: error.message };
+    return { deliveryId: delivery.id, status: "error", error: message };
   }
 }
 
@@ -183,8 +184,8 @@ async function combinePdfBuffers(buffers: Buffer[]): Promise<Buffer> {
 
     const mergedBytes = await merged.save();
     return Buffer.from(mergedBytes);
-  } catch (error: any) {
-    console.error("PDF-Zusammenführung fehlgeschlagen, sende nur erstes Dokument:", error.message);
+  } catch (error: unknown) {
+    console.error("PDF-Zusammenführung fehlgeschlagen, sende nur erstes Dokument:", error instanceof Error ? error.message : error);
     return buffers[0];
   }
 }

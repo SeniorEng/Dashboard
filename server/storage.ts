@@ -44,6 +44,11 @@ const appointmentWithCustomerSelectFields = {
   customerKilometers: appointments.customerKilometers,
   notes: appointments.notes,
   servicesDone: appointments.servicesDone,
+  signatureData: appointments.signatureData,
+  signatureHash: appointments.signatureHash,
+  signedAt: appointments.signedAt,
+  signedByUserId: appointments.signedByUserId,
+  deletedAt: appointments.deletedAt,
   createdAt: appointments.createdAt,
   performedByEmployeeId: appointments.performedByEmployeeId,
   customer: {
@@ -70,36 +75,40 @@ const appointmentWithCustomerSelectFields = {
   }
 };
 
-function mapAppointmentRow(row: any): AppointmentWithCustomer {
+type AppointmentQueryRow = typeof appointmentWithCustomerSelectFields extends infer T
+  ? { [K in keyof T]: T[K] extends { $inferSelect: infer S } ? S : unknown }
+  : never;
+
+function mapAppointmentRow(row: AppointmentQueryRow & Record<string, unknown>): AppointmentWithCustomer {
   return {
-    id: row.id,
-    customerId: row.customerId,
-    createdByUserId: row.createdByUserId,
-    assignedEmployeeId: row.assignedEmployeeId,
-    appointmentType: row.appointmentType,
-    serviceType: row.serviceType,
-    date: row.date,
-    scheduledStart: row.scheduledStart,
-    scheduledEnd: row.scheduledEnd,
-    durationPromised: row.durationPromised,
-    status: row.status,
-    actualStart: row.actualStart,
-    actualEnd: row.actualEnd,
-    travelOriginType: row.travelOriginType,
-    travelFromAppointmentId: row.travelFromAppointmentId,
-    travelKilometers: row.travelKilometers,
-    travelMinutes: row.travelMinutes,
-    customerKilometers: row.customerKilometers,
-    notes: row.notes,
-    servicesDone: row.servicesDone,
-    signatureData: row.signatureData ?? null,
-    signatureHash: row.signatureHash ?? null,
-    signedAt: row.signedAt ?? null,
-    signedByUserId: row.signedByUserId ?? null,
-    deletedAt: row.deletedAt ?? null,
-    createdAt: row.createdAt,
-    performedByEmployeeId: row.performedByEmployeeId,
-    customer: row.customer?.id ? row.customer : null,
+    id: row.id as number,
+    customerId: row.customerId as number,
+    createdByUserId: row.createdByUserId as number | null,
+    assignedEmployeeId: row.assignedEmployeeId as number | null,
+    appointmentType: row.appointmentType as string,
+    serviceType: row.serviceType as string | null,
+    date: row.date as string,
+    scheduledStart: row.scheduledStart as string,
+    scheduledEnd: row.scheduledEnd as string | null,
+    durationPromised: row.durationPromised as number,
+    status: row.status as string,
+    actualStart: row.actualStart as string | null,
+    actualEnd: row.actualEnd as string | null,
+    travelOriginType: row.travelOriginType as string | null,
+    travelFromAppointmentId: row.travelFromAppointmentId as number | null,
+    travelKilometers: row.travelKilometers as number | null,
+    travelMinutes: row.travelMinutes as number | null,
+    customerKilometers: row.customerKilometers as number | null,
+    notes: row.notes as string | null,
+    servicesDone: row.servicesDone as string[] | null,
+    signatureData: (row.signatureData as string | null) ?? null,
+    signatureHash: (row.signatureHash as string | null) ?? null,
+    signedAt: (row.signedAt as Date | null) ?? null,
+    signedByUserId: (row.signedByUserId as number | null) ?? null,
+    deletedAt: (row.deletedAt as Date | null) ?? null,
+    createdAt: row.createdAt as Date,
+    performedByEmployeeId: row.performedByEmployeeId as number | null,
+    customer: (row.customer as { id?: number })?.id ? row.customer as AppointmentWithCustomer["customer"] : null,
   };
 }
 

@@ -98,7 +98,7 @@ export function EmployeeQualificationsSection({ employeeId }: { employeeId: numb
       setSelectedQualId("");
       toast({ title: "Qualifikation zugewiesen" });
     },
-    onError: () => toast({ title: "Fehler", variant: "destructive" }),
+    onError: (error: Error) => toast({ title: "Fehler", description: error.message, variant: "destructive" }),
   });
 
   const removeMutation = useMutation({
@@ -108,7 +108,7 @@ export function EmployeeQualificationsSection({ employeeId }: { employeeId: numb
       queryClient.invalidateQueries({ queryKey: ["admin", "employee-proofs", employeeId] });
       toast({ title: "Qualifikation entfernt" });
     },
-    onError: () => toast({ title: "Fehler", variant: "destructive" }),
+    onError: (error: Error) => toast({ title: "Fehler", description: error.message, variant: "destructive" }),
   });
 
   const proofsByQual = (qualId: number) => proofs?.filter((p) => p.qualificationId === qualId) || [];

@@ -8,6 +8,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { errorMiddleware } from "./lib/errors";
 import { pool } from "./lib/db";
+import { closeBrowser } from "./services/pdf-generator";
 const app = express();
 app.set("trust proxy", 1);
 const httpServer = createServer(app);
@@ -181,6 +182,12 @@ process.on("uncaughtException", (error) => {
 function gracefulShutdown(signal: string) {
   log(`${signal} received, shutting down gracefully...`);
   httpServer.close(async () => {
+    try {
+      await closeBrowser();
+      log("Puppeteer browser closed");
+    } catch (err) {
+      console.error("Error closing browser:", err);
+    }
     try {
       await pool.end();
       log("Database pool drained");

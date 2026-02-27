@@ -2,6 +2,8 @@ import { pgTable, text, integer, serial, boolean } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp } from "./common";
 import { users } from "./users";
+import { customers } from "./customers";
+import { generatedDocuments } from "./documents";
 
 export const companySettings = pgTable("company_settings", {
   id: serial("id").primaryKey(),
@@ -94,8 +96,8 @@ export type UpdateCompanySettings = z.infer<typeof updateCompanySettingsSchema>;
 
 export const documentDeliveries = pgTable("document_deliveries", {
   id: serial("id").primaryKey(),
-  customerId: integer("customer_id"),
-  generatedDocumentId: integer("generated_document_id"),
+  customerId: integer("customer_id").references(() => customers.id),
+  generatedDocumentId: integer("generated_document_id").references(() => generatedDocuments.id),
   deliveryMethod: text("delivery_method").notNull(),
   status: text("status").notNull().default("pending"),
   recipientEmail: text("recipient_email"),

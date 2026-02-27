@@ -69,8 +69,8 @@ export async function requestSmsCode(
 
     const message = await response.text().catch(() => "");
     return { success: true, message: message || "SMS-Code wurde an die hinterlegte Mobilnummer gesendet." };
-  } catch (error: any) {
-    return { success: false, error: error.message || "SMS-Anfrage fehlgeschlagen" };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : "SMS-Anfrage fehlgeschlagen" };
   }
 }
 
@@ -103,8 +103,8 @@ export async function setEpostPassword(
     }
 
     return { success: true, secret };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Passwort setzen fehlgeschlagen" };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : "Passwort setzen fehlgeschlagen" };
   }
 }
 
@@ -120,8 +120,8 @@ export async function checkEpostHealthCheck(): Promise<{ success: boolean; error
     }
 
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message || "API nicht erreichbar" };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : "API nicht erreichbar" };
   }
 }
 
@@ -210,7 +210,7 @@ export async function testEpostConnection(settings: CompanySettings): Promise<{ 
     validateEpostConfig(settings);
     await loginEpost(settings);
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Verbindung fehlgeschlagen" };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : "Verbindung fehlgeschlagen" };
   }
 }

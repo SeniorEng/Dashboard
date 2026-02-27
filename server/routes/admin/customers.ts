@@ -423,14 +423,36 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
   }
   
   const validatedData = updateCustomerSchema.parse(req.body);
+
+  const existingCustomer = await storage.getCustomer(id);
+  if (!existingCustomer) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+    return;
+  }
+
+  const changedFields: string[] = [];
+  const oldValues: Record<string, unknown> = {};
+  const newValues: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(validatedData)) {
+    const oldVal = (existingCustomer as Record<string, unknown>)[key];
+    if (oldVal !== value) {
+      changedFields.push(key);
+      oldValues[key] = oldVal;
+      newValues[key] = value;
+    }
+  }
+
   const customer = await customerManagementStorage.updateCustomer(id, validatedData);
   
   if (!customer) {
     res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
     return;
   }
+
+  if (changedFields.length > 0) {
+    await auditService.customerUpdated(req.user!.id, id, { changedFields, oldValues, newValues }, req.ip);
+  }
   
-  // Invalidate birthday cache (customer data may have changed)
   birthdaysCache.invalidateAll();
   
   res.json(customer);

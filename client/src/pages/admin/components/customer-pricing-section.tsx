@@ -75,8 +75,8 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
       setEditPrice("");
       toast({ title: "Kundenpreis gespeichert" });
     },
-    onError: () => {
-      toast({ title: "Fehler beim Speichern", variant: "destructive" });
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 
@@ -89,8 +89,8 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
       queryClient.invalidateQueries({ queryKey: ["customer-service-prices", customerId] });
       toast({ title: "Kundenpreis zurückgesetzt auf Katalogpreis" });
     },
-    onError: () => {
-      toast({ title: "Fehler beim Löschen", variant: "destructive" });
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 

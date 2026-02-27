@@ -62,7 +62,7 @@ function PageLoader() {
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAuthenticated, isLoading } = useAuth();
-  const [, navigate] = useLocation();
+  const [,] = useLocation();
 
   if (isLoading) {
     return <PageLoader />;

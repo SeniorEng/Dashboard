@@ -5,7 +5,6 @@
 // §45b Entlastungsbetrag
 // ============================================
 export const BUDGET_45B_MAX_MONTHLY_CENTS = 13100; // 131€ max per month
-export const BUDGET_45B_CARRYOVER_DEADLINE_MONTH = 6; // Expires June 30 of following year
 
 // ============================================
 // §45a Umwandlungsanspruch (40% of unused Pflegesachleistungen)
@@ -18,15 +17,6 @@ export const BUDGET_45A_MAX_BY_PFLEGEGRAD: Record<number, number> = {
   3: 59880,  // PG3: 598.80€ (40% of 1,497€)
   4: 74360,  // PG4: 743.60€ (40% of 1,859€)
   5: 91960,  // PG5: 919.60€ (40% of 2,299€)
-};
-
-// Full Sachleistung amounts per Pflegegrad (for reference/display)
-export const SACHLEISTUNG_BY_PFLEGEGRAD: Record<number, number> = {
-  1: 0,
-  2: 79600,   // 796€
-  3: 149700,  // 1,497€
-  4: 185900,  // 1,859€
-  5: 229900,  // 2,299€
 };
 
 // ============================================

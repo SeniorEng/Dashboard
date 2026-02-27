@@ -68,7 +68,7 @@ function ProofReviewContent() {
       setRejectingProof(null);
       setRejectionReason("");
     },
-    onError: () => toast({ title: "Fehler", variant: "destructive" }),
+    onError: (error: Error) => toast({ title: "Fehler", description: error.message, variant: "destructive" }),
   });
 
   const groupedByEmployee = (proofs || []).reduce<Record<string, PendingProof[]>>((acc, proof) => {

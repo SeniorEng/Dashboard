@@ -232,8 +232,8 @@ function BackfillSection({ customerId, onRefresh }: { customerId: number; onRefr
       } else {
         toast({ title: "Keine Änderungen", description: "Alle Termine wurden übersprungen." });
       }
-    } catch (err: any) {
-      toast({ variant: "destructive", title: "Fehler", description: err.message || "Nachbuchung fehlgeschlagen" });
+    } catch (err: unknown) {
+      toast({ variant: "destructive", title: "Fehler", description: err instanceof Error ? err.message : "Nachbuchung fehlgeschlagen" });
     } finally {
       setIsRunning(false);
     }

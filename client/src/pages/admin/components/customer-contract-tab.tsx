@@ -104,8 +104,8 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
       invalidateCustomer();
       setCreatingContract(false);
       setNewContractStart("");
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message || "Vertrag konnte nicht angelegt werden." });
+    } catch (error: unknown) {
+      toast({ variant: "destructive", title: "Fehler", description: error instanceof Error ? error.message : "Vertrag konnte nicht angelegt werden." });
     } finally {
       setSaving(false);
     }
@@ -125,8 +125,8 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
       toast({ title: "Vertragsdaten gespeichert" });
       invalidateCustomer();
       setEditingSection(null);
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message || "Speichern fehlgeschlagen." });
+    } catch (error: unknown) {
+      toast({ variant: "destructive", title: "Fehler", description: error instanceof Error ? error.message : "Speichern fehlgeschlagen." });
     } finally {
       setSaving(false);
     }
@@ -144,8 +144,8 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
       toast({ title: "Vereinbarte Leistungen gespeichert" });
       invalidateCustomer();
       setEditingSection(null);
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message || "Speichern fehlgeschlagen." });
+    } catch (error: unknown) {
+      toast({ variant: "destructive", title: "Fehler", description: error instanceof Error ? error.message : "Speichern fehlgeschlagen." });
     } finally {
       setSaving(false);
     }
