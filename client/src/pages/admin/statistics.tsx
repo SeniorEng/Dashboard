@@ -10,7 +10,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ArrowLeft, Loader2, BarChart3, Users, TrendingUp, Activity,
   Euro, Car, Clock, UserCheck, Heart, CalendarDays, PiggyBank,
+  CalendarCheck, UserX,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 
@@ -124,6 +126,15 @@ export default function AdminStatistics() {
     staleTime: 60000,
   });
 
+  const { data: planning } = useQuery<any>({
+    queryKey: ["statistics-planning", selectedYear, selectedMonth],
+    queryFn: async () => {
+      const result = await api.get(`/statistics/planning?year=${selectedYear}${monthParam}`);
+      return unwrapResult(result);
+    },
+    staleTime: 60000,
+  });
+
   const employees = data?.employees ?? [];
   const revenue = data?.revenue ?? {};
   const customerStats = data?.customers ?? {};
@@ -200,6 +211,7 @@ export default function AdminStatistics() {
               <TabsTrigger value="employees" data-testid="tab-employees">Mitarbeiter</TabsTrigger>
               <TabsTrigger value="customers" data-testid="tab-customers">Kunden</TabsTrigger>
               <TabsTrigger value="trends" data-testid="tab-trends">Trends</TabsTrigger>
+              <TabsTrigger value="planning" data-testid="tab-planning">Planung</TabsTrigger>
             </TabsList>
 
             {/* OVERVIEW TAB */}
@@ -716,6 +728,177 @@ export default function AdminStatistics() {
                   </div>
                 </CardContent>
               </Card>
+            </TabsContent>
+
+            {/* PLANNING TAB */}
+            <TabsContent value="planning">
+              {planning ? (() => {
+                const t = planning.totals;
+                const planEmpList = planning.employees || [];
+                const maxPlanMargin = Math.max(...planEmpList.map((e: any) => Math.abs(Number(e.marginCents || 0))), 1);
+                const noApptCustomers = planning.customersWithoutAppointments || [];
+
+                return (
+                  <>
+                    <Card className="mb-4 border-blue-200 bg-blue-50/50">
+                      <CardContent className="p-4">
+                        <div className="flex items-center gap-3 mb-3">
+                          <CalendarCheck className="w-6 h-6 text-blue-600" />
+                          <div>
+                            <div className="text-sm text-muted-foreground">Gesamtplanung ({periodLabel})</div>
+                            <div className="text-2xl font-bold text-blue-700" data-testid="planning-total-appointments">{t.appointments} Termine</div>
+                          </div>
+                          <div className="ml-auto text-right">
+                            <div className={`text-xl font-bold ${planning.marginPercent >= 50 ? 'text-emerald-600' : planning.marginPercent >= 30 ? 'text-amber-600' : 'text-red-600'}`} data-testid="planning-margin-pct">
+                              {planning.marginPercent}% DB
+                            </div>
+                            <div className="text-xs text-muted-foreground">{t.scheduledCount} offen · {t.completedCount} erledigt</div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                      <StatCard
+                        label="Erwarteter Umsatz"
+                        value={cents(t.revenueCents)}
+                        sub={`${cents(t.revenueServiceCents)} Dienst + ${cents(t.revenueKmCents)} KM`}
+                        icon={<Euro className="w-5 h-5" />}
+                        color="text-emerald-600"
+                        testId="planning-revenue"
+                      />
+                      <StatCard
+                        label="Erwartete Kosten"
+                        value={cents(t.costCents)}
+                        sub={`${cents(t.costServiceCents)} Dienst + ${cents(t.costKmCents)} KM`}
+                        icon={<Users className="w-5 h-5" />}
+                        color="text-red-600"
+                        testId="planning-costs"
+                      />
+                      <StatCard
+                        label="Deckungsbeitrag"
+                        value={cents(t.marginCents)}
+                        icon={<PiggyBank className="w-5 h-5" />}
+                        color={Number(t.marginCents) >= 0 ? "text-emerald-600" : "text-red-600"}
+                        testId="planning-margin"
+                      />
+                      <StatCard
+                        label="Geplante Stunden"
+                        value={hours(t.totalMinutes)}
+                        sub={`${t.customers} Kunden`}
+                        icon={<Clock className="w-5 h-5" />}
+                        color="text-blue-600"
+                        testId="planning-hours"
+                      />
+                    </div>
+
+                    <Card className="mb-4">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base">Planung pro Mitarbeiter</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-3">
+                          {planEmpList.map((emp: any, i: number) => {
+                            const empMarginPct = Number(emp.revenueCents) > 0
+                              ? Math.round((Number(emp.marginCents) / Number(emp.revenueCents)) * 100)
+                              : 0;
+                            return (
+                              <div key={emp.employeeId} className="border rounded-lg p-3" data-testid={`planning-employee-${emp.employeeId}`}>
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs text-muted-foreground">{i + 1}.</span>
+                                    <span className="font-semibold text-sm">{emp.employeeName}</span>
+                                  </div>
+                                  <div className="text-right">
+                                    <span className={`font-bold ${Number(emp.marginCents) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                      {cents(emp.marginCents)}
+                                    </span>
+                                    <span className={`text-xs ml-1.5 px-1.5 py-0.5 rounded ${empMarginPct >= 50 ? 'bg-emerald-100 text-emerald-700' : empMarginPct >= 30 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
+                                      {empMarginPct}%
+                                    </span>
+                                  </div>
+                                </div>
+                                <BarSimple value={Math.abs(Number(emp.marginCents))} max={maxPlanMargin} color={Number(emp.marginCents) >= 0 ? "bg-emerald-500" : "bg-red-500"} />
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-2 text-xs">
+                                  <div>
+                                    <span className="text-muted-foreground">Termine: </span>
+                                    <span className="font-medium">{emp.appointments}</span>
+                                    <span className="text-muted-foreground ml-1">({emp.scheduledCount} offen)</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Umsatz: </span>
+                                    <span className="font-medium">{cents(emp.revenueCents)}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Kosten: </span>
+                                    <span className="font-medium">{cents(emp.costCents)}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Stunden: </span>
+                                    <span className="font-medium">{hours(emp.totalMinutes)}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Kunden: </span>
+                                    <span className="font-medium">{emp.customers}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {planEmpList.length === 0 && (
+                            <div className="text-center py-8 text-muted-foreground">
+                              Keine geplanten Termine im gewählten Zeitraum.
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <UserX className="w-4 h-4 text-amber-600" />
+                          Aktive Kunden ohne Termine ({noApptCustomers.length})
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        {noApptCustomers.length > 0 ? (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {noApptCustomers.map((c: any) => (
+                              <Link
+                                key={c.id}
+                                href={`/admin/customers/${c.id}`}
+                                className="flex items-center justify-between p-3 rounded-lg border hover:bg-gray-50 transition-colors"
+                                data-testid={`planning-no-appt-customer-${c.id}`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="font-medium text-sm truncate">{c.name}</span>
+                                  {c.pflegegrad && (
+                                    <Badge variant="outline" className="shrink-0 text-xs">
+                                      PG {c.pflegegrad}
+                                    </Badge>
+                                  )}
+                                </div>
+                                {c.primaryEmployeeName && (
+                                  <span className="text-xs text-muted-foreground shrink-0 ml-2">{c.primaryEmployeeName}</span>
+                                )}
+                              </Link>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-center py-6 text-muted-foreground text-sm">
+                            Alle aktiven Kunden haben Termine im gewählten Zeitraum.
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </>
+                );
+              })() : (
+                <div className="flex justify-center py-16">
+                  <Loader2 className={`${iconSize.lg} animate-spin text-teal-600`} />
+                </div>
+              )}
             </TabsContent>
           </Tabs>
         )}
