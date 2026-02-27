@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, ClipboardList, Building2, Receipt, FileText, UserCog, Stethoscope, BookOpen, ScrollText, GraduationCap, Gift, Cake, Bell } from "lucide-react";
+import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, ClipboardList, Building2, Receipt, FileText, UserCog, Stethoscope, BookOpen, ScrollText, GraduationCap, Gift, Bell } from "lucide-react";
 import { type LayoutVariant, layoutVariants, colors } from "@/design-system";
 import { useUnreadCount } from "@/features/notifications/use-notifications";
 
@@ -334,9 +334,7 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
                       <Icon className="w-4 h-4" />
                       {item.label}
                       {'badge' in item && (item as any).badge && (
-                        'badgeType' in item && (item as any).badgeType === "birthday"
-                          ? <Cake className="w-3.5 h-3.5 text-pink-500" />
-                          : <span className="w-2 h-2 bg-red-500 rounded-full" />
+                        <span className="w-2 h-2 bg-red-500 rounded-full" />
                       )}
                       {isActive && (
                         <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-primary rounded-full" />
@@ -365,7 +363,7 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
           <div className="relative">
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             {hasBirthdayBadge && (
-              <Cake className="absolute -top-1.5 -right-2 w-3.5 h-3.5 text-pink-500" data-testid="badge-birthdays-dot" />
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full" data-testid="badge-birthdays-dot" />
             )}
           </div>
           <span className="text-[10px] font-medium">Kunden</span>
