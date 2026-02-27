@@ -336,9 +336,6 @@ export default function AdminCustomers() {
                       {customer.pflegegrad !== null && customer.pflegegrad > 0 && (
                         <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
                       )}
-                      {customer.hasActiveContract && (
-                        <StatusBadge type="info" value="Vertrag" data-testid={`badge-contract-${customer.id}`} />
-                      )}
                     </div>
                   </div>
                   {customer.primaryEmployee && (
