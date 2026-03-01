@@ -6,11 +6,13 @@ import { Label } from "@/components/ui/label";
 import { SignaturePad, type SignatureMetadata } from "@/components/ui/signature-pad";
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
-import { FileText, Check, AlertCircle, Loader2, AlertTriangle, Upload, Camera, X, Pen, ChevronDown, ChevronUp } from "lucide-react";
+import { FileText, Check, AlertCircle, Loader2, AlertTriangle, Upload, Camera, X, Pen, ChevronDown, ChevronUp, Eye, ArrowLeft } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { type BillingType } from "@shared/domain/customers";
 import { useUpload } from "@/hooks/use-upload";
 import { useToast } from "@/hooks/use-toast";
+import { DocumentPreview } from "@/features/documents/document-preview";
+import type { CustomerFormData } from "./customer-types";
 
 interface TemplateWithRequirement {
   id: number;
@@ -45,6 +47,7 @@ interface SignaturesStepProps {
   onSignatureChange: (slug: string, signatureData: string, location?: string | null) => void;
   uploadedDocuments: WizardUploadedDoc[];
   onUploadedDocumentsChange: (docs: WizardUploadedDoc[]) => void;
+  formData?: CustomerFormData;
 }
 
 
@@ -54,6 +57,7 @@ export function SignaturesStep({
   onSignatureChange,
   uploadedDocuments,
   onUploadedDocumentsChange,
+  formData,
 }: SignaturesStepProps) {
   const { data: templates, isLoading: templatesLoading, isError, refetch } = useQuery({
     queryKey: ["/api/customers/document-templates/billing-type", billingType],
@@ -141,6 +145,7 @@ export function SignaturesStep({
                 if (!matchingType) return;
                 onUploadedDocumentsChange(uploadedDocuments.filter(u => u.documentTypeId !== matchingType.id));
               }}
+              formData={formData}
             />
           ))}
         </div>
@@ -173,6 +178,7 @@ export function SignaturesStep({
                 if (!matchingType) return;
                 onUploadedDocumentsChange(uploadedDocuments.filter(u => u.documentTypeId !== matchingType.id));
               }}
+              formData={formData}
             />
           ))}
         </div>
@@ -204,6 +210,7 @@ function DocumentSignatureCard({
   documentTypeId,
   onDocUploaded,
   onDocRemoved,
+  formData,
 }: {
   doc: TemplateWithRequirement;
   signature?: string;
@@ -212,10 +219,14 @@ function DocumentSignatureCard({
   documentTypeId?: number;
   onDocUploaded: (doc: WizardUploadedDoc) => void;
   onDocRemoved: () => void;
+  formData?: CustomerFormData;
 }) {
   const { toast } = useToast();
   const [showSignaturePad, setShowSignaturePad] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const isSigned = !!signature;
   const isUploaded = !!uploadedDoc;
@@ -244,8 +255,72 @@ function DocumentSignatureCard({
     const location = metadata?.location ? `${metadata.location.lat},${metadata.location.lng}` : null;
     onSignatureChange(signatureData, location);
     setShowSignaturePad(false);
+    setShowPreview(false);
     if (isUploaded) onDocRemoved();
   }, [onSignatureChange, isUploaded, onDocRemoved]);
+
+  const handleShowPreview = useCallback(async () => {
+    if (previewHtml) {
+      setShowPreview(true);
+      return;
+    }
+
+    if (!formData) {
+      toast({ title: "Hinweis", description: "Vorschau ist nur verfügbar, wenn Kundendaten ausgefüllt sind.", variant: "destructive" });
+      return;
+    }
+
+    setIsLoadingPreview(true);
+    try {
+      const result = await api.post("/admin/document-templates/render-preview", {
+        templateSlug: doc.slug,
+        formData: {
+          vorname: formData.vorname,
+          nachname: formData.nachname,
+          geburtsdatum: formData.geburtsdatum,
+          email: formData.email,
+          telefon: formData.telefon,
+          festnetz: formData.festnetz,
+          strasse: formData.strasse,
+          nr: formData.nr,
+          plz: formData.plz,
+          stadt: formData.stadt,
+          pflegegrad: formData.pflegegrad,
+          billingType: formData.billingType,
+          vorerkrankungen: formData.vorerkrankungen,
+          haustierVorhanden: formData.haustierVorhanden,
+          haustierDetails: formData.haustierDetails,
+          personenbefoerderungGewuenscht: formData.personenbefoerderungGewuenscht,
+          versichertennummer: formData.versichertennummer,
+          contractDate: formData.contractDate,
+          contractStart: formData.contractStart,
+          vereinbarteLeistungen: formData.vereinbarteLeistungen,
+          contractHours: formData.contractHours,
+          contractPeriod: formData.contractPeriod,
+          contacts: formData.contacts?.map(c => ({
+            vorname: c.vorname,
+            nachname: c.nachname,
+            contactType: c.contactType,
+            telefon: c.telefon,
+            email: c.email,
+            isPrimary: c.isPrimary,
+          })),
+          insuranceProviderId: formData.insuranceProviderId,
+        },
+      });
+      const data = unwrapResult(result) as { html: string };
+      setPreviewHtml(data.html);
+      setShowPreview(true);
+    } catch (error: unknown) {
+      toast({
+        title: "Vorschau-Fehler",
+        description: error instanceof Error ? error.message : "Dokument konnte nicht geladen werden",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingPreview(false);
+    }
+  }, [previewHtml, formData, doc.slug, toast]);
 
   return (
     <Card
@@ -288,65 +363,118 @@ function DocumentSignatureCard({
           <p className="text-sm text-gray-500">{doc.description}</p>
         )}
 
-        <div className="space-y-2">
-          {showSignaturePad ? (
-            <SignaturePad
-              title={`Unterschrift: ${doc.name}`}
-              onSave={handleSignatureSave}
-              onCancel={() => setShowSignaturePad(false)}
-            />
-          ) : showUpload ? (
-            <UploadArea
-              isUploading={isUploading}
-              onFileSelect={handleFileSelect}
-              onCancel={() => setShowUpload(false)}
-              cameraInputRef={cameraInputRef}
-              testIdSuffix={doc.slug}
-            />
-          ) : (
+        {showPreview && previewHtml && (
+          <div className="space-y-3">
+            <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <DocumentPreview html={previewHtml} />
+            </div>
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
-                variant={isSigned ? "outline" : "default"}
-                onClick={() => setShowSignaturePad(true)}
-                className={`text-sm min-h-[44px] ${!isSigned ? "bg-teal-600 hover:bg-teal-700" : ""}`}
-                data-testid={`button-sign-${doc.slug}`}
+                variant="outline"
+                size="sm"
+                onClick={() => setShowPreview(false)}
+                className="min-h-[44px]"
+                data-testid={`button-close-preview-${doc.slug}`}
               >
-                <Pen className={`${iconSize.sm} mr-1.5`} />
-                {isSigned ? "Unterschrift ändern" : "Unterschreiben"}
+                <ArrowLeft className={`${iconSize.sm} mr-1.5`} />
+                Vorschau schließen
               </Button>
-              {documentTypeId && (
+              {!isSigned && (
                 <Button
                   type="button"
-                  variant="outline"
-                  onClick={() => setShowUpload(true)}
-                  className="text-sm min-h-[44px]"
-                  data-testid={`button-upload-alt-${doc.slug}`}
+                  size="sm"
+                  onClick={() => {
+                    setShowPreview(false);
+                    setShowSignaturePad(true);
+                  }}
+                  className="min-h-[44px] bg-teal-600 hover:bg-teal-700"
+                  data-testid={`button-sign-after-preview-${doc.slug}`}
                 >
-                  <Upload className={`${iconSize.sm} mr-1.5`} />
-                  {isUploaded ? "Erneut hochladen" : "Stattdessen hochladen"}
+                  <Pen className={`${iconSize.sm} mr-1.5`} />
+                  Jetzt unterschreiben
                 </Button>
               )}
             </div>
-          )}
+          </div>
+        )}
 
-          {isUploaded && !showUpload && (
-            <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-md">
-              <FileText className="h-4 w-4 text-blue-500 shrink-0" />
-              <span className="text-xs text-blue-700 truncate flex-1">{uploadedDoc!.fileName}</span>
-              <button
-                type="button"
-                onClick={() => onDocRemoved()}
-                className="p-2 text-gray-400 hover:text-red-500 rounded-md"
-                aria-label="Upload entfernen"
-                data-testid={`button-remove-upload-${doc.slug}`}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          )}
+        {!showPreview && (
+          <div className="space-y-2">
+            {showSignaturePad ? (
+              <SignaturePad
+                title={`Unterschrift: ${doc.name}`}
+                onSave={handleSignatureSave}
+                onCancel={() => setShowSignaturePad(false)}
+              />
+            ) : showUpload ? (
+              <UploadArea
+                isUploading={isUploading}
+                onFileSelect={handleFileSelect}
+                onCancel={() => setShowUpload(false)}
+                cameraInputRef={cameraInputRef}
+                testIdSuffix={doc.slug}
+              />
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {formData && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleShowPreview}
+                    disabled={isLoadingPreview}
+                    className="text-sm min-h-[44px]"
+                    data-testid={`button-preview-${doc.slug}`}
+                  >
+                    {isLoadingPreview ? (
+                      <><Loader2 className={`${iconSize.sm} mr-1.5 animate-spin`} />Wird geladen...</>
+                    ) : (
+                      <><Eye className={`${iconSize.sm} mr-1.5`} />Vorschau</>
+                    )}
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant={isSigned ? "outline" : "default"}
+                  onClick={() => setShowSignaturePad(true)}
+                  className={`text-sm min-h-[44px] ${!isSigned ? "bg-teal-600 hover:bg-teal-700" : ""}`}
+                  data-testid={`button-sign-${doc.slug}`}
+                >
+                  <Pen className={`${iconSize.sm} mr-1.5`} />
+                  {isSigned ? "Unterschrift ändern" : "Unterschreiben"}
+                </Button>
+                {documentTypeId && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setShowUpload(true)}
+                    className="text-sm min-h-[44px]"
+                    data-testid={`button-upload-alt-${doc.slug}`}
+                  >
+                    <Upload className={`${iconSize.sm} mr-1.5`} />
+                    {isUploaded ? "Erneut hochladen" : "Stattdessen hochladen"}
+                  </Button>
+                )}
+              </div>
+            )}
 
-        </div>
+            {isUploaded && !showUpload && (
+              <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-md">
+                <FileText className="h-4 w-4 text-blue-500 shrink-0" />
+                <span className="text-xs text-blue-700 truncate flex-1">{uploadedDoc!.fileName}</span>
+                <button
+                  type="button"
+                  onClick={() => onDocRemoved()}
+                  className="p-2 text-gray-400 hover:text-red-500 rounded-md"
+                  aria-label="Upload entfernen"
+                  data-testid={`button-remove-upload-${doc.slug}`}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </CardContent>
 
       <input

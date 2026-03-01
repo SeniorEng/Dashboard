@@ -4,7 +4,7 @@ import crypto from "crypto";
 import { documentStorage } from "../../storage/documents";
 import { insertDocumentTypeSchema, updateDocumentTypeSchema, insertEmployeeDocumentSchema, insertCustomerDocumentSchema, insertDocumentTemplateSchema, updateDocumentTemplateSchema } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
-import { renderTemplateForCustomer, wrapInPrintableHtml, getPlaceholderCatalog } from "../../services/template-engine";
+import { renderTemplateForCustomer, renderTemplateFromFormData, wrapInPrintableHtml, getPlaceholderCatalog, type WizardFormData } from "../../services/template-engine";
 import { generateAndStorePdf, getDocumentPdfBuffer } from "../../services/document-pdf";
 
 const router = Router();
@@ -146,6 +146,63 @@ router.post("/document-templates/render", asyncHandler("Vorlage konnte nicht ger
 
   const { templateSlug, customerId, overrides } = parsed.data;
   const result = await renderTemplateForCustomer(templateSlug, customerId, overrides || {});
+  const printableHtml = wrapInPrintableHtml(result.html, templateSlug);
+
+  res.json({
+    html: result.html,
+    printableHtml,
+    templateId: result.templateId,
+    templateVersion: result.templateVersion,
+  });
+}));
+
+const renderPreviewSchema = z.object({
+  templateSlug: z.string().min(1),
+  formData: z.object({
+    vorname: z.string(),
+    nachname: z.string(),
+    geburtsdatum: z.string().optional(),
+    email: z.string().optional(),
+    telefon: z.string().optional(),
+    festnetz: z.string().optional(),
+    strasse: z.string().optional(),
+    nr: z.string().optional(),
+    plz: z.string().optional(),
+    stadt: z.string().optional(),
+    pflegegrad: z.string().optional(),
+    billingType: z.string().optional(),
+    vorerkrankungen: z.string().optional(),
+    haustierVorhanden: z.boolean().optional(),
+    haustierDetails: z.string().optional(),
+    personenbefoerderungGewuenscht: z.boolean().optional(),
+    versichertennummer: z.string().optional(),
+    contractDate: z.string().optional(),
+    contractStart: z.string().optional(),
+    vereinbarteLeistungen: z.string().optional(),
+    contractHours: z.string().optional(),
+    contractPeriod: z.string().optional(),
+    contacts: z.array(z.object({
+      vorname: z.string().optional(),
+      nachname: z.string().optional(),
+      contactType: z.string().optional(),
+      telefon: z.string().optional(),
+      email: z.string().optional(),
+      isPrimary: z.boolean().optional(),
+    })).optional(),
+    insuranceProviderId: z.string().optional(),
+  }),
+  overrides: z.record(z.string()).optional(),
+});
+
+router.post("/document-templates/render-preview", asyncHandler("Vorschau konnte nicht erstellt werden", async (req: Request, res: Response) => {
+  const parsed = renderPreviewSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "templateSlug und formData sind erforderlich", details: parsed.error.issues });
+    return;
+  }
+
+  const { templateSlug, formData, overrides } = parsed.data;
+  const result = await renderTemplateFromFormData(templateSlug, formData as WizardFormData, overrides || {});
   const printableHtml = wrapInPrintableHtml(result.html, templateSlug);
 
   res.json({

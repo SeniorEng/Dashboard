@@ -54,7 +54,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Birthdays**: Integrated tab showing upcoming birthdays.
 - **Employee Self-Service Profile**: Employees manage contact data, emergency contact, pet acceptance, password, and document uploads.
 - **Document Type System**: `document_types` table defines document types with `context`, `targetType`, `reviewIntervalMonths`, and optional linkage to `document_template`.
-- **Customer Documents**: Document-type-centric UI for existing documents. "Hinzufügen" allows digital creation via template or upload. Customer creation wizard (`signatures-step.tsx`) handles template-based and upload-only documents.
+- **Customer Documents**: Document-type-centric UI for existing documents. "Hinzufügen" allows digital creation via template or upload. Customer creation wizard (`signatures-step.tsx`) handles template-based and upload-only documents. Wizard signatures step includes document preview: each document card has a "Vorschau" button that renders the template with all wizard form data (via `POST /admin/document-templates/render-preview`) so the customer can review the filled-in document before signing.
 - **Employee Document Upload**: Employees can upload and view customer documents (PDF, images, Word) from the customer detail page.
 - **Navigation Structure**: Bottom navigation tabs: Termine, Kunden, Aufgaben, Nachweise, Zeiten. User dropdown for "Mein Profil".
 - **Invoicing Module**: Full billing system with audit-safe data flow requiring signed Leistungsnachweis. Snapshot approach, three invoice formats per billing type, GoBD-compliant Stornorechnung, sequential numbering, Nachberechnung.

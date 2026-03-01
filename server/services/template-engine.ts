@@ -1,6 +1,6 @@
 import { documentStorage } from "../storage/documents";
 import { storage } from "../storage";
-import { getCustomerCurrentInsurance } from "../storage/customer-mgmt/insurance";
+import { getCustomerCurrentInsurance, getInsuranceProvider } from "../storage/customer-mgmt/insurance";
 import { formatDateISO, formatDateForDisplay } from "@shared/utils/datetime";
 import { BILLING_TYPE_LABELS, type BillingType } from "@shared/domain/customers";
 
@@ -105,6 +105,194 @@ function formatDE(dateStr: string | null | undefined): string {
   } catch {
     return dateStr;
   }
+}
+
+export interface WizardFormData {
+  vorname: string;
+  nachname: string;
+  geburtsdatum?: string;
+  email?: string;
+  telefon?: string;
+  festnetz?: string;
+  strasse?: string;
+  nr?: string;
+  plz?: string;
+  stadt?: string;
+  pflegegrad?: string;
+  billingType?: string;
+  vorerkrankungen?: string;
+  haustierVorhanden?: boolean;
+  haustierDetails?: string;
+  personenbefoerderungGewuenscht?: boolean;
+  versichertennummer?: string;
+  contractDate?: string;
+  contractStart?: string;
+  vereinbarteLeistungen?: string;
+  contractHours?: string;
+  contractPeriod?: string;
+  contacts?: Array<{
+    vorname?: string;
+    nachname?: string;
+    contactType?: string;
+    telefon?: string;
+    email?: string;
+    isPrimary?: boolean;
+  }>;
+  insuranceProviderId?: string;
+}
+
+export async function buildPlaceholdersFromFormData(
+  formData: WizardFormData,
+  overrides: TemplatePlaceholders = {}
+): Promise<TemplatePlaceholders> {
+  const today = new Date();
+  const todayDE = formatDateForDisplay(formatDateISO(today));
+
+  const fullName = [formData.vorname, formData.nachname].filter(Boolean).join(" ");
+  const pg = formData.pflegegrad && formData.pflegegrad !== "0" ? formData.pflegegrad : "";
+
+  const placeholders: TemplatePlaceholders = {
+    customer_name: fullName,
+    customer_vorname: formData.vorname || "",
+    customer_nachname: formData.nachname || "",
+    customer_address: [formData.strasse ? `${formData.strasse} ${formData.nr || ""}`.trim() : "", `${formData.plz || ""} ${formData.stadt || ""}`.trim()].filter(Boolean).join(", "),
+    customer_strasse: formData.strasse ? `${formData.strasse} ${formData.nr || ""}`.trim() : "",
+    customer_hausnummer: formData.nr || "",
+    customer_plz: formData.plz || "",
+    customer_stadt: formData.stadt || "",
+    customer_birthdate: formatDE(formData.geburtsdatum),
+    customer_phone: formData.telefon || "",
+    customer_festnetz: formData.festnetz || "",
+    customer_email: formData.email || "",
+    pflegegrad: pg ? `Pflegegrad ${pg}` : "",
+    pflegegrad_nummer: pg,
+    pflegegrad_seit: "",
+    abrechnungsart: formData.billingType ? (BILLING_TYPE_LABELS[formData.billingType as BillingType] || formData.billingType) : "",
+    versichertennummer: formData.versichertennummer || "",
+    insurance_name: "",
+    ik_nummer: "",
+    insurance_empfaenger: "",
+    insurance_strasse: "",
+    insurance_plz: "",
+    insurance_stadt: "",
+    insurance_address: "",
+    vorerkrankungen: formData.vorerkrankungen || "",
+    haustier: formData.haustierVorhanden ? "Ja" : "Nein",
+    haustier_details: formData.haustierDetails || "",
+    personenbefoerderung: formData.personenbefoerderungGewuenscht ? "Ja" : "Nein",
+    vertragsdatum: formatDE(formData.contractDate) || todayDE,
+    vertragsbeginn: formatDE(formData.contractStart) || todayDE,
+    vereinbarte_leistungen: formData.vereinbarteLeistungen || "",
+    vertragsstunden: formData.contractHours || "",
+    vertragsperiode: formData.contractPeriod === "monthly" ? "pro Monat" : formData.contractPeriod === "weekly" ? "pro Woche" : "",
+    kontaktperson_name: "",
+    kontaktperson_telefon: "",
+    kontaktperson_email: "",
+    kontaktperson_typ: "",
+    mandatsreferenz: `SE-NEU-${today.getFullYear()}`,
+    current_date: todayDE,
+    heute: todayDE,
+    company_name: "",
+    company_strasse: "",
+    company_plz: "",
+    company_stadt: "",
+    company_address: "",
+    company_telefon: "",
+    company_email: "",
+    company_website: "",
+    company_ik_nummer: "",
+    company_steuernummer: "",
+    company_ust_id: "",
+    company_geschaeftsfuehrer: "",
+    company_iban: "",
+    company_bic: "",
+    company_bank_name: "",
+    company_logo: "",
+    company_logo_url: "",
+    customer_signature: "",
+    employee_signature: "",
+  };
+
+  const primaryContact = formData.contacts?.find(c => c.isPrimary) || formData.contacts?.[0];
+  if (primaryContact) {
+    placeholders.kontaktperson_name = [primaryContact.vorname, primaryContact.nachname].filter(Boolean).join(" ");
+    placeholders.kontaktperson_telefon = primaryContact.telefon || "";
+    placeholders.kontaktperson_email = primaryContact.email || "";
+    placeholders.kontaktperson_typ = primaryContact.contactType || "";
+  }
+
+  try {
+    const companySettings = await storage.getCompanySettings();
+    if (companySettings) {
+      placeholders.company_name = companySettings.companyName || "";
+      placeholders.company_strasse = [companySettings.strasse, companySettings.hausnummer].filter(Boolean).join(" ");
+      placeholders.company_plz = companySettings.plz || "";
+      placeholders.company_stadt = companySettings.stadt || "";
+      placeholders.company_address = [
+        companySettings.strasse ? `${companySettings.strasse} ${companySettings.hausnummer || ""}`.trim() : "",
+        [companySettings.plz, companySettings.stadt].filter(Boolean).join(" "),
+      ].filter(Boolean).join(", ");
+      placeholders.company_telefon = companySettings.telefon || "";
+      placeholders.company_email = companySettings.email || "";
+      placeholders.company_website = companySettings.website || "";
+      placeholders.company_ik_nummer = companySettings.ikNummer || "";
+      placeholders.company_steuernummer = companySettings.steuernummer || "";
+      placeholders.company_ust_id = companySettings.ustId || "";
+      placeholders.company_geschaeftsfuehrer = companySettings.geschaeftsfuehrer || "";
+      placeholders.company_iban = companySettings.iban || "";
+      placeholders.company_bic = companySettings.bic || "";
+      placeholders.company_bank_name = companySettings.bankName || "";
+      const pdfLogo = companySettings.pdfLogoUrl || companySettings.logoUrl;
+      if (pdfLogo) {
+        placeholders.company_logo_url = pdfLogo;
+        placeholders.company_logo = `<img src="${pdfLogo}" alt="Firmenlogo" style="max-height:80px;" />`;
+      }
+    }
+  } catch (_e) {
+  }
+
+  if (formData.insuranceProviderId) {
+    try {
+      const providerId = parseInt(formData.insuranceProviderId);
+      if (!isNaN(providerId)) {
+        const provider = await getInsuranceProvider(providerId);
+        if (provider) {
+          placeholders.insurance_name = provider.name || "";
+          placeholders.ik_nummer = provider.ikNummer || "";
+          placeholders.insurance_empfaenger = provider.empfaenger || provider.name || "";
+          placeholders.insurance_strasse = [provider.strasse, provider.hausnummer].filter(Boolean).join(" ");
+          placeholders.insurance_plz = provider.plz || "";
+          placeholders.insurance_stadt = provider.stadt || "";
+          placeholders.insurance_address = [
+            provider.strasse ? `${provider.strasse} ${provider.hausnummer || ""}`.trim() : "",
+            [provider.plz, provider.stadt].filter(Boolean).join(" "),
+          ].filter(Boolean).join(", ");
+        }
+      }
+    } catch (_e) {
+    }
+  }
+
+  Object.assign(placeholders, overrides);
+  return placeholders;
+}
+
+export async function renderTemplateFromFormData(
+  templateSlug: string,
+  formData: WizardFormData,
+  overrides: TemplatePlaceholders = {}
+): Promise<{ html: string; templateId: number; templateVersion: number }> {
+  const template = await documentStorage.getDocumentTemplateBySlug(templateSlug);
+  if (!template) throw new Error(`Vorlage "${templateSlug}" nicht gefunden`);
+
+  const placeholders = await buildPlaceholdersFromFormData(formData, overrides);
+  const html = renderTemplate(template.htmlContent, placeholders);
+
+  return {
+    html,
+    templateId: template.id,
+    templateVersion: template.version,
+  };
 }
 
 export async function buildPlaceholders(
