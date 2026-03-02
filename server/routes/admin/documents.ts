@@ -80,6 +80,20 @@ router.post("/employees/:employeeId/documents", asyncHandler("Dokument konnte ni
   res.status(201).json(doc);
 }));
 
+router.delete("/employees/:employeeId/documents/batch/:batchId", asyncHandler("Batch konnte nicht gelöscht werden", async (req: Request, res: Response) => {
+  const { batchId } = req.params;
+  if (!batchId) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Batch-ID" }); return; }
+  const count = await documentStorage.softDeleteBatch(batchId);
+  res.json({ success: true, deletedCount: count });
+}));
+
+router.delete("/employees/:employeeId/documents/:documentId", asyncHandler("Dokument konnte nicht gelöscht werden", async (req: Request, res: Response) => {
+  const documentId = parseInt(req.params.documentId);
+  if (isNaN(documentId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Dokument-ID" }); return; }
+  await documentStorage.softDeleteDocument(documentId);
+  res.json({ success: true });
+}));
+
 router.get("/customers/:customerId/documents", asyncHandler("Kundendokumente konnten nicht geladen werden", async (req: Request, res: Response) => {
   const customerId = parseInt(req.params.customerId);
   if (isNaN(customerId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" }); return; }
@@ -118,6 +132,20 @@ router.post("/customers/:customerId/documents", asyncHandler("Kundendokument kon
   const batchLabel = typeof req.body.batchLabel === "string" ? req.body.batchLabel : undefined;
   const doc = await documentStorage.uploadCustomerDocument(result.data, userId, { skipDeactivation, batchId, batchLabel });
   res.status(201).json(doc);
+}));
+
+router.delete("/customers/:customerId/documents/batch/:batchId", asyncHandler("Kunden-Batch konnte nicht gelöscht werden", async (req: Request, res: Response) => {
+  const { batchId } = req.params;
+  if (!batchId) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Batch-ID" }); return; }
+  const count = await documentStorage.softDeleteCustomerBatch(batchId);
+  res.json({ success: true, deletedCount: count });
+}));
+
+router.delete("/customers/:customerId/documents/:documentId", asyncHandler("Kundendokument konnte nicht gelöscht werden", async (req: Request, res: Response) => {
+  const documentId = parseInt(req.params.documentId);
+  if (isNaN(documentId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Dokument-ID" }); return; }
+  await documentStorage.softDeleteCustomerDocument(documentId);
+  res.json({ success: true });
 }));
 
 router.get("/documents/due-soon", asyncHandler("Fällige Dokumente konnten nicht geladen werden", async (req: Request, res: Response) => {

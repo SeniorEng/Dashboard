@@ -39,6 +39,7 @@ export const employeeDocuments = pgTable("employee_documents", {
   notes: text("notes"),
   batchId: uuid("batch_id").notNull().defaultRandom(),
   batchLabel: text("batch_label"),
+  deletedAt: timestamp("deleted_at"),
 }, (table) => [
   index("employee_documents_employee_idx").on(table.employeeId),
   index("employee_documents_type_idx").on(table.documentTypeId),
@@ -60,6 +61,7 @@ export const customerDocuments = pgTable("customer_documents", {
   notes: text("notes"),
   batchId: uuid("batch_id").notNull().defaultRandom(),
   batchLabel: text("batch_label"),
+  deletedAt: timestamp("deleted_at"),
 }, (table) => [
   index("customer_documents_customer_idx").on(table.customerId),
   index("customer_documents_type_idx").on(table.documentTypeId),

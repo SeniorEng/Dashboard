@@ -56,6 +56,11 @@ export interface IDocumentStorage {
   getGroupedCustomerDocuments(customerId: number): Promise<GroupedDocumentsByType[]>;
   getCustomerDocumentHistory(customerId: number, documentTypeId: number): Promise<CustomerDocument[]>;
   getCustomerDocumentsDueSoon(leadTimeDays?: number): Promise<(CustomerDocument & { documentType: DocumentType; customer: { id: number; name: string } })[]>;
+
+  softDeleteDocument(documentId: number): Promise<void>;
+  softDeleteBatch(batchId: string): Promise<number>;
+  softDeleteCustomerDocument(documentId: number): Promise<void>;
+  softDeleteCustomerBatch(batchId: string): Promise<number>;
 }
 
 export class DocumentStorage implements IDocumentStorage {
@@ -149,7 +154,8 @@ export class DocumentStorage implements IDocumentStorage {
             and(
               eq(employeeDocuments.employeeId, data.employeeId),
               eq(employeeDocuments.documentTypeId, data.documentTypeId),
-              eq(employeeDocuments.isCurrent, true)
+              eq(employeeDocuments.isCurrent, true),
+              isNull(employeeDocuments.deletedAt)
             )
           );
       }
@@ -182,7 +188,8 @@ export class DocumentStorage implements IDocumentStorage {
       .where(
         and(
           eq(employeeDocuments.employeeId, employeeId),
-          eq(employeeDocuments.isCurrent, true)
+          eq(employeeDocuments.isCurrent, true),
+          isNull(employeeDocuments.deletedAt)
         )
       )
       .orderBy(asc(documentTypes.name));
@@ -198,7 +205,7 @@ export class DocumentStorage implements IDocumentStorage {
       })
       .from(employeeDocuments)
       .innerJoin(documentTypes, eq(employeeDocuments.documentTypeId, documentTypes.id))
-      .where(eq(employeeDocuments.employeeId, employeeId))
+      .where(and(eq(employeeDocuments.employeeId, employeeId), isNull(employeeDocuments.deletedAt)))
       .orderBy(asc(documentTypes.name), desc(employeeDocuments.uploadedAt));
 
     const typeMap = new Map<number, { documentType: DocumentType; docs: EmployeeDocument[] }>();
@@ -244,7 +251,8 @@ export class DocumentStorage implements IDocumentStorage {
       .where(
         and(
           eq(employeeDocuments.employeeId, employeeId),
-          eq(employeeDocuments.documentTypeId, documentTypeId)
+          eq(employeeDocuments.documentTypeId, documentTypeId),
+          isNull(employeeDocuments.deletedAt)
         )
       )
       .orderBy(desc(employeeDocuments.uploadedAt));
@@ -273,7 +281,8 @@ export class DocumentStorage implements IDocumentStorage {
         and(
           eq(employeeDocuments.isCurrent, true),
           lte(employeeDocuments.reviewDueDate, futureDateStr),
-          sql`${employeeDocuments.reviewDueDate} IS NOT NULL`
+          sql`${employeeDocuments.reviewDueDate} IS NOT NULL`,
+          isNull(employeeDocuments.deletedAt)
         )
       )
       .orderBy(asc(employeeDocuments.reviewDueDate));
@@ -293,7 +302,8 @@ export class DocumentStorage implements IDocumentStorage {
             and(
               eq(customerDocuments.customerId, data.customerId),
               eq(customerDocuments.documentTypeId, data.documentTypeId),
-              eq(customerDocuments.isCurrent, true)
+              eq(customerDocuments.isCurrent, true),
+              isNull(customerDocuments.deletedAt)
             )
           );
       }
@@ -326,7 +336,8 @@ export class DocumentStorage implements IDocumentStorage {
       .where(
         and(
           eq(customerDocuments.customerId, customerId),
-          eq(customerDocuments.isCurrent, true)
+          eq(customerDocuments.isCurrent, true),
+          isNull(customerDocuments.deletedAt)
         )
       )
       .orderBy(asc(documentTypes.name));
@@ -342,7 +353,7 @@ export class DocumentStorage implements IDocumentStorage {
       })
       .from(customerDocuments)
       .innerJoin(documentTypes, eq(customerDocuments.documentTypeId, documentTypes.id))
-      .where(eq(customerDocuments.customerId, customerId))
+      .where(and(eq(customerDocuments.customerId, customerId), isNull(customerDocuments.deletedAt)))
       .orderBy(asc(documentTypes.name), desc(customerDocuments.uploadedAt));
 
     const typeMap = new Map<number, { documentType: DocumentType; docs: CustomerDocument[] }>();
@@ -388,7 +399,8 @@ export class DocumentStorage implements IDocumentStorage {
       .where(
         and(
           eq(customerDocuments.customerId, customerId),
-          eq(customerDocuments.documentTypeId, documentTypeId)
+          eq(customerDocuments.documentTypeId, documentTypeId),
+          isNull(customerDocuments.deletedAt)
         )
       )
       .orderBy(desc(customerDocuments.uploadedAt));
@@ -415,12 +427,45 @@ export class DocumentStorage implements IDocumentStorage {
         and(
           eq(customerDocuments.isCurrent, true),
           lte(customerDocuments.reviewDueDate, futureDateStr),
-          sql`${customerDocuments.reviewDueDate} IS NOT NULL`
+          sql`${customerDocuments.reviewDueDate} IS NOT NULL`,
+          isNull(customerDocuments.deletedAt)
         )
       )
       .orderBy(asc(customerDocuments.reviewDueDate));
 
     return docs.map(d => ({ ...d.doc, documentType: d.docType, customer: d.customer }));
+  }
+
+  async softDeleteDocument(documentId: number): Promise<void> {
+    await db
+      .update(employeeDocuments)
+      .set({ deletedAt: new Date() })
+      .where(and(eq(employeeDocuments.id, documentId), isNull(employeeDocuments.deletedAt)));
+  }
+
+  async softDeleteBatch(batchId: string): Promise<number> {
+    const result = await db
+      .update(employeeDocuments)
+      .set({ deletedAt: new Date() })
+      .where(and(eq(employeeDocuments.batchId, batchId), isNull(employeeDocuments.deletedAt)))
+      .returning({ id: employeeDocuments.id });
+    return result.length;
+  }
+
+  async softDeleteCustomerDocument(documentId: number): Promise<void> {
+    await db
+      .update(customerDocuments)
+      .set({ deletedAt: new Date() })
+      .where(and(eq(customerDocuments.id, documentId), isNull(customerDocuments.deletedAt)));
+  }
+
+  async softDeleteCustomerBatch(batchId: string): Promise<number> {
+    const result = await db
+      .update(customerDocuments)
+      .set({ deletedAt: new Date() })
+      .where(and(eq(customerDocuments.batchId, batchId), isNull(customerDocuments.deletedAt)))
+      .returning({ id: customerDocuments.id });
+    return result.length;
   }
   async getDocumentTemplates(activeOnly = true): Promise<DocumentTemplate[]> {
     const conditions = [];

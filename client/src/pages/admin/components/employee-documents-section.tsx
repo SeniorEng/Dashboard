@@ -12,6 +12,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Loader2,
   Upload,
   FileCheck2,
@@ -22,6 +32,7 @@ import {
   Clock,
   FolderOpen,
   History,
+  Trash2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -83,6 +94,8 @@ interface GeneratedDocumentData {
   signingStatus: string | null;
 }
 
+type DeleteTarget = { type: "file"; id: number; fileName: string } | { type: "batch"; batchId: string; fileCount: number };
+
 export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false }: { employeeId: number; userName: string; isAdmin?: boolean }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -94,6 +107,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
   const [expandedTypes, setExpandedTypes] = useState<Set<number>>(new Set());
   const [showArchive, setShowArchive] = useState<number | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
   const { data: groupedDocs, isLoading: docsLoading } = useQuery<GroupedDocData[]>({
     queryKey: ["admin", "employees", employeeId, "documents", "grouped"],
@@ -134,6 +148,44 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
+
+  const deleteFileMutation = useMutation({
+    mutationFn: async (documentId: number) => {
+      const result = await api.delete(`/admin/employees/${employeeId}/documents/${documentId}`);
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "employees", employeeId, "documents"] });
+      toast({ title: "Dokument gelöscht" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const deleteBatchMutation = useMutation({
+    mutationFn: async (batchId: string) => {
+      const result = await api.delete(`/admin/employees/${employeeId}/documents/batch/${batchId}`);
+      return unwrapResult(result);
+    },
+    onSuccess: (_data, _batchId) => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "employees", employeeId, "documents"] });
+      toast({ title: "Upload gelöscht" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleConfirmDelete = useCallback(() => {
+    if (!deleteTarget) return;
+    if (deleteTarget.type === "file") {
+      deleteFileMutation.mutate(deleteTarget.id);
+    } else {
+      deleteBatchMutation.mutate(deleteTarget.batchId);
+    }
+    setDeleteTarget(null);
+  }, [deleteTarget, deleteFileMutation, deleteBatchMutation]);
 
   const handleUpload = useCallback(async () => {
     if (selectedFiles.length === 0 || !selectedDocTypeId) return;
@@ -192,6 +244,8 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
     }
     return worstStatus;
   };
+
+  const isDeleting = deleteFileMutation.isPending || deleteBatchMutation.isPending;
 
   return (
     <div className="mt-6 pt-6 border-t">
@@ -353,6 +407,16 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
                           {batch.files.length > 1 && (
                             <span className="text-xs text-gray-400">{batch.files.length} Dateien</span>
                           )}
+                          {isAdmin && batch.files.length > 1 && (
+                            <button
+                              onClick={() => setDeleteTarget({ type: "batch", batchId: batch.batchId, fileCount: batch.files.length })}
+                              className="ml-auto text-gray-300 hover:text-red-500 transition-colors"
+                              disabled={isDeleting}
+                              data-testid={`button-delete-batch-${batch.batchId}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
                         </div>
                         <div className="space-y-1">
                           {batch.files.map((file) => (
@@ -361,15 +425,27 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
                                 <FileText className="h-3.5 w-3.5 text-gray-400 shrink-0" />
                                 <span className="text-xs text-gray-700 truncate">{file.fileName}</span>
                               </div>
-                              <a
-                                href={file.objectPath}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center justify-center h-7 w-7 rounded hover:bg-gray-100 shrink-0"
-                                data-testid={`button-download-doc-${file.id}`}
-                              >
-                                <Download className="h-3.5 w-3.5 text-gray-500" />
-                              </a>
+                              <div className="flex items-center gap-0.5 shrink-0">
+                                <a
+                                  href={file.objectPath}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center justify-center h-7 w-7 rounded hover:bg-gray-100"
+                                  data-testid={`button-download-doc-${file.id}`}
+                                >
+                                  <Download className="h-3.5 w-3.5 text-gray-500" />
+                                </a>
+                                {isAdmin && (
+                                  <button
+                                    onClick={() => setDeleteTarget({ type: "file", id: file.id, fileName: file.fileName })}
+                                    className="inline-flex items-center justify-center h-7 w-7 rounded hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors"
+                                    disabled={isDeleting}
+                                    data-testid={`button-delete-doc-${file.id}`}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -497,6 +573,31 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
           queryClient.invalidateQueries({ queryKey: ["admin", "employees", employeeId, "documents"] });
         }}
       />
+
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deleteTarget?.type === "batch" ? "Upload löschen?" : "Dokument löschen?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget?.type === "batch"
+                ? `Alle ${deleteTarget.fileCount} Dateien dieses Uploads werden gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.`
+                : `Die Datei "${deleteTarget?.fileName}" wird gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Abbrechen</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-red-600 hover:bg-red-700 text-white"
+              data-testid="button-confirm-delete"
+            >
+              Löschen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
