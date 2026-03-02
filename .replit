@@ -10,7 +10,7 @@ packages = ["chromium"]
 deploymentTarget = "autoscale"
 build = ["npm", "run", "build"]
 publicDir = "dist/public"
-run = ["npm", "run", "start"]
+run = ["sh", "-c", "node script/check-build.mjs && NODE_ENV=production node dist/index.cjs"]
 
 [[ports]]
 localPort = 5000
