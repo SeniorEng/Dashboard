@@ -822,7 +822,8 @@ router.post("/:id/documents", asyncHandler("Kundendokument konnte nicht hochgela
     return;
   }
 
-  const doc = await documentStorage.uploadCustomerDocument(result.data, user.id);
+  const documentDate = typeof req.body.documentDate === "string" && req.body.documentDate ? req.body.documentDate : undefined;
+  const doc = await documentStorage.uploadCustomerDocument(result.data, user.id, { documentDate });
   res.status(201).json(doc);
 }));
 

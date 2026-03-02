@@ -45,13 +45,13 @@ export interface IDocumentStorage {
   createDocumentType(data: InsertDocumentType): Promise<DocumentType>;
   updateDocumentType(id: number, data: UpdateDocumentType): Promise<DocumentType | null>;
 
-  uploadDocument(data: InsertEmployeeDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean; batchId?: string; batchLabel?: string }): Promise<EmployeeDocument>;
+  uploadDocument(data: InsertEmployeeDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean; batchId?: string; batchLabel?: string; documentDate?: string }): Promise<EmployeeDocument>;
   getCurrentDocuments(employeeId: number): Promise<(EmployeeDocument & { documentType: DocumentType })[]>;
   getGroupedDocuments(employeeId: number): Promise<GroupedDocumentsByType[]>;
   getDocumentHistory(employeeId: number, documentTypeId: number): Promise<EmployeeDocument[]>;
   getEmployeeDocumentsDueSoon(leadTimeDays?: number): Promise<(EmployeeDocument & { documentType: DocumentType; employee: { id: number; displayName: string } })[]>;
 
-  uploadCustomerDocument(data: InsertCustomerDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean; batchId?: string; batchLabel?: string }): Promise<CustomerDocument>;
+  uploadCustomerDocument(data: InsertCustomerDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean; batchId?: string; batchLabel?: string; documentDate?: string }): Promise<CustomerDocument>;
   getCurrentCustomerDocuments(customerId: number): Promise<(CustomerDocument & { documentType: DocumentType })[]>;
   getGroupedCustomerDocuments(customerId: number): Promise<GroupedDocumentsByType[]>;
   getCustomerDocumentHistory(customerId: number, documentTypeId: number): Promise<CustomerDocument[]>;
@@ -142,7 +142,7 @@ export class DocumentStorage implements IDocumentStorage {
     return formatDateISO(dueDate);
   }
 
-  async uploadDocument(data: InsertEmployeeDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean; batchId?: string; batchLabel?: string }): Promise<EmployeeDocument> {
+  async uploadDocument(data: InsertEmployeeDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean; batchId?: string; batchLabel?: string; documentDate?: string }): Promise<EmployeeDocument> {
     const reviewDueDate = await this.calculateReviewDueDate(data.documentTypeId);
 
     return db.transaction(async (tx) => {
@@ -169,6 +169,7 @@ export class DocumentStorage implements IDocumentStorage {
         reviewDueDate,
         isCurrent: true,
         notes: data.notes || null,
+        documentDate: options?.documentDate || null,
         ...(options?.batchId ? { batchId: options.batchId } : {}),
         ...(options?.batchLabel !== undefined ? { batchLabel: options.batchLabel || null } : {}),
       }).returning();
@@ -290,7 +291,7 @@ export class DocumentStorage implements IDocumentStorage {
     return docs.map(d => ({ ...d.doc, documentType: d.docType, employee: d.employee }));
   }
 
-  async uploadCustomerDocument(data: InsertCustomerDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean; batchId?: string; batchLabel?: string }): Promise<CustomerDocument> {
+  async uploadCustomerDocument(data: InsertCustomerDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean; batchId?: string; batchLabel?: string; documentDate?: string }): Promise<CustomerDocument> {
     const reviewDueDate = await this.calculateReviewDueDate(data.documentTypeId);
 
     return db.transaction(async (tx) => {
@@ -317,6 +318,7 @@ export class DocumentStorage implements IDocumentStorage {
         reviewDueDate,
         isCurrent: true,
         notes: data.notes || null,
+        documentDate: options?.documentDate || null,
         ...(options?.batchId ? { batchId: options.batchId } : {}),
         ...(options?.batchLabel !== undefined ? { batchLabel: options.batchLabel || null } : {}),
       }).returning();

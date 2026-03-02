@@ -61,6 +61,7 @@ interface DocumentFileData {
   objectPath: string;
   uploadedAt: string;
   reviewDueDate: string | null;
+  documentDate: string | null;
   isCurrent: boolean;
   notes: string | null;
   batchId: string;

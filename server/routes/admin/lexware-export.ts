@@ -137,7 +137,7 @@ async function getMonthlyHoursBatch(
       AND a.deleted_at IS NULL
       AND a.date >= ${startDate}
       AND a.date <= ${endDate}
-      AND a.performed_by_employee_id = ANY(${employeeIds})
+      AND a.performed_by_employee_id = ANY(${sql`ARRAY[${sql.join(employeeIds.map(id => sql`${id}`), sql`, `)}]::int[]`})
       AND s.unit_type = 'hours'
     GROUP BY a.performed_by_employee_id, category, EXTRACT(MONTH FROM a.date::date)
   `);
@@ -289,11 +289,11 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
       performed_by_employee_id as employee_id,
       COALESCE(SUM(COALESCE(travel_kilometers, 0) + COALESCE(customer_kilometers, 0)), 0) as total_km
     FROM appointments
-    WHERE status = 'completed'
+    WHERE status IN ('completed', 'documented')
       AND deleted_at IS NULL
       AND date >= ${startDate}
       AND date <= ${endDate}
-      AND performed_by_employee_id = ANY(${employeeIds})
+      AND performed_by_employee_id = ANY(${sql`ARRAY[${sql.join(employeeIds.map(id => sql`${id}`), sql`, `)}]::int[]`})
     GROUP BY performed_by_employee_id
   `);
 

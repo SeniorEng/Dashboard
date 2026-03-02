@@ -59,6 +59,7 @@ interface DocumentFileData {
   objectPath: string;
   uploadedAt: string;
   reviewDueDate: string | null;
+  documentDate: string | null;
   isCurrent: boolean;
   notes: string | null;
   batchId: string;
@@ -104,6 +105,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
   const [selectedDocTypeId, setSelectedDocTypeId] = useState("");
   const [batchLabel, setBatchLabel] = useState("");
   const [notes, setNotes] = useState("");
+  const [documentDate, setDocumentDate] = useState("");
   const [expandedTypes, setExpandedTypes] = useState<Set<number>>(new Set());
   const [showArchive, setShowArchive] = useState<number | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -205,6 +207,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
         skipDeactivation: i > 0,
         batchId: uploadBatchId,
         batchLabel: batchLabel || undefined,
+        documentDate: documentDate || undefined,
       });
     }
 
@@ -213,9 +216,10 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
     setSelectedDocTypeId("");
     setBatchLabel("");
     setNotes("");
+    setDocumentDate("");
     setSelectedFiles([]);
     toast({ title: selectedFiles.length > 1 ? `${selectedFiles.length} Dokumente hinzugefügt` : "Dokument hinzugefügt" });
-  }, [selectedFiles, selectedDocTypeId, notes, batchLabel, uploadFile, saveMutation, queryClient, employeeId, toast]);
+  }, [selectedFiles, selectedDocTypeId, notes, batchLabel, documentDate, uploadFile, saveMutation, queryClient, employeeId, toast]);
 
   const toggleType = (typeId: number) => {
     setExpandedTypes(prev => {
@@ -326,6 +330,18 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
           </div>
 
           <div className="space-y-2">
+            <Label>Dokumentendatum (optional)</Label>
+            <Input
+              type="date"
+              value={documentDate}
+              onChange={(e) => setDocumentDate(e.target.value)}
+              className="text-base"
+              data-testid="input-document-date"
+            />
+            <p className="text-[11px] text-gray-500">Von wann stammt das Dokument? Z.B. Vertragsdatum oder Ausstellungsdatum</p>
+          </div>
+
+          <div className="space-y-2">
             <Label>Notiz (optional)</Label>
             <Input
               value={notes}
@@ -346,7 +362,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
                 <><Loader2 className={`mr-2 ${iconSize.sm} animate-spin`} />Wird hinzugefügt...</>
               ) : selectedFiles.length > 1 ? `${selectedFiles.length} Dateien hinzufügen` : "Hinzufügen"}
             </Button>
-            <Button variant="outline" onClick={() => { setIsUploadOpen(false); setSelectedFiles([]); setBatchLabel(""); setNotes(""); }}>
+            <Button variant="outline" onClick={() => { setIsUploadOpen(false); setSelectedFiles([]); setBatchLabel(""); setNotes(""); setDocumentDate(""); }}>
               Abbrechen
             </Button>
           </div>
@@ -399,7 +415,9 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
                       <div key={batch.batchId} className="ml-2 pl-3 border-l-2 border-teal-100" data-testid={`batch-${batch.batchId}`}>
                         <div className="flex items-center gap-2 mb-1.5">
                           <span className="text-xs text-gray-500">
-                            {formatDateForDisplay(batch.uploadedAt.split("T")[0])}
+                            {batch.files[0]?.documentDate
+                              ? `Dok. vom ${formatDateForDisplay(batch.files[0].documentDate)}`
+                              : formatDateForDisplay(batch.uploadedAt.split("T")[0])}
                           </span>
                           {batch.batchLabel && (
                             <span className="text-xs px-1.5 py-0.5 rounded bg-teal-50 text-teal-700">{batch.batchLabel}</span>
