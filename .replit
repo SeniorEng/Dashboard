@@ -47,8 +47,5 @@ integrations = ["javascript_object_storage:2.0.0"]
 [userenv]
 
 [userenv.development]
-TEST_USER_EMAIL = "test@test.de"
-TEST_USER_PASSWORD_INTERNAL = "TestPasswort2024!"
 
 [userenv.shared]
-EMAIL_WEBHOOK_SECRET = "2ea5cf5da18fa33e66655154427d66a97d5667915d20ae2f361e7c606e3e6ff9"
