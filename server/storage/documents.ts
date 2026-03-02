@@ -26,19 +26,34 @@ import {
 } from "@shared/schema";
 import { db } from "../lib/db";
 
+export interface DocumentBatch {
+  batchId: string;
+  batchLabel: string | null;
+  uploadedAt: string;
+  files: (EmployeeDocument | CustomerDocument)[];
+}
+
+export interface GroupedDocumentsByType {
+  documentType: DocumentType;
+  currentBatches: DocumentBatch[];
+  archivedBatches: DocumentBatch[];
+}
+
 export interface IDocumentStorage {
   getDocumentTypes(activeOnly?: boolean, targetType?: string): Promise<DocumentType[]>;
   getDocumentType(id: number): Promise<DocumentType | null>;
   createDocumentType(data: InsertDocumentType): Promise<DocumentType>;
   updateDocumentType(id: number, data: UpdateDocumentType): Promise<DocumentType | null>;
 
-  uploadDocument(data: InsertEmployeeDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean }): Promise<EmployeeDocument>;
+  uploadDocument(data: InsertEmployeeDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean; batchId?: string; batchLabel?: string }): Promise<EmployeeDocument>;
   getCurrentDocuments(employeeId: number): Promise<(EmployeeDocument & { documentType: DocumentType })[]>;
+  getGroupedDocuments(employeeId: number): Promise<GroupedDocumentsByType[]>;
   getDocumentHistory(employeeId: number, documentTypeId: number): Promise<EmployeeDocument[]>;
   getEmployeeDocumentsDueSoon(leadTimeDays?: number): Promise<(EmployeeDocument & { documentType: DocumentType; employee: { id: number; displayName: string } })[]>;
 
-  uploadCustomerDocument(data: InsertCustomerDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean }): Promise<CustomerDocument>;
+  uploadCustomerDocument(data: InsertCustomerDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean; batchId?: string; batchLabel?: string }): Promise<CustomerDocument>;
   getCurrentCustomerDocuments(customerId: number): Promise<(CustomerDocument & { documentType: DocumentType })[]>;
+  getGroupedCustomerDocuments(customerId: number): Promise<GroupedDocumentsByType[]>;
   getCustomerDocumentHistory(customerId: number, documentTypeId: number): Promise<CustomerDocument[]>;
   getCustomerDocumentsDueSoon(leadTimeDays?: number): Promise<(CustomerDocument & { documentType: DocumentType; customer: { id: number; name: string } })[]>;
 }
@@ -122,7 +137,7 @@ export class DocumentStorage implements IDocumentStorage {
     return formatDateISO(dueDate);
   }
 
-  async uploadDocument(data: InsertEmployeeDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean }): Promise<EmployeeDocument> {
+  async uploadDocument(data: InsertEmployeeDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean; batchId?: string; batchLabel?: string }): Promise<EmployeeDocument> {
     const reviewDueDate = await this.calculateReviewDueDate(data.documentTypeId);
 
     return db.transaction(async (tx) => {
@@ -148,6 +163,8 @@ export class DocumentStorage implements IDocumentStorage {
         reviewDueDate,
         isCurrent: true,
         notes: data.notes || null,
+        ...(options?.batchId ? { batchId: options.batchId } : {}),
+        ...(options?.batchLabel !== undefined ? { batchLabel: options.batchLabel || null } : {}),
       }).returning();
 
       return result;
@@ -171,6 +188,53 @@ export class DocumentStorage implements IDocumentStorage {
       .orderBy(asc(documentTypes.name));
 
     return docs.map(d => ({ ...d.doc, documentType: d.docType }));
+  }
+
+  async getGroupedDocuments(employeeId: number): Promise<GroupedDocumentsByType[]> {
+    const docs = await db
+      .select({
+        doc: employeeDocuments,
+        docType: documentTypes,
+      })
+      .from(employeeDocuments)
+      .innerJoin(documentTypes, eq(employeeDocuments.documentTypeId, documentTypes.id))
+      .where(eq(employeeDocuments.employeeId, employeeId))
+      .orderBy(asc(documentTypes.name), desc(employeeDocuments.uploadedAt));
+
+    const typeMap = new Map<number, { documentType: DocumentType; docs: EmployeeDocument[] }>();
+    for (const d of docs) {
+      if (!typeMap.has(d.docType.id)) {
+        typeMap.set(d.docType.id, { documentType: d.docType, docs: [] });
+      }
+      typeMap.get(d.docType.id)!.docs.push(d.doc);
+    }
+
+    const result: GroupedDocumentsByType[] = [];
+    for (const entry of Array.from(typeMap.values())) {
+      const { documentType, docs: typeDocs } = entry;
+      const batchMap = new Map<string, { batchLabel: string | null; uploadedAt: string; files: EmployeeDocument[] }>();
+      for (const doc of typeDocs) {
+        if (!batchMap.has(doc.batchId)) {
+          batchMap.set(doc.batchId, { batchLabel: doc.batchLabel, uploadedAt: doc.uploadedAt as unknown as string, files: [] });
+        }
+        batchMap.get(doc.batchId)!.files.push(doc);
+      }
+
+      const currentBatches: DocumentBatch[] = [];
+      const archivedBatches: DocumentBatch[] = [];
+      for (const [batchId, batch] of Array.from(batchMap.entries())) {
+        const batchObj: DocumentBatch = { batchId, batchLabel: batch.batchLabel, uploadedAt: batch.uploadedAt, files: batch.files };
+        if (batch.files.some((f: EmployeeDocument) => f.isCurrent)) {
+          currentBatches.push(batchObj);
+        } else {
+          archivedBatches.push(batchObj);
+        }
+      }
+
+      result.push({ documentType, currentBatches, archivedBatches });
+    }
+
+    return result;
   }
 
   async getDocumentHistory(employeeId: number, documentTypeId: number): Promise<EmployeeDocument[]> {
@@ -217,7 +281,7 @@ export class DocumentStorage implements IDocumentStorage {
     return docs.map(d => ({ ...d.doc, documentType: d.docType, employee: d.employee }));
   }
 
-  async uploadCustomerDocument(data: InsertCustomerDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean }): Promise<CustomerDocument> {
+  async uploadCustomerDocument(data: InsertCustomerDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean; batchId?: string; batchLabel?: string }): Promise<CustomerDocument> {
     const reviewDueDate = await this.calculateReviewDueDate(data.documentTypeId);
 
     return db.transaction(async (tx) => {
@@ -243,6 +307,8 @@ export class DocumentStorage implements IDocumentStorage {
         reviewDueDate,
         isCurrent: true,
         notes: data.notes || null,
+        ...(options?.batchId ? { batchId: options.batchId } : {}),
+        ...(options?.batchLabel !== undefined ? { batchLabel: options.batchLabel || null } : {}),
       }).returning();
 
       return result;
@@ -266,6 +332,53 @@ export class DocumentStorage implements IDocumentStorage {
       .orderBy(asc(documentTypes.name));
 
     return docs.map(d => ({ ...d.doc, documentType: d.docType }));
+  }
+
+  async getGroupedCustomerDocuments(customerId: number): Promise<GroupedDocumentsByType[]> {
+    const docs = await db
+      .select({
+        doc: customerDocuments,
+        docType: documentTypes,
+      })
+      .from(customerDocuments)
+      .innerJoin(documentTypes, eq(customerDocuments.documentTypeId, documentTypes.id))
+      .where(eq(customerDocuments.customerId, customerId))
+      .orderBy(asc(documentTypes.name), desc(customerDocuments.uploadedAt));
+
+    const typeMap = new Map<number, { documentType: DocumentType; docs: CustomerDocument[] }>();
+    for (const d of docs) {
+      if (!typeMap.has(d.docType.id)) {
+        typeMap.set(d.docType.id, { documentType: d.docType, docs: [] });
+      }
+      typeMap.get(d.docType.id)!.docs.push(d.doc);
+    }
+
+    const result: GroupedDocumentsByType[] = [];
+    for (const entry of Array.from(typeMap.values())) {
+      const { documentType, docs: typeDocs } = entry;
+      const batchMap = new Map<string, { batchLabel: string | null; uploadedAt: string; files: CustomerDocument[] }>();
+      for (const doc of typeDocs) {
+        if (!batchMap.has(doc.batchId)) {
+          batchMap.set(doc.batchId, { batchLabel: doc.batchLabel, uploadedAt: doc.uploadedAt as unknown as string, files: [] });
+        }
+        batchMap.get(doc.batchId)!.files.push(doc);
+      }
+
+      const currentBatches: DocumentBatch[] = [];
+      const archivedBatches: DocumentBatch[] = [];
+      for (const [batchId, batch] of Array.from(batchMap.entries())) {
+        const batchObj: DocumentBatch = { batchId, batchLabel: batch.batchLabel, uploadedAt: batch.uploadedAt, files: batch.files };
+        if (batch.files.some((f: CustomerDocument) => f.isCurrent)) {
+          currentBatches.push(batchObj);
+        } else {
+          archivedBatches.push(batchObj);
+        }
+      }
+
+      result.push({ documentType, currentBatches, archivedBatches });
+    }
+
+    return result;
   }
 
   async getCustomerDocumentHistory(customerId: number, documentTypeId: number): Promise<CustomerDocument[]> {

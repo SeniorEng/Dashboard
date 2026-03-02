@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { StatusBadge } from "@/components/patterns/status-badge";
 import { iconSize } from "@/design-system";
 import {
   Select,
@@ -17,11 +16,13 @@ import {
   Upload,
   FileCheck2,
   ChevronDown,
-  ChevronUp,
+  ChevronRight,
   FileText,
   Download,
   Camera,
   X,
+  FolderOpen,
+  History,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -41,7 +42,7 @@ interface DocumentTypeData {
   isActive: boolean;
 }
 
-interface CustomerDocumentData {
+interface DocumentFileData {
   id: number;
   customerId: number;
   documentTypeId: number;
@@ -51,7 +52,21 @@ interface CustomerDocumentData {
   reviewDueDate: string | null;
   isCurrent: boolean;
   notes: string | null;
+  batchId: string;
+  batchLabel: string | null;
+}
+
+interface BatchData {
+  batchId: string;
+  batchLabel: string | null;
+  uploadedAt: string;
+  files: DocumentFileData[];
+}
+
+interface GroupedDocData {
   documentType: DocumentTypeData;
+  currentBatches: BatchData[];
+  archivedBatches: BatchData[];
 }
 
 interface GeneratedDocumentData {
@@ -75,16 +90,18 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isDigitalFlowOpen, setIsDigitalFlowOpen] = useState(false);
   const [selectedDocTypeId, setSelectedDocTypeId] = useState("");
+  const [batchLabel, setBatchLabel] = useState("");
   const [notes, setNotes] = useState("");
-  const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
+  const [expandedTypes, setExpandedTypes] = useState<Set<number>>(new Set());
+  const [showArchive, setShowArchive] = useState<number | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [filePreviews, setFilePreviews] = useState<{ file: File; preview?: string }[]>([]);
 
-  const { data: documents, isLoading: docsLoading } = useQuery<CustomerDocumentData[]>({
-    queryKey: ["admin", "customers", customerId, "documents"],
+  const { data: groupedDocs, isLoading: docsLoading } = useQuery<GroupedDocData[]>({
+    queryKey: ["admin", "customers", customerId, "documents", "grouped"],
     queryFn: async () => {
-      const result = await api.get<CustomerDocumentData[]>(`/admin/customers/${customerId}/documents`);
+      const result = await api.get<GroupedDocData[]>(`/admin/customers/${customerId}/documents?grouped=true`);
       return unwrapResult(result);
     },
   });
@@ -103,15 +120,6 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
       const result = await api.get<GeneratedDocumentData[]>(`/admin/customers/${customerId}/generated-documents`);
       return unwrapResult(result);
     },
-  });
-
-  const { data: history, isLoading: historyLoading } = useQuery<CustomerDocumentData[]>({
-    queryKey: ["admin", "customers", customerId, "documents", expandedHistory, "history"],
-    queryFn: async () => {
-      const result = await api.get<CustomerDocumentData[]>(`/admin/customers/${customerId}/documents/${expandedHistory}/history`);
-      return unwrapResult(result);
-    },
-    enabled: !!expandedHistory,
   });
 
   const addFiles = useCallback((newFiles: File[]) => {
@@ -158,7 +166,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
   });
 
   const saveMutation = useMutation({
-    mutationFn: async (data: { documentTypeId: number; fileName: string; objectPath: string; notes?: string | null; skipDeactivation?: boolean }) => {
+    mutationFn: async (data: { documentTypeId: number; fileName: string; objectPath: string; notes?: string | null; skipDeactivation?: boolean; batchId?: string; batchLabel?: string }) => {
       const result = await api.post(`/admin/customers/${customerId}/documents`, data);
       return unwrapResult(result);
     },
@@ -169,6 +177,8 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
 
   const handleUpload = useCallback(async () => {
     if (selectedFiles.length === 0 || !selectedDocTypeId) return;
+
+    const uploadBatchId = crypto.randomUUID();
 
     for (let i = 0; i < selectedFiles.length; i++) {
       const file = selectedFiles[i];
@@ -181,6 +191,8 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
         objectPath: uploadResult.objectPath,
         notes: notes || null,
         skipDeactivation: i > 0,
+        batchId: uploadBatchId,
+        batchLabel: batchLabel || undefined,
       });
     }
 
@@ -188,16 +200,39 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
     const count = selectedFiles.length;
     setIsUploadOpen(false);
     setSelectedDocTypeId("");
+    setBatchLabel("");
     setNotes("");
     clearAllFiles();
     toast({ title: count > 1 ? `${count} Dokumente hinzugefügt` : "Dokument hinzugefügt" });
-  }, [selectedFiles, selectedDocTypeId, notes, uploadFile, saveMutation, queryClient, customerId, toast, clearAllFiles]);
+  }, [selectedFiles, selectedDocTypeId, notes, batchLabel, uploadFile, saveMutation, queryClient, customerId, toast, clearAllFiles]);
 
-  const uploadedDocTypeIds = new Set(documents?.map(d => d.documentTypeId) || []);
+  const toggleType = (typeId: number) => {
+    setExpandedTypes(prev => {
+      const next = new Set(prev);
+      if (next.has(typeId)) {
+        next.delete(typeId);
+      } else {
+        next.add(typeId);
+      }
+      return next;
+    });
+  };
+
   const availableDocTypes = (docTypes?.filter(dt => dt.isActive) || []).sort((a, b) => a.name.localeCompare(b.name, "de"));
-  const missingDocTypes = availableDocTypes.filter(dt => !uploadedDocTypeIds.has(dt.id));
-
   const isSubmitting = isUploading || saveMutation.isPending;
+
+  const getBestReviewStatus = (batches: BatchData[]) => {
+    let worstStatus: "ok" | "warning" | "overdue" | null = null;
+    for (const batch of batches) {
+      for (const file of batch.files) {
+        const s = getReviewStatus(file.reviewDueDate);
+        if (s === "overdue") return "overdue";
+        if (s === "warning") worstStatus = "warning";
+        if (!worstStatus && s === "ok") worstStatus = "ok";
+      }
+    }
+    return worstStatus;
+  };
 
   return (
     <div>
@@ -335,6 +370,18 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
           </div>
 
           <div className="space-y-2">
+            <Label>Bezeichnung (optional)</Label>
+            <Input
+              value={batchLabel}
+              onChange={(e) => setBatchLabel(e.target.value)}
+              placeholder="z.B. Pflegevertrag, Vollmacht"
+              className="text-base"
+              data-testid="input-customer-batch-label"
+            />
+            <p className="text-[11px] text-gray-500">Hilft beim Zuordnen, wenn es mehrere Uploads gibt</p>
+          </div>
+
+          <div className="space-y-2">
             <Label>Notiz (optional)</Label>
             <Input
               value={notes}
@@ -355,7 +402,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                 <><Loader2 className={`mr-2 ${iconSize.sm} animate-spin`} />Wird hinzugefügt...</>
               ) : selectedFiles.length > 1 ? `${selectedFiles.length} Dateien hinzufügen` : "Hinzufügen"}
             </Button>
-            <Button variant="outline" onClick={() => { setIsUploadOpen(false); clearAllFiles(); }}>
+            <Button variant="outline" onClick={() => { setIsUploadOpen(false); clearAllFiles(); setBatchLabel(""); setNotes(""); }}>
               Abbrechen
             </Button>
           </div>
@@ -366,83 +413,128 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
         <div className="flex justify-center py-4">
           <Loader2 className={`${iconSize.md} animate-spin text-teal-600`} />
         </div>
-      ) : documents && documents.length > 0 ? (
+      ) : groupedDocs && groupedDocs.length > 0 ? (
         <div className="space-y-2">
-          {documents.map((doc) => {
-            const status = getReviewStatus(doc.reviewDueDate);
-            const borderClass = status === "overdue" ? "border-red-200" : status === "warning" ? "border-amber-200" : "border-gray-100";
+          {groupedDocs.map((group) => {
+            const isExpanded = expandedTypes.has(group.documentType.id);
+            const totalFiles = group.currentBatches.reduce((sum, b) => sum + b.files.length, 0);
+            const reviewStatus = getBestReviewStatus(group.currentBatches);
+            const borderClass = reviewStatus === "overdue" ? "border-red-200" : reviewStatus === "warning" ? "border-amber-200" : "border-gray-100";
 
             return (
-              <div key={doc.id} className={`p-3 bg-white border rounded-lg ${borderClass}`} data-testid={`customer-doc-${doc.id}`}>
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <FileText className={`${iconSize.sm} text-gray-400 shrink-0`} />
-                      <span className="text-sm font-medium text-gray-900 truncate">{doc.documentType.name}</span>
-                    </div>
-                    <div className="ml-6 space-y-1">
-                      <p className="text-xs text-gray-500 truncate">{doc.fileName}</p>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs text-gray-500">
-                          Hochgeladen: {formatDateForDisplay(doc.uploadedAt.split("T")[0])}
-                        </span>
-                        <ReviewBadge reviewDueDate={doc.reviewDueDate} />
-                      </div>
-                      {doc.notes && <p className="text-xs text-gray-500 italic">{doc.notes}</p>}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <a
-                      href={doc.objectPath}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-gray-100"
-                      data-testid={`button-download-customer-doc-${doc.id}`}
-                    >
-                      <Download className={`${iconSize.sm} text-gray-600`} />
-                    </a>
-                    {doc.documentType.reviewIntervalMonths && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 w-8 p-0"
-                        onClick={() => setExpandedHistory(expandedHistory === doc.documentTypeId ? null : doc.documentTypeId)}
-                        data-testid={`button-customer-history-${doc.documentTypeId}`}
-                      >
-                        {expandedHistory === doc.documentTypeId ? (
-                          <ChevronUp className={`${iconSize.sm} text-gray-600`} />
-                        ) : (
-                          <ChevronDown className={`${iconSize.sm} text-gray-600`} />
-                        )}
-                      </Button>
+              <div key={group.documentType.id} className={`bg-white border rounded-lg ${borderClass}`} data-testid={`customer-doctype-group-${group.documentType.id}`}>
+                <button
+                  onClick={() => toggleType(group.documentType.id)}
+                  className="w-full p-3 flex items-center justify-between gap-2 text-left hover:bg-gray-50 rounded-lg transition-colors"
+                  data-testid={`button-toggle-customer-doctype-${group.documentType.id}`}
+                >
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <FolderOpen className={`${iconSize.sm} text-teal-600 shrink-0`} />
+                    <span className="text-sm font-medium text-gray-900 truncate">{group.documentType.name}</span>
+                    <span className="text-xs text-gray-400 shrink-0">
+                      {group.currentBatches.length === 1 && totalFiles === 1
+                        ? "1 Datei"
+                        : group.currentBatches.length === 1
+                        ? `${totalFiles} Dateien`
+                        : `${group.currentBatches.length} Uploads`}
+                    </span>
+                    {group.currentBatches.length > 0 && (
+                      <ReviewBadge reviewDueDate={group.currentBatches[0]?.files[0]?.reviewDueDate ?? null} />
                     )}
                   </div>
-                </div>
+                  {isExpanded ? (
+                    <ChevronDown className={`${iconSize.sm} text-gray-400 shrink-0`} />
+                  ) : (
+                    <ChevronRight className={`${iconSize.sm} text-gray-400 shrink-0`} />
+                  )}
+                </button>
 
-                {expandedHistory === doc.documentTypeId && (
-                  <div className="mt-3 ml-6 pt-3 border-t border-gray-100">
-                    <p className="text-xs font-medium text-gray-500 mb-2">Dokumentenhistorie</p>
-                    {historyLoading ? (
-                      <Loader2 className={`${iconSize.sm} animate-spin text-teal-600`} />
-                    ) : history && history.length > 1 ? (
-                      <div className="space-y-1.5">
-                        {history.filter(h => !h.isCurrent).map(h => (
-                          <div key={h.id} className="flex items-center justify-between text-xs text-gray-500 p-1.5 bg-gray-50 rounded">
-                            <span className="truncate flex-1">{h.fileName}</span>
-                            <span className="shrink-0 ml-2">{formatDateForDisplay(h.uploadedAt.split("T")[0])}</span>
-                            <a
-                              href={h.objectPath}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="ml-2 shrink-0"
-                            >
-                              <Download className="h-3 w-3 text-gray-400 hover:text-gray-600" />
-                            </a>
-                          </div>
-                        ))}
+                {isExpanded && (
+                  <div className="px-3 pb-3 space-y-2">
+                    {group.currentBatches.map((batch) => (
+                      <div key={batch.batchId} className="ml-2 pl-3 border-l-2 border-teal-100" data-testid={`customer-batch-${batch.batchId}`}>
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="text-xs text-gray-500">
+                            {formatDateForDisplay(batch.uploadedAt.split("T")[0])}
+                          </span>
+                          {batch.batchLabel && (
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-teal-50 text-teal-700">{batch.batchLabel}</span>
+                          )}
+                          {batch.files.length > 1 && (
+                            <span className="text-xs text-gray-400">{batch.files.length} Dateien</span>
+                          )}
+                        </div>
+                        <div className="space-y-1">
+                          {batch.files.map((file) => (
+                            <div key={file.id} className="flex items-center justify-between gap-2 py-1 px-2 rounded hover:bg-gray-50" data-testid={`customer-doc-${file.id}`}>
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <FileText className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                                <span className="text-xs text-gray-700 truncate">{file.fileName}</span>
+                              </div>
+                              <a
+                                href={file.objectPath}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center justify-center h-7 w-7 rounded hover:bg-gray-100 shrink-0"
+                                data-testid={`button-download-customer-doc-${file.id}`}
+                              >
+                                <Download className="h-3.5 w-3.5 text-gray-500" />
+                              </a>
+                            </div>
+                          ))}
+                        </div>
+                        {batch.files[0]?.notes && (
+                          <p className="text-[11px] text-gray-500 italic mt-1 ml-2">{batch.files[0].notes}</p>
+                        )}
                       </div>
-                    ) : (
-                      <p className="text-xs text-gray-500">Keine älteren Versionen</p>
+                    ))}
+
+                    {group.archivedBatches.length > 0 && (
+                      <div className="ml-2">
+                        <button
+                          onClick={() => setShowArchive(showArchive === group.documentType.id ? null : group.documentType.id)}
+                          className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1 mt-1"
+                          data-testid={`button-customer-archive-${group.documentType.id}`}
+                        >
+                          <History className="h-3 w-3" />
+                          {group.archivedBatches.length} ältere{group.archivedBatches.length === 1 ? "r Upload" : " Uploads"}
+                        </button>
+
+                        {showArchive === group.documentType.id && (
+                          <div className="mt-2 space-y-2">
+                            {group.archivedBatches.map((batch) => (
+                              <div key={batch.batchId} className="pl-3 border-l-2 border-gray-200 opacity-60" data-testid={`customer-archived-batch-${batch.batchId}`}>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-xs text-gray-500">
+                                    {formatDateForDisplay(batch.uploadedAt.split("T")[0])}
+                                  </span>
+                                  {batch.batchLabel && (
+                                    <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{batch.batchLabel}</span>
+                                  )}
+                                </div>
+                                <div className="space-y-1">
+                                  {batch.files.map((file) => (
+                                    <div key={file.id} className="flex items-center justify-between gap-2 py-1 px-2 rounded">
+                                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                                        <FileText className="h-3 w-3 text-gray-400 shrink-0" />
+                                        <span className="text-[11px] text-gray-500 truncate">{file.fileName}</span>
+                                      </div>
+                                      <a
+                                        href={file.objectPath}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="ml-2 shrink-0"
+                                      >
+                                        <Download className="h-3 w-3 text-gray-400 hover:text-gray-600" />
+                                      </a>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}

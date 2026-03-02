@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, boolean, date, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, boolean, date, index, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp } from "./common";
 import { users } from "./users";
@@ -37,11 +37,14 @@ export const employeeDocuments = pgTable("employee_documents", {
   reviewDueDate: date("review_due_date"),
   isCurrent: boolean("is_current").notNull().default(true),
   notes: text("notes"),
+  batchId: uuid("batch_id").notNull().defaultRandom(),
+  batchLabel: text("batch_label"),
 }, (table) => [
   index("employee_documents_employee_idx").on(table.employeeId),
   index("employee_documents_type_idx").on(table.documentTypeId),
   index("employee_documents_current_idx").on(table.employeeId, table.isCurrent),
   index("employee_documents_review_due_idx").on(table.reviewDueDate, table.isCurrent),
+  index("employee_documents_batch_idx").on(table.batchId),
 ]);
 
 export const customerDocuments = pgTable("customer_documents", {
@@ -55,11 +58,14 @@ export const customerDocuments = pgTable("customer_documents", {
   reviewDueDate: date("review_due_date"),
   isCurrent: boolean("is_current").notNull().default(true),
   notes: text("notes"),
+  batchId: uuid("batch_id").notNull().defaultRandom(),
+  batchLabel: text("batch_label"),
 }, (table) => [
   index("customer_documents_customer_idx").on(table.customerId),
   index("customer_documents_type_idx").on(table.documentTypeId),
   index("customer_documents_current_idx").on(table.customerId, table.isCurrent),
   index("customer_documents_review_due_idx").on(table.reviewDueDate, table.isCurrent),
+  index("customer_documents_batch_idx").on(table.batchId),
 ]);
 
 export const documentTemplates = pgTable("document_templates", {

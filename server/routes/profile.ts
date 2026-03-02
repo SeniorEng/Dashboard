@@ -76,8 +76,14 @@ router.get("/document-types", asyncHandler("Dokumententypen konnten nicht gelade
 }));
 
 router.get("/documents", asyncHandler("Dokumente konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const docs = await documentStorage.getCurrentDocuments(req.user!.id);
-  res.json(docs);
+  const grouped = req.query.grouped === "true";
+  if (grouped) {
+    const docs = await documentStorage.getGroupedDocuments(req.user!.id);
+    res.json(docs);
+  } else {
+    const docs = await documentStorage.getCurrentDocuments(req.user!.id);
+    res.json(docs);
+  }
 }));
 
 router.get("/documents/:documentTypeId/history", asyncHandler("Dokumentenhistorie konnte nicht geladen werden", async (req: Request, res: Response) => {
@@ -114,7 +120,9 @@ router.post("/documents", asyncHandler("Dokument konnte nicht hochgeladen werden
   }
 
   const skipDeactivation = req.body.skipDeactivation === true;
-  const doc = await documentStorage.uploadDocument(result.data, req.user!.id, { skipDeactivation });
+  const batchId = typeof req.body.batchId === "string" ? req.body.batchId : undefined;
+  const batchLabel = typeof req.body.batchLabel === "string" ? req.body.batchLabel : undefined;
+  const doc = await documentStorage.uploadDocument(result.data, req.user!.id, { skipDeactivation, batchId, batchLabel });
   res.status(201).json(doc);
 }));
 

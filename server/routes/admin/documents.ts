@@ -43,8 +43,14 @@ router.patch("/document-types/:id", asyncHandler("Dokumententyp konnte nicht akt
 router.get("/employees/:employeeId/documents", asyncHandler("Dokumente konnten nicht geladen werden", async (req: Request, res: Response) => {
   const employeeId = parseInt(req.params.employeeId);
   if (isNaN(employeeId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Mitarbeiter-ID" }); return; }
-  const docs = await documentStorage.getCurrentDocuments(employeeId);
-  res.json(docs);
+  const grouped = req.query.grouped === "true";
+  if (grouped) {
+    const docs = await documentStorage.getGroupedDocuments(employeeId);
+    res.json(docs);
+  } else {
+    const docs = await documentStorage.getCurrentDocuments(employeeId);
+    res.json(docs);
+  }
 }));
 
 router.get("/employees/:employeeId/documents/:documentTypeId/history", asyncHandler("Dokumentenhistorie konnte nicht geladen werden", async (req: Request, res: Response) => {
@@ -68,15 +74,23 @@ router.post("/employees/:employeeId/documents", asyncHandler("Dokument konnte ni
 
   const userId = req.user!.id;
   const skipDeactivation = req.body.skipDeactivation === true;
-  const doc = await documentStorage.uploadDocument(result.data, userId, { skipDeactivation });
+  const batchId = typeof req.body.batchId === "string" ? req.body.batchId : undefined;
+  const batchLabel = typeof req.body.batchLabel === "string" ? req.body.batchLabel : undefined;
+  const doc = await documentStorage.uploadDocument(result.data, userId, { skipDeactivation, batchId, batchLabel });
   res.status(201).json(doc);
 }));
 
 router.get("/customers/:customerId/documents", asyncHandler("Kundendokumente konnten nicht geladen werden", async (req: Request, res: Response) => {
   const customerId = parseInt(req.params.customerId);
   if (isNaN(customerId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" }); return; }
-  const docs = await documentStorage.getCurrentCustomerDocuments(customerId);
-  res.json(docs);
+  const grouped = req.query.grouped === "true";
+  if (grouped) {
+    const docs = await documentStorage.getGroupedCustomerDocuments(customerId);
+    res.json(docs);
+  } else {
+    const docs = await documentStorage.getCurrentCustomerDocuments(customerId);
+    res.json(docs);
+  }
 }));
 
 router.get("/customers/:customerId/documents/:documentTypeId/history", asyncHandler("Dokumentenhistorie konnte nicht geladen werden", async (req: Request, res: Response) => {
@@ -100,7 +114,9 @@ router.post("/customers/:customerId/documents", asyncHandler("Kundendokument kon
 
   const userId = req.user!.id;
   const skipDeactivation = req.body.skipDeactivation === true;
-  const doc = await documentStorage.uploadCustomerDocument(result.data, userId, { skipDeactivation });
+  const batchId = typeof req.body.batchId === "string" ? req.body.batchId : undefined;
+  const batchLabel = typeof req.body.batchLabel === "string" ? req.body.batchLabel : undefined;
+  const doc = await documentStorage.uploadCustomerDocument(result.data, userId, { skipDeactivation, batchId, batchLabel });
   res.status(201).json(doc);
 }));
 
