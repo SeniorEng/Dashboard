@@ -126,6 +126,22 @@ function TimeEntryFormContent({
         </>
       )}
 
+      {!isFullDayType && (
+        <div className="space-y-2">
+          <Label>Kilometer (optional)</Label>
+          <Input
+            type="number"
+            min="0"
+            step="1"
+            placeholder="0"
+            value={formState.kilometers ?? ""}
+            onChange={(e) => onFieldChange("kilometers", e.target.value ? parseInt(e.target.value) : null)}
+            className="text-base"
+            data-testid={`${prefix}input-kilometers`}
+          />
+        </div>
+      )}
+
       {(validation.timeError || validation.conflict) && (
         <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2" data-testid={`${prefix}validation-warning`}>
           <AlertCircle className={`${iconSize.md} text-red-600 shrink-0 mt-0.5`} />

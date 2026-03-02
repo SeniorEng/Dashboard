@@ -87,6 +87,7 @@ export interface ServiceHoursSummary {
 export interface TravelSummary {
   totalKilometers: number;
   customerKilometers: number;
+  timeEntryKilometers: number;
   totalMinutes: number;
 }
 
@@ -482,6 +483,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     const travel: TravelSummary = {
       totalKilometers: 0,
       customerKilometers: 0,
+      timeEntryKilometers: 0,
       totalMinutes: 0,
     };
     
@@ -548,6 +550,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     
     for (const entry of timeEntries) {
       const duration = getEntryDuration(entry);
+      travel.timeEntryKilometers += entry.kilometers || 0;
       switch (entry.entryType) {
         case 'urlaub':
           timeEntrySummary.urlaubDays++;

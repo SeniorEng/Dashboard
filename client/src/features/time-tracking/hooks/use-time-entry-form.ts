@@ -33,6 +33,7 @@ export interface TimeEntryFormState {
   startTime?: string | null;
   endTime?: string | null;
   isFullDay: boolean;
+  kilometers?: number | null;
   notes?: string | null;
 }
 
@@ -46,6 +47,7 @@ function getDefaultFormState(): TimeEntryFormState {
     startTime: undefined,
     endTime: undefined,
     isFullDay: true,
+    kilometers: null,
     notes: undefined,
   };
 }
@@ -108,6 +110,7 @@ export function useTimeEntryForm(initialState?: Partial<TimeEntryFormState>) {
     startTime?: string | null;
     endTime?: string | null;
     isFullDay: boolean;
+    kilometers?: number | null;
     notes?: string | null;
   }) => {
     setFormState({
@@ -117,6 +120,7 @@ export function useTimeEntryForm(initialState?: Partial<TimeEntryFormState>) {
       startTime: entry.startTime?.slice(0, 5) || null,
       endTime: entry.endTime?.slice(0, 5) || null,
       isFullDay: entry.isFullDay,
+      kilometers: entry.kilometers ?? null,
       notes: entry.notes,
     });
   }, []);
@@ -128,6 +132,7 @@ export function useTimeEntryForm(initialState?: Partial<TimeEntryFormState>) {
     startTime: formState.isFullDay ? undefined : formState.startTime || undefined,
     endTime: formState.isFullDay ? undefined : formState.endTime || undefined,
     isFullDay: formState.isFullDay,
+    kilometers: formState.isFullDay ? undefined : (formState.kilometers ?? undefined),
     notes: formState.notes || undefined,
   }), [formState]);
 
@@ -137,6 +142,7 @@ export function useTimeEntryForm(initialState?: Partial<TimeEntryFormState>) {
     startTime: formState.isFullDay ? null : formState.startTime,
     endTime: formState.isFullDay ? null : formState.endTime,
     isFullDay: formState.isFullDay,
+    kilometers: formState.isFullDay ? null : (formState.kilometers ?? null),
     notes: formState.notes || null,
   }), [formState]);
 

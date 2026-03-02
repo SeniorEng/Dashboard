@@ -239,6 +239,12 @@ export function DayDetailPanel({
                       {entry.isFullDay && (
                         <div className="text-sm text-gray-600">Ganztägig</div>
                       )}
+                      {entry.kilometers != null && entry.kilometers > 0 && (
+                        <div className="flex items-center gap-1 text-sm text-gray-600 mt-1">
+                          <Car className={iconSize.xs} />
+                          <span>{entry.kilometers} km</span>
+                        </div>
+                      )}
                       {entry.notes && (
                         <div className="text-sm text-gray-600 mt-1">{entry.notes}</div>
                       )}

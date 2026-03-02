@@ -354,6 +354,7 @@ export interface TimeEntry {
   endTime: string | null;
   isFullDay: boolean;
   durationMinutes: number | null;
+  kilometers: number | null;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
@@ -373,6 +374,7 @@ export interface CreateTimeEntryRequest {
   endTime?: string | null;
   isFullDay?: boolean;
   durationMinutes?: number | null;
+  kilometers?: number | null;
   notes?: string | null;
   targetUserId?: number;
 }

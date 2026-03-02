@@ -15,6 +15,7 @@ interface TimeOverview {
     totalMinutes?: number;
     totalKilometers?: number;
     customerKilometers?: number;
+    timeEntryKilometers?: number;
   };
   timeEntries?: {
     pauseMinutes?: number;
@@ -117,7 +118,8 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
     return null;
   })();
 
-  const totalKm = (timeOverview?.travel?.totalKilometers || 0) + (timeOverview?.travel?.customerKilometers || 0);
+  const timeEntryKm = timeOverview?.travel?.timeEntryKilometers || 0;
+  const totalKm = (timeOverview?.travel?.totalKilometers || 0) + (timeOverview?.travel?.customerKilometers || 0) + timeEntryKm;
 
   return (
     <div className="flex flex-col gap-4 mb-6">
@@ -167,8 +169,9 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
         testId="card-km-summary"
       >
         <div className="space-y-2">
-          <SummaryRow label="Anfahrt" value={`${formatKm(timeOverview?.travel?.totalKilometers)} km`} color="text-amber-700" testId="text-anfahrt-km" />
+          <SummaryRow label="Anfahrt (Termine)" value={`${formatKm(timeOverview?.travel?.totalKilometers)} km`} color="text-amber-700" testId="text-anfahrt-km" />
           <SummaryRow label="Kundenfahrten" value={`${formatKm(timeOverview?.travel?.customerKilometers)} km`} color="text-teal-700" testId="text-customer-km" />
+          <SummaryRow label="Sonstige Fahrten" value={`${formatKm(timeEntryKm)} km`} color="text-gray-700" testId="text-time-entry-km" />
           <div className="border-t pt-2 mt-2 flex justify-between items-center">
             <span className="text-sm font-medium text-gray-700">Gesamt</span>
             <span className="font-bold text-gray-900" data-testid="text-total-km">
