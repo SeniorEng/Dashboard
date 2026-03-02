@@ -376,7 +376,9 @@ export class AuthService {
         userMap.get(row.user.id)!.roles.push(row.roleEntry.role as EmployeeRole);
       }
     }
-    return Array.from(userMap.values());
+    return Array.from(userMap.values()).sort((a, b) =>
+      (a.nachname || "").localeCompare(b.nachname || "", "de") || (a.vorname || "").localeCompare(b.vorname || "", "de")
+    );
   }
 
   async updateUser(
