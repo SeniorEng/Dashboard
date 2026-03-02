@@ -228,15 +228,15 @@ router.get("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
     return;
   }
   const settings = await budgetLedgerStorage.getBudgetTypeSettings(customerId);
-  const defaults: { budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null; yearlyLimitCents: number | null; initialBalanceCents: number | null; initialBalanceMonth: string | null }[] = [
-    { budgetType: "umwandlung_45a", enabled: true, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null, initialBalanceCents: null, initialBalanceMonth: null },
-    { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null, initialBalanceCents: null, initialBalanceMonth: null },
-    { budgetType: "ersatzpflege_39_42a", enabled: true, priority: 3, monthlyLimitCents: null, yearlyLimitCents: null, initialBalanceCents: null, initialBalanceMonth: null },
+  const defaults: { budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null; yearlyLimitCents: number | null }[] = [
+    { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null },
+    { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null },
+    { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, monthlyLimitCents: null, yearlyLimitCents: null },
   ];
   if (settings.length === 0) {
     const prefs = await budgetLedgerStorage.getBudgetPreferences(customerId);
     if (prefs?.monthlyLimitCents !== null && prefs?.monthlyLimitCents !== undefined) {
-      defaults[1].monthlyLimitCents = prefs.monthlyLimitCents;
+      defaults[0].monthlyLimitCents = prefs.monthlyLimitCents;
     }
     res.json(defaults.map(d => ({ ...d, customerId, id: null })));
   } else {

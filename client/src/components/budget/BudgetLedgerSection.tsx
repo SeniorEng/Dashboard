@@ -66,7 +66,6 @@ interface BudgetLedgerSectionProps {
 
 export function BudgetLedgerSection({ customerId, customerName, initialSummary, onRefresh }: BudgetLedgerSectionProps) {
   const queryClient = useQueryClient();
-  const [showInitialBudgetDialog, setShowInitialBudgetDialog] = useState(false);
   const [showAdjustmentDialog, setShowAdjustmentDialog] = useState(false);
 
 
@@ -122,32 +121,12 @@ export function BudgetLedgerSection({ customerId, customerName, initialSummary, 
     <div className="space-y-6">
       {hasNoBudget ? (
         <Card className="border-dashed border-2">
-          <CardContent className="py-8 text-center">
+          <CardContent className="py-6 text-center">
             <Wallet className={`${iconSize.xl} text-gray-400 mx-auto mb-3`} />
-            <h3 className="font-medium text-gray-900">Kein Budget erfasst</h3>
-            <p className="text-sm text-gray-500 mt-1 mb-4">
-              Erfassen Sie das Startbudget für {customerName}
+            <h3 className="font-medium text-gray-900">Noch kein Budget zugewiesen</h3>
+            <p className="text-sm text-gray-500 mt-1">
+              Aktivieren Sie die Budget-Einstellungen oben und legen Sie ggf. einen Startwert fest.
             </p>
-            <Dialog open={showInitialBudgetDialog} onOpenChange={setShowInitialBudgetDialog}>
-              <DialogTrigger asChild>
-                <Button className={componentStyles.btnPrimary} data-testid="button-add-initial-budget">
-                  <Plus className={iconSize.sm} />
-                  Startbudget erfassen
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Startbudget erfassen</DialogTitle>
-                </DialogHeader>
-                <InitialBudgetForm
-                  customerId={customerId}
-                  onSuccess={() => {
-                    setShowInitialBudgetDialog(false);
-                    handleRefresh();
-                  }}
-                />
-              </DialogContent>
-            </Dialog>
           </CardContent>
         </Card>
       ) : (
