@@ -21,13 +21,17 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { ArrowLeft, Calendar, Loader2, Unlock, Trash2, Lock } from "lucide-react";
-import type { TimeEntryType, TimeEntryWithUser, VacationSummary, TimeEntry } from "@/lib/api/types";
+import type { TimeEntryType, TimeEntryWithUser, VacationSummary, TimeEntry, AppointmentWithCustomerName } from "@/lib/api/types";
 import { TIME_ENTRY_TYPE_CONFIG } from "@/features/time-tracking/constants";
 import { TimeEntryDialog } from "@/features/time-tracking/components/time-entry-dialog";
 import { useTimeEntryForm } from "@/features/time-tracking/hooks/use-time-entry-form";
 import { useTimeEntryConflict } from "@/features/time-tracking/hooks/use-time-entry-conflict";
 import { EmployeeTimeCard } from "./components/employee-time-card";
 import { VacationDialog } from "./components/vacation-dialog";
+
+interface AdminAppointment extends AppointmentWithCustomerName {
+  assignedEmployeeId: number;
+}
 
 const MONTH_NAMES = [
   "Januar", "Februar", "März", "April", "Mai", "Juni",
@@ -90,6 +94,31 @@ export default function AdminTimeEntries() {
     },
     staleTime: 30_000,
   });
+
+  const { data: appointmentsData } = useQuery({
+    queryKey: ["admin-employee-appointments", selectedYear, selectedMonth, selectedUserId],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams();
+      params.set("year", selectedYear.toString());
+      params.set("month", selectedMonth.toString());
+      if (selectedUserId !== "all") params.set("userId", selectedUserId);
+      const result = await api.get<AdminAppointment[]>(`/admin/employee-appointments?${params.toString()}`, signal);
+      return unwrapResult(result);
+    },
+    staleTime: 30_000,
+  });
+
+  const appointmentsByEmployee = useMemo(() => {
+    if (!appointmentsData || !employees) return {} as Record<string, AdminAppointment[]>;
+    const map: Record<string, AdminAppointment[]> = {};
+    for (const appt of appointmentsData) {
+      const emp = employees.find(e => e.id === appt.assignedEmployeeId);
+      const key = emp?.displayName || "Unbekannt";
+      if (!map[key]) map[key] = [];
+      map[key].push(appt);
+    }
+    return map;
+  }, [appointmentsData, employees]);
 
   const { data: selectedUserVacation, isLoading: vacationLoading } = useQuery({
     queryKey: ["admin-vacation-summary", vacationEditUser?.id, selectedYear],
@@ -247,18 +276,18 @@ export default function AdminTimeEntries() {
   }, [entries]);
 
   const stats = useMemo(() => {
-    if (!entries) return { vacation: 0, sick: 0, other: 0, total: 0 };
-    return entries.reduce(
-      (acc, entry) => {
-        acc.total++;
-        if (entry.entryType === "urlaub") acc.vacation++;
-        else if (entry.entryType === "krankheit") acc.sick++;
-        else acc.other++;
-        return acc;
-      },
-      { vacation: 0, sick: 0, other: 0, total: 0 }
-    );
-  }, [entries]);
+    const base = { vacation: 0, sick: 0, other: 0, total: 0, appointments: 0 };
+    if (entries) {
+      for (const entry of entries) {
+        base.total++;
+        if (entry.entryType === "urlaub") base.vacation++;
+        else if (entry.entryType === "krankheit") base.sick++;
+        else base.other++;
+      }
+    }
+    base.appointments = appointmentsData?.length || 0;
+    return base;
+  }, [entries, appointmentsData]);
 
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
@@ -341,6 +370,8 @@ export default function AdminTimeEntries() {
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-gray-600 mb-4">
             <span><span className="font-semibold text-gray-900" data-testid="text-stats-total">{stats.total}</span> Einträge</span>
             <span className="text-gray-300">|</span>
+            <span><span className="font-semibold text-gray-700" data-testid="text-stats-appointments">{stats.appointments}</span> Termine</span>
+            <span className="text-gray-300">|</span>
             <span><span className="font-semibold text-green-700" data-testid="text-stats-vacation">{stats.vacation}</span> Urlaub</span>
             <span className="text-gray-300">|</span>
             <span><span className="font-semibold text-red-700" data-testid="text-stats-sick">{stats.sick}</span> Krankheit</span>
@@ -398,41 +429,53 @@ export default function AdminTimeEntries() {
             <div className="flex items-center justify-center py-12">
               <Loader2 className={`${iconSize.xl} animate-spin text-teal-600`} />
             </div>
-          ) : entries && entries.length > 0 ? (
-            <div className="flex flex-col gap-3">
-              {Object.entries(entriesByEmployee).map(([employeeName, employeeEntries]) => {
-                const employee = employees?.find(e => e.displayName === employeeName);
-                return (
-                  <EmployeeTimeCard
-                    key={employeeName}
-                    employeeName={employeeName}
-                    employeeEntries={employeeEntries}
-                    employeeId={employee?.id}
-                    isClosed={employee ? closedUserIds.has(employee.id) : false}
-                    onCloseMonth={(id, name) => setCloseMonthTarget({ userId: id, userName: name })}
-                    onReopenMonth={(id, name) => setReopenTarget({ userId: id, userName: name })}
-                    onAddEntry={handleOpenCreate}
-                    onEditVacation={handleEditVacation}
-                    onEditEntry={handleOpenEdit}
-                    onDeleteEntry={handleDeleteEntry}
-                  />
-                );
-              })}
-            </div>
-          ) : (
-            <Card>
-              <CardContent className="p-12 text-center">
-                <Calendar className={`${iconSize["2xl"]} mx-auto mb-4 text-gray-300`} />
-                <p className="text-gray-500">Keine Zeiteinträge für diesen Zeitraum.</p>
-              </CardContent>
-            </Card>
-          )}
+          ) : (() => {
+            const allNames = new Set([
+              ...Object.keys(entriesByEmployee),
+              ...Object.keys(appointmentsByEmployee),
+            ]);
+            const sortedNames = [...allNames].sort((a, b) => a.localeCompare(b, "de"));
+            return sortedNames.length > 0 ? (
+              <div className="flex flex-col gap-3">
+                {sortedNames.map((employeeName) => {
+                  const employee = employees?.find(e => e.displayName === employeeName);
+                  return (
+                    <EmployeeTimeCard
+                      key={employeeName}
+                      employeeName={employeeName}
+                      employeeEntries={entriesByEmployee[employeeName] || []}
+                      employeeAppointments={appointmentsByEmployee[employeeName] || []}
+                      employeeId={employee?.id}
+                      isClosed={employee ? closedUserIds.has(employee.id) : false}
+                      onCloseMonth={(id, name) => setCloseMonthTarget({ userId: id, userName: name })}
+                      onReopenMonth={(id, name) => setReopenTarget({ userId: id, userName: name })}
+                      onAddEntry={handleOpenCreate}
+                      onEditVacation={handleEditVacation}
+                      onEditEntry={handleOpenEdit}
+                      onDeleteEntry={handleDeleteEntry}
+                    />
+                  );
+                })}
+              </div>
+            ) : (
+              <Card>
+                <CardContent className="p-12 text-center">
+                  <Calendar className={`${iconSize["2xl"]} mx-auto mb-4 text-gray-300`} />
+                  <p className="text-gray-500">Keine Einträge oder Termine für diesen Zeitraum.</p>
+                </CardContent>
+              </Card>
+            );
+          })()}
 
           {(() => {
             if (!monthClosings?.closings || !employees) return null;
+            const allDisplayedNames = new Set([
+              ...Object.keys(entriesByEmployee),
+              ...Object.keys(appointmentsByEmployee),
+            ]);
             const employeesInList = new Set(
-              Object.entries(entriesByEmployee)
-                .map(([name]) => employees?.find(e => e.displayName === name)?.id)
+              [...allDisplayedNames]
+                .map(name => employees?.find(e => e.displayName === name)?.id)
                 .filter(Boolean)
             );
             const closedWithoutEntries = monthClosings.closings
@@ -448,6 +491,7 @@ export default function AdminTimeEntries() {
                       key={closing.id}
                       employeeName={emp.displayName}
                       employeeEntries={[]}
+                      employeeAppointments={[]}
                       employeeId={emp.id}
                       isClosed={true}
                       onCloseMonth={(id, name) => setCloseMonthTarget({ userId: id, userName: name })}
