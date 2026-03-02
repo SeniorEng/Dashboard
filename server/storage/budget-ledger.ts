@@ -549,7 +549,10 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       .where(and(
         eq(budgetAllocations.customerId, customerId),
         eq(budgetAllocations.budgetType, budgetType),
-        eq(budgetAllocations.source, "initial_balance"),
+        or(
+          eq(budgetAllocations.source, "initial_balance"),
+          eq(budgetAllocations.source, "carryover"),
+        ),
       ))
       .orderBy(desc(budgetAllocations.validFrom));
   }
