@@ -265,12 +265,30 @@ export default function AppointmentDetail() {
             </span>
           </div>
           
-          <div className="flex items-center justify-between py-2 border-b border-border/50">
-            <span className="text-muted-foreground">Uhrzeit</span>
-            <span className="font-medium">
-              {formatTimeSlot(appointment.scheduledStart)} - {getEndTime(appointment)} Uhr
-            </span>
-          </div>
+          {isCompleted && hasAnyDocumentedService && appointment.actualStart ? (
+            <div className="py-2 border-b border-border/50">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Uhrzeit (geplant)</span>
+                <span className="text-muted-foreground text-sm">
+                  {formatTimeSlot(appointment.scheduledStart)} - {getEndTime(appointment)} Uhr
+                </span>
+              </div>
+              <div className="flex items-center justify-between mt-1">
+                <span className="text-muted-foreground">Uhrzeit (tatsächlich)</span>
+                <span className="font-medium text-primary">
+                  {formatTimeSlot(appointment.actualStart)}
+                  {appointment.actualEnd ? ` - ${formatTimeSlot(appointment.actualEnd)} Uhr` : ""}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between py-2 border-b border-border/50">
+              <span className="text-muted-foreground">Uhrzeit</span>
+              <span className="font-medium">
+                {formatTimeSlot(appointment.scheduledStart)} - {getEndTime(appointment)} Uhr
+              </span>
+            </div>
+          )}
 
           <div className="flex items-center justify-between py-2 border-b border-border/50">
             <span className="text-muted-foreground">Art</span>
@@ -282,10 +300,10 @@ export default function AppointmentDetail() {
           {(hasAnyService || (isCompleted && hasAnyDocumentedService)) && (
             <>
               {isCompleted && hasAnyDocumentedService && (
-                <div className="flex items-center justify-between pt-1 text-xs text-muted-foreground">
+                <div className="flex items-center justify-between pt-2 pb-1">
                   <span className="flex-1" />
-                  <span className="w-16 text-right">Geplant</span>
-                  <span className="w-16 text-right font-medium text-primary">Ist</span>
+                  <span className="w-20 text-right text-xs text-muted-foreground uppercase tracking-wide">Geplant</span>
+                  <span className="w-20 text-right text-xs font-semibold text-primary uppercase tracking-wide">Ist</span>
                 </div>
               )}
 
@@ -293,6 +311,10 @@ export default function AppointmentDetail() {
                 const hasDocumented = service.actualDurationMinutes !== null && service.actualDurationMinutes > 0;
                 const serviceColorKey = service.serviceCode as string;
                 if (!service.plannedDurationMinutes && !(isCompleted && hasDocumented)) return null;
+
+                const plannedMins = service.plannedDurationMinutes || 0;
+                const actualMins = service.actualDurationMinutes || 0;
+                const hasDifference = hasDocumented && plannedMins !== actualMins;
                 
                 return (
                   <div key={service.id} className="py-2 border-b border-border/50">
@@ -302,12 +324,12 @@ export default function AppointmentDetail() {
                         <span>{service.serviceName}</span>
                       </div>
                       {isCompleted && hasDocumented ? (
-                        <div className="flex items-center">
-                          <span className="w-16 text-right text-muted-foreground text-sm">
-                            {service.plannedDurationMinutes ? formatDuration(service.plannedDurationMinutes) : "—"}
+                        <div className="flex items-center gap-1">
+                          <span className="w-20 text-right text-muted-foreground text-sm">
+                            {plannedMins ? formatDuration(plannedMins) : "—"}
                           </span>
-                          <span className="w-16 text-right font-medium text-primary">
-                            {formatDuration(service.actualDurationMinutes!)}
+                          <span className={`w-20 text-right font-semibold ${hasDifference ? "text-amber-600" : "text-primary"}`}>
+                            {formatDuration(actualMins)}
                           </span>
                         </div>
                       ) : (
@@ -325,25 +347,30 @@ export default function AppointmentDetail() {
                 );
               })}
 
-              <div className="flex items-center justify-between py-2 pt-2 border-t border-border">
-                <span className="font-medium">Gesamt</span>
-                {isCompleted && hasAnyDocumentedService ? (
-                  <div className="flex items-center">
-                    <span className="w-16 text-right text-muted-foreground text-sm">
-                      {formatDuration(appointment.durationPromised || 0)}
-                    </span>
-                    <span className="w-16 text-right font-medium text-primary">
-                      {formatDuration(
-                        services.reduce((sum, s) => sum + (s.actualDurationMinutes || 0), 0)
-                      )}
-                    </span>
+              {(() => {
+                const totalPlanned = appointment.durationPromised || 0;
+                const totalActual = services.reduce((sum, s) => sum + (s.actualDurationMinutes || 0), 0);
+                const hasTotalDifference = isCompleted && hasAnyDocumentedService && totalPlanned !== totalActual;
+                return (
+                  <div className="flex items-center justify-between py-2 pt-2 border-t border-border">
+                    <span className="font-medium">Gesamt</span>
+                    {isCompleted && hasAnyDocumentedService ? (
+                      <div className="flex items-center gap-1">
+                        <span className="w-20 text-right text-muted-foreground text-sm">
+                          {formatDuration(totalPlanned)}
+                        </span>
+                        <span className={`w-20 text-right font-semibold ${hasTotalDifference ? "text-amber-600" : "text-primary"}`}>
+                          {formatDuration(totalActual)}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="font-medium">
+                        {formatDuration(totalPlanned)}
+                      </span>
+                    )}
                   </div>
-                ) : (
-                  <span className="font-medium">
-                    {formatDuration(appointment.durationPromised || 0)}
-                  </span>
-                )}
-              </div>
+                );
+              })()}
             </>
           )}
         </div>
