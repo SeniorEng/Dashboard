@@ -205,7 +205,7 @@ export function useDocumentationForm(id: number) {
   }, [formData.services, toast]);
 
   const handleSubmit = useCallback(() => {
-    if (formData.travelKilometers <= 0) {
+    if (formData.travelKilometers === null || formData.travelKilometers === undefined || formData.travelKilometers < 0) {
       toast({
         title: "Kilometer fehlt",
         description: "Bitte geben Sie die gefahrenen Kilometer an.",
@@ -213,7 +213,7 @@ export function useDocumentationForm(id: number) {
       });
       return;
     }
-    if (formData.travelOriginType === "appointment" && formData.travelMinutes <= 0) {
+    if (formData.travelOriginType === "appointment" && (formData.travelMinutes === null || formData.travelMinutes === undefined || formData.travelMinutes < 0)) {
       toast({
         title: "Fahrzeit fehlt",
         description: "Bitte geben Sie die Fahrzeit vom vorherigen Kunden an.",
