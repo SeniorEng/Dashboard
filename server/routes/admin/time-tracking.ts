@@ -40,22 +40,10 @@ router.get("/employee-appointments", asyncHandler("Termine konnten nicht geladen
   if (userId && userId !== "all") {
     const uid = parseInt(userId as string);
     const appts = await timeTrackingStorage.getEmployeeAppointments(uid, startDate, endDate);
-    res.json(appts.map(a => ({ ...a, assignedEmployeeId: uid })));
+    res.json(appts);
   } else {
-    const { authService } = await import("../../services/auth");
-    const employees = await authService.getActiveEmployees();
-    const allAppts: Array<any> = [];
-    const seen = new Set<number>();
-    for (const emp of employees) {
-      const appts = await timeTrackingStorage.getEmployeeAppointments(emp.id, startDate, endDate);
-      for (const a of appts) {
-        if (!seen.has(a.id)) {
-          seen.add(a.id);
-          allAppts.push({ ...a, assignedEmployeeId: emp.id });
-        }
-      }
-    }
-    res.json(allAppts);
+    const appts = await timeTrackingStorage.getAllAppointmentsInRange(startDate, endDate);
+    res.json(appts);
   }
 }));
 

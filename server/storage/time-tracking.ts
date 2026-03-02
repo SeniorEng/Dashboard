@@ -133,6 +133,7 @@ export interface ITimeTrackingStorage {
   // Time Overview (combined appointments + time entries)
   getTimeOverview(userId: number, filters: TimeOverviewFilters): Promise<TimeOverviewData>;
   getEmployeeAppointments(userId: number, startDate: string, endDate: string): Promise<AppointmentWithCustomerName[]>;
+  getAllAppointmentsInRange(startDate: string, endDate: string): Promise<AppointmentWithCustomerName[]>;
   
   // Open Tasks
   getOpenTasks(userId: number): Promise<OpenTasksSummary>;
@@ -202,7 +203,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     if (data.endTime !== undefined) updateData.endTime = data.endTime;
     if (data.isFullDay !== undefined) updateData.isFullDay = data.isFullDay;
     if (data.durationMinutes !== undefined) updateData.durationMinutes = data.durationMinutes;
-    if (data.kilometers !== undefined) updateData.kilometers = data.kilometers ?? 0;
+    if (data.kilometers !== undefined) updateData.kilometers = data.kilometers;
     if (data.notes !== undefined) updateData.notes = data.notes;
     
     const results = await db
@@ -443,6 +444,55 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       )
       .orderBy(asc(appointments.date), asc(appointments.scheduledStart));
     
+    return results.map(r => ({
+      ...r,
+      customerName: String(r.customerName),
+    }));
+  }
+
+  async getAllAppointmentsInRange(startDate: string, endDate: string): Promise<AppointmentWithCustomerName[]> {
+    const results = await db
+      .select({
+        id: appointments.id,
+        customerId: appointments.customerId,
+        createdByUserId: appointments.createdByUserId,
+        assignedEmployeeId: appointments.assignedEmployeeId,
+        appointmentType: appointments.appointmentType,
+        serviceType: appointments.serviceType,
+        date: appointments.date,
+        scheduledStart: appointments.scheduledStart,
+        scheduledEnd: appointments.scheduledEnd,
+        durationPromised: appointments.durationPromised,
+        actualStart: appointments.actualStart,
+        actualEnd: appointments.actualEnd,
+        status: appointments.status,
+        notes: appointments.notes,
+        travelOriginType: appointments.travelOriginType,
+        travelFromAppointmentId: appointments.travelFromAppointmentId,
+        travelKilometers: appointments.travelKilometers,
+        travelMinutes: appointments.travelMinutes,
+        customerKilometers: appointments.customerKilometers,
+        signatureData: appointments.signatureData,
+        signatureHash: appointments.signatureHash,
+        signedAt: appointments.signedAt,
+        signedByUserId: appointments.signedByUserId,
+        servicesDone: appointments.servicesDone,
+        createdAt: appointments.createdAt,
+        performedByEmployeeId: appointments.performedByEmployeeId,
+        deletedAt: appointments.deletedAt,
+        customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as('customer_name'),
+      })
+      .from(appointments)
+      .innerJoin(customers, eq(appointments.customerId, customers.id))
+      .where(
+        and(
+          gte(appointments.date, startDate),
+          lte(appointments.date, endDate),
+          isNull(appointments.deletedAt)
+        )
+      )
+      .orderBy(asc(appointments.date), asc(appointments.scheduledStart));
+
     return results.map(r => ({
       ...r,
       customerName: String(r.customerName),

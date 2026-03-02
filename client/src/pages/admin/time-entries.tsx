@@ -29,9 +29,7 @@ import { useTimeEntryConflict } from "@/features/time-tracking/hooks/use-time-en
 import { EmployeeTimeCard } from "./components/employee-time-card";
 import { VacationDialog } from "./components/vacation-dialog";
 
-interface AdminAppointment extends AppointmentWithCustomerName {
-  assignedEmployeeId: number;
-}
+type AdminAppointment = AppointmentWithCustomerName;
 
 const MONTH_NAMES = [
   "Januar", "Februar", "März", "April", "Mai", "Juni",
@@ -108,17 +106,17 @@ export default function AdminTimeEntries() {
     staleTime: 30_000,
   });
 
-  const appointmentsByEmployee = useMemo(() => {
-    if (!appointmentsData || !employees) return {} as Record<string, AdminAppointment[]>;
-    const map: Record<string, AdminAppointment[]> = {};
+  const appointmentsByEmployeeId = useMemo(() => {
+    if (!appointmentsData) return {} as Record<number, AdminAppointment[]>;
+    const map: Record<number, AdminAppointment[]> = {};
     for (const appt of appointmentsData) {
-      const emp = employees.find(e => e.id === appt.assignedEmployeeId);
-      const key = emp?.displayName || "Unbekannt";
-      if (!map[key]) map[key] = [];
-      map[key].push(appt);
+      const empId = appt.assignedEmployeeId;
+      if (empId == null) continue;
+      if (!map[empId]) map[empId] = [];
+      map[empId].push(appt);
     }
     return map;
-  }, [appointmentsData, employees]);
+  }, [appointmentsData]);
 
   const { data: selectedUserVacation, isLoading: vacationLoading } = useQuery({
     queryKey: ["admin-vacation-summary", vacationEditUser?.id, selectedYear],
@@ -265,14 +263,14 @@ export default function AdminTimeEntries() {
     },
   });
 
-  const entriesByEmployee = useMemo(() => {
-    if (!entries) return {};
+  const entriesByEmployeeId = useMemo(() => {
+    if (!entries) return {} as Record<number, TimeEntryWithUser[]>;
     return entries.reduce((acc, entry) => {
-      const key = entry.user.displayName;
+      const key = entry.userId;
       if (!acc[key]) acc[key] = [];
       acc[key].push(entry);
       return acc;
-    }, {} as Record<string, TimeEntryWithUser[]>);
+    }, {} as Record<number, TimeEntryWithUser[]>);
   }, [entries]);
 
   const stats = useMemo(() => {
@@ -430,23 +428,28 @@ export default function AdminTimeEntries() {
               <Loader2 className={`${iconSize.xl} animate-spin text-teal-600`} />
             </div>
           ) : (() => {
-            const allNames = new Set([
-              ...Object.keys(entriesByEmployee),
-              ...Object.keys(appointmentsByEmployee),
+            const allIds = new Set([
+              ...Object.keys(entriesByEmployeeId).map(Number),
+              ...Object.keys(appointmentsByEmployeeId).map(Number),
             ]);
-            const sortedNames = [...allNames].sort((a, b) => a.localeCompare(b, "de"));
-            return sortedNames.length > 0 ? (
+            const sortedIds = [...allIds].sort((a, b) => {
+              const nameA = employees?.find(e => e.id === a)?.displayName || "";
+              const nameB = employees?.find(e => e.id === b)?.displayName || "";
+              return nameA.localeCompare(nameB, "de");
+            });
+            return sortedIds.length > 0 ? (
               <div className="flex flex-col gap-3">
-                {sortedNames.map((employeeName) => {
-                  const employee = employees?.find(e => e.displayName === employeeName);
+                {sortedIds.map((empId) => {
+                  const employee = employees?.find(e => e.id === empId);
+                  const empName = employee?.displayName || "Unbekannt";
                   return (
                     <EmployeeTimeCard
-                      key={employeeName}
-                      employeeName={employeeName}
-                      employeeEntries={entriesByEmployee[employeeName] || []}
-                      employeeAppointments={appointmentsByEmployee[employeeName] || []}
-                      employeeId={employee?.id}
-                      isClosed={employee ? closedUserIds.has(employee.id) : false}
+                      key={empId}
+                      employeeName={empName}
+                      employeeEntries={entriesByEmployeeId[empId] || []}
+                      employeeAppointments={appointmentsByEmployeeId[empId] || []}
+                      employeeId={empId}
+                      isClosed={closedUserIds.has(empId)}
                       onCloseMonth={(id, name) => setCloseMonthTarget({ userId: id, userName: name })}
                       onReopenMonth={(id, name) => setReopenTarget({ userId: id, userName: name })}
                       onAddEntry={handleOpenCreate}
@@ -469,15 +472,10 @@ export default function AdminTimeEntries() {
 
           {(() => {
             if (!monthClosings?.closings || !employees) return null;
-            const allDisplayedNames = new Set([
-              ...Object.keys(entriesByEmployee),
-              ...Object.keys(appointmentsByEmployee),
+            const employeesInList = new Set([
+              ...Object.keys(entriesByEmployeeId).map(Number),
+              ...Object.keys(appointmentsByEmployeeId).map(Number),
             ]);
-            const employeesInList = new Set(
-              [...allDisplayedNames]
-                .map(name => employees?.find(e => e.displayName === name)?.id)
-                .filter(Boolean)
-            );
             const closedWithoutEntries = monthClosings.closings
               .filter((c) => !c.reopenedAt && !employeesInList.has(c.userId));
             if (closedWithoutEntries.length === 0) return null;
