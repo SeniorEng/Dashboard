@@ -193,6 +193,9 @@ function BackfillSection({ customerId, onRefresh }: { customerId: number; onRefr
   const [isRunning, setIsRunning] = useState(false);
   const [result, setResult] = useState<{ total: number; created: number; skipped: number; errors: number } | null>(null);
 
+  const backfillDateFrom = "2026-01-01";
+  const backfillDateTo = "2026-01-31";
+
   const { data: preview, isLoading: previewLoading } = useQuery<{
     totalAppointments: number;
     customerBreakdown: Record<string, { count: number; missingSignatures: number; dates: string[] }>;
@@ -202,7 +205,7 @@ function BackfillSection({ customerId, onRefresh }: { customerId: number; onRefr
       const res = await api.get<{
         totalAppointments: number;
         customerBreakdown: Record<string, { count: number; missingSignatures: number; dates: string[] }>;
-      }>(`/admin/budget/backfill-preview?customerId=${customerId}`);
+      }>(`/admin/budget/backfill-preview?customerId=${customerId}&dateFrom=${backfillDateFrom}&dateTo=${backfillDateTo}`);
       return unwrapResult(res);
     },
     staleTime: 60000,
@@ -216,7 +219,7 @@ function BackfillSection({ customerId, onRefresh }: { customerId: number; onRefr
     setIsRunning(true);
     setResult(null);
     try {
-      const res = await api.post("/admin/budget/backfill-transactions", { customerId });
+      const res = await api.post("/admin/budget/backfill-transactions", { customerId, dateFrom: backfillDateFrom, dateTo: backfillDateTo });
       const data = unwrapResult(res) as { total: number; created: number; skipped: number; errors: number };
       setResult(data);
       queryClient.invalidateQueries({ queryKey: ["budget-summary", customerId] });
@@ -247,11 +250,11 @@ function BackfillSection({ customerId, onRefresh }: { customerId: number; onRefr
       <div className="space-y-3">
         <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">
           <p className="text-sm text-amber-800">
-            <strong>{count} Termin{count !== 1 ? "e" : ""}</strong> ohne Budget-Buchung gefunden.
+            <strong>{count} Termin{count !== 1 ? "e" : ""}</strong> aus Januar 2026 ohne Budget-Buchung gefunden.
             Diese Termine wurden importiert und haben den Dokumentationsprozess nicht durchlaufen.
           </p>
           <p className="text-xs text-amber-700 mt-1">
-            Die Nachbuchung setzt "SYSTEMGENERIERT" als Unterschrift und erstellt die fehlenden Budget-Transaktionen.
+            Die Nachbuchung setzt "SYSTEMGENERIERT" als Unterschrift und erstellt die fehlenden Budget-Transaktionen für Januar.
           </p>
         </div>
 

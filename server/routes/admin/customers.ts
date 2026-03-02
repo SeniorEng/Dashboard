@@ -32,7 +32,7 @@ import { prospectStorage } from "../../storage/prospects";
 import { prospects } from "@shared/schema";
 import { todayISO } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
-import { eq, and, sql, gte, isNull, or, count, notInArray, isNotNull } from "drizzle-orm";
+import { eq, and, sql, gte, lte, isNull, or, count, notInArray, isNotNull } from "drizzle-orm";
 
 const router = Router();
 
@@ -1127,6 +1127,8 @@ router.post("/customers/match-employees", asyncHandler("Matching konnte nicht du
 
 router.get("/budget/backfill-preview", asyncHandler("Vorschau fehlgeschlagen", async (req: Request, res: Response) => {
   const customerIdFilter = req.query.customerId ? parseInt(req.query.customerId as string) : null;
+  const dateFrom = typeof req.query.dateFrom === "string" ? req.query.dateFrom : null;
+  const dateTo = typeof req.query.dateTo === "string" ? req.query.dateTo : null;
 
   const conditions = [
     eq(appointments.status, "completed"),
@@ -1137,6 +1139,12 @@ router.get("/budget/backfill-preview", asyncHandler("Vorschau fehlgeschlagen", a
   ];
   if (customerIdFilter) {
     conditions.push(eq(appointments.customerId, customerIdFilter));
+  }
+  if (dateFrom) {
+    conditions.push(gte(appointments.date, dateFrom));
+  }
+  if (dateTo) {
+    conditions.push(lte(appointments.date, dateTo));
   }
 
   const appointmentsWithoutBudget = await db.select({
@@ -1168,7 +1176,11 @@ router.get("/budget/backfill-preview", asyncHandler("Vorschau fehlgeschlagen", a
   });
 }));
 
-const backfillSchema = z.object({ customerId: z.number().int().optional() });
+const backfillSchema = z.object({
+  customerId: z.number().int().optional(),
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
 
 router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fehlgeschlagen", async (req: Request, res: Response) => {
   const data = backfillSchema.parse(req.body);
@@ -1183,6 +1195,12 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
   ];
   if (customerIdFilter) {
     conditions.push(eq(appointments.customerId, customerIdFilter));
+  }
+  if (data.dateFrom) {
+    conditions.push(gte(appointments.date, data.dateFrom));
+  }
+  if (data.dateTo) {
+    conditions.push(lte(appointments.date, data.dateTo));
   }
 
   const appointmentsWithoutBudget = await db.select({
