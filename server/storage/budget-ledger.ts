@@ -64,7 +64,7 @@ export interface BudgetLedgerStorage {
   getBudgetAllocations(customerId: number, year?: number): Promise<BudgetAllocation[]>;
   
   createBudgetTransaction(transaction: InsertBudgetTransaction, userId?: number): Promise<BudgetTransaction>;
-  getBudgetTransactions(customerId: number, options?: { year?: number; limit?: number }): Promise<BudgetTransaction[]>;
+  getBudgetTransactions(customerId: number, options?: { year?: number; limit?: number; budgetType?: string }): Promise<BudgetTransaction[]>;
   getTransactionByAppointmentId(appointmentId: number): Promise<BudgetTransaction | undefined>;
   reverseBudgetTransaction(transactionId: number, userId?: number): Promise<BudgetTransaction | undefined>;
   
@@ -193,7 +193,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return result[0];
   }
 
-  async getBudgetTransactions(customerId: number, options?: { year?: number; limit?: number }): Promise<BudgetTransaction[]> {
+  async getBudgetTransactions(customerId: number, options?: { year?: number; limit?: number; budgetType?: string }): Promise<BudgetTransaction[]> {
     const conditions = [eq(budgetTransactions.customerId, customerId)];
     
     if (options?.year) {
@@ -201,6 +201,10 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       const yearEnd = `${options.year}-12-31`;
       conditions.push(gte(budgetTransactions.transactionDate, yearStart));
       conditions.push(lte(budgetTransactions.transactionDate, yearEnd));
+    }
+
+    if (options?.budgetType) {
+      conditions.push(eq(budgetTransactions.budgetType, options.budgetType));
     }
 
     let query = db.select()

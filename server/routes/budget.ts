@@ -40,7 +40,8 @@ router.get("/:customerId/transactions", checkCustomerAccess, asyncHandler("Budge
   const year = req.query.year ? parseInt(req.query.year as string) : undefined;
   const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
 
-  const transactions = await budgetLedgerStorage.getBudgetTransactions(customerId, { year, limit });
+  const budgetType = req.query.budgetType as string | undefined;
+  const transactions = await budgetLedgerStorage.getBudgetTransactions(customerId, { year, limit, budgetType });
   res.json(transactions);
 }));
 
