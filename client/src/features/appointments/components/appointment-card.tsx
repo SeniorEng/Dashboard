@@ -178,12 +178,25 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
 
             {/* Time */}
             <div className="w-24 flex flex-col items-center justify-center py-4 px-2 text-center border-r border-border/30">
-              <span className="text-base font-bold text-foreground leading-none">
-                {formatTimeSlot(appointment.scheduledStart)}
-              </span>
-              <span className="text-sm font-medium text-muted-foreground leading-none mt-0.5">
-                - {getEndTime(appointment)}
-              </span>
+              {appointment.status === "completed" && appointment.actualStart ? (
+                <>
+                  <span className="text-base font-bold text-primary leading-none">
+                    {formatTimeSlot(appointment.actualStart)}
+                  </span>
+                  <span className="text-sm font-medium text-primary/70 leading-none mt-0.5">
+                    - {appointment.actualEnd ? formatTimeSlot(appointment.actualEnd) : getEndTime(appointment)}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="text-base font-bold text-foreground leading-none">
+                    {formatTimeSlot(appointment.scheduledStart)}
+                  </span>
+                  <span className="text-sm font-medium text-muted-foreground leading-none mt-0.5">
+                    - {getEndTime(appointment)}
+                  </span>
+                </>
+              )}
             </div>
 
             {/* Content */}
