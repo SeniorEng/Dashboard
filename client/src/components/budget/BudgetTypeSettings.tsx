@@ -289,29 +289,33 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
                     </div>
                   )}
 
-                  <button
-                    type="button"
-                    onClick={() => toggleInitialBalance(setting.budgetType)}
-                    className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700"
-                    data-testid={`btn-toggle-initial-balance-${setting.budgetType}`}
-                  >
-                    {expandedInitialBalance[setting.budgetType] ? (
-                      <ChevronDown className="h-3 w-3" />
-                    ) : (
-                      <ChevronRight className="h-3 w-3" />
-                    )}
-                    Startwert festlegen
-                  </button>
+                  {setting.budgetType === "entlastungsbetrag_45b" && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => toggleInitialBalance(setting.budgetType)}
+                        className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700"
+                        data-testid={`btn-toggle-initial-balance-${setting.budgetType}`}
+                      >
+                        {expandedInitialBalance[setting.budgetType] ? (
+                          <ChevronDown className="h-3 w-3" />
+                        ) : (
+                          <ChevronRight className="h-3 w-3" />
+                        )}
+                        Startwert festlegen
+                      </button>
 
-                  {expandedInitialBalance[setting.budgetType] && (
-                    <div className="border-t border-gray-100 pt-2">
-                      <InitialBalanceSection
-                        customerId={customerId}
-                        budgetType={setting.budgetType}
-                        expanded={!!expandedHistory[setting.budgetType]}
-                        onToggleHistory={() => toggleHistory(setting.budgetType)}
-                      />
-                    </div>
+                      {expandedInitialBalance[setting.budgetType] && (
+                        <div className="border-t border-gray-100 pt-2">
+                          <InitialBalanceSection
+                            customerId={customerId}
+                            budgetType={setting.budgetType}
+                            expanded={!!expandedHistory[setting.budgetType]}
+                            onToggleHistory={() => toggleHistory(setting.budgetType)}
+                          />
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}
