@@ -1,6 +1,6 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
-import { rm, readFile } from "fs/promises";
+import { rm, readFile, writeFile } from "fs/promises";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
@@ -34,6 +34,9 @@ const allowlist = [
 async function buildAll() {
   await rm("dist", { recursive: true, force: true });
 
+  const buildTimestamp = new Date().toISOString();
+  console.log(`Build started at ${buildTimestamp}`);
+
   console.log("building client...");
   await viteBuild();
 
@@ -60,7 +63,41 @@ async function buildAll() {
   });
 }
 
-buildAll().catch((err) => {
+buildAll().then(async () => {
+  const sourceHash = await getSourceHash();
+  await writeFile("dist/.build-meta.json", JSON.stringify({
+    builtAt: new Date().toISOString(),
+    sourceHash,
+  }));
+  console.log(`Build complete. Source hash: ${sourceHash}`);
+}).catch((err) => {
   console.error(err);
   process.exit(1);
 });
+
+async function getSourceHash(): Promise<string> {
+  const { createHash } = await import("crypto");
+  const { readdir, stat } = await import("fs/promises");
+  const { join } = await import("path");
+
+  const hash = createHash("sha256");
+  const dirs = ["server", "shared", "client/src"];
+
+  async function walkDir(dir: string) {
+    try {
+      const entries = await readdir(dir, { withFileTypes: true });
+      for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+        const fullPath = join(dir, entry.name);
+        if (entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules") {
+          await walkDir(fullPath);
+        } else if (entry.isFile() && /\.(ts|tsx|css)$/.test(entry.name)) {
+          const s = await stat(fullPath);
+          hash.update(`${fullPath}:${s.mtimeMs}`);
+        }
+      }
+    } catch {}
+  }
+
+  for (const dir of dirs) await walkDir(dir);
+  return hash.digest("hex").slice(0, 16);
+}
