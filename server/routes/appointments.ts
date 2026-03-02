@@ -24,8 +24,10 @@ import {
 import { requireAuth } from "../middleware/auth";
 import { notificationService } from "../services/notification-service";
 import { timeTrackingStorage } from "../storage/time-tracking";
+import { budgetLedgerStorage } from "../storage/budget-ledger";
 import type { Response } from "express";
 import appointmentDocumentationRouter from "./appointment-documentation";
+import { db } from "../lib/db";
 
 const router = Router();
 
@@ -171,8 +173,10 @@ router.get("/:id", asyncHandler(ErrorMessages.fetchAppointmentFailed, async (req
       return sendForbidden(res, "Zugriff verweigert", "Access denied");
     }
   }
+
+  const isLocked = await storage.isAppointmentLocked(id);
   
-  res.json(appointment);
+  res.json({ ...appointment, isLocked });
 }));
 
 router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed, async (req, res) => {
@@ -518,6 +522,70 @@ router.get("/:id/travel-suggestion", asyncHandler("Fehler beim Laden der Fahrvor
     previousAppointmentId: suggestion.previousAppointment?.id ?? null,
     previousCustomerName: suggestion.previousCustomerName ?? null,
   });
+}));
+
+router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins", async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
+  }
+
+  const appointment = await storage.getAppointment(id);
+  if (!appointment) {
+    return sendNotFound(res, ErrorMessages.appointmentNotFound);
+  }
+
+  if (!await checkCustomerAccess(req.user!, appointment.customerId, res)) return;
+
+  if (appointment.status !== "completed") {
+    return sendForbidden(res, "INVALID_STATUS", "Nur abgeschlossene Termine können zur Korrektur geöffnet werden.");
+  }
+
+  const isLocked = await storage.isAppointmentLocked(id);
+  if (isLocked) {
+    return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
+  }
+
+  if (!req.user!.isAdmin && appointment.date) {
+    const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
+    if (employeeId && await timeTrackingStorage.isMonthClosed(employeeId, appointment.date)) {
+      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Änderungen sind nur noch durch einen Admin möglich.");
+    }
+  }
+
+  const transactions = await budgetLedgerStorage.getTransactionsByAppointmentId(id);
+
+  const updatedAppointment = await db.transaction(async () => {
+    for (const tx of transactions) {
+      await budgetLedgerStorage.reverseBudgetTransaction(tx.id, req.user!.id);
+    }
+
+    const result = await storage.updateAppointment(id, {
+      status: "documenting",
+      signatureData: null,
+      signatureHash: null,
+      signedAt: null,
+      signedByUserId: null,
+    });
+
+    return result;
+  });
+
+  const ip = req.ip || req.socket.remoteAddress;
+  await auditService.log(
+    req.user!.id,
+    "appointment_reopened",
+    "appointment",
+    id,
+    {
+      customerId: appointment.customerId,
+      reversedTransactions: transactions.length,
+      hadSignature: !!appointment.signatureData,
+    },
+    ip
+  );
+
+  res.json(updatedAppointment);
 }));
 
 router.use(appointmentDocumentationRouter);

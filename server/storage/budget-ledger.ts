@@ -231,6 +231,15 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return result[0];
   }
 
+  async getTransactionsByAppointmentId(appointmentId: number): Promise<BudgetTransaction[]> {
+    return db.select()
+      .from(budgetTransactions)
+      .where(and(
+        eq(budgetTransactions.appointmentId, appointmentId),
+        eq(budgetTransactions.transactionType, "consumption")
+      ));
+  }
+
   async reverseBudgetTransaction(transactionId: number, userId?: number): Promise<BudgetTransaction | undefined> {
     const original = await db.select()
       .from(budgetTransactions)

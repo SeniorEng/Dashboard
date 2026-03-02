@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { 
   MapPin, Calendar, FileText, ChevronLeft, Loader2, 
-  Pencil, Trash2, AlertTriangle, Phone, Car, Home, ArrowRight, UserCheck, UserPlus, CheckCircle2, XCircle
+  Pencil, Trash2, AlertTriangle, Phone, Car, Home, ArrowRight, UserCheck, UserPlus, CheckCircle2, XCircle, RotateCcw
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -63,6 +63,27 @@ export default function AppointmentDetail() {
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const [showReopenDialog, setShowReopenDialog] = useState(false);
+
+  const reopenMutation = useMutation({
+    mutationFn: async () => {
+      const result = await api.post(`/appointments/${id}/reopen`, {});
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}`] });
+      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      queryClient.invalidateQueries({ queryKey: ["budget-summary"] });
+      toast({ title: "Dokumentation zur Korrektur geöffnet" });
+      setShowReopenDialog(false);
+      setLocation(`/document-appointment/${id}`);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+      setShowReopenDialog(false);
     },
   });
   
@@ -452,6 +473,21 @@ export default function AppointmentDetail() {
         </div>
       )}
 
+      {isCompleted && !appointment.isLocked && (
+        <div className="mt-6">
+          <Button 
+            variant="outline"
+            className="w-full"
+            size="lg"
+            onClick={() => setShowReopenDialog(true)}
+            data-testid="button-reopen"
+          >
+            <RotateCcw className={`${iconSize.sm} mr-2`} />
+            Dokumentation korrigieren
+          </Button>
+        </div>
+      )}
+
       {canModify && (
         <div className="flex gap-3 mt-6">
           <Button 
@@ -495,6 +531,30 @@ export default function AppointmentDetail() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Löschen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showReopenDialog} onOpenChange={setShowReopenDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <RotateCcw className={`${iconSize.md} text-primary`} />
+              Dokumentation korrigieren?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Die Dokumentation wird zur Korrektur geöffnet. Vorhandene Budget-Buchungen werden vorübergehend zurückgebucht und bei erneuter Dokumentation neu berechnet.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Abbrechen</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={() => reopenMutation.mutate()}
+              disabled={reopenMutation.isPending}
+            >
+              {reopenMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Zur Korrektur öffnen
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

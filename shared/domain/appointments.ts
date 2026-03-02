@@ -140,6 +140,9 @@ export function isValidStatusTransition(
   if (targetStatus === "cancelled" && ALLOWED_CANCELLATION_SOURCES.includes(currentStatus)) {
     return true;
   }
+  if (currentStatus === "completed" && targetStatus === "documenting") {
+    return true;
+  }
   const currentIndex = STATUS_ORDER[currentStatus];
   const targetIndex = STATUS_ORDER[targetStatus];
   return targetIndex === currentIndex || targetIndex === currentIndex + 1;

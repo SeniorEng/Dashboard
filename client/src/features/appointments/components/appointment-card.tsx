@@ -1,7 +1,10 @@
 import { memo, useState, useCallback, useRef, useMemo } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import { de } from "date-fns/locale";
 import { Card } from "@/components/ui/card";
+import { Loader2 } from "lucide-react";
+import { api, unwrapResult } from "@/lib/api";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,7 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { MapPin, CheckCircle2, Clock, FileText, Pencil, Trash2, MoreVertical, Phone, Navigation } from "lucide-react";
+import { MapPin, CheckCircle2, Clock, FileText, Pencil, Trash2, MoreVertical, Phone, Navigation, RotateCcw } from "lucide-react";
 import { useLocation } from "wouter";
 import type { AppointmentWithCustomer, AppointmentStatus } from "@shared/types";
 import { getCardServiceInfoFromAppointment, canModifyAppointment } from "@shared/types";
@@ -46,13 +49,36 @@ function getStatusIcon(status: string) {
 
 function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProps) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showReopenDialog, setShowReopenDialog] = useState(false);
   const [swiped, setSwiped] = useState(false);
   const startX = useRef(0);
   const deleteMutation = useDeleteAppointment();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
   const [, navigate] = useLocation();
   
   const canModify = canModifyAppointment(appointment.status as AppointmentStatus);
+  const isCompleted = appointment.status === "completed";
+  const canReopen = isCompleted && !(appointment as any).isLocked;
+
+  const reopenMutation = useMutation({
+    mutationFn: async () => {
+      const result = await api.post(`/appointments/${appointment.id}/reopen`, {});
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/appointments/${appointment.id}`] });
+      queryClient.invalidateQueries({ queryKey: ["budget-summary"] });
+      toast({ title: "Dokumentation zur Korrektur geöffnet" });
+      setShowReopenDialog(false);
+      navigate(`/document-appointment/${appointment.id}`);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+      setShowReopenDialog(false);
+    },
+  });
   const serviceInfo = useMemo(() => 
     getCardServiceInfoFromAppointment(appointment),
     [appointment.appointmentType, appointment.serviceType, appointment.durationPromised, appointment.status]
@@ -267,7 +293,7 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
                   {getStatusIcon(appointment.status)}
                   
                   {/* Desktop Actions Menu */}
-                  {canModify && (
+                  {(canModify || canReopen) && (
                     <div onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -279,18 +305,31 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={handleEditClick} data-testid={`button-edit-${appointment.id}`}>
-                            <Pencil className="w-4 h-4 mr-2" />
-                            Bearbeiten
-                          </DropdownMenuItem>
-                          <DropdownMenuItem 
-                            onClick={handleDeleteClick} 
-                            className="text-destructive focus:text-destructive"
-                            data-testid={`button-delete-${appointment.id}`}
-                          >
-                            <Trash2 className="w-4 h-4 mr-2" />
-                            Löschen
-                          </DropdownMenuItem>
+                          {canModify && (
+                            <>
+                              <DropdownMenuItem onClick={handleEditClick} data-testid={`button-edit-${appointment.id}`}>
+                                <Pencil className="w-4 h-4 mr-2" />
+                                Bearbeiten
+                              </DropdownMenuItem>
+                              <DropdownMenuItem 
+                                onClick={handleDeleteClick} 
+                                className="text-destructive focus:text-destructive"
+                                data-testid={`button-delete-${appointment.id}`}
+                              >
+                                <Trash2 className="w-4 h-4 mr-2" />
+                                Löschen
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                          {canReopen && (
+                            <DropdownMenuItem 
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowReopenDialog(true); }}
+                              data-testid={`button-reopen-${appointment.id}`}
+                            >
+                              <RotateCcw className="w-4 h-4 mr-2" />
+                              Dokumentation korrigieren
+                            </DropdownMenuItem>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
@@ -328,6 +367,30 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Löschen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showReopenDialog} onOpenChange={setShowReopenDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <RotateCcw className="w-5 h-5 text-primary" />
+              Dokumentation korrigieren?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Die Dokumentation wird zur Korrektur geöffnet. Vorhandene Budget-Buchungen werden vorübergehend zurückgebucht und bei erneuter Dokumentation neu berechnet.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Abbrechen</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={() => reopenMutation.mutate()}
+              disabled={reopenMutation.isPending}
+            >
+              {reopenMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Zur Korrektur öffnen
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
