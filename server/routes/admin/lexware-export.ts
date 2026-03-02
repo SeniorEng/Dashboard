@@ -121,19 +121,25 @@ async function getMonthlyHoursBatch(
 
   const appointmentHours = await db.execute(sql`
     SELECT 
-      performed_by_employee_id as employee_id,
-      service_type,
-      EXTRACT(MONTH FROM date::date) as month_num,
-      SUM(EXTRACT(EPOCH FROM (actual_end::time - actual_start::time)) / 60) as minutes
-    FROM appointments
-    WHERE status = 'completed'
-      AND deleted_at IS NULL
-      AND date >= ${startDate}
-      AND date <= ${endDate}
-      AND performed_by_employee_id = ANY(${employeeIds})
-      AND actual_start IS NOT NULL
-      AND actual_end IS NOT NULL
-    GROUP BY performed_by_employee_id, service_type, EXTRACT(MONTH FROM date::date)
+      a.performed_by_employee_id as employee_id,
+      EXTRACT(MONTH FROM a.date::date) as month_num,
+      CASE
+        WHEN s.code = 'erstberatung' THEN 'erstberatung'
+        WHEN s.lohnart_kategorie = 'alltagsbegleitung' THEN 'alltagsbegleitung'
+        WHEN s.lohnart_kategorie = 'hauswirtschaft' THEN 'hauswirtschaft'
+        ELSE 'sonstiges'
+      END as category,
+      SUM(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes)) as minutes
+    FROM appointments a
+    JOIN appointment_services asvc ON asvc.appointment_id = a.id
+    JOIN services s ON s.id = asvc.service_id
+    WHERE a.status IN ('completed', 'documented')
+      AND a.deleted_at IS NULL
+      AND a.date >= ${startDate}
+      AND a.date <= ${endDate}
+      AND a.performed_by_employee_id = ANY(${employeeIds})
+      AND s.unit_type = 'hours'
+    GROUP BY a.performed_by_employee_id, category, EXTRACT(MONTH FROM a.date::date)
   `);
 
   for (const row of appointmentHours.rows as any[]) {
@@ -142,11 +148,12 @@ async function getMonthlyHoursBatch(
     if (!result[m]) result[m] = {};
     if (!result[m][empId]) result[m][empId] = { hauswirtschaft: 0, alltagsbegleitung: 0, erstberatung: 0, sonstiges: 0 };
     const minutes = Number(row.minutes) || 0;
-    if (row.service_type === "alltagsbegleitung") {
+    const category = row.category as string;
+    if (category === "alltagsbegleitung") {
       result[m][empId].alltagsbegleitung += minutes;
-    } else if (row.service_type === "hauswirtschaft") {
+    } else if (category === "hauswirtschaft") {
       result[m][empId].hauswirtschaft += minutes;
-    } else if (row.service_type === "erstberatung") {
+    } else if (category === "erstberatung") {
       result[m][empId].erstberatung += minutes;
     } else {
       result[m][empId].sonstiges += minutes;

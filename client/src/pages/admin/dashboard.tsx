@@ -89,7 +89,7 @@ export default function AdminDashboard() {
             icon={<Clock className={`${iconSize.lg} text-green-600`} />}
             iconBg="bg-green-100"
             title="Zeiterfassung"
-            description="Urlaub, Krankheit und Arbeitszeiten"
+            description="Zeiten nachtragen, Monatsabschluss öffnen/schließen, Urlaub & Krankheit"
           />
           <AdminCard
             href="/admin/birthday-cards"
