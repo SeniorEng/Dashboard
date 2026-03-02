@@ -18,14 +18,16 @@ export function validateGermanPhone(input: string): PhoneValidationResult {
   const cleaned = input.trim();
 
   try {
-    if (!isValidPhoneNumber(cleaned, "DE")) {
-      return { valid: false, error: "Ungültige Telefonnummer" };
+    let phoneNumber: PhoneNumber | undefined;
+
+    if (isValidPhoneNumber(cleaned, "DE")) {
+      phoneNumber = parsePhoneNumber(cleaned, "DE");
+    } else if (isValidPhoneNumber(cleaned)) {
+      phoneNumber = parsePhoneNumber(cleaned);
     }
 
-    const phoneNumber = parsePhoneNumber(cleaned, "DE");
-
-    if (phoneNumber.country !== "DE") {
-      return { valid: false, error: "Bitte eine deutsche Telefonnummer eingeben" };
+    if (!phoneNumber || !phoneNumber.isValid()) {
+      return { valid: false, error: "Ungültige Telefonnummer" };
     }
 
     const phoneType = phoneNumber.getType();
@@ -40,7 +42,7 @@ export function validateGermanPhone(input: string): PhoneValidationResult {
     return {
       valid: true,
       normalized: phoneNumber.format("E.164"),
-      formatted: phoneNumber.formatNational(),
+      formatted: phoneNumber.country === "DE" ? phoneNumber.formatNational() : phoneNumber.formatInternational(),
       type,
     };
   } catch {
@@ -62,7 +64,7 @@ export function formatPhoneForDisplay(e164OrInput: string): string {
   try {
     const phoneNumber = parsePhoneNumber(e164OrInput, "DE");
     if (phoneNumber && phoneNumber.isValid()) {
-      return phoneNumber.formatNational();
+      return phoneNumber.country === "DE" ? phoneNumber.formatNational() : phoneNumber.formatInternational();
     }
   } catch {
     // Fall through to return original
@@ -73,6 +75,10 @@ export function formatPhoneForDisplay(e164OrInput: string): string {
 
 export function formatPhoneAsYouType(input: string): string {
   if (!input) return "";
+  if (input.startsWith("+") || input.startsWith("00")) {
+    const normalized = input.startsWith("00") ? "+" + input.slice(2) : input;
+    return formatIncompletePhoneNumber(normalized);
+  }
   return formatIncompletePhoneNumber(input, "DE");
 }
 
