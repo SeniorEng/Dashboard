@@ -184,6 +184,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
         endTime: data.endTime || null,
         isFullDay: data.isFullDay ?? false,
         durationMinutes: data.durationMinutes || null,
+        kilometers: data.kilometers ?? 0,
         notes: data.notes || null,
       })
       .returning();
@@ -201,6 +202,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     if (data.endTime !== undefined) updateData.endTime = data.endTime;
     if (data.isFullDay !== undefined) updateData.isFullDay = data.isFullDay;
     if (data.durationMinutes !== undefined) updateData.durationMinutes = data.durationMinutes;
+    if (data.kilometers !== undefined) updateData.kilometers = data.kilometers ?? 0;
     if (data.notes !== undefined) updateData.notes = data.notes;
     
     const results = await db
