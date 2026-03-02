@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { StatusBadge } from "@/components/patterns/status-badge";
-import { ArrowUp, ArrowDown, Save, Plus, History, ChevronDown, ChevronUp, ChevronRight } from "lucide-react";
+import { ArrowUp, ArrowDown, Save, Plus, History, ChevronDown, ChevronUp, ChevronRight, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { BUDGET_TYPE_LABELS, type BudgetType, BUDGET_45B_MAX_MONTHLY_CENTS, BUDGET_39_42A_MAX_YEARLY_CENTS, BUDGET_45A_MAX_BY_PFLEGEGRAD } from "@shared/domain/budgets";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -19,8 +19,6 @@ interface BudgetTypeSetting {
   priority: number;
   monthlyLimitCents: number | null;
   yearlyLimitCents: number | null;
-  initialBalanceCents: number | null;
-  initialBalanceMonth: string | null;
 }
 
 interface InitialBalanceAllocation {
@@ -90,7 +88,6 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
   const [hasChanges, setHasChanges] = useState(false);
   const [expandedHistory, setExpandedHistory] = useState<Record<string, boolean>>({});
   const [expandedInitialBalance, setExpandedInitialBalance] = useState<Record<string, boolean>>({});
-  const [newBalances, setNewBalances] = useState<Record<string, { amount: string; month: string }>>({});
   const [euroValues, setEuroValues] = useState<Record<string, { monthly: string; yearly: string }>>({});
 
   const { data, isLoading } = useQuery<BudgetTypeSetting[]>({
@@ -121,8 +118,6 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
   const saveMutation = useMutation({
     mutationFn: async (newSettings: BudgetTypeSetting[]) => {
       const settingsPayload = newSettings.map(s => {
-        const newBal = newBalances[s.budgetType];
-        const hasNewBalance = newBal && newBal.amount && parseFloat(newBal.amount.replace(",", ".")) > 0;
         const ev = euroValues[s.budgetType];
         return {
           budgetType: s.budgetType,
@@ -130,8 +125,6 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
           priority: s.priority,
           monthlyLimitCents: euroStringToCents(ev?.monthly || ""),
           yearlyLimitCents: euroStringToCents(ev?.yearly || ""),
-          initialBalanceCents: hasNewBalance ? Math.round(parseFloat(newBal.amount.replace(",", ".")) * 100) : null,
-          initialBalanceMonth: hasNewBalance ? newBal.month : null,
         };
       });
       return unwrapResult(await api.put(`/budget/${customerId}/type-settings`, {
@@ -141,10 +134,8 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
     onSuccess: () => {
       toast({ title: "Budget-Einstellungen gespeichert" });
       queryClient.invalidateQueries({ queryKey: ["budget-type-settings", customerId] });
-      queryClient.invalidateQueries({ queryKey: ["initial-balances", customerId] });
       queryClient.invalidateQueries({ queryKey: ["budget-summary", customerId] });
       setHasChanges(false);
-      setNewBalances({});
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
@@ -178,17 +169,6 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
     setEuroValues(prev => ({
       ...prev,
       [budgetType]: { ...prev[budgetType], [field]: value },
-    }));
-    setHasChanges(true);
-  };
-
-  const updateNewBalance = (budgetType: string, field: "amount" | "month", value: string) => {
-    setNewBalances(prev => ({
-      ...prev,
-      [budgetType]: {
-        amount: field === "amount" ? value : (prev[budgetType]?.amount || ""),
-        month: field === "month" ? value : (prev[budgetType]?.month || getCurrentYearMonth()),
-      },
     }));
     setHasChanges(true);
   };
@@ -230,8 +210,6 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
       <div className="space-y-2">
         {settings.map((setting, index) => {
           const label = BUDGET_TYPE_LABELS[setting.budgetType as BudgetType] || setting.budgetType;
-          const newBal = newBalances[setting.budgetType];
-          const hasNewBalanceInput = newBal && newBal.amount && (euroStringToCents(newBal.amount) ?? 0) > 0;
 
           return (
             <div
@@ -330,9 +308,6 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
                       <InitialBalanceSection
                         customerId={customerId}
                         budgetType={setting.budgetType}
-                        newBal={newBal}
-                        hasNewBalanceInput={!!hasNewBalanceInput}
-                        onUpdateBalance={updateNewBalance}
                         expanded={!!expandedHistory[setting.budgetType]}
                         onToggleHistory={() => toggleHistory(setting.budgetType)}
                       />
@@ -363,14 +338,17 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
 interface InitialBalanceSectionProps {
   customerId: number;
   budgetType: string;
-  newBal: { amount: string; month: string } | undefined;
-  hasNewBalanceInput: boolean;
-  onUpdateBalance: (budgetType: string, field: "amount" | "month", value: string) => void;
   expanded: boolean;
   onToggleHistory: () => void;
 }
 
-function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceInput, onUpdateBalance, expanded, onToggleHistory }: InitialBalanceSectionProps) {
+function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHistory }: InitialBalanceSectionProps) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [amount, setAmount] = useState("");
+  const [month, setMonth] = useState(getCurrentYearMonth());
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+
   const { data: allocations, isLoading } = useQuery<InitialBalanceAllocation[]>({
     queryKey: ["initial-balances", customerId, budgetType],
     queryFn: async () => {
@@ -380,8 +358,54 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
     staleTime: 30000,
   });
 
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const amountCents = euroStringToCents(amount);
+      if (!amountCents || amountCents <= 0) throw new Error("Bitte einen gültigen Betrag eingeben");
+      return unwrapResult(await api.post(`/budget/${customerId}/initial-balance/${budgetType}`, {
+        amountCents,
+        validFrom: month,
+      }));
+    },
+    onSuccess: () => {
+      toast({ title: "Startwert gespeichert" });
+      setAmount("");
+      queryClient.invalidateQueries({ queryKey: ["initial-balances", customerId, budgetType] });
+      queryClient.invalidateQueries({ queryKey: ["budget-summary", customerId] });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (allocationId: number) => {
+      return unwrapResult(await api.delete(`/budget/${customerId}/initial-balance/${allocationId}`));
+    },
+    onSuccess: () => {
+      toast({ title: "Startwert gelöscht" });
+      setDeleteConfirmId(null);
+      queryClient.invalidateQueries({ queryKey: ["initial-balances", customerId, budgetType] });
+      queryClient.invalidateQueries({ queryKey: ["budget-summary", customerId] });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+    },
+  });
+
   const latestAllocation = allocations?.[0];
   const hasHistory = allocations && allocations.length > 0;
+  const hasValidInput = amount && (euroStringToCents(amount) ?? 0) > 0;
+
+  const selectedYear = parseInt(month.split("-")[0]);
+  const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth() + 1;
+
+  const filteredMonths = MONTH_OPTIONS.filter(m => {
+    if (selectedYear < currentYear) return true;
+    if (selectedYear === currentYear) return parseInt(m.value) <= currentMonth;
+    return false;
+  });
 
   return (
     <div>
@@ -390,26 +414,55 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
           <span className="text-gray-600">
             Startwert (ab {formatMonthYear(latestAllocation.validFrom)})
           </span>
-          <span className="font-semibold text-teal-700">{formatCurrency(latestAllocation.amountCents)}</span>
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-teal-700">{formatCurrency(latestAllocation.amountCents)}</span>
+            {deleteConfirmId === latestAllocation.id ? (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => deleteMutation.mutate(latestAllocation.id)}
+                  className="text-[10px] px-1.5 py-0.5 bg-red-500 text-white rounded hover:bg-red-600"
+                  data-testid={`btn-confirm-delete-${budgetType}`}
+                >
+                  Löschen
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDeleteConfirmId(null)}
+                  className="text-[10px] px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded hover:bg-gray-300"
+                >
+                  Abbrechen
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmId(latestAllocation.id)}
+                className="p-0.5 text-gray-400 hover:text-red-500 rounded"
+                title="Startwert löschen"
+                data-testid={`btn-delete-balance-${budgetType}`}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
         </div>
       )}
 
       <div className="space-y-2">
         <Label className="text-xs text-gray-500">
-          {hasHistory ? "Neuen Startwert hinzufügen" : "Startwert festlegen"}
+          {hasHistory ? "Startwert anpassen" : "Startwert festlegen"}
         </Label>
         <div className="space-y-2">
           <div>
-            <Label className="text-[11px] text-gray-500">Betrag (€)</Label>
+            <Label className="text-[11px] text-gray-500">Restguthaben (€)</Label>
             <Input
               type="text"
               inputMode="decimal"
               placeholder="0,00"
-              value={newBal?.amount || ""}
+              value={amount}
               onChange={(e) => {
-                if (isValidEuroInput(e.target.value)) {
-                  onUpdateBalance(budgetType, "amount", e.target.value);
-                }
+                if (isValidEuroInput(e.target.value)) setAmount(e.target.value);
               }}
               className="h-8 text-base"
               data-testid={`input-initial-balance-${budgetType}`}
@@ -419,22 +472,15 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
             <div>
               <Label className="text-[11px] text-gray-500">Ab Monat</Label>
               <select
-                value={(newBal?.month || getCurrentYearMonth()).split("-")[1]}
+                value={month.split("-")[1]}
                 onChange={(e) => {
-                  const year = (newBal?.month || getCurrentYearMonth()).split("-")[0];
-                  onUpdateBalance(budgetType, "month", `${year}-${e.target.value}`);
+                  const yr = month.split("-")[0];
+                  setMonth(`${yr}-${e.target.value}`);
                 }}
                 className="h-8 w-full text-sm border border-gray-200 rounded-md px-2"
                 data-testid={`select-balance-month-${budgetType}`}
               >
-                {MONTH_OPTIONS.filter(m => {
-                  const selectedYear = parseInt((newBal?.month || getCurrentYearMonth()).split("-")[0]);
-                  const currentYear = new Date().getFullYear();
-                  const currentMonth = new Date().getMonth() + 1;
-                  if (selectedYear < currentYear) return true;
-                  if (selectedYear === currentYear) return parseInt(m.value) <= currentMonth;
-                  return false;
-                }).map(m => (
+                {filteredMonths.map(m => (
                   <option key={m.value} value={m.value}>{m.label}</option>
                 ))}
               </select>
@@ -442,10 +488,13 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
             <div>
               <Label className="text-[11px] text-gray-500">Jahr</Label>
               <select
-                value={(newBal?.month || getCurrentYearMonth()).split("-")[0]}
+                value={month.split("-")[0]}
                 onChange={(e) => {
-                  const month = (newBal?.month || getCurrentYearMonth()).split("-")[1];
-                  onUpdateBalance(budgetType, "month", `${e.target.value}-${month}`);
+                  const mo = month.split("-")[1];
+                  const newYear = parseInt(e.target.value);
+                  const maxMonth = newYear === currentYear ? String(currentMonth).padStart(2, "0") : "12";
+                  const adjustedMonth = mo > maxMonth ? maxMonth : mo;
+                  setMonth(`${e.target.value}-${adjustedMonth}`);
                 }}
                 className="h-8 w-full text-sm border border-gray-200 rounded-md px-2"
                 data-testid={`select-balance-year-${budgetType}`}
@@ -458,10 +507,23 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
           </div>
         </div>
 
-        {hasNewBalanceInput && (
-          <p className="text-xs text-teal-600 mt-1">
-            <Plus className="h-3 w-3 inline" /> {formatCurrency(euroStringToCents(newBal!.amount) || 0)} wird als Restguthaben ab {formatMonthYear(newBal!.month || getCurrentYearMonth())} gespeichert
-          </p>
+        {hasValidInput && (
+          <div className="space-y-2 mt-1">
+            <p className="text-xs text-teal-600">
+              <Plus className="h-3 w-3 inline" /> {formatCurrency(euroStringToCents(amount) || 0)} wird als Restguthaben ab {formatMonthYear(month)} {hasHistory ? "aktualisiert" : "gespeichert"}
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending}
+              className="w-full h-7 text-xs"
+              data-testid={`btn-save-initial-balance-${budgetType}`}
+            >
+              <Save className="h-3 w-3 mr-1" />
+              {saveMutation.isPending ? "Wird gespeichert..." : (hasHistory ? "Startwert aktualisieren" : "Startwert speichern")}
+            </Button>
+          </div>
         )}
       </div>
 
@@ -486,7 +548,36 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
                 <StatusBadge type="info" value={`ab ${formatMonthYear(alloc.validFrom)}`} size="sm" />
                 {alloc.notes && <span className="text-gray-500">{alloc.notes}</span>}
               </div>
-              <span className="font-medium text-gray-700">{formatCurrency(alloc.amountCents)}</span>
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-gray-700">{formatCurrency(alloc.amountCents)}</span>
+                {deleteConfirmId === alloc.id ? (
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => deleteMutation.mutate(alloc.id)}
+                      className="text-[10px] px-1.5 py-0.5 bg-red-500 text-white rounded hover:bg-red-600"
+                    >
+                      Löschen
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeleteConfirmId(null)}
+                      className="text-[10px] px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded hover:bg-gray-300"
+                    >
+                      Nein
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setDeleteConfirmId(alloc.id)}
+                    className="p-0.5 text-gray-400 hover:text-red-500 rounded"
+                    title="Startwert löschen"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>

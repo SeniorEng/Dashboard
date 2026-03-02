@@ -112,7 +112,7 @@ export interface BudgetLedgerStorage {
   getAllBudgetSummaries(customerId: number): Promise<AllBudgetSummaries>;
   
   getBudgetTypeSettings(customerId: number): Promise<CustomerBudgetTypeSetting[]>;
-  upsertBudgetTypeSettings(customerId: number, settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null; initialBalanceCents?: number | null; initialBalanceMonth?: string | null }>): Promise<CustomerBudgetTypeSetting[]>;
+  upsertBudgetTypeSettings(customerId: number, settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null }>): Promise<CustomerBudgetTypeSetting[]>;
   upsertInitialBalanceAllocation(params: { customerId: number; budgetType: string; year: number; month: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string }, userId?: number): Promise<void>;
   getInitialBalanceAllocations(customerId: number, budgetType: string): Promise<BudgetAllocation[]>;
   
@@ -457,7 +457,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
   async upsertBudgetTypeSettings(
     customerId: number,
-    settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null; initialBalanceCents?: number | null; initialBalanceMonth?: string | null }>
+    settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null }>
   ): Promise<CustomerBudgetTypeSetting[]> {
     const results: CustomerBudgetTypeSetting[] = [];
     for (const s of settings) {
@@ -469,8 +469,6 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           priority: s.priority,
           monthlyLimitCents: s.monthlyLimitCents ?? null,
           yearlyLimitCents: s.yearlyLimitCents ?? null,
-          initialBalanceCents: s.initialBalanceCents ?? null,
-          initialBalanceMonth: s.initialBalanceMonth ?? null,
         })
         .onConflictDoUpdate({
           target: [customerBudgetTypeSettings.customerId, customerBudgetTypeSettings.budgetType],
@@ -479,8 +477,6 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
             priority: sql`EXCLUDED.priority`,
             monthlyLimitCents: sql`EXCLUDED.monthly_limit_cents`,
             yearlyLimitCents: sql`EXCLUDED.yearly_limit_cents`,
-            initialBalanceCents: sql`EXCLUDED.initial_balance_cents`,
-            initialBalanceMonth: sql`EXCLUDED.initial_balance_month`,
             updatedAt: sql`now()`,
           },
         })

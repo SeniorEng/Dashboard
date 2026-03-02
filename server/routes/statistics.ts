@@ -389,26 +389,6 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
     costKmCents: number;
   }
 
-  const diagCounts = await db.execute(sql`
-    SELECT
-      (SELECT COUNT(*) FROM appointment_services) AS total_as,
-      (SELECT COUNT(*) FROM appointment_services asvc
-       JOIN appointments a ON a.id = asvc.appointment_id
-       WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented')
-         AND EXTRACT(YEAR FROM a.date::date) = ${year}) AS year_as,
-      (SELECT COUNT(*) FROM appointments a2
-       WHERE a2.deleted_at IS NULL AND a2.status IN ('completed','documented')
-         AND EXTRACT(YEAR FROM a2.date::date) = ${year}) AS year_appts
-  `);
-  const dc = diagCounts.rows[0] as Record<string, unknown>;
-  console.log(`[PROD-DIAG] year=${year} month=${month} | appointment_services: total=${dc.total_as}, year=${dc.year_as} | appointments(year): ${dc.year_appts}`);
-  if (result.rows.length > 0) {
-    const sample = result.rows[0] as Record<string, unknown>;
-    console.log(`[PROD-DIAG] Query rows=${result.rows.length} | sample: revenueCents=${sample.revenueCents}, revenueServiceCents=${sample.revenueServiceCents}, revenueKmCents=${sample.revenueKmCents}`);
-  } else {
-    console.log(`[PROD-DIAG] Query returned 0 rows`);
-  }
-
   const totals = result.rows.reduce<ProfitabilityTotals>((acc, r: Record<string, unknown>) => ({
     appointments: acc.appointments + Number(r.appointments),
     customers: acc.customers + Number(r.customers),

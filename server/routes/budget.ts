@@ -261,6 +261,100 @@ router.get("/:customerId/initial-balances/:budgetType", asyncHandler("Startwert-
   res.json(allocations);
 }));
 
+const initialBalanceSchema = z.object({
+  amountCents: z.number().min(1),
+  validFrom: z.string().regex(/^\d{4}-\d{2}$/),
+});
+
+router.post("/:customerId/initial-balance/:budgetType", requireAdmin, asyncHandler("Startwert konnte nicht gespeichert werden", async (req: Request, res: Response) => {
+  const customerId = parseInt(req.params.customerId);
+  const budgetType = req.params.budgetType;
+  if (isNaN(customerId)) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
+    return;
+  }
+
+  const result = initialBalanceSchema.safeParse(req.body);
+  if (!result.success) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Daten", details: result.error.issues });
+    return;
+  }
+
+  const [yearStr, monthStr] = result.data.validFrom.split("-");
+  const year = parseInt(yearStr);
+  const month = parseInt(monthStr);
+  const validFromDate = `${result.data.validFrom}-01`;
+  const expiresAt = budgetType === "ersatzpflege_39_42a" ? `${year}-12-31` : null;
+  const userId = req.user?.id;
+
+  await budgetLedgerStorage.upsertInitialBalanceAllocation({
+    customerId,
+    budgetType,
+    year,
+    month,
+    amountCents: result.data.amountCents,
+    validFrom: validFromDate,
+    expiresAt,
+    notes: `Startwert ab ${monthStr}/${yearStr}`,
+  }, userId);
+
+  if (userId) {
+    const ip = req.ip || req.socket.remoteAddress;
+    await auditService.log(userId, "initial_balance_set", "budget", customerId, {
+      customerId,
+      budgetType,
+      amountCents: result.data.amountCents,
+      validFrom: result.data.validFrom,
+    }, ip);
+  }
+
+  const allocations = await budgetLedgerStorage.getInitialBalanceAllocations(customerId, budgetType);
+  res.json(allocations);
+}));
+
+router.delete("/:customerId/initial-balance/:allocationId", requireAdmin, asyncHandler("Startwert konnte nicht gelöscht werden", async (req: Request, res: Response) => {
+  const customerId = parseInt(req.params.customerId);
+  const allocationId = parseInt(req.params.allocationId);
+  if (isNaN(customerId) || isNaN(allocationId)) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Parameter" });
+    return;
+  }
+
+  const userId = req.user?.id;
+  const { db: database } = await import("../lib/db");
+  const { budgetAllocations } = await import("@shared/schema");
+  const { eq, and } = await import("drizzle-orm");
+
+  const existing = await database.select()
+    .from(budgetAllocations)
+    .where(and(
+      eq(budgetAllocations.id, allocationId),
+      eq(budgetAllocations.customerId, customerId),
+      eq(budgetAllocations.source, "initial_balance"),
+    ))
+    .limit(1);
+
+  if (existing.length === 0) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Startwert nicht gefunden" });
+    return;
+  }
+
+  await database.delete(budgetAllocations)
+    .where(eq(budgetAllocations.id, allocationId));
+
+  if (userId) {
+    const ip = req.ip || req.socket.remoteAddress;
+    await auditService.log(userId, "initial_balance_deleted", "budget", customerId, {
+      customerId,
+      allocationId,
+      amountCents: existing[0].amountCents,
+      budgetType: existing[0].budgetType,
+    }, ip);
+  }
+
+  res.json({ success: true });
+}));
+
 const bulkBudgetTypeSettingsSchema = z.object({
   settings: z.array(z.object({
     budgetType: z.enum(["entlastungsbetrag_45b", "umwandlung_45a", "ersatzpflege_39_42a"]),
@@ -268,8 +362,6 @@ const bulkBudgetTypeSettingsSchema = z.object({
     priority: z.number().min(1).max(3),
     monthlyLimitCents: z.number().min(0).nullable().optional(),
     yearlyLimitCents: z.number().min(0).nullable().optional(),
-    initialBalanceCents: z.number().min(0).nullable().optional(),
-    initialBalanceMonth: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
   })).min(1).max(3),
 });
 
@@ -295,27 +387,6 @@ router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
   const userId = req.user?.id;
   const saved = await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, result.data.settings);
 
-  for (const s of result.data.settings) {
-    if (s.initialBalanceCents != null && s.initialBalanceCents > 0 && s.initialBalanceMonth) {
-      const [yearStr, monthStr] = s.initialBalanceMonth.split("-");
-      const year = parseInt(yearStr);
-      const month = parseInt(monthStr);
-      const validFrom = `${s.initialBalanceMonth}-01`;
-      const expiresAt = s.budgetType === "ersatzpflege_39_42a" ? `${year}-12-31` : null;
-
-      await budgetLedgerStorage.upsertInitialBalanceAllocation({
-        customerId,
-        budgetType: s.budgetType,
-        year,
-        month,
-        amountCents: s.initialBalanceCents,
-        validFrom,
-        expiresAt,
-        notes: `Startwert ab ${monthStr}/${yearStr}`,
-      }, userId);
-    }
-  }
-
   if (userId) {
     const ip = req.ip || req.socket.remoteAddress;
     await auditService.log(userId, "budget_type_settings_updated", "budget", customerId, {
@@ -326,7 +397,6 @@ router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
         priority: s.priority,
         monthlyLimitCents: s.monthlyLimitCents ?? null,
         yearlyLimitCents: s.yearlyLimitCents ?? null,
-        initialBalanceCents: s.initialBalanceCents ?? null,
       })),
     }, ip);
   }
