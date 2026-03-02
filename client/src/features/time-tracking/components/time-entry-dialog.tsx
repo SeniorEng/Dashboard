@@ -126,7 +126,7 @@ function TimeEntryFormContent({
         </>
       )}
 
-      {!isFullDayType && (
+      {!isFullDayType && formState.entryType !== "verfuegbar" && (
         <div className="space-y-2">
           <Label>Kilometer (optional)</Label>
           <Input
