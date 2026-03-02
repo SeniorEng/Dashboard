@@ -427,7 +427,14 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
                 className="h-8 w-full text-sm border border-gray-200 rounded-md px-2"
                 data-testid={`select-balance-month-${budgetType}`}
               >
-                {MONTH_OPTIONS.map(m => (
+                {MONTH_OPTIONS.filter(m => {
+                  const selectedYear = parseInt((newBal?.month || getCurrentYearMonth()).split("-")[0]);
+                  const currentYear = new Date().getFullYear();
+                  const currentMonth = new Date().getMonth() + 1;
+                  if (selectedYear < currentYear) return true;
+                  if (selectedYear === currentYear) return parseInt(m.value) <= currentMonth;
+                  return false;
+                }).map(m => (
                   <option key={m.value} value={m.value}>{m.label}</option>
                 ))}
               </select>
@@ -443,7 +450,7 @@ function InitialBalanceSection({ customerId, budgetType, newBal, hasNewBalanceIn
                 className="h-8 w-full text-sm border border-gray-200 rounded-md px-2"
                 data-testid={`select-balance-year-${budgetType}`}
               >
-                {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map(y => (
+                {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(y => (
                   <option key={y} value={String(y)}>{y}</option>
                 ))}
               </select>

@@ -656,4 +656,65 @@ router.get("/planning", asyncHandler("Planungsdaten konnten nicht geladen werden
   });
 }));
 
+router.post("/repair-appointment-services", asyncHandler(async (req, res) => {
+  const user = (req as any).user;
+  if (user?.role !== "admin") return forbidden(res, "Nur Admins dürfen diese Aktion ausführen");
+
+  const dryRun = req.query.dryRun === "true";
+
+  const missing = await db.execute(sql`
+    SELECT a.id AS appointment_id, a.service_type, a.duration_promised, a.actual_duration
+    FROM appointments a
+    WHERE a.deleted_at IS NULL
+      AND a.status IN ('completed', 'documented')
+      AND NOT EXISTS (SELECT 1 FROM appointment_services asvc WHERE asvc.appointment_id = a.id)
+      AND a.service_type IS NOT NULL
+  `);
+
+  const serviceMap = await db.execute(sql`SELECT id, code FROM services WHERE unit_type = 'hours'`);
+  const codeToId: Record<string, number> = {};
+  for (const s of serviceMap.rows as { id: number; code: string }[]) {
+    codeToId[s.code] = s.id;
+  }
+
+  const toInsert: { appointmentId: number; serviceId: number; planned: number; actual: number | null }[] = [];
+  const skipped: { appointmentId: number; reason: string }[] = [];
+
+  for (const row of missing.rows as { appointment_id: number; service_type: string; duration_promised: number | null; actual_duration: number | null }[]) {
+    const serviceId = codeToId[row.service_type];
+    if (!serviceId) {
+      skipped.push({ appointmentId: row.appointment_id, reason: `Unknown service_type: ${row.service_type}` });
+      continue;
+    }
+    toInsert.push({
+      appointmentId: row.appointment_id,
+      serviceId,
+      planned: row.duration_promised || 60,
+      actual: row.actual_duration || null,
+    });
+  }
+
+  let inserted = 0;
+  if (!dryRun && toInsert.length > 0) {
+    for (const item of toInsert) {
+      await db.execute(sql`
+        INSERT INTO appointment_services (appointment_id, service_id, planned_duration_minutes, actual_duration_minutes)
+        VALUES (${item.appointmentId}, ${item.serviceId}, ${item.planned}, ${item.actual})
+      `);
+      inserted++;
+    }
+  }
+
+  console.log(`[REPAIR] dryRun=${dryRun} | found=${missing.rows.length} missing | toInsert=${toInsert.length} | skipped=${skipped.length} | inserted=${inserted}`);
+
+  res.json({
+    dryRun,
+    found: missing.rows.length,
+    toInsert: toInsert.length,
+    skipped,
+    inserted,
+    serviceMap: codeToId,
+  });
+}));
+
 export default router;
