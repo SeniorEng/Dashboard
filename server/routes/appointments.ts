@@ -23,6 +23,7 @@ import {
 } from "../lib/errors";
 import { requireAuth } from "../middleware/auth";
 import { notificationService } from "../services/notification-service";
+import { timeTrackingStorage } from "../storage/time-tracking";
 import type { Response } from "express";
 import appointmentDocumentationRouter from "./appointment-documentation";
 
@@ -358,6 +359,13 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
   if (isLocked) {
     return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
   }
+
+  if (!req.user!.isAdmin && existingAppointment.date) {
+    const employeeId = existingAppointment.assignedEmployeeId || existingAppointment.performedByEmployeeId;
+    if (employeeId && await timeTrackingStorage.isMonthClosed(employeeId, existingAppointment.date)) {
+      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Termin-Änderungen sind nur noch durch einen Admin möglich.");
+    }
+  }
   
   if (existingAppointment.signatureData) {
     const protectedFields = ['signatureData', 'signatureHash', 'signedAt', 'signedByUserId'];
@@ -426,6 +434,13 @@ router.post("/:id/start", asyncHandler("Fehler beim Starten des Besuchs", async 
   if (isLocked) {
     return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
   }
+
+  if (!req.user!.isAdmin && appointment.date) {
+    const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
+    if (employeeId && await timeTrackingStorage.isMonthClosed(employeeId, appointment.date)) {
+      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Termin-Änderungen sind nur noch durch einen Admin möglich.");
+    }
+  }
   
   if (appointment.status !== "scheduled") {
     return sendForbidden(res, "INVALID_STATUS", "Nur geplante Termine können gestartet werden");
@@ -455,6 +470,13 @@ router.post("/:id/end", asyncHandler("Fehler beim Beenden des Besuchs", async (r
   const isLocked = await storage.isAppointmentLocked(id);
   if (isLocked) {
     return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
+  }
+
+  if (!req.user!.isAdmin && appointment.date) {
+    const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
+    if (employeeId && await timeTrackingStorage.isMonthClosed(employeeId, appointment.date)) {
+      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Termin-Änderungen sind nur noch durch einen Admin möglich.");
+    }
   }
   
   if (appointment.status !== "in-progress") {

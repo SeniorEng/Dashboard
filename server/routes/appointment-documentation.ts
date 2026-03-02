@@ -8,6 +8,7 @@ import { computeDataHash } from "../services/signature-integrity";
 import { asyncHandler, badRequest, notFound, forbidden, AppError, ErrorMessages } from "../lib/errors";
 import { requireAuth } from "../middleware/auth";
 import { checkCustomerAccess } from "./appointments";
+import { timeTrackingStorage } from "../storage/time-tracking";
 
 const router = Router();
 router.use(requireAuth);
@@ -28,6 +29,13 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
   const isLocked = await storage.isAppointmentLocked(id);
   if (isLocked) {
     throw forbidden("APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
+  }
+
+  if (!req.user!.isAdmin && appointment.date) {
+    const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
+    if (employeeId && await timeTrackingStorage.isMonthClosed(employeeId, appointment.date)) {
+      throw forbidden("MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Dokumentations-Änderungen sind nur noch durch einen Admin möglich.");
+    }
   }
 
   if (appointment.signatureData && req.body.signatureData) {
