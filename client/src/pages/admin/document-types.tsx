@@ -198,7 +198,7 @@ export function DocumentTypesContent() {
       </div>
       <div className="space-y-2">
         <Label>Zielgruppe *</Label>
-        <Select value={formData.targetType} onValueChange={(v) => setFormData(p => ({ ...p, targetType: v }))}>
+        <Select value={formData.targetType} onValueChange={(v) => setFormData(p => ({ ...p, targetType: v, ...(v === "employee" ? { context: "beide" } : {}) }))}>
           <SelectTrigger data-testid="select-doctype-target">
             <SelectValue />
           </SelectTrigger>
@@ -208,20 +208,22 @@ export function DocumentTypesContent() {
           </SelectContent>
         </Select>
       </div>
-      <div className="space-y-2">
-        <Label>Kontext</Label>
-        <Select value={formData.context} onValueChange={(v) => setFormData(p => ({ ...p, context: v }))}>
-          <SelectTrigger data-testid="select-doctype-context">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {CONTEXT_OPTIONS.map(opt => (
-              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-[11px] text-gray-500">Wann wird dieses Dokument benötigt?</p>
-      </div>
+      {formData.targetType === "customer" && (
+        <div className="space-y-2">
+          <Label>Kontext</Label>
+          <Select value={formData.context} onValueChange={(v) => setFormData(p => ({ ...p, context: v }))}>
+            <SelectTrigger data-testid="select-doctype-context">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CONTEXT_OPTIONS.map(opt => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[11px] text-gray-500">Wann wird dieses Dokument benötigt?</p>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label className="flex items-center gap-1">
