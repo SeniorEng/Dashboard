@@ -299,16 +299,11 @@ function BudgetsTabContent({
         <BudgetTypeSettings customerId={customerId} pflegegrad={pflegegrad} />
       </SectionCard>
 
-      <SectionCard
-        title="§45b Entlastungsbetrag"
-        icon={<Wallet className={iconSize.sm} />}
-      >
-        <BudgetLedgerSection
-          customerId={customerId}
-          customerName={customerDisplayName}
-          onRefresh={onRefresh}
-        />
-      </SectionCard>
+      <BudgetLedgerSection
+        customerId={customerId}
+        customerName={customerDisplayName}
+        onRefresh={onRefresh}
+      />
 
       <SectionCard
         title="Preisvereinbarung"
