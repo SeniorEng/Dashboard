@@ -501,19 +501,26 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         eq(budgetAllocations.budgetType, params.budgetType),
         eq(budgetAllocations.source, "initial_balance"),
         eq(budgetAllocations.year, params.year),
-        eq(budgetAllocations.month, params.month),
       ))
-      .limit(1);
+      .orderBy(desc(budgetAllocations.id));
 
     if (existing.length > 0) {
       await db.update(budgetAllocations)
         .set({
           amountCents: params.amountCents,
+          month: params.month,
           validFrom: params.validFrom,
           expiresAt: params.expiresAt,
           notes: params.notes ?? null,
         })
         .where(eq(budgetAllocations.id, existing[0].id));
+
+      if (existing.length > 1) {
+        for (let i = 1; i < existing.length; i++) {
+          await db.delete(budgetAllocations)
+            .where(eq(budgetAllocations.id, existing[i].id));
+        }
+      }
     } else {
       await db.insert(budgetAllocations)
         .values({

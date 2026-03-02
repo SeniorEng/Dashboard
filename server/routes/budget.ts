@@ -395,18 +395,19 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
 
   if (currentYearAmountCents > 0) {
     const expiresAt = budgetType === "ersatzpflege_39_42a" ? `${year}-12-31` : null;
-    const currentYearAllocation = await budgetLedgerStorage.createBudgetAllocation({
+    const startMonth = startDate.getMonth() + 1;
+    await budgetLedgerStorage.upsertInitialBalanceAllocation({
       customerId,
       budgetType,
       year,
-      month: null,
+      month: startMonth,
       amountCents: currentYearAmountCents,
-      source: "initial_balance",
       validFrom: budgetStartDate,
       expiresAt,
       notes: `Startguthaben ${year}`,
     }, userId);
-    allocations.push(currentYearAllocation);
+    const allAllocations = await budgetLedgerStorage.getInitialBalanceAllocations(customerId, budgetType);
+    if (allAllocations.length > 0) allocations.push(allAllocations[0]);
   }
 
   if (carryoverAmountCents > 0 && budgetType === "entlastungsbetrag_45b") {
@@ -601,6 +602,43 @@ router.post("/transactions/:transactionId/reverse", asyncHandler("Storno konnte 
   }
 
   res.status(201).json(reversal);
+}));
+
+router.post("/repair-duplicate-allocations", requireAdmin, asyncHandler("Bereinigung fehlgeschlagen", async (req: Request, res: Response) => {
+  const { sql: rawSql } = await import("drizzle-orm");
+  const { db } = await import("../lib/db");
+
+  const duplicates = await db.execute(rawSql`
+    WITH ranked AS (
+      SELECT id, customer_id, budget_type, year, month, amount_cents, valid_from,
+        ROW_NUMBER() OVER (
+          PARTITION BY customer_id, budget_type, year
+          ORDER BY
+            CASE WHEN month IS NOT NULL THEN 0 ELSE 1 END,
+            valid_from DESC,
+            id DESC
+        ) AS rn
+      FROM budget_allocations
+      WHERE source = 'initial_balance'
+    )
+    SELECT id, customer_id, budget_type, year, month, amount_cents
+    FROM ranked WHERE rn > 1
+  `);
+
+  const dryRun = req.query.dryRun !== "false";
+
+  if (!dryRun && duplicates.rows.length > 0) {
+    for (const dup of duplicates.rows as { id: number }[]) {
+      await db.execute(rawSql`DELETE FROM budget_allocations WHERE id = ${dup.id}`);
+    }
+  }
+
+  res.json({
+    dryRun,
+    duplicatesFound: duplicates.rows.length,
+    removed: dryRun ? 0 : duplicates.rows.length,
+    details: duplicates.rows,
+  });
 }));
 
 export default router;
