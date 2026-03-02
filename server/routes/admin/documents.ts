@@ -67,7 +67,8 @@ router.post("/employees/:employeeId/documents", asyncHandler("Dokument konnte ni
   }
 
   const userId = req.user!.id;
-  const doc = await documentStorage.uploadDocument(result.data, userId);
+  const skipDeactivation = req.body.skipDeactivation === true;
+  const doc = await documentStorage.uploadDocument(result.data, userId, { skipDeactivation });
   res.status(201).json(doc);
 }));
 
@@ -98,7 +99,8 @@ router.post("/customers/:customerId/documents", asyncHandler("Kundendokument kon
   }
 
   const userId = req.user!.id;
-  const doc = await documentStorage.uploadCustomerDocument(result.data, userId);
+  const skipDeactivation = req.body.skipDeactivation === true;
+  const doc = await documentStorage.uploadCustomerDocument(result.data, userId, { skipDeactivation });
   res.status(201).json(doc);
 }));
 

@@ -32,12 +32,12 @@ export interface IDocumentStorage {
   createDocumentType(data: InsertDocumentType): Promise<DocumentType>;
   updateDocumentType(id: number, data: UpdateDocumentType): Promise<DocumentType | null>;
 
-  uploadDocument(data: InsertEmployeeDocument, uploadedByUserId: number): Promise<EmployeeDocument>;
+  uploadDocument(data: InsertEmployeeDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean }): Promise<EmployeeDocument>;
   getCurrentDocuments(employeeId: number): Promise<(EmployeeDocument & { documentType: DocumentType })[]>;
   getDocumentHistory(employeeId: number, documentTypeId: number): Promise<EmployeeDocument[]>;
   getEmployeeDocumentsDueSoon(leadTimeDays?: number): Promise<(EmployeeDocument & { documentType: DocumentType; employee: { id: number; displayName: string } })[]>;
 
-  uploadCustomerDocument(data: InsertCustomerDocument, uploadedByUserId: number): Promise<CustomerDocument>;
+  uploadCustomerDocument(data: InsertCustomerDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean }): Promise<CustomerDocument>;
   getCurrentCustomerDocuments(customerId: number): Promise<(CustomerDocument & { documentType: DocumentType })[]>;
   getCustomerDocumentHistory(customerId: number, documentTypeId: number): Promise<CustomerDocument[]>;
   getCustomerDocumentsDueSoon(leadTimeDays?: number): Promise<(CustomerDocument & { documentType: DocumentType; customer: { id: number; name: string } })[]>;
@@ -122,20 +122,22 @@ export class DocumentStorage implements IDocumentStorage {
     return formatDateISO(dueDate);
   }
 
-  async uploadDocument(data: InsertEmployeeDocument, uploadedByUserId: number): Promise<EmployeeDocument> {
+  async uploadDocument(data: InsertEmployeeDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean }): Promise<EmployeeDocument> {
     const reviewDueDate = await this.calculateReviewDueDate(data.documentTypeId);
 
     return db.transaction(async (tx) => {
-      await tx
-        .update(employeeDocuments)
-        .set({ isCurrent: false })
-        .where(
-          and(
-            eq(employeeDocuments.employeeId, data.employeeId),
-            eq(employeeDocuments.documentTypeId, data.documentTypeId),
-            eq(employeeDocuments.isCurrent, true)
-          )
-        );
+      if (!options?.skipDeactivation) {
+        await tx
+          .update(employeeDocuments)
+          .set({ isCurrent: false })
+          .where(
+            and(
+              eq(employeeDocuments.employeeId, data.employeeId),
+              eq(employeeDocuments.documentTypeId, data.documentTypeId),
+              eq(employeeDocuments.isCurrent, true)
+            )
+          );
+      }
 
       const [result] = await tx.insert(employeeDocuments).values({
         employeeId: data.employeeId,
@@ -215,20 +217,22 @@ export class DocumentStorage implements IDocumentStorage {
     return docs.map(d => ({ ...d.doc, documentType: d.docType, employee: d.employee }));
   }
 
-  async uploadCustomerDocument(data: InsertCustomerDocument, uploadedByUserId: number): Promise<CustomerDocument> {
+  async uploadCustomerDocument(data: InsertCustomerDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean }): Promise<CustomerDocument> {
     const reviewDueDate = await this.calculateReviewDueDate(data.documentTypeId);
 
     return db.transaction(async (tx) => {
-      await tx
-        .update(customerDocuments)
-        .set({ isCurrent: false })
-        .where(
-          and(
-            eq(customerDocuments.customerId, data.customerId),
-            eq(customerDocuments.documentTypeId, data.documentTypeId),
-            eq(customerDocuments.isCurrent, true)
-          )
-        );
+      if (!options?.skipDeactivation) {
+        await tx
+          .update(customerDocuments)
+          .set({ isCurrent: false })
+          .where(
+            and(
+              eq(customerDocuments.customerId, data.customerId),
+              eq(customerDocuments.documentTypeId, data.documentTypeId),
+              eq(customerDocuments.isCurrent, true)
+            )
+          );
+      }
 
       const [result] = await tx.insert(customerDocuments).values({
         customerId: data.customerId,

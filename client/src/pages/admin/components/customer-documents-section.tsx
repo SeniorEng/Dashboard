@@ -158,7 +158,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
   });
 
   const saveMutation = useMutation({
-    mutationFn: async (data: { documentTypeId: number; fileName: string; objectPath: string; notes?: string | null }) => {
+    mutationFn: async (data: { documentTypeId: number; fileName: string; objectPath: string; notes?: string | null; skipDeactivation?: boolean }) => {
       const result = await api.post(`/admin/customers/${customerId}/documents`, data);
       return unwrapResult(result);
     },
@@ -170,7 +170,8 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
   const handleUpload = useCallback(async () => {
     if (selectedFiles.length === 0 || !selectedDocTypeId) return;
 
-    for (const file of selectedFiles) {
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const file = selectedFiles[i];
       const uploadResult = await uploadFile(file);
       if (!uploadResult) return;
 
@@ -179,6 +180,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
         fileName: file.name,
         objectPath: uploadResult.objectPath,
         notes: notes || null,
+        skipDeactivation: i > 0,
       });
     }
 
