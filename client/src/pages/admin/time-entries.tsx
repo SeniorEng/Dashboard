@@ -432,7 +432,7 @@ export default function AdminTimeEntries() {
               ...Object.keys(entriesByEmployeeId).map(Number),
               ...Object.keys(appointmentsByEmployeeId).map(Number),
             ]);
-            const sortedIds = [...allIds].sort((a, b) => {
+            const sortedIds = Array.from(allIds).sort((a, b) => {
               const nameA = employees?.find(e => e.id === a)?.displayName || "";
               const nameB = employees?.find(e => e.id === b)?.displayName || "";
               return nameA.localeCompare(nameB, "de");

@@ -24,9 +24,6 @@ export const INVOICE_TYPE_LABELS: Record<InvoiceType, string> = {
   nachberechnung: "Nachberechnung",
 };
 
-export const BILLING_TYPES = ["pflegekasse_gesetzlich", "pflegekasse_privat", "selbstzahler"] as const;
-export type BillingType = typeof BILLING_TYPES[number];
-
 export const invoices = pgTable("invoices", {
   id: serial("id").primaryKey(),
   invoiceNumber: text("invoice_number").notNull().unique(),

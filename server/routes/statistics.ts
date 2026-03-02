@@ -636,9 +636,8 @@ router.get("/planning", asyncHandler("Planungsdaten konnten nicht geladen werden
   });
 }));
 
-router.post("/repair-appointment-services", asyncHandler(async (req, res) => {
-  const user = (req as any).user;
-  if (user?.role !== "admin") return forbidden(res, "Nur Admins dürfen diese Aktion ausführen");
+router.post("/repair-appointment-services", asyncHandler("Reparatur der Termin-Services fehlgeschlagen", async (req, res) => {
+  if (!req.user!.isAdmin) throw forbidden("FORBIDDEN", "Nur Admins dürfen diese Aktion ausführen");
 
   const dryRun = req.query.dryRun === "true";
 

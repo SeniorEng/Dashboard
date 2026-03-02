@@ -313,7 +313,7 @@ export function UserForm({
         <div className="space-y-4">
           <h3 className="text-sm font-semibold text-gray-700 border-b pb-2">Adresse</h3>
           
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="col-span-3 space-y-2">
               <Label htmlFor="strasse">Straße</Label>
               <Input
@@ -334,7 +334,7 @@ export function UserForm({
             </div>
           </div>
           
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label htmlFor="plz">PLZ</Label>
               <Input

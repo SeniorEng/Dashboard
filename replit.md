@@ -75,6 +75,16 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Build Verification**: `script/check-build.mjs` — validates that `dist/` matches source code using **content-based hashing** (NOT file modification times). Both build.ts and check-build.mjs must use identical hashing logic. Critical: mtime-based hashing breaks in deployment environments where file timestamps differ.
 - **Deployment Config**: `.replit` `[deployment]` section — `build` runs `npm run build`, `run` executes check-build then starts `dist/index.cjs`.
 
+### Audit Status
+- **Last Full Audit**: 8-agent team audit completed with 0 FAIL, all WARN items resolved
+- **TypeScript**: 0 errors (fixed: audit action types, DayTimeEntry.kilometers, AppointmentWithCustomerName fields, isLocked type, documentDate mutation type, Set iteration, asyncHandler signature)
+- **Build**: Clean (535.8 KB gzipped, 105 chunks, code-split)
+- **npm audit**: 0 critical/high/moderate vulns (4 moderate esbuild in dev-only drizzle-kit — not fixable without breaking change)
+- **Responsive grids**: All grid-cols-3/4 have sm: responsive fallbacks
+- **Error handling**: All useMutation hooks have onError with German toast
+- **N+1 fixed**: upsertBudgetTypeSettings uses batch insert in transaction
+- **Dead code removed**: Duplicate BillingType/BILLING_TYPES from shared/schema/billing.ts
+
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)
 - **Frontend Libraries**: React, TypeScript, Vite, Wouter, `shadcn/ui`, Radix UI, Tailwind CSS v4, TanStack Query, Zod.

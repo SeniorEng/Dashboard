@@ -255,7 +255,7 @@ export default function NewAppointment() {
                 <Label className="flex items-center gap-2">
                   <Home className={iconSize.sm} /> Adresse
                 </Label>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="col-span-2 space-y-2">
                     <Label htmlFor="eb-strasse">Straße *</Label>
                     <Input
@@ -279,7 +279,7 @@ export default function NewAppointment() {
                     {form.errors.ebNr && <p className="text-destructive text-sm">{form.errors.ebNr}</p>}
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="eb-plz">PLZ *</Label>
                     <Input

@@ -419,6 +419,8 @@ export interface AppointmentWithCustomerName {
   signatureData: string | null;
   servicesDone: string[] | null;
   createdAt: string;
+  assignedEmployeeId: number | null;
+  performedByEmployeeId: number | null;
   customerName: string;
   services?: AppointmentServiceBreakdown[];
 }

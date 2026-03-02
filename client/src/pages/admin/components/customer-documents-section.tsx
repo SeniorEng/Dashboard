@@ -392,7 +392,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                     Alle entfernen
                   </button>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {filePreviews.map((item, idx) => (
                     <div key={idx} className="relative group rounded-lg border border-gray-200 overflow-hidden bg-gray-50">
                       {item.preview ? (

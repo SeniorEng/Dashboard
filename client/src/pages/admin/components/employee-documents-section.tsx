@@ -142,7 +142,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
   });
 
   const saveMutation = useMutation({
-    mutationFn: async (data: { documentTypeId: number; fileName: string; objectPath: string; notes?: string | null; skipDeactivation?: boolean; batchId?: string; batchLabel?: string }) => {
+    mutationFn: async (data: { documentTypeId: number; fileName: string; objectPath: string; notes?: string | null; skipDeactivation?: boolean; batchId?: string; batchLabel?: string; documentDate?: string }) => {
       const result = await api.post(`/admin/employees/${employeeId}/documents`, data);
       return unwrapResult(result);
     },

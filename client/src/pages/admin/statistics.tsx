@@ -647,7 +647,7 @@ export default function AdminStatistics() {
                   <CardTitle className="text-base">§45b Entlastungsbudget {selectedYear}</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-3 gap-4 mb-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-3">
                     <div>
                       <div className="text-xs text-muted-foreground">Zugewiesen</div>
                       <div className="text-lg font-bold text-blue-600">{cents(budget.totalAllocatedCents || 0)}</div>

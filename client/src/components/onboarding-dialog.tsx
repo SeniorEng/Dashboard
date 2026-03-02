@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { api, unwrapResult } from "@/lib/api/client";
+import { useToast } from "@/hooks/use-toast";
 import {
   Calendar,
   Users,
@@ -85,6 +86,7 @@ const STEPS: OnboardingStep[] = [
 export function OnboardingDialog({ open, onComplete }: { open: boolean; onComplete: () => void }) {
   const [step, setStep] = useState(0);
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const completeMutation = useMutation({
     mutationFn: async () => {
@@ -95,7 +97,8 @@ export function OnboardingDialog({ open, onComplete }: { open: boolean; onComple
       queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
       onComplete();
     },
-    onError: () => {
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
       onComplete();
     },
   });

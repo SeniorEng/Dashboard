@@ -251,7 +251,7 @@ export function InsuranceStep({
             <div className="border-t border-teal-200 pt-4">
               <p className="text-xs text-gray-500 mb-3 font-medium uppercase tracking-wide">Adresse</p>
               <div className="space-y-4">
-                <div className="grid grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   <div className="col-span-3 space-y-2">
                     <Label htmlFor="newProviderStrasse">Straße</Label>
                     <Input
@@ -273,7 +273,7 @@ export function InsuranceStep({
                     />
                   </div>
                 </div>
-                <div className="grid grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="newProviderPlz">PLZ</Label>
                     <Input

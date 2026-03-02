@@ -17,7 +17,7 @@ export function AddressFields({ strasse, nr, plz, stadt, onChange, required = fa
   
   return (
     <>
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="col-span-3 space-y-2">
           <Label htmlFor={`${prefix}strasse`}>Straße{suffix}</Label>
           <Input
@@ -42,7 +42,7 @@ export function AddressFields({ strasse, nr, plz, stadt, onChange, required = fa
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="space-y-2">
           <Label htmlFor={`${prefix}plz`}>PLZ{suffix}</Label>
           <Input

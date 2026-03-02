@@ -472,31 +472,27 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     customerId: number,
     settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null }>
   ): Promise<CustomerBudgetTypeSetting[]> {
-    const results: CustomerBudgetTypeSetting[] = [];
-    for (const s of settings) {
-      const result = await db.insert(customerBudgetTypeSettings)
-        .values({
+    if (settings.length === 0) {
+      await db.delete(customerBudgetTypeSettings)
+        .where(eq(customerBudgetTypeSettings.customerId, customerId));
+      return [];
+    }
+
+    return await db.transaction(async (tx) => {
+      await tx.delete(customerBudgetTypeSettings)
+        .where(eq(customerBudgetTypeSettings.customerId, customerId));
+
+      return await tx.insert(customerBudgetTypeSettings)
+        .values(settings.map(s => ({
           customerId,
           budgetType: s.budgetType,
           enabled: s.enabled,
           priority: s.priority,
           monthlyLimitCents: s.monthlyLimitCents ?? null,
           yearlyLimitCents: s.yearlyLimitCents ?? null,
-        })
-        .onConflictDoUpdate({
-          target: [customerBudgetTypeSettings.customerId, customerBudgetTypeSettings.budgetType],
-          set: {
-            enabled: sql`EXCLUDED.enabled`,
-            priority: sql`EXCLUDED.priority`,
-            monthlyLimitCents: sql`EXCLUDED.monthly_limit_cents`,
-            yearlyLimitCents: sql`EXCLUDED.yearly_limit_cents`,
-            updatedAt: sql`now()`,
-          },
-        })
+        })))
         .returning();
-      results.push(result[0]);
-    }
-    return results;
+    });
   }
 
   async upsertInitialBalanceAllocation(

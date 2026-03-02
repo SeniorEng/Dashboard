@@ -38,6 +38,9 @@ export const AUDIT_ACTIONS = [
   "admin_time_entry_updated",
   "admin_time_entry_deleted",
   "admin_month_closed",
+  "appointment_reopened",
+  "initial_balance_set",
+  "initial_balance_deleted",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];

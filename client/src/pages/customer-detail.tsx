@@ -569,7 +569,7 @@ export default function CustomerDetailPage() {
                 <div className="flex items-center justify-between">
                   <h2 className="text-sm font-semibold">Kontaktdaten bearbeiten</h2>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div className="col-span-2">
                     <Label>Straße</Label>
                     <Input value={contactForm.strasse} onChange={(e) => setContactForm(f => ({ ...f, strasse: e.target.value }))} data-testid="input-strasse" />
@@ -579,7 +579,7 @@ export default function CustomerDetailPage() {
                     <Input value={contactForm.nr} onChange={(e) => setContactForm(f => ({ ...f, nr: e.target.value }))} data-testid="input-nr" />
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div>
                     <Label>PLZ</Label>
                     <Input value={contactForm.plz} onChange={(e) => setContactForm(f => ({ ...f, plz: e.target.value }))} maxLength={5} data-testid="input-plz" />
