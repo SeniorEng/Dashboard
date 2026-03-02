@@ -77,7 +77,7 @@ buildAll().then(async () => {
 
 async function getSourceHash(): Promise<string> {
   const { createHash } = await import("crypto");
-  const { readdir, stat } = await import("fs/promises");
+  const { readdir, readFile: rf } = await import("fs/promises");
   const { join } = await import("path");
 
   const hash = createHash("sha256");
@@ -91,8 +91,9 @@ async function getSourceHash(): Promise<string> {
         if (entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules") {
           await walkDir(fullPath);
         } else if (entry.isFile() && /\.(ts|tsx|css)$/.test(entry.name)) {
-          const s = await stat(fullPath);
-          hash.update(`${fullPath}:${s.mtimeMs}`);
+          const content = await rf(fullPath);
+          hash.update(`${fullPath}:`);
+          hash.update(content);
         }
       }
     } catch {}

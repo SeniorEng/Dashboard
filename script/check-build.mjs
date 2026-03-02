@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from "fs/promises";
+import { readFile, readdir } from "fs/promises";
 import { createHash } from "crypto";
 import { join } from "path";
 
@@ -14,8 +14,9 @@ async function getSourceHash() {
         if (entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules") {
           await walkDir(fullPath);
         } else if (entry.isFile() && /\.(ts|tsx|css)$/.test(entry.name)) {
-          const s = await stat(fullPath);
-          hash.update(`${fullPath}:${s.mtimeMs}`);
+          const content = await readFile(fullPath);
+          hash.update(`${fullPath}:`);
+          hash.update(content);
         }
       }
     } catch {}

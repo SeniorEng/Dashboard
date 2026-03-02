@@ -69,6 +69,11 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Planning Overview (Planungsübersicht)**: "Planung" tab in Statistics page (`/admin/statistics`). Forward-looking view of all non-cancelled appointments (scheduled + completed + documented) per employee with expected revenue, costs, and Deckungsbeitrag. Also shows active customers without any appointments in the selected period. Endpoint: `GET /api/statistics/planning?year=YYYY&month=M`. Uses `appointment_services` JOIN `services` for revenue/cost calculation (same as profitability). Uses `assignedEmployeeId` instead of `performedByEmployeeId` for unfinished appointments.
 - **Statistics Revenue Calculation**: Both profitability (`GET /api/statistics/profitability`) and planning endpoints use `appointment_services` JOIN `services` (with `unit_type='hours'`) for service revenue/cost calculation. Per-service-line: `COALESCE(actual_duration_minutes, planned_duration_minutes)` × hourly price/cost. Customer-specific pricing via `customer_service_prices`, fallback to `services.default_price_cents`. KM revenue/cost calculated at appointment level using `travel_km`/`customer_km` fields. Legacy `service_type` field is no longer used for revenue calculation.
 
+### Build & Deployment
+- **Build Script**: `script/build.ts` — esbuild for server (CJS bundle), Vite for client. Uses an allowlist to bundle specific packages (drizzle-orm, neon, express, etc.) for faster cold starts; unlisted dependencies are external.
+- **Build Verification**: `script/check-build.mjs` — validates that `dist/` matches source code using **content-based hashing** (NOT file modification times). Both build.ts and check-build.mjs must use identical hashing logic. Critical: mtime-based hashing breaks in deployment environments where file timestamps differ.
+- **Deployment Config**: `.replit` `[deployment]` section — `build` runs `npm run build`, `run` executes check-build then starts `dist/index.cjs`.
+
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)
 - **Frontend Libraries**: React, TypeScript, Vite, Wouter, `shadcn/ui`, Radix UI, Tailwind CSS v4, TanStack Query, Zod.

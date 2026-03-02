@@ -389,13 +389,6 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
     costKmCents: number;
   }
 
-  console.log(`[PROFITABILITY-DIAG] Query returned ${result.rows.length} employee rows`);
-  if (result.rows.length > 0) {
-    const sample = result.rows[0] as Record<string, unknown>;
-    console.log(`[PROFITABILITY-DIAG] Sample row keys: ${Object.keys(sample).join(', ')}`);
-    console.log(`[PROFITABILITY-DIAG] Sample row[0]: revenueCents=${sample.revenueCents} (type=${typeof sample.revenueCents}), revenueServiceCents=${sample.revenueServiceCents}, revenueKmCents=${sample.revenueKmCents}, costCents=${sample.costCents}, marginCents=${sample.marginCents}`);
-  }
-
   const totals = result.rows.reduce<ProfitabilityTotals>((acc, r: Record<string, unknown>) => ({
     appointments: acc.appointments + Number(r.appointments),
     customers: acc.customers + Number(r.customers),
@@ -424,8 +417,6 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
       ${monthFilter}
   `);
   totals.customers = Number(uniqueCustomers.rows[0]?.count || 0);
-
-  console.log(`[PROFITABILITY-DIAG] Totals: revenueCents=${totals.revenueCents}, revenueServiceCents=${totals.revenueServiceCents}, revenueKmCents=${totals.revenueKmCents}, costCents=${totals.costCents}, marginCents=${totals.marginCents}`);
 
   const servicePrices = await db.execute(sql`
     SELECT code, default_price_cents AS "priceCents", employee_rate_cents AS "rateCents"
