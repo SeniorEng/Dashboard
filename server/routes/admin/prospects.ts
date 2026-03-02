@@ -39,13 +39,31 @@ router.get("/prospects/:id", asyncHandler("Interessent konnte nicht geladen werd
 }));
 
 router.post("/prospects", asyncHandler("Interessent konnte nicht erstellt werden", async (req: Request, res: Response) => {
-  const parsed = insertProspectSchema.safeParse(req.body);
+  const initialNote = typeof req.body._initialNote === "string" ? req.body._initialNote.trim() : "";
+  const { _initialNote, ...bodyWithoutNote } = req.body;
+
+  const parsed = insertProspectSchema.safeParse(bodyWithoutNote);
   if (!parsed.success) {
     res.status(400).json({ error: "Validierungsfehler", details: parsed.error.flatten() });
     return;
   }
 
+  if (parsed.data.wiedervorlageDate && parsed.data.status !== "wiedervorlage") {
+    parsed.data.status = "wiedervorlage";
+  }
+
   const prospect = await prospectStorage.create(parsed.data);
+
+  if (initialNote) {
+    const userId = (req as any).user?.id;
+    await prospectStorage.addNote({
+      prospectId: prospect.id,
+      userId,
+      noteText: initialNote,
+      noteType: "notiz",
+    });
+  }
+
   res.status(201).json(prospect);
 }));
 

@@ -1,0 +1,34 @@
+Objective
+Interessenten-Anlage verbessern und Notizen bei Erstberatungs-Konvertierung übernehmen. Drei zusammenhängende Verbesserungen:
+
+Anlage-Formular erweitern: Adresse auflösen (Straße, Hausnr, PLZ, Stadt statt nur "Stadt"), Notiz-Feld und Status "Wiedervorlage" mit Datum direkt bei Anlage ermöglichen
+Prospect-Notizen bei Umwandlung in Erstberatung in das Notiz-Feld des Termins überführen
+Bestehende Adressfelder in der Prospect-Detailansicht ebenfalls anpassen
+Tasks
+T001: Anlage-Formular erweitern — Adressfelder auflösen
+Blocked By: []
+Details:
+Das einzelne "Stadt"-Feld im CreateProspectSheet ersetzen durch 4 Felder: Straße, Hausnummer, PLZ, Stadt
+Die DB-Felder existieren bereits (strasse, nr, plz, stadt in prospects-Tabelle)
+Frontend: client/src/pages/admin/prospects.tsx — CreateProspectSheet Komponente anpassen
+Validierung: PLZ optional aber wenn angegeben 5 Ziffern (Schema bereits vorhanden)
+Layout: Straße + Hausnummer nebeneinander, PLZ + Stadt nebeneinander (wie beim Kunden-Anlageformular)
+Files: client/src/pages/admin/prospects.tsx
+Acceptance: Neue Interessenten können mit vollständiger Adresse angelegt werden
+T002: Anlage-Formular erweitern — Notiz und Wiedervorlage
+Blocked By: []
+Details:
+Im CreateProspectSheet zwei neue Felder hinzufügen:
+Notiz (Textarea): Freitext für erste Gesprächsnotizen, wird nach Anlage als prospect_note mit Typ "notiz" gespeichert
+Wiedervorlage-Datum (Date Input): Optional, wenn gesetzt wird Status automatisch auf "wiedervorlage" gesetzt
+Backend: POST /admin/prospects Route anpassen — wenn notes mitkommt, automatisch eine prospect_note anlegen; wenn wiedervorlageDate gesetzt, Status auf "wiedervorlage" setzen
+Files: client/src/pages/admin/prospects.tsx, server/routes/admin/prospects.ts
+Acceptance: Interessent kann direkt mit Notiz und Wiedervorlage-Datum angelegt werden; Status wird automatisch auf "wiedervorlage" gesetzt wenn Datum angegeben
+T003: Notizen bei Erstberatungs-Umwandlung übernehmen
+Blocked By: []
+Details:
+Bei "In Erstberatung umwandeln" (handleConvertToErstberatung in prospects.tsx) alle prospect_notes sammeln und als gebündelten Notiz-Text an die Erstberatung übergeben
+Aktuell werden nur Stammdaten per URL-Parameter übergeben — Notizen als formatierter Text (Datum + Typ + Text) ins notes-Feld des Erstberatungs-Termins übernehmen
+Im useNewAppointmentForm den notes-URL-Parameter auslesen und ins Notiz-Feld des Termins vorausfüllen
+Files: client/src/pages/admin/prospects.tsx, client/src/features/appointments/hooks/use-new-appointment-form.ts
+Acceptance: Alle Gesprächsnotizen des Interessenten erscheinen im Notiz-Feld der Erstberatung

@@ -23,7 +23,7 @@ export const PROSPECT_STATUS_LABELS: Record<ProspectStatus, string> = {
   wiedervorlage: "Wiedervorlage",
   nicht_interessiert: "Nicht interessiert",
   absage: "Absage",
-  erstberatung: "In Erstberatung",
+  erstberatung: "Erstberatung vereinbart",
   gewonnen: "Erfolgreich gewonnen",
 };
 

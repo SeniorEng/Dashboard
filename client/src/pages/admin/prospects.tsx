@@ -107,8 +107,13 @@ function CreateProspectSheet({ open, onClose }: { open: boolean; onClose: () => 
   const [nachname, setNachname] = useState("");
   const [telefon, setTelefon] = useState("");
   const [email, setEmail] = useState("");
+  const [strasse, setStrasse] = useState("");
+  const [nr, setNr] = useState("");
+  const [plz, setPlz] = useState("");
   const [stadt, setStadt] = useState("");
   const [quelle, setQuelle] = useState("");
+  const [notiz, setNotiz] = useState("");
+  const [wiedervorlageDate, setWiedervorlageDate] = useState("");
   const createMutation = useCreateProspect();
 
   const handleSubmit = () => {
@@ -117,12 +122,19 @@ function CreateProspectSheet({ open, onClose }: { open: boolean; onClose: () => 
       nachname,
       telefon: telefon || null,
       email: email || null,
+      strasse: strasse || null,
+      nr: nr || null,
+      plz: plz || null,
       stadt: stadt || null,
       quelle: quelle || null,
-      status: "neu",
-    }, {
+      status: wiedervorlageDate ? "wiedervorlage" : "neu",
+      wiedervorlageDate: wiedervorlageDate || null,
+      _initialNote: notiz || undefined,
+    } as any, {
       onSuccess: () => {
-        setVorname(""); setNachname(""); setTelefon(""); setEmail(""); setStadt(""); setQuelle("");
+        setVorname(""); setNachname(""); setTelefon(""); setEmail("");
+        setStrasse(""); setNr(""); setPlz(""); setStadt("");
+        setQuelle(""); setNotiz(""); setWiedervorlageDate("");
         onClose();
       },
     });
@@ -153,13 +165,38 @@ function CreateProspectSheet({ open, onClose }: { open: boolean; onClose: () => 
             <Label>E-Mail</Label>
             <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" data-testid="input-prospect-email" />
           </div>
-          <div>
-            <Label>Stadt</Label>
-            <Input value={stadt} onChange={(e) => setStadt(e.target.value)} data-testid="input-prospect-stadt" />
+          <div className="grid grid-cols-[1fr_80px] gap-3">
+            <div>
+              <Label>Straße</Label>
+              <Input value={strasse} onChange={(e) => setStrasse(e.target.value)} data-testid="input-prospect-strasse" />
+            </div>
+            <div>
+              <Label>Nr.</Label>
+              <Input value={nr} onChange={(e) => setNr(e.target.value)} data-testid="input-prospect-nr" />
+            </div>
+          </div>
+          <div className="grid grid-cols-[100px_1fr] gap-3">
+            <div>
+              <Label>PLZ</Label>
+              <Input value={plz} onChange={(e) => setPlz(e.target.value)} maxLength={5} data-testid="input-prospect-plz" />
+            </div>
+            <div>
+              <Label>Stadt</Label>
+              <Input value={stadt} onChange={(e) => setStadt(e.target.value)} data-testid="input-prospect-stadt" />
+            </div>
           </div>
           <div>
             <Label>Quelle</Label>
             <Input value={quelle} onChange={(e) => setQuelle(e.target.value)} placeholder="z.B. pflege24.de" data-testid="input-prospect-quelle" />
+          </div>
+          <div>
+            <Label>Wiedervorlage am</Label>
+            <Input type="date" value={wiedervorlageDate} onChange={(e) => setWiedervorlageDate(e.target.value)} data-testid="input-prospect-wiedervorlage" />
+            <p className="text-[11px] text-gray-500 mt-1">Wenn gesetzt, wird der Status automatisch auf „Wiedervorlage" gesetzt</p>
+          </div>
+          <div>
+            <Label>Notiz</Label>
+            <Textarea value={notiz} onChange={(e) => setNotiz(e.target.value)} placeholder="z.B. Wünscht Hauswirtschaft 2x wöchentlich, Rückruf vereinbart" rows={3} data-testid="input-prospect-notiz" />
           </div>
           <Button onClick={handleSubmit} disabled={!vorname || !nachname || createMutation.isPending} className="w-full" data-testid="button-create-prospect">
             {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
@@ -248,6 +285,19 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
 
   const handleConvertToErstberatung = () => {
     if (!prospect) return;
+
+    let prospectNotes = "";
+    if (prospect.notes && prospect.notes.length > 0) {
+      const relevantNotes = prospect.notes.filter((n: any) => n.noteType !== "statuswechsel");
+      if (relevantNotes.length > 0) {
+        prospectNotes = relevantNotes.map((n: any) => {
+          const date = formatDateForDisplay(n.createdAt.split("T")[0]);
+          const typeLabel = PROSPECT_NOTE_TYPE_LABELS[n.noteType as ProspectNoteType] || n.noteType;
+          return `[${date} – ${typeLabel}] ${n.noteText}`;
+        }).join("\n");
+      }
+    }
+
     const params = new URLSearchParams({
       fromProspect: String(prospect.id),
       vorname: prospect.vorname,
@@ -259,6 +309,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
       ...(prospect.plz && { plz: prospect.plz }),
       ...(prospect.stadt && { stadt: prospect.stadt }),
       ...(prospect.pflegegrad && { pflegegrad: String(prospect.pflegegrad) }),
+      ...(prospectNotes && { notes: prospectNotes }),
     });
     navigate(`/new-appointment?type=erstberatung&${params}`);
   };
@@ -370,7 +421,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                         data-testid="button-convert-erstberatung"
                       >
                         <ArrowRightCircle className="h-4 w-4 mr-2" />
-                        In Erstberatung umwandeln
+                        Erstberatung vereinbaren
                       </Button>
                     </CardContent>
                   </Card>

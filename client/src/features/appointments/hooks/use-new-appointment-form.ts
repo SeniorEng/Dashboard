@@ -54,7 +54,7 @@ export function useNewAppointmentForm() {
   const [ebDate, setEbDate] = useState<string>(initialDate);
   const [ebStartTime, setEbStartTime] = useState<string>("09:00");
   const [ebErstberatungDauer, setEbErstberatungDauer] = useState<number>(60);
-  const [ebNotes, setEbNotes] = useState<string>("");
+  const [ebNotes, setEbNotes] = useState<string>(urlParams.get("notes") || "");
   const [ebAssignedEmployeeId, setEbAssignedEmployeeId] = useState<string>("");
 
   const defaultsInitialized = useRef(false);
