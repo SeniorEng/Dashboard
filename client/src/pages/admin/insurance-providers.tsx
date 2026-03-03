@@ -52,7 +52,11 @@ const EMPTY_FORM: InsuranceProviderFormData = {
   plz: "",
   stadt: "",
   telefon: "",
+  fax: "",
   email: "",
+  kimAdresse: "",
+  ansprechpartner: "",
+  datenannahmeIk: "",
   emailInvoiceEnabled: false,
   zahlungsbedingungen: "30_tage",
   zahlungsart: "ueberweisung",
@@ -88,7 +92,11 @@ export default function AdminInsuranceProviders() {
       plz: provider.plz || "",
       stadt: provider.stadt || "",
       telefon: provider.telefon || "",
+      fax: provider.fax || "",
       email: provider.email || "",
+      kimAdresse: provider.kimAdresse || "",
+      ansprechpartner: provider.ansprechpartner || "",
+      datenannahmeIk: provider.datenannahmeIk || "",
       emailInvoiceEnabled: provider.emailInvoiceEnabled,
       zahlungsbedingungen: provider.zahlungsbedingungen || "30_tage",
       zahlungsart: provider.zahlungsart || "ueberweisung",
@@ -125,7 +133,11 @@ export default function AdminInsuranceProviders() {
       plz: plzValue || null,
       stadt: form.stadt?.trim() || null,
       telefon: form.telefon?.trim() || null,
+      fax: form.fax?.trim() || null,
       email: form.email?.trim() || null,
+      kimAdresse: form.kimAdresse?.trim() || null,
+      ansprechpartner: form.ansprechpartner?.trim() || null,
+      datenannahmeIk: form.datenannahmeIk?.trim() || null,
     };
   };
 
@@ -382,6 +394,16 @@ export default function AdminInsuranceProviders() {
                   />
                 </div>
                 <div className="space-y-2">
+                  <Label htmlFor="fax">Fax</Label>
+                  <Input
+                    id="fax"
+                    value={form.fax || ""}
+                    onChange={(e) => handleChange("fax", e.target.value)}
+                    placeholder="+49 89 1234568"
+                    data-testid="input-provider-fax"
+                  />
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="email">E-Mail</Label>
                   <Input
                     id="email"
@@ -391,6 +413,44 @@ export default function AdminInsuranceProviders() {
                     placeholder="kontakt@pflegekasse.de"
                     data-testid="input-provider-email"
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ansprechpartner">Ansprechpartner</Label>
+                  <Input
+                    id="ansprechpartner"
+                    value={form.ansprechpartner || ""}
+                    onChange={(e) => handleChange("ansprechpartner", e.target.value)}
+                    placeholder="Frau Müller, Datenannahme"
+                    data-testid="input-provider-ansprechpartner"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t pt-4">
+              <p className="text-xs text-gray-500 mb-3 font-medium uppercase tracking-wide">KIM / Digitale Kommunikation</p>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="kimAdresse">KIM-Adresse</Label>
+                  <Input
+                    id="kimAdresse"
+                    value={form.kimAdresse || ""}
+                    onChange={(e) => handleChange("kimAdresse", e.target.value)}
+                    placeholder="postfach@kasse.kim.telematik"
+                    data-testid="input-provider-kim-adresse"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="datenannahmeIk">Datenannahme-IK</Label>
+                  <Input
+                    id="datenannahmeIk"
+                    value={form.datenannahmeIk || ""}
+                    onChange={(e) => handleChange("datenannahmeIk", e.target.value.replace(/\D/g, ""))}
+                    placeholder="109910000"
+                    maxLength={9}
+                    data-testid="input-provider-datenannahme-ik"
+                  />
+                  <p className="text-xs text-gray-500">IK der zuständigen Datenannahmestelle</p>
                 </div>
               </div>
             </div>

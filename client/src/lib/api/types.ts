@@ -322,7 +322,11 @@ export interface InsuranceProviderItem {
   plz: string | null;
   stadt: string | null;
   telefon: string | null;
+  fax: string | null;
   email: string | null;
+  kimAdresse: string | null;
+  ansprechpartner: string | null;
+  datenannahmeIk: string | null;
   emailInvoiceEnabled: boolean;
   zahlungsbedingungen: string | null;
   zahlungsart: string | null;
