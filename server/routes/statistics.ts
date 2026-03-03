@@ -1154,7 +1154,7 @@ router.get("/budget-potential", asyncHandler("Budget-Potenzial konnte nicht gela
 
   const result = await db.execute(sql`
     WITH active_customers AS (
-      SELECT id, first_name, last_name, pflegegrad
+      SELECT id, name, pflegegrad
       FROM customers
       WHERE status = 'aktiv' AND deleted_at IS NULL
     ),
@@ -1206,7 +1206,7 @@ router.get("/budget-potential", asyncHandler("Budget-Potenzial konnte nicht gela
     )
     SELECT
       ac.id,
-      ac.first_name || ' ' || ac.last_name AS name,
+      ac.name,
       ac.pflegegrad,
       COALESCE(aa.total_allocated, 0)::bigint AS "allocatedCents",
       COALESCE(u.total_used, 0)::bigint AS "usedCents",
