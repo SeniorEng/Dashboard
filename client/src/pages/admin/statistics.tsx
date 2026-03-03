@@ -156,6 +156,23 @@ export default function AdminStatistics() {
     return Math.max(...trends.map((t: any) => Number(t.completedCount || 0)), 1);
   }, [trends]);
 
+  const maxTrendMinutes = useMemo(() => {
+    return Math.max(...trends.map((t: any) => {
+      const hw = Number(t.hwMinutes || 0);
+      const ab = Number(t.abMinutes || 0);
+      const eb = Number(t.ebMinutes || 0);
+      const pause = Number(t.pauseMinutes || 0);
+      const urlaub = Number(t.urlaubMinutes || 0);
+      const krank = Number(t.krankMinutes || 0);
+      const buero = Number(t.bueroarbeitMinutes || 0);
+      const bespr = Number(t.besprechungMinutes || 0);
+      const vertr = Number(t.vertriebMinutes || 0);
+      const sonst = Number(t.sonstigesMinutes || 0);
+      const weiter = Number(t.weiterbildungMinutes || 0);
+      return hw + ab + eb + pause + urlaub + krank + buero + bespr + vertr + sonst + weiter;
+    }), 1);
+  }, [trends]);
+
   const maxEmpAppts = useMemo(() => {
     return Math.max(...employees.map((e: any) => Number(e.appointments || 0)), 1);
   }, [employees]);
@@ -331,40 +348,71 @@ export default function AdminStatistics() {
               {/* Quick Monthly Trend */}
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Monatliche Termine {selectedYear}</CardTitle>
-                  <div className="flex items-center gap-4 mt-1 flex-wrap">
-                    <div className="flex items-center gap-1.5">
+                  <CardTitle className="text-base">Monatliche Stunden {selectedYear}</CardTitle>
+                  <div className="flex items-center gap-3 mt-1 flex-wrap">
+                    <div className="flex items-center gap-1">
                       <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-                      <span className="text-xs text-muted-foreground">Hauswirtschaft</span>
+                      <span className="text-xs text-muted-foreground">HW</span>
                     </div>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1">
                       <div className="w-2.5 h-2.5 rounded-full bg-teal-500" />
-                      <span className="text-xs text-muted-foreground">Alltagsbegleitung</span>
+                      <span className="text-xs text-muted-foreground">AB</span>
                     </div>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1">
                       <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                      <span className="text-xs text-muted-foreground">Erstberatungen</span>
+                      <span className="text-xs text-muted-foreground">EB</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="w-2.5 h-2.5 rounded-full bg-slate-400" />
+                      <span className="text-xs text-muted-foreground">Pause</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
+                      <span className="text-xs text-muted-foreground">Büro</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="w-2.5 h-2.5 rounded-full bg-purple-500" />
+                      <span className="text-xs text-muted-foreground">Sonst.</span>
                     </div>
                   </div>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2">
-                    {trends.map((t: any) => (
-                      <div key={t.month} className="flex items-center gap-3">
-                        <span className="text-xs text-muted-foreground w-8 text-right">{MONTH_NAMES[t.month].slice(0, 3)}</span>
-                        <div className="flex-1">
-                          <BarStacked
-                            segments={[
-                              { value: Number(t.completedHauswirtschaft || 0), color: "bg-blue-500" },
-                              { value: Number(t.completedAlltagsbegleitung || 0), color: "bg-teal-500" },
-                              { value: Number(t.completedErstberatungen || 0), color: "bg-amber-500" },
-                            ]}
-                            max={maxAppointments}
-                          />
+                    {trends.map((t: any) => {
+                      const hw = Number(t.hwMinutes || 0);
+                      const ab = Number(t.abMinutes || 0);
+                      const eb = Number(t.ebMinutes || 0);
+                      const pause = Number(t.pauseMinutes || 0);
+                      const buero = Number(t.bueroarbeitMinutes || 0) + Number(t.besprechungMinutes || 0);
+                      const sonst = Number(t.sonstigesMinutes || 0) + Number(t.weiterbildungMinutes || 0) + Number(t.krankMinutes || 0) + Number(t.urlaubMinutes || 0) + Number(t.vertriebMinutes || 0);
+                      const totalMin = hw + ab + eb + pause + buero + sonst;
+                      const totalHours = totalMin > 0 ? (totalMin / 60).toFixed(1) : "0";
+                      const termine = Number(t.completedHauswirtschaft || 0) + Number(t.completedAlltagsbegleitung || 0) + Number(t.completedErstberatungen || 0);
+                      return (
+                        <div key={t.month} className="flex items-center gap-3">
+                          <span className="text-xs text-muted-foreground w-8 text-right">{MONTH_NAMES[t.month].slice(0, 3)}</span>
+                          <div className="flex-1">
+                            <BarStacked
+                              segments={[
+                                { value: hw, color: "bg-blue-500" },
+                                { value: ab, color: "bg-teal-500" },
+                                { value: eb, color: "bg-amber-500" },
+                                { value: pause, color: "bg-slate-400" },
+                                { value: buero, color: "bg-indigo-500" },
+                                { value: sonst, color: "bg-purple-500" },
+                              ]}
+                              max={maxTrendMinutes}
+                            />
+                          </div>
+                          <div className="text-xs w-28 text-right shrink-0">
+                            <span className="font-medium">{totalHours}h</span>
+                            <span className="text-muted-foreground"> · </span>
+                            <span className="font-medium">{termine}</span>
+                            <span className="text-muted-foreground"> Termine</span>
+                          </div>
                         </div>
-                        <span className="text-xs font-medium w-16 text-right">{t.completedCount} Termine</span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </CardContent>
               </Card>
@@ -694,28 +742,52 @@ export default function AdminStatistics() {
             <TabsContent value="trends">
               <Card className="mb-4">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Monatliche Termine {selectedYear}</CardTitle>
-                  <div className="flex items-center gap-4 mt-1 flex-wrap">
-                    <div className="flex items-center gap-1.5">
+                  <CardTitle className="text-base">Monatliche Stunden {selectedYear}</CardTitle>
+                  <div className="flex items-center gap-3 mt-1 flex-wrap">
+                    <div className="flex items-center gap-1">
                       <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-                      <span className="text-xs text-muted-foreground">Hauswirtschaft</span>
+                      <span className="text-xs text-muted-foreground">HW</span>
                     </div>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1">
                       <div className="w-2.5 h-2.5 rounded-full bg-teal-500" />
-                      <span className="text-xs text-muted-foreground">Alltagsbegleitung</span>
+                      <span className="text-xs text-muted-foreground">AB</span>
                     </div>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1">
                       <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                      <span className="text-xs text-muted-foreground">Erstberatungen</span>
+                      <span className="text-xs text-muted-foreground">EB</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="w-2.5 h-2.5 rounded-full bg-slate-400" />
+                      <span className="text-xs text-muted-foreground">Pause</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
+                      <span className="text-xs text-muted-foreground">Büro</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="w-2.5 h-2.5 rounded-full bg-sky-500" />
+                      <span className="text-xs text-muted-foreground">Vertrieb</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="w-2.5 h-2.5 rounded-full bg-purple-500" />
+                      <span className="text-xs text-muted-foreground">Sonst.</span>
                     </div>
                   </div>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2">
                     {trends.map((t: any) => {
-                      const hw = Number(t.completedHauswirtschaft || 0);
-                      const ab = Number(t.completedAlltagsbegleitung || 0);
-                      const eb = Number(t.completedErstberatungen || 0);
+                      const hw = Number(t.hwMinutes || 0);
+                      const ab = Number(t.abMinutes || 0);
+                      const eb = Number(t.ebMinutes || 0);
+                      const pause = Number(t.pauseMinutes || 0);
+                      const buero = Number(t.bueroarbeitMinutes || 0);
+                      const bespr = Number(t.besprechungMinutes || 0);
+                      const vertr = Number(t.vertriebMinutes || 0);
+                      const sonst = Number(t.sonstigesMinutes || 0) + Number(t.weiterbildungMinutes || 0) + Number(t.krankMinutes || 0) + Number(t.urlaubMinutes || 0);
+                      const totalMin = hw + ab + eb + pause + buero + bespr + vertr + sonst;
+                      const totalHours = totalMin > 0 ? (totalMin / 60).toFixed(1) : "0";
+                      const termine = Number(t.completedHauswirtschaft || 0) + Number(t.completedAlltagsbegleitung || 0) + Number(t.completedErstberatungen || 0);
                       return (
                         <div key={t.month} className="flex items-center gap-3">
                           <span className="text-xs text-muted-foreground w-8 text-right">{MONTH_NAMES[t.month].slice(0, 3)}</span>
@@ -725,20 +797,19 @@ export default function AdminStatistics() {
                                 { value: hw, color: "bg-blue-500" },
                                 { value: ab, color: "bg-teal-500" },
                                 { value: eb, color: "bg-amber-500" },
+                                { value: pause, color: "bg-slate-400" },
+                                { value: buero + bespr, color: "bg-indigo-500" },
+                                { value: vertr, color: "bg-sky-500" },
+                                { value: sonst, color: "bg-purple-500" },
                               ]}
-                              max={maxAppointments}
+                              max={maxTrendMinutes}
                             />
                           </div>
-                          <div className="text-xs w-32 text-right">
-                            <span className="font-medium">{hw}</span>
-                            <span className="text-muted-foreground"> HW </span>
-                            <span className="font-medium text-teal-600">{ab}</span>
-                            <span className="text-muted-foreground"> AB </span>
-                            <span className="font-medium text-amber-600">{eb}</span>
-                            <span className="text-muted-foreground"> EB</span>
-                            {Number(t.cancelledCount) > 0 && (
-                              <span className="text-red-500 ml-1">({t.cancelledCount} st.)</span>
-                            )}
+                          <div className="text-xs w-28 text-right shrink-0">
+                            <span className="font-medium">{totalHours}h</span>
+                            <span className="text-muted-foreground"> · </span>
+                            <span className="font-medium">{termine}</span>
+                            <span className="text-muted-foreground"> Termine</span>
                           </div>
                         </div>
                       );

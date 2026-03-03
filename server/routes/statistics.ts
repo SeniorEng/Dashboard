@@ -149,7 +149,7 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
         ${monthFilter}
     `),
 
-    // 5. Monthly Trends (revenue + appointments per month)
+    // 5. Monthly Trends (revenue + appointments + hours per month)
     db.execute(sql`
       SELECT
         m.month::int AS month,
@@ -161,7 +161,18 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
         COALESCE(apt.completed_alltagsbegleitung, 0)::int AS "completedAlltagsbegleitung",
         COALESCE(apt.completed_erstberatungen, 0)::int AS "completedErstberatungen",
         COALESCE(apt.cancelled_count, 0)::int AS "cancelledCount",
-        COALESCE(apt.unique_customers, 0)::int AS "activeCustomers"
+        COALESCE(apt.unique_customers, 0)::int AS "activeCustomers",
+        COALESCE(apt.hw_minutes, 0)::int AS "hwMinutes",
+        COALESCE(apt.ab_minutes, 0)::int AS "abMinutes",
+        COALESCE(apt.eb_minutes, 0)::int AS "ebMinutes",
+        COALESCE(te.pause_minutes, 0)::int AS "pauseMinutes",
+        COALESCE(te.urlaub_minutes, 0)::int AS "urlaubMinutes",
+        COALESCE(te.krank_minutes, 0)::int AS "krankMinutes",
+        COALESCE(te.bueroarbeit_minutes, 0)::int AS "bueroarbeitMinutes",
+        COALESCE(te.besprechung_minutes, 0)::int AS "besprechungMinutes",
+        COALESCE(te.vertrieb_minutes, 0)::int AS "vertriebMinutes",
+        COALESCE(te.sonstiges_minutes, 0)::int AS "sonstigesMinutes",
+        COALESCE(te.weiterbildung_minutes, 0)::int AS "weiterbildungMinutes"
       FROM generate_series(1, 12) AS m(month)
       LEFT JOIN (
         SELECT
@@ -181,12 +192,31 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
           COUNT(*) FILTER (WHERE a.status IN ('completed', 'documented') AND a.service_type = 'alltagsbegleitung') AS completed_alltagsbegleitung,
           COUNT(*) FILTER (WHERE a.status IN ('completed', 'documented') AND a.appointment_type = 'Erstberatung') AS completed_erstberatungen,
           COUNT(*) FILTER (WHERE a.status = 'cancelled') AS cancelled_count,
-          COUNT(DISTINCT a.customer_id) FILTER (WHERE a.status IN ('completed', 'documented')) AS unique_customers
+          COUNT(DISTINCT a.customer_id) FILTER (WHERE a.status IN ('completed', 'documented')) AS unique_customers,
+          COALESCE(SUM(COALESCE(a.actual_duration, a.duration_promised)) FILTER (WHERE a.status IN ('completed', 'documented') AND a.service_type = 'hauswirtschaft'), 0) AS hw_minutes,
+          COALESCE(SUM(COALESCE(a.actual_duration, a.duration_promised)) FILTER (WHERE a.status IN ('completed', 'documented') AND a.service_type = 'alltagsbegleitung'), 0) AS ab_minutes,
+          COALESCE(SUM(COALESCE(a.actual_duration, a.duration_promised)) FILTER (WHERE a.status IN ('completed', 'documented') AND a.appointment_type = 'Erstberatung'), 0) AS eb_minutes
         FROM appointments a
         WHERE a.deleted_at IS NULL
           AND EXTRACT(YEAR FROM a.date::date) = ${year}
         GROUP BY EXTRACT(MONTH FROM a.date::date)
       ) apt ON apt.m = m.month
+      LEFT JOIN (
+        SELECT
+          EXTRACT(MONTH FROM t.entry_date::date)::int AS m,
+          COALESCE(SUM(t.duration_minutes) FILTER (WHERE t.entry_type = 'pause'), 0) AS pause_minutes,
+          COALESCE(SUM(t.duration_minutes) FILTER (WHERE t.entry_type = 'urlaub'), 0) AS urlaub_minutes,
+          COALESCE(SUM(t.duration_minutes) FILTER (WHERE t.entry_type = 'krankheit'), 0) AS krank_minutes,
+          COALESCE(SUM(t.duration_minutes) FILTER (WHERE t.entry_type = 'bueroarbeit'), 0) AS bueroarbeit_minutes,
+          COALESCE(SUM(t.duration_minutes) FILTER (WHERE t.entry_type = 'besprechung'), 0) AS besprechung_minutes,
+          COALESCE(SUM(t.duration_minutes) FILTER (WHERE t.entry_type = 'vertrieb'), 0) AS vertrieb_minutes,
+          COALESCE(SUM(t.duration_minutes) FILTER (WHERE t.entry_type = 'sonstiges'), 0) AS sonstiges_minutes,
+          COALESCE(SUM(t.duration_minutes) FILTER (WHERE t.entry_type = 'schulung'), 0) AS weiterbildung_minutes
+        FROM employee_time_entries t
+        WHERE t.deleted_at IS NULL
+          AND EXTRACT(YEAR FROM t.entry_date::date) = ${year}
+        GROUP BY EXTRACT(MONTH FROM t.entry_date::date)
+      ) te ON te.m = m.month
       ORDER BY m.month
     `),
 
