@@ -243,6 +243,115 @@ function parsePflegehilfeEmail(body: string, subject?: string): ParsedLead {
   return result;
 }
 
+function isPflegeDeEmail(body: string, subject?: string): boolean {
+  const lower = body.toLowerCase();
+  const subjectLower = (subject || "").toLowerCase();
+  return (subjectLower.includes("pflege.de") && subjectLower.includes("anfrage"))
+    || (lower.includes("pflege.de") && lower.includes("produktgruppe"));
+}
+
+function parsePflegeDeEmail(body: string, subject?: string): ParsedLead {
+  const text = stripHtml(body);
+
+  let vorname = "";
+  let nachname = "";
+  const rawName = extractTableValue(text, "Ansprechpartner Name")
+    || extractTableValue(text, "Name");
+  if (rawName) {
+    const parsed = parseName(rawName);
+    vorname = parsed.vorname;
+    nachname = parsed.nachname;
+  }
+
+  const rawTelefon = extractTableValue(text, "Telefon")
+    || extractTableValue(text, "Tel");
+
+  const rawEmail = extractTableValue(text, "Email")
+    || extractTableValue(text, "E-Mail");
+  let email: string | undefined;
+  if (rawEmail) {
+    const emailMatch = rawEmail.match(/[\w.+-]+@[\w.-]+\.\w{2,}/);
+    if (emailMatch) {
+      const addr = emailMatch[0].toLowerCase();
+      if (!addr.endsWith("@pflege.de")) {
+        email = emailMatch[0];
+      }
+    }
+  }
+
+  const strasseRaw = extractTableValue(text, "Strasse")
+    || extractTableValue(text, "Straße");
+  const addressFromStrasse = strasseRaw ? splitAddress(strasseRaw) : {};
+
+  const plzOrtRaw = extractTableValue(text, "PLZ Ort")
+    || extractTableValue(text, "PLZ/Ort");
+  let plz = addressFromStrasse.plz;
+  let stadt = addressFromStrasse.stadt;
+  if (plzOrtRaw) {
+    const plzOrtMatch = plzOrtRaw.match(/(\d{5})\s+(.+)/);
+    if (plzOrtMatch) {
+      plz = plzOrtMatch[1];
+      stadt = plzOrtMatch[2].trim();
+    }
+  }
+
+  const angefragtePlz = extractTableValue(text, "Angefragte PLZ");
+
+  const idMatch = text.match(/ID:\s*(PT-\d+)/i)
+    || (subject || "").match(/ID:\s*(PT-\d+)/i);
+  const leadId = idMatch ? idMatch[1] : undefined;
+
+  let produktgruppe = "";
+  if (subject) {
+    const pgMatch = subject.match(/Produktgruppe\s*[""„]([^""\"]+)[""\"]/i);
+    if (pgMatch) produktgruppe = pgMatch[1].trim();
+  }
+
+  let quelleDetails = "";
+  if (leadId) quelleDetails += leadId;
+  if (produktgruppe) quelleDetails += quelleDetails ? ` | ${produktgruppe}` : produktgruppe;
+
+  const notizenParts: string[] = [];
+
+  const fieldsToCapture = [
+    { key: "Angefragte PLZ", label: "Angefragte PLZ (Bedarfsort)" },
+    { key: "Aktuelle Betreuung", label: "Aktuelle Betreuung" },
+    { key: "Mobilität", label: "Mobilität" },
+    { key: "Betreuung", label: "Betreuung" },
+    { key: "Hauswirtschaft", label: "Hauswirtschaft" },
+    { key: "Medizinische Pflege", label: "Medizinische Pflege" },
+    { key: "Leichte Pflege", label: "Leichte Pflege" },
+    { key: "Geschlecht", label: "Geschlecht" },
+    { key: "Deutschkenntnisse", label: "Deutschkenntnisse" },
+    { key: "Gewünschter Betreuungsbeginn", label: "Gewünschter Betreuungsbeginn" },
+    { key: "Budget", label: "Budget" },
+    { key: "Unterbringungsmöglichkeit", label: "Unterbringungsmöglichkeit" },
+    { key: "Bezugspunkt", label: "Bezugspunkt der PLZ-Suche" },
+  ];
+
+  for (const { key, label } of fieldsToCapture) {
+    const val = extractTableValue(text, key);
+    if (val && val !== "-") notizenParts.push(`${label}: ${val}`);
+  }
+
+  const kommentar = extractTableValue(text, "Kommentar");
+  if (kommentar && kommentar !== "-") notizenParts.push(`Kommentar: ${kommentar}`);
+
+  return {
+    vorname: vorname || "Unbekannt",
+    nachname: nachname || "Interessent",
+    telefon: rawTelefon?.replace(/\s+/g, "") || undefined,
+    email,
+    strasse: addressFromStrasse.strasse,
+    nr: addressFromStrasse.nr,
+    plz,
+    stadt,
+    quelle: "pflege.de",
+    quelleDetails: quelleDetails || undefined,
+    notizen: notizenParts.length > 0 ? notizenParts.join("\n") : undefined,
+  };
+}
+
 function extractField(text: string, patterns: RegExp[]): string | undefined {
   for (const pattern of patterns) {
     const match = text.match(pattern);
@@ -360,6 +469,9 @@ function parseGenericEmail(body: string, subject?: string): ParsedLead {
 export function parseLeadEmail(body: string, subject?: string): ParsedLead {
   if (isPflegehilfeEmail(body)) {
     return parsePflegehilfeEmail(body, subject);
+  }
+  if (isPflegeDeEmail(body, subject)) {
+    return parsePflegeDeEmail(body, subject);
   }
   return parseGenericEmail(body, subject);
 }
