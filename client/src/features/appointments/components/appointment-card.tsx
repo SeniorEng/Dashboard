@@ -59,7 +59,7 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
   
   const canModify = canModifyAppointment(appointment.status as AppointmentStatus);
   const isCompleted = appointment.status === "completed";
-  const canReopen = isCompleted && !(appointment as any).isLocked;
+  const canReopen = isCompleted && !appointment.isLocked;
 
   const reopenMutation = useMutation({
     mutationFn: async () => {

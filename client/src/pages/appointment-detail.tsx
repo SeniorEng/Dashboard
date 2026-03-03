@@ -481,7 +481,7 @@ export default function AppointmentDetail() {
         </div>
       )}
 
-      {isCompleted && !appointment.isLocked && (appointment as any).isMonthClosed && !user?.isAdmin && (
+      {isCompleted && !appointment.isLocked && appointment.isMonthClosed && !user?.isAdmin && (
         <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
           <p className="text-xs text-amber-700" data-testid="text-month-closed-info">
             Der Monat ist bereits abgeschlossen. Nur ein Admin kann die Dokumentation noch korrigieren.
@@ -489,7 +489,7 @@ export default function AppointmentDetail() {
         </div>
       )}
 
-      {isCompleted && !appointment.isLocked && (!(appointment as any).isMonthClosed || user?.isAdmin) && (
+      {isCompleted && !appointment.isLocked && (!appointment.isMonthClosed || user?.isAdmin) && (
         <div className="mt-6">
           <Button 
             variant="outline"

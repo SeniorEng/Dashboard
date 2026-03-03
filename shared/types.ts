@@ -72,6 +72,7 @@ export {
 export interface AppointmentWithCustomer extends Appointment {
   customer: Customer | null;
   isLocked?: boolean;
+  isMonthClosed?: boolean;
 }
 
 /**

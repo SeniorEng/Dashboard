@@ -168,21 +168,21 @@ function CreateProspectSheet({ open, onClose }: { open: boolean; onClose: () => 
           <div className="grid grid-cols-[1fr_80px] gap-3">
             <div>
               <Label>Straße</Label>
-              <Input value={strasse} onChange={(e) => setStrasse(e.target.value)} data-testid="input-prospect-strasse" />
+              <Input value={strasse} onChange={(e) => setStrasse(e.target.value)} placeholder="Musterstraße" data-testid="input-prospect-strasse" />
             </div>
             <div>
               <Label>Nr.</Label>
-              <Input value={nr} onChange={(e) => setNr(e.target.value)} data-testid="input-prospect-nr" />
+              <Input value={nr} onChange={(e) => setNr(e.target.value)} placeholder="12a" data-testid="input-prospect-nr" />
             </div>
           </div>
           <div className="grid grid-cols-[100px_1fr] gap-3">
             <div>
               <Label>PLZ</Label>
-              <Input value={plz} onChange={(e) => setPlz(e.target.value)} maxLength={5} data-testid="input-prospect-plz" />
+              <Input value={plz} onChange={(e) => setPlz(e.target.value)} placeholder="09111" maxLength={5} data-testid="input-prospect-plz" />
             </div>
             <div>
               <Label>Stadt</Label>
-              <Input value={stadt} onChange={(e) => setStadt(e.target.value)} data-testid="input-prospect-stadt" />
+              <Input value={stadt} onChange={(e) => setStadt(e.target.value)} placeholder="Chemnitz" data-testid="input-prospect-stadt" />
             </div>
           </div>
           <div>
@@ -286,6 +286,28 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
   const handleConvertToErstberatung = () => {
     if (!prospect) return;
 
+    let pStrasse = prospect.strasse || "";
+    let pNr = prospect.nr || "";
+    let pPlz = prospect.plz || "";
+    let pStadt = prospect.stadt || "";
+
+    if (!pStrasse && pStadt) {
+      const full = pStadt.trim();
+      const plzStadtMatch = full.match(/(\d{5})\s+(.+)/);
+      if (plzStadtMatch) {
+        const beforePlz = full.substring(0, plzStadtMatch.index).replace(/,\s*$/, "").trim();
+        const strasseNrMatch = beforePlz.match(/^(.+?)\s+(\d+\s*[a-zA-Z]?)$/);
+        if (strasseNrMatch) {
+          pStrasse = strasseNrMatch[1].trim();
+          pNr = strasseNrMatch[2].trim();
+        } else if (beforePlz) {
+          pStrasse = beforePlz;
+        }
+        pPlz = plzStadtMatch[1];
+        pStadt = plzStadtMatch[2].trim();
+      }
+    }
+
     let prospectNotes = "";
     if (prospect.notes && prospect.notes.length > 0) {
       const relevantNotes = prospect.notes.filter((n: any) => n.noteType !== "statuswechsel");
@@ -304,10 +326,10 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
       nachname: prospect.nachname,
       ...(prospect.telefon && { telefon: prospect.telefon }),
       ...(prospect.email && { email: prospect.email }),
-      ...(prospect.strasse && { strasse: prospect.strasse }),
-      ...(prospect.nr && { nr: prospect.nr }),
-      ...(prospect.plz && { plz: prospect.plz }),
-      ...(prospect.stadt && { stadt: prospect.stadt }),
+      ...(pStrasse && { strasse: pStrasse }),
+      ...(pNr && { nr: pNr }),
+      ...(pPlz && { plz: pPlz }),
+      ...(pStadt && { stadt: pStadt }),
       ...(prospect.pflegegrad && { pflegegrad: String(prospect.pflegegrad) }),
       ...(prospectNotes && { notes: prospectNotes }),
     });
