@@ -193,9 +193,9 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
           COUNT(*) FILTER (WHERE a.status IN ('completed', 'documented') AND a.appointment_type = 'Erstberatung') AS completed_erstberatungen,
           COUNT(*) FILTER (WHERE a.status = 'cancelled') AS cancelled_count,
           COUNT(DISTINCT a.customer_id) FILTER (WHERE a.status IN ('completed', 'documented')) AS unique_customers,
-          COALESCE(SUM(COALESCE(a.actual_duration, a.duration_promised)) FILTER (WHERE a.status IN ('completed', 'documented') AND a.service_type = 'hauswirtschaft'), 0) AS hw_minutes,
-          COALESCE(SUM(COALESCE(a.actual_duration, a.duration_promised)) FILTER (WHERE a.status IN ('completed', 'documented') AND a.service_type = 'alltagsbegleitung'), 0) AS ab_minutes,
-          COALESCE(SUM(COALESCE(a.actual_duration, a.duration_promised)) FILTER (WHERE a.status IN ('completed', 'documented') AND a.appointment_type = 'Erstberatung'), 0) AS eb_minutes
+          COALESCE(SUM(a.duration_promised) FILTER (WHERE a.status IN ('completed', 'documented') AND a.service_type = 'hauswirtschaft'), 0) AS hw_minutes,
+          COALESCE(SUM(a.duration_promised) FILTER (WHERE a.status IN ('completed', 'documented') AND a.service_type = 'alltagsbegleitung'), 0) AS ab_minutes,
+          COALESCE(SUM(a.duration_promised) FILTER (WHERE a.status IN ('completed', 'documented') AND a.appointment_type = 'Erstberatung'), 0) AS eb_minutes
         FROM appointments a
         WHERE a.deleted_at IS NULL
           AND EXTRACT(YEAR FROM a.date::date) = ${year}
@@ -684,7 +684,7 @@ router.get("/growth", asyncHandler("Wachstums-Statistiken konnten nicht geladen 
       SELECT
         a.service_type,
         COUNT(*)::int AS count,
-        COALESCE(SUM(COALESCE(a.actual_duration, a.duration_promised)), 0)::int AS total_minutes
+        COALESCE(SUM(a.duration_promised), 0)::int AS total_minutes
       FROM appointments a
       WHERE a.deleted_at IS NULL
         AND a.status IN ('completed', 'documented')
@@ -784,7 +784,7 @@ router.post("/repair-appointment-services", asyncHandler("Reparatur der Termin-S
   const dryRun = req.query.dryRun === "true";
 
   const missing = await db.execute(sql`
-    SELECT a.id AS appointment_id, a.service_type, a.duration_promised, a.actual_duration
+    SELECT a.id AS appointment_id, a.service_type, a.duration_promised
     FROM appointments a
     WHERE a.deleted_at IS NULL
       AND a.status IN ('completed', 'documented')
@@ -801,7 +801,7 @@ router.post("/repair-appointment-services", asyncHandler("Reparatur der Termin-S
   const toInsert: { appointmentId: number; serviceId: number; planned: number; actual: number | null }[] = [];
   const skipped: { appointmentId: number; reason: string }[] = [];
 
-  for (const row of missing.rows as { appointment_id: number; service_type: string; duration_promised: number | null; actual_duration: number | null }[]) {
+  for (const row of missing.rows as { appointment_id: number; service_type: string; duration_promised: number | null }[]) {
     const serviceId = codeToId[row.service_type];
     if (!serviceId) {
       skipped.push({ appointmentId: row.appointment_id, reason: `Unknown service_type: ${row.service_type}` });
@@ -811,7 +811,7 @@ router.post("/repair-appointment-services", asyncHandler("Reparatur der Termin-S
       appointmentId: row.appointment_id,
       serviceId,
       planned: row.duration_promised || 60,
-      actual: row.actual_duration || null,
+      actual: null,
     });
   }
 
