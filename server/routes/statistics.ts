@@ -176,7 +176,7 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
           EXTRACT(MONTH FROM a.date::date)::int AS m,
           COUNT(*) AS appointment_count,
           COUNT(*) FILTER (WHERE a.status IN ('completed', 'documented')) AS completed_count,
-          COUNT(*) FILTER (WHERE a.status IN ('completed', 'documented') AND a.appointment_type = 'Kundentermin') AS completed_kundentermine,
+          COUNT(*) FILTER (WHERE a.status IN ('completed', 'documented') AND a.appointment_type IN ('Kundentermin', 'service')) AS completed_kundentermine,
           COUNT(*) FILTER (WHERE a.status IN ('completed', 'documented') AND a.appointment_type = 'Erstberatung') AS completed_erstberatungen,
           COUNT(*) FILTER (WHERE a.status = 'cancelled') AS cancelled_count,
           COUNT(DISTINCT a.customer_id) FILTER (WHERE a.status IN ('completed', 'documented')) AS unique_customers
