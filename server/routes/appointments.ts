@@ -646,43 +646,4 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   res.json({ success: true, message: "Termin erfolgreich gelöscht" });
 }));
 
-router.get("/:id/lock-status", asyncHandler("Fehler beim Abrufen des Sperrstatus", async (req, res) => {
-  if (!req.user?.isAdmin) {
-    return sendForbidden(res, "FORBIDDEN", "Nur Admins können den Sperrstatus prüfen.");
-  }
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
-
-  const appointment = await storage.getAppointment(id);
-  if (!appointment) return sendNotFound(res, ErrorMessages.appointmentNotFound);
-
-  const serviceRecordLinks = await db.select({
-    serviceRecordId: serviceRecordAppointments.serviceRecordId,
-    status: monthlyServiceRecords.status,
-    employeeId: monthlyServiceRecords.employeeId,
-    customerId: monthlyServiceRecords.customerId,
-    year: monthlyServiceRecords.year,
-    month: monthlyServiceRecords.month,
-  })
-    .from(serviceRecordAppointments)
-    .innerJoin(monthlyServiceRecords, eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id))
-    .where(eq(serviceRecordAppointments.appointmentId, id));
-
-  let isMonthClosed = false;
-  if (appointment.date) {
-    const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
-    if (employeeId) {
-      isMonthClosed = await timeTrackingStorage.isMonthClosed(employeeId, appointment.date);
-    }
-  }
-
-  res.json({
-    appointmentId: id,
-    appointmentStatus: appointment.status,
-    serviceRecordLinks,
-    isMonthClosed,
-    isLocked: serviceRecordLinks.some(l => l.status === 'employee_signed' || l.status === 'completed'),
-  });
-}));
-
 export default router;

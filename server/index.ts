@@ -112,9 +112,6 @@ process.on("uncaughtException", (error) => {
   await documentStorage.ensureTemplateBillingTypes();
   await documentStorage.ensureCustomerDocumentTypes();
 
-  const { repairDuplicateInitialBalances } = await import("./startup/repair-allocations");
-  await repairDuplicateInitialBalances();
-
   await registerRoutes(httpServer, app);
 
   const { authService } = await import("./services/auth");
