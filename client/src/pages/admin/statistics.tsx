@@ -322,10 +322,14 @@ export default function AdminStatistics() {
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">Monatliche Termine {selectedYear}</CardTitle>
-                  <div className="flex items-center gap-4 mt-1">
+                  <div className="flex items-center gap-4 mt-1 flex-wrap">
                     <div className="flex items-center gap-1.5">
                       <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-                      <span className="text-xs text-muted-foreground">Kundentermine</span>
+                      <span className="text-xs text-muted-foreground">Hauswirtschaft</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2.5 h-2.5 rounded-full bg-teal-500" />
+                      <span className="text-xs text-muted-foreground">Alltagsbegleitung</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
@@ -341,7 +345,8 @@ export default function AdminStatistics() {
                         <div className="flex-1">
                           <BarStacked
                             segments={[
-                              { value: Number(t.completedKundentermine || 0), color: "bg-blue-500" },
+                              { value: Number(t.completedHauswirtschaft || 0), color: "bg-blue-500" },
+                              { value: Number(t.completedAlltagsbegleitung || 0), color: "bg-teal-500" },
                               { value: Number(t.completedErstberatungen || 0), color: "bg-amber-500" },
                             ]}
                             max={maxAppointments}
@@ -680,10 +685,14 @@ export default function AdminStatistics() {
               <Card className="mb-4">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">Monatliche Termine {selectedYear}</CardTitle>
-                  <div className="flex items-center gap-4 mt-1">
+                  <div className="flex items-center gap-4 mt-1 flex-wrap">
                     <div className="flex items-center gap-1.5">
                       <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-                      <span className="text-xs text-muted-foreground">Kundentermine</span>
+                      <span className="text-xs text-muted-foreground">Hauswirtschaft</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2.5 h-2.5 rounded-full bg-teal-500" />
+                      <span className="text-xs text-muted-foreground">Alltagsbegleitung</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
@@ -694,7 +703,8 @@ export default function AdminStatistics() {
                 <CardContent>
                   <div className="space-y-2">
                     {trends.map((t: any) => {
-                      const kt = Number(t.completedKundentermine || 0);
+                      const hw = Number(t.completedHauswirtschaft || 0);
+                      const ab = Number(t.completedAlltagsbegleitung || 0);
                       const eb = Number(t.completedErstberatungen || 0);
                       return (
                         <div key={t.month} className="flex items-center gap-3">
@@ -702,15 +712,18 @@ export default function AdminStatistics() {
                           <div className="flex-1">
                             <BarStacked
                               segments={[
-                                { value: kt, color: "bg-blue-500" },
+                                { value: hw, color: "bg-blue-500" },
+                                { value: ab, color: "bg-teal-500" },
                                 { value: eb, color: "bg-amber-500" },
                               ]}
                               max={maxAppointments}
                             />
                           </div>
                           <div className="text-xs w-32 text-right">
-                            <span className="font-medium">{kt}</span>
-                            <span className="text-muted-foreground"> + </span>
+                            <span className="font-medium">{hw}</span>
+                            <span className="text-muted-foreground"> HW </span>
+                            <span className="font-medium text-teal-600">{ab}</span>
+                            <span className="text-muted-foreground"> AB </span>
                             <span className="font-medium text-amber-600">{eb}</span>
                             <span className="text-muted-foreground"> EB</span>
                             {Number(t.cancelledCount) > 0 && (

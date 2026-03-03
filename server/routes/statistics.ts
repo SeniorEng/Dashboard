@@ -157,7 +157,8 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
         COALESCE(inv.invoice_count, 0)::int AS "invoiceCount",
         COALESCE(apt.appointment_count, 0)::int AS "appointmentCount",
         COALESCE(apt.completed_count, 0)::int AS "completedCount",
-        COALESCE(apt.completed_kundentermine, 0)::int AS "completedKundentermine",
+        COALESCE(apt.completed_hauswirtschaft, 0)::int AS "completedHauswirtschaft",
+        COALESCE(apt.completed_alltagsbegleitung, 0)::int AS "completedAlltagsbegleitung",
         COALESCE(apt.completed_erstberatungen, 0)::int AS "completedErstberatungen",
         COALESCE(apt.cancelled_count, 0)::int AS "cancelledCount",
         COALESCE(apt.unique_customers, 0)::int AS "activeCustomers"
@@ -176,7 +177,8 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
           EXTRACT(MONTH FROM a.date::date)::int AS m,
           COUNT(*) AS appointment_count,
           COUNT(*) FILTER (WHERE a.status IN ('completed', 'documented')) AS completed_count,
-          COUNT(*) FILTER (WHERE a.status IN ('completed', 'documented') AND a.appointment_type IN ('Kundentermin', 'service')) AS completed_kundentermine,
+          COUNT(*) FILTER (WHERE a.status IN ('completed', 'documented') AND a.service_type = 'hauswirtschaft') AS completed_hauswirtschaft,
+          COUNT(*) FILTER (WHERE a.status IN ('completed', 'documented') AND a.service_type = 'alltagsbegleitung') AS completed_alltagsbegleitung,
           COUNT(*) FILTER (WHERE a.status IN ('completed', 'documented') AND a.appointment_type = 'Erstberatung') AS completed_erstberatungen,
           COUNT(*) FILTER (WHERE a.status = 'cancelled') AS cancelled_count,
           COUNT(DISTINCT a.customer_id) FILTER (WHERE a.status IN ('completed', 'documented')) AS unique_customers
@@ -634,6 +636,19 @@ router.get("/planning", asyncHandler("Planungsdaten konnten nicht geladen werden
       : 0,
     customersWithoutAppointments: customersWithoutAppointments.rows,
   });
+}));
+
+router.post("/repair-appointment-types", asyncHandler("Datenbereinigung der Termintypen fehlgeschlagen", async (req, res) => {
+  if (!req.user!.isAdmin) throw forbidden("FORBIDDEN", "Nur Admins dürfen diese Aktion ausführen");
+
+  const result = await db.execute(sql`
+    UPDATE appointments SET appointment_type = 'Kundentermin'
+    WHERE appointment_type = 'service' AND deleted_at IS NULL
+  `);
+
+  const count = result.rowCount ?? 0;
+  console.log(`[REPAIR] appointment_type 'service' -> 'Kundentermin': ${count} updated`);
+  res.json({ updated: count });
 }));
 
 router.post("/repair-appointment-services", asyncHandler("Reparatur der Termin-Services fehlgeschlagen", async (req, res) => {
