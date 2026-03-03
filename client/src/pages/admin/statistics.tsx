@@ -222,7 +222,6 @@ export default function AdminStatistics() {
               ))}
             </SelectContent>
           </Select>
-          <span className="text-sm text-muted-foreground ml-auto">{periodLabel}</span>
         </div>
 
         {isLoading ? (
