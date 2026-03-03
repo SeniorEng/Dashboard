@@ -160,6 +160,18 @@ process.on("uncaughtException", (error) => {
   setTimeout(runBirthdayCheck, 5 * 60 * 1000);
   const birthdayInterval = setInterval(runBirthdayCheck, 6 * 60 * 60 * 1000);
 
+  const { checkBudgetRenewals } = await import("./services/budget-renewal-checker");
+  const runBudgetRenewalCheck = async () => {
+    try {
+      const created = await checkBudgetRenewals();
+      if (created > 0) log(`${created} §39/42a Budget-Verlängerungs-Aufgaben erstellt`);
+    } catch (e) {
+      console.error("Fehler bei Budget-Verlängerungs-Prüfung:", e);
+    }
+  };
+  setTimeout(runBudgetRenewalCheck, 7 * 60 * 1000);
+  const budgetRenewalInterval = setInterval(runBudgetRenewalCheck, 24 * 60 * 60 * 1000);
+
   app.use(errorMiddleware);
 
   if (process.env.NODE_ENV === "production") {

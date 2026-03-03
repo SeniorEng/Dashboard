@@ -714,11 +714,16 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         const totalAvailable = effective45a + effective45b + effective39_42a;
 
         if (costs.totalCents > totalAvailable) {
-          throw new Error(
-            `Budget reicht nicht aus. Kosten: ${(costs.totalCents / 100).toFixed(2)} €, ` +
-            `verfügbar: ${(totalAvailable / 100).toFixed(2)} €. ` +
-            `Kunde akzeptiert keine Privatzahlung.`
-          );
+          const shortfall = costs.totalCents - totalAvailable;
+          const parts = [
+            `Budget reicht nicht aus. Fehlbetrag: ${(shortfall / 100).toFixed(2)} €.`,
+            `Kosten: ${(costs.totalCents / 100).toFixed(2)} €.`,
+            `§45b verfügbar: ${(effective45b / 100).toFixed(2)} €,`,
+            `§39/42a verfügbar: ${(effective39_42a / 100).toFixed(2)} €,`,
+            `§45a verfügbar: ${(effective45a / 100).toFixed(2)} €.`,
+            `Kunde akzeptiert keine Privatzahlung.`,
+          ];
+          throw new Error(parts.join(" "));
         }
       }
 
