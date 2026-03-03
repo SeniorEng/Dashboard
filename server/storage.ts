@@ -900,6 +900,9 @@ export class DatabaseStorage implements IStorage {
       ))
       .limit(1);
     
+    if (result.length > 0) {
+      console.log(`[isAppointmentLocked] Termin ${appointmentId} gesperrt: serviceRecordId=${result[0].serviceRecordId}, status=${result[0].status}`);
+    }
     return result.length > 0;
   }
 

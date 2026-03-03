@@ -28,6 +28,8 @@ import { budgetLedgerStorage } from "../storage/budget-ledger";
 import type { Response } from "express";
 import appointmentDocumentationRouter from "./appointment-documentation";
 import { db } from "../lib/db";
+import { serviceRecordAppointments, monthlyServiceRecords } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 const router = Router();
 
@@ -184,7 +186,14 @@ router.get("/:id", asyncHandler(ErrorMessages.fetchAppointmentFailed, async (req
     }
   }
 
-  res.json({ ...appointment, isLocked, isMonthClosed });
+  let lockedReason: string | undefined;
+  if (isLocked) {
+    lockedReason = "Verknüpft mit einem unterschriebenen Leistungsnachweis";
+  } else if (isMonthClosed) {
+    lockedReason = "Der Monat ist bereits abgeschlossen";
+  }
+
+  res.json({ ...appointment, isLocked, isMonthClosed, lockedReason });
 }));
 
 router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed, async (req, res) => {
@@ -635,6 +644,45 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   }
   
   res.json({ success: true, message: "Termin erfolgreich gelöscht" });
+}));
+
+router.get("/:id/lock-status", asyncHandler("Fehler beim Abrufen des Sperrstatus", async (req, res) => {
+  if (!req.user?.isAdmin) {
+    return sendForbidden(res, "FORBIDDEN", "Nur Admins können den Sperrstatus prüfen.");
+  }
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
+
+  const appointment = await storage.getAppointment(id);
+  if (!appointment) return sendNotFound(res, ErrorMessages.appointmentNotFound);
+
+  const serviceRecordLinks = await db.select({
+    serviceRecordId: serviceRecordAppointments.serviceRecordId,
+    status: monthlyServiceRecords.status,
+    employeeId: monthlyServiceRecords.employeeId,
+    customerId: monthlyServiceRecords.customerId,
+    year: monthlyServiceRecords.year,
+    month: monthlyServiceRecords.month,
+  })
+    .from(serviceRecordAppointments)
+    .innerJoin(monthlyServiceRecords, eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id))
+    .where(eq(serviceRecordAppointments.appointmentId, id));
+
+  let isMonthClosed = false;
+  if (appointment.date) {
+    const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
+    if (employeeId) {
+      isMonthClosed = await timeTrackingStorage.isMonthClosed(employeeId, appointment.date);
+    }
+  }
+
+  res.json({
+    appointmentId: id,
+    appointmentStatus: appointment.status,
+    serviceRecordLinks,
+    isMonthClosed,
+    isLocked: serviceRecordLinks.some(l => l.status === 'employee_signed' || l.status === 'completed'),
+  });
 }));
 
 export default router;
