@@ -41,6 +41,7 @@ export const AUDIT_ACTIONS = [
   "appointment_reopened",
   "initial_balance_set",
   "initial_balance_deleted",
+  "service_record_deleted",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];

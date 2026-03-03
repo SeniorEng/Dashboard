@@ -1,10 +1,12 @@
 import { Router, Request, Response } from "express";
 import { storage } from "../storage";
 import { requireAuth, canAccessCustomer } from "../middleware/auth";
-import { insertServiceRecordSchema, signServiceRecordSchema } from "@shared/schema";
-import { asyncHandler } from "../lib/errors";
+import { insertServiceRecordSchema, signServiceRecordSchema, serviceRecordAppointments, monthlyServiceRecords } from "@shared/schema";
+import { asyncHandler, sendForbidden, sendNotFound } from "../lib/errors";
 import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
+import { db } from "../lib/db";
+import { eq } from "drizzle-orm";
 
 const router = Router();
 
@@ -321,6 +323,35 @@ router.post("/:id/sign", requireAuth, asyncHandler("Unterschrift konnte nicht ge
     }
     throw error;
   }
+}));
+
+router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht gelöscht werden", async (req, res) => {
+  if (!req.user?.isAdmin) {
+    return sendForbidden(res, "FORBIDDEN", "Nur Admins können Leistungsnachweise löschen.");
+  }
+
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    return res.status(400).json({ message: "Ungültige ID" });
+  }
+
+  const record = await storage.getServiceRecord(id);
+  if (!record) {
+    return sendNotFound(res, "Leistungsnachweis nicht gefunden.");
+  }
+
+  await db.delete(serviceRecordAppointments).where(eq(serviceRecordAppointments.serviceRecordId, id));
+  await db.delete(monthlyServiceRecords).where(eq(monthlyServiceRecords.id, id));
+
+  await auditService.log(
+    req.user.id,
+    "service_record_deleted",
+    "service_record",
+    id,
+    { customerId: record.customerId, employeeId: record.employeeId, year: record.year, month: record.month, status: record.status }
+  );
+
+  res.json({ success: true, message: "Leistungsnachweis und Verknüpfungen gelöscht" });
 }));
 
 export default router;
