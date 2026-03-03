@@ -973,7 +973,8 @@ function DonutChart({ segments, size = 160 }: { segments: { label: string; value
   const total = segments.reduce((sum, s) => sum + s.value, 0);
   if (total === 0) return <div className="text-sm text-muted-foreground text-center py-8">Keine Daten</div>;
 
-  const radius = size / 2 - 10;
+  const strokeW = 22;
+  const radius = size / 2 - strokeW / 2 - 2;
   const circumference = 2 * Math.PI * radius;
   let offset = 0;
 
@@ -993,7 +994,7 @@ function DonutChart({ segments, size = 160 }: { segments: { label: string; value
               r={radius}
               fill="none"
               stroke={seg.color}
-              strokeWidth={24}
+              strokeWidth={strokeW}
               strokeDasharray={`${dashLength} ${circumference - dashLength}`}
               strokeDashoffset={dashOffset}
               transform={`rotate(-90 ${size / 2} ${size / 2})`}
