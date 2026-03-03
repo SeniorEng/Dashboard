@@ -28,9 +28,9 @@ router.post("/document-delivery/send", asyncHandler("Versand fehlgeschlagen", as
   });
 
   if (result.status === "error") {
-    res.status(500).json({
-      error: "DELIVERY_ERROR",
-      message: result.error || "Versand fehlgeschlagen",
+    res.status(502).json({
+      code: "DELIVERY_ERROR",
+      message: result.error || "Versand fehlgeschlagen — bitte prüfen Sie die Versandeinstellungen",
       deliveryId: result.deliveryId,
     });
     return;
@@ -95,9 +95,9 @@ router.post("/document-delivery/send-for-customer/:customerId", asyncHandler("Ve
   });
 
   if (result.status === "error") {
-    res.status(500).json({
-      error: "DELIVERY_ERROR",
-      message: result.error || "Versand fehlgeschlagen",
+    res.status(502).json({
+      code: "DELIVERY_ERROR",
+      message: result.error || "Versand fehlgeschlagen — bitte prüfen Sie die Versandeinstellungen",
       deliveryId: result.deliveryId,
     });
     return;

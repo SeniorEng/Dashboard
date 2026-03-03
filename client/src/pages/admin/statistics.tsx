@@ -111,15 +111,6 @@ export default function AdminStatistics() {
     staleTime: 60000,
   });
 
-  const { data: topCustomers } = useQuery<any[]>({
-    queryKey: ["statistics-top-customers", selectedYear],
-    queryFn: async () => {
-      const result = await api.get<any[]>(`/statistics/top-customers?year=${selectedYear}`);
-      return unwrapResult(result);
-    },
-    staleTime: 60000,
-  });
-
   const { data: profitability } = useQuery<any>({
     queryKey: ["statistics-profitability", selectedYear, selectedMonth],
     queryFn: async () => {

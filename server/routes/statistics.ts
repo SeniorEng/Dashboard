@@ -1106,7 +1106,7 @@ router.get("/alerts", asyncHandler("Handlungsbedarf konnte nicht geladen werden"
       title: "Budget-Überschreitung",
       description: `${overCount} Kunden haben ihr §45b-Budget für ${curYear} überschritten.`,
       count: overCount,
-      link: "/admin/budgets",
+      link: "/admin/billing",
     });
   }
 
@@ -1128,7 +1128,7 @@ router.get("/alerts", asyncHandler("Handlungsbedarf konnte nicht geladen werden"
       title: "Fehlende Leistungsnachweise",
       description: `${missingCount} Kunden haben noch keinen Leistungsnachweis für ${MONTH_NAMES_DE[prevM]}.`,
       count: missingCount,
-      link: "/admin/service-records",
+      link: "/service-records",
     });
   }
 

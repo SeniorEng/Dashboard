@@ -463,7 +463,7 @@ router.post("/:id/signatures", asyncHandler("Unterschriften konnten nicht gespei
   }
 
   if (errors.length > 0 && results.length === 0) {
-    res.status(500).json({ error: "Alle Unterschriften fehlgeschlagen", details: errors });
+    res.status(422).json({ code: "SIGNING_FAILED", message: "Alle Unterschriften fehlgeschlagen — bitte versuchen Sie es erneut", details: errors });
     return;
   }
 
@@ -581,7 +581,7 @@ router.post("/:id/convert", requireRoles("erstberatung"), asyncHandler("Konverti
 
   const updated = await customerManagementStorage.updateCustomer(id, updateData);
   if (!updated) {
-    res.status(500).json({ error: "UPDATE_FAILED", message: "Kunde konnte nicht aktualisiert werden" });
+    res.status(422).json({ code: "UPDATE_FAILED", message: "Kunde konnte nicht aktualisiert werden — bitte laden Sie die Seite neu und versuchen es erneut" });
     return;
   }
 
