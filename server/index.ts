@@ -176,23 +176,8 @@ process.on("uncaughtException", (error) => {
       host: "0.0.0.0",
       reusePort: true,
     },
-    async () => {
+    () => {
       log(`serving on port ${port}`);
-
-      try {
-        const { db: database } = await import("./lib/db");
-        const { sql: rawSql } = await import("drizzle-orm");
-        const repaired = await database.execute(rawSql`
-          UPDATE appointments SET appointment_type = 'Kundentermin'
-          WHERE appointment_type = 'service' AND deleted_at IS NULL
-        `);
-        const count = repaired.rowCount ?? 0;
-        if (count > 0) {
-          log(`[AUTO-REPAIR] appointment_type 'service' -> 'Kundentermin': ${count} updated`);
-        }
-      } catch (e) {
-        console.error("[AUTO-REPAIR] appointment_type migration failed:", e);
-      }
     },
   );
 })();

@@ -638,6 +638,103 @@ router.get("/planning", asyncHandler("Planungsdaten konnten nicht geladen werden
   });
 }));
 
+router.get("/growth", asyncHandler("Wachstums-Statistiken konnten nicht geladen werden", async (req, res) => {
+  if (!req.user!.isAdmin) throw forbidden("FORBIDDEN", "Nur für Administratoren");
+
+  const year = parseInt(req.query.year as string) || new Date().getFullYear();
+
+  const [
+    hoursByServiceType,
+    hoursByEntryType,
+    customerLifecycle,
+    customerGrowth,
+    prevYearCustomers,
+  ] = await Promise.all([
+    db.execute(sql`
+      SELECT
+        a.service_type,
+        COUNT(*)::int AS count,
+        COALESCE(SUM(COALESCE(a.actual_duration, a.duration_promised)), 0)::int AS total_minutes
+      FROM appointments a
+      WHERE a.deleted_at IS NULL
+        AND a.status IN ('completed', 'documented')
+        AND EXTRACT(YEAR FROM a.date::date) = ${year}
+      GROUP BY a.service_type
+      ORDER BY total_minutes DESC
+    `),
+
+    db.execute(sql`
+      SELECT
+        t.entry_type,
+        COUNT(*)::int AS count,
+        COALESCE(SUM(t.duration_minutes), 0)::int AS total_minutes
+      FROM employee_time_entries t
+      WHERE t.deleted_at IS NULL
+        AND EXTRACT(YEAR FROM t.entry_date::date) = ${year}
+      GROUP BY t.entry_type
+      ORDER BY total_minutes DESC
+    `),
+
+    db.execute(sql`
+      SELECT
+        m.month::int AS month,
+        COALESCE(gained.cnt, 0)::int AS "customersGained",
+        COALESCE(lost.cnt, 0)::int AS "customersLost"
+      FROM generate_series(1, 12) AS m(month)
+      LEFT JOIN (
+        SELECT EXTRACT(MONTH FROM c.created_at)::int AS m, COUNT(*) AS cnt
+        FROM customers c
+        WHERE c.deleted_at IS NULL
+          AND c.status IN ('aktiv', 'inaktiv', 'gekuendigt')
+          AND EXTRACT(YEAR FROM c.created_at) = ${year}
+        GROUP BY EXTRACT(MONTH FROM c.created_at)
+      ) gained ON gained.m = m.month
+      LEFT JOIN (
+        SELECT EXTRACT(MONTH FROM c.inaktiv_ab::date)::int AS m, COUNT(*) AS cnt
+        FROM customers c
+        WHERE c.deleted_at IS NULL
+          AND c.inaktiv_ab IS NOT NULL
+          AND EXTRACT(YEAR FROM c.inaktiv_ab::date) = ${year}
+        GROUP BY EXTRACT(MONTH FROM c.inaktiv_ab::date)
+      ) lost ON lost.m = m.month
+      ORDER BY m.month
+    `),
+
+    db.execute(sql`
+      SELECT
+        COUNT(*) FILTER (WHERE c.status = 'aktiv' AND c.deleted_at IS NULL)::int AS "activeNow",
+        COUNT(*) FILTER (WHERE c.deleted_at IS NULL AND EXTRACT(YEAR FROM c.created_at) = ${year})::int AS "gainedThisYear",
+        COUNT(*) FILTER (WHERE c.deleted_at IS NULL AND c.inaktiv_ab IS NOT NULL AND EXTRACT(YEAR FROM c.inaktiv_ab::date) = ${year})::int AS "lostThisYear"
+      FROM customers c
+    `),
+
+    db.execute(sql`
+      SELECT
+        COUNT(*) FILTER (WHERE c.deleted_at IS NULL AND EXTRACT(YEAR FROM c.created_at) = ${year - 1})::int AS "gainedPrevYear",
+        COUNT(*) FILTER (WHERE c.deleted_at IS NULL AND c.inaktiv_ab IS NOT NULL AND EXTRACT(YEAR FROM c.inaktiv_ab::date) = ${year - 1})::int AS "lostPrevYear"
+      FROM customers c
+    `),
+  ]);
+
+  const growth = customerGrowth.rows[0] as any;
+  const prevYear = prevYearCustomers.rows[0] as any;
+
+  res.json({
+    year,
+    hoursByServiceType: hoursByServiceType.rows,
+    hoursByEntryType: hoursByEntryType.rows,
+    customerLifecycle: customerLifecycle.rows,
+    summary: {
+      activeCustomers: growth?.activeNow ?? 0,
+      gainedThisYear: growth?.gainedThisYear ?? 0,
+      lostThisYear: growth?.lostThisYear ?? 0,
+      netGrowth: (growth?.gainedThisYear ?? 0) - (growth?.lostThisYear ?? 0),
+      gainedPrevYear: prevYear?.gainedPrevYear ?? 0,
+      lostPrevYear: prevYear?.lostPrevYear ?? 0,
+    },
+  });
+}));
+
 router.post("/repair-appointment-types", asyncHandler("Datenbereinigung der Termintypen fehlgeschlagen", async (req, res) => {
   if (!req.user!.isAdmin) throw forbidden("FORBIDDEN", "Nur Admins dürfen diese Aktion ausführen");
 

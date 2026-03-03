@@ -135,6 +135,15 @@ export default function AdminStatistics() {
     staleTime: 60000,
   });
 
+  const { data: growth } = useQuery<any>({
+    queryKey: ["statistics-growth", selectedYear],
+    queryFn: async () => {
+      const result = await api.get(`/statistics/growth?year=${selectedYear}`);
+      return unwrapResult(result);
+    },
+    staleTime: 60000,
+  });
+
   const employees = data?.employees ?? [];
   const revenue = data?.revenue ?? {};
   const customerStats = data?.customers ?? {};
@@ -211,6 +220,7 @@ export default function AdminStatistics() {
               <TabsTrigger value="employees" data-testid="tab-employees">Mitarbeiter</TabsTrigger>
               <TabsTrigger value="customers" data-testid="tab-customers">Kunden</TabsTrigger>
               <TabsTrigger value="trends" data-testid="tab-trends">Trends</TabsTrigger>
+              <TabsTrigger value="growth" data-testid="tab-growth">Wachstum</TabsTrigger>
               <TabsTrigger value="planning" data-testid="tab-planning">Planung</TabsTrigger>
             </TabsList>
 
@@ -930,9 +940,210 @@ export default function AdminStatistics() {
                 </div>
               )}
             </TabsContent>
+
+            {/* GROWTH TAB */}
+            <TabsContent value="growth">
+              <GrowthTab growth={growth} selectedYear={selectedYear} />
+            </TabsContent>
           </Tabs>
         )}
       </div>
     </Layout>
+  );
+}
+
+const SERVICE_TYPE_LABELS: Record<string, string> = {
+  hauswirtschaft: "Hauswirtschaft",
+  alltagsbegleitung: "Alltagsbegleitung",
+  erstberatung: "Erstberatung",
+};
+
+const SERVICE_TYPE_COLORS: Record<string, string> = {
+  hauswirtschaft: "#3b82f6",
+  alltagsbegleitung: "#14b8a6",
+  erstberatung: "#f59e0b",
+};
+
+const ENTRY_TYPE_LABELS: Record<string, string> = {
+  verfuegbar: "Verfügbar",
+  urlaub: "Urlaub",
+  krank: "Krank",
+  pause: "Pause",
+  bueroarbeit: "Büroarbeit",
+  besprechung: "Besprechung",
+  vertrieb: "Vertrieb",
+  sonstiges: "Sonstiges",
+  weiterbildung: "Weiterbildung",
+};
+
+const ENTRY_TYPE_COLORS: Record<string, string> = {
+  verfuegbar: "#22c55e",
+  urlaub: "#f59e0b",
+  krank: "#ef4444",
+  pause: "#94a3b8",
+  bueroarbeit: "#6366f1",
+  besprechung: "#8b5cf6",
+  vertrieb: "#0ea5e9",
+  sonstiges: "#a3a3a3",
+  weiterbildung: "#ec4899",
+};
+
+function DonutChart({ segments, size = 160 }: { segments: { label: string; value: number; color: string }[]; size?: number }) {
+  const total = segments.reduce((sum, s) => sum + s.value, 0);
+  if (total === 0) return <div className="text-sm text-muted-foreground text-center py-8">Keine Daten</div>;
+
+  const radius = size / 2 - 10;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+
+  return (
+    <div className="flex flex-col items-center gap-4">
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        {segments.filter(s => s.value > 0).map((seg, i) => {
+          const pct = seg.value / total;
+          const dashLength = pct * circumference;
+          const dashOffset = -offset * circumference;
+          offset += pct;
+          return (
+            <circle
+              key={i}
+              cx={size / 2}
+              cy={size / 2}
+              r={radius}
+              fill="none"
+              stroke={seg.color}
+              strokeWidth={24}
+              strokeDasharray={`${dashLength} ${circumference - dashLength}`}
+              strokeDashoffset={dashOffset}
+              transform={`rotate(-90 ${size / 2} ${size / 2})`}
+            />
+          );
+        })}
+        <text x={size / 2} y={size / 2 - 8} textAnchor="middle" className="text-xl font-bold fill-current">{Math.round(total / 60)}h</text>
+        <text x={size / 2} y={size / 2 + 12} textAnchor="middle" className="text-xs fill-muted-foreground">gesamt</text>
+      </svg>
+      <div className="flex flex-wrap justify-center gap-x-4 gap-y-1">
+        {segments.filter(s => s.value > 0).map((seg, i) => (
+          <div key={i} className="flex items-center gap-1.5 text-xs">
+            <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: seg.color }} />
+            <span className="text-muted-foreground">{seg.label}</span>
+            <span className="font-medium">{Math.round(seg.value / 60)}h</span>
+            <span className="text-muted-foreground">({Math.round((seg.value / total) * 100)}%)</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function GrowthTab({ growth, selectedYear }: { growth: any; selectedYear: number }) {
+  if (!growth) return <div className="flex justify-center py-16"><Loader2 className={`${iconSize.lg} animate-spin text-teal-600`} /></div>;
+
+  const serviceSegments = (growth.hoursByServiceType || [])
+    .filter((s: any) => s.service_type)
+    .map((s: any) => ({
+      label: SERVICE_TYPE_LABELS[s.service_type] || s.service_type,
+      value: Number(s.total_minutes || 0),
+      color: SERVICE_TYPE_COLORS[s.service_type] || "#a3a3a3",
+    }));
+
+  const entrySegments = (growth.hoursByEntryType || [])
+    .filter((s: any) => s.entry_type)
+    .map((s: any) => ({
+      label: ENTRY_TYPE_LABELS[s.entry_type] || s.entry_type,
+      value: Number(s.total_minutes || 0),
+      color: ENTRY_TYPE_COLORS[s.entry_type] || "#a3a3a3",
+    }));
+
+  const lifecycle = growth.customerLifecycle || [];
+  const summary = growth.summary || {};
+  const maxLifecycle = Math.max(...lifecycle.map((m: any) => Math.max(m.customersGained, m.customersLost)), 1);
+
+  const yoyGrowthPct = summary.gainedPrevYear > 0
+    ? Math.round(((summary.gainedThisYear - summary.gainedPrevYear) / summary.gainedPrevYear) * 100)
+    : null;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <StatCard label="Aktive Kunden" value={summary.activeCustomers} icon={<Users className={iconSize.sm} />} testId="stat-active-customers" />
+        <StatCard label={`Gewonnen ${selectedYear}`} value={summary.gainedThisYear} icon={<UserCheck className={iconSize.sm} />} color="text-green-600" testId="stat-gained" />
+        <StatCard label={`Verloren ${selectedYear}`} value={summary.lostThisYear} icon={<UserX className={iconSize.sm} />} color="text-red-600" testId="stat-lost" />
+        <StatCard label="Netto-Wachstum" value={summary.netGrowth > 0 ? `+${summary.netGrowth}` : summary.netGrowth} icon={<TrendingUp className={iconSize.sm} />} color={summary.netGrowth >= 0 ? "text-green-600" : "text-red-600"} sub={yoyGrowthPct !== null ? `YoY: ${yoyGrowthPct > 0 ? "+" : ""}${yoyGrowthPct}%` : undefined} testId="stat-net-growth" />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Clock className={iconSize.sm} />
+              Leistungsstunden {selectedYear}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <DonutChart segments={serviceSegments} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Activity className={iconSize.sm} />
+              Zeiterfassung {selectedYear}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <DonutChart segments={entrySegments} />
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Heart className={iconSize.sm} />
+            Kunden-Lifecycle {selectedYear}
+          </CardTitle>
+          <div className="flex items-center gap-4 mt-1">
+            <div className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
+              <span className="text-xs text-muted-foreground">Gewonnen</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded-full bg-red-400" />
+              <span className="text-xs text-muted-foreground">Verloren</span>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            {lifecycle.map((m: any) => (
+              <div key={m.month} className="flex items-center gap-3">
+                <span className="text-xs text-muted-foreground w-8 text-right">{MONTH_NAMES[m.month].slice(0, 3)}</span>
+                <div className="flex-1 flex gap-1">
+                  <div className="flex-1">
+                    <BarStacked
+                      segments={[{ value: m.customersGained, color: "bg-green-500" }]}
+                      max={maxLifecycle}
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <BarStacked
+                      segments={[{ value: m.customersLost, color: "bg-red-400" }]}
+                      max={maxLifecycle}
+                    />
+                  </div>
+                </div>
+                <div className="text-xs w-20 text-right">
+                  <span className="font-medium text-green-600">+{m.customersGained}</span>
+                  <span className="text-muted-foreground"> / </span>
+                  <span className="font-medium text-red-500">-{m.customersLost}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
