@@ -587,19 +587,47 @@ export default function AdminStatistics() {
                     </Card>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                      {serviceSegments.length > 0 && (
-                        <Card>
-                          <CardHeader className="pb-3">
-                            <CardTitle className="text-base flex items-center gap-2">
-                              <Clock className={iconSize.sm} />
-                              Leistungsstunden {selectedYear}
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent>
-                            <DonutChart segments={serviceSegments} />
-                          </CardContent>
-                        </Card>
-                      )}
+                      {(() => {
+                        const entryTypes = growth?.hoursByEntryType || [];
+                        const productiveTypes = ['hauswirtschaft', 'alltagsbegleitung', 'erstberatung'];
+                        const paidUnproductiveTypes = ['bueroarbeit', 'besprechung', 'vertrieb', 'sonstiges', 'weiterbildung'];
+
+                        const productiveMin = serviceSegments.reduce((sum: number, s: any) => sum + s.value, 0);
+                        const paidUnproductiveMin = entryTypes
+                          .filter((e: any) => paidUnproductiveTypes.includes(e.entry_type))
+                          .reduce((sum: number, e: any) => sum + Number(e.total_minutes || 0), 0);
+
+                        const segments = [
+                          ...serviceSegments,
+                          ...(paidUnproductiveMin > 0 ? [{
+                            label: "Büro/Vertrieb/Sonst.",
+                            value: paidUnproductiveMin,
+                            color: "#94a3b8",
+                          }] : []),
+                        ];
+
+                        return segments.length > 0 ? (
+                          <Card>
+                            <CardHeader className="pb-3">
+                              <CardTitle className="text-base flex items-center gap-2">
+                                <Clock className={iconSize.sm} />
+                                Produktiv vs. Unproduktiv {selectedYear}
+                              </CardTitle>
+                              <div className="text-xs text-muted-foreground mt-1">
+                                Ohne Fahrtzeiten · Produktiv: {Math.round(productiveMin / 60)}h · Bezahlt unproduktiv: {Math.round(paidUnproductiveMin / 60)}h
+                                {(productiveMin + paidUnproductiveMin) > 0 && (
+                                  <span className="ml-1">
+                                    ({Math.round((productiveMin / (productiveMin + paidUnproductiveMin)) * 100)}% produktiv)
+                                  </span>
+                                )}
+                              </div>
+                            </CardHeader>
+                            <CardContent>
+                              <DonutChart segments={segments} />
+                            </CardContent>
+                          </Card>
+                        ) : null;
+                      })()}
 
                       {lifecycle.length > 0 && (
                         <Card>
