@@ -1,0 +1,94 @@
+## Konzept: Statistiken-Redesign (separates Vorhaben nach Phase 1)
+
+### Problem: Zahlenfriedhof
+- 7 Tabs, 11+ StatCards auf Übersicht — alles gleiche visuelle Gewichtung
+- Keine Vergleiche (Vormonat, Vorjahr, Soll/Ist)
+- Keine Handlungsaufforderungen/Alerts
+- Duplikate (Stunden-Chart in Übersicht UND Trends)
+- Rohe Zahlen ohne Kontext ("39% DB" — gut oder schlecht?)
+
+### Neues Konzept: 3-Ebenen-Steuerung
+
+#### Ebene 1: Cockpit (ersetzt "Übersicht" — auf einen Blick)
+
+3 große KPI-Karten mit Trend-Indikator (▲▼→) und Ampel-Farbcoding:```
+┌────────────────────┬────────────────────┬────────────────────┐
+│  DB-MARGE           │  AUSLASTUNG         │  BUDGET-NUTZUNG    │
+│  39% ▼ (VM: 42%)   │  78% ▲ (VM: 72%)   │  64% → (Ziel: 80%)│
+│  ████████░░ GELB    │  █████████░ GRÜN    │  ██████░░░░ GELB   │
+│  DB: 2.845€         │  Prod: 156h/200h   │  8.320€/13.100€    │
+│  Erlöse: 7.290€     │  145 Termine       │  12 Kunden          │
+└────────────────────┴────────────────────┴────────────────────┘```
+
+Ampel-Schwellen:
+- DB-Marge: ≥45% Grün, ≥30% Gelb, <30% Rot
+- Auslastung: ≥75% Grün, ≥60% Gelb, <60% Rot
+- Budget: ≥70% Grün, ≥50% Gelb, <50% Rot (ungenutztes Budget = Umsatzpotenzial)
+
+Trend: Vergleich aktueller Monat vs. Vormonat.
+
+#### Ebene 2: Handlungsbedarf ("Was muss ich jetzt tun?")
+
+Alert-Karten, nur sichtbar wenn relevant, sortiert nach Dringlichkeit:```
+🔴 DRINGEND
+├─ 8 Termine abgeschlossen aber nicht dokumentiert (seit >3 Tagen)
+├─ 2 Kunden: Monatsbudget überschritten (Müller, Schmidt)
+└─ 1 MA: EU-Rentner-Limit fast erreicht (Yilmaz: 14,2h/15h)
+
+🟡 ACHTUNG
+├─ 3 Kunden ohne Termine im März (Budget verfällt)
+├─ 5 Tage ohne Pause-Eintrag (Weber, letzte 7 Tage)
+└─ Leistungsnachweis Feb: 4 Kunden noch nicht erstellt
+
+🟢 POSITIV
+├─ 2 neue Kunden diesen Monat (Erstberatung → Aktiv)
+└─ DB/Stunde: 12,80€ (Vormonat: 11,40€ ▲)
+Datenquellen (alle bereits vorhanden oder einfach ableitbar):
+
+Undokumentiert: appointments WHERE status='completed' + kein passender serviceRecord
+Budget-Überschreitung: budgetSummary (existiert)
+Kunden ohne Termine: planning.customersWithoutAppointments (existiert)
+Fehlende Pausen: getOpenTasks() (existiert)
+Fehlende Leistungsnachweise: Vormonats-Check gegen monthlyServiceRecords
+
+Ebene 3: Details (3 Tabs statt 7)
+Tab "Finanzen" (fusioniert: Deckungsbeitrag + Kunden-Budget)
+
+DB-Trend: Balken pro Monat (Erlöse vs. Kosten vs. DB) — nicht Stunden
+Top-5-Kunden nach Erlös + DB%
+§45b Budget-Ausschöpfung pro Kunde
+Kalkulationsgrundlage (gewichtete Durchschnitte, nicht nur Katalog-Defaults)
+
+Tab "Team" (fusioniert: Mitarbeiter + Planung)
+
+Auslastungs-Ranking: produktive vs. unproduktive Stunden pro MA
+DB/Stunde pro MA (sortiert, mit Durchschnitts-Linie)
+Geplant vs. erledigt pro MA
+Kranktage/Urlaub als Kontext
+
+Tab "Entwicklung" (fusioniert: Trends + Wachstum)
+
+Erlös-Trend 12 Monate (Linie)
+Kunden-Zu-/Abgänge
+Stunden-Mix über Zeit (HW vs. AB Anteil-Verschiebung)
+
+Entfällt:
+
+Übersicht → Cockpit (Ebene 1+2)
+Trends → in Entwicklung
+Kunden → Budget in Finanzen, Status in Entwicklung
+Planung → in Team (geplant vs. erledigt)
+
+Backend-Änderungen:
+
+Erweiterung /statistics/overview: Vormonatswerte für Trend-Berechnung
+Neuer Endpoint GET /statistics/alerts: Handlungsbedarf aggregieren
+Bestehende Endpoints bleiben (Profitability, Growth, Planning)
+
+
+Audit-Referenz (Phase 2-5 — Backlog)
+Vollständiger Audit identifizierte 22 Issues in 3 Bereichen. Nicht in Phase 1:
+Phase 2 (Datenkonsistenz): H1 Documented-Appointments editierbar, H2 Orphaned Service-Records, H3 Signatur-Validierung, K3 Versicherungs-Snapshot
+Phase 3 (Budget): K4 §45a Pflegegrad-Konstanten, K5 §39/§42a Max, H7 Advisory Locks, H8 Write-Off Constraint
+Phase 4 (Zeiterfassung): K6 performedByEmployeeId, K8 Fahrtzeit/Pausen, K7 EU-Rentner, H5 KM-Doppelzählung, H6 Admin-Bypass
+Phase 5 (Tests): pipeline-budget-consumption, pipeline-service-records, pipeline-time-tracking
