@@ -76,6 +76,10 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Build Verification**: `script/check-build.mjs` — validates that `dist/` matches source code using **content-based hashing** (NOT file modification times). Both build.ts and check-build.mjs must use identical hashing logic. Critical: mtime-based hashing breaks in deployment environments where file timestamps differ.
 - **Deployment Config**: `.replit` `[deployment]` section — `build` runs `npm run build`, `run` executes check-build then starts `dist/index.cjs`.
 
+### Startup Migrations
+- **Backfill appointment_services** (`server/startup/backfill-appointment-services.ts`): Idempotent — erstellt fehlende `appointment_services`-Einträge für completed/documented Termine die `service_type` + `duration_promised` haben aber keinen `appointment_services`-Eintrag. Behebt die Diskrepanz zwischen Einsatzzeit und Erlösen in der Statistik.
+- **Pflegekassen-Import** (`server/startup/import-pflegekassen.ts`): Idempotent — parst EDIFACT-Kostenträgerverzeichnisse (.ke0/.ke1 Dateien) aus `attached_assets/` und importiert alle Pflegekassen (IK 18*) als `insurance_providers`. 304 Pflegekassen aus 6 Dateien (AOK, BKK, BN, EK, IK, LK). Aktualisiert fehlende Adressen bei bestehenden Einträgen.
+
 ### Audit Status
 - **Data Integrity Audit (03.03.2026)**: Comprehensive audit of billing, budgets, time tracking flows. 6 fixes applied: atomic budget+appointment transactions, LN signing validation, customer-specific pricing in billing, FIFO split detail proportioning, missing price error handling, test data cleanup. Full report in `.local/audit-report.md`.
 - **Last Full Audit**: 8-agent team audit completed with 0 FAIL, all WARN items resolved

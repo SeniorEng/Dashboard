@@ -115,6 +115,9 @@ process.on("uncaughtException", (error) => {
   const { backfillAppointmentServices } = await import("./startup/backfill-appointment-services");
   await backfillAppointmentServices();
 
+  const { importPflegekassen } = await import("./startup/import-pflegekassen");
+  await importPflegekassen();
+
   await registerRoutes(httpServer, app);
 
   const { authService } = await import("./services/auth");
