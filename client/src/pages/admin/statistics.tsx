@@ -274,7 +274,7 @@ export default function AdminStatistics() {
                       testId="cockpit-utilization"
                     />
                     <CockpitKPI
-                      title="§45b Budget"
+                      title="Budget gesamt"
                       icon={<Wallet className="w-5 h-5" />}
                       value={`${cockpit.budget.percent}%`}
                       percent={cockpit.budget.percent}
@@ -283,7 +283,7 @@ export default function AdminStatistics() {
                       prevLabel="Vormonat"
                       metrics={[
                         { label: "Verbraucht", value: cents(cockpit.budget.usedCents) },
-                        { label: "Zugewiesen", value: cents(cockpit.budget.allocatedCents) },
+                        { label: "Verfügbar", value: cents(cockpit.budget.allocatedCents) },
                         { label: "Kunden", value: String(cockpit.budget.customerCount) },
                       ]}
                       testId="cockpit-budget"
@@ -564,12 +564,12 @@ export default function AdminStatistics() {
 
                     <Card className="mb-4">
                       <CardHeader className="pb-3">
-                        <CardTitle className="text-base">§45b Entlastungsbudget {selectedYear}</CardTitle>
+                        <CardTitle className="text-base">Budget gesamt (kumuliert) {selectedYear}</CardTitle>
                       </CardHeader>
                       <CardContent>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-3">
                           <div>
-                            <div className="text-xs text-muted-foreground">Zugewiesen</div>
+                            <div className="text-xs text-muted-foreground">Verfügbar (kumuliert)</div>
                             <div className="text-lg font-bold text-blue-600">{cents(budget.totalAllocatedCents || 0)}</div>
                           </div>
                           <div>
@@ -577,7 +577,7 @@ export default function AdminStatistics() {
                             <div className="text-lg font-bold text-emerald-600">{cents(budget.totalUsedCents || 0)}</div>
                           </div>
                           <div>
-                            <div className="text-xs text-muted-foreground">Verfügbar</div>
+                            <div className="text-xs text-muted-foreground">Noch offen</div>
                             <div className="text-lg font-bold text-amber-600">{cents(Math.max(0, Number(budget.totalAllocatedCents || 0) - Number(budget.totalUsedCents || 0)))}</div>
                           </div>
                         </div>

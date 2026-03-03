@@ -11,6 +11,55 @@ function currentMonth() {
   return new Date().getMonth() + 1;
 }
 
+async function computeBudgetAllPots(
+  yr: number,
+  effectiveMonth: number,
+  usedMonthFilter: ReturnType<typeof sql>,
+  includeCustomerCount: boolean
+) {
+  const [r45b, r45a, r39, usedAll] = await Promise.all([
+    db.execute(sql`
+      SELECT COALESCE(SUM(ba.amount_cents), 0)::bigint AS "allocated"
+      FROM budget_allocations ba
+      WHERE ba.budget_type = 'entlastungsbetrag_45b'
+        AND ba.year = ${yr} AND ba.month <= ${effectiveMonth}
+    `),
+    db.execute(sql`
+      SELECT COALESCE(SUM(ba.amount_cents), 0)::bigint AS "allocated"
+      FROM budget_allocations ba
+      WHERE ba.budget_type = 'umwandlung_45a'
+        AND ba.year = ${yr} AND ba.month = ${effectiveMonth}
+    `),
+    db.execute(sql`
+      SELECT COALESCE(SUM(ba.amount_cents), 0)::bigint AS "yearTotal"
+      FROM budget_allocations ba
+      WHERE ba.budget_type = 'ersatzpflege_39_42a'
+        AND ba.year = ${yr}
+    `),
+    db.execute(sql`
+      SELECT COALESCE(ABS(SUM(bt.amount_cents)), 0)::bigint AS "used"
+        ${includeCustomerCount ? sql`, COUNT(DISTINCT bt.customer_id)::int AS "customerCount"` : sql``}
+      FROM budget_transactions bt
+      WHERE bt.transaction_type = 'consumption'
+        AND EXTRACT(YEAR FROM bt.transaction_date::date) = ${yr}
+        ${usedMonthFilter}
+    `),
+  ]);
+
+  const alloc45b = Number((r45b.rows[0] as any)?.allocated || 0);
+  const alloc45a = Number((r45a.rows[0] as any)?.allocated || 0);
+  const yearTotal39 = Number((r39.rows[0] as any)?.yearTotal || 0);
+  const alloc39 = effectiveMonth >= 12 ? yearTotal39 : Math.round(yearTotal39 / 12 * effectiveMonth);
+  const totalAllocated = alloc45b + alloc45a + alloc39;
+  const totalUsed = Number((usedAll.rows[0] as any)?.used || 0);
+
+  const row: any = { allocatedCents: totalAllocated, usedCents: totalUsed };
+  if (includeCustomerCount) {
+    row.customerCount = Number((usedAll.rows[0] as any)?.customerCount || 0);
+  }
+  return { rows: [row] };
+}
+
 router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden", async (req, res) => {
   if (!req.user!.isAdmin) throw forbidden("FORBIDDEN", "Nur für Administratoren");
 
@@ -235,21 +284,17 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
       ORDER BY c.pflegegrad NULLS FIRST
     `),
 
-    // 7. Budget utilization (§45b) – consumption amounts are stored as negative, use ABS()
-    db.execute(sql`
-      SELECT
-        COALESCE(SUM(ba.amount_cents), 0)::bigint AS "totalAllocatedCents",
-        COALESCE(ABS((
-          SELECT SUM(bt.amount_cents)
-          FROM budget_transactions bt
-          WHERE bt.budget_type = 'entlastungsbetrag_45b'
-            AND EXTRACT(YEAR FROM bt.transaction_date::date) = ${year}
-            AND bt.transaction_type = 'consumption'
-        )), 0)::bigint AS "totalUsedCents"
-      FROM budget_allocations ba
-      WHERE ba.budget_type = 'entlastungsbetrag_45b'
-        AND ba.year = ${year}
-    `),
+    // 7. Budget utilization (all pots) – cumulative to current month
+    (async () => {
+      const now = new Date();
+      const effectiveMonth = month || (year < now.getFullYear() ? 12 : currentMonth());
+      const usedMonthFilter = month
+        ? sql`AND EXTRACT(MONTH FROM bt.transaction_date::date) <= ${month}`
+        : sql``;
+      const result = await computeBudgetAllPots(year, effectiveMonth, usedMonthFilter, true);
+      const r = result.rows[0] as any;
+      return { rows: [{ totalAllocatedCents: r.allocatedCents, totalUsedCents: r.usedCents, customerCount: r.customerCount }] };
+    })(),
   ]);
 
   const isMonthSelected = !!month;
@@ -320,38 +365,8 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
       ) slc
     `) : Promise.resolve({ rows: [null] }),
 
-    db.execute(sql`
-      SELECT
-        COALESCE(SUM(ba.amount_cents), 0)::bigint AS "allocatedCents",
-        COALESCE(ABS((
-          SELECT SUM(bt.amount_cents)
-          FROM budget_transactions bt
-          WHERE bt.budget_type = 'entlastungsbetrag_45b'
-            AND EXTRACT(YEAR FROM bt.transaction_date::date) = ${year}
-            ${cockpitBudgetMonthFilter}
-            AND bt.transaction_type = 'consumption'
-        )), 0)::bigint AS "usedCents",
-        (SELECT COUNT(DISTINCT ba2.customer_id) FROM budget_allocations ba2
-         WHERE ba2.budget_type = 'entlastungsbetrag_45b' AND ba2.year = ${year})::int AS "customerCount"
-      FROM budget_allocations ba
-      WHERE ba.budget_type = 'entlastungsbetrag_45b'
-        AND ba.year = ${year}
-    `),
-    isMonthSelected ? db.execute(sql`
-      SELECT
-        COALESCE(SUM(ba.amount_cents), 0)::bigint AS "allocatedCents",
-        COALESCE(ABS((
-          SELECT SUM(bt.amount_cents)
-          FROM budget_transactions bt
-          WHERE bt.budget_type = 'entlastungsbetrag_45b'
-            AND EXTRACT(YEAR FROM bt.transaction_date::date) = ${prevMonthYear!}
-            AND EXTRACT(MONTH FROM bt.transaction_date::date) = ${prevMonth!}
-            AND bt.transaction_type = 'consumption'
-        )), 0)::bigint AS "usedCents"
-      FROM budget_allocations ba
-      WHERE ba.budget_type = 'entlastungsbetrag_45b'
-        AND ba.year = ${prevMonthYear!}
-    `) : Promise.resolve({ rows: [null] }),
+    computeBudgetAllPots(year, month ? month : (year < new Date().getFullYear() ? 12 : currentMonth()), month ? sql`AND EXTRACT(MONTH FROM bt.transaction_date::date) <= ${month}` : sql``, true),
+    isMonthSelected ? computeBudgetAllPots(prevMonthYear!, prevMonth!, sql`AND EXTRACT(MONTH FROM bt.transaction_date::date) <= ${prevMonth!}`, false) : Promise.resolve({ rows: [null] }),
 
     db.execute(sql`
       SELECT
