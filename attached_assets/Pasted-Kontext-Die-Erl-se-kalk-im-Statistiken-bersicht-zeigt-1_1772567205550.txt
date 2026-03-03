@@ -1,0 +1,104 @@
+Kontext
+Die "Erlöse (kalk.)" im Statistiken-Übersicht zeigt 1.183€ statt erwarteter ~7.000-8.500€ für 213h bei 38€/h HW und 42€/h AB.
+Root Cause: Kundenspezifische Preise aus customer_service_prices werden an drei Stellen ignoriert. Die UI (customer-pricing-section.tsx) schreibt korrekt in customer_service_prices, aber die Berechnungslogik liest nur services.defaultPriceCents.
+
+Betroffene Berechnungspfade
+#DateiMethodeBugAuswirkung1server/storage/budget-ledger.ts Z.593-607calculateAppointmentCost()Nur serviceCatalogStorage.getServiceByCode()Budget-Transaktionen falsch2server/routes/billing.ts Z.119buildLineItemsFromAppointments()svc.defaultPriceCents direktRechnungen falsch!3server/routes/budget.ts Z.69-88cost-estimate Branch 1service.defaultPriceCents direktKostenvoranschlag falsch✓server/routes/statistics.ts Z.336profitability CTECOALESCE(csp.price_cents, s.default_price_cents)Funktioniert (wenn csp befüllt)
+Die Statistik-Profitability ist der einzige Pfad, der customer_service_prices korrekt nutzt.
+
+Teil 1: Pricing-Fix
+1a. calculateAppointmentCost() — server/storage/budget-ledger.ts Z.593-607
+Kundenpreise aus customer_service_prices laden und bevorzugen:
+typescript// Kundenspezifische Preise aus customer_service_prices laden
+const customerPrices = await db.select({
+  serviceCode: services.code,
+  priceCents: customerServicePrices.priceCents,
+}).from(customerServicePrices)
+  .innerJoin(services, eq(customerServicePrices.serviceId, services.id))
+  .where(and(
+    eq(customerServicePrices.customerId, params.customerId),
+    isNull(customerServicePrices.validTo)
+  ));
+
+const cpMap = Object.fromEntries(customerPrices.map(cp => [cp.serviceCode, cp.priceCents]));
+
+// Service-Katalog-Defaults (Fallback)
+const [hwService, abService, travelKmService, customerKmService] = await Promise.all([...]);
+
+// Hierarchie: customer_service_prices > service catalog default
+const hauswirtschaftRateCents = cpMap["hauswirtschaft"]
+  ?? ((hwService?.isBillable !== false) ? (hwService?.defaultPriceCents || 0) : 0);
+const alltagsbegleitungRateCents = cpMap["alltagsbegleitung"]
+  ?? ((abService?.isBillable !== false) ? (abService?.defaultPriceCents || 0) : 0);
+const travelKmRateCents = cpMap["travel_km"]
+  ?? ((travelKmService?.isBillable !== false) ? (travelKmService?.defaultPriceCents || 0) : 0);
+const customerKmRateCents = cpMap["customer_km"]
+  ?? ((customerKmService?.isBillable !== false) ? (customerKmService?.defaultPriceCents || 0) : 0);
+Rest der Methode (Berechnung + Return Z.609-622) bleibt unverändert.
+1b. buildLineItemsFromAppointments() — server/routes/billing.ts Z.79-145
+Aktuell Z.119: const pricePer60Min = svc.defaultPriceCents || 0;
+Fix: customer_service_prices per Batch laden. Vor der Appointment-Schleife (Z.99):
+typescript// Kundenpreise laden (customerId aus dem ersten Appointment)
+const customerId = appts[0]?.customerId;
+const cspRows = customerId ? await db.select({
+  serviceId: customerServicePrices.serviceId,
+  priceCents: customerServicePrices.priceCents,
+}).from(customerServicePrices)
+  .where(and(
+    eq(customerServicePrices.customerId, customerId),
+    isNull(customerServicePrices.validTo)
+  )) : [];
+const cspMap = new Map(cspRows.map(r => [r.serviceId, r.priceCents]));
+Dann Z.119 ersetzen durch:
+typescriptconst pricePer60Min = cspMap.get(svc.serviceId) ?? svc.defaultPriceCents ?? 0;
+Dafür muss serviceId im serviceBreakdown-Query (Z.86-97) mit selektiert werden.
+1c. cost-estimate Branch 1 — server/routes/budget.ts Z.69-88
+Vor der Schleife customer_service_prices für den Kunden laden. In der Schleife: customerPrice ?? service.defaultPriceCents.
+
+Teil 2: Altdaten-Korrektur
+Budget-Transaktionen: POST /api/admin/budget/recalculate-consumption
+Datei: server/routes/budget.ts (neuer Admin-Endpoint)
+
+Alle consumption-Transaktionen laden
+Pro Transaktion: Korrekte Kosten mit gefixtem calculateAppointmentCost() berechnen
+Differenz ≠ 0 → manual_adjustment-Transaktion erstellen
+Features: ?dryRun=true, Admin-only, Audit-Log
+
+Rechnungs-Report (kein automatisches Storno)
+Der Endpoint liefert zusätzlich eine Liste betroffener Rechnungen mit Differenzen. Kein automatisches Storno/Neuerstellen — das muss manuell entschieden werden.
+
+Teil 3: Integrationstests
+tests/pipeline-pricing.test.ts
+TestPrüftKundenpreis bei Budget-BuchungcalculateAppointmentCost mit customer_service_prices → korrekte CentsKundenpreis bei RechnungbuildLineItemsFromAppointments → lineItem.unitPriceCents = KundenpreisFallback ohne KundenpreisOhne customer_service_prices → services.defaultPriceCentscost-estimate mit KundenpreisenGET cost-estimate → totalCents = Kundenpreis × Stunden
+tests/pipeline-budget-consumption.test.ts
+TestPrüftKaskade §45a → §45b → §39/§42aPrioritätsverteilung korrektPrivatzahlung-FallbackBudget erschöpft + acceptsPrivatePaymentNull-Kosten (Erstberatung)isBillable=false → keine Transaktion
+tests/pipeline-service-records.test.ts
+TestPrüftHappy Path ErstellungStatus 201, Termine verknüpftAppointment-LockPATCH nach Lock → Status 403Signatur-Workflowpending → employee_signed → completed
+tests/pipeline-time-tracking.test.ts
+TestPrüftService-Stunden aggregiertgetTimeOverview HW + AB korrektactual vs. planned DurationCompleted zeigt actualGesperrter MonatPOST time-entry → Status 400
+
+Reihenfolge
+
+Fix calculateAppointmentCost() — budget-ledger.ts
+Fix buildLineItemsFromAppointments() — billing.ts
+Fix cost-estimate Branch 1 — budget.ts
+Altdaten-Endpoint — budget.ts (neu)
+Tests — 4 Test-Dateien
+
+Verifizierung
+
+npx vitest run — bestehende Tests grün
+npx vitest run tests/pipeline-*.test.ts — neue Tests bestehen
+Dry-Run: POST /api/admin/budget/recalculate-consumption?dryRun=true
+Statistik prüfen — Erlöse realistisch
+
+Kritische Dateien
+
+server/storage/budget-ledger.ts — calculateAppointmentCost() Z.579-622
+server/routes/billing.ts — buildLineItemsFromAppointments() Z.79-145
+server/routes/budget.ts — cost-estimate Z.55-192
+server/routes/statistics.ts — profitability Z.309-407 (Referenz, funktioniert)
+shared/schema/services.ts — customerServicePrices Z.42-53
+client/src/pages/admin/components/customer-pricing-section.tsx — UI (Referenz)
+tests/test-utils.ts — Test-Helpers
+Genehmige Claudes Plan und starte mit dem Programmieren
