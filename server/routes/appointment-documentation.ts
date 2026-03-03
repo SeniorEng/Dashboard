@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { storage } from "../storage";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
-import { documentKundenterminSchema } from "@shared/schema";
+import { documentKundenterminSchema, appointments } from "@shared/schema";
 import { appointmentService } from "../services/appointments";
 import { auditService } from "../services/audit";
 import { computeDataHash } from "../services/signature-integrity";
@@ -9,6 +9,8 @@ import { asyncHandler, badRequest, notFound, forbidden, AppError, ErrorMessages 
 import { requireAuth } from "../middleware/auth";
 import { checkCustomerAccess } from "./appointments";
 import { timeTrackingStorage } from "../storage/time-tracking";
+import { db } from "../lib/db";
+import { eq } from "drizzle-orm";
 
 const router = Router();
 router.use(requireAuth);
@@ -83,6 +85,15 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
   let budgetTransaction = null;
   let budgetWarning: string | null = null;
 
+  const updatedAppointment = await storage.updateAppointment(id, updateData);
+  if (!updatedAppointment) {
+    throw new AppError(500, "SERVER_ERROR", "Fehler beim Speichern der Dokumentation");
+  }
+
+  if (docResult.serviceUpdates && docResult.serviceUpdates.length > 0) {
+    await storage.updateAppointmentServiceDocumentation(id, docResult.serviceUpdates);
+  }
+
   if (hasUsage) {
     try {
       budgetTransaction = await budgetLedgerStorage.createConsumptionTransaction({
@@ -108,21 +119,16 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
     } catch (budgetError: unknown) {
       const errorMessage = budgetError instanceof Error ? budgetError.message : "Budget-Abbuchung fehlgeschlagen";
       if (errorMessage.includes("Preisvereinbarung")) {
+        await db.update(appointments).set({ status: appointment.status }).where(eq(appointments.id, id));
         throw badRequest(`${errorMessage}. Bitte hinterlegen Sie zuerst eine Preisvereinbarung für diesen Kunden.`);
+      }
+      if (errorMessage.includes("Budget reicht nicht aus")) {
+        await db.update(appointments).set({ status: appointment.status }).where(eq(appointments.id, id));
+        throw badRequest(errorMessage);
       }
       budgetWarning = errorMessage;
       console.warn("Budget booking warning:", budgetError);
     }
-  }
-
-  const updatedAppointment = await storage.updateAppointment(id, updateData);
-
-  if (!updatedAppointment) {
-    throw new AppError(500, "SERVER_ERROR", "Fehler beim Speichern der Dokumentation");
-  }
-
-  if (docResult.serviceUpdates && docResult.serviceUpdates.length > 0) {
-    await storage.updateAppointmentServiceDocumentation(id, docResult.serviceUpdates);
   }
 
   const ip = req.ip || req.socket.remoteAddress;

@@ -14,6 +14,7 @@ import {
   invoiceLineItems,
   monthlyServiceRecords,
   serviceRecordAppointments,
+  customerServicePrices,
 } from "@shared/schema";
 import type { Invoice, InvoiceLineItem, CompanySettings } from "@shared/schema";
 import { eq, and, gte, lte, isNull, inArray, ne, notInArray } from "drizzle-orm";
@@ -76,7 +77,7 @@ async function getAppointmentIdsFromServiceRecords(serviceRecordIds: number[]): 
   return rows.map(r => r.appointmentId);
 }
 
-async function buildLineItemsFromAppointments(apptIds: number[]) {
+async function buildLineItemsFromAppointments(apptIds: number[], customerId?: number) {
   if (apptIds.length === 0) return { lineItems: [], totalNetCents: 0, totalVatCents: 0 };
 
   const appts = await db.select()
@@ -85,6 +86,7 @@ async function buildLineItemsFromAppointments(apptIds: number[]) {
 
   const serviceBreakdown = await db.select({
     appointmentId: appointmentServicesTable.appointmentId,
+    serviceId: appointmentServicesTable.serviceId,
     serviceCode: servicesTable.code,
     serviceName: servicesTable.name,
     plannedDurationMinutes: appointmentServicesTable.plannedDurationMinutes,
@@ -95,6 +97,21 @@ async function buildLineItemsFromAppointments(apptIds: number[]) {
   .from(appointmentServicesTable)
   .innerJoin(servicesTable, eq(appointmentServicesTable.serviceId, servicesTable.id))
   .where(inArray(appointmentServicesTable.appointmentId, apptIds));
+
+  const resolvedCustomerId = customerId ?? appts[0]?.customerId;
+  let customerPriceMap = new Map<number, number>();
+  if (resolvedCustomerId) {
+    const customerPrices = await db.select({
+      serviceId: customerServicePrices.serviceId,
+      priceCents: customerServicePrices.priceCents,
+    })
+    .from(customerServicePrices)
+    .where(and(
+      eq(customerServicePrices.customerId, resolvedCustomerId),
+      isNull(customerServicePrices.validTo)
+    ));
+    customerPriceMap = new Map(customerPrices.map(p => [p.serviceId, p.priceCents]));
+  }
 
   const lineItems: BuildLineItem[] = [];
   let totalNetCents = 0;
@@ -116,7 +133,11 @@ async function buildLineItemsFromAppointments(apptIds: number[]) {
 
     for (const svc of apptServices) {
       const durationMinutes = svc.actualDurationMinutes ?? svc.plannedDurationMinutes;
-      const pricePer60Min = svc.defaultPriceCents || 0;
+      const customerPrice = customerPriceMap.get(svc.serviceId);
+      const pricePer60Min = customerPrice ?? svc.defaultPriceCents;
+      if (pricePer60Min == null) {
+        throw badRequest(`Kein Preis hinterlegt für Dienstleistung "${svc.serviceName || svc.serviceCode}". Bitte prüfen Sie den Dienstleistungskatalog.`);
+      }
       const totalCents = Math.round((durationMinutes / 60) * pricePer60Min);
       const vatBasisPoints = svc.vatRate || 0;
       const vatCents = Math.round(totalCents * vatBasisPoints / 10000);
@@ -207,7 +228,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
     throw badRequest("Alle Termine aus dem Leistungsnachweis wurden bereits abgerechnet.");
   }
 
-  const { lineItems, totalNetCents, totalVatCents } = await buildLineItemsFromAppointments(apptIds);
+  const { lineItems, totalNetCents, totalVatCents } = await buildLineItemsFromAppointments(apptIds, customerId);
 
   const billingType = customer.billingType || "selbstzahler";
   let recipientName = "";
@@ -386,7 +407,7 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
         continue;
       }
 
-      const { lineItems, totalNetCents, totalVatCents } = await buildLineItemsFromAppointments(apptIds);
+      const { lineItems, totalNetCents, totalVatCents } = await buildLineItemsFromAppointments(apptIds, customerId);
 
       const billingType = customer.billingType || "selbstzahler";
       const customerName = customer.vorname && customer.nachname

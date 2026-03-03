@@ -297,6 +297,15 @@ router.post("/:id/sign", requireAuth, asyncHandler("Unterschrift konnte nicht ge
       errors: parsed.error.errors 
     });
   }
+
+  const linkedAppointments = await storage.getAppointmentsForServiceRecord(id);
+  const nonCompletedAppointments = linkedAppointments.filter(a => a.status !== "completed");
+  if (nonCompletedAppointments.length > 0) {
+    const details = nonCompletedAppointments.slice(0, 3).map(a => `${a.date} (${a.status})`).join(", ");
+    return res.status(400).json({
+      message: `Der Leistungsnachweis kann nicht unterschrieben werden: ${nonCompletedAppointments.length} Termin(e) sind nicht mehr im Status 'abgeschlossen'. Betroffene Termine: ${details}`
+    });
+  }
   
   const { signatureData, signerType, signingLocation } = parsed.data;
   const signingIp = req.ip || req.socket.remoteAddress || null;

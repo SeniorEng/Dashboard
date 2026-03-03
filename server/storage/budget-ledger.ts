@@ -1224,15 +1224,16 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         createdByUserId: params?.userId,
       };
 
-      if (isFirstTransaction && params) {
-        txData.hauswirtschaftMinutes = params.hauswirtschaftMinutes ?? null;
-        txData.hauswirtschaftCents = params.hauswirtschaftCents ?? null;
-        txData.alltagsbegleitungMinutes = params.alltagsbegleitungMinutes ?? null;
-        txData.alltagsbegleitungCents = params.alltagsbegleitungCents ?? null;
-        txData.travelKilometers = params.travelKilometers ?? null;
-        txData.travelCents = params.travelCents ?? null;
-        txData.customerKilometers = params.customerKilometers ?? null;
-        txData.customerKilometersCents = params.customerKilometersCents ?? null;
+      if (params) {
+        const ratio = amountCents > 0 ? consumeAmount / amountCents : (isFirstTransaction ? 1 : 0);
+        txData.hauswirtschaftMinutes = params.hauswirtschaftMinutes != null ? Math.round(params.hauswirtschaftMinutes * ratio) : null;
+        txData.hauswirtschaftCents = params.hauswirtschaftCents != null ? Math.round(params.hauswirtschaftCents * ratio) : null;
+        txData.alltagsbegleitungMinutes = params.alltagsbegleitungMinutes != null ? Math.round(params.alltagsbegleitungMinutes * ratio) : null;
+        txData.alltagsbegleitungCents = params.alltagsbegleitungCents != null ? Math.round(params.alltagsbegleitungCents * ratio) : null;
+        txData.travelKilometers = params.travelKilometers != null ? Math.round(params.travelKilometers * ratio) : null;
+        txData.travelCents = params.travelCents != null ? Math.round(params.travelCents * ratio) : null;
+        txData.customerKilometers = params.customerKilometers != null ? Math.round(params.customerKilometers * ratio) : null;
+        txData.customerKilometersCents = params.customerKilometersCents != null ? Math.round(params.customerKilometersCents * ratio) : null;
       }
 
       const result = await d.insert(budgetTransactions).values(txData).returning();

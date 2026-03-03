@@ -76,6 +76,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Deployment Config**: `.replit` `[deployment]` section — `build` runs `npm run build`, `run` executes check-build then starts `dist/index.cjs`.
 
 ### Audit Status
+- **Data Integrity Audit (03.03.2026)**: Comprehensive audit of billing, budgets, time tracking flows. 6 fixes applied: atomic budget+appointment transactions, LN signing validation, customer-specific pricing in billing, FIFO split detail proportioning, missing price error handling, test data cleanup. Full report in `.local/audit-report.md`.
 - **Last Full Audit**: 8-agent team audit completed with 0 FAIL, all WARN items resolved
 - **TypeScript**: 0 errors (fixed: audit action types, DayTimeEntry.kilometers, AppointmentWithCustomerName fields, isLocked type, documentDate mutation type, Set iteration, asyncHandler signature)
 - **Build**: Clean (535.8 KB gzipped, 105 chunks, code-split)
