@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Link } from "wouter";
+import { Link, useSearch } from "wouter";
 import { formatKm } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
@@ -94,9 +94,11 @@ function BarStacked({ segments, max }: { segments: { value: number; color: strin
 export default function AdminStatistics() {
   const currentYear = new Date().getFullYear();
   const currentMonth = new Date().getMonth() + 1;
+  const searchString = useSearch();
+  const urlTab = new URLSearchParams(searchString).get("tab");
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
-  const [activeTab, setActiveTab] = useState("cockpit");
+  const [activeTab, setActiveTab] = useState(urlTab && ["cockpit", "team", "customers", "planning"].includes(urlTab) ? urlTab : "cockpit");
 
   const monthParam = selectedMonth !== "all" ? `&month=${selectedMonth}` : "";
 

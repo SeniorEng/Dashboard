@@ -1095,7 +1095,7 @@ router.get("/alerts", asyncHandler("Handlungsbedarf konnte nicht geladen werden"
       title: "Undokumentierte Termine",
       description: `${undocCount} abgeschlossene Termine warten seit mehr als 3 Tagen auf Dokumentation.`,
       count: undocCount,
-      link: "/admin/appointments?status=completed",
+      link: "/undocumented",
     });
   }
 
@@ -1117,7 +1117,7 @@ router.get("/alerts", asyncHandler("Handlungsbedarf konnte nicht geladen werden"
       title: "Kunden ohne Termine",
       description: `${noApptCount} aktive Kunden haben keine Termine im ${MONTH_NAMES_DE[curMonth]}.`,
       count: noApptCount,
-      link: "/admin/statistics",
+      link: "/admin/statistics?tab=planning",
     });
   }
 
