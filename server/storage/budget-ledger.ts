@@ -682,8 +682,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           const s45b = settingsMap.get("entlastungsbetrag_45b");
           if (s45b && !s45b.enabled) effective45b = 0;
           if (s45b?.monthlyLimitCents !== null && s45b?.monthlyLimitCents !== undefined) {
-            const carryoverAvailable = await this.getAvailableCarryoverCents(params.customerId, params.transactionDate);
-            const effectiveLimit = s45b.monthlyLimitCents + carryoverAvailable;
+            const totalCarryover = await this.getTotalCarryoverCents(params.customerId, params.transactionDate);
+            const effectiveLimit = s45b.monthlyLimitCents + totalCarryover;
             const monthlyRemaining45b = Math.max(0, effectiveLimit - summaries.entlastungsbetrag45b.currentMonthUsedCents);
             effective45b = Math.min(effective45b, monthlyRemaining45b);
           }
@@ -704,8 +704,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         } else {
           const preferences = await this.getBudgetPreferences(params.customerId);
           if (preferences?.monthlyLimitCents !== null && preferences?.monthlyLimitCents !== undefined) {
-            const carryoverAvailable = await this.getAvailableCarryoverCents(params.customerId, params.transactionDate);
-            const effectiveLimit = preferences.monthlyLimitCents + carryoverAvailable;
+            const totalCarryover = await this.getTotalCarryoverCents(params.customerId, params.transactionDate);
+            const effectiveLimit = preferences.monthlyLimitCents + totalCarryover;
             const monthlyRemaining45b = Math.max(0, effectiveLimit - summaries.entlastungsbetrag45b.currentMonthUsedCents);
             effective45b = Math.min(effective45b, monthlyRemaining45b);
           }
@@ -1017,6 +1017,26 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return { entlastungsbetrag45b, umwandlung45a, ersatzpflege39_42a };
   }
 
+  async getTotalCarryoverCents(customerId: number, asOfDate: string, _tx?: DbClient): Promise<number> {
+    const d = _tx ?? db;
+    const carryoverAllocations = await d.select({
+      total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
+    })
+      .from(budgetAllocations)
+      .where(and(
+        eq(budgetAllocations.customerId, customerId),
+        eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
+        eq(budgetAllocations.source, "carryover"),
+        lte(budgetAllocations.validFrom, asOfDate),
+        or(
+          isNull(budgetAllocations.expiresAt),
+          gte(budgetAllocations.expiresAt, asOfDate)
+        )
+      ));
+
+    return Number(carryoverAllocations[0]?.total ?? 0);
+  }
+
   async getAvailableCarryoverCents(customerId: number, asOfDate: string, _tx?: DbClient): Promise<number> {
     const d = _tx ?? db;
     const carryoverAllocations = await d.select()
@@ -1325,8 +1345,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
           let effectiveMonthlyLimit = pot.monthlyLimitCents;
           if (pot.budgetType === "entlastungsbetrag_45b") {
-            const carryoverAvailable = await this.getAvailableCarryoverCents(params.customerId, params.transactionDate, tx);
-            effectiveMonthlyLimit = pot.monthlyLimitCents + carryoverAvailable;
+            const totalCarryover = await this.getTotalCarryoverCents(params.customerId, params.transactionDate, tx);
+            effectiveMonthlyLimit = pot.monthlyLimitCents + totalCarryover;
           }
 
           const monthlyRemaining = Math.max(0, effectiveMonthlyLimit - alreadyUsedThisMonth);
