@@ -10,7 +10,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ArrowLeft, Loader2, BarChart3, Users, TrendingUp, Activity,
   Euro, Car, Clock, UserCheck, Heart, CalendarDays, PiggyBank,
-  CalendarCheck, UserX,
+  CalendarCheck, UserX, AlertTriangle, CheckCircle2, AlertCircle,
+  ArrowUpRight, ArrowDownRight, Minus, Gauge, Wallet,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { iconSize, componentStyles } from "@/design-system";
@@ -95,7 +96,7 @@ export default function AdminStatistics() {
   const currentMonth = new Date().getMonth() + 1;
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTab, setActiveTab] = useState("cockpit");
 
   const monthParam = selectedMonth !== "all" ? `&month=${selectedMonth}` : "";
 
@@ -144,6 +145,16 @@ export default function AdminStatistics() {
     staleTime: 60000,
   });
 
+  const { data: alerts } = useQuery<any[]>({
+    queryKey: ["statistics-alerts"],
+    queryFn: async () => {
+      const result = await api.get<any[]>(`/statistics/alerts`);
+      return unwrapResult(result);
+    },
+    staleTime: 120000,
+  });
+
+  const cockpit = data?.cockpit;
   const employees = data?.employees ?? [];
   const revenue = data?.revenue ?? {};
   const customerStats = data?.customers ?? {};
@@ -231,7 +242,7 @@ export default function AdminStatistics() {
         ) : (
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="mb-6 flex-wrap h-auto gap-1">
-              <TabsTrigger value="overview" data-testid="tab-overview">Übersicht</TabsTrigger>
+              <TabsTrigger value="cockpit" data-testid="tab-cockpit">Cockpit</TabsTrigger>
               <TabsTrigger value="profitability" data-testid="tab-profitability">Deckungsbeitrag</TabsTrigger>
               <TabsTrigger value="employees" data-testid="tab-employees">Mitarbeiter</TabsTrigger>
               <TabsTrigger value="customers" data-testid="tab-customers">Kunden</TabsTrigger>
@@ -240,181 +251,143 @@ export default function AdminStatistics() {
               <TabsTrigger value="planning" data-testid="tab-planning">Planung</TabsTrigger>
             </TabsList>
 
-            {/* OVERVIEW TAB */}
-            <TabsContent value="overview">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-                <StatCard
-                  label="Erlöse (kalk.)"
-                  value={cents(profitability?.totals?.revenueCents || 0)}
-                  sub={`DB: ${cents(profitability?.totals?.marginCents || 0)} (${profitability?.marginPercent || 0}%)`}
-                  icon={<Euro className="w-5 h-5" />}
-                  color="text-emerald-600"
-                  testId="stat-revenue"
-                />
-                <StatCard
-                  label="Aktive Kunden"
-                  value={customerStats.activeCustomers || 0}
-                  icon={<Users className="w-5 h-5" />}
-                  color="text-purple-600"
-                  testId="stat-customers"
-                />
-                <StatCard
-                  label="Aktive Mitarbeiter"
-                  value={employees.filter((e: any) => e.appointments > 0).length}
-                  icon={<UserCheck className="w-5 h-5" />}
-                  color="text-teal-600"
-                  testId="stat-employees"
-                />
-              </div>
+            {/* COCKPIT TAB */}
+            <TabsContent value="cockpit">
+              {cockpit ? (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <CockpitKPI
+                      title="DB-Marge"
+                      icon={<PiggyBank className="w-5 h-5" />}
+                      value={`${cockpit.margin.marginPercent}%`}
+                      percent={cockpit.margin.marginPercent}
+                      thresholds={{ green: 45, yellow: 30 }}
+                      prevValue={cockpit.marginPrev ? cockpit.marginPrev.marginPercent : null}
+                      prevLabel="Vormonat"
+                      metrics={[
+                        { label: "Erlöse", value: cents(cockpit.margin.revenueCents) },
+                        { label: "DB", value: cents(cockpit.margin.marginCents) },
+                        { label: "Termine", value: String(cockpit.margin.appointments) },
+                      ]}
+                      testId="cockpit-margin"
+                    />
+                    <CockpitKPI
+                      title="Auslastung"
+                      icon={<Gauge className="w-5 h-5" />}
+                      value={`${cockpit.utilization.percent}%`}
+                      percent={cockpit.utilization.percent}
+                      thresholds={{ green: 75, yellow: 60 }}
+                      prevValue={cockpit.utilizationPrev ? cockpit.utilizationPrev.percent : null}
+                      prevLabel="Vormonat"
+                      metrics={[
+                        { label: "Produktiv", value: hours(cockpit.utilization.productiveMinutes) },
+                        { label: "Overhead", value: hours(cockpit.utilization.overheadMinutes) },
+                        { label: "Termine", value: String(cockpit.utilization.appointments) },
+                      ]}
+                      testId="cockpit-utilization"
+                    />
+                    <CockpitKPI
+                      title="§45b Budget"
+                      icon={<Wallet className="w-5 h-5" />}
+                      value={`${cockpit.budget.percent}%`}
+                      percent={cockpit.budget.percent}
+                      thresholds={{ green: 70, yellow: 50 }}
+                      prevValue={cockpit.budgetPrev ? cockpit.budgetPrev.percent : null}
+                      prevLabel="Vormonat"
+                      metrics={[
+                        { label: "Verbraucht", value: cents(cockpit.budget.usedCents) },
+                        { label: "Zugewiesen", value: cents(cockpit.budget.allocatedCents) },
+                        { label: "Kunden", value: String(cockpit.budget.customerCount) },
+                      ]}
+                      testId="cockpit-budget"
+                    />
+                  </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-                <StatCard
-                  label="Geplant"
-                  value={efficiency.scheduledAppointments || 0}
-                  sub="offene Termine"
-                  icon={<CalendarDays className="w-5 h-5" />}
-                  color="text-blue-600"
-                  testId="stat-scheduled"
-                />
-                <StatCard
-                  label="Abgeschlossen"
-                  value={efficiency.completedAppointments || 0}
-                  sub="ohne Leistungsnachweis"
-                  icon={<CalendarCheck className="w-5 h-5" />}
-                  color="text-amber-600"
-                  testId="stat-completed"
-                />
-                <StatCard
-                  label="Dokumentiert"
-                  value={efficiency.documentedAppointments || 0}
-                  sub="mit Leistungsnachweis"
-                  icon={<Activity className="w-5 h-5" />}
-                  color="text-emerald-600"
-                  testId="stat-documented"
-                />
-                <StatCard
-                  label="Stornoquote"
-                  value={pct(efficiency.cancelledAppointments || 0, efficiency.totalAppointments || 1)}
-                  sub={`${efficiency.cancelledAppointments || 0} storniert`}
-                  color="text-red-600"
-                  testId="stat-cancel-rate"
-                />
-                <StatCard
-                  label="Gesamt-KM"
-                  value={`${formatKm((efficiency.totalTravelKm || 0) + (efficiency.totalCustomerKm || 0))} km`}
-                  sub={`${formatKm(efficiency.totalTravelKm)} Anfahrt + ${formatKm(efficiency.totalCustomerKm)} Kunden`}
-                  icon={<Car className="w-5 h-5" />}
-                  color="text-orange-600"
-                  testId="stat-km"
-                />
-                <StatCard
-                  label="Einsatzzeit"
-                  value={hours(efficiency.totalServiceMinutes || 0)}
-                  sub={`${(efficiency.completedAppointments || 0) + (efficiency.documentedAppointments || 0)} Termine`}
-                  icon={<Clock className="w-5 h-5" />}
-                  color="text-amber-600"
-                  testId="stat-service-time"
-                />
-                <StatCard
-                  label="§45b Nutzung"
-                  value={pct(Number(budget.totalUsedCents || 0), Number(budget.totalAllocatedCents || 1))}
-                  sub={`${cents(budget.totalUsedCents || 0)} / ${cents(budget.totalAllocatedCents || 0)}`}
-                  icon={<Heart className="w-5 h-5" />}
-                  color="text-pink-600"
-                  testId="stat-budget"
-                />
-              </div>
+                  <AlertsSection alerts={alerts || []} />
 
-              {/* Pflegegrad Distribution */}
-              <Card className="mb-6">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Pflegegradverteilung</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex gap-3 flex-wrap">
-                    {pflegegrad.map((pg: any) => (
-                      <div key={pg.pflegegrad} className="text-center px-4 py-2 bg-gray-50 rounded-lg" data-testid={`pg-${pg.pflegegrad}`}>
-                        <div className="text-lg font-bold text-teal-700">{pg.count}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {pg.pflegegrad === 0 ? "Kein PG" : `PG ${pg.pflegegrad}`}
-                        </div>
+                  <Card className="mb-6">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base">Pflegegradverteilung</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex gap-3 flex-wrap">
+                        {pflegegrad.map((pg: any) => (
+                          <div key={pg.pflegegrad} className="text-center px-4 py-2 bg-gray-50 rounded-lg" data-testid={`pg-${pg.pflegegrad}`}>
+                            <div className="text-lg font-bold text-teal-700">{pg.count}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {pg.pflegegrad === 0 ? "Kein PG" : `PG ${pg.pflegegrad}`}
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
+                    </CardContent>
+                  </Card>
 
-              {/* Quick Monthly Trend */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Monatliche Stunden {selectedYear}</CardTitle>
-                  <div className="flex items-center gap-3 mt-1 flex-wrap">
-                    <div className="flex items-center gap-1">
-                      <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-                      <span className="text-xs text-muted-foreground">HW</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-2.5 h-2.5 rounded-full bg-teal-500" />
-                      <span className="text-xs text-muted-foreground">AB</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                      <span className="text-xs text-muted-foreground">EB</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-2.5 h-2.5 rounded-full bg-slate-400" />
-                      <span className="text-xs text-muted-foreground">Pause</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
-                      <span className="text-xs text-muted-foreground">Büro</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-2.5 h-2.5 rounded-full bg-purple-500" />
-                      <span className="text-xs text-muted-foreground">Sonst.</span>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    {trends.map((t: any) => {
-                      const hw = Number(t.hwMinutes || 0);
-                      const ab = Number(t.abMinutes || 0);
-                      const eb = Number(t.ebMinutes || 0);
-                      const pause = Number(t.pauseMinutes || 0);
-                      const buero = Number(t.bueroarbeitMinutes || 0) + Number(t.besprechungMinutes || 0);
-                      const sonst = Number(t.sonstigesMinutes || 0) + Number(t.weiterbildungMinutes || 0) + Number(t.krankMinutes || 0) + Number(t.urlaubMinutes || 0) + Number(t.vertriebMinutes || 0);
-                      const totalMin = hw + ab + eb + pause + buero + sonst;
-                      const totalHours = totalMin > 0 ? (totalMin / 60).toFixed(1) : "0";
-                      const termine = Number(t.completedHauswirtschaft || 0) + Number(t.completedAlltagsbegleitung || 0) + Number(t.completedErstberatungen || 0);
-                      return (
-                        <div key={t.month} className="flex items-center gap-3">
-                          <span className="text-xs text-muted-foreground w-8 text-right">{MONTH_NAMES[t.month].slice(0, 3)}</span>
-                          <div className="flex-1">
-                            <BarStacked
-                              segments={[
-                                { value: hw, color: "bg-blue-500" },
-                                { value: ab, color: "bg-teal-500" },
-                                { value: eb, color: "bg-amber-500" },
-                                { value: pause, color: "bg-slate-400" },
-                                { value: buero, color: "bg-indigo-500" },
-                                { value: sonst, color: "bg-purple-500" },
-                              ]}
-                              max={maxTrendMinutes}
-                            />
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base">Monatliche Stunden {selectedYear}</CardTitle>
+                      <div className="flex items-center gap-3 mt-1 flex-wrap">
+                        {[
+                          { color: "bg-blue-500", label: "HW" },
+                          { color: "bg-teal-500", label: "AB" },
+                          { color: "bg-amber-500", label: "EB" },
+                          { color: "bg-slate-400", label: "Pause" },
+                          { color: "bg-indigo-500", label: "Büro" },
+                          { color: "bg-purple-500", label: "Sonst." },
+                        ].map(l => (
+                          <div key={l.label} className="flex items-center gap-1">
+                            <div className={`w-2.5 h-2.5 rounded-full ${l.color}`} />
+                            <span className="text-xs text-muted-foreground">{l.label}</span>
                           </div>
-                          <div className="text-xs w-28 text-right shrink-0">
-                            <span className="font-medium">{totalHours}h</span>
-                            <span className="text-muted-foreground"> · </span>
-                            <span className="font-medium">{termine}</span>
-                            <span className="text-muted-foreground"> Termine</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
+                        ))}
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        {trends.map((t: any) => {
+                          const hw = Number(t.hwMinutes || 0);
+                          const ab = Number(t.abMinutes || 0);
+                          const eb = Number(t.ebMinutes || 0);
+                          const pause = Number(t.pauseMinutes || 0);
+                          const buero = Number(t.bueroarbeitMinutes || 0) + Number(t.besprechungMinutes || 0);
+                          const sonst = Number(t.sonstigesMinutes || 0) + Number(t.weiterbildungMinutes || 0) + Number(t.krankMinutes || 0) + Number(t.urlaubMinutes || 0);
+                          const totalMin = hw + ab + eb + pause + buero + sonst;
+                          const totalHours = totalMin > 0 ? (totalMin / 60).toFixed(1) : "0";
+                          const termine = Number(t.completedHauswirtschaft || 0) + Number(t.completedAlltagsbegleitung || 0) + Number(t.completedErstberatungen || 0);
+                          return (
+                            <div key={t.month} className="flex items-center gap-3">
+                              <span className="text-xs text-muted-foreground w-8 text-right">{MONTH_NAMES[t.month].slice(0, 3)}</span>
+                              <div className="flex-1">
+                                <BarStacked
+                                  segments={[
+                                    { value: hw, color: "bg-blue-500" },
+                                    { value: ab, color: "bg-teal-500" },
+                                    { value: eb, color: "bg-amber-500" },
+                                    { value: pause, color: "bg-slate-400" },
+                                    { value: buero, color: "bg-indigo-500" },
+                                    { value: sonst, color: "bg-purple-500" },
+                                  ]}
+                                  max={maxTrendMinutes}
+                                />
+                              </div>
+                              <div className="text-xs w-28 text-right shrink-0">
+                                <span className="font-medium">{totalHours}h</span>
+                                <span className="text-muted-foreground"> · </span>
+                                <span className="font-medium">{termine}</span>
+                                <span className="text-muted-foreground"> Termine</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </>
+              ) : (
+                <div className="flex justify-center py-16">
+                  <Loader2 className={`${iconSize.lg} animate-spin text-teal-600`} />
+                </div>
+              )}
             </TabsContent>
 
             {/* EMPLOYEES TAB */}
@@ -1102,6 +1075,120 @@ function DonutChart({ segments, size = 160 }: { segments: { label: string; value
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+interface CockpitKPIProps {
+  title: string;
+  icon: React.ReactNode;
+  value: string;
+  percent: number;
+  thresholds: { green: number; yellow: number };
+  prevValue: number | null;
+  prevLabel: string;
+  metrics: { label: string; value: string }[];
+  testId: string;
+}
+
+function CockpitKPI({ title, icon, value, percent, thresholds, prevValue, prevLabel, metrics, testId }: CockpitKPIProps) {
+  const color = percent >= thresholds.green
+    ? { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-700", bar: "bg-emerald-500", badge: "bg-emerald-100 text-emerald-800" }
+    : percent >= thresholds.yellow
+    ? { bg: "bg-amber-50", border: "border-amber-200", text: "text-amber-700", bar: "bg-amber-500", badge: "bg-amber-100 text-amber-800" }
+    : { bg: "bg-red-50", border: "border-red-200", text: "text-red-700", bar: "bg-red-500", badge: "bg-red-100 text-red-800" };
+
+  const trend = prevValue !== null ? percent - prevValue : null;
+
+  return (
+    <Card className={`${color.border} ${color.bg}`} data-testid={testId}>
+      <CardContent className="p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <div className={color.text}>{icon}</div>
+          <span className="font-semibold text-sm">{title}</span>
+          <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-medium ${color.badge}`}>
+            {percent >= thresholds.green ? "Gut" : percent >= thresholds.yellow ? "Achtung" : "Kritisch"}
+          </span>
+        </div>
+
+        <div className="flex items-end gap-3 mb-3">
+          <span className={`text-3xl font-bold ${color.text}`} data-testid={`${testId}-value`}>{value}</span>
+          {trend !== null && (
+            <div className={`flex items-center gap-0.5 text-sm mb-1 ${trend > 0 ? "text-emerald-600" : trend < 0 ? "text-red-600" : "text-gray-500"}`} data-testid={`${testId}-trend`}>
+              {trend > 0 ? <ArrowUpRight className="w-4 h-4" /> : trend < 0 ? <ArrowDownRight className="w-4 h-4" /> : <Minus className="w-4 h-4" />}
+              <span className="font-medium">{trend > 0 ? "+" : ""}{trend}%</span>
+              <span className="text-xs text-muted-foreground ml-0.5">{prevLabel}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="w-full bg-white/60 rounded-full h-2 mb-3">
+          <div className={`h-2 rounded-full ${color.bar} transition-all`} style={{ width: `${Math.min(percent, 100)}%` }} />
+        </div>
+
+        <div className="grid grid-cols-3 gap-2">
+          {metrics.map(m => (
+            <div key={m.label} className="text-center">
+              <div className="text-xs text-muted-foreground">{m.label}</div>
+              <div className="text-sm font-semibold">{m.value}</div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function AlertsSection({ alerts }: { alerts: any[] }) {
+  const activeAlerts = alerts.filter(a => a.count > 0);
+
+  if (activeAlerts.length === 0) {
+    return (
+      <Card className="mb-6 border-emerald-200 bg-emerald-50/50">
+        <CardContent className="p-4 flex items-center gap-3">
+          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+          <span className="text-sm text-emerald-700 font-medium" data-testid="alerts-all-clear">Alles im grünen Bereich — kein Handlungsbedarf.</span>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const severityOrder = { rot: 0, gelb: 1, gruen: 2 };
+  const sorted = [...activeAlerts].sort((a, b) => (severityOrder[a.severity as keyof typeof severityOrder] ?? 9) - (severityOrder[b.severity as keyof typeof severityOrder] ?? 9));
+
+  const severityConfig = {
+    rot: { border: "border-l-red-500", bg: "bg-red-50/50", icon: <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />, badge: "bg-red-100 text-red-800" },
+    gelb: { border: "border-l-amber-500", bg: "bg-amber-50/50", icon: <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />, badge: "bg-amber-100 text-amber-800" },
+    gruen: { border: "border-l-emerald-500", bg: "bg-emerald-50/50", icon: <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />, badge: "bg-emerald-100 text-emerald-800" },
+  };
+
+  return (
+    <div className="space-y-2 mb-6" data-testid="alerts-section">
+      <h3 className="text-sm font-semibold text-muted-foreground mb-2">Handlungsbedarf</h3>
+      {sorted.map((alert, i) => {
+        const cfg = severityConfig[alert.severity as keyof typeof severityConfig] || severityConfig.gelb;
+        return (
+          <Card key={i} className={`border-l-4 ${cfg.border} ${cfg.bg}`} data-testid={`alert-${i}`}>
+            <CardContent className="p-4 flex items-start gap-3">
+              {cfg.icon}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className="font-semibold text-sm">{alert.title}</span>
+                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${cfg.badge}`}>{alert.count}</span>
+                </div>
+                <p className="text-xs text-muted-foreground">{alert.description}</p>
+              </div>
+              {alert.link && (
+                <Link href={alert.link}>
+                  <Button variant="ghost" size="sm" className="shrink-0 text-xs" data-testid={`alert-${i}-link`}>
+                    Anzeigen
+                  </Button>
+                </Link>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })}
     </div>
   );
 }

@@ -7,6 +7,10 @@ import { sql } from "drizzle-orm";
 const router = Router();
 router.use(requireAuth);
 
+function currentMonth() {
+  return new Date().getMonth() + 1;
+}
+
 router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden", async (req, res) => {
   if (!req.user!.isAdmin) throw forbidden("FORBIDDEN", "Nur für Administratoren");
 
@@ -248,6 +252,202 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
     `),
   ]);
 
+  const isMonthSelected = !!month;
+  const cockpitMonthFilter = month
+    ? sql`AND EXTRACT(MONTH FROM a.date::date) = ${month}`
+    : sql``;
+  const cockpitTimeMonthFilter = month
+    ? sql`AND EXTRACT(MONTH FROM t.entry_date::date) = ${month}`
+    : sql``;
+  const cockpitBudgetMonthFilter = month
+    ? sql`AND EXTRACT(MONTH FROM bt.transaction_date::date) = ${month}`
+    : sql``;
+
+  const prevMonth = month ? (month === 1 ? 12 : month - 1) : null;
+  const prevMonthYear = month ? (month === 1 ? year - 1 : year) : null;
+
+  const [cockpitCurrent, cockpitPrev, cockpitBudgetCurrent, cockpitBudgetPrev, cockpitUtilCurrent, cockpitUtilPrev] = await Promise.all([
+    db.execute(sql`
+      SELECT
+        COALESCE(SUM(ROUND(slc.minutes / 60.0 * slc.price)), 0)::bigint AS "revenueCents",
+        COALESCE(SUM(ROUND(slc.minutes / 60.0 * slc.cost)), 0)::bigint AS "costCents",
+        COALESCE(SUM(slc.minutes), 0)::int AS "totalMinutes",
+        COUNT(DISTINCT slc.appointment_id)::int AS appointments
+      FROM (
+        SELECT asvc.appointment_id,
+          COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) AS minutes,
+          COALESCE(
+            (SELECT csp.price_cents FROM customer_service_prices csp
+             WHERE csp.customer_id = a.customer_id AND csp.service_id = s.id
+               AND csp.valid_from::date <= a.date::date AND (csp.valid_to IS NULL OR csp.valid_to::date >= a.date::date)
+             ORDER BY csp.valid_from DESC LIMIT 1),
+            s.default_price_cents
+          ) AS price,
+          s.employee_rate_cents AS cost
+        FROM appointments a
+        JOIN appointment_services asvc ON asvc.appointment_id = a.id
+        JOIN services s ON s.id = asvc.service_id
+        WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented')
+          AND s.unit_type = 'hours'
+          AND EXTRACT(YEAR FROM a.date::date) = ${year}
+          ${cockpitMonthFilter}
+      ) slc
+    `),
+    isMonthSelected ? db.execute(sql`
+      SELECT
+        COALESCE(SUM(ROUND(slc.minutes / 60.0 * slc.price)), 0)::bigint AS "revenueCents",
+        COALESCE(SUM(ROUND(slc.minutes / 60.0 * slc.cost)), 0)::bigint AS "costCents",
+        COALESCE(SUM(slc.minutes), 0)::int AS "totalMinutes",
+        COUNT(DISTINCT slc.appointment_id)::int AS appointments
+      FROM (
+        SELECT asvc.appointment_id,
+          COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) AS minutes,
+          COALESCE(
+            (SELECT csp.price_cents FROM customer_service_prices csp
+             WHERE csp.customer_id = a.customer_id AND csp.service_id = s.id
+               AND csp.valid_from::date <= a.date::date AND (csp.valid_to IS NULL OR csp.valid_to::date >= a.date::date)
+             ORDER BY csp.valid_from DESC LIMIT 1),
+            s.default_price_cents
+          ) AS price,
+          s.employee_rate_cents AS cost
+        FROM appointments a
+        JOIN appointment_services asvc ON asvc.appointment_id = a.id
+        JOIN services s ON s.id = asvc.service_id
+        WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented')
+          AND s.unit_type = 'hours'
+          AND EXTRACT(YEAR FROM a.date::date) = ${prevMonthYear!}
+          AND EXTRACT(MONTH FROM a.date::date) = ${prevMonth!}
+      ) slc
+    `) : Promise.resolve({ rows: [null] }),
+
+    db.execute(sql`
+      SELECT
+        COALESCE(SUM(ba.amount_cents), 0)::bigint AS "allocatedCents",
+        COALESCE(ABS((
+          SELECT SUM(bt.amount_cents)
+          FROM budget_transactions bt
+          WHERE bt.budget_type = 'entlastungsbetrag_45b'
+            AND EXTRACT(YEAR FROM bt.transaction_date::date) = ${year}
+            ${cockpitBudgetMonthFilter}
+            AND bt.transaction_type = 'consumption'
+        )), 0)::bigint AS "usedCents",
+        (SELECT COUNT(DISTINCT ba2.customer_id) FROM budget_allocations ba2
+         WHERE ba2.budget_type = 'entlastungsbetrag_45b' AND ba2.year = ${year})::int AS "customerCount"
+      FROM budget_allocations ba
+      WHERE ba.budget_type = 'entlastungsbetrag_45b'
+        AND ba.year = ${year}
+    `),
+    isMonthSelected ? db.execute(sql`
+      SELECT
+        COALESCE(SUM(ba.amount_cents), 0)::bigint AS "allocatedCents",
+        COALESCE(ABS((
+          SELECT SUM(bt.amount_cents)
+          FROM budget_transactions bt
+          WHERE bt.budget_type = 'entlastungsbetrag_45b'
+            AND EXTRACT(YEAR FROM bt.transaction_date::date) = ${prevMonthYear!}
+            AND EXTRACT(MONTH FROM bt.transaction_date::date) = ${prevMonth!}
+            AND bt.transaction_type = 'consumption'
+        )), 0)::bigint AS "usedCents"
+      FROM budget_allocations ba
+      WHERE ba.budget_type = 'entlastungsbetrag_45b'
+        AND ba.year = ${prevMonthYear!}
+    `) : Promise.resolve({ rows: [null] }),
+
+    db.execute(sql`
+      SELECT
+        COALESCE(SUM(CASE WHEN a.status IN ('completed','documented') THEN a.duration_promised ELSE 0 END), 0)::int AS "productiveMinutes",
+        COALESCE((
+          SELECT SUM(t.duration_minutes)
+          FROM employee_time_entries t
+          WHERE t.deleted_at IS NULL
+            AND EXTRACT(YEAR FROM t.entry_date::date) = ${year}
+            ${cockpitTimeMonthFilter}
+            AND t.entry_type IN ('bueroarbeit','besprechung','vertrieb','sonstiges','schulung')
+        ), 0)::int AS "overheadMinutes",
+        COUNT(*) FILTER (WHERE a.status IN ('completed','documented'))::int AS "completedAppointments"
+      FROM appointments a
+      WHERE a.deleted_at IS NULL
+        AND EXTRACT(YEAR FROM a.date::date) = ${year}
+        ${cockpitMonthFilter}
+    `),
+    isMonthSelected ? db.execute(sql`
+      SELECT
+        COALESCE(SUM(CASE WHEN a.status IN ('completed','documented') THEN a.duration_promised ELSE 0 END), 0)::int AS "productiveMinutes",
+        COALESCE((
+          SELECT SUM(t.duration_minutes)
+          FROM employee_time_entries t
+          WHERE t.deleted_at IS NULL
+            AND EXTRACT(YEAR FROM t.entry_date::date) = ${prevMonthYear!}
+            AND EXTRACT(MONTH FROM t.entry_date::date) = ${prevMonth!}
+            AND t.entry_type IN ('bueroarbeit','besprechung','vertrieb','sonstiges','schulung')
+        ), 0)::int AS "overheadMinutes",
+        COUNT(*) FILTER (WHERE a.status IN ('completed','documented'))::int AS "completedAppointments"
+      FROM appointments a
+      WHERE a.deleted_at IS NULL
+        AND EXTRACT(YEAR FROM a.date::date) = ${prevMonthYear!}
+        AND EXTRACT(MONTH FROM a.date::date) = ${prevMonth!}
+    `) : Promise.resolve({ rows: [null] }),
+  ]);
+
+  const cur = cockpitCurrent.rows[0] as any;
+  const prev = cockpitPrev.rows[0] as any;
+  const budCur = cockpitBudgetCurrent.rows[0] as any;
+  const budPrev = cockpitBudgetPrev.rows[0] as any;
+  const utilCur = cockpitUtilCurrent.rows[0] as any;
+  const utilPrev = cockpitUtilPrev.rows[0] as any;
+
+  const marginPct = (rev: number, cost: number) => rev > 0 ? Math.round(((rev - cost) / rev) * 100) : 0;
+  const utilizationPct = (prod: number, overhead: number) => {
+    const total = prod + overhead;
+    return total > 0 ? Math.round((prod / total) * 100) : 0;
+  };
+  const budgetPct = (used: number, allocated: number) => allocated > 0 ? Math.round((used / allocated) * 100) : 0;
+
+  const cockpit = {
+    month: month,
+    year: year,
+    hasPreviousMonth: isMonthSelected,
+    margin: {
+      revenueCents: Number(cur?.revenueCents || 0),
+      costCents: Number(cur?.costCents || 0),
+      marginCents: Number(cur?.revenueCents || 0) - Number(cur?.costCents || 0),
+      marginPercent: marginPct(Number(cur?.revenueCents || 0), Number(cur?.costCents || 0)),
+      appointments: Number(cur?.appointments || 0),
+      totalMinutes: Number(cur?.totalMinutes || 0),
+    },
+    marginPrev: prev ? {
+      revenueCents: Number(prev.revenueCents || 0),
+      costCents: Number(prev.costCents || 0),
+      marginCents: Number(prev.revenueCents || 0) - Number(prev.costCents || 0),
+      marginPercent: marginPct(Number(prev.revenueCents || 0), Number(prev.costCents || 0)),
+      appointments: Number(prev.appointments || 0),
+      totalMinutes: Number(prev.totalMinutes || 0),
+    } : null,
+    utilization: {
+      productiveMinutes: Number(utilCur?.productiveMinutes || 0),
+      overheadMinutes: Number(utilCur?.overheadMinutes || 0),
+      percent: utilizationPct(Number(utilCur?.productiveMinutes || 0), Number(utilCur?.overheadMinutes || 0)),
+      appointments: Number(utilCur?.completedAppointments || 0),
+    },
+    utilizationPrev: utilPrev ? {
+      productiveMinutes: Number(utilPrev.productiveMinutes || 0),
+      overheadMinutes: Number(utilPrev.overheadMinutes || 0),
+      percent: utilizationPct(Number(utilPrev.productiveMinutes || 0), Number(utilPrev.overheadMinutes || 0)),
+      appointments: Number(utilPrev.completedAppointments || 0),
+    } : null,
+    budget: {
+      allocatedCents: Number(budCur?.allocatedCents || 0),
+      usedCents: Number(budCur?.usedCents || 0),
+      percent: budgetPct(Number(budCur?.usedCents || 0), Number(budCur?.allocatedCents || 0)),
+      customerCount: Number(budCur?.customerCount || 0),
+    },
+    budgetPrev: budPrev ? {
+      allocatedCents: Number(budPrev.allocatedCents || 0),
+      usedCents: Number(budPrev.usedCents || 0),
+      percent: budgetPct(Number(budPrev.usedCents || 0), Number(budPrev.allocatedCents || 0)),
+    } : null,
+  };
+
   res.json({
     year,
     month,
@@ -258,6 +458,7 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
     monthlyTrends: monthlyTrends.rows,
     pflegegradDistribution: pflegegradDistribution.rows,
     budgetUtilization: budgetUtilization.rows[0],
+    cockpit,
   });
 }));
 
@@ -774,5 +975,164 @@ router.get("/growth", asyncHandler("Wachstums-Statistiken konnten nicht geladen 
     },
   });
 }));
+
+router.get("/alerts", asyncHandler("Handlungsbedarf konnte nicht geladen werden", async (req, res) => {
+  if (!req.user!.isAdmin) throw forbidden("FORBIDDEN", "Nur für Administratoren");
+
+  const now = new Date();
+  const curYear = now.getFullYear();
+  const curMonth = now.getMonth() + 1;
+  const prevM = curMonth === 1 ? 12 : curMonth - 1;
+  const prevMYear = curMonth === 1 ? curYear - 1 : curYear;
+  const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  const [undocumented, budgetOverspend, noAppointments, missingRecords, newCustomers] = await Promise.all([
+    db.execute(sql`
+      SELECT COUNT(*)::int AS count
+      FROM appointments a
+      WHERE a.deleted_at IS NULL
+        AND a.status = 'completed'
+        AND a.date::date < ${threeDaysAgo}::date
+    `),
+
+    db.execute(sql`
+      SELECT COUNT(DISTINCT sub.customer_id)::int AS count
+      FROM (
+        SELECT ba.customer_id,
+          COALESCE(SUM(ba.amount_cents), 0) AS allocated,
+          COALESCE(ABS((
+            SELECT SUM(bt.amount_cents)
+            FROM budget_transactions bt
+            WHERE bt.customer_id = ba.customer_id
+              AND bt.budget_type = 'entlastungsbetrag_45b'
+              AND bt.transaction_type = 'consumption'
+              AND EXTRACT(YEAR FROM bt.transaction_date::date) = ${curYear}
+          )), 0) AS used
+        FROM budget_allocations ba
+        WHERE ba.budget_type = 'entlastungsbetrag_45b'
+          AND ba.year = ${curYear}
+        GROUP BY ba.customer_id
+        HAVING COALESCE(ABS((
+          SELECT SUM(bt.amount_cents)
+          FROM budget_transactions bt
+          WHERE bt.customer_id = ba.customer_id
+            AND bt.budget_type = 'entlastungsbetrag_45b'
+            AND bt.transaction_type = 'consumption'
+            AND EXTRACT(YEAR FROM bt.transaction_date::date) = ${curYear}
+        )), 0) > COALESCE(SUM(ba.amount_cents), 0)
+      ) sub
+    `),
+
+    db.execute(sql`
+      SELECT COUNT(*)::int AS count
+      FROM customers c
+      WHERE c.status = 'aktiv' AND c.deleted_at IS NULL
+        AND c.id NOT IN (
+          SELECT DISTINCT a.customer_id
+          FROM appointments a
+          WHERE a.deleted_at IS NULL
+            AND a.status != 'cancelled'
+            AND EXTRACT(YEAR FROM a.date::date) = ${curYear}
+            AND EXTRACT(MONTH FROM a.date::date) = ${curMonth}
+        )
+    `),
+
+    db.execute(sql`
+      SELECT COUNT(DISTINCT sub.customer_id)::int AS count
+      FROM (
+        SELECT DISTINCT a.customer_id
+        FROM appointments a
+        WHERE a.deleted_at IS NULL
+          AND a.status IN ('completed','documented')
+          AND EXTRACT(YEAR FROM a.date::date) = ${prevMYear}
+          AND EXTRACT(MONTH FROM a.date::date) = ${prevM}
+      ) sub
+      WHERE sub.customer_id NOT IN (
+        SELECT msr.customer_id
+        FROM monthly_service_records msr
+        WHERE msr.year = ${prevMYear} AND msr.month = ${prevM}
+      )
+    `),
+
+    db.execute(sql`
+      SELECT COUNT(*)::int AS count
+      FROM customers c
+      WHERE c.status = 'aktiv' AND c.deleted_at IS NULL
+        AND EXTRACT(YEAR FROM c.created_at) = ${curYear}
+        AND EXTRACT(MONTH FROM c.created_at) = ${curMonth}
+    `),
+  ]);
+
+  interface AlertItem {
+    severity: "rot" | "gelb" | "gruen";
+    title: string;
+    description: string;
+    count: number;
+    link?: string;
+  }
+
+  const alerts: AlertItem[] = [];
+
+  const undocCount = Number(undocumented.rows[0]?.count || 0);
+  if (undocCount > 0) {
+    alerts.push({
+      severity: "rot",
+      title: "Undokumentierte Termine",
+      description: `${undocCount} abgeschlossene Termine warten seit mehr als 3 Tagen auf Dokumentation.`,
+      count: undocCount,
+      link: "/admin/appointments?status=completed",
+    });
+  }
+
+  const overCount = Number(budgetOverspend.rows[0]?.count || 0);
+  if (overCount > 0) {
+    alerts.push({
+      severity: "rot",
+      title: "Budget-Überschreitung",
+      description: `${overCount} Kunden haben ihr §45b-Budget für ${curYear} überschritten.`,
+      count: overCount,
+      link: "/admin/budgets",
+    });
+  }
+
+  const noApptCount = Number(noAppointments.rows[0]?.count || 0);
+  if (noApptCount > 0) {
+    alerts.push({
+      severity: "gelb",
+      title: "Kunden ohne Termine",
+      description: `${noApptCount} aktive Kunden haben keine Termine im ${MONTH_NAMES_DE[curMonth]}.`,
+      count: noApptCount,
+      link: "/admin/statistics",
+    });
+  }
+
+  const missingCount = Number(missingRecords.rows[0]?.count || 0);
+  if (missingCount > 0) {
+    alerts.push({
+      severity: "gelb",
+      title: "Fehlende Leistungsnachweise",
+      description: `${missingCount} Kunden haben noch keinen Leistungsnachweis für ${MONTH_NAMES_DE[prevM]}.`,
+      count: missingCount,
+      link: "/admin/service-records",
+    });
+  }
+
+  const newCustCount = Number(newCustomers.rows[0]?.count || 0);
+  if (newCustCount > 0) {
+    alerts.push({
+      severity: "gruen",
+      title: "Neue Kunden",
+      description: `${newCustCount} neue Kunden im ${MONTH_NAMES_DE[curMonth]} gewonnen.`,
+      count: newCustCount,
+    });
+  }
+
+  res.json(alerts);
+}));
+
+const MONTH_NAMES_DE = [
+  "", "Januar", "Februar", "März", "April", "Mai", "Juni",
+  "Juli", "August", "September", "Oktober", "November", "Dezember",
+];
 
 export default router;
