@@ -175,8 +175,16 @@ router.get("/:id", asyncHandler(ErrorMessages.fetchAppointmentFailed, async (req
   }
 
   const isLocked = await storage.isAppointmentLocked(id);
-  
-  res.json({ ...appointment, isLocked });
+
+  let isMonthClosed = false;
+  if (appointment.status === "completed" && appointment.date) {
+    const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
+    if (employeeId) {
+      isMonthClosed = await timeTrackingStorage.isMonthClosed(employeeId, appointment.date);
+    }
+  }
+
+  res.json({ ...appointment, isLocked, isMonthClosed });
 }));
 
 router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed, async (req, res) => {
@@ -542,7 +550,7 @@ router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins
   }
 
   const isLocked = await storage.isAppointmentLocked(id);
-  if (isLocked && !req.user!.isAdmin) {
+  if (isLocked) {
     return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
   }
 

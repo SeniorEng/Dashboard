@@ -473,7 +473,23 @@ export default function AppointmentDetail() {
         </div>
       )}
 
-      {isCompleted && (!appointment.isLocked || user?.isAdmin) && (
+      {isCompleted && appointment.isLocked && (
+        <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+          <p className="text-xs text-amber-700" data-testid="text-locked-info">
+            Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.
+          </p>
+        </div>
+      )}
+
+      {isCompleted && !appointment.isLocked && (appointment as any).isMonthClosed && !user?.isAdmin && (
+        <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+          <p className="text-xs text-amber-700" data-testid="text-month-closed-info">
+            Der Monat ist bereits abgeschlossen. Nur ein Admin kann die Dokumentation noch korrigieren.
+          </p>
+        </div>
+      )}
+
+      {isCompleted && !appointment.isLocked && (!(appointment as any).isMonthClosed || user?.isAdmin) && (
         <div className="mt-6">
           <Button 
             variant="outline"
