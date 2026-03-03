@@ -542,7 +542,7 @@ router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins
   }
 
   const isLocked = await storage.isAppointmentLocked(id);
-  if (isLocked) {
+  if (isLocked && !req.user!.isAdmin) {
     return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
   }
 

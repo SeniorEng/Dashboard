@@ -473,7 +473,7 @@ export default function AppointmentDetail() {
         </div>
       )}
 
-      {isCompleted && !appointment.isLocked && (
+      {isCompleted && (!appointment.isLocked || user?.isAdmin) && (
         <div className="mt-6">
           <Button 
             variant="outline"
