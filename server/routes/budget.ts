@@ -69,17 +69,29 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     if (serviceIdsParam && serviceDurationsParam) {
       const serviceIds = serviceIdsParam.split(",").map(Number);
       const durations = serviceDurationsParam.split(",").map(Number);
-      
+
+      const { sql: sqlTag } = await import("drizzle-orm");
+      const { db: dbInstance } = await import("../lib/db");
+      const cspResult = await dbInstance.execute(sqlTag`
+        SELECT service_id AS "serviceId", price_cents AS "priceCents"
+        FROM customer_service_prices
+        WHERE customer_id = ${customerId}
+          AND valid_from::date <= ${date}::date
+          AND (valid_to IS NULL OR valid_to::date >= ${date}::date)
+      `);
+      const cspMap = new Map((cspResult.rows as any[]).map(r => [r.serviceId, r.priceCents]));
+
       for (let i = 0; i < serviceIds.length; i++) {
         const service = await serviceCatalogStorage.getServiceById(serviceIds[i]);
         if (!service || !service.isBillable) continue;
         
         const durationMinutes = durations[i] || 0;
+        const effectivePrice = cspMap.get(service.id) ?? service.defaultPriceCents;
         let costCents = 0;
         if (service.unitType === "hours") {
-          costCents = Math.round((durationMinutes / 60) * service.defaultPriceCents);
+          costCents = Math.round((durationMinutes / 60) * effectivePrice);
         } else if (service.unitType === "flat") {
-          costCents = service.defaultPriceCents;
+          costCents = effectivePrice;
         }
         if (costCents > 0) {
           totalCostCents += costCents;

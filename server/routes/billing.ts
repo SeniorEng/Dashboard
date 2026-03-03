@@ -99,18 +99,40 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
   .where(inArray(appointmentServicesTable.appointmentId, apptIds));
 
   const resolvedCustomerId = customerId ?? appts[0]?.customerId;
-  let customerPriceMap = new Map<number, number>();
+  let allCustomerPrices: { serviceId: number; priceCents: number; validFrom: Date | null; validTo: Date | null }[] = [];
   if (resolvedCustomerId) {
-    const customerPrices = await db.select({
+    allCustomerPrices = await db.select({
       serviceId: customerServicePrices.serviceId,
       priceCents: customerServicePrices.priceCents,
+      validFrom: customerServicePrices.validFrom,
+      validTo: customerServicePrices.validTo,
     })
     .from(customerServicePrices)
-    .where(and(
-      eq(customerServicePrices.customerId, resolvedCustomerId),
-      isNull(customerServicePrices.validTo)
-    ));
-    customerPriceMap = new Map(customerPrices.map(p => [p.serviceId, p.priceCents]));
+    .where(eq(customerServicePrices.customerId, resolvedCustomerId));
+  }
+
+  function toDateStr(d: Date | string | null): string {
+    if (!d) return "";
+    if (d instanceof Date) {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    }
+    return String(d).substring(0, 10);
+  }
+
+  function getCustomerPrice(serviceId: number, appointmentDate: string): number | undefined {
+    const matching = allCustomerPrices.filter(p => {
+      if (p.serviceId !== serviceId) return false;
+      const fromDate = p.validFrom ? toDateStr(p.validFrom) : "0000-01-01";
+      const toDate = p.validTo ? toDateStr(p.validTo) : "9999-12-31";
+      return appointmentDate >= fromDate && appointmentDate <= toDate;
+    });
+    if (matching.length === 0) return undefined;
+    matching.sort((a, b) => {
+      const aFrom = a.validFrom ? new Date(a.validFrom).getTime() : 0;
+      const bFrom = b.validFrom ? new Date(b.validFrom).getTime() : 0;
+      return bFrom - aFrom;
+    });
+    return matching[0].priceCents;
   }
 
   const lineItems: BuildLineItem[] = [];
@@ -119,6 +141,7 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
 
   for (const appt of appts) {
     const apptServices = serviceBreakdown.filter(s => s.appointmentId === appt.id);
+    const apptDate = appt.date;
 
     let employeeName = "";
     let employeeLbnr = "";
@@ -133,7 +156,7 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
 
     for (const svc of apptServices) {
       const durationMinutes = svc.actualDurationMinutes ?? svc.plannedDurationMinutes;
-      const customerPrice = customerPriceMap.get(svc.serviceId);
+      const customerPrice = getCustomerPrice(svc.serviceId, apptDate);
       const pricePer60Min = customerPrice ?? svc.defaultPriceCents;
       if (pricePer60Min == null) {
         throw badRequest(`Kein Preis hinterlegt für Dienstleistung "${svc.serviceName || svc.serviceCode}". Bitte prüfen Sie den Dienstleistungskatalog.`);

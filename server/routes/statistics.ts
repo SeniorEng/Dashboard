@@ -307,15 +307,11 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
     : sql``;
 
   const result = await db.execute(sql`
-    WITH active_customer_prices AS (
-      SELECT csp.customer_id, csp.service_id, csp.price_cents
-      FROM customer_service_prices csp
-      WHERE csp.valid_to IS NULL
-    ),
-    filtered_appointments AS (
+    WITH filtered_appointments AS (
       SELECT
         a.id,
         a.customer_id,
+        a.date::date AS appt_date,
         COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
         a.duration_promised,
         COALESCE(a.travel_kilometers, 0) AS travel_km,
@@ -333,12 +329,17 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
         fa.employee_id,
         fa.customer_id,
         COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) AS duration_minutes,
-        COALESCE(acp.price_cents, s.default_price_cents) AS hourly_price,
+        COALESCE(
+          (SELECT csp.price_cents FROM customer_service_prices csp
+           WHERE csp.customer_id = fa.customer_id AND csp.service_id = s.id
+             AND csp.valid_from::date <= fa.appt_date AND (csp.valid_to IS NULL OR csp.valid_to::date >= fa.appt_date)
+           ORDER BY csp.valid_from DESC LIMIT 1),
+          s.default_price_cents
+        ) AS hourly_price,
         s.employee_rate_cents AS hourly_cost
       FROM filtered_appointments fa
       JOIN appointment_services asvc ON asvc.appointment_id = fa.id
       JOIN services s ON s.id = asvc.service_id
-      LEFT JOIN active_customer_prices acp ON acp.customer_id = fa.customer_id AND acp.service_id = s.id
       WHERE s.unit_type = 'hours'
     ),
     service_totals AS (
@@ -364,16 +365,20 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
         COALESCE(st.revenue_service_cents, 0) AS revenue_service_cents,
         COALESCE(st.cost_service_cents, 0) AS cost_service_cents,
         ROUND(fa.travel_km * COALESCE(
-          (SELECT acp.price_cents FROM active_customer_prices acp
-           JOIN services sp ON sp.id = acp.service_id AND sp.code = 'travel_km'
-           WHERE acp.customer_id = fa.customer_id),
+          (SELECT csp.price_cents FROM customer_service_prices csp
+           JOIN services sp ON sp.id = csp.service_id AND sp.code = 'travel_km'
+           WHERE csp.customer_id = fa.customer_id
+             AND csp.valid_from::date <= fa.appt_date AND (csp.valid_to IS NULL OR csp.valid_to::date >= fa.appt_date)
+           ORDER BY csp.valid_from DESC LIMIT 1),
           (SELECT default_price_cents FROM services WHERE code = 'travel_km')
         )) AS revenue_km_cents,
         ROUND(fa.travel_km * (SELECT employee_rate_cents FROM services WHERE code = 'travel_km')) AS cost_km_cents,
         ROUND(fa.customer_km * COALESCE(
-          (SELECT acp.price_cents FROM active_customer_prices acp
-           JOIN services sp ON sp.id = acp.service_id AND sp.code = 'customer_km'
-           WHERE acp.customer_id = fa.customer_id),
+          (SELECT csp.price_cents FROM customer_service_prices csp
+           JOIN services sp ON sp.id = csp.service_id AND sp.code = 'customer_km'
+           WHERE csp.customer_id = fa.customer_id
+             AND csp.valid_from::date <= fa.appt_date AND (csp.valid_to IS NULL OR csp.valid_to::date >= fa.appt_date)
+           ORDER BY csp.valid_from DESC LIMIT 1),
           (SELECT default_price_cents FROM services WHERE code = 'customer_km')
         )) AS revenue_ckm_cents,
         ROUND(fa.customer_km * (SELECT employee_rate_cents FROM services WHERE code = 'customer_km')) AS cost_ckm_cents
@@ -477,15 +482,11 @@ router.get("/planning", asyncHandler("Planungsdaten konnten nicht geladen werden
     : sql``;
 
   const result = await db.execute(sql`
-    WITH active_customer_prices AS (
-      SELECT csp.customer_id, csp.service_id, csp.price_cents
-      FROM customer_service_prices csp
-      WHERE csp.valid_to IS NULL
-    ),
-    filtered_appointments AS (
+    WITH filtered_appointments AS (
       SELECT
         a.id,
         a.customer_id,
+        a.date::date AS appt_date,
         COALESCE(a.assigned_employee_id, a.performed_by_employee_id) AS employee_id,
         a.status,
         a.duration_promised,
@@ -504,12 +505,17 @@ router.get("/planning", asyncHandler("Planungsdaten konnten nicht geladen werden
         fa.employee_id,
         fa.customer_id,
         COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) AS duration_minutes,
-        COALESCE(acp.price_cents, s.default_price_cents) AS hourly_price,
+        COALESCE(
+          (SELECT csp.price_cents FROM customer_service_prices csp
+           WHERE csp.customer_id = fa.customer_id AND csp.service_id = s.id
+             AND csp.valid_from::date <= fa.appt_date AND (csp.valid_to IS NULL OR csp.valid_to::date >= fa.appt_date)
+           ORDER BY csp.valid_from DESC LIMIT 1),
+          s.default_price_cents
+        ) AS hourly_price,
         s.employee_rate_cents AS hourly_cost
       FROM filtered_appointments fa
       JOIN appointment_services asvc ON asvc.appointment_id = fa.id
       JOIN services s ON s.id = asvc.service_id
-      LEFT JOIN active_customer_prices acp ON acp.customer_id = fa.customer_id AND acp.service_id = s.id
       WHERE s.unit_type = 'hours'
     ),
     service_totals AS (
@@ -536,16 +542,20 @@ router.get("/planning", asyncHandler("Planungsdaten konnten nicht geladen werden
         COALESCE(st.revenue_service_cents, 0) AS revenue_service_cents,
         COALESCE(st.cost_service_cents, 0) AS cost_service_cents,
         ROUND(fa.travel_km * COALESCE(
-          (SELECT acp.price_cents FROM active_customer_prices acp
-           JOIN services sp ON sp.id = acp.service_id AND sp.code = 'travel_km'
-           WHERE acp.customer_id = fa.customer_id),
+          (SELECT csp.price_cents FROM customer_service_prices csp
+           JOIN services sp ON sp.id = csp.service_id AND sp.code = 'travel_km'
+           WHERE csp.customer_id = fa.customer_id
+             AND csp.valid_from::date <= fa.appt_date AND (csp.valid_to IS NULL OR csp.valid_to::date >= fa.appt_date)
+           ORDER BY csp.valid_from DESC LIMIT 1),
           (SELECT default_price_cents FROM services WHERE code = 'travel_km')
         )) AS revenue_km_cents,
         ROUND(fa.travel_km * (SELECT employee_rate_cents FROM services WHERE code = 'travel_km')) AS cost_km_cents,
         ROUND(fa.customer_km * COALESCE(
-          (SELECT acp.price_cents FROM active_customer_prices acp
-           JOIN services sp ON sp.id = acp.service_id AND sp.code = 'customer_km'
-           WHERE acp.customer_id = fa.customer_id),
+          (SELECT csp.price_cents FROM customer_service_prices csp
+           JOIN services sp ON sp.id = csp.service_id AND sp.code = 'customer_km'
+           WHERE csp.customer_id = fa.customer_id
+             AND csp.valid_from::date <= fa.appt_date AND (csp.valid_to IS NULL OR csp.valid_to::date >= fa.appt_date)
+           ORDER BY csp.valid_from DESC LIMIT 1),
           (SELECT default_price_cents FROM services WHERE code = 'customer_km')
         )) AS revenue_ckm_cents,
         ROUND(fa.customer_km * (SELECT employee_rate_cents FROM services WHERE code = 'customer_km')) AS cost_ckm_cents

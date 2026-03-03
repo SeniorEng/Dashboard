@@ -4,8 +4,9 @@ import {
   customerBudgetPreferences,
   customerBudgetTypeSettings,
   customerBudgets,
-  customerPricingHistory,
   customers,
+  customerServicePrices,
+  services,
   type BudgetAllocation,
   type InsertBudgetAllocation,
   type BudgetTransaction,
@@ -13,7 +14,6 @@ import {
   type CustomerBudgetPreferences,
   type InsertBudgetPreferences,
   type CustomerBudgetTypeSetting,
-  type CustomerPricing,
 } from "@shared/schema";
 import { eq, and, sql, lte, gte, isNull, or, desc, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";
@@ -74,8 +74,6 @@ export interface BudgetLedgerStorage {
   
   getBudgetPreferences(customerId: number): Promise<CustomerBudgetPreferences | undefined>;
   upsertBudgetPreferences(preferences: InsertBudgetPreferences, userId?: number): Promise<CustomerBudgetPreferences>;
-  
-  getCurrentPricing(customerId: number, date?: string): Promise<CustomerPricing | undefined>;
   
   calculateAppointmentCost(params: {
     customerId: number;
@@ -557,25 +555,6 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       .orderBy(desc(budgetAllocations.validFrom));
   }
 
-  async getCurrentPricing(customerId: number, date?: string): Promise<CustomerPricing | undefined> {
-    const targetDate = date || todayISO();
-    
-    const result = await db.select()
-      .from(customerPricingHistory)
-      .where(and(
-        eq(customerPricingHistory.customerId, customerId),
-        lte(customerPricingHistory.validFrom, targetDate),
-        or(
-          isNull(customerPricingHistory.validTo),
-          gte(customerPricingHistory.validTo, targetDate)
-        )
-      ))
-      .orderBy(desc(customerPricingHistory.validFrom))
-      .limit(1);
-    
-    return result[0];
-  }
-
   async calculateAppointmentCost(params: {
     customerId: number;
     hauswirtschaftMinutes: number;
@@ -601,10 +580,25 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       throw new Error(`Keine Preisvereinbarung für Kunde ${params.customerId} zum Datum ${params.date} gefunden`);
     }
 
-    const hauswirtschaftRateCents = (hwService?.isBillable !== false) ? (hwService?.defaultPriceCents || 0) : 0;
-    const alltagsbegleitungRateCents = (abService?.isBillable !== false) ? (abService?.defaultPriceCents || 0) : 0;
-    const travelKmRateCents = (travelKmService?.isBillable !== false) ? (travelKmService?.defaultPriceCents || 0) : 0;
-    const customerKmRateCents = (customerKmService?.isBillable !== false) ? (customerKmService?.defaultPriceCents || 0) : 0;
+    const customerPrices = await db.execute(sql`
+      SELECT s.code AS "serviceCode", csp.price_cents AS "priceCents"
+      FROM customer_service_prices csp
+      INNER JOIN services s ON s.id = csp.service_id
+      WHERE csp.customer_id = ${params.customerId}
+        AND csp.valid_from::date <= ${params.date}::date
+        AND (csp.valid_to IS NULL OR csp.valid_to::date >= ${params.date}::date)
+    `);
+
+    const cpMap = new Map(customerPrices.rows.map((cp: any) => [cp.serviceCode, cp.priceCents]));
+
+    const hauswirtschaftRateCents = cpMap.get("hauswirtschaft")
+      ?? ((hwService?.isBillable !== false) ? (hwService?.defaultPriceCents || 0) : 0);
+    const alltagsbegleitungRateCents = cpMap.get("alltagsbegleitung")
+      ?? ((abService?.isBillable !== false) ? (abService?.defaultPriceCents || 0) : 0);
+    const travelKmRateCents = cpMap.get("travel_km")
+      ?? ((travelKmService?.isBillable !== false) ? (travelKmService?.defaultPriceCents || 0) : 0);
+    const customerKmRateCents = cpMap.get("customer_km")
+      ?? ((customerKmService?.isBillable !== false) ? (customerKmService?.defaultPriceCents || 0) : 0);
 
     const hauswirtschaftCents = Math.round((params.hauswirtschaftMinutes / 60) * hauswirtschaftRateCents);
     const alltagsbegleitungCents = Math.round((params.alltagsbegleitungMinutes / 60) * alltagsbegleitungRateCents);

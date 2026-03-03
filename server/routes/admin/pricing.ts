@@ -1,3 +1,8 @@
+/**
+ * @deprecated Legacy pricing routes using `customer_pricing_history` table.
+ * New pricing logic uses `customer_service_prices` via /api/customers/:id/service-prices endpoints.
+ * These routes are kept for backward compatibility but should not be used for new features.
+ */
 import { Router, Request, Response } from "express";
 import { customerPricingStorage } from "../../storage/customer-pricing";
 import { insertCustomerPricingSchema } from "@shared/schema";

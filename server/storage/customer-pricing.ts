@@ -1,3 +1,9 @@
+/**
+ * @deprecated Legacy pricing storage using `customer_pricing_history` table (3 fixed columns: HW/AB/km).
+ * Replaced by `customer_service_prices` table (per-service, flexible, temporal).
+ * This file is kept for backward compatibility but should not be used for new features.
+ * All pricing logic should use customer_service_prices via customers.ts routes.
+ */
 import { eq, and, isNull, desc, lte, or, gte } from "drizzle-orm";
 import { 
   customerPricingHistory,

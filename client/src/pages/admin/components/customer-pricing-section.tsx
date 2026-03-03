@@ -1,12 +1,11 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { StatusBadge } from "@/components/patterns/status-badge";
 import { formatCurrency } from "@shared/utils/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, unwrapResult } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Pencil, Trash2, Check, X, RotateCcw } from "lucide-react";
+import { Loader2, Pencil, Check, X, RotateCcw, Calendar, ChevronDown, ChevronUp } from "lucide-react";
 
 interface CatalogService {
   id: number;
@@ -38,6 +37,20 @@ const UNIT_LABELS: Record<string, string> = {
   flat: "€ pauschal",
 };
 
+function formatDateDisplay(dateStr: string): string {
+  try {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
+  } catch {
+    return dateStr;
+  }
+}
+
+function getTodayISO(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 export interface PricingSectionProps {
   customerId: number;
   customerName: string;
@@ -49,6 +62,8 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
   const { toast } = useToast();
   const [editingServiceId, setEditingServiceId] = useState<number | null>(null);
   const [editPrice, setEditPrice] = useState("");
+  const [editValidFrom, setEditValidFrom] = useState("");
+  const [showHistory, setShowHistory] = useState(false);
 
   const { data: services, isLoading: loadingServices } = useQuery<CatalogService[]>({
     queryKey: ["/api/services"],
@@ -64,15 +79,39 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
     staleTime: 30000,
   });
 
+  const { data: futurePrices } = useQuery<CustomerPrice[]>({
+    queryKey: ["customer-service-prices-future", customerId],
+    queryFn: async () => {
+      const result = await api.get<CustomerPrice[]>(`/customers/${customerId}/service-prices/future`);
+      return unwrapResult(result);
+    },
+    staleTime: 30000,
+  });
+
+  const { data: allPrices } = useQuery<CustomerPrice[]>({
+    queryKey: ["customer-service-prices-all", customerId],
+    queryFn: async () => {
+      const result = await api.get<CustomerPrice[]>(`/customers/${customerId}/service-prices/all`);
+      return unwrapResult(result);
+    },
+    staleTime: 30000,
+    enabled: showHistory,
+  });
+
   const saveMutation = useMutation({
-    mutationFn: async ({ serviceId, priceCents }: { serviceId: number; priceCents: number }) => {
-      const result = await api.post(`/customers/${customerId}/service-prices`, { serviceId, priceCents });
+    mutationFn: async ({ serviceId, priceCents, validFrom }: { serviceId: number; priceCents: number; validFrom?: string }) => {
+      const body: Record<string, unknown> = { serviceId, priceCents };
+      if (validFrom) body.validFrom = validFrom;
+      const result = await api.post(`/customers/${customerId}/service-prices`, body);
       return unwrapResult(result);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["customer-service-prices", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["customer-service-prices-future", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["customer-service-prices-all", customerId] });
       setEditingServiceId(null);
       setEditPrice("");
+      setEditValidFrom("");
       toast({ title: "Kundenpreis gespeichert" });
     },
     onError: (error: Error) => {
@@ -87,6 +126,8 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["customer-service-prices", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["customer-service-prices-future", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["customer-service-prices-all", customerId] });
       toast({ title: "Kundenpreis zurückgesetzt auf Katalogpreis" });
     },
     onError: (error: Error) => {
@@ -106,15 +147,24 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
   const priceMap = new Map<number, CustomerPrice>();
   customerPrices?.forEach(cp => priceMap.set(cp.serviceId, cp));
 
+  const futureByService = new Map<number, CustomerPrice[]>();
+  futurePrices?.forEach(fp => {
+    const list = futureByService.get(fp.serviceId) || [];
+    list.push(fp);
+    futureByService.set(fp.serviceId, list);
+  });
+
   if (activeServices.length === 0) {
     return <p className="text-sm text-gray-500 py-4 text-center" data-testid="text-no-prices">Keine Dienstleistungen im Katalog</p>;
   }
 
   const hasCustomPrices = priceMap.size > 0;
+  const hasFuturePrices = (futurePrices?.length || 0) > 0;
 
   function startEdit(serviceId: number, currentPriceCents: number) {
     setEditingServiceId(serviceId);
     setEditPrice((currentPriceCents / 100).toFixed(2).replace(".", ","));
+    setEditValidFrom("");
   }
 
   function handleSave(serviceId: number) {
@@ -124,7 +174,11 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
       toast({ title: "Ungültiger Preis", variant: "destructive" });
       return;
     }
-    saveMutation.mutate({ serviceId, priceCents: Math.round(euros * 100) });
+    saveMutation.mutate({
+      serviceId,
+      priceCents: Math.round(euros * 100),
+      validFrom: editValidFrom || undefined,
+    });
   }
 
   return (
@@ -132,6 +186,14 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
       {hasCustomPrices && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">
           <p className="text-xs text-amber-700">Kundenindividuelle Preise aktiv – abweichende Preise sind markiert.</p>
+        </div>
+      )}
+      {hasFuturePrices && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mb-2">
+          <p className="text-xs text-blue-700">
+            <Calendar className="inline h-3 w-3 mr-1" />
+            Geplante Preisänderungen vorhanden.
+          </p>
         </div>
       )}
       <div className="grid grid-cols-[1fr_auto_auto] gap-x-3 items-center px-2 py-1 text-xs text-gray-500 font-medium">
@@ -145,98 +207,172 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
         const effectivePrice = customPrice ? customPrice.priceCents : service.defaultPriceCents;
         const isEditing = editingServiceId === service.id;
         const isCustom = !!customPrice;
+        const serviceFuturePrices = futureByService.get(service.id) || [];
 
         return (
-          <div key={service.id} className={`grid grid-cols-[1fr_auto_auto] gap-x-3 items-center px-2 py-2 rounded-lg hover:bg-gray-50 ${isCustom ? 'bg-amber-50/50' : ''}`} data-testid={`pricing-row-${service.id}`}>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium truncate">{service.name}</span>
+          <div key={service.id} data-testid={`pricing-row-${service.id}`}>
+            <div className={`grid grid-cols-[1fr_auto_auto] gap-x-3 items-center px-2 py-2 rounded-lg hover:bg-gray-50 ${isCustom ? 'bg-amber-50/50' : ''}`}>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium truncate">{service.name}</span>
+                  {isCustom && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">Kundenpreis</span>
+                  )}
+                </div>
                 {isCustom && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">Kundenpreis</span>
+                  <div className="text-[11px] text-gray-500 mt-0.5">
+                    Katalog: {formatCurrency(service.defaultPriceCents)} {unitLabel}
+                  </div>
+                )}
+                {serviceFuturePrices.map(fp => (
+                  <div key={fp.id} className="text-[11px] text-blue-600 mt-0.5 flex items-center gap-1" data-testid={`future-price-${fp.id}`}>
+                    <Calendar className="h-3 w-3" />
+                    Ab {formatDateDisplay(fp.validFrom)}: {formatCurrency(fp.priceCents)} {unitLabel}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-5 w-5 p-0 ml-1"
+                      onClick={() => deleteMutation.mutate(fp.id)}
+                      disabled={deleteMutation.isPending}
+                      data-testid={`btn-delete-future-${fp.id}`}
+                    >
+                      <X className="h-3 w-3 text-blue-400 hover:text-red-500" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              <div className="text-right w-24">
+                {isEditing ? (
+                  <div className="space-y-1">
+                    <Input
+                      type="text"
+                      value={editPrice}
+                      onChange={e => setEditPrice(e.target.value)}
+                      className="h-7 text-sm text-right w-20"
+                      autoFocus
+                      placeholder="0,00"
+                      onKeyDown={e => {
+                        if (e.key === "Enter") handleSave(service.id);
+                        if (e.key === "Escape") { setEditingServiceId(null); setEditPrice(""); setEditValidFrom(""); }
+                      }}
+                      data-testid={`input-price-${service.id}`}
+                    />
+                    <Input
+                      type="date"
+                      value={editValidFrom}
+                      onChange={e => setEditValidFrom(e.target.value)}
+                      min={getTodayISO()}
+                      className="h-7 text-xs w-20"
+                      placeholder="Gültig ab"
+                      data-testid={`input-valid-from-${service.id}`}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <span className={`text-sm font-semibold ${isCustom ? 'text-amber-700' : ''}`}>{formatCurrency(effectivePrice)}</span>
+                    <span className="text-xs text-gray-500 ml-0.5">{unitLabel}</span>
+                  </>
                 )}
               </div>
-              {isCustom && (
-                <div className="text-[11px] text-gray-500 mt-0.5">
-                  Katalog: {formatCurrency(service.defaultPriceCents)} {unitLabel}
-                </div>
-              )}
-            </div>
-            <div className="text-right w-24">
-              {isEditing ? (
-                <Input
-                  type="text"
-                  value={editPrice}
-                  onChange={e => setEditPrice(e.target.value)}
-                  className="h-7 text-sm text-right w-20"
-                  autoFocus
-                  onKeyDown={e => {
-                    if (e.key === "Enter") handleSave(service.id);
-                    if (e.key === "Escape") { setEditingServiceId(null); setEditPrice(""); }
-                  }}
-                  data-testid={`input-price-${service.id}`}
-                />
-              ) : (
-                <>
-                  <span className={`text-sm font-semibold ${isCustom ? 'text-amber-700' : ''}`}>{formatCurrency(effectivePrice)}</span>
-                  <span className="text-xs text-gray-500 ml-0.5">{unitLabel}</span>
-                </>
-              )}
-            </div>
-            <div className="w-16 flex justify-end gap-1">
-              {isEditing ? (
-                <>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 w-7 p-0"
-                    onClick={() => handleSave(service.id)}
-                    disabled={saveMutation.isPending}
-                    data-testid={`btn-save-price-${service.id}`}
-                  >
-                    <Check className="h-3.5 w-3.5 text-green-600" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 w-7 p-0"
-                    onClick={() => { setEditingServiceId(null); setEditPrice(""); }}
-                    data-testid={`btn-cancel-price-${service.id}`}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 w-7 p-0"
-                    onClick={() => startEdit(service.id, effectivePrice)}
-                    data-testid={`btn-edit-price-${service.id}`}
-                  >
-                    <Pencil className="h-3.5 w-3.5 text-gray-400" />
-                  </Button>
-                  {isCustom && (
+              <div className="w-16 flex justify-end gap-1">
+                {isEditing ? (
+                  <>
                     <Button
                       variant="ghost"
                       size="sm"
                       className="h-7 w-7 p-0"
-                      onClick={() => deleteMutation.mutate(customPrice.id)}
-                      disabled={deleteMutation.isPending}
-                      data-testid={`btn-reset-price-${service.id}`}
+                      onClick={() => handleSave(service.id)}
+                      disabled={saveMutation.isPending}
+                      data-testid={`btn-save-price-${service.id}`}
                     >
-                      <RotateCcw className="h-3.5 w-3.5 text-gray-400" />
+                      <Check className="h-3.5 w-3.5 text-green-600" />
                     </Button>
-                  )}
-                </>
-              )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0"
+                      onClick={() => { setEditingServiceId(null); setEditPrice(""); setEditValidFrom(""); }}
+                      data-testid={`btn-cancel-price-${service.id}`}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0"
+                      onClick={() => startEdit(service.id, effectivePrice)}
+                      data-testid={`btn-edit-price-${service.id}`}
+                    >
+                      <Pencil className="h-3.5 w-3.5 text-gray-400" />
+                    </Button>
+                    {isCustom && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0"
+                        onClick={() => deleteMutation.mutate(customPrice.id)}
+                        disabled={deleteMutation.isPending}
+                        data-testid={`btn-reset-price-${service.id}`}
+                      >
+                        <RotateCcw className="h-3.5 w-3.5 text-gray-400" />
+                      </Button>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           </div>
         );
       })}
-      <p className="text-[11px] text-gray-500 px-2 pt-2">
-        Preise zzgl. MwSt. Klicken Sie auf den Stift, um einen kundenindividuellen Preis zu setzen. {hasCustomPrices ? "Der Pfeil setzt den Preis auf den Katalogpreis zurück." : ""}
-      </p>
+
+      <div className="px-2 pt-2 space-y-2">
+        <p className="text-[11px] text-gray-500">
+          Preise zzgl. MwSt. Klicken Sie auf den Stift, um einen kundenindividuellen Preis zu setzen.
+          {" "}Über das Datumsfeld können Sie einen zukünftigen Gültigkeitszeitpunkt festlegen.
+          {hasCustomPrices ? " Der Pfeil setzt den Preis auf den Katalogpreis zurück." : ""}
+        </p>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-xs text-gray-500 h-6 px-2"
+          onClick={() => setShowHistory(!showHistory)}
+          data-testid="btn-toggle-history"
+        >
+          {showHistory ? <ChevronUp className="h-3 w-3 mr-1" /> : <ChevronDown className="h-3 w-3 mr-1" />}
+          Preishistorie {showHistory ? "ausblenden" : "anzeigen"}
+        </Button>
+
+        {showHistory && allPrices && allPrices.length > 0 && (
+          <div className="border rounded-lg overflow-hidden" data-testid="pricing-history">
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="text-left px-2 py-1.5 font-medium text-gray-500">Dienstleistung</th>
+                  <th className="text-right px-2 py-1.5 font-medium text-gray-500">Preis</th>
+                  <th className="text-left px-2 py-1.5 font-medium text-gray-500">Gültig ab</th>
+                  <th className="text-left px-2 py-1.5 font-medium text-gray-500">Gültig bis</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allPrices.map(p => (
+                  <tr key={p.id} className={`border-t ${!p.validTo ? 'bg-amber-50/50' : ''}`} data-testid={`history-row-${p.id}`}>
+                    <td className="px-2 py-1.5">{p.serviceName}</td>
+                    <td className="px-2 py-1.5 text-right font-medium">{formatCurrency(p.priceCents)} {UNIT_LABELS[p.unitType] || "€"}</td>
+                    <td className="px-2 py-1.5">{formatDateDisplay(p.validFrom)}</td>
+                    <td className="px-2 py-1.5">{p.validTo ? formatDateDisplay(p.validTo) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {showHistory && (!allPrices || allPrices.length === 0) && (
+          <p className="text-xs text-gray-400 text-center py-2">Keine Preishistorie vorhanden.</p>
+        )}
+      </div>
     </div>
   );
 }

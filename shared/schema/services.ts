@@ -55,7 +55,8 @@ export const customerServicePrices = pgTable("customer_service_prices", {
 export const insertCustomerServicePriceSchema = z.object({
   customerId: z.number().int(),
   serviceId: z.number().int(),
-  priceCents: z.number().int().min(0, "Preis muss positiv sein"),
+  priceCents: z.number().int().min(1, "Preis muss mindestens 1 Cent betragen"),
+  validFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Datum muss im Format YYYY-MM-DD sein").optional(),
 });
 
 export type CustomerServicePrice = typeof customerServicePrices.$inferSelect;
