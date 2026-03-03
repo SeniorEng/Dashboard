@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ArrowLeft, Loader2, BarChart3, Users, TrendingUp, Activity,
-  Euro, Car, Clock, UserCheck, Heart, CalendarDays, PiggyBank,
+  Euro, Clock, UserCheck, Heart, PiggyBank,
   CalendarCheck, UserX, AlertTriangle, CheckCircle2, AlertCircle,
   ArrowUpRight, ArrowDownRight, Minus, Gauge, Wallet,
 } from "lucide-react";
@@ -156,16 +156,10 @@ export default function AdminStatistics() {
 
   const cockpit = data?.cockpit;
   const employees = data?.employees ?? [];
-  const revenue = data?.revenue ?? {};
   const customerStats = data?.customers ?? {};
-  const efficiency = data?.efficiency ?? {};
   const trends = data?.monthlyTrends ?? [];
   const pflegegrad = data?.pflegegradDistribution ?? [];
   const budget = data?.budgetUtilization ?? {};
-
-  const maxAppointments = useMemo(() => {
-    return Math.max(...trends.map((t: any) => Number(t.completedCount || 0)), 1);
-  }, [trends]);
 
   const maxTrendMinutes = useMemo(() => {
     return Math.max(...trends.map((t: any) => {
@@ -183,10 +177,6 @@ export default function AdminStatistics() {
       return hw + ab + eb + pause + urlaub + krank + buero + bespr + vertr + sonst + weiter;
     }), 1);
   }, [trends]);
-
-  const maxEmpAppts = useMemo(() => {
-    return Math.max(...employees.map((e: any) => Number(e.appointments || 0)), 1);
-  }, [employees]);
 
   const periodLabel = selectedMonth !== "all"
     ? `${MONTH_NAMES[parseInt(selectedMonth)]} ${selectedYear}`
@@ -243,11 +233,8 @@ export default function AdminStatistics() {
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="mb-6 flex-wrap h-auto gap-1">
               <TabsTrigger value="cockpit" data-testid="tab-cockpit">Cockpit</TabsTrigger>
-              <TabsTrigger value="profitability" data-testid="tab-profitability">Deckungsbeitrag</TabsTrigger>
-              <TabsTrigger value="employees" data-testid="tab-employees">Mitarbeiter</TabsTrigger>
+              <TabsTrigger value="team" data-testid="tab-team">Team</TabsTrigger>
               <TabsTrigger value="customers" data-testid="tab-customers">Kunden</TabsTrigger>
-              <TabsTrigger value="trends" data-testid="tab-trends">Trends</TabsTrigger>
-              <TabsTrigger value="growth" data-testid="tab-growth">Wachstum</TabsTrigger>
               <TabsTrigger value="planning" data-testid="tab-planning">Planung</TabsTrigger>
             </TabsList>
 
@@ -390,83 +377,8 @@ export default function AdminStatistics() {
               )}
             </TabsContent>
 
-            {/* EMPLOYEES TAB */}
-            <TabsContent value="employees">
-              <div className="space-y-3">
-                {employees.filter((e: any) => e.appointments > 0 || e.sickDays > 0 || e.vacationDays > 0).map((emp: any) => (
-                  <Card key={emp.id} data-testid={`employee-${emp.id}`}>
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="font-semibold">{emp.name}</span>
-                        {(() => {
-                          const profEmp = profitability?.employees?.find((pe: any) => pe.employeeId === emp.id);
-                          return profEmp ? (
-                            <span className="text-sm font-medium text-emerald-600">{cents(profEmp.marginCents)} DB</span>
-                          ) : null;
-                        })()}
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
-                        <div>
-                          <div className="text-muted-foreground text-xs">Termine</div>
-                          <div className="font-medium">{emp.appointments}</div>
-                        </div>
-                        <div>
-                          <div className="text-muted-foreground text-xs">Kunden</div>
-                          <div className="font-medium">{emp.customers}</div>
-                        </div>
-                        <div>
-                          <div className="text-muted-foreground text-xs">Arbeitszeit</div>
-                          <div className="font-medium">{hours(emp.workMinutes)}</div>
-                        </div>
-                        <div>
-                          <div className="text-muted-foreground text-xs">DB/Stunde</div>
-                          <div className="font-medium">
-                            {(() => {
-                              const profEmp = profitability?.employees?.find((pe: any) => pe.employeeId === emp.id);
-                              return profEmp && Number(profEmp.totalMinutes) > 0
-                                ? cents(Math.round(Number(profEmp.marginCents) / (Number(profEmp.totalMinutes) / 60)))
-                                : "–";
-                            })()}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                        <div>
-                          <div className="text-muted-foreground text-xs">Anfahrt-KM</div>
-                          <div className="font-medium">{formatKm(emp.travelKm)} km</div>
-                        </div>
-                        <div>
-                          <div className="text-muted-foreground text-xs">Kunden-KM</div>
-                          <div className="font-medium">{formatKm(emp.customerKm)} km</div>
-                        </div>
-                        <div>
-                          <div className="text-muted-foreground text-xs">Kranktage</div>
-                          <div className={`font-medium ${emp.sickDays > 5 ? "text-red-600" : ""}`}>{emp.sickDays}</div>
-                        </div>
-                        <div>
-                          <div className="text-muted-foreground text-xs">Urlaub</div>
-                          <div className="font-medium">{emp.vacationDays} Tage</div>
-                        </div>
-                      </div>
-                      <div className="mt-3">
-                        <div className="text-xs text-muted-foreground mb-1">Termine-Anteil</div>
-                        <BarSimple value={emp.appointments} max={maxEmpAppts} color="bg-blue-500" />
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-                {employees.filter((e: any) => e.appointments > 0 || e.sickDays > 0 || e.vacationDays > 0).length === 0 && (
-                  <Card>
-                    <CardContent className="py-12 text-center text-muted-foreground">
-                      Keine Mitarbeiterdaten für den gewählten Zeitraum.
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-            </TabsContent>
-
-            {/* PROFITABILITY TAB */}
-            <TabsContent value="profitability">
+            {/* TEAM TAB (Mitarbeiter + Deckungsbeitrag + Zeiterfassung) */}
+            <TabsContent value="team">
               {profitability ? (() => {
                 const t = profitability.totals;
                 const empList = profitability.employees || [];
@@ -474,8 +386,15 @@ export default function AdminStatistics() {
                 const prices = profitability.servicePrices || [];
                 const hwPrice = prices.find((p: any) => p.code === 'hauswirtschaft');
                 const abPrice = prices.find((p: any) => p.code === 'alltagsbegleitung');
-                const kmPrice = prices.find((p: any) => p.code === 'travel_km');
-                const ckmPrice = prices.find((p: any) => p.code === 'customer_km');
+
+                const entrySegments = (growth?.hoursByEntryType || [])
+                  .filter((s: any) => s.entry_type)
+                  .map((s: any) => ({
+                    label: ENTRY_TYPE_LABELS[s.entry_type] || s.entry_type,
+                    value: Number(s.total_minutes || 0),
+                    color: ENTRY_TYPE_COLORS[s.entry_type] || "#a3a3a3",
+                  }));
+
                 return (
                   <>
                     <Card className="mb-4 border-emerald-200 bg-emerald-50/50">
@@ -497,38 +416,10 @@ export default function AdminStatistics() {
                     </Card>
 
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                      <StatCard
-                        label="Kalkulierte Erlöse"
-                        value={cents(t.revenueCents)}
-                        sub={`${cents(t.revenueServiceCents)} Dienst + ${cents(t.revenueKmCents)} KM`}
-                        icon={<Euro className="w-5 h-5" />}
-                        color="text-emerald-600"
-                        testId="profit-revenue"
-                      />
-                      <StatCard
-                        label="Personalkosten"
-                        value={cents(t.costCents)}
-                        sub={`${cents(t.costServiceCents)} Dienst + ${cents(t.costKmCents)} KM`}
-                        icon={<Users className="w-5 h-5" />}
-                        color="text-red-600"
-                        testId="profit-costs"
-                      />
-                      <StatCard
-                        label="Einsatzstunden"
-                        value={hours(t.totalMinutes)}
-                        sub={`${t.appointments} Termine`}
-                        icon={<Clock className="w-5 h-5" />}
-                        color="text-blue-600"
-                        testId="profit-hours"
-                      />
-                      <StatCard
-                        label="Erlös/Stunde"
-                        value={t.totalMinutes > 0 ? cents(Math.round(t.revenueCents / (t.totalMinutes / 60))) : "–"}
-                        sub={t.totalMinutes > 0 ? `Kosten: ${cents(Math.round(t.costCents / (t.totalMinutes / 60)))}/h` : ""}
-                        icon={<TrendingUp className="w-5 h-5" />}
-                        color="text-teal-600"
-                        testId="profit-per-hour"
-                      />
+                      <StatCard label="Erlöse" value={cents(t.revenueCents)} sub={`${cents(t.revenueServiceCents)} Dienst + ${cents(t.revenueKmCents)} KM`} icon={<Euro className="w-5 h-5" />} color="text-emerald-600" testId="profit-revenue" />
+                      <StatCard label="Personalkosten" value={cents(t.costCents)} sub={`${cents(t.costServiceCents)} Dienst + ${cents(t.costKmCents)} KM`} icon={<Users className="w-5 h-5" />} color="text-red-600" testId="profit-costs" />
+                      <StatCard label="Einsatzstunden" value={hours(t.totalMinutes)} sub={`${t.appointments} Termine`} icon={<Clock className="w-5 h-5" />} color="text-blue-600" testId="profit-hours" />
+                      <StatCard label="Erlös/Stunde" value={t.totalMinutes > 0 ? cents(Math.round(t.revenueCents / (t.totalMinutes / 60))) : "–"} sub={t.totalMinutes > 0 ? `Kosten: ${cents(Math.round(t.costCents / (t.totalMinutes / 60)))}/h` : ""} icon={<TrendingUp className="w-5 h-5" />} color="text-teal-600" testId="profit-per-hour" />
                     </div>
 
                     <Card className="mb-4">
@@ -536,91 +427,57 @@ export default function AdminStatistics() {
                         <CardTitle className="text-base">Kalkulationsgrundlage</CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                           {hwPrice && (
                             <div className="bg-gray-50 rounded-lg p-3">
                               <div className="font-medium mb-1">Hauswirtschaft</div>
-                              <div className="text-muted-foreground">Erlös: {cents(hwPrice.priceCents)}/h</div>
-                              <div className="text-muted-foreground">MA-Kosten: {cents(hwPrice.rateCents)}/h</div>
+                              <div className="text-muted-foreground">Erlös: {cents(hwPrice.priceCents)}/h · MA: {cents(hwPrice.rateCents)}/h</div>
                               <div className="text-emerald-600 font-medium">Marge: {cents(hwPrice.priceCents - hwPrice.rateCents)}/h ({Math.round(((hwPrice.priceCents - hwPrice.rateCents) / hwPrice.priceCents) * 100)}%)</div>
                             </div>
                           )}
                           {abPrice && (
                             <div className="bg-gray-50 rounded-lg p-3">
                               <div className="font-medium mb-1">Alltagsbegleitung</div>
-                              <div className="text-muted-foreground">Erlös: {cents(abPrice.priceCents)}/h</div>
-                              <div className="text-muted-foreground">MA-Kosten: {cents(abPrice.rateCents)}/h</div>
+                              <div className="text-muted-foreground">Erlös: {cents(abPrice.priceCents)}/h · MA: {cents(abPrice.rateCents)}/h</div>
                               <div className="text-emerald-600 font-medium">Marge: {cents(abPrice.priceCents - abPrice.rateCents)}/h ({Math.round(((abPrice.priceCents - abPrice.rateCents) / abPrice.priceCents) * 100)}%)</div>
-                            </div>
-                          )}
-                          {kmPrice && (
-                            <div className="bg-gray-50 rounded-lg p-3">
-                              <div className="font-medium mb-1">Anfahrtskilometer</div>
-                              <div className="text-muted-foreground">Erlös: {cents(kmPrice.priceCents)}/km</div>
-                              <div className="text-muted-foreground">MA-Kosten: {cents(kmPrice.rateCents)}/km</div>
-                              <div className="text-muted-foreground font-medium">Marge: {cents(kmPrice.priceCents - kmPrice.rateCents)}/km</div>
-                            </div>
-                          )}
-                          {ckmPrice && (
-                            <div className="bg-gray-50 rounded-lg p-3">
-                              <div className="font-medium mb-1">Kundenkilometer</div>
-                              <div className="text-muted-foreground">Erlös: {cents(ckmPrice.priceCents)}/km</div>
-                              <div className="text-muted-foreground">MA-Kosten: {cents(ckmPrice.rateCents)}/km</div>
-                              <div className="text-muted-foreground font-medium">Marge: {cents(ckmPrice.priceCents - ckmPrice.rateCents)}/km</div>
                             </div>
                           )}
                         </div>
                       </CardContent>
                     </Card>
 
-                    <Card>
+                    <Card className="mb-4">
                       <CardHeader className="pb-3">
                         <CardTitle className="text-base">Deckungsbeitrag pro Mitarbeiter</CardTitle>
                       </CardHeader>
                       <CardContent>
                         <div className="space-y-3">
                           {empList.map((emp: any, i: number) => {
-                            const empMarginPct = Number(emp.revenueCents) > 0
-                              ? Math.round((Number(emp.marginCents) / Number(emp.revenueCents)) * 100)
-                              : 0;
+                            const empMarginPct = Number(emp.revenueCents) > 0 ? Math.round((Number(emp.marginCents) / Number(emp.revenueCents)) * 100) : 0;
+                            const empOverview = employees.find((e: any) => e.id === emp.employeeId);
                             return (
-                              <div key={emp.employeeId} className="border rounded-lg p-3" data-testid={`profit-employee-${emp.employeeId}`}>
+                              <div key={emp.employeeId} className="border rounded-lg p-3" data-testid={`team-employee-${emp.employeeId}`}>
                                 <div className="flex items-center justify-between mb-2">
                                   <div className="flex items-center gap-2">
                                     <span className="text-xs text-muted-foreground">{i + 1}.</span>
                                     <span className="font-semibold text-sm">{emp.employeeName}</span>
                                   </div>
                                   <div className="text-right">
-                                    <span className={`font-bold ${Number(emp.marginCents) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                      {cents(emp.marginCents)}
-                                    </span>
-                                    <span className={`text-xs ml-1.5 px-1.5 py-0.5 rounded ${empMarginPct >= 50 ? 'bg-emerald-100 text-emerald-700' : empMarginPct >= 30 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
-                                      {empMarginPct}%
-                                    </span>
+                                    <span className={`font-bold ${Number(emp.marginCents) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{cents(emp.marginCents)}</span>
+                                    <span className={`text-xs ml-1.5 px-1.5 py-0.5 rounded ${empMarginPct >= 50 ? 'bg-emerald-100 text-emerald-700' : empMarginPct >= 30 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{empMarginPct}%</span>
                                   </div>
                                 </div>
                                 <BarSimple value={Number(emp.marginCents)} max={maxEmpMargin} color={Number(emp.marginCents) >= 0 ? "bg-emerald-500" : "bg-red-500"} />
-                                <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-2 text-xs">
-                                  <div>
-                                    <span className="text-muted-foreground">Erlöse: </span>
-                                    <span className="font-medium">{cents(emp.revenueCents)}</span>
-                                  </div>
-                                  <div>
-                                    <span className="text-muted-foreground">Kosten: </span>
-                                    <span className="font-medium">{cents(emp.costCents)}</span>
-                                  </div>
-                                  <div>
-                                    <span className="text-muted-foreground">Stunden: </span>
-                                    <span className="font-medium">{hours(emp.totalMinutes)}</span>
-                                  </div>
-                                  <div>
-                                    <span className="text-muted-foreground">Termine: </span>
-                                    <span className="font-medium">{emp.appointments}</span>
-                                  </div>
-                                  <div>
-                                    <span className="text-muted-foreground">KM: </span>
-                                    <span className="font-medium">{formatKm(emp.totalTravelKm)}+{formatKm(emp.totalCustomerKm)} km</span>
-                                  </div>
+                                <div className="grid grid-cols-3 md:grid-cols-7 gap-2 mt-2 text-xs">
+                                  <div><span className="text-muted-foreground">Erlöse: </span><span className="font-medium">{cents(emp.revenueCents)}</span></div>
+                                  <div><span className="text-muted-foreground">Kosten: </span><span className="font-medium">{cents(emp.costCents)}</span></div>
+                                  <div><span className="text-muted-foreground">Stunden: </span><span className="font-medium">{hours(emp.totalMinutes)}</span></div>
+                                  <div><span className="text-muted-foreground">DB/h: </span><span className="font-medium">{Number(emp.totalMinutes) > 0 ? cents(Math.round(Number(emp.marginCents) / (Number(emp.totalMinutes) / 60))) : "–"}</span></div>
+                                  <div><span className="text-muted-foreground">Termine: </span><span className="font-medium">{emp.appointments}</span></div>
+                                  <div><span className="text-muted-foreground">KM: </span><span className="font-medium">{formatKm(emp.totalTravelKm)}+{formatKm(emp.totalCustomerKm)}</span></div>
+                                  {empOverview && (
+                                    <div><span className="text-muted-foreground">Krank/Urlaub: </span><span className={`font-medium ${empOverview.sickDays > 5 ? 'text-red-600' : ''}`}>{empOverview.sickDays}d / {empOverview.vacationDays}d</span></div>
+                                  )}
                                 </div>
                               </div>
                             );
@@ -628,6 +485,20 @@ export default function AdminStatistics() {
                         </div>
                       </CardContent>
                     </Card>
+
+                    {entrySegments.length > 0 && (
+                      <Card>
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-base flex items-center gap-2">
+                            <Activity className={iconSize.sm} />
+                            Zeiterfassung {selectedYear}
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <DonutChart segments={entrySegments} />
+                        </CardContent>
+                      </Card>
+                    )}
                   </>
                 );
               })() : (
@@ -637,180 +508,141 @@ export default function AdminStatistics() {
               )}
             </TabsContent>
 
-            {/* CUSTOMERS TAB */}
+            {/* CUSTOMERS TAB (Kunden + Wachstum + Budget) */}
             <TabsContent value="customers">
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-                <StatCard label="Aktiv" value={customerStats.activeCustomers || 0} color="text-green-600" testId="cust-active" />
-                <StatCard label="Interessenten" value={customerStats.prospects || 0} color="text-blue-600" testId="cust-prospects" />
-                <StatCard label="Erstberatung" value={customerStats.consultation || 0} color="text-amber-600" testId="cust-consultation" />
-                <StatCard label="Inaktiv" value={customerStats.inactiveCustomers || 0} color="text-gray-500" testId="cust-inactive" />
-                <StatCard label="Gekündigt" value={customerStats.terminated || 0} color="text-red-600" testId="cust-terminated" />
-                <StatCard
-                  label="Ø Termine/Kunde"
-                  value={Number(customerStats.avgAppointmentsPerCustomer || 0).toFixed(1).replace(".", ",")}
-                  color="text-teal-600"
-                  testId="cust-avg-appts"
-                />
-              </div>
+              {(() => {
+                const summary = growth?.summary || {};
+                const lifecycle = growth?.customerLifecycle || [];
+                const maxLifecycle = Math.max(...lifecycle.map((m: any) => Math.max(m.customersGained, m.customersLost)), 1);
+                const yoyGrowthPct = summary.gainedPrevYear > 0
+                  ? Math.round(((summary.gainedThisYear - summary.gainedPrevYear) / summary.gainedPrevYear) * 100)
+                  : null;
+                const serviceSegments = (growth?.hoursByServiceType || [])
+                  .filter((s: any) => s.service_type)
+                  .map((s: any) => ({
+                    label: SERVICE_TYPE_LABELS[s.service_type] || s.service_type,
+                    value: Number(s.total_minutes || 0),
+                    color: SERVICE_TYPE_COLORS[s.service_type] || "#a3a3a3",
+                  }));
 
-              {/* Pflegegrad */}
-              <Card className="mb-4">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Pflegegradverteilung (aktive Kunden)</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
-                    {pflegegrad.map((pg: any) => {
-                      const total = pflegegrad.reduce((s: number, p: any) => s + p.count, 0);
-                      return (
-                        <div key={pg.pflegegrad} className="text-center p-3 bg-gray-50 rounded-lg">
-                          <div className="text-xl font-bold text-teal-700">{pg.count}</div>
-                          <div className="text-xs text-muted-foreground mb-1">
-                            {pg.pflegegrad === 0 ? "Kein PG" : `PG ${pg.pflegegrad}`}
-                          </div>
-                          <div className="text-xs text-muted-foreground/70">{pct(pg.count, total)}</div>
+                return (
+                  <>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                      <StatCard label="Aktive Kunden" value={customerStats.activeCustomers || 0} icon={<Users className={iconSize.sm} />} color="text-green-600" testId="cust-active" />
+                      <StatCard label={`Gewonnen ${selectedYear}`} value={summary.gainedThisYear || 0} icon={<UserCheck className={iconSize.sm} />} color="text-green-600" testId="cust-gained" />
+                      <StatCard label={`Verloren ${selectedYear}`} value={summary.lostThisYear || 0} icon={<UserX className={iconSize.sm} />} color="text-red-600" testId="cust-lost" />
+                      <StatCard label="Netto-Wachstum" value={(summary.netGrowth || 0) > 0 ? `+${summary.netGrowth}` : String(summary.netGrowth || 0)} icon={<TrendingUp className={iconSize.sm} />} color={(summary.netGrowth || 0) >= 0 ? "text-green-600" : "text-red-600"} sub={yoyGrowthPct !== null ? `YoY: ${yoyGrowthPct > 0 ? "+" : ""}${yoyGrowthPct}%` : undefined} testId="cust-net-growth" />
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+                      <StatCard label="Interessenten" value={customerStats.prospects || 0} color="text-blue-600" testId="cust-prospects" />
+                      <StatCard label="Erstberatung" value={customerStats.consultation || 0} color="text-amber-600" testId="cust-consultation" />
+                      <StatCard label="Inaktiv" value={customerStats.inactiveCustomers || 0} color="text-gray-500" testId="cust-inactive" />
+                      <StatCard label="Gekündigt" value={customerStats.terminated || 0} color="text-red-600" testId="cust-terminated" />
+                      <StatCard label="Ø Termine/Kunde" value={Number(customerStats.avgAppointmentsPerCustomer || 0).toFixed(1).replace(".", ",")} color="text-teal-600" testId="cust-avg-appts" />
+                    </div>
+
+                    <Card className="mb-4">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base">Pflegegradverteilung (aktive Kunden)</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
+                          {pflegegrad.map((pg: any) => {
+                            const total = pflegegrad.reduce((s: number, p: any) => s + p.count, 0);
+                            return (
+                              <div key={pg.pflegegrad} className="text-center p-3 bg-gray-50 rounded-lg">
+                                <div className="text-xl font-bold text-teal-700">{pg.count}</div>
+                                <div className="text-xs text-muted-foreground mb-1">{pg.pflegegrad === 0 ? "Kein PG" : `PG ${pg.pflegegrad}`}</div>
+                                <div className="text-xs text-muted-foreground/70">{pct(pg.count, total)}</div>
+                              </div>
+                            );
+                          })}
                         </div>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
+                      </CardContent>
+                    </Card>
 
-              {/* Budget */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">§45b Entlastungsbudget {selectedYear}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-3">
-                    <div>
-                      <div className="text-xs text-muted-foreground">Zugewiesen</div>
-                      <div className="text-lg font-bold text-blue-600">{cents(budget.totalAllocatedCents || 0)}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-muted-foreground">Verbraucht</div>
-                      <div className="text-lg font-bold text-emerald-600">{cents(budget.totalUsedCents || 0)}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-muted-foreground">Verfügbar</div>
-                      <div className="text-lg font-bold text-amber-600">
-                        {cents(Math.max(0, Number(budget.totalAllocatedCents || 0) - Number(budget.totalUsedCents || 0)))}
-                      </div>
-                    </div>
-                  </div>
-                  <BarSimple
-                    value={Number(budget.totalUsedCents || 0)}
-                    max={Number(budget.totalAllocatedCents || 1)}
-                    color="bg-emerald-500"
-                  />
-                  <div className="text-xs text-muted-foreground mt-1 text-right">
-                    {pct(Number(budget.totalUsedCents || 0), Number(budget.totalAllocatedCents || 1))} genutzt
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            {/* TRENDS TAB */}
-            <TabsContent value="trends">
-              <Card className="mb-4">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Monatliche Stunden {selectedYear}</CardTitle>
-                  <div className="flex items-center gap-3 mt-1 flex-wrap">
-                    <div className="flex items-center gap-1">
-                      <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-                      <span className="text-xs text-muted-foreground">HW</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-2.5 h-2.5 rounded-full bg-teal-500" />
-                      <span className="text-xs text-muted-foreground">AB</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                      <span className="text-xs text-muted-foreground">EB</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-2.5 h-2.5 rounded-full bg-slate-400" />
-                      <span className="text-xs text-muted-foreground">Pause</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
-                      <span className="text-xs text-muted-foreground">Büro</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-2.5 h-2.5 rounded-full bg-sky-500" />
-                      <span className="text-xs text-muted-foreground">Vertrieb</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-2.5 h-2.5 rounded-full bg-purple-500" />
-                      <span className="text-xs text-muted-foreground">Sonst.</span>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    {trends.map((t: any) => {
-                      const hw = Number(t.hwMinutes || 0);
-                      const ab = Number(t.abMinutes || 0);
-                      const eb = Number(t.ebMinutes || 0);
-                      const pause = Number(t.pauseMinutes || 0);
-                      const buero = Number(t.bueroarbeitMinutes || 0);
-                      const bespr = Number(t.besprechungMinutes || 0);
-                      const vertr = Number(t.vertriebMinutes || 0);
-                      const sonst = Number(t.sonstigesMinutes || 0) + Number(t.weiterbildungMinutes || 0) + Number(t.krankMinutes || 0) + Number(t.urlaubMinutes || 0);
-                      const totalMin = hw + ab + eb + pause + buero + bespr + vertr + sonst;
-                      const totalHours = totalMin > 0 ? (totalMin / 60).toFixed(1) : "0";
-                      const termine = Number(t.completedHauswirtschaft || 0) + Number(t.completedAlltagsbegleitung || 0) + Number(t.completedErstberatungen || 0);
-                      return (
-                        <div key={t.month} className="flex items-center gap-3">
-                          <span className="text-xs text-muted-foreground w-8 text-right">{MONTH_NAMES[t.month].slice(0, 3)}</span>
-                          <div className="flex-1">
-                            <BarStacked
-                              segments={[
-                                { value: hw, color: "bg-blue-500" },
-                                { value: ab, color: "bg-teal-500" },
-                                { value: eb, color: "bg-amber-500" },
-                                { value: pause, color: "bg-slate-400" },
-                                { value: buero + bespr, color: "bg-indigo-500" },
-                                { value: vertr, color: "bg-sky-500" },
-                                { value: sonst, color: "bg-purple-500" },
-                              ]}
-                              max={maxTrendMinutes}
-                            />
+                    <Card className="mb-4">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base">§45b Entlastungsbudget {selectedYear}</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-3">
+                          <div>
+                            <div className="text-xs text-muted-foreground">Zugewiesen</div>
+                            <div className="text-lg font-bold text-blue-600">{cents(budget.totalAllocatedCents || 0)}</div>
                           </div>
-                          <div className="text-xs w-28 text-right shrink-0">
-                            <span className="font-medium">{totalHours}h</span>
-                            <span className="text-muted-foreground"> · </span>
-                            <span className="font-medium">{termine}</span>
-                            <span className="text-muted-foreground"> Termine</span>
+                          <div>
+                            <div className="text-xs text-muted-foreground">Verbraucht</div>
+                            <div className="text-lg font-bold text-emerald-600">{cents(budget.totalUsedCents || 0)}</div>
+                          </div>
+                          <div>
+                            <div className="text-xs text-muted-foreground">Verfügbar</div>
+                            <div className="text-lg font-bold text-amber-600">{cents(Math.max(0, Number(budget.totalAllocatedCents || 0) - Number(budget.totalUsedCents || 0)))}</div>
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
+                        <BarSimple value={Number(budget.totalUsedCents || 0)} max={Number(budget.totalAllocatedCents || 1)} color="bg-emerald-500" />
+                        <div className="text-xs text-muted-foreground mt-1 text-right">{pct(Number(budget.totalUsedCents || 0), Number(budget.totalAllocatedCents || 1))} genutzt</div>
+                      </CardContent>
+                    </Card>
 
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Aktive Kunden pro Monat {selectedYear}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    {trends.map((t: any) => {
-                      const maxCust = Math.max(...trends.map((tr: any) => Number(tr.activeCustomers || 0)), 1);
-                      return (
-                        <div key={t.month} className="flex items-center gap-3">
-                          <span className="text-xs text-muted-foreground w-8 text-right">{MONTH_NAMES[t.month].slice(0, 3)}</span>
-                          <div className="flex-1">
-                            <BarSimple value={Number(t.activeCustomers)} max={maxCust} color="bg-purple-500" />
-                          </div>
-                          <span className="text-xs font-medium w-10 text-right">{t.activeCustomers}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                      {serviceSegments.length > 0 && (
+                        <Card>
+                          <CardHeader className="pb-3">
+                            <CardTitle className="text-base flex items-center gap-2">
+                              <Clock className={iconSize.sm} />
+                              Leistungsstunden {selectedYear}
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            <DonutChart segments={serviceSegments} />
+                          </CardContent>
+                        </Card>
+                      )}
+
+                      {lifecycle.length > 0 && (
+                        <Card>
+                          <CardHeader className="pb-3">
+                            <CardTitle className="text-base flex items-center gap-2">
+                              <Heart className={iconSize.sm} />
+                              Kunden-Lifecycle {selectedYear}
+                            </CardTitle>
+                            <div className="flex items-center gap-4 mt-1">
+                              <div className="flex items-center gap-1.5">
+                                <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
+                                <span className="text-xs text-muted-foreground">Gewonnen</span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <div className="w-2.5 h-2.5 rounded-full bg-red-400" />
+                                <span className="text-xs text-muted-foreground">Verloren</span>
+                              </div>
+                            </div>
+                          </CardHeader>
+                          <CardContent>
+                            <div className="space-y-2">
+                              {lifecycle.map((m: any) => (
+                                <div key={m.month} className="flex items-center gap-3">
+                                  <span className="text-xs text-muted-foreground w-8 text-right">{MONTH_NAMES[m.month].slice(0, 3)}</span>
+                                  <div className="flex-1 flex gap-1">
+                                    <div className="flex-1"><BarStacked segments={[{ value: m.customersGained, color: "bg-green-500" }]} max={maxLifecycle} /></div>
+                                    <div className="flex-1"><BarStacked segments={[{ value: m.customersLost, color: "bg-red-400" }]} max={maxLifecycle} /></div>
+                                  </div>
+                                  <div className="text-xs w-20 text-right">
+                                    <span className="font-medium text-green-600">+{m.customersGained}</span>
+                                    <span className="text-muted-foreground"> / </span>
+                                    <span className="font-medium text-red-500">-{m.customersLost}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
             </TabsContent>
 
             {/* PLANNING TAB */}
@@ -937,7 +769,7 @@ export default function AdminStatistics() {
                       </CardContent>
                     </Card>
 
-                    <Card>
+                    <Card className="mb-4">
                       <CardHeader className="pb-3">
                         <CardTitle className="text-base flex items-center gap-2">
                           <UserX className="w-4 h-4 text-amber-600" />
@@ -975,6 +807,88 @@ export default function AdminStatistics() {
                         )}
                       </CardContent>
                     </Card>
+
+                    {trends.length > 0 && (
+                      <>
+                        <Card className="mb-4">
+                          <CardHeader className="pb-3">
+                            <CardTitle className="text-base">Monatliche Stunden {selectedYear}</CardTitle>
+                            <div className="flex items-center gap-3 mt-1 flex-wrap">
+                              {[["bg-blue-500","HW"],["bg-teal-500","AB"],["bg-amber-500","EB"],["bg-slate-400","Pause"],["bg-indigo-500","Büro"],["bg-sky-500","Vertrieb"],["bg-purple-500","Sonst."]].map(([c,l]) => (
+                                <div key={l} className="flex items-center gap-1">
+                                  <div className={`w-2.5 h-2.5 rounded-full ${c}`} />
+                                  <span className="text-xs text-muted-foreground">{l}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </CardHeader>
+                          <CardContent>
+                            <div className="space-y-2">
+                              {trends.map((t: any) => {
+                                const hw = Number(t.hwMinutes || 0);
+                                const ab = Number(t.abMinutes || 0);
+                                const eb = Number(t.ebMinutes || 0);
+                                const pause = Number(t.pauseMinutes || 0);
+                                const buero = Number(t.bueroarbeitMinutes || 0);
+                                const bespr = Number(t.besprechungMinutes || 0);
+                                const vertr = Number(t.vertriebMinutes || 0);
+                                const sonst = Number(t.sonstigesMinutes || 0) + Number(t.weiterbildungMinutes || 0) + Number(t.krankMinutes || 0) + Number(t.urlaubMinutes || 0);
+                                const totalMin = hw + ab + eb + pause + buero + bespr + vertr + sonst;
+                                const totalHours = totalMin > 0 ? (totalMin / 60).toFixed(1) : "0";
+                                const termine = Number(t.completedHauswirtschaft || 0) + Number(t.completedAlltagsbegleitung || 0) + Number(t.completedErstberatungen || 0);
+                                return (
+                                  <div key={t.month} className="flex items-center gap-3">
+                                    <span className="text-xs text-muted-foreground w-8 text-right">{MONTH_NAMES[t.month].slice(0, 3)}</span>
+                                    <div className="flex-1">
+                                      <BarStacked
+                                        segments={[
+                                          { value: hw, color: "bg-blue-500" },
+                                          { value: ab, color: "bg-teal-500" },
+                                          { value: eb, color: "bg-amber-500" },
+                                          { value: pause, color: "bg-slate-400" },
+                                          { value: buero + bespr, color: "bg-indigo-500" },
+                                          { value: vertr, color: "bg-sky-500" },
+                                          { value: sonst, color: "bg-purple-500" },
+                                        ]}
+                                        max={maxTrendMinutes}
+                                      />
+                                    </div>
+                                    <div className="text-xs w-28 text-right shrink-0">
+                                      <span className="font-medium">{totalHours}h</span>
+                                      <span className="text-muted-foreground"> · </span>
+                                      <span className="font-medium">{termine}</span>
+                                      <span className="text-muted-foreground"> Termine</span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </CardContent>
+                        </Card>
+
+                        <Card>
+                          <CardHeader className="pb-3">
+                            <CardTitle className="text-base">Aktive Kunden pro Monat {selectedYear}</CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            <div className="space-y-2">
+                              {trends.map((t: any) => {
+                                const maxCust = Math.max(...trends.map((tr: any) => Number(tr.activeCustomers || 0)), 1);
+                                return (
+                                  <div key={t.month} className="flex items-center gap-3">
+                                    <span className="text-xs text-muted-foreground w-8 text-right">{MONTH_NAMES[t.month].slice(0, 3)}</span>
+                                    <div className="flex-1">
+                                      <BarSimple value={Number(t.activeCustomers)} max={maxCust} color="bg-purple-500" />
+                                    </div>
+                                    <span className="text-xs font-medium w-10 text-right">{t.activeCustomers}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </>
+                    )}
                   </>
                 );
               })() : (
@@ -984,10 +898,6 @@ export default function AdminStatistics() {
               )}
             </TabsContent>
 
-            {/* GROWTH TAB */}
-            <TabsContent value="growth">
-              <GrowthTab growth={growth} selectedYear={selectedYear} />
-            </TabsContent>
           </Tabs>
         )}
       </div>
@@ -1193,114 +1103,3 @@ function AlertsSection({ alerts }: { alerts: any[] }) {
   );
 }
 
-function GrowthTab({ growth, selectedYear }: { growth: any; selectedYear: number }) {
-  if (!growth) return <div className="flex justify-center py-16"><Loader2 className={`${iconSize.lg} animate-spin text-teal-600`} /></div>;
-
-  const serviceSegments = (growth.hoursByServiceType || [])
-    .filter((s: any) => s.service_type)
-    .map((s: any) => ({
-      label: SERVICE_TYPE_LABELS[s.service_type] || s.service_type,
-      value: Number(s.total_minutes || 0),
-      color: SERVICE_TYPE_COLORS[s.service_type] || "#a3a3a3",
-    }));
-
-  const entrySegments = (growth.hoursByEntryType || [])
-    .filter((s: any) => s.entry_type)
-    .map((s: any) => ({
-      label: ENTRY_TYPE_LABELS[s.entry_type] || s.entry_type,
-      value: Number(s.total_minutes || 0),
-      color: ENTRY_TYPE_COLORS[s.entry_type] || "#a3a3a3",
-    }));
-
-  const lifecycle = growth.customerLifecycle || [];
-  const summary = growth.summary || {};
-  const maxLifecycle = Math.max(...lifecycle.map((m: any) => Math.max(m.customersGained, m.customersLost)), 1);
-
-  const yoyGrowthPct = summary.gainedPrevYear > 0
-    ? Math.round(((summary.gainedThisYear - summary.gainedPrevYear) / summary.gainedPrevYear) * 100)
-    : null;
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Aktive Kunden" value={summary.activeCustomers} icon={<Users className={iconSize.sm} />} testId="stat-active-customers" />
-        <StatCard label={`Gewonnen ${selectedYear}`} value={summary.gainedThisYear} icon={<UserCheck className={iconSize.sm} />} color="text-green-600" testId="stat-gained" />
-        <StatCard label={`Verloren ${selectedYear}`} value={summary.lostThisYear} icon={<UserX className={iconSize.sm} />} color="text-red-600" testId="stat-lost" />
-        <StatCard label="Netto-Wachstum" value={summary.netGrowth > 0 ? `+${summary.netGrowth}` : summary.netGrowth} icon={<TrendingUp className={iconSize.sm} />} color={summary.netGrowth >= 0 ? "text-green-600" : "text-red-600"} sub={yoyGrowthPct !== null ? `YoY: ${yoyGrowthPct > 0 ? "+" : ""}${yoyGrowthPct}%` : undefined} testId="stat-net-growth" />
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Clock className={iconSize.sm} />
-              Leistungsstunden {selectedYear}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <DonutChart segments={serviceSegments} />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Activity className={iconSize.sm} />
-              Zeiterfassung {selectedYear}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <DonutChart segments={entrySegments} />
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Heart className={iconSize.sm} />
-            Kunden-Lifecycle {selectedYear}
-          </CardTitle>
-          <div className="flex items-center gap-4 mt-1">
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
-              <span className="text-xs text-muted-foreground">Gewonnen</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full bg-red-400" />
-              <span className="text-xs text-muted-foreground">Verloren</span>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            {lifecycle.map((m: any) => (
-              <div key={m.month} className="flex items-center gap-3">
-                <span className="text-xs text-muted-foreground w-8 text-right">{MONTH_NAMES[m.month].slice(0, 3)}</span>
-                <div className="flex-1 flex gap-1">
-                  <div className="flex-1">
-                    <BarStacked
-                      segments={[{ value: m.customersGained, color: "bg-green-500" }]}
-                      max={maxLifecycle}
-                    />
-                  </div>
-                  <div className="flex-1">
-                    <BarStacked
-                      segments={[{ value: m.customersLost, color: "bg-red-400" }]}
-                      max={maxLifecycle}
-                    />
-                  </div>
-                </div>
-                <div className="text-xs w-20 text-right">
-                  <span className="font-medium text-green-600">+{m.customersGained}</span>
-                  <span className="text-muted-foreground"> / </span>
-                  <span className="font-medium text-red-500">-{m.customersLost}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
