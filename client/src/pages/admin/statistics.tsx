@@ -145,6 +145,15 @@ export default function AdminStatistics() {
     staleTime: 60000,
   });
 
+  const { data: budgetPotential } = useQuery<any>({
+    queryKey: ["statistics-budget-potential", selectedYear],
+    queryFn: async () => {
+      const result = await api.get(`/statistics/budget-potential?year=${selectedYear}`);
+      return unwrapResult(result);
+    },
+    staleTime: 60000,
+  });
+
   const { data: alerts } = useQuery<any[]>({
     queryKey: ["statistics-alerts"],
     queryFn: async () => {
@@ -291,24 +300,6 @@ export default function AdminStatistics() {
                   </div>
 
                   <AlertsSection alerts={alerts || []} />
-
-                  <Card className="mb-6">
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-base">Pflegegradverteilung</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="flex gap-3 flex-wrap">
-                        {pflegegrad.map((pg: any) => (
-                          <div key={pg.pflegegrad} className="text-center px-4 py-2 bg-gray-50 rounded-lg" data-testid={`pg-${pg.pflegegrad}`}>
-                            <div className="text-lg font-bold text-teal-700">{pg.count}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {pg.pflegegrad === 0 ? "Kein PG" : `PG ${pg.pflegegrad}`}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
 
                   <Card>
                     <CardHeader className="pb-3">
@@ -468,15 +459,38 @@ export default function AdminStatistics() {
                                   </div>
                                 </div>
                                 <BarSimple value={Number(emp.marginCents)} max={maxEmpMargin} color={Number(emp.marginCents) >= 0 ? "bg-emerald-500" : "bg-red-500"} />
-                                <div className="grid grid-cols-3 md:grid-cols-7 gap-2 mt-2 text-xs">
-                                  <div><span className="text-muted-foreground">Erlöse: </span><span className="font-medium">{cents(emp.revenueCents)}</span></div>
-                                  <div><span className="text-muted-foreground">Kosten: </span><span className="font-medium">{cents(emp.costCents)}</span></div>
-                                  <div><span className="text-muted-foreground">Stunden: </span><span className="font-medium">{hours(emp.totalMinutes)}</span></div>
-                                  <div><span className="text-muted-foreground">DB/h: </span><span className="font-medium">{Number(emp.totalMinutes) > 0 ? cents(Math.round(Number(emp.marginCents) / (Number(emp.totalMinutes) / 60))) : "–"}</span></div>
-                                  <div><span className="text-muted-foreground">Termine: </span><span className="font-medium">{emp.appointments}</span></div>
-                                  <div><span className="text-muted-foreground">KM: </span><span className="font-medium">{formatKm(emp.totalTravelKm)}+{formatKm(emp.totalCustomerKm)}</span></div>
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 mt-3 text-xs">
+                                  <div>
+                                    <div className="text-muted-foreground mb-0.5">Erlöse</div>
+                                    <div className="font-semibold">{cents(emp.revenueCents)}</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-muted-foreground mb-0.5">Kosten</div>
+                                    <div className="font-semibold">{cents(emp.costCents)}</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-muted-foreground mb-0.5">DB/h</div>
+                                    <div className="font-semibold">{Number(emp.totalMinutes) > 0 ? cents(Math.round(Number(emp.marginCents) / (Number(emp.totalMinutes) / 60))) : "–"}</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-muted-foreground mb-0.5">Stunden</div>
+                                    <div className="font-semibold">{hours(emp.totalMinutes)}</div>
+                                  </div>
+                                </div>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 mt-2 text-xs border-t pt-2">
+                                  <div>
+                                    <div className="text-muted-foreground mb-0.5">Termine</div>
+                                    <div className="font-semibold">{emp.appointments}</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-muted-foreground mb-0.5">KM</div>
+                                    <div className="font-semibold">{formatKm(emp.totalTravelKm)}+{formatKm(emp.totalCustomerKm)}</div>
+                                  </div>
                                   {empOverview && (
-                                    <div><span className="text-muted-foreground">Krank/Urlaub: </span><span className={`font-medium ${empOverview.sickDays > 5 ? 'text-red-600' : ''}`}>{empOverview.sickDays}d / {empOverview.vacationDays}d</span></div>
+                                    <div>
+                                      <div className="text-muted-foreground mb-0.5">Krank/Urlaub</div>
+                                      <div className={`font-semibold ${empOverview.sickDays > 5 ? 'text-red-600' : ''}`}>{empOverview.sickDays}d / {empOverview.vacationDays}d</div>
+                                    </div>
                                   )}
                                 </div>
                               </div>
@@ -585,6 +599,48 @@ export default function AdminStatistics() {
                         <div className="text-xs text-muted-foreground mt-1 text-right">{pct(Number(budget.totalUsedCents || 0), Number(budget.totalAllocatedCents || 1))} genutzt</div>
                       </CardContent>
                     </Card>
+
+                    {budgetPotential?.customers?.length > 0 && (
+                      <Card className="mb-4">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-base flex items-center gap-2">
+                            <Wallet className={iconSize.sm} />
+                            Budget-Potenzial
+                          </CardTitle>
+                          <div className="text-xs text-muted-foreground">Kunden mit dem meisten ungenutzten Budget (alle Töpfe, kumuliert {selectedYear})</div>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-2">
+                            {budgetPotential.customers.map((c: any) => {
+                              const colorClass = c.percent < 30 ? "text-red-600" : c.percent < 50 ? "text-amber-600" : "text-emerald-600";
+                              const barColor = c.percent < 30 ? "bg-red-400" : c.percent < 50 ? "bg-amber-400" : "bg-emerald-500";
+                              const bgColor = c.percent < 30 ? "border-red-200 bg-red-50/30" : c.percent < 50 ? "border-amber-200 bg-amber-50/30" : "";
+                              return (
+                                <div key={c.id} className={`flex items-center gap-3 p-2.5 rounded-lg border ${bgColor}`} data-testid={`budget-potential-${c.id}`}>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <Link href={`/admin/customers/${c.id}`} className="text-sm font-medium hover:underline truncate" data-testid={`budget-potential-link-${c.id}`}>
+                                        {c.name}
+                                      </Link>
+                                      {c.pflegegrad > 0 && (
+                                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">PG {c.pflegegrad}</Badge>
+                                      )}
+                                    </div>
+                                    <div className="mt-1.5 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                      <div className={`h-full rounded-full ${barColor} transition-all`} style={{ width: `${Math.min(100, c.percent)}%` }} />
+                                    </div>
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    <div className={`text-sm font-bold ${colorClass}`}>{c.percent}%</div>
+                                    <div className="text-[10px] text-muted-foreground">{cents(c.unusedCents)} offen</div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                       {(() => {

@@ -1145,6 +1145,97 @@ router.get("/alerts", asyncHandler("Handlungsbedarf konnte nicht geladen werden"
   res.json(alerts);
 }));
 
+router.get("/budget-potential", asyncHandler("Budget-Potenzial konnte nicht geladen werden", async (req, res) => {
+  if (!req.user!.isAdmin) throw forbidden("FORBIDDEN", "Nur für Administratoren");
+
+  const year = parseInt(req.query.year as string) || new Date().getFullYear();
+  const now = new Date();
+  const effectiveMonth = year < now.getFullYear() ? 12 : currentMonth();
+
+  const result = await db.execute(sql`
+    WITH active_customers AS (
+      SELECT id, first_name, last_name, pflegegrad
+      FROM customers
+      WHERE status = 'aktiv' AND deleted_at IS NULL
+    ),
+    alloc_45b AS (
+      SELECT ba.customer_id, COALESCE(SUM(ba.amount_cents), 0)::bigint AS allocated
+      FROM budget_allocations ba
+      JOIN active_customers ac ON ac.id = ba.customer_id
+      WHERE ba.budget_type = 'entlastungsbetrag_45b'
+        AND ba.year = ${year} AND ba.month <= ${effectiveMonth}
+      GROUP BY ba.customer_id
+    ),
+    alloc_45a AS (
+      SELECT ba.customer_id, COALESCE(SUM(ba.amount_cents), 0)::bigint AS allocated
+      FROM budget_allocations ba
+      JOIN active_customers ac ON ac.id = ba.customer_id
+      WHERE ba.budget_type = 'umwandlung_45a'
+        AND ba.year = ${year} AND ba.month = ${effectiveMonth}
+      GROUP BY ba.customer_id
+    ),
+    alloc_39 AS (
+      SELECT ba.customer_id,
+        CASE WHEN ${effectiveMonth} >= 12
+          THEN COALESCE(SUM(ba.amount_cents), 0)::bigint
+          ELSE ROUND(COALESCE(SUM(ba.amount_cents), 0)::numeric / 12 * ${effectiveMonth})::bigint
+        END AS allocated
+      FROM budget_allocations ba
+      JOIN active_customers ac ON ac.id = ba.customer_id
+      WHERE ba.budget_type = 'ersatzpflege_39_42a'
+        AND ba.year = ${year}
+      GROUP BY ba.customer_id
+    ),
+    all_alloc AS (
+      SELECT customer_id, SUM(allocated) AS total_allocated FROM (
+        SELECT customer_id, allocated FROM alloc_45b
+        UNION ALL
+        SELECT customer_id, allocated FROM alloc_45a
+        UNION ALL
+        SELECT customer_id, allocated FROM alloc_39
+      ) u GROUP BY customer_id
+    ),
+    used AS (
+      SELECT bt.customer_id, COALESCE(ABS(SUM(bt.amount_cents)), 0)::bigint AS total_used
+      FROM budget_transactions bt
+      JOIN active_customers ac ON ac.id = bt.customer_id
+      WHERE bt.transaction_type = 'consumption'
+        AND EXTRACT(YEAR FROM bt.transaction_date::date) = ${year}
+        AND EXTRACT(MONTH FROM bt.transaction_date::date) <= ${effectiveMonth}
+      GROUP BY bt.customer_id
+    )
+    SELECT
+      ac.id,
+      ac.first_name || ' ' || ac.last_name AS name,
+      ac.pflegegrad,
+      COALESCE(aa.total_allocated, 0)::bigint AS "allocatedCents",
+      COALESCE(u.total_used, 0)::bigint AS "usedCents",
+      (COALESCE(aa.total_allocated, 0) - COALESCE(u.total_used, 0))::bigint AS "unusedCents"
+    FROM active_customers ac
+    LEFT JOIN all_alloc aa ON aa.customer_id = ac.id
+    LEFT JOIN used u ON u.customer_id = ac.id
+    WHERE COALESCE(aa.total_allocated, 0) > 0
+    ORDER BY (COALESCE(aa.total_allocated, 0) - COALESCE(u.total_used, 0)) DESC
+    LIMIT 10
+  `);
+
+  const customers = result.rows.map((r: any) => {
+    const allocated = Number(r.allocatedCents || 0);
+    const used = Number(r.usedCents || 0);
+    return {
+      id: r.id,
+      name: r.name,
+      pflegegrad: r.pflegegrad,
+      allocatedCents: allocated,
+      usedCents: used,
+      unusedCents: Number(r.unusedCents || 0),
+      percent: allocated > 0 ? Math.round((used / allocated) * 100) : 0,
+    };
+  });
+
+  res.json({ customers });
+}));
+
 const MONTH_NAMES_DE = [
   "", "Januar", "Februar", "März", "April", "Mai", "Juni",
   "Juli", "August", "September", "Oktober", "November", "Dezember",
