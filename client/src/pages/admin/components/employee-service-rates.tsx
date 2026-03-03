@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { iconSize } from "@/design-system";
 import { Loader2, Euro } from "lucide-react";
 import { api, unwrapResult } from "@/lib/api/client";
+import { formatCurrency } from "@shared/utils/format";
 
 interface ServiceData {
   id: number;
@@ -19,10 +20,6 @@ const UNIT_LABELS: Record<string, string> = {
   kilometers: "/km",
   flat: "pauschal",
 };
-
-function formatCurrency(cents: number): string {
-  return `${(cents / 100).toFixed(2).replace(".", ",")} €`;
-}
 
 export function EmployeeServiceRates() {
   const { data: services, isLoading } = useQuery<ServiceData[]>({

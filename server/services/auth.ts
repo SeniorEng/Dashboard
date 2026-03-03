@@ -152,7 +152,7 @@ export class AuthService {
         .update(users)
         .set({ passwordHash: bcryptHash, updatedAt: new Date() })
         .where(eq(users.id, user.id));
-      console.warn(`[AUTH] SHA-256 password upgraded to bcrypt for user ${user.id} (${user.email})`);
+      console.warn(`[AUTH] SHA-256 password upgraded to bcrypt for user ${user.id}`);
     }
 
     const roles = await this.getUserRoles(user.id);

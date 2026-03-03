@@ -18,8 +18,12 @@ router.post("/", asyncHandler("Qualifikation konnte nicht erstellt werden", asyn
 
   const qualification = await qualificationStorage.createQualification(result.data);
 
-  if (req.body.documentTypeIds && Array.isArray(req.body.documentTypeIds)) {
-    await qualificationStorage.setQualificationDocuments(qualification.id, req.body.documentTypeIds);
+  if (req.body.documentTypeIds) {
+    const dtSchema = z.array(z.number().int());
+    const dtResult = dtSchema.safeParse(req.body.documentTypeIds);
+    if (dtResult.success) {
+      await qualificationStorage.setQualificationDocuments(qualification.id, dtResult.data);
+    }
   }
 
   res.status(201).json(qualification);
@@ -115,8 +119,12 @@ router.patch("/:id", asyncHandler("Qualifikation konnte nicht aktualisiert werde
   const qualification = await qualificationStorage.updateQualification(id, result.data);
   if (!qualification) return res.status(404).json({ error: "Qualifikation nicht gefunden" });
 
-  if (req.body.documentTypeIds && Array.isArray(req.body.documentTypeIds)) {
-    await qualificationStorage.setQualificationDocuments(id, req.body.documentTypeIds);
+  if (req.body.documentTypeIds) {
+    const dtSchema = z.array(z.number().int());
+    const dtResult = dtSchema.safeParse(req.body.documentTypeIds);
+    if (dtResult.success) {
+      await qualificationStorage.setQualificationDocuments(id, dtResult.data);
+    }
   }
 
   res.json(qualification);

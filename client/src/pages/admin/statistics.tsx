@@ -16,15 +16,12 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
-
-const MONTH_NAMES = [
-  "", "Januar", "Februar", "März", "April", "Mai", "Juni",
-  "Juli", "August", "September", "Oktober", "November", "Dezember",
-];
+import { MONTH_NAMES } from "@/features/time-tracking/constants";
+import { formatCurrency } from "@shared/utils/format";
 
 function cents(value: number | string | bigint): string {
   const num = typeof value === "string" ? parseInt(value) : Number(value);
-  return new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" }).format(num / 100);
+  return formatCurrency(num);
 }
 
 function pct(a: number, b: number): string {
@@ -185,8 +182,7 @@ export default function AdminStatistics() {
     : `${selectedYear}`;
 
   return (
-    <Layout variant="admin">
-      <div className="max-w-6xl mx-auto">
+    <Layout variant="wide">
         <div className="flex items-center gap-3 mb-6">
           <Link href="/admin" data-testid="link-back-admin">
             <Button variant="ghost" size="sm">
@@ -977,7 +973,6 @@ export default function AdminStatistics() {
 
           </Tabs>
         )}
-      </div>
     </Layout>
   );
 }
@@ -1029,7 +1024,7 @@ function DonutChart({ segments, size = 160 }: { segments: { label: string; value
 
   return (
     <div className="flex flex-col items-center gap-4">
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Zeitverteilung Diagramm">
         {segments.filter(s => s.value > 0).map((seg, i) => {
           const pct = seg.value / total;
           const dashLength = pct * circumference;
@@ -1100,7 +1095,7 @@ function CockpitKPI({ title, icon, value, percent, thresholds, prevValue, prevLa
         </div>
 
         <div className="flex items-end gap-3 mb-3">
-          <span className={`text-3xl font-bold ${color.text}`} data-testid={`${testId}-value`}>{value}</span>
+          <span className={`text-2xl sm:text-3xl font-bold ${color.text}`} data-testid={`${testId}-value`}>{value}</span>
           {trend !== null && (
             <div className={`flex items-center gap-0.5 text-sm mb-1 ${trend > 0 ? "text-emerald-600" : trend < 0 ? "text-red-600" : "text-gray-500"}`} data-testid={`${testId}-trend`}>
               {trend > 0 ? <ArrowUpRight className="w-4 h-4" /> : trend < 0 ? <ArrowDownRight className="w-4 h-4" /> : <Minus className="w-4 h-4" />}

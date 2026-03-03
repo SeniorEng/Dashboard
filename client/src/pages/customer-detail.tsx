@@ -553,8 +553,8 @@ export default function CustomerDetailPage() {
                     <span className="text-xs text-muted-foreground/60">Kein Pflegegrad</span>
                   )}
                 </div>
-                <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => startEditing("pflegegrad")} data-testid="button-edit-pflegegrad">
-                  <Pencil className="h-3.5 w-3.5 text-gray-400" />
+                <Button variant="ghost" size="sm" className="min-h-[44px] min-w-[44px] p-0" onClick={() => startEditing("pflegegrad")} data-testid="button-edit-pflegegrad">
+                  <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
                 </Button>
               </div>
             )}
@@ -614,8 +614,8 @@ export default function CustomerDetailPage() {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-semibold text-gray-700">Kontakt & Adresse</span>
-                  <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => startEditing("contact")} data-testid="button-edit-contact">
-                    <Pencil className="h-3.5 w-3.5 text-gray-400" />
+                  <Button variant="ghost" size="sm" className="min-h-[44px] min-w-[44px] p-0" onClick={() => startEditing("contact")} data-testid="button-edit-contact">
+                    <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
                   </Button>
                 </div>
                 <div className="space-y-2.5">
@@ -707,8 +707,8 @@ export default function CustomerDetailPage() {
                     <PawPrint className={`${iconSize.sm} text-amber-600`} />
                     Haustier
                   </h2>
-                  <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => startEditing("pet")} data-testid="button-edit-pet">
-                    <Pencil className="h-3.5 w-3.5 text-gray-400" />
+                  <Button variant="ghost" size="sm" className="min-h-[44px] min-w-[44px] p-0" onClick={() => startEditing("pet")} data-testid="button-edit-pet">
+                    <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
                   </Button>
                 </div>
                 <p className="text-sm text-muted-foreground" data-testid="text-pet-details">
@@ -818,11 +818,11 @@ export default function CustomerDetailPage() {
                           <Phone className={iconSize.xs} />
                           {formatPhoneForDisplay(contact.telefon)}
                         </a>
-                        <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => startEditContact(contact)} data-testid={`button-edit-contact-${contact.id}`}>
-                          <Pencil className="h-3 w-3 text-gray-400" />
+                        <Button variant="ghost" size="sm" className="min-h-[44px] min-w-[44px] p-0" onClick={() => startEditContact(contact)} data-testid={`button-edit-contact-${contact.id}`}>
+                          <Pencil className="h-3 w-3 text-muted-foreground" />
                         </Button>
-                        <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => deleteContactMutation.mutate(contact.id)} disabled={contactSaving} data-testid={`button-delete-contact-${contact.id}`}>
-                          <Trash2 className="h-3 w-3 text-gray-400" />
+                        <Button variant="ghost" size="sm" className="min-h-[44px] min-w-[44px] p-0" onClick={() => deleteContactMutation.mutate(contact.id)} disabled={contactSaving} data-testid={`button-delete-contact-${contact.id}`}>
+                          <Trash2 className="h-3 w-3 text-muted-foreground" />
                         </Button>
                       </div>
                     </div>
@@ -951,8 +951,8 @@ export default function CustomerDetailPage() {
                     <Stethoscope className={`${iconSize.sm} text-rose-500`} />
                     Vorerkrankungen
                   </h2>
-                  <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => startEditing("medical")} data-testid="button-edit-medical">
-                    <Pencil className="h-3.5 w-3.5 text-gray-400" />
+                  <Button variant="ghost" size="sm" className="min-h-[44px] min-w-[44px] p-0" onClick={() => startEditing("medical")} data-testid="button-edit-medical">
+                    <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
                   </Button>
                 </div>
                 <p className="text-sm text-muted-foreground whitespace-pre-line" data-testid="text-medical-history">
@@ -995,8 +995,8 @@ export default function CustomerDetailPage() {
                     <ClipboardList className={`${iconSize.sm} text-green-600`} />
                     Vereinbarte Leistungen
                   </h2>
-                  <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => startEditing("services")} data-testid="button-edit-services">
-                    <Pencil className="h-3.5 w-3.5 text-gray-400" />
+                  <Button variant="ghost" size="sm" className="min-h-[44px] min-w-[44px] p-0" onClick={() => startEditing("services")} data-testid="button-edit-services">
+                    <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
                   </Button>
                 </div>
                 <p className="text-sm text-muted-foreground whitespace-pre-line" data-testid="text-agreed-services">

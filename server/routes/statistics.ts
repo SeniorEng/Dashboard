@@ -999,7 +999,8 @@ router.get("/alerts", asyncHandler("Handlungsbedarf konnte nicht geladen werden"
   const curMonth = now.getMonth() + 1;
   const prevM = curMonth === 1 ? 12 : curMonth - 1;
   const prevMYear = curMonth === 1 ? curYear - 1 : curYear;
-  const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const threeDaysAgoDate = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+  const threeDaysAgo = `${threeDaysAgoDate.getFullYear()}-${String(threeDaysAgoDate.getMonth() + 1).padStart(2, "0")}-${String(threeDaysAgoDate.getDate()).padStart(2, "0")}`;
 
   const [undocumented, budgetOverspend, noAppointments, missingRecords, newCustomers] = await Promise.all([
     db.execute(sql`
