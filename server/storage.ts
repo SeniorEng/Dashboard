@@ -23,6 +23,8 @@ import { eq, count, sql as sqlBuilder, lt, ne, and, or, ilike, inArray, isNull, 
 import { customerIdsCache } from "./services/cache";
 import { db } from "./lib/db";
 
+const assignedEmployee = sqlBuilder`(SELECT display_name FROM users WHERE users.id = ${appointments.assignedEmployeeId})`.as("assigned_employee_name");
+
 const appointmentWithCustomerSelectFields = {
   id: appointments.id,
   customerId: appointments.customerId,
@@ -51,6 +53,7 @@ const appointmentWithCustomerSelectFields = {
   deletedAt: appointments.deletedAt,
   createdAt: appointments.createdAt,
   performedByEmployeeId: appointments.performedByEmployeeId,
+  assignedEmployeeName: assignedEmployee,
   customer: {
     id: customers.id,
     name: customers.name,
@@ -108,6 +111,7 @@ function mapAppointmentRow(row: AppointmentQueryRow & Record<string, unknown>): 
     deletedAt: (row.deletedAt as Date | null) ?? null,
     createdAt: row.createdAt as Date,
     performedByEmployeeId: row.performedByEmployeeId as number | null,
+    assignedEmployeeName: (row.assignedEmployeeName as string | null) ?? null,
     customer: (row.customer as { id?: number })?.id ? row.customer as AppointmentWithCustomer["customer"] : null,
   };
 }

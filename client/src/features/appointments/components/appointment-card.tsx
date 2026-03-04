@@ -15,9 +15,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { MapPin, CheckCircle2, Clock, FileText, Pencil, Trash2, MoreVertical, Phone, Navigation, RotateCcw } from "lucide-react";
+import { MapPin, CheckCircle2, Clock, FileText, Pencil, Trash2, MoreVertical, Phone, Navigation, RotateCcw, User } from "lucide-react";
 import { useLocation } from "wouter";
 import type { AppointmentWithCustomer, AppointmentStatus } from "@shared/types";
+import { useAuth } from "@/hooks/use-auth";
 import { getCardServiceInfoFromAppointment, canModifyAppointment } from "@shared/types";
 import { formatTimeSlot, getEndTime } from "../utils";
 import { useDeleteAppointment } from "../hooks";
@@ -56,6 +57,7 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [, navigate] = useLocation();
+  const { user } = useAuth();
   
   const canModify = canModifyAppointment(appointment.status as AppointmentStatus);
   const isCompleted = appointment.status === "completed";
@@ -241,6 +243,12 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
                     <MapPin className="w-3 h-3 mr-1 shrink-0" />
                     <span className="truncate">{appointment.customer?.address || "Keine Adresse"}</span>
                   </div>
+                  {user?.isAdmin && appointment.assignedEmployeeName && (
+                    <div className="flex items-center text-xs text-muted-foreground mt-0.5" data-testid={`text-employee-${appointment.id}`}>
+                      <User className="w-3 h-3 mr-1 shrink-0" />
+                      <span className="truncate">{appointment.assignedEmployeeName}</span>
+                    </div>
+                  )}
                 </div>
                 
                 {/* Quick Action Buttons + Status */}
