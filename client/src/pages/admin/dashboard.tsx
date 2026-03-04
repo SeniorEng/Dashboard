@@ -6,7 +6,7 @@ import { Layout } from "@/components/layout";
 import {
   Users, ArrowLeft, Contact2, Clock, Settings,
   Building2, ClipboardList, FileText, Shield, Receipt, Gift, BarChart3, UserPlus,
-  GraduationCap, FileCheck, Crown, BookOpen, ScrollText,
+  GraduationCap, FileCheck, BookOpen, ScrollText,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -235,18 +235,6 @@ export default function AdminDashboard() {
     },
   ];
 
-  const superadminCards: AdminCardData[] = user?.isSuperAdmin ? [
-    {
-      href: "/admin/users",
-      testId: "card-superadmin-users",
-      icon: <Crown className={`${iconSize.lg} text-amber-600`} />,
-      iconBg: "bg-amber-100",
-      title: "Admin-Verwaltung",
-      description: "Admins ernennen und deren Bereichsberechtigungen konfigurieren",
-      permissionKey: "users",
-    },
-  ] : [];
-
   const filterCards = (cards: AdminCardData[]) =>
     cards.filter((card) => hasAdminPermission(card.permissionKey));
 
@@ -270,14 +258,6 @@ export default function AdminDashboard() {
       </div>
 
       <div className="space-y-8">
-        {superadminCards.length > 0 && (
-          <Section title="Superadmin">
-            {superadminCards.map((card) => (
-              <AdminCard key={card.testId} {...card} />
-            ))}
-          </Section>
-        )}
-
         {visiblePersonal.length > 0 && (
           <Section title="Personal & Team">
             {visiblePersonal.map((card) => (
