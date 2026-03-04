@@ -146,6 +146,7 @@ export default function AdminCustomerNew() {
 
   useEffect(() => {
     if (createdRef.current) return;
+    if (draftDialog) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       const hasData = formData.vorname.trim() || formData.nachname.trim() || formData.billingType;
