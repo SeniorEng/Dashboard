@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -38,9 +38,11 @@ import {
 } from "@shared/schema";
 import { formatAddress } from "@shared/utils/format";
 import { api, unwrapResult } from "@/lib/api";
-import { ArrowLeft, Plus, Pencil, Loader2, Building2, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Loader2, Building2, AlertTriangle, Search, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, componentStyles } from "@/design-system";
+
+const PAGE_SIZE = 25;
 
 const EMPTY_FORM: InsuranceProviderFormData = {
   name: "",
@@ -73,6 +75,26 @@ export default function AdminInsuranceProviders() {
   const [editingProvider, setEditingProvider] = useState<InsuranceProviderItem | null>(null);
   const [form, setForm] = useState<InsuranceProviderFormData>(EMPTY_FORM);
   const [deactivateConfirm, setDeactivateConfirm] = useState<{ count: number; payload: InsuranceProviderFormData } | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+  const filteredProviders = useMemo(() => {
+    if (!providers) return [];
+    if (!searchQuery.trim()) return providers;
+    const q = searchQuery.trim().toLowerCase();
+    return providers.filter(p =>
+      p.name.toLowerCase().includes(q) ||
+      p.ikNummer.includes(q) ||
+      (p.empfaenger && p.empfaenger.toLowerCase().includes(q))
+    );
+  }, [providers, searchQuery]);
+
+  const visibleProviders = useMemo(
+    () => filteredProviders.slice(0, visibleCount),
+    [filteredProviders, visibleCount]
+  );
+
+  const hasMore = visibleCount < filteredProviders.length;
 
   const openCreate = () => {
     setEditingProvider(null);
@@ -235,43 +257,95 @@ export default function AdminInsuranceProviders() {
               </CardContent>
             </Card>
           ) : (
-            <div className="flex flex-col gap-3">
-              {providers.map((provider) => (
-                <Card
-                  key={provider.id}
-                  className={`cursor-pointer hover:shadow-md transition-shadow ${!provider.isActive ? "opacity-60" : ""}`}
-                  onClick={() => openEdit(provider)}
-                  data-testid={`card-provider-${provider.id}`}
-                >
-                  <CardContent className="py-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-medium text-gray-900 truncate">{provider.name}</span>
-                          {!provider.isActive && (
-                            <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">Inaktiv</span>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
-                          <span>IK: {provider.ikNummer}</span>
-                          {provider.empfaenger && <span>· {provider.empfaenger}</span>}
-                          {(provider.strasse || provider.plz || provider.stadt) && (
-                            <span>· {formatAddress(provider)}</span>
-                          )}
-                        </div>
-                        {provider.zahlungsbedingungen && (
-                          <div className="text-xs text-gray-500 mt-1">
-                            {ZAHLUNGSBEDINGUNGEN_LABELS[provider.zahlungsbedingungen] || provider.zahlungsbedingungen}
-                            {provider.zahlungsart && ` · ${ZAHLUNGSARTEN_LABELS[provider.zahlungsart] || provider.zahlungsart}`}
-                          </div>
-                        )}
-                      </div>
-                      <Pencil className={`${iconSize.sm} text-gray-400 shrink-0`} />
-                    </div>
+            <>
+              <div className="relative mb-4">
+                <Search className={`${iconSize.sm} absolute left-3 top-1/2 -translate-y-1/2 text-gray-400`} />
+                <Input
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setVisibleCount(PAGE_SIZE);
+                  }}
+                  placeholder="Name, IK-Nummer oder Empfänger suchen..."
+                  className="pl-10 pr-10"
+                  data-testid="input-search-providers"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => { setSearchQuery(""); setVisibleCount(PAGE_SIZE); }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    data-testid="button-clear-search"
+                  >
+                    <X className={iconSize.sm} />
+                  </button>
+                )}
+              </div>
+
+              {searchQuery && (
+                <p className="text-sm text-gray-500 mb-3" data-testid="text-search-result-count">
+                  {filteredProviders.length} {filteredProviders.length === 1 ? "Ergebnis" : "Ergebnisse"}
+                  {providers && ` von ${providers.length}`}
+                </p>
+              )}
+
+              {filteredProviders.length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 text-center">
+                    <Search className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                    <p className="text-gray-500">Keine Kostenträger gefunden</p>
                   </CardContent>
                 </Card>
-              ))}
-            </div>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {visibleProviders.map((provider) => (
+                    <Card
+                      key={provider.id}
+                      className={`cursor-pointer hover:shadow-md transition-shadow ${!provider.isActive ? "opacity-60" : ""}`}
+                      onClick={() => openEdit(provider)}
+                      data-testid={`card-provider-${provider.id}`}
+                    >
+                      <CardContent className="py-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-medium text-gray-900 truncate">{provider.name}</span>
+                              {!provider.isActive && (
+                                <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">Inaktiv</span>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
+                              <span>IK: {provider.ikNummer}</span>
+                              {provider.empfaenger && <span>· {provider.empfaenger}</span>}
+                              {(provider.strasse || provider.plz || provider.stadt) && (
+                                <span>· {formatAddress(provider)}</span>
+                              )}
+                            </div>
+                            {provider.zahlungsbedingungen && (
+                              <div className="text-xs text-gray-500 mt-1">
+                                {ZAHLUNGSBEDINGUNGEN_LABELS[provider.zahlungsbedingungen] || provider.zahlungsbedingungen}
+                                {provider.zahlungsart && ` · ${ZAHLUNGSARTEN_LABELS[provider.zahlungsart] || provider.zahlungsart}`}
+                              </div>
+                            )}
+                          </div>
+                          <Pencil className={`${iconSize.sm} text-gray-400 shrink-0`} />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+
+                  {hasMore && (
+                    <Button
+                      variant="outline"
+                      className="w-full mt-2"
+                      onClick={() => setVisibleCount(prev => prev + PAGE_SIZE)}
+                      data-testid="button-load-more"
+                    >
+                      Weitere laden ({filteredProviders.length - visibleCount} verbleibend)
+                    </Button>
+                  )}
+                </div>
+              )}
+            </>
           )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
