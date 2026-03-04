@@ -6,6 +6,7 @@ import { Layout } from "@/components/layout";
 import {
   Users, ArrowLeft, Contact2, Clock, Settings,
   Building2, ClipboardList, FileText, Shield, Receipt, Gift, BarChart3, UserPlus,
+  GraduationCap, FileCheck, Crown, BookOpen, ScrollText,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -98,6 +99,15 @@ export default function AdminDashboard() {
       permissionKey: "birthday_cards",
     },
     {
+      href: "/admin/qualifications",
+      testId: "card-qualifications",
+      icon: <GraduationCap className={`${iconSize.lg} text-orange-600`} />,
+      iconBg: "bg-orange-100",
+      title: "Qualifikationen",
+      description: "Qualifikationstypen definieren und Mitarbeitern zuweisen",
+      permissionKey: "users",
+    },
+    {
       href: "/admin/statistics",
       testId: "card-statistics",
       icon: <BarChart3 className={`${iconSize.lg} text-indigo-600`} />,
@@ -146,6 +156,24 @@ export default function AdminDashboard() {
       permissionKey: "documents",
     },
     {
+      href: "/admin/document-types",
+      testId: "card-document-types",
+      icon: <BookOpen className={`${iconSize.lg} text-yellow-600`} />,
+      iconBg: "bg-yellow-100",
+      title: "Dokumentenkategorien",
+      description: "Dokumententypen und Prüffristen verwalten",
+      permissionKey: "documents",
+    },
+    {
+      href: "/admin/document-templates",
+      testId: "card-document-templates",
+      icon: <ScrollText className={`${iconSize.lg} text-lime-600`} />,
+      iconBg: "bg-lime-100",
+      title: "Dokumentenvorlagen",
+      description: "Vertragsvorlagen erstellen und bearbeiten",
+      permissionKey: "documents",
+    },
+    {
       href: "/admin/services",
       testId: "card-services",
       icon: <ClipboardList className={`${iconSize.lg} text-cyan-600`} />,
@@ -175,6 +203,15 @@ export default function AdminDashboard() {
       description: "Monatliche Stunden, KM, Urlaub und Krankheit je Mitarbeiter",
       permissionKey: "hours_overview",
     },
+    {
+      href: "/admin/proof-review",
+      testId: "card-proof-review",
+      icon: <FileCheck className={`${iconSize.lg} text-sky-600`} />,
+      iconBg: "bg-sky-100",
+      title: "Leistungsnachweis-Prüfung",
+      description: "Eingereichte Leistungsnachweise prüfen und freigeben",
+      permissionKey: "billing",
+    },
   ];
 
   const systemCards: AdminCardData[] = [
@@ -197,6 +234,18 @@ export default function AdminDashboard() {
       permissionKey: "audit_log",
     },
   ];
+
+  const superadminCards: AdminCardData[] = user?.isSuperAdmin ? [
+    {
+      href: "/admin/users",
+      testId: "card-superadmin-users",
+      icon: <Crown className={`${iconSize.lg} text-amber-600`} />,
+      iconBg: "bg-amber-100",
+      title: "Admin-Verwaltung",
+      description: "Admins ernennen und deren Bereichsberechtigungen konfigurieren",
+      permissionKey: "users",
+    },
+  ] : [];
 
   const filterCards = (cards: AdminCardData[]) =>
     cards.filter((card) => hasAdminPermission(card.permissionKey));
@@ -221,6 +270,14 @@ export default function AdminDashboard() {
       </div>
 
       <div className="space-y-8">
+        {superadminCards.length > 0 && (
+          <Section title="Superadmin">
+            {superadminCards.map((card) => (
+              <AdminCard key={card.testId} {...card} />
+            ))}
+          </Section>
+        )}
+
         {visiblePersonal.length > 0 && (
           <Section title="Personal & Team">
             {visiblePersonal.map((card) => (
