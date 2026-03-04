@@ -79,7 +79,21 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
 
   const vorjahrVerbraucht = parseFloat(formData.vorjahrVerbraucht45b) || 0;
   const uebertrag = parseFloat(formData.uebertrag45b) || 0;
-  const maxCarryover = (BUDGET_45B_MAX_MONTHLY_CENTS / 100) * 12;
+
+  const currentYear = new Date().getFullYear();
+  const previousYear = currentYear - 1;
+  let eligibleMonthsLastYear = 12;
+  if (formData.pflegegradSeit) {
+    const pgStart = new Date(formData.pflegegradSeit);
+    const pgStartYear = pgStart.getFullYear();
+    if (pgStartYear > previousYear) {
+      eligibleMonthsLastYear = 0;
+    } else if (pgStartYear === previousYear) {
+      eligibleMonthsLastYear = 12 - pgStart.getMonth();
+    }
+  }
+
+  const maxCarryover = (BUDGET_45B_MAX_MONTHLY_CENTS / 100) * eligibleMonthsLastYear;
   const errorCarryover = uebertrag < 0 ? "Übertrag darf nicht negativ sein" : null;
 
   const is45bEnabled = formData.budgetTypeSettings.find(s => s.budgetType === "entlastungsbetrag_45b")?.enabled ?? true;
@@ -193,7 +207,10 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
                           data-testid="input-vorjahr-verbraucht-45b"
                         />
                         <p className="text-xs text-gray-500">
-                          Maximaler Jahresbetrag: {maxCarryover.toFixed(2)} € (131 € × 12 Monate)
+                          {eligibleMonthsLastYear === 0
+                            ? "Kein Vorjahresanspruch (Pflegegrad erst in diesem Jahr)"
+                            : `Maximaler Jahresbetrag: ${maxCarryover.toFixed(2)} € (131 € × ${eligibleMonthsLastYear} Monat${eligibleMonthsLastYear !== 1 ? "e" : ""})`
+                          }
                         </p>
                       </div>
                       <div className="space-y-2">
