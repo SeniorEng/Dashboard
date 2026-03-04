@@ -119,6 +119,7 @@ export default function AdminCustomerNew() {
   const [draftDialog, setDraftDialog] = useState<{ timestamp: string } | null>(null);
   const createdRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftRestoringRef = useRef(false);
 
   useEffect(() => {
     const draft = loadDraft();
@@ -130,13 +131,20 @@ export default function AdminCustomerNew() {
   const restoreDraft = useCallback(() => {
     const draft = loadDraft();
     if (draft) {
+      draftRestoringRef.current = true;
       setFormData(prev => ({ ...prev, ...draft.formData }));
       const restoredSteps = getStepsForBillingType(draft.formData.billingType);
       const clampedStep = Math.min(draft.currentStep, restoredSteps.length - 1);
-      setCurrentStep(Math.max(1, clampedStep));
+      const targetStep = Math.max(1, clampedStep);
+      setCurrentStep(targetStep);
+      setDraftDialog(null);
+      setTimeout(() => {
+        draftRestoringRef.current = false;
+      }, 600);
       toast({ title: "Entwurf wiederhergestellt" });
+    } else {
+      setDraftDialog(null);
     }
-    setDraftDialog(null);
   }, [toast]);
 
   const discardDraft = useCallback(() => {
@@ -147,8 +155,11 @@ export default function AdminCustomerNew() {
   useEffect(() => {
     if (createdRef.current) return;
     if (draftDialog) return;
+    if (draftRestoringRef.current) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
+      if (draftRestoringRef.current) return;
+      if (draftDialog) return;
       const hasData = formData.vorname.trim() || formData.nachname.trim() || formData.billingType;
       if (hasData) {
         localStorage.setItem(DRAFT_KEY, JSON.stringify({
@@ -156,14 +167,12 @@ export default function AdminCustomerNew() {
           currentStep,
           timestamp: new Date().toISOString(),
         }));
-      } else {
-        localStorage.removeItem(DRAFT_KEY);
       }
     }, 500);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [formData, currentStep]);
+  }, [formData, currentStep, draftDialog]);
 
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
