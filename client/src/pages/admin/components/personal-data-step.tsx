@@ -2,12 +2,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DatePicker } from "@/components/ui/date-picker";
 import { MapPin } from "lucide-react";
 import { iconSize } from "@/design-system";
-import { CustomerFormData, PFLEGEGRAD_OPTIONS } from "./customer-types";
-import { needsPflegegradData, needsVorerkrankungenData, isPflegekasseCustomer } from "@shared/domain/customers";
+import { CustomerFormData } from "./customer-types";
+import { needsVorerkrankungenData, isPflegekasseCustomer } from "@shared/domain/customers";
 import { AddressFields } from "./address-fields";
 
 interface PersonalDataStepProps {
@@ -17,7 +16,6 @@ interface PersonalDataStepProps {
 }
 
 export function PersonalDataStep({ formData, phoneErrors, onChange }: PersonalDataStepProps) {
-  const showPflegegrad = needsPflegegradData(formData.billingType);
   const showVorerkrankungen = needsVorerkrankungenData(formData.billingType);
   const showGeburtsdatum = isPflegekasseCustomer(formData.billingType);
   return (
@@ -114,37 +112,6 @@ export function PersonalDataStep({ formData, phoneErrors, onChange }: PersonalDa
           />
         </div>
       </div>
-
-      {showPflegegrad && (
-        <div className="border-t pt-4 space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="pflegegrad">Pflegegrad *</Label>
-            <Select
-              value={formData.pflegegrad}
-              onValueChange={(value) => onChange("pflegegrad", value)}
-            >
-              <SelectTrigger data-testid="select-pflegegrad">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PFLEGEGRAD_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label>Pflegegrad seit *</Label>
-            <DatePicker
-              value={formData.pflegegradSeit || null}
-              onChange={(val) => onChange("pflegegradSeit", val || "")}
-              data-testid="input-pflegegrad-seit"
-            />
-          </div>
-        </div>
-      )}
 
       <div className="border-t pt-4 space-y-4">
         {showVorerkrankungen && (

@@ -522,13 +522,17 @@ export default function AdminCustomerNew() {
         if (!formData.stadt.trim()) errors.push("Stadt fehlt");
         if (isPflegekasseCustomer(formData.billingType)) {
           if (!formData.geburtsdatum) errors.push("Geburtsdatum fehlt");
-          if (!formData.pflegegrad || formData.pflegegrad === "0") errors.push("Pflegegrad auswählen");
-          if (!formData.pflegegradSeit) errors.push("Pflegegrad seit fehlt");
         }
         break;
       case "insurance":
         if (formData.insuranceProviderId && !formData.versichertennummer.trim()) {
           errors.push("Versichertennummer fehlt");
+        }
+        break;
+      case "budgets":
+        if (isPflegekasseCustomer(formData.billingType)) {
+          if (!formData.pflegegrad || formData.pflegegrad === "0") errors.push("Pflegegrad auswählen");
+          if (!formData.pflegegradSeit) errors.push("Pflegegrad seit fehlt");
         }
         break;
       case "contract":
@@ -587,7 +591,7 @@ export default function AdminCustomerNew() {
   const findStepIndex = (stepId: string) => steps.findIndex((s) => s.id === stepId);
 
   const handleSubmit = () => {
-    const stepsToValidate = ["personal", "insurance", "contract", "matching"];
+    const stepsToValidate = ["personal", "insurance", "budgets", "contract", "matching"];
     for (const stepId of stepsToValidate) {
       const idx = findStepIndex(stepId);
       if (idx < 0) continue;
