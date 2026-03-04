@@ -68,6 +68,7 @@ export default function EditAppointment() {
   const [endTime, setEndTime] = useState<string>("");
   const [duration, setDuration] = useState<number>(60);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [ktAssignedEmployeeId, setKtAssignedEmployeeId] = useState<string>("");
 
   const [ebVorname, setEbVorname] = useState("");
   const [ebNachname, setEbNachname] = useState("");
@@ -92,6 +93,9 @@ export default function EditAppointment() {
             serviceId: e.serviceId,
             durationMinutes: e.plannedDurationMinutes,
           })));
+        }
+        if (appointment.assignedEmployeeId) {
+          setKtAssignedEmployeeId(appointment.assignedEmployeeId.toString());
         }
       } else {
         if (appointment.scheduledEnd) {
@@ -122,6 +126,27 @@ export default function EditAppointment() {
       }
     }
   }, [appointment, appointmentServiceEntries, catalogServices]);
+
+  const ktEmployeeOptions = useMemo(() => {
+    const active = employees.filter(e => e.isActive);
+    if (appointment?.customer) {
+      const c = appointment.customer;
+      const assignedIds = [c.primaryEmployeeId, c.backupEmployeeId].filter(Boolean);
+      if (assignedIds.length > 0) {
+        return active
+          .filter(e => assignedIds.includes(e.id))
+          .map((e) => ({
+            value: e.id.toString(),
+            label: e.displayName + (e.id === c.primaryEmployeeId ? " (Haupt)" : " (Vertretung)"),
+          }))
+          .sort((a, b) => a.label.localeCompare(b.label, "de"));
+      }
+    }
+    return active.map((e) => ({
+      value: e.id.toString(),
+      label: e.displayName,
+    })).sort((a, b) => a.label.localeCompare(b.label, "de"));
+  }, [employees, appointment]);
 
   const ebEmployeeOptions = useMemo(() => {
     return employees
@@ -208,6 +233,9 @@ export default function EditAppointment() {
       if (services.length === 0) {
         newErrors.services = "Bitte wählen Sie mindestens einen Service";
       }
+      if (isAdmin && !ktAssignedEmployeeId) {
+        newErrors.ktAssignedEmployeeId = "Bitte wählen Sie einen Mitarbeiter";
+      }
     } else if (appointment?.appointmentType === "Erstberatung") {
       if (!ebVorname.trim()) newErrors.ebVorname = "Vorname ist erforderlich";
       if (!ebNachname.trim()) newErrors.ebNachname = "Nachname ist erforderlich";
@@ -245,6 +273,7 @@ export default function EditAppointment() {
         scheduledEnd: calculatedEndTime,
         durationPromised: totalDuration,
         notes: notes || null,
+        assignedEmployeeId: isAdmin && ktAssignedEmployeeId ? parseInt(ktAssignedEmployeeId) : undefined,
         services: services.map(s => ({
           serviceId: s.serviceId,
           plannedDurationMinutes: s.durationMinutes,
@@ -353,6 +382,25 @@ export default function EditAppointment() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
+          {isKundentermin && isAdmin && (
+            <div className="space-y-2">
+              <Label>
+                <Users className={`${iconSize.sm} inline mr-1`} /> Mitarbeiter zuweisen *
+              </Label>
+              <SearchableSelect
+                options={ktEmployeeOptions}
+                value={ktAssignedEmployeeId}
+                onValueChange={setKtAssignedEmployeeId}
+                placeholder="Mitarbeiter auswählen..."
+                searchPlaceholder="Mitarbeiter suchen..."
+                emptyText="Kein Mitarbeiter gefunden."
+                className={errors.ktAssignedEmployeeId ? "border-destructive" : ""}
+                data-testid="select-kt-employee"
+              />
+              {errors.ktAssignedEmployeeId && <p className="text-destructive text-sm">{errors.ktAssignedEmployeeId}</p>}
+            </div>
+          )}
+
           {isErstberatung && (
             <>
               <div className="grid grid-cols-2 gap-4">
