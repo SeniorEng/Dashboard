@@ -133,7 +133,7 @@ export default function AdminCustomerNew() {
       setFormData(draft.formData);
       const restoredSteps = getStepsForBillingType(draft.formData.billingType);
       const clampedStep = Math.min(draft.currentStep, restoredSteps.length - 1);
-      setCurrentStep(Math.max(0, clampedStep));
+      setCurrentStep(Math.max(1, clampedStep));
       toast({ title: "Entwurf wiederhergestellt" });
     }
     setDraftDialog(null);
