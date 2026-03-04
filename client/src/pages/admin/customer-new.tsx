@@ -130,7 +130,7 @@ export default function AdminCustomerNew() {
   const restoreDraft = useCallback(() => {
     const draft = loadDraft();
     if (draft) {
-      setFormData(draft.formData);
+      setFormData(prev => ({ ...prev, ...draft.formData }));
       const restoredSteps = getStepsForBillingType(draft.formData.billingType);
       const clampedStep = Math.min(draft.currentStep, restoredSteps.length - 1);
       setCurrentStep(Math.max(1, clampedStep));
@@ -719,7 +719,7 @@ export default function AdminCustomerNew() {
 
   return (
     <Layout variant="admin">
-          <AlertDialog open={!!draftDialog} onOpenChange={(open) => { if (!open) discardDraft(); }}>
+          <AlertDialog open={!!draftDialog} onOpenChange={() => {}}>
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle className="flex items-center gap-2">
