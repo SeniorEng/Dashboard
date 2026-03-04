@@ -28,6 +28,7 @@ export const users = pgTable("users", {
   isAnonymized: boolean("is_anonymized").notNull().default(false),
   anonymizedAt: timestamp("anonymized_at"),
   isAdmin: boolean("is_admin").notNull().default(false),
+  isSuperAdmin: boolean("is_super_admin").notNull().default(false),
   haustierAkzeptiert: boolean("haustier_akzeptiert").notNull().default(true),
   isEuRentner: boolean("is_eu_rentner").notNull().default(false),
   employmentType: text("employment_type").notNull().default("sozialversicherungspflichtig"), // "minijobber" | "sozialversicherungspflichtig"
@@ -78,6 +79,54 @@ export const passwordResetTokens = pgTable("password_reset_tokens", {
 }, (table) => [
   index("password_reset_tokens_user_idx").on(table.userId),
 ]);
+
+// Admin permission keys for dashboard tiles / route access
+export const ADMIN_PERMISSION_KEYS = [
+  "users",
+  "time_entries",
+  "birthday_cards",
+  "statistics",
+  "prospects",
+  "customers",
+  "insurance_providers",
+  "documents",
+  "services",
+  "billing",
+  "hours_overview",
+  "settings",
+  "audit_log",
+] as const;
+
+export type AdminPermissionKey = typeof ADMIN_PERMISSION_KEYS[number];
+
+export const ADMIN_PERMISSION_LABELS: Record<AdminPermissionKey, string> = {
+  users: "Benutzerverwaltung",
+  time_entries: "Zeiterfassung",
+  birthday_cards: "Geburtstagskarten",
+  statistics: "Statistiken",
+  prospects: "Interessenten",
+  customers: "Kundenverwaltung",
+  insurance_providers: "Kostenträger",
+  documents: "Dokumente & Vorlagen",
+  services: "Dienstleistungen",
+  billing: "Abrechnung",
+  hours_overview: "Stundenübersicht",
+  settings: "Einstellungen",
+  audit_log: "Audit-Log",
+};
+
+export const adminPermissions = pgTable("admin_permissions", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  permissionKey: text("permission_key").notNull(),
+  granted: boolean("granted").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  unique("admin_permission_unique").on(table.userId, table.permissionKey),
+  index("admin_permissions_user_idx").on(table.userId),
+]);
+
+export type AdminPermission = typeof adminPermissions.$inferSelect;
 
 // Employee compensation history (historized)
 export const TRAVEL_COST_TYPES = ["kilometergeld", "pauschale"] as const;

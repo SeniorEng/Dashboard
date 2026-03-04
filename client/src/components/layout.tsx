@@ -138,7 +138,7 @@ function GlobalSearch() {
 
 export function Layout({ children, variant = 'default' }: { children: React.ReactNode; variant?: LayoutVariant }) {
   const [location, navigate] = useLocation();
-  const { user, logout, isAuthenticated, badgeCount, birthdayCount } = useAuth();
+  const { user, logout, isAuthenticated, badgeCount, birthdayCount, hasAdminPermission } = useAuth();
   const { data: notificationUnreadCount = 0 } = useUnreadCount();
   const { toast } = useToast();
 
@@ -211,23 +211,27 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
     { href: "/my-times", label: "Zeiten", icon: Clock, testId: "my-times", match: (loc: string) => loc === "/my-times" },
   ];
 
-  const adminNavItems = [
-    { href: "/admin", label: "Übersicht", icon: Shield, testId: "admin-overview", match: (loc: string) => loc === "/admin" },
-    { href: "/admin/users", label: "Mitarbeiter", icon: UserCog, testId: "admin-users", match: (loc: string) => loc === "/admin/users" },
-    { href: "/admin/customers", label: "Kunden", icon: Users, testId: "admin-customers", match: (loc: string) => loc.startsWith("/admin/customers") },
-    { href: "/admin/time-entries", label: "Zeiten", icon: Clock, testId: "admin-times", match: (loc: string) => loc === "/admin/time-entries" },
-    { href: "/admin/insurance-providers", label: "Kostenträger", icon: Building2, testId: "admin-insurance", match: (loc: string) => loc === "/admin/insurance-providers" },
-    { href: "/admin/services", label: "Leistungen", icon: Stethoscope, testId: "admin-services", match: (loc: string) => loc === "/admin/services" },
-    { href: "/admin/billing", label: "Abrechnung", icon: Receipt, testId: "admin-billing", match: (loc: string) => loc === "/admin/billing" },
-    { href: "/admin/documents", label: "Dokumente", icon: FileText, testId: "admin-documents", match: (loc: string) => loc === "/admin/documents" },
-    { href: "/admin/document-types", label: "Dok.-Kategorien", icon: BookOpen, testId: "admin-doc-types", match: (loc: string) => loc === "/admin/document-types" },
-    { href: "/admin/document-templates", label: "Vorlagen", icon: ScrollText, testId: "admin-doc-templates", match: (loc: string) => loc === "/admin/document-templates" },
-    { href: "/admin/hours-overview", label: "Stunden", icon: Clock, testId: "admin-hours", match: (loc: string) => loc === "/admin/hours-overview" },
-    { href: "/admin/qualifications", label: "Qualifikationen", icon: GraduationCap, testId: "admin-qualifications", match: (loc: string) => loc === "/admin/qualifications" },
-    { href: "/admin/settings", label: "Einstellungen", icon: Settings, testId: "admin-settings", match: (loc: string) => loc === "/admin/settings" },
-    { href: "/admin/birthday-cards", label: "Geburtstag", icon: Gift, testId: "admin-birthday-cards", match: (loc: string) => loc === "/admin/birthday-cards" },
-    { href: "/admin/audit-log", label: "Audit-Log", icon: ClipboardList, testId: "admin-audit-log", match: (loc: string) => loc === "/admin/audit-log" },
+  const allAdminNavItems = [
+    { href: "/admin", label: "Übersicht", icon: Shield, testId: "admin-overview", match: (loc: string) => loc === "/admin", permissionKey: null },
+    { href: "/admin/users", label: "Mitarbeiter", icon: UserCog, testId: "admin-users", match: (loc: string) => loc === "/admin/users", permissionKey: "users" },
+    { href: "/admin/customers", label: "Kunden", icon: Users, testId: "admin-customers", match: (loc: string) => loc.startsWith("/admin/customers"), permissionKey: "customers" },
+    { href: "/admin/time-entries", label: "Zeiten", icon: Clock, testId: "admin-times", match: (loc: string) => loc === "/admin/time-entries", permissionKey: "time_entries" },
+    { href: "/admin/insurance-providers", label: "Kostenträger", icon: Building2, testId: "admin-insurance", match: (loc: string) => loc === "/admin/insurance-providers", permissionKey: "insurance_providers" },
+    { href: "/admin/services", label: "Leistungen", icon: Stethoscope, testId: "admin-services", match: (loc: string) => loc === "/admin/services", permissionKey: "services" },
+    { href: "/admin/billing", label: "Abrechnung", icon: Receipt, testId: "admin-billing", match: (loc: string) => loc === "/admin/billing", permissionKey: "billing" },
+    { href: "/admin/documents", label: "Dokumente", icon: FileText, testId: "admin-documents", match: (loc: string) => loc === "/admin/documents", permissionKey: "documents" },
+    { href: "/admin/document-types", label: "Dok.-Kategorien", icon: BookOpen, testId: "admin-doc-types", match: (loc: string) => loc === "/admin/document-types", permissionKey: "documents" },
+    { href: "/admin/document-templates", label: "Vorlagen", icon: ScrollText, testId: "admin-doc-templates", match: (loc: string) => loc === "/admin/document-templates", permissionKey: "documents" },
+    { href: "/admin/hours-overview", label: "Stunden", icon: Clock, testId: "admin-hours", match: (loc: string) => loc === "/admin/hours-overview", permissionKey: "hours_overview" },
+    { href: "/admin/qualifications", label: "Qualifikationen", icon: GraduationCap, testId: "admin-qualifications", match: (loc: string) => loc === "/admin/qualifications", permissionKey: "users" },
+    { href: "/admin/settings", label: "Einstellungen", icon: Settings, testId: "admin-settings", match: (loc: string) => loc === "/admin/settings", permissionKey: "settings" },
+    { href: "/admin/birthday-cards", label: "Geburtstag", icon: Gift, testId: "admin-birthday-cards", match: (loc: string) => loc === "/admin/birthday-cards", permissionKey: "birthday_cards" },
+    { href: "/admin/audit-log", label: "Audit-Log", icon: ClipboardList, testId: "admin-audit-log", match: (loc: string) => loc === "/admin/audit-log", permissionKey: "audit_log" },
   ];
+
+  const adminNavItems = allAdminNavItems.filter(
+    (item) => item.permissionKey === null || hasAdminPermission(item.permissionKey)
+  );
 
   const desktopNavItems = isAdmin && isOnAdminPage ? adminNavItems : employeeNavItems;
 

@@ -9,6 +9,16 @@ import {
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 
+interface AdminCardData {
+  href: string;
+  testId: string;
+  icon: React.ReactNode;
+  iconBg: string;
+  title: string;
+  description: string;
+  permissionKey: string;
+}
+
 interface AdminCardProps {
   href: string;
   testId: string;
@@ -57,7 +67,144 @@ function Section({ title, children }: SectionProps) {
 }
 
 export default function AdminDashboard() {
-  const { user } = useAuth();
+  const { user, hasAdminPermission } = useAuth();
+
+  const personalCards: AdminCardData[] = [
+    {
+      href: "/admin/users",
+      testId: "card-users",
+      icon: <Users className={`${iconSize.lg} text-teal-600`} />,
+      iconBg: "bg-teal-100",
+      title: "Benutzerverwaltung",
+      description: "Mitarbeiter hinzufügen, bearbeiten und Rollen zuweisen",
+      permissionKey: "users",
+    },
+    {
+      href: "/admin/time-entries",
+      testId: "card-time-entries",
+      icon: <Clock className={`${iconSize.lg} text-green-600`} />,
+      iconBg: "bg-green-100",
+      title: "Zeiterfassung",
+      description: "Zeiten nachtragen, Monatsabschluss öffnen/schließen, Urlaub & Krankheit",
+      permissionKey: "time_entries",
+    },
+    {
+      href: "/admin/birthday-cards",
+      testId: "card-birthday-cards",
+      icon: <Gift className={`${iconSize.lg} text-rose-600`} />,
+      iconBg: "bg-rose-100",
+      title: "Geburtstagskarten",
+      description: "Versandstatus von Geburtstagskarten verwalten",
+      permissionKey: "birthday_cards",
+    },
+    {
+      href: "/admin/statistics",
+      testId: "card-statistics",
+      icon: <BarChart3 className={`${iconSize.lg} text-indigo-600`} />,
+      iconBg: "bg-indigo-100",
+      title: "Statistiken",
+      description: "Kennzahlen, Umsatz und Performance-Analysen",
+      permissionKey: "statistics",
+    },
+  ];
+
+  const kundenCards: AdminCardData[] = [
+    {
+      href: "/admin/prospects",
+      testId: "card-prospects",
+      icon: <UserPlus className={`${iconSize.lg} text-violet-600`} />,
+      iconBg: "bg-violet-100",
+      title: "Interessenten",
+      description: "Lead-Pipeline, Kontaktverfolgung und Erstberatungs-Konvertierung",
+      permissionKey: "prospects",
+    },
+    {
+      href: "/admin/customers",
+      testId: "card-customers",
+      icon: <Contact2 className={`${iconSize.lg} text-blue-600`} />,
+      iconBg: "bg-blue-100",
+      title: "Kundenverwaltung",
+      description: "Kunden anlegen, bearbeiten und verwalten",
+      permissionKey: "customers",
+    },
+    {
+      href: "/admin/insurance-providers",
+      testId: "card-insurance-providers",
+      icon: <Building2 className={`${iconSize.lg} text-pink-600`} />,
+      iconBg: "bg-pink-100",
+      title: "Kostenträger",
+      description: "Pflegekassen anlegen und verwalten",
+      permissionKey: "insurance_providers",
+    },
+    {
+      href: "/admin/documents",
+      testId: "card-documents",
+      icon: <FileText className={`${iconSize.lg} text-amber-600`} />,
+      iconBg: "bg-amber-100",
+      title: "Dokumente & Vorlagen",
+      description: "Dokumententypen, Vertragsvorlagen und Prüffristen",
+      permissionKey: "documents",
+    },
+    {
+      href: "/admin/services",
+      testId: "card-services",
+      icon: <ClipboardList className={`${iconSize.lg} text-cyan-600`} />,
+      iconBg: "bg-cyan-100",
+      title: "Dienstleistungen",
+      description: "Leistungskatalog und Standardpreise verwalten",
+      permissionKey: "services",
+    },
+  ];
+
+  const abrechnungCards: AdminCardData[] = [
+    {
+      href: "/admin/billing",
+      testId: "card-billing",
+      icon: <Receipt className={`${iconSize.lg} text-emerald-600`} />,
+      iconBg: "bg-emerald-100",
+      title: "Abrechnung",
+      description: "Rechnungen erstellen, Leistungsnachweise und Storno",
+      permissionKey: "billing",
+    },
+    {
+      href: "/admin/hours-overview",
+      testId: "card-hours-overview",
+      icon: <Clock className={`${iconSize.lg} text-cyan-600`} />,
+      iconBg: "bg-cyan-100",
+      title: "Stundenübersicht",
+      description: "Monatliche Stunden, KM, Urlaub und Krankheit je Mitarbeiter",
+      permissionKey: "hours_overview",
+    },
+  ];
+
+  const systemCards: AdminCardData[] = [
+    {
+      href: "/admin/settings",
+      testId: "card-settings",
+      icon: <Settings className={`${iconSize.lg} text-purple-600`} />,
+      iconBg: "bg-purple-100",
+      title: "Einstellungen",
+      description: "Firmendaten, E-Mail-Versand und Systemkonfiguration",
+      permissionKey: "settings",
+    },
+    {
+      href: "/admin/audit-log",
+      testId: "card-audit-log",
+      icon: <Shield className={`${iconSize.lg} text-red-600`} />,
+      iconBg: "bg-red-100",
+      title: "Audit-Log",
+      description: "Unveränderliches Protokoll aller Unterschriften und Änderungen",
+      permissionKey: "audit_log",
+    },
+  ];
+
+  const filterCards = (cards: AdminCardData[]) =>
+    cards.filter((card) => hasAdminPermission(card.permissionKey));
+
+  const visiblePersonal = filterCards(personalCards);
+  const visibleKunden = filterCards(kundenCards);
+  const visibleAbrechnung = filterCards(abrechnungCards);
+  const visibleSystem = filterCards(systemCards);
 
   return (
     <Layout variant="admin">
@@ -74,121 +221,37 @@ export default function AdminDashboard() {
       </div>
 
       <div className="space-y-8">
-        <Section title="Personal & Team">
-          <AdminCard
-            href="/admin/users"
-            testId="card-users"
-            icon={<Users className={`${iconSize.lg} text-teal-600`} />}
-            iconBg="bg-teal-100"
-            title="Benutzerverwaltung"
-            description="Mitarbeiter hinzufügen, bearbeiten und Rollen zuweisen"
-          />
-          <AdminCard
-            href="/admin/time-entries"
-            testId="card-time-entries"
-            icon={<Clock className={`${iconSize.lg} text-green-600`} />}
-            iconBg="bg-green-100"
-            title="Zeiterfassung"
-            description="Zeiten nachtragen, Monatsabschluss öffnen/schließen, Urlaub & Krankheit"
-          />
-          <AdminCard
-            href="/admin/birthday-cards"
-            testId="card-birthday-cards"
-            icon={<Gift className={`${iconSize.lg} text-rose-600`} />}
-            iconBg="bg-rose-100"
-            title="Geburtstagskarten"
-            description="Versandstatus von Geburtstagskarten verwalten"
-          />
-          <AdminCard
-            href="/admin/statistics"
-            testId="card-statistics"
-            icon={<BarChart3 className={`${iconSize.lg} text-indigo-600`} />}
-            iconBg="bg-indigo-100"
-            title="Statistiken"
-            description="Kennzahlen, Umsatz und Performance-Analysen"
-          />
-        </Section>
+        {visiblePersonal.length > 0 && (
+          <Section title="Personal & Team">
+            {visiblePersonal.map((card) => (
+              <AdminCard key={card.testId} {...card} />
+            ))}
+          </Section>
+        )}
 
-        <Section title="Kunden & Verträge">
-          <AdminCard
-            href="/admin/prospects"
-            testId="card-prospects"
-            icon={<UserPlus className={`${iconSize.lg} text-violet-600`} />}
-            iconBg="bg-violet-100"
-            title="Interessenten"
-            description="Lead-Pipeline, Kontaktverfolgung und Erstberatungs-Konvertierung"
-          />
-          <AdminCard
-            href="/admin/customers"
-            testId="card-customers"
-            icon={<Contact2 className={`${iconSize.lg} text-blue-600`} />}
-            iconBg="bg-blue-100"
-            title="Kundenverwaltung"
-            description="Kunden anlegen, bearbeiten und verwalten"
-          />
-          <AdminCard
-            href="/admin/insurance-providers"
-            testId="card-insurance-providers"
-            icon={<Building2 className={`${iconSize.lg} text-pink-600`} />}
-            iconBg="bg-pink-100"
-            title="Kostenträger"
-            description="Pflegekassen anlegen und verwalten"
-          />
-          <AdminCard
-            href="/admin/documents"
-            testId="card-documents"
-            icon={<FileText className={`${iconSize.lg} text-amber-600`} />}
-            iconBg="bg-amber-100"
-            title="Dokumente & Vorlagen"
-            description="Dokumententypen, Vertragsvorlagen und Prüffristen"
-          />
-          <AdminCard
-            href="/admin/services"
-            testId="card-services"
-            icon={<ClipboardList className={`${iconSize.lg} text-cyan-600`} />}
-            iconBg="bg-cyan-100"
-            title="Dienstleistungen"
-            description="Leistungskatalog und Standardpreise verwalten"
-          />
-        </Section>
+        {visibleKunden.length > 0 && (
+          <Section title="Kunden & Verträge">
+            {visibleKunden.map((card) => (
+              <AdminCard key={card.testId} {...card} />
+            ))}
+          </Section>
+        )}
 
-        <Section title="Abrechnung & Finanzen">
-          <AdminCard
-            href="/admin/billing"
-            testId="card-billing"
-            icon={<Receipt className={`${iconSize.lg} text-emerald-600`} />}
-            iconBg="bg-emerald-100"
-            title="Abrechnung"
-            description="Rechnungen erstellen, Leistungsnachweise und Storno"
-          />
-          <AdminCard
-            href="/admin/hours-overview"
-            testId="card-hours-overview"
-            icon={<Clock className={`${iconSize.lg} text-cyan-600`} />}
-            iconBg="bg-cyan-100"
-            title="Stundenübersicht"
-            description="Monatliche Stunden, KM, Urlaub und Krankheit je Mitarbeiter"
-          />
-        </Section>
+        {visibleAbrechnung.length > 0 && (
+          <Section title="Abrechnung & Finanzen">
+            {visibleAbrechnung.map((card) => (
+              <AdminCard key={card.testId} {...card} />
+            ))}
+          </Section>
+        )}
 
-        <Section title="System & Sicherheit">
-          <AdminCard
-            href="/admin/settings"
-            testId="card-settings"
-            icon={<Settings className={`${iconSize.lg} text-purple-600`} />}
-            iconBg="bg-purple-100"
-            title="Einstellungen"
-            description="Firmendaten, E-Mail-Versand und Systemkonfiguration"
-          />
-          <AdminCard
-            href="/admin/audit-log"
-            testId="card-audit-log"
-            icon={<Shield className={`${iconSize.lg} text-red-600`} />}
-            iconBg="bg-red-100"
-            title="Audit-Log"
-            description="Unveränderliches Protokoll aller Unterschriften und Änderungen"
-          />
-        </Section>
+        {visibleSystem.length > 0 && (
+          <Section title="System & Sicherheit">
+            {visibleSystem.map((card) => (
+              <AdminCard key={card.testId} {...card} />
+            ))}
+          </Section>
+        )}
       </div>
     </Layout>
   );

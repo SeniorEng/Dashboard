@@ -80,6 +80,14 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
     return;
   }
 
+  if (result.data.isAdmin && !req.user!.isSuperAdmin) {
+    res.status(403).json({
+      error: "FORBIDDEN",
+      message: "Nur der Hauptadministrator kann Administratoren anlegen",
+    });
+    return;
+  }
+
   let user;
   try {
     user = await authService.createUser({
@@ -206,6 +214,17 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
       message: "Sie können sich nicht selbst die Admin-Rechte entziehen",
     });
     return;
+  }
+
+  if (req.body.isAdmin !== undefined && !req.user!.isSuperAdmin) {
+    const currentUser = await authService.getUser(id);
+    if (currentUser && currentUser.isAdmin !== req.body.isAdmin) {
+      res.status(403).json({
+        error: "FORBIDDEN",
+        message: "Nur der Hauptadministrator kann Admin-Rechte vergeben oder entziehen",
+      });
+      return;
+    }
   }
 
   const result = updateUserSchema.safeParse(req.body);

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { authService } from "../services/auth";
-import type { UserWithRoles, EmployeeRole } from "@shared/schema";
+import { adminPermissionStorage } from "../storage/admin-permissions";
+import type { UserWithRoles, EmployeeRole, AdminPermissionKey } from "@shared/schema";
 
 declare global {
   namespace Express {
@@ -105,6 +106,66 @@ export function requireAdmin(
   }
 
   next();
+}
+
+export function requireSuperAdmin(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  if (!req.user) {
+    res.status(401).json({
+      error: "UNAUTHORIZED",
+      message: "Bitte melden Sie sich an",
+    });
+    return;
+  }
+
+  if (!req.user.isSuperAdmin) {
+    res.status(403).json({
+      error: "FORBIDDEN",
+      message: "Nur der Hauptadministrator kann diese Aktion ausführen",
+    });
+    return;
+  }
+
+  next();
+}
+
+export function requireAdminPermission(permissionKey: AdminPermissionKey) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.user) {
+      res.status(401).json({
+        error: "UNAUTHORIZED",
+        message: "Bitte melden Sie sich an",
+      });
+      return;
+    }
+
+    if (!req.user.isAdmin) {
+      res.status(403).json({
+        error: "FORBIDDEN",
+        message: "Sie haben keine Berechtigung für diese Aktion",
+      });
+      return;
+    }
+
+    if (req.user.isSuperAdmin) {
+      next();
+      return;
+    }
+
+    const hasPermission = await adminPermissionStorage.hasPermission(req.user.id, permissionKey);
+    if (!hasPermission) {
+      res.status(403).json({
+        error: "FORBIDDEN",
+        message: "Sie haben keine Berechtigung für diesen Bereich",
+      });
+      return;
+    }
+
+    next();
+  };
 }
 
 export function requireRoles(...requiredRoles: EmployeeRole[]) {

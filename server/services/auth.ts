@@ -64,6 +64,7 @@ export interface CreateUserData {
   eintrittsdatum?: string;
   vacationDaysPerYear?: number;
   isAdmin?: boolean;
+  isSuperAdmin?: boolean;
   haustierAkzeptiert?: boolean;
   isEuRentner?: boolean;
   employmentType?: string;

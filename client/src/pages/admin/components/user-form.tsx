@@ -22,6 +22,7 @@ import {
   validateGermanPhone,
 } from "./user-types";
 import { calculateVacationEntitlementByWorkDays } from "@shared/domain/vacation";
+import { useAuth } from "@/hooks/use-auth";
 
 export function UserForm({
   mode,
@@ -34,6 +35,9 @@ export function UserForm({
   onSubmit: (data: UserFormData & { password?: string }) => void;
   isLoading: boolean;
 }) {
+  const { user: currentUser } = useAuth();
+  const isSuperAdmin = currentUser?.isSuperAdmin ?? false;
+
   const [email, setEmail] = useState(user?.email ?? "");
   const [password, setPassword] = useState("");
   const [vorname, setVorname] = useState(user?.vorname ?? "");
@@ -393,15 +397,17 @@ export function UserForm({
         <div className="space-y-4">
           <h3 className="text-sm font-semibold text-gray-700 border-b pb-2">Berechtigungen</h3>
           
-          <div className="flex items-center space-x-2">
-            <Checkbox
-              id="isAdmin"
-              checked={isAdmin}
-              onCheckedChange={(checked) => setIsAdmin(!!checked)}
-              data-testid="checkbox-is-admin"
-            />
-            <Label htmlFor="isAdmin">Administrator-Rechte</Label>
-          </div>
+          {isSuperAdmin && (
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="isAdmin"
+                checked={isAdmin}
+                onCheckedChange={(checked) => setIsAdmin(!!checked)}
+                data-testid="checkbox-is-admin"
+              />
+              <Label htmlFor="isAdmin">Administrator-Rechte</Label>
+            </div>
+          )}
           
           <div className="flex items-center space-x-2">
             <Checkbox
