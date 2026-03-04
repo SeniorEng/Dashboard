@@ -5,6 +5,7 @@ import {
   updateAppointmentSchema, 
   insertKundenterminSchema,
   insertErstberatungSchema,
+  insertErstberatungCustomerSchema,
 } from "@shared/schema";
 import { appointmentService } from "../services/appointments";
 import { authService } from "../services/auth";
@@ -28,6 +29,8 @@ import { budgetLedgerStorage } from "../storage/budget-ledger";
 import type { Response } from "express";
 import appointmentDocumentationRouter from "./appointment-documentation";
 import { db } from "../lib/db";
+import { customerManagementStorage } from "../storage/customer-management";
+import { addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
 import { serviceRecordAppointments, monthlyServiceRecords } from "@shared/schema";
 import { eq } from "drizzle-orm";
 
@@ -361,6 +364,114 @@ router.post("/erstberatung", asyncHandler(ErrorMessages.createErstberatungFailed
   }
   
   res.status(201).json({ appointment, customer });
+}));
+
+const updateErstberatungSchema = z.object({
+  customer: insertErstberatungCustomerSchema,
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat (YYYY-MM-DD erwartet)"),
+  scheduledStart: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Ungültiges Zeitformat (HH:MM erwartet)"),
+  erstberatungDauer: z.number().min(15, "Mindestens 15 Minuten").multipleOf(15),
+  notes: z.string().max(255, "Maximal 255 Zeichen").optional().nullable(),
+  assignedEmployeeId: z.number().nullable().optional(),
+});
+
+router.patch("/:id/erstberatung", asyncHandler("Erstberatung konnte nicht aktualisiert werden", async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
+  }
+
+  const existingAppointment = await storage.getAppointment(id);
+  if (!existingAppointment) {
+    return sendNotFound(res, ErrorMessages.appointmentNotFound);
+  }
+
+  if (existingAppointment.appointmentType !== "Erstberatung") {
+    return sendBadRequest(res, "Dieser Endpoint ist nur für Erstberatungs-Termine.");
+  }
+
+  if (!await checkCustomerAccess(req.user!, existingAppointment.customerId, res)) return;
+
+  const isLocked = await storage.isAppointmentLocked(id);
+  if (isLocked) {
+    return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
+  }
+
+  if (existingAppointment.status === "completed") {
+    return sendBadRequest(res, "Abgeschlossene Termine können nicht bearbeitet werden.");
+  }
+
+  const validatedData = updateErstberatungSchema.parse(req.body);
+  const user = req.user!;
+
+  if (isWeekend(validatedData.date)) {
+    return sendBadRequest(res, "Termine können nicht an Samstagen oder Sonntagen erstellt werden.");
+  }
+
+  let assignedEmployeeId = existingAppointment.assignedEmployeeId;
+  if (user.isAdmin && validatedData.assignedEmployeeId !== undefined) {
+    assignedEmployeeId = validatedData.assignedEmployeeId;
+  }
+
+  const scheduledEnd = addMinutesToTimeHHMMSS(validatedData.scheduledStart, validatedData.erstberatungDauer);
+
+  const overlapResult = await appointmentService.checkOverlap(
+    validatedData.date,
+    validatedData.scheduledStart,
+    scheduledEnd,
+    assignedEmployeeId!,
+    id
+  );
+
+  if (overlapResult.hasUnreliableData) {
+    return sendConflict(res, "Datenprüfung erforderlich", ErrorMessages.unreliableData(overlapResult.unreliableAppointmentId!));
+  }
+
+  if (overlapResult.hasOverlap) {
+    return sendConflict(res, "Terminüberschneidung", ErrorMessages.timeOverlap);
+  }
+
+  const customerUpdate: Record<string, unknown> = {
+    vorname: validatedData.customer.vorname,
+    nachname: validatedData.customer.nachname,
+    telefon: validatedData.customer.telefon,
+    email: validatedData.customer.email || null,
+    strasse: validatedData.customer.strasse,
+    nr: validatedData.customer.nr,
+    plz: validatedData.customer.plz,
+    stadt: validatedData.customer.stadt,
+  };
+  await customerManagementStorage.updateCustomer(existingAppointment.customerId, customerUpdate as any);
+
+  if (validatedData.customer.pflegegrad != null) {
+    const { customers } = await import("@shared/schema");
+    await db.update(customers)
+      .set({ pflegegrad: validatedData.customer.pflegegrad })
+      .where(eq(customers.id, existingAppointment.customerId));
+  }
+
+  const updated = await storage.updateAppointment(id, {
+    date: validatedData.date,
+    scheduledStart: validatedData.scheduledStart,
+    scheduledEnd,
+    durationPromised: validatedData.erstberatungDauer,
+    notes: validatedData.notes || null,
+    assignedEmployeeId,
+  });
+
+  const erstberatungService = await serviceCatalogStorage.getServiceByCode("erstberatung");
+  if (erstberatungService) {
+    await storage.replaceAppointmentServices(id, [{
+      serviceId: erstberatungService.id,
+      plannedDurationMinutes: validatedData.erstberatungDauer,
+    }]);
+  }
+
+  if (!updated) {
+    return sendNotFound(res, ErrorMessages.appointmentNotFound);
+  }
+
+  res.json(updated);
 }));
 
 router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (req, res) => {
