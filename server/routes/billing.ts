@@ -135,6 +135,15 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
     return matching[0].priceCents;
   }
 
+  const employeeIds = [...new Set(appts.map(a => a.assignedEmployeeId || a.performedByEmployeeId).filter((id): id is number => id != null))];
+  const employeeMap = new Map<number, { displayName: string; lbnr: string }>();
+  if (employeeIds.length > 0) {
+    const emps = await db.select({ id: users.id, displayName: users.displayName, lbnr: users.lbnr }).from(users).where(inArray(users.id, employeeIds));
+    for (const emp of emps) {
+      employeeMap.set(emp.id, { displayName: emp.displayName, lbnr: emp.lbnr || "" });
+    }
+  }
+
   const lineItems: BuildLineItem[] = [];
   let totalNetCents = 0;
   let totalVatCents = 0;
@@ -143,16 +152,10 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
     const apptServices = serviceBreakdown.filter(s => s.appointmentId === appt.id);
     const apptDate = appt.date;
 
-    let employeeName = "";
-    let employeeLbnr = "";
     const employeeId = appt.assignedEmployeeId || appt.performedByEmployeeId;
-    if (employeeId) {
-      const [emp] = await db.select({ displayName: users.displayName, lbnr: users.lbnr }).from(users).where(eq(users.id, employeeId));
-      if (emp) {
-        employeeName = emp.displayName;
-        employeeLbnr = emp.lbnr || "";
-      }
-    }
+    const emp = employeeId ? employeeMap.get(employeeId) : undefined;
+    const employeeName = emp?.displayName || "";
+    const employeeLbnr = emp?.lbnr || "";
 
     for (const svc of apptServices) {
       const durationMinutes = svc.actualDurationMinutes ?? svc.plannedDurationMinutes;
