@@ -7,7 +7,8 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { errorMiddleware } from "./lib/errors";
-import { pool } from "./lib/db";
+import { pool, db } from "./lib/db";
+import { sql as sqlBuilder } from "drizzle-orm";
 import { closeBrowser } from "./services/pdf-generator";
 const app = express();
 app.set("trust proxy", 1);
@@ -174,6 +175,19 @@ process.on("uncaughtException", (error) => {
   };
   setTimeout(runBudgetRenewalCheck, 7 * 60 * 1000);
   const budgetRenewalInterval = setInterval(runBudgetRenewalCheck, 24 * 60 * 60 * 1000);
+
+  try {
+    const superAdminEmail = "alrikdegenkolb@seniorenengel-alltagsbegleitung.de";
+    const promoteResult = await db.execute(sqlBuilder`
+      UPDATE users SET is_super_admin = true 
+      WHERE email = ${superAdminEmail} AND is_admin = true AND is_super_admin = false
+    `);
+    if (promoteResult.rowCount && promoteResult.rowCount > 0) {
+      log(`Superadmin-Promotion: ${superAdminEmail}`);
+    }
+  } catch (e) {
+    console.error("Fehler bei Superadmin-Promotion:", e);
+  }
 
   app.use(errorMiddleware);
 
