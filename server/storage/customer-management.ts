@@ -31,7 +31,7 @@ import {
   users,
   customerAssignmentHistory,
 } from "@shared/schema";
-import { eq, and, isNull, isNotNull, desc, count, or, ilike, sql as sqlBuilder } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, desc, asc, count, or, ilike, sql as sqlBuilder } from "drizzle-orm";
 import { customerIdsCache } from "../services/cache";
 import { todayISO } from "@shared/utils/datetime";
 import { db } from "../lib/db";
@@ -50,6 +50,8 @@ export interface CustomerListFilters {
   status?: string;
   billingType?: string;
   insuranceProviderId?: number;
+  sortBy?: "name" | "contractStart" | "createdAt";
+  sortOrder?: "asc" | "desc";
 }
 
 export interface PaginationOptions {
@@ -223,9 +225,39 @@ export class CustomerManagementStorage {
       dataQueryBuilder = dataQueryBuilder.leftJoin(insuranceSubquery, eq(customers.id, insuranceSubquery.customerId)) as any;
     }
     
+    const sortBy = filters?.sortBy || "name";
+    const sortOrder = filters?.sortOrder || "asc";
+    const orderFn = sortOrder === "desc" ? desc : asc;
+
+    let orderByClause;
+    if (sortBy === "contractStart") {
+      const contractStartSubquery = db
+        .select({
+          customerId: customerContracts.customerId,
+          contractStart: sqlBuilder<string>`MIN(${customerContracts.contractStart})`.as('earliest_contract_start'),
+        })
+        .from(customerContracts)
+        .where(eq(customerContracts.status, "active"))
+        .groupBy(customerContracts.customerId)
+        .as('contract_start_sq');
+
+      dataQueryBuilder = dataQueryBuilder.leftJoin(
+        contractStartSubquery,
+        eq(customers.id, contractStartSubquery.customerId)
+      ) as any;
+
+      orderByClause = sortOrder === "desc"
+        ? desc(contractStartSubquery.contractStart)
+        : asc(contractStartSubquery.contractStart);
+    } else if (sortBy === "createdAt") {
+      orderByClause = orderFn(customers.createdAt);
+    } else {
+      orderByClause = orderFn(customers.nachname);
+    }
+
     const result = await dataQueryBuilder
       .where(fullWhereClause)
-      .orderBy(desc(customers.createdAt))
+      .orderBy(orderByClause)
       .limit(limit)
       .offset(offset);
 

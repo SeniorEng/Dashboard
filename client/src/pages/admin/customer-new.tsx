@@ -109,6 +109,8 @@ export default function AdminCustomerNew() {
     contractPeriod: "weekly",
     documentDeliveryMethod: "email",
     acceptsPrivatePayment: false,
+    vorjahrVerbraucht45b: "",
+    uebertrag45b: "0",
   });
 
   const [customerSignatures, setCustomerSignatures] = useState<Record<string, string>>({});
@@ -302,11 +304,14 @@ export default function AdminCustomerNew() {
         email: c.email.trim() || undefined,
       }));
 
+    const is45bEnabled = formData.budgetTypeSettings.find(s => s.budgetType === "entlastungsbetrag_45b")?.enabled ?? true;
+    const carryoverAmount = is45bEnabled ? (Math.round(parseFloat(formData.uebertrag45b) * 100) || 0) : 0;
     const budgetValues = {
       entlastungsbetrag45b: Math.round(parseFloat(formData.entlastungsbetrag45b) * 100) || 0,
       verhinderungspflege39: Math.round(parseFloat(formData.verhinderungspflege39) * 100) || 0,
       pflegesachleistungen36: Math.round(parseFloat(formData.pflegesachleistungen36) * 100) || 0,
       validFrom: today,
+      carryoverAmountCents: carryoverAmount > 0 ? carryoverAmount : undefined,
     };
     const budgets = budgetValues.entlastungsbetrag45b > 0 || budgetValues.verhinderungspflege39 > 0 || budgetValues.pflegesachleistungen36 > 0
       ? budgetValues
@@ -410,6 +415,28 @@ export default function AdminCustomerNew() {
           }
         }
 
+        if (isPflegekasse && budgets) {
+          const budgetStart = formData.contractStart || today;
+          const budgetTypes: Array<{ type: string; cents: number }> = [];
+          if (budgets.entlastungsbetrag45b > 0) budgetTypes.push({ type: "entlastungsbetrag_45b", cents: budgets.entlastungsbetrag45b });
+          if (budgets.pflegesachleistungen36 > 0) budgetTypes.push({ type: "umwandlung_45a", cents: budgets.pflegesachleistungen36 });
+          if (budgets.verhinderungspflege39 > 0) budgetTypes.push({ type: "ersatzpflege_39_42a", cents: budgets.verhinderungspflege39 });
+
+          for (const bt of budgetTypes) {
+            try {
+              await api.post(`/budgets/${customer.id}/initial-budget`, {
+                budgetType: bt.type,
+                currentYearAmountCents: bt.cents,
+                carryoverAmountCents: 0,
+                budgetStartDate: budgetStart,
+              });
+            } catch (budgetErr) {
+              console.error(`Budget-Initialisierung (${bt.type}) fehlgeschlagen:`, budgetErr);
+              warnings.push(`Budget ${bt.type} konnte nicht initialisiert werden`);
+            }
+          }
+        }
+
         if (warnings.length > 0) {
           toast({ title: "Kunde erstellt mit Hinweisen", description: warnings.join("; ") });
         } else {
@@ -465,6 +492,12 @@ export default function AdminCustomerNew() {
         if (!currentValue || currentValue === 0) {
           newData.pflegesachleistungen36 = (maxCents / 100).toString();
         }
+      }
+      if (field === "vorjahrVerbraucht45b") {
+        const verbraucht = parseFloat(value as string) || 0;
+        const maxCarryover = (131 * 12);
+        const uebertrag = Math.max(0, maxCarryover - verbraucht);
+        newData.uebertrag45b = uebertrag.toFixed(2).replace(/\.00$/, "");
       }
       return newData;
     });

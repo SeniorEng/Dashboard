@@ -47,6 +47,8 @@ export default function AdminCustomers() {
   const [employeeFilter, setEmployeeFilter] = useState<string>("");
   const [insuranceProviderFilter, setInsuranceProviderFilter] = useState<string>("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [sortBy, setSortBy] = useState<string>("name");
+  const [sortOrder, setSortOrder] = useState<string>("asc");
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
 
   useEffect(() => {
@@ -82,9 +84,11 @@ export default function AdminCustomers() {
     billingType: billingTypeFilter || undefined,
     primaryEmployeeId: employeeFilter || undefined,
     insuranceProviderId: insuranceProviderFilter || undefined,
+    sortBy: sortBy || undefined,
+    sortOrder: sortOrder || undefined,
     page: currentPage,
     limit: 15,
-  }), [debouncedSearch, statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter, insuranceProviderFilter, currentPage]);
+  }), [debouncedSearch, statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter, insuranceProviderFilter, sortBy, sortOrder, currentPage]);
 
   const { data, isLoading, error, refetch } = useCustomers(queryParams);
 
@@ -112,12 +116,21 @@ export default function AdminCustomers() {
     setCurrentPage(1);
   }, []);
 
+  const handleSortChange = useCallback((value: string) => {
+    const [newSortBy, newSortOrder] = value.split("_");
+    setSortBy(newSortBy);
+    setSortOrder(newSortOrder);
+    setCurrentPage(1);
+  }, []);
+
   const clearFilters = useCallback(() => {
     setStatusFilter("aktiv");
     setPflegegradFilter("");
     setBillingTypeFilter("");
     setEmployeeFilter("");
     setInsuranceProviderFilter("");
+    setSortBy("name");
+    setSortOrder("asc");
     setSearchQuery("");
     setCurrentPage(1);
     setFilterSheetOpen(false);
@@ -130,8 +143,9 @@ export default function AdminCustomers() {
     if (billingTypeFilter) count++;
     if (employeeFilter) count++;
     if (insuranceProviderFilter) count++;
+    if (sortBy !== "name" || sortOrder !== "asc") count++;
     return count;
-  }, [statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter, insuranceProviderFilter]);
+  }, [statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter, insuranceProviderFilter, sortBy, sortOrder]);
 
   const customers = data?.data || [];
   const totalPages = data?.totalPages || 1;
@@ -267,6 +281,26 @@ export default function AdminCustomers() {
                       emptyText="Kein Kostenträger gefunden."
                       data-testid="select-insurance-provider"
                     />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Sortierung</Label>
+                    <Select
+                      value={`${sortBy}_${sortOrder}`}
+                      onValueChange={handleSortChange}
+                    >
+                      <SelectTrigger data-testid="select-sort">
+                        <SelectValue placeholder="Sortierung wählen" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="name_asc">Name (A-Z)</SelectItem>
+                        <SelectItem value="name_desc">Name (Z-A)</SelectItem>
+                        <SelectItem value="contractStart_desc">Vertragsbeginn (neueste zuerst)</SelectItem>
+                        <SelectItem value="contractStart_asc">Vertragsbeginn (älteste zuerst)</SelectItem>
+                        <SelectItem value="createdAt_desc">Angelegt (neueste zuerst)</SelectItem>
+                        <SelectItem value="createdAt_asc">Angelegt (älteste zuerst)</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   <Button

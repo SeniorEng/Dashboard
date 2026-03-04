@@ -126,8 +126,15 @@ router.patch("/customers/:id/assign", asyncHandler("Zuordnung konnte nicht aktua
 // ============================================
 
 router.get("/customers", asyncHandler("Kunden konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const { search, pflegegrad, primaryEmployeeId, status, billingType, insuranceProviderId, page, limit } = req.query;
+  const { search, pflegegrad, primaryEmployeeId, status, billingType, insuranceProviderId, page, limit, sortBy, sortOrder } = req.query;
   
+  const validSortBy = ["name", "contractStart", "createdAt"].includes(sortBy as string)
+    ? (sortBy as "name" | "contractStart" | "createdAt")
+    : undefined;
+  const validSortOrder = ["asc", "desc"].includes(sortOrder as string)
+    ? (sortOrder as "asc" | "desc")
+    : undefined;
+
   const filters = {
     search: search as string | undefined,
     pflegegrad: pflegegrad ? parseInt(pflegegrad as string) : undefined,
@@ -135,6 +142,8 @@ router.get("/customers", asyncHandler("Kunden konnten nicht geladen werden", asy
     status: status as string | undefined,
     billingType: billingType as string | undefined,
     insuranceProviderId: insuranceProviderId ? parseInt(insuranceProviderId as string) : undefined,
+    sortBy: validSortBy,
+    sortOrder: validSortOrder,
   };
   
   const pageNum = page ? parseInt(page as string) : 1;
@@ -237,6 +246,7 @@ const simpleCreateCustomerSchema = z.object({
     verhinderungspflege39: z.number(),
     pflegesachleistungen36: z.number(),
     validFrom: z.string(),
+    carryoverAmountCents: z.number().min(0).optional(),
   }).optional(),
   contract: z.object({
     contractStart: z.string(),
@@ -338,6 +348,28 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
         pflegesachleistungen36: data.budgets.pflegesachleistungen36,
         validFrom: data.budgets.validFrom,
       }, userId);
+
+      if (data.budgets.carryoverAmountCents && data.budgets.carryoverAmountCents > 0) {
+        try {
+          const validFrom = data.budgets.validFrom || todayISO();
+          const validFromDate = new Date(validFrom + "T00:00:00");
+          const currentYear = validFromDate.getFullYear();
+          await budgetLedgerStorage.createBudgetAllocation({
+            customerId: customer.id,
+            budgetType: "entlastungsbetrag_45b",
+            year: currentYear - 1,
+            month: null,
+            amountCents: data.budgets.carryoverAmountCents,
+            source: "carryover",
+            validFrom,
+            expiresAt: `${currentYear}-06-30`,
+            notes: `Übertrag aus ${currentYear - 1}`,
+          }, userId);
+        } catch (err) {
+          console.error(`[POST /customers] Carryover-Allocation fehlgeschlagen für Kunde ${customer.id}:`, err);
+          warnings.push("Übertrag aus Vorjahr konnte nicht gespeichert werden");
+        }
+      }
     } catch (err) {
       console.error(`[POST /customers] Budgets fehlgeschlagen für Kunde ${customer.id}:`, err);
       warnings.push("Budgets konnten nicht gespeichert werden");

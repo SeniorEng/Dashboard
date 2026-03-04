@@ -38,6 +38,8 @@ function buildQueryString(params: CustomerListParams): string {
   if (params.primaryEmployeeId) searchParams.set("primaryEmployeeId", params.primaryEmployeeId);
   if (params.status) searchParams.set("status", params.status);
   if (params.insuranceProviderId) searchParams.set("insuranceProviderId", params.insuranceProviderId);
+  if (params.sortBy) searchParams.set("sortBy", params.sortBy);
+  if (params.sortOrder) searchParams.set("sortOrder", params.sortOrder);
   const qs = searchParams.toString();
   return qs ? `?${qs}` : "";
 }

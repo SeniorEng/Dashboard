@@ -103,6 +103,8 @@ export interface CustomerListParams extends PaginationParams {
   primaryEmployeeId?: string;
   status?: string;
   insuranceProviderId?: string;
+  sortBy?: string;
+  sortOrder?: string;
 }
 
 export interface CustomerPricingInfo {

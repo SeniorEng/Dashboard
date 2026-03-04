@@ -3,9 +3,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
-import { CustomerFormData, BudgetTypeSettingForm } from "./customer-types";
+import { CustomerFormData, BudgetTypeSettingForm, PFLEGEGRAD_OPTIONS } from "./customer-types";
 import { 
   BUDGET_45B_MAX_MONTHLY_CENTS, 
   BUDGET_45A_MAX_BY_PFLEGEGRAD, 
@@ -76,8 +77,47 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
     ersatzpflege_39_42a: "€/Jahr",
   };
 
+  const vorjahrVerbraucht = parseFloat(formData.vorjahrVerbraucht45b) || 0;
+  const uebertrag = parseFloat(formData.uebertrag45b) || 0;
+  const maxCarryover = (BUDGET_45B_MAX_MONTHLY_CENTS / 100) * 12;
+  const errorCarryover = uebertrag < 0 ? "Übertrag darf nicht negativ sein" : null;
+
+  const is45bEnabled = formData.budgetTypeSettings.find(s => s.budgetType === "entlastungsbetrag_45b")?.enabled ?? true;
+
   return (
     <div className="space-y-6">
+      <div className="p-4 rounded-lg bg-gray-50 border border-gray-200">
+        <h3 className="font-medium text-gray-900 mb-3">Pflegegrad</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="pflegegrad-budget">Pflegegrad *</Label>
+            <Select
+              value={formData.pflegegrad}
+              onValueChange={(value) => onChange("pflegegrad", value)}
+            >
+              <SelectTrigger data-testid="select-pflegegrad-budget">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PFLEGEGRAD_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Pflegegrad seit *</Label>
+            <DatePicker
+              value={formData.pflegegradSeit || null}
+              onChange={(val) => onChange("pflegegradSeit", val || "")}
+              data-testid="input-pflegegrad-seit-budget"
+            />
+          </div>
+        </div>
+      </div>
+
       <p className="text-sm text-gray-600">
         Wählen Sie die Budget-Töpfe für den Kunden aus und erfassen Sie die Beträge.
       </p>
@@ -133,6 +173,48 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
                   {error && <p className="text-xs text-red-600 font-medium">{error}</p>}
                   {is45aDisabled && (
                     <p className="text-xs text-amber-600">Erst ab Pflegegrad 2 verfügbar</p>
+                  )}
+
+                  {budgetType === "entlastungsbetrag_45b" && (
+                    <div className="mt-4 p-3 rounded-md bg-green-100/50 border border-green-200 space-y-3">
+                      <h4 className="text-sm font-medium text-green-800">Übertrag aus Vorjahr</h4>
+                      <div className="space-y-2">
+                        <Label htmlFor="vorjahrVerbraucht45b" className="text-xs">
+                          Wie viel wurde im Vorjahr vom Entlastungsbetrag verbraucht? (€)
+                        </Label>
+                        <Input
+                          id="vorjahrVerbraucht45b"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          max={maxCarryover}
+                          value={formData.vorjahrVerbraucht45b}
+                          onChange={(e) => onChange("vorjahrVerbraucht45b", e.target.value)}
+                          data-testid="input-vorjahr-verbraucht-45b"
+                        />
+                        <p className="text-xs text-gray-500">
+                          Maximaler Jahresbetrag: {maxCarryover.toFixed(2)} € (131 € × 12 Monate)
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="uebertrag45b" className="text-xs">
+                          Übertrag (€)
+                        </Label>
+                        <Input
+                          id="uebertrag45b"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={formData.uebertrag45b}
+                          onChange={(e) => onChange("uebertrag45b", e.target.value)}
+                          data-testid="input-uebertrag-45b"
+                        />
+                        <p className="text-xs text-gray-500">
+                          Automatisch berechnet: {maxCarryover.toFixed(2)} € − {vorjahrVerbraucht.toFixed(2)} € = {Math.max(0, maxCarryover - vorjahrVerbraucht).toFixed(2)} €. Manuell überschreibbar.
+                        </p>
+                        {errorCarryover && <p className="text-xs text-red-600 font-medium">{errorCarryover}</p>}
+                      </div>
+                    </div>
                   )}
                 </div>
               )}

@@ -53,6 +53,8 @@ export interface CustomerFormData {
   contractPeriod: "weekly" | "monthly";
   documentDeliveryMethod: "email" | "post";
   acceptsPrivatePayment: boolean;
+  vorjahrVerbraucht45b: string;
+  uebertrag45b: string;
 }
 
 export interface SelectOption {
