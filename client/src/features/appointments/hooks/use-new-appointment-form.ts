@@ -10,12 +10,14 @@ import { useCreateKundentermin, useCreateErstberatung } from "./use-appointment-
 import { validateGermanPhone, normalizePhone, formatPhoneAsYouType } from "@shared/utils/phone";
 import { timeToMinutes, minutesToTimeDisplay, formatDurationDisplay, todayISO } from "@shared/utils/datetime";
 import type { Service } from "@shared/schema";
+import type { AppointmentWithCustomer } from "@shared/types";
 
 export function useNewAppointmentForm() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { user } = useAuth();
-  const initialTab = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("type") === "erstberatung" ? "erstberatung" : "kundentermin";
+  const copyFromId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("copyFrom") : null;
+  const initialTab = copyFromId ? "kundentermin" : (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("type") === "erstberatung" ? "erstberatung" : "kundentermin");
   const [activeTab, setActiveTab] = useState<string>(initialTab);
 
   const isAdmin = user?.isAdmin ?? false;
@@ -28,6 +30,45 @@ export function useNewAppointmentForm() {
 
   const { data: catalogServices = [] } = useQuery<Service[]>({
     queryKey: ["/api/services"],
+    staleTime: 60_000,
+  });
+
+  const copyFromNumericId = copyFromId ? parseInt(copyFromId) : 0;
+  const { data: copyFromAppointment } = useQuery<AppointmentWithCustomer>({
+    queryKey: [`/api/appointments/${copyFromNumericId}`],
+    queryFn: async () => {
+      const result = await api.get<AppointmentWithCustomer>(`/appointments/${copyFromNumericId}`);
+      return unwrapResult(result);
+    },
+    enabled: copyFromNumericId > 0,
+    staleTime: 60_000,
+  });
+
+  const { data: copyFromServices } = useQuery<Array<{
+    id: number;
+    serviceId: number;
+    serviceName: string;
+    serviceCode: string;
+    serviceUnitType: string;
+    plannedDurationMinutes: number;
+    actualDurationMinutes: number | null;
+    details: string | null;
+  }>>({
+    queryKey: [`/api/appointments/${copyFromNumericId}/services`],
+    queryFn: async () => {
+      const result = await api.get<Array<{
+        id: number;
+        serviceId: number;
+        serviceName: string;
+        serviceCode: string;
+        serviceUnitType: string;
+        plannedDurationMinutes: number;
+        actualDurationMinutes: number | null;
+        details: string | null;
+      }>>(`/appointments/${copyFromNumericId}/services`);
+      return unwrapResult(result);
+    },
+    enabled: copyFromNumericId > 0 && !!copyFromAppointment,
     staleTime: 60_000,
   });
 
@@ -58,7 +99,9 @@ export function useNewAppointmentForm() {
   const [ebAssignedEmployeeId, setEbAssignedEmployeeId] = useState<string>("");
 
   const defaultsInitialized = useRef(false);
+  const copyFromInitialized = useRef(false);
   useEffect(() => {
+    if (copyFromId) return;
     if (catalogServices.length > 0 && !defaultsInitialized.current) {
       defaultsInitialized.current = true;
       const defaults = catalogServices
@@ -68,7 +111,30 @@ export function useNewAppointmentForm() {
         setKtServices(defaults);
       }
     }
-  }, [catalogServices]);
+  }, [catalogServices, copyFromId]);
+
+  useEffect(() => {
+    if (!copyFromId || copyFromInitialized.current) return;
+    if (!copyFromAppointment || !copyFromServices) return;
+
+    copyFromInitialized.current = true;
+    defaultsInitialized.current = true;
+
+    setKtCustomerId(copyFromAppointment.customerId.toString());
+    if (copyFromAppointment.assignedEmployeeId) {
+      setKtAssignedEmployeeId(copyFromAppointment.assignedEmployeeId.toString());
+    }
+    setKtNotes(copyFromAppointment.notes || "");
+    const copiedServices = copyFromServices.map(s => ({
+      serviceId: s.serviceId,
+      durationMinutes: s.plannedDurationMinutes,
+    }));
+    if (copiedServices.length > 0) {
+      setKtServices(copiedServices);
+    }
+
+    toast({ title: "Termin als Vorlage geladen" });
+  }, [copyFromId, copyFromAppointment, copyFromServices, toast]);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -358,6 +424,8 @@ export function useNewAppointmentForm() {
     ebAssignedEmployeeId,
     setEbAssignedEmployeeId,
 
+    copyFromId,
+    copyFromCustomerName: copyFromAppointment?.customer?.name ?? null,
     fromProspectId,
     errors,
     costEstimate,

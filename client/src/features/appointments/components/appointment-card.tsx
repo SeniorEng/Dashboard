@@ -15,7 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { MapPin, CheckCircle2, Clock, FileText, Pencil, Trash2, MoreVertical, Phone, Navigation, RotateCcw, User } from "lucide-react";
+import { MapPin, CheckCircle2, Clock, FileText, Pencil, Trash2, MoreVertical, Phone, Navigation, RotateCcw, User, Copy } from "lucide-react";
 import { useLocation } from "wouter";
 import type { AppointmentWithCustomer, AppointmentStatus } from "@shared/types";
 import { useAuth } from "@/hooks/use-auth";
@@ -151,6 +151,12 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
     e.preventDefault();
     e.stopPropagation();
     navigate(`/edit-appointment/${appointment.id}`);
+  }, [navigate, appointment.id]);
+
+  const handleCopyClick = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    navigate(`/new-appointment?copyFrom=${appointment.id}`);
   }, [navigate, appointment.id]);
 
   return (
@@ -301,47 +307,49 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
                   {getStatusIcon(appointment.status)}
                   
                   {/* Desktop Actions Menu */}
-                  {(canModify || canReopen) && (
-                    <div onClick={(e) => e.stopPropagation()}>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button 
-                            className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary transition-opacity"
-                            data-testid={`button-menu-${appointment.id}`}
-                          >
-                            <MoreVertical className="w-4 h-4 text-muted-foreground" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          {canModify && (
-                            <>
-                              <DropdownMenuItem onClick={handleEditClick} data-testid={`button-edit-${appointment.id}`}>
-                                <Pencil className="w-4 h-4 mr-2" />
-                                Bearbeiten
-                              </DropdownMenuItem>
-                              <DropdownMenuItem 
-                                onClick={handleDeleteClick} 
-                                className="text-destructive focus:text-destructive"
-                                data-testid={`button-delete-${appointment.id}`}
-                              >
-                                <Trash2 className="w-4 h-4 mr-2" />
-                                Löschen
-                              </DropdownMenuItem>
-                            </>
-                          )}
-                          {canReopen && (
-                            <DropdownMenuItem 
-                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowReopenDialog(true); }}
-                              data-testid={`button-reopen-${appointment.id}`}
-                            >
-                              <RotateCcw className="w-4 h-4 mr-2" />
-                              Dokumentation korrigieren
+                  <div onClick={(e) => e.stopPropagation()}>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button 
+                          className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary transition-opacity"
+                          data-testid={`button-menu-${appointment.id}`}
+                        >
+                          <MoreVertical className="w-4 h-4 text-muted-foreground" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        {canModify && (
+                          <>
+                            <DropdownMenuItem onClick={handleEditClick} data-testid={`button-edit-${appointment.id}`}>
+                              <Pencil className="w-4 h-4 mr-2" />
+                              Bearbeiten
                             </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  )}
+                            <DropdownMenuItem 
+                              onClick={handleDeleteClick} 
+                              className="text-destructive focus:text-destructive"
+                              data-testid={`button-delete-${appointment.id}`}
+                            >
+                              <Trash2 className="w-4 h-4 mr-2" />
+                              Löschen
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                        {canReopen && (
+                          <DropdownMenuItem 
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowReopenDialog(true); }}
+                            data-testid={`button-reopen-${appointment.id}`}
+                          >
+                            <RotateCcw className="w-4 h-4 mr-2" />
+                            Dokumentation korrigieren
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem onClick={handleCopyClick} data-testid={`button-copy-${appointment.id}`}>
+                          <Copy className="w-4 h-4 mr-2" />
+                          Kopieren
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 </div>
               </div>
 

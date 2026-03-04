@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { 
   MapPin, Calendar, FileText, ChevronLeft, Loader2, 
-  Pencil, Trash2, AlertTriangle, Phone, Car, Home, ArrowRight, UserCheck, UserPlus, CheckCircle2, XCircle, RotateCcw
+  Pencil, Trash2, AlertTriangle, Phone, Car, Home, ArrowRight, UserCheck, UserPlus, CheckCircle2, XCircle, RotateCcw, Copy
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -526,6 +526,18 @@ export default function AppointmentDetail() {
           </Button>
         </div>
       )}
+
+      <div className="mt-4">
+        <Button 
+          variant="outline"
+          className="w-full"
+          onClick={() => setLocation(`/new-appointment?copyFrom=${appointment.id}`)}
+          data-testid="button-copy-appointment"
+        >
+          <Copy className={`${iconSize.sm} mr-2`} />
+          Termin kopieren
+        </Button>
+      </div>
 
 
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>

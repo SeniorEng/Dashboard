@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DatePicker } from "@/components/ui/date-picker";
-import { ChevronLeft, Loader2, Calendar, Clock, User, Home, Plus, Users, AlertTriangle, XCircle } from "lucide-react";
+import { ChevronLeft, Loader2, Calendar, Clock, User, Home, Plus, Users, AlertTriangle, XCircle, Copy } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { useNewAppointmentForm, ServiceSelector, AppointmentSummary } from "@/features/appointments";
 import { EmployeeAvailability } from "@/features/appointments/components/employee-availability";
@@ -32,6 +32,12 @@ export default function NewAppointment() {
           <ChevronLeft className={`${iconSize.sm} mr-1`} /> Zurück
         </Button>
         <h1 className={componentStyles.pageTitle}>Neuer Termin</h1>
+        {form.copyFromId && form.copyFromCustomerName && (
+          <div className="mt-3 flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800" data-testid="banner-copy-info">
+            <Copy className={iconSize.sm} />
+            <span>Kopie von Termin bei <strong>{form.copyFromCustomerName}</strong></span>
+          </div>
+        )}
       </div>
 
       <Tabs value={form.activeTab} onValueChange={form.setActiveTab} className="w-full">
