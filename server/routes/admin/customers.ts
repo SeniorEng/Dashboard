@@ -126,7 +126,7 @@ router.patch("/customers/:id/assign", asyncHandler("Zuordnung konnte nicht aktua
 // ============================================
 
 router.get("/customers", asyncHandler("Kunden konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const { search, pflegegrad, primaryEmployeeId, status, billingType, page, limit } = req.query;
+  const { search, pflegegrad, primaryEmployeeId, status, billingType, insuranceProviderId, page, limit } = req.query;
   
   const filters = {
     search: search as string | undefined,
@@ -134,6 +134,7 @@ router.get("/customers", asyncHandler("Kunden konnten nicht geladen werden", asy
     primaryEmployeeId: primaryEmployeeId ? parseInt(primaryEmployeeId as string) : undefined,
     status: status as string | undefined,
     billingType: billingType as string | undefined,
+    insuranceProviderId: insuranceProviderId ? parseInt(insuranceProviderId as string) : undefined,
   };
   
   const pageNum = page ? parseInt(page as string) : 1;

@@ -20,7 +20,7 @@ import { SectionCard } from "@/components/patterns/section-card";
 import { DataList, DataListItem } from "@/components/patterns/data-list";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { StatusBadge } from "@/components/patterns/status-badge";
-import { useCustomers, useEmployees } from "@/features/customers";
+import { useCustomers, useEmployees, useInsuranceProviders } from "@/features/customers";
 import { iconSize, getPflegegradColors, componentStyles } from "@/design-system";
 import {
   Plus,
@@ -45,6 +45,7 @@ export default function AdminCustomers() {
   const [pflegegradFilter, setPflegegradFilter] = useState<string>("");
   const [billingTypeFilter, setBillingTypeFilter] = useState<string>("");
   const [employeeFilter, setEmployeeFilter] = useState<string>("");
+  const [insuranceProviderFilter, setInsuranceProviderFilter] = useState<string>("");
   const [currentPage, setCurrentPage] = useState(1);
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
 
@@ -56,6 +57,7 @@ export default function AdminCustomers() {
   }, [searchQuery]);
 
   const { data: employees } = useEmployees();
+  const { data: insuranceProviders } = useInsuranceProviders();
 
   const employeeFilterOptions = useMemo(() => [
     { value: "all", label: "Alle Mitarbeiter" },
@@ -65,15 +67,24 @@ export default function AdminCustomers() {
     })).sort((a, b) => a.label.localeCompare(b.label, "de")) || []),
   ], [employees]);
 
+  const insuranceProviderFilterOptions = useMemo(() => [
+    { value: "all", label: "Alle Kostenträger" },
+    ...(insuranceProviders?.map((p) => ({
+      value: p.id.toString(),
+      label: `${p.name} (${p.ikNummer})`,
+    })).sort((a, b) => a.label.localeCompare(b.label, "de")) || []),
+  ], [insuranceProviders]);
+
   const queryParams = useMemo(() => ({
     search: debouncedSearch || undefined,
     status: statusFilter || undefined,
     pflegegrad: pflegegradFilter || undefined,
     billingType: billingTypeFilter || undefined,
     primaryEmployeeId: employeeFilter || undefined,
+    insuranceProviderId: insuranceProviderFilter || undefined,
     page: currentPage,
     limit: 15,
-  }), [debouncedSearch, statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter, currentPage]);
+  }), [debouncedSearch, statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter, insuranceProviderFilter, currentPage]);
 
   const { data, isLoading, error, refetch } = useCustomers(queryParams);
 
@@ -86,13 +97,15 @@ export default function AdminCustomers() {
     setCurrentPage(1);
   }, []);
 
-  const handleFilterChange = useCallback((type: "pflegegrad" | "employee" | "status" | "billingType", value: string) => {
+  const handleFilterChange = useCallback((type: "pflegegrad" | "employee" | "status" | "billingType" | "insuranceProvider", value: string) => {
     if (type === "pflegegrad") {
       setPflegegradFilter(value === "all" ? "" : value);
     } else if (type === "billingType") {
       setBillingTypeFilter(value === "all" ? "" : value);
     } else if (type === "employee") {
       setEmployeeFilter(value === "all" ? "" : value);
+    } else if (type === "insuranceProvider") {
+      setInsuranceProviderFilter(value === "all" ? "" : value);
     } else if (type === "status") {
       setStatusFilter(value === "all" ? "" : value);
     }
@@ -104,6 +117,7 @@ export default function AdminCustomers() {
     setPflegegradFilter("");
     setBillingTypeFilter("");
     setEmployeeFilter("");
+    setInsuranceProviderFilter("");
     setSearchQuery("");
     setCurrentPage(1);
     setFilterSheetOpen(false);
@@ -115,8 +129,9 @@ export default function AdminCustomers() {
     if (pflegegradFilter) count++;
     if (billingTypeFilter) count++;
     if (employeeFilter) count++;
+    if (insuranceProviderFilter) count++;
     return count;
-  }, [statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter]);
+  }, [statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter, insuranceProviderFilter]);
 
   const customers = data?.data || [];
   const totalPages = data?.totalPages || 1;
@@ -238,6 +253,19 @@ export default function AdminCustomers() {
                       searchPlaceholder="Mitarbeiter suchen..."
                       emptyText="Kein Mitarbeiter gefunden."
                       data-testid="select-employee"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Kostenträger</Label>
+                    <SearchableSelect
+                      options={insuranceProviderFilterOptions}
+                      value={insuranceProviderFilter || "all"}
+                      onValueChange={(value) => handleFilterChange("insuranceProvider", value)}
+                      placeholder="Alle Kostenträger"
+                      searchPlaceholder="Kostenträger suchen..."
+                      emptyText="Kein Kostenträger gefunden."
+                      data-testid="select-insurance-provider"
                     />
                   </div>
 

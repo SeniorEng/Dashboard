@@ -102,6 +102,7 @@ export interface CustomerListParams extends PaginationParams {
   billingType?: string;
   primaryEmployeeId?: string;
   status?: string;
+  insuranceProviderId?: string;
 }
 
 export interface CustomerPricingInfo {

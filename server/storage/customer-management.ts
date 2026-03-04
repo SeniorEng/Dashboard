@@ -49,6 +49,7 @@ export interface CustomerListFilters {
   hasActiveContract?: boolean;
   status?: string;
   billingType?: string;
+  insuranceProviderId?: number;
 }
 
 export interface PaginationOptions {
@@ -151,6 +152,20 @@ export class CustomerManagementStorage {
       baseConditions.push(eq(customers.billingType, filters.billingType));
     }
 
+    const insuranceSubquery = filters?.insuranceProviderId
+      ? db
+          .select({ customerId: customerInsuranceHistory.customerId })
+          .from(customerInsuranceHistory)
+          .where(
+            and(
+              eq(customerInsuranceHistory.insuranceProviderId, filters.insuranceProviderId),
+              isNull(customerInsuranceHistory.validTo)
+            )
+          )
+          .groupBy(customerInsuranceHistory.customerId)
+          .as('active_insurance')
+      : null;
+
     const activeContractSubquery = db
       .select({ 
         customerId: customerContracts.customerId,
@@ -167,18 +182,23 @@ export class CustomerManagementStorage {
     } else if (filters?.hasActiveContract === false) {
       fullConditions.push(isNull(activeContractSubquery.customerId));
     }
+    if (insuranceSubquery) {
+      fullConditions.push(isNotNull(insuranceSubquery.customerId));
+    }
     const fullWhereClause = fullConditions.length > 0 ? and(...fullConditions) : undefined;
 
-    const countQuery = db
+    let countQueryBuilder = db
       .select({ count: count() })
       .from(customers)
-      .leftJoin(activeContractSubquery, eq(customers.id, activeContractSubquery.customerId))
-      .where(fullWhereClause);
+      .leftJoin(activeContractSubquery, eq(customers.id, activeContractSubquery.customerId));
+    if (insuranceSubquery) {
+      countQueryBuilder = countQueryBuilder.leftJoin(insuranceSubquery, eq(customers.id, insuranceSubquery.customerId)) as any;
+    }
     
-    const countResult = await countQuery;
+    const countResult = await countQueryBuilder.where(fullWhereClause);
     const total = Number(countResult[0]?.count ?? 0);
 
-    const result = await db
+    let dataQueryBuilder = db
       .select({
         id: customers.id,
         name: customers.name,
@@ -198,7 +218,12 @@ export class CustomerManagementStorage {
       })
       .from(customers)
       .leftJoin(users, eq(customers.primaryEmployeeId, users.id))
-      .leftJoin(activeContractSubquery, eq(customers.id, activeContractSubquery.customerId))
+      .leftJoin(activeContractSubquery, eq(customers.id, activeContractSubquery.customerId));
+    if (insuranceSubquery) {
+      dataQueryBuilder = dataQueryBuilder.leftJoin(insuranceSubquery, eq(customers.id, insuranceSubquery.customerId)) as any;
+    }
+    
+    const result = await dataQueryBuilder
       .where(fullWhereClause)
       .orderBy(desc(customers.createdAt))
       .limit(limit)

@@ -37,6 +37,7 @@ function buildQueryString(params: CustomerListParams): string {
   if (params.billingType) searchParams.set("billingType", params.billingType);
   if (params.primaryEmployeeId) searchParams.set("primaryEmployeeId", params.primaryEmployeeId);
   if (params.status) searchParams.set("status", params.status);
+  if (params.insuranceProviderId) searchParams.set("insuranceProviderId", params.insuranceProviderId);
   const qs = searchParams.toString();
   return qs ? `?${qs}` : "";
 }
