@@ -321,21 +321,35 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
 
       {isUploadOpen && (
         <div className="mb-4 p-4 bg-gray-50 rounded-lg space-y-3">
-          <div className="space-y-2">
-            <Label>Dokumententyp *</Label>
-            <Select value={selectedDocTypeId} onValueChange={setSelectedDocTypeId}>
-              <SelectTrigger data-testid="select-customer-doc-type">
-                <SelectValue placeholder="Typ auswählen..." />
-              </SelectTrigger>
-              <SelectContent>
-                {availableDocTypes.map(dt => (
-                  <SelectItem key={dt.id} value={dt.id.toString()}>
-                    {dt.name}
-                    {dt.reviewIntervalMonths ? ` (alle ${dt.reviewIntervalMonths} Mon.)` : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>Dokumententyp *</Label>
+              <Select value={selectedDocTypeId} onValueChange={setSelectedDocTypeId}>
+                <SelectTrigger data-testid="select-customer-doc-type">
+                  <SelectValue placeholder="Typ auswählen..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableDocTypes.map(dt => (
+                    <SelectItem key={dt.id} value={dt.id.toString()}>
+                      {dt.name}
+                      {dt.reviewIntervalMonths ? ` (alle ${dt.reviewIntervalMonths} Mon.)` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Bezeichnung (optional)</Label>
+              <Input
+                value={batchLabel}
+                onChange={(e) => setBatchLabel(e.target.value)}
+                placeholder="z.B. Pflegevertrag, Vollmacht"
+                className="text-base"
+                data-testid="input-customer-batch-label"
+              />
+              <p className="text-[11px] text-gray-500">Hilft beim Zuordnen, wenn es mehrere Uploads gibt</p>
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -392,7 +406,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                     Alle entfernen
                   </button>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                   {filePreviews.map((item, idx) => (
                     <div key={idx} className="relative group rounded-lg border border-gray-200 overflow-hidden bg-gray-50">
                       {item.preview ? (
@@ -421,18 +435,6 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                 </div>
               </div>
             )}
-          </div>
-
-          <div className="space-y-2">
-            <Label>Bezeichnung (optional)</Label>
-            <Input
-              value={batchLabel}
-              onChange={(e) => setBatchLabel(e.target.value)}
-              placeholder="z.B. Pflegevertrag, Vollmacht"
-              className="text-base"
-              data-testid="input-customer-batch-label"
-            />
-            <p className="text-[11px] text-gray-500">Hilft beim Zuordnen, wenn es mehrere Uploads gibt</p>
           </div>
 
           <div className="space-y-2">

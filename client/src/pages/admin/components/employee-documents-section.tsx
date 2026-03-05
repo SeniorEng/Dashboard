@@ -284,61 +284,63 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
 
       {isUploadOpen && (
         <div className="mb-4 p-4 bg-gray-50 rounded-lg space-y-3">
-          <div className="space-y-2">
-            <Label>Dokumententyp *</Label>
-            <Select value={selectedDocTypeId} onValueChange={setSelectedDocTypeId}>
-              <SelectTrigger data-testid="select-doc-type">
-                <SelectValue placeholder="Typ auswählen..." />
-              </SelectTrigger>
-              <SelectContent>
-                {availableDocTypes.map(dt => (
-                  <SelectItem key={dt.id} value={dt.id.toString()}>
-                    {dt.name}
-                    {dt.reviewIntervalMonths ? ` (alle ${dt.reviewIntervalMonths} Mon.)` : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>Dokumententyp *</Label>
+              <Select value={selectedDocTypeId} onValueChange={setSelectedDocTypeId}>
+                <SelectTrigger data-testid="select-doc-type">
+                  <SelectValue placeholder="Typ auswählen..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableDocTypes.map(dt => (
+                    <SelectItem key={dt.id} value={dt.id.toString()}>
+                      {dt.name}
+                      {dt.reviewIntervalMonths ? ` (alle ${dt.reviewIntervalMonths} Mon.)` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-          <div className="space-y-2">
-            <Label>Dateien auswählen *</Label>
-            <Input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-              multiple
-              onChange={(e) => setSelectedFiles(Array.from(e.target.files || []))}
-              className="text-base"
-              data-testid="input-document-file"
-            />
-            <p className="text-[11px] text-gray-500">PDF, Bild oder Word-Dokument (max. 10 MB je Datei). Mehrere Dateien möglich.</p>
-            {selectedFiles.length > 1 && (
-              <p className="text-xs text-teal-600">{selectedFiles.length} Dateien ausgewählt</p>
-            )}
-          </div>
+            <div className="space-y-2">
+              <Label>Dateien auswählen *</Label>
+              <Input
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                multiple
+                onChange={(e) => setSelectedFiles(Array.from(e.target.files || []))}
+                className="text-base"
+                data-testid="input-document-file"
+              />
+              <p className="text-[11px] text-gray-500">PDF, Bild oder Word-Dokument (max. 10 MB). Mehrere Dateien möglich.</p>
+              {selectedFiles.length > 1 && (
+                <p className="text-xs text-teal-600">{selectedFiles.length} Dateien ausgewählt</p>
+              )}
+            </div>
 
-          <div className="space-y-2">
-            <Label>Bezeichnung (optional)</Label>
-            <Input
-              value={batchLabel}
-              onChange={(e) => setBatchLabel(e.target.value)}
-              placeholder="z.B. Minijob-Vertrag, Midijob-Vertrag"
-              className="text-base"
-              data-testid="input-batch-label"
-            />
-            <p className="text-[11px] text-gray-500">Hilft beim Zuordnen, wenn es mehrere Uploads gibt</p>
-          </div>
+            <div className="space-y-2">
+              <Label>Bezeichnung (optional)</Label>
+              <Input
+                value={batchLabel}
+                onChange={(e) => setBatchLabel(e.target.value)}
+                placeholder="z.B. Minijob-Vertrag, Midijob-Vertrag"
+                className="text-base"
+                data-testid="input-batch-label"
+              />
+              <p className="text-[11px] text-gray-500">Hilft beim Zuordnen, wenn es mehrere Uploads gibt</p>
+            </div>
 
-          <div className="space-y-2">
-            <Label>Dokumentendatum (optional)</Label>
-            <Input
-              type="date"
-              value={documentDate}
-              onChange={(e) => setDocumentDate(e.target.value)}
-              className="text-base"
-              data-testid="input-document-date"
-            />
-            <p className="text-[11px] text-gray-500">Von wann stammt das Dokument? Z.B. Vertragsdatum oder Ausstellungsdatum</p>
+            <div className="space-y-2">
+              <Label>Dokumentendatum (optional)</Label>
+              <Input
+                type="date"
+                value={documentDate}
+                onChange={(e) => setDocumentDate(e.target.value)}
+                className="text-base"
+                data-testid="input-document-date"
+              />
+              <p className="text-[11px] text-gray-500">Z.B. Vertragsdatum oder Ausstellungsdatum</p>
+            </div>
           </div>
 
           <div className="space-y-2">
