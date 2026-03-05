@@ -2,8 +2,12 @@ import { Router, Request, Response } from "express";
 import { timeTrackingStorage } from "../../storage/time-tracking";
 import { 
   insertVacationAllowanceSchema,
+  appointmentServices as appointmentServicesTable,
+  services as servicesTable,
 } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
+import { db } from "../../lib/db";
+import { eq, inArray } from "drizzle-orm";
 
 const router = Router();
 
@@ -37,14 +41,45 @@ router.get("/employee-appointments", asyncHandler("Termine konnten nicht geladen
   const lastDay = new Date(y, m, 0).getDate();
   const endDate = `${y}-${monthStr}-${lastDay}`;
 
+  let appts;
   if (userId && userId !== "all") {
     const uid = parseInt(userId as string);
-    const appts = await timeTrackingStorage.getEmployeeAppointments(uid, startDate, endDate);
-    res.json(appts);
+    appts = await timeTrackingStorage.getEmployeeAppointments(uid, startDate, endDate);
   } else {
-    const appts = await timeTrackingStorage.getAllAppointmentsInRange(startDate, endDate);
-    res.json(appts);
+    appts = await timeTrackingStorage.getAllAppointmentsInRange(startDate, endDate);
   }
+
+  const apptIds = appts.map(a => a.id);
+  let servicesByAppt = new Map<number, Array<{ serviceCode: string; serviceName: string; actualMinutes: number | null; plannedMinutes: number }>>();
+  if (apptIds.length > 0) {
+    const svcRows = await db.select({
+      appointmentId: appointmentServicesTable.appointmentId,
+      serviceCode: servicesTable.code,
+      serviceName: servicesTable.name,
+      plannedMinutes: appointmentServicesTable.plannedDurationMinutes,
+      actualMinutes: appointmentServicesTable.actualDurationMinutes,
+    })
+    .from(appointmentServicesTable)
+    .innerJoin(servicesTable, eq(appointmentServicesTable.serviceId, servicesTable.id))
+    .where(inArray(appointmentServicesTable.appointmentId, apptIds));
+
+    for (const row of svcRows) {
+      if (!servicesByAppt.has(row.appointmentId)) servicesByAppt.set(row.appointmentId, []);
+      servicesByAppt.get(row.appointmentId)!.push({
+        serviceCode: row.serviceCode,
+        serviceName: row.serviceName,
+        actualMinutes: row.actualMinutes,
+        plannedMinutes: row.plannedMinutes,
+      });
+    }
+  }
+
+  const enriched = appts.map(a => ({
+    ...a,
+    appointmentServiceDetails: servicesByAppt.get(a.id) || [],
+  }));
+
+  res.json(enriched);
 }));
 
 router.get("/time-entries/vacation-summary/:userId/:year", asyncHandler("Urlaubsübersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
