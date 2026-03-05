@@ -424,6 +424,14 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
     return res.status(400).json({ error: conflict });
   }
   
+  if (validatedData.startTime && validatedData.endTime) {
+    const startMin = timeToMinutes(validatedData.startTime);
+    const endMin = timeToMinutes(validatedData.endTime);
+    if (endMin > startMin) {
+      validatedData.durationMinutes = endMin - startMin;
+    }
+  }
+
   const entry = await timeTrackingStorage.createTimeEntry(userId, validatedData);
 
   await auditService.log(req.user!.id, isAdminActingForOther ? "admin_time_entry_created" : "time_entry_created", "time_entry", entry.id, {
@@ -498,6 +506,16 @@ router.put("/:id", asyncHandler("Zeiteintrag konnte nicht aktualisiert werden", 
     return res.status(400).json({ error: conflict });
   }
   
+  const finalStartTime = validatedData.startTime !== undefined ? validatedData.startTime : existing.startTime;
+  const finalEndTime = validatedData.endTime !== undefined ? validatedData.endTime : existing.endTime;
+  if (finalStartTime && finalEndTime) {
+    const startMin = timeToMinutes(finalStartTime);
+    const endMin = timeToMinutes(finalEndTime);
+    if (endMin > startMin) {
+      validatedData.durationMinutes = endMin - startMin;
+    }
+  }
+
   const updated = await timeTrackingStorage.updateTimeEntry(entryId, validatedData);
 
   const changedFields: string[] = [];

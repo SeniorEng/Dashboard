@@ -134,7 +134,6 @@ function TimeEntryCard({
           {entry.startTime && entry.endTime && (
             <div className="text-xs text-gray-500">
               {entry.startTime.slice(0, 5)} – {entry.endTime.slice(0, 5)}
-              {entry.durationMinutes ? ` (${entry.durationMinutes} Min.)` : ""}
             </div>
           )}
           {!entry.startTime && entry.durationMinutes && (
