@@ -19,8 +19,9 @@ import { api, unwrapResult } from "@/lib/api/client";
 import { MONTH_NAMES } from "@/features/time-tracking/constants";
 import { formatCurrency } from "@shared/utils/format";
 
-function cents(value: number | string | bigint): string {
-  const num = typeof value === "string" ? parseInt(value) : Number(value);
+function cents(value: number | string | bigint | null | undefined): string {
+  if (value == null) return formatCurrency(0);
+  const num = typeof value === "string" ? parseInt(value) || 0 : Number(value) || 0;
   return formatCurrency(num);
 }
 
@@ -29,9 +30,10 @@ function pct(a: number, b: number): string {
   return `${Math.round((a / b) * 100)}%`;
 }
 
-function hours(minutes: number): string {
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
+function hours(minutes: number | null | undefined): string {
+  const min = Number(minutes) || 0;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
   return m > 0 ? `${h}h ${m}min` : `${h}h`;
 }
 
@@ -154,6 +156,9 @@ export default function AdminStatistics() {
   });
 
   const cockpit = data?.cockpit;
+  const cockpitMargin = cockpit?.margin || { revenueCents: 0, costCents: 0, marginCents: 0, marginPercent: 0, appointments: 0, totalMinutes: 0 };
+  const cockpitUtil = cockpit?.utilization || { productiveMinutes: 0, overheadMinutes: 0, percent: 0, appointments: 0 };
+  const cockpitBudget = cockpit?.budget || { allocatedCents: 0, usedCents: 0, percent: 0, customerCount: 0 };
   const employees = data?.employees ?? [];
   const customerStats = data?.customers ?? {};
   const trends = data?.monthlyTrends ?? [];
@@ -244,45 +249,45 @@ export default function AdminStatistics() {
                     <CockpitKPI
                       title="DB-Marge"
                       icon={<PiggyBank className="w-5 h-5" />}
-                      value={`${cockpit.margin.marginPercent}%`}
-                      percent={cockpit.margin.marginPercent}
+                      value={`${cockpitMargin.marginPercent}%`}
+                      percent={cockpitMargin.marginPercent}
                       thresholds={{ green: 45, yellow: 30 }}
-                      prevValue={cockpit.marginPrev ? cockpit.marginPrev.marginPercent : null}
+                      prevValue={cockpit?.marginPrev ? cockpit.marginPrev.marginPercent : null}
                       prevLabel="Vormonat"
                       metrics={[
-                        { label: "Erlöse", value: cents(cockpit.margin.revenueCents) },
-                        { label: "DB", value: cents(cockpit.margin.marginCents) },
-                        { label: "Termine", value: String(cockpit.margin.appointments) },
+                        { label: "Erlöse", value: cents(cockpitMargin.revenueCents) },
+                        { label: "DB", value: cents(cockpitMargin.marginCents) },
+                        { label: "Termine", value: String(cockpitMargin.appointments) },
                       ]}
                       testId="cockpit-margin"
                     />
                     <CockpitKPI
                       title="Auslastung"
                       icon={<Gauge className="w-5 h-5" />}
-                      value={`${cockpit.utilization.percent}%`}
-                      percent={cockpit.utilization.percent}
+                      value={`${cockpitUtil.percent}%`}
+                      percent={cockpitUtil.percent}
                       thresholds={{ green: 75, yellow: 60 }}
-                      prevValue={cockpit.utilizationPrev ? cockpit.utilizationPrev.percent : null}
+                      prevValue={cockpit?.utilizationPrev ? cockpit.utilizationPrev.percent : null}
                       prevLabel="Vormonat"
                       metrics={[
-                        { label: "Produktiv", value: hours(cockpit.utilization.productiveMinutes) },
-                        { label: "Overhead", value: hours(cockpit.utilization.overheadMinutes) },
-                        { label: "Termine", value: String(cockpit.utilization.appointments) },
+                        { label: "Produktiv", value: hours(cockpitUtil.productiveMinutes) },
+                        { label: "Overhead", value: hours(cockpitUtil.overheadMinutes) },
+                        { label: "Termine", value: String(cockpitUtil.appointments) },
                       ]}
                       testId="cockpit-utilization"
                     />
                     <CockpitKPI
                       title="Budget gesamt"
                       icon={<Wallet className="w-5 h-5" />}
-                      value={`${cockpit.budget.percent}%`}
-                      percent={cockpit.budget.percent}
+                      value={`${cockpitBudget.percent}%`}
+                      percent={cockpitBudget.percent}
                       thresholds={{ green: 70, yellow: 50 }}
-                      prevValue={cockpit.budgetPrev ? cockpit.budgetPrev.percent : null}
+                      prevValue={cockpit?.budgetPrev ? cockpit.budgetPrev.percent : null}
                       prevLabel="Vormonat"
                       metrics={[
-                        { label: "Verbraucht", value: cents(cockpit.budget.usedCents) },
-                        { label: "Verfügbar", value: cents(cockpit.budget.allocatedCents) },
-                        { label: "Kunden", value: String(cockpit.budget.customerCount) },
+                        { label: "Verbraucht", value: cents(cockpitBudget.usedCents) },
+                        { label: "Verfügbar", value: cents(cockpitBudget.allocatedCents) },
+                        { label: "Kunden", value: String(cockpitBudget.customerCount) },
                       ]}
                       testId="cockpit-budget"
                     />
@@ -360,7 +365,7 @@ export default function AdminStatistics() {
             {/* TEAM TAB (Mitarbeiter + Deckungsbeitrag + Zeiterfassung) */}
             <TabsContent value="team">
               {profitability ? (() => {
-                const t = profitability.totals;
+                const t = profitability.totals || {};
                 const empList = profitability.employees || [];
                 const maxEmpMargin = Math.max(...empList.map((e: any) => Number(e.marginCents || 0)), 1);
                 const prices = profitability.servicePrices || [];
@@ -386,8 +391,8 @@ export default function AdminStatistics() {
                             <div className="text-2xl font-bold text-emerald-700" data-testid="profit-margin-total">{cents(t.marginCents)}</div>
                           </div>
                           <div className="ml-auto text-right">
-                            <div className={`text-xl font-bold ${profitability.marginPercent >= 50 ? 'text-emerald-600' : profitability.marginPercent >= 30 ? 'text-amber-600' : 'text-red-600'}`} data-testid="profit-margin-pct">
-                              {profitability.marginPercent}%
+                            <div className={`text-xl font-bold ${(profitability.marginPercent || 0) >= 50 ? 'text-emerald-600' : (profitability.marginPercent || 0) >= 30 ? 'text-amber-600' : 'text-red-600'}`} data-testid="profit-margin-pct">
+                              {profitability.marginPercent || 0}%
                             </div>
                             <div className="text-xs text-muted-foreground">DB-Marge</div>
                           </div>
@@ -721,7 +726,7 @@ export default function AdminStatistics() {
             {/* PLANNING TAB */}
             <TabsContent value="planning">
               {planning ? (() => {
-                const t = planning.totals;
+                const t = planning.totals || {};
                 const planEmpList = planning.employees || [];
                 const maxPlanMargin = Math.max(...planEmpList.map((e: any) => Math.abs(Number(e.marginCents || 0))), 1);
                 const noApptCustomers = planning.customersWithoutAppointments || [];
@@ -737,8 +742,8 @@ export default function AdminStatistics() {
                             <div className="text-2xl font-bold text-blue-700" data-testid="planning-total-appointments">{t.appointments} Termine</div>
                           </div>
                           <div className="ml-auto text-right">
-                            <div className={`text-xl font-bold ${planning.marginPercent >= 50 ? 'text-emerald-600' : planning.marginPercent >= 30 ? 'text-amber-600' : 'text-red-600'}`} data-testid="planning-margin-pct">
-                              {planning.marginPercent}% DB
+                            <div className={`text-xl font-bold ${(planning.marginPercent || 0) >= 50 ? 'text-emerald-600' : (planning.marginPercent || 0) >= 30 ? 'text-amber-600' : 'text-red-600'}`} data-testid="planning-margin-pct">
+                              {planning.marginPercent || 0}% DB
                             </div>
                             <div className="text-xs text-muted-foreground">{t.scheduledCount} geplant · {t.completedCount} abgeschl. · {t.documentedCount} dokumentiert</div>
                           </div>
