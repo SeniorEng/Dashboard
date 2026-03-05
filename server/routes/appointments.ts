@@ -12,6 +12,7 @@ import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
 import { serviceCatalogStorage } from "../storage/service-catalog";
 import { suggestTravelOrigin } from "@shared/domain/appointments";
+import { calculateRoute } from "../services/routing";
 import { isWeekend, currentTimeHHMMSS, todayISO } from "@shared/utils/datetime";
 import { 
   ErrorMessages, 
@@ -644,12 +645,91 @@ router.get("/:id/travel-suggestion", asyncHandler("Fehler beim Laden der Fahrvor
   }));
   
   const suggestion = suggestTravelOrigin(appointment, appointmentsWithNames);
+
+  let suggestedKilometers: number | null = null;
+  let suggestedMinutes: number | null = null;
+
+  const destCustomer = appointment.customer;
+  if (destCustomer?.latitude && destCustomer?.longitude) {
+    if (suggestion.suggestedOrigin === "home") {
+      const company = await storage.getCompanySettings();
+      if (company?.latitude && company?.longitude) {
+        const route = await calculateRoute(company.latitude, company.longitude, destCustomer.latitude, destCustomer.longitude);
+        if (route) {
+          suggestedKilometers = route.distanceKm;
+          suggestedMinutes = route.durationMinutes;
+        }
+      }
+    } else if (suggestion.previousAppointment) {
+      const prevAppointment = await storage.getAppointmentWithCustomer(suggestion.previousAppointment.id);
+      const prevCustomer = prevAppointment?.customer;
+      if (prevCustomer?.latitude && prevCustomer?.longitude) {
+        const route = await calculateRoute(prevCustomer.latitude, prevCustomer.longitude, destCustomer.latitude, destCustomer.longitude);
+        if (route) {
+          suggestedKilometers = route.distanceKm;
+          suggestedMinutes = route.durationMinutes;
+        }
+      }
+    }
+  }
   
   res.json({
     suggestedOrigin: suggestion.suggestedOrigin,
     previousAppointmentId: suggestion.previousAppointment?.id ?? null,
     previousCustomerName: suggestion.previousCustomerName ?? null,
+    suggestedKilometers,
+    suggestedMinutes,
   });
+}));
+
+router.get("/:id/route-calculation", asyncHandler("Fehler bei der Routenberechnung", async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
+  }
+
+  const originType = req.query.originType as string;
+  const fromAppointmentId = req.query.fromAppointmentId ? parseInt(req.query.fromAppointmentId as string) : null;
+
+  if (!originType || !["home", "appointment"].includes(originType)) {
+    return sendBadRequest(res, "Ungültiger Origin-Typ");
+  }
+
+  const appointment = await storage.getAppointmentWithCustomer(id);
+  if (!appointment) {
+    return sendNotFound(res, ErrorMessages.appointmentNotFound);
+  }
+
+  const destCustomer = appointment.customer;
+  if (!destCustomer?.latitude || !destCustomer?.longitude) {
+    return res.json({ suggestedKilometers: null, suggestedMinutes: null });
+  }
+
+  let suggestedKilometers: number | null = null;
+  let suggestedMinutes: number | null = null;
+
+  if (originType === "home") {
+    const company = await storage.getCompanySettings();
+    if (company?.latitude && company?.longitude) {
+      const route = await calculateRoute(company.latitude, company.longitude, destCustomer.latitude, destCustomer.longitude);
+      if (route) {
+        suggestedKilometers = route.distanceKm;
+        suggestedMinutes = route.durationMinutes;
+      }
+    }
+  } else if (originType === "appointment" && fromAppointmentId) {
+    const prevAppointment = await storage.getAppointmentWithCustomer(fromAppointmentId);
+    const prevCustomer = prevAppointment?.customer;
+    if (prevCustomer?.latitude && prevCustomer?.longitude) {
+      const route = await calculateRoute(prevCustomer.latitude, prevCustomer.longitude, destCustomer.latitude, destCustomer.longitude);
+      if (route) {
+        suggestedKilometers = route.distanceKm;
+        suggestedMinutes = route.durationMinutes;
+      }
+    }
+  }
+
+  res.json({ suggestedKilometers, suggestedMinutes });
 }));
 
 router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins", async (req, res) => {

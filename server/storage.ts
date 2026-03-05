@@ -75,6 +75,8 @@ const appointmentWithCustomerSelectFields = {
     updatedAt: customers.updatedAt,
     createdByUserId: customers.createdByUserId,
     status: customers.status,
+    latitude: customers.latitude,
+    longitude: customers.longitude,
   }
 };
 

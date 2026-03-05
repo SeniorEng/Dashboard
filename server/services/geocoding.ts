@@ -1,0 +1,128 @@
+import { db } from "../lib/db";
+import { customers } from "@shared/schema/customers";
+import { companySettings } from "@shared/schema/company";
+import { eq, isNull, and, or, isNotNull } from "drizzle-orm";
+
+const NOMINATIM_BASE = "https://nominatim.openstreetmap.org/search";
+const USER_AGENT = "CareConnect/1.0 (care-management-app)";
+const RATE_LIMIT_MS = 1100;
+
+let lastRequestTime = 0;
+
+interface GeocodingResult {
+  latitude: number;
+  longitude: number;
+}
+
+async function rateLimitedFetch(url: string): Promise<Response> {
+  const now = Date.now();
+  const elapsed = now - lastRequestTime;
+  if (elapsed < RATE_LIMIT_MS) {
+    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_MS - elapsed));
+  }
+  lastRequestTime = Date.now();
+  return fetch(url, {
+    headers: { "User-Agent": USER_AGENT, "Accept": "application/json" },
+    signal: AbortSignal.timeout(5000),
+  });
+}
+
+export async function geocodeAddress(
+  strasse: string | null | undefined,
+  hausnummer: string | null | undefined,
+  plz: string | null | undefined,
+  stadt: string | null | undefined
+): Promise<GeocodingResult | null> {
+  if (!strasse || !plz || !stadt) return null;
+
+  const street = hausnummer ? `${strasse} ${hausnummer}` : strasse;
+
+  try {
+    const params = new URLSearchParams({
+      street,
+      city: stadt,
+      postalcode: plz,
+      country: "Germany",
+      format: "json",
+      limit: "1",
+    });
+    const url = `${NOMINATIM_BASE}?${params}`;
+    const response = await rateLimitedFetch(url);
+    if (!response.ok) return null;
+
+    const results = await response.json() as Array<{ lat: string; lon: string }>;
+    if (!results || results.length === 0) return null;
+
+    const lat = parseFloat(results[0].lat);
+    const lon = parseFloat(results[0].lon);
+    if (isNaN(lat) || isNaN(lon)) return null;
+
+    return { latitude: lat, longitude: lon };
+  } catch (error) {
+    console.error("[geocoding] Error geocoding address:", `${street}, ${plz} ${stadt}`, error);
+    return null;
+  }
+}
+
+export async function geocodeCustomer(customerId: number): Promise<void> {
+  const [customer] = await db.select().from(customers).where(eq(customers.id, customerId));
+  if (!customer) return;
+
+  const result = await geocodeAddress(customer.strasse, customer.nr, customer.plz, customer.stadt);
+  if (result) {
+    await db.update(customers)
+      .set({ latitude: result.latitude, longitude: result.longitude })
+      .where(eq(customers.id, customerId));
+  }
+}
+
+export async function geocodeCompanySettings(): Promise<void> {
+  const [settings] = await db.select().from(companySettings);
+  if (!settings) return;
+
+  const result = await geocodeAddress(settings.strasse, settings.hausnummer, settings.plz, settings.stadt);
+  if (result) {
+    await db.update(companySettings)
+      .set({ latitude: result.latitude, longitude: result.longitude })
+      .where(eq(companySettings.id, settings.id));
+  }
+}
+
+export async function geocodeAllMissing(): Promise<void> {
+  console.log("[geocoding] Starting batch geocoding of addresses without coordinates...");
+
+  const [settings] = await db.select().from(companySettings);
+  if (settings && !settings.latitude && settings.strasse && settings.plz && settings.stadt) {
+    await geocodeCompanySettings();
+    console.log("[geocoding] Company address geocoded");
+  }
+
+  const customersWithoutCoords = await db.select({
+    id: customers.id,
+    strasse: customers.strasse,
+    nr: customers.nr,
+    plz: customers.plz,
+    stadt: customers.stadt,
+  }).from(customers).where(
+    and(
+      isNull(customers.latitude),
+      isNotNull(customers.strasse),
+      isNotNull(customers.plz),
+      isNotNull(customers.stadt),
+      or(eq(customers.status, "aktiv"), eq(customers.status, "erstberatung"))
+    )
+  );
+
+  let geocoded = 0;
+  for (const customer of customersWithoutCoords) {
+    const result = await geocodeAddress(customer.strasse, customer.nr, customer.plz, customer.stadt);
+    if (result) {
+      await db.update(customers)
+        .set({ latitude: result.latitude, longitude: result.longitude })
+        .where(eq(customers.id, customer.id));
+      geocoded++;
+    }
+  }
+
+  console.log(`[geocoding] Batch geocoding complete: ${geocoded}/${customersWithoutCoords.length} addresses geocoded`);
+}

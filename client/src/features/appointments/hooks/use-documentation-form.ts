@@ -5,7 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useAppointment } from "./use-appointments";
-import { useDocumentAppointment, useTravelSuggestion } from "./use-appointment-mutations";
+import { useDocumentAppointment, useTravelSuggestion, useRouteCalculation } from "./use-appointment-mutations";
 import type { TravelOriginType, ServiceType } from "@shared/types";
 import type { Service } from "@shared/schema";
 import { formatTimeHHMM, addMinutesToTime } from "@shared/utils/datetime";
@@ -98,14 +98,47 @@ export function useDocumentationForm(id: number) {
     }
   }, [appointment, appointmentServicesData]);
 
+  const [manualOriginChange, setManualOriginChange] = useState(false);
+
   useEffect(() => {
     if (travelSuggestion) {
       setFormData(prev => ({
         ...prev,
         travelOriginType: travelSuggestion.suggestedOrigin,
         travelFromAppointmentId: travelSuggestion.previousAppointmentId,
+        travelKilometers: travelSuggestion.suggestedKilometers ?? 0,
+        travelMinutes: travelSuggestion.suggestedMinutes ?? 0,
       }));
     }
+  }, [travelSuggestion]);
+
+  const { data: routeCalc } = useRouteCalculation(
+    id,
+    formData.travelOriginType,
+    formData.travelFromAppointmentId,
+    manualOriginChange
+  );
+
+  useEffect(() => {
+    if (routeCalc && manualOriginChange) {
+      if (routeCalc.suggestedKilometers != null && routeCalc.suggestedKilometers > 0) {
+        setFormData(prev => ({
+          ...prev,
+          travelKilometers: routeCalc.suggestedKilometers!,
+          travelMinutes: routeCalc.suggestedMinutes ?? 0,
+        }));
+      }
+      setManualOriginChange(false);
+    }
+  }, [routeCalc, manualOriginChange]);
+
+  const handleTravelOriginChange = useCallback((value: TravelOriginType) => {
+    setFormData(prev => ({
+      ...prev,
+      travelOriginType: value,
+      travelFromAppointmentId: value === "appointment" ? (travelSuggestion?.previousAppointmentId ?? null) : null,
+    }));
+    setManualOriginChange(true);
   }, [travelSuggestion]);
 
   const updateService = useCallback((index: number, field: keyof ServiceFormData, value: number | string) => {
@@ -286,5 +319,6 @@ export function useDocumentationForm(id: number) {
     updateService, removeService, addService,
     handleNext, handleSubmit,
     travelSuggestion,
+    handleTravelOriginChange,
   };
 }

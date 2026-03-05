@@ -32,6 +32,7 @@ export default function DocumentAppointment() {
     updateService, removeService, addService,
     handleNext, handleSubmit,
     travelSuggestion,
+    handleTravelOriginChange,
   } = useDocumentationForm(id);
 
   if (appointmentLoading) {
@@ -341,11 +342,7 @@ export default function DocumentAppointment() {
         <div className="space-y-4">
           <TravelDocumentation
             travelOriginType={formData.travelOriginType}
-            onTravelOriginTypeChange={(value) => setFormData(prev => ({
-              ...prev,
-              travelOriginType: value,
-              travelMinutes: value === "home" ? 0 : prev.travelMinutes,
-            }))}
+            onTravelOriginTypeChange={handleTravelOriginChange}
             travelKilometers={formData.travelKilometers}
             onTravelKilometersChange={(value) => setFormData(prev => ({ ...prev, travelKilometers: value }))}
             travelMinutes={formData.travelMinutes}
@@ -353,6 +350,8 @@ export default function DocumentAppointment() {
             previousCustomerName={travelSuggestion?.previousCustomerName}
             notes={formData.notes}
             onNotesChange={(value) => setFormData(prev => ({ ...prev, notes: value }))}
+            suggestedKilometers={travelSuggestion?.suggestedKilometers ?? null}
+            suggestedMinutes={travelSuggestion?.suggestedMinutes ?? null}
           />
           
           <Button 

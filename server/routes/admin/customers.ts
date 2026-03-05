@@ -7,6 +7,7 @@ import { notificationService } from "../../services/notification-service";
 import { budgetLedgerStorage } from "../../storage/budget-ledger";
 import { computeDataHash } from "../../services/signature-integrity";
 import { auditService } from "../../services/audit";
+import { geocodeCustomer } from "../../services/geocoding";
 import { formatDateISO, isChild } from "@shared/utils/datetime";
 import { 
   insertCustomerInsuranceSchema,
@@ -416,6 +417,8 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
     customerName: `${data.vorname} ${data.nachname}`,
     billingType: data.billingType,
   }, req.ip).catch(() => {});
+
+  geocodeCustomer(customer.id).catch(err => console.error("[geocoding] Background geocoding failed:", err));
   
   res.status(201).json({ ...customer, warnings: warnings.length > 0 ? warnings : undefined });
 }));
@@ -484,6 +487,11 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
 
   if (changedFields.length > 0) {
     await auditService.customerUpdated(req.user!.id, id, { changedFields, oldValues, newValues }, req.ip);
+  }
+
+  const addressChanged = changedFields.some(f => ["strasse", "nr", "plz", "stadt"].includes(f));
+  if (addressChanged) {
+    geocodeCustomer(id).catch(err => console.error("[geocoding] Background geocoding failed:", err));
   }
   
   birthdaysCache.invalidateAll();

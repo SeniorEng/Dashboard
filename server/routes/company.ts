@@ -4,6 +4,7 @@ import { asyncHandler, badRequest } from "../lib/errors";
 import { updateCompanySettingsSchema } from "@shared/schema";
 import { fromError } from "zod-validation-error";
 import { storage } from "../storage";
+import { geocodeCompanySettings } from "../services/geocoding";
 
 const router = Router();
 router.use(requireAuth);
@@ -19,6 +20,12 @@ router.patch("/", requireAdmin, asyncHandler("Firmendaten konnten nicht gespeich
     throw badRequest(fromError(parsed.error).toString());
   }
   const updated = await storage.updateCompanySettings(parsed.data, req.user!.id);
+
+  const addressFields = ["strasse", "hausnummer", "plz", "stadt"];
+  if (addressFields.some(f => f in parsed.data)) {
+    geocodeCompanySettings().catch(err => console.error("[geocoding] Background geocoding failed:", err));
+  }
+
   res.json(updated);
 }));
 

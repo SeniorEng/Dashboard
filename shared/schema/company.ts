@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, boolean, real } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp } from "./common";
 import { users } from "./users";
@@ -45,6 +45,8 @@ export const companySettings = pgTable("company_settings", {
   epostTestMode: boolean("epost_test_mode").notNull().default(true),
   deliveryEmailSubject: text("delivery_email_subject"),
   deliveryCoverLetterText: text("delivery_cover_letter_text"),
+  latitude: real("latitude"),
+  longitude: real("longitude"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   updatedByUserId: integer("updated_by_user_id").references(() => users.id),
 });

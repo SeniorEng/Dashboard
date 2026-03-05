@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, date, boolean, index, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, date, boolean, real, index, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { timestamp, germanPhoneTransformSchema, optionalGermanPhoneSchema } from "./common";
@@ -55,6 +55,8 @@ export const customers = pgTable("customers", {
   deletedAt: timestamp("deleted_at"),
   isAnonymized: boolean("is_anonymized").notNull().default(false),
   anonymizedAt: timestamp("anonymized_at"),
+  latitude: real("latitude"),
+  longitude: real("longitude"),
 }, (table) => [
   index("customers_primary_employee_id_idx").on(table.primaryEmployeeId),
   index("customers_backup_employee_id_idx").on(table.backupEmployeeId),

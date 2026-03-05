@@ -8,6 +8,13 @@ interface TravelSuggestion {
   suggestedOrigin: "home" | "appointment";
   previousAppointmentId: number | null;
   previousCustomerName: string | null;
+  suggestedKilometers: number | null;
+  suggestedMinutes: number | null;
+}
+
+interface RouteCalculationResult {
+  suggestedKilometers: number | null;
+  suggestedMinutes: number | null;
 }
 
 export function useCreateKundentermin() {
@@ -80,5 +87,24 @@ export function useTravelSuggestion(appointmentId: number) {
       return unwrapResult(result);
     },
     enabled: appointmentId > 0,
+  });
+}
+
+export function useRouteCalculation(
+  appointmentId: number,
+  originType: "home" | "appointment",
+  fromAppointmentId: number | null,
+  enabled: boolean
+) {
+  return useQuery<RouteCalculationResult>({
+    queryKey: [QUERY_KEY, appointmentId, "route-calculation", originType, fromAppointmentId],
+    queryFn: async () => {
+      const params = new URLSearchParams({ originType });
+      if (fromAppointmentId) params.set("fromAppointmentId", fromAppointmentId.toString());
+      const result = await api.get<RouteCalculationResult>(`/appointments/${appointmentId}/route-calculation?${params}`);
+      return unwrapResult(result);
+    },
+    enabled: enabled && appointmentId > 0,
+    staleTime: 5 * 60 * 1000,
   });
 }

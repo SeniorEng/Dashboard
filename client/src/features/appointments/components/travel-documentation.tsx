@@ -3,7 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Car, Home, MapPin } from "lucide-react";
+import { Car, Home, MapPin, Navigation } from "lucide-react";
 import { iconSize } from "@/design-system";
 
 interface TravelDocumentationProps {
@@ -16,6 +16,8 @@ interface TravelDocumentationProps {
   previousCustomerName?: string | null;
   notes: string;
   onNotesChange: (value: string) => void;
+  suggestedKilometers?: number | null;
+  suggestedMinutes?: number | null;
 }
 
 export function TravelDocumentation({
@@ -28,7 +30,11 @@ export function TravelDocumentation({
   previousCustomerName,
   notes,
   onNotesChange,
+  suggestedKilometers,
+  suggestedMinutes,
 }: TravelDocumentationProps) {
+  const hasRouteSuggestion = suggestedKilometers != null && suggestedKilometers > 0;
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -69,6 +75,18 @@ export function TravelDocumentation({
             </Label>
           </div>
         </RadioGroup>
+
+        {hasRouteSuggestion && (
+          <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800" data-testid="banner-route-suggestion">
+            <Navigation className={`${iconSize.sm} flex-shrink-0`} />
+            <span>
+              Berechnete Route: <strong>{suggestedKilometers} km</strong>
+              {suggestedMinutes != null && suggestedMinutes > 0 && (
+                <>, ca. <strong>{suggestedMinutes} Min.</strong> Fahrzeit</>
+              )}
+            </span>
+          </div>
+        )}
 
         <div className="space-y-4">
           <div className="space-y-2">
