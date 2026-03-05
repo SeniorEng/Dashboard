@@ -102,7 +102,7 @@ function TimeEntryFormContent({
       )}
 
       {!isFullDayType && (
-        <>
+        <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
             <Label>Startzeit</Label>
             <Input
@@ -123,7 +123,7 @@ function TimeEntryFormContent({
               data-testid={`${prefix}input-end-time`}
             />
           </div>
-        </>
+        </div>
       )}
 
       {!isFullDayType && formState.entryType !== "verfuegbar" && (
