@@ -1,5 +1,7 @@
+import { useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
 
 interface AddressFieldsProps {
   strasse: string;
@@ -14,16 +16,24 @@ interface AddressFieldsProps {
 export function AddressFields({ strasse, nr, plz, stadt, onChange, required = false, testIdPrefix = "" }: AddressFieldsProps) {
   const prefix = testIdPrefix ? `${testIdPrefix}-` : "";
   const suffix = required ? " *" : "";
+
+  const handleAddressSelect = useCallback((address: { strasse: string; hausnummer: string; plz: string; stadt: string }) => {
+    onChange("strasse", address.strasse);
+    onChange("nr", address.hausnummer);
+    onChange("plz", address.plz);
+    onChange("stadt", address.stadt);
+  }, [onChange]);
   
   return (
     <>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="col-span-3 space-y-2">
           <Label htmlFor={`${prefix}strasse`}>Straße{suffix}</Label>
-          <Input
+          <AddressAutocomplete
             id={`${prefix}strasse`}
             value={strasse}
-            onChange={(e) => onChange("strasse", e.target.value)}
+            onChange={(val) => onChange("strasse", val)}
+            onAddressSelect={handleAddressSelect}
             placeholder="Musterstraße"
             required={required}
             data-testid={`input-${prefix}strasse`}

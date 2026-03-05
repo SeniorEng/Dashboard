@@ -15,7 +15,7 @@ interface GeocodingResult {
   longitude: number;
 }
 
-async function rateLimitedFetch(url: string): Promise<Response> {
+export async function rateLimitedFetch(url: string): Promise<Response> {
   const now = Date.now();
   const elapsed = now - lastRequestTime;
   if (elapsed < RATE_LIMIT_MS) {

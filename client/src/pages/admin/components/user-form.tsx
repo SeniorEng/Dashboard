@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -320,10 +321,16 @@ export function UserForm({
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="col-span-3 space-y-2">
               <Label htmlFor="strasse">Straße</Label>
-              <Input
+              <AddressAutocomplete
                 id="strasse"
                 value={strasse}
-                onChange={(e) => setStrasse(e.target.value)}
+                onChange={setStrasse}
+                onAddressSelect={(addr) => {
+                  setStrasse(addr.strasse);
+                  setHausnummer(addr.hausnummer);
+                  setPlz(addr.plz);
+                  setStadt(addr.stadt);
+                }}
                 data-testid="input-user-strasse"
               />
             </div>

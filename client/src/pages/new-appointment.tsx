@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
@@ -264,10 +265,16 @@ export default function NewAppointment() {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="col-span-2 space-y-2">
                     <Label htmlFor="eb-strasse">Straße *</Label>
-                    <Input
+                    <AddressAutocomplete
                       id="eb-strasse"
                       value={form.ebStrasse}
-                      onChange={(e) => form.setEbStrasse(e.target.value)}
+                      onChange={(val) => form.setEbStrasse(val)}
+                      onAddressSelect={(addr) => {
+                        form.setEbStrasse(addr.strasse);
+                        form.setEbNr(addr.hausnummer);
+                        form.setEbPlz(addr.plz);
+                        form.setEbStadt(addr.stadt);
+                      }}
                       placeholder="Musterstraße"
                       data-testid="input-eb-strasse"
                     />

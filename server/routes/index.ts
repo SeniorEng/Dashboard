@@ -98,4 +98,58 @@ router.use("/holidays", holidaysRouter);
 router.use("/statistics", statisticsRouter);
 router.use("/notifications", notificationsRouter);
 
+router.get("/address-search", async (req, res) => {
+  try {
+    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    if (q.length < 3) {
+      return res.json([]);
+    }
+
+    const { rateLimitedFetch } = await import("../services/geocoding");
+    const params = new URLSearchParams({
+      q,
+      format: "jsonv2",
+      addressdetails: "1",
+      countrycodes: "de",
+      limit: "5",
+    });
+    const url = `https://nominatim.openstreetmap.org/search?${params}`;
+    const response = await rateLimitedFetch(url);
+    if (!response.ok) {
+      return res.json([]);
+    }
+
+    const results = await response.json() as Array<{
+      display_name: string;
+      lat: string;
+      lon: string;
+      address: {
+        road?: string;
+        house_number?: string;
+        postcode?: string;
+        city?: string;
+        town?: string;
+        village?: string;
+        municipality?: string;
+      };
+    }>;
+
+    const suggestions = results
+      .filter(r => r.address?.road)
+      .map(r => ({
+        displayName: r.display_name,
+        strasse: r.address.road || "",
+        hausnummer: r.address.house_number || "",
+        plz: r.address.postcode || "",
+        stadt: r.address.city || r.address.town || r.address.village || r.address.municipality || "",
+        latitude: parseFloat(r.lat),
+        longitude: parseFloat(r.lon),
+      }));
+
+    res.json(suggestions);
+  } catch {
+    res.json([]);
+  }
+});
+
 export default router;

@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ArrowLeft, Loader2, Upload, Trash2, ImageIcon, Mail, Truck, CheckCircle2, XCircle, Eye, EyeOff, FileText, Smartphone, KeyRound, Wrench } from "lucide-react";
@@ -612,11 +613,17 @@ export default function AdminSettings() {
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <Label htmlFor="strasse">Straße</Label>
-                          <Input
+                          <AddressAutocomplete
                             id="strasse"
                             data-testid="input-company-strasse"
                             value={companyForm.strasse}
-                            onChange={(e) => updateField("strasse", e.target.value)}
+                            onChange={(val) => updateField("strasse", val)}
+                            onAddressSelect={(addr) => {
+                              updateField("strasse", addr.strasse);
+                              updateField("hausnummer", addr.hausnummer);
+                              updateField("plz", addr.plz);
+                              updateField("stadt", addr.stadt);
+                            }}
                           />
                         </div>
                         <div>
