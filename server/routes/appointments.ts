@@ -13,6 +13,7 @@ import { auditService } from "../services/audit";
 import { serviceCatalogStorage } from "../storage/service-catalog";
 import { suggestTravelOrigin } from "@shared/domain/appointments";
 import { calculateRoute } from "../services/routing";
+import { geocodeCustomer } from "../services/geocoding";
 import { isWeekend, currentTimeHHMMSS, todayISO } from "@shared/utils/datetime";
 import { 
   ErrorMessages, 
@@ -350,6 +351,8 @@ router.post("/erstberatung", asyncHandler(ErrorMessages.createErstberatungFailed
     customerDataWithEmployee,
     appointmentData
   );
+
+  geocodeCustomer(customer.id).catch(err => console.error("[geocoding] Background geocoding failed:", err));
   
   const erstberatungService = await serviceCatalogStorage.getServiceByCode("erstberatung");
   if (erstberatungService) {
@@ -443,6 +446,8 @@ router.patch("/:id/erstberatung", asyncHandler("Erstberatung konnte nicht aktual
     stadt: validatedData.customer.stadt,
   };
   await customerManagementStorage.updateCustomer(existingAppointment.customerId, customerUpdate as any);
+
+  geocodeCustomer(existingAppointment.customerId).catch(err => console.error("[geocoding] Background geocoding failed:", err));
 
   if (validatedData.customer.pflegegrad != null) {
     const { customers } = await import("@shared/schema");
