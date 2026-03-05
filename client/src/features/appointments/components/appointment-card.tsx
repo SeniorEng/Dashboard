@@ -122,7 +122,7 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
                 </div>
               </div>
               
-              <div className="shrink-0 flex items-center gap-0.5">
+              <div className="shrink-0 flex flex-col items-center gap-0.5">
                 {(() => {
                   const phoneNumber = appointment.customer?.telefon || appointment.customer?.festnetz;
                   return phoneNumber ? (
