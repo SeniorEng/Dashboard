@@ -1,34 +1,13 @@
-import { memo, useState, useCallback, useRef, useMemo } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { memo, useCallback, useMemo } from "react";
 import { format, parseISO } from "date-fns";
 import { de } from "date-fns/locale";
 import { Card } from "@/components/ui/card";
-import { Loader2 } from "lucide-react";
-import { api, unwrapResult } from "@/lib/api";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { MapPin, CheckCircle2, Clock, FileText, Pencil, Trash2, MoreVertical, Phone, Navigation, RotateCcw, User, Copy } from "lucide-react";
+import { MapPin, CheckCircle2, Clock, FileText, Phone, Navigation, User } from "lucide-react";
 import { useLocation } from "wouter";
-import type { AppointmentWithCustomer, AppointmentStatus } from "@shared/types";
+import type { AppointmentWithCustomer } from "@shared/types";
 import { useAuth } from "@/hooks/use-auth";
-import { getCardServiceInfoFromAppointment, canModifyAppointment } from "@shared/types";
+import { getCardServiceInfoFromAppointment } from "@shared/types";
 import { formatTimeSlot, getEndTime } from "../utils";
-import { useDeleteAppointment } from "../hooks";
-import { useToast } from "@/hooks/use-toast";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 
 interface AppointmentCardProps {
   appointment: AppointmentWithCustomer;
@@ -38,380 +17,146 @@ interface AppointmentCardProps {
 function getStatusIcon(status: string) {
   switch (status) {
     case "completed":
-      return <CheckCircle2 className="w-5 h-5 text-green-500" />;
+      return <CheckCircle2 className="w-4 h-4 text-green-500" />;
     case "in-progress":
-      return <Clock className="w-5 h-5 text-blue-500" />;
+      return <Clock className="w-4 h-4 text-blue-500" />;
     case "documenting":
-      return <FileText className="w-5 h-5 text-orange-500" />;
+      return <FileText className="w-4 h-4 text-orange-500" />;
     default:
       return null;
   }
 }
 
 function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProps) {
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [showReopenDialog, setShowReopenDialog] = useState(false);
-  const [swiped, setSwiped] = useState(false);
-  const startX = useRef(0);
-  const deleteMutation = useDeleteAppointment();
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
   const [, navigate] = useLocation();
   const { user } = useAuth();
-  
-  const canModify = canModifyAppointment(appointment.status as AppointmentStatus);
-  const isCompleted = appointment.status === "completed";
-  const canReopen = isCompleted && !appointment.isLocked;
 
-  const reopenMutation = useMutation({
-    mutationFn: async () => {
-      const result = await api.post(`/appointments/${appointment.id}/reopen`, {});
-      return unwrapResult(result);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["appointments"] });
-      queryClient.invalidateQueries({ queryKey: [`/api/appointments/${appointment.id}`] });
-      queryClient.invalidateQueries({ queryKey: ["budget-summary"] });
-      toast({ title: "Dokumentation zur Korrektur geöffnet" });
-      setShowReopenDialog(false);
-      navigate(`/document-appointment/${appointment.id}`);
-    },
-    onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message, variant: "destructive" });
-      setShowReopenDialog(false);
-    },
-  });
   const serviceInfo = useMemo(() => 
     getCardServiceInfoFromAppointment(appointment),
     [appointment.appointmentType, appointment.serviceType, appointment.durationPromised, appointment.status]
   );
 
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    if (!canModify) return;
-    startX.current = e.touches[0].clientX;
-  }, [canModify]);
-
-  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
-    if (!canModify) return;
-    const endX = e.changedTouches[0].clientX;
-    const diff = startX.current - endX;
-    if (diff > 50) {
-      setSwiped(true);
-    } else if (diff < -50) {
-      setSwiped(false);
-    }
-  }, [canModify]);
-
-  const handleCardClick = useCallback((e: React.MouseEvent) => {
-    if (swiped) {
-      e.preventDefault();
-      e.stopPropagation();
-      setSwiped(false);
-      return;
-    }
+  const handleCardClick = useCallback(() => {
     navigate(`/appointment/${appointment.id}`);
-  }, [swiped, navigate, appointment.id]);
+  }, [navigate, appointment.id]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      if (swiped) {
-        setSwiped(false);
-      } else {
-        navigate(`/appointment/${appointment.id}`);
-      }
+      navigate(`/appointment/${appointment.id}`);
     }
-  }, [swiped, navigate, appointment.id]);
-
-  const handleDeleteClick = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setShowDeleteDialog(true);
-  }, []);
-
-  const handleConfirmDelete = useCallback(async () => {
-    try {
-      await deleteMutation.mutateAsync(appointment.id);
-      toast({
-        title: "Termin gelöscht",
-        description: "Der Termin wurde erfolgreich gelöscht.",
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Der Termin konnte nicht gelöscht werden.";
-      toast({
-        variant: "destructive",
-        title: "Fehler",
-        description: message,
-      });
-    }
-    setShowDeleteDialog(false);
-  }, [deleteMutation, appointment.id, toast]);
-
-  const handleEditClick = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    navigate(`/edit-appointment/${appointment.id}`);
-  }, [navigate, appointment.id]);
-
-  const handleCopyClick = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    navigate(`/new-appointment?copyFrom=${appointment.id}`);
   }, [navigate, appointment.id]);
 
   return (
-    <>
-      <div 
-        className={`relative overflow-hidden rounded-xl group transition-opacity duration-200 ${
-          appointment.status === "completed" ? "opacity-60 hover:opacity-100" : ""
-        }`}
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
+    <div 
+      className={`rounded-xl transition-opacity duration-200 ${
+        appointment.status === "completed" ? "opacity-60 hover:opacity-100" : ""
+      }`}
+    >
+      <Card 
+        className="border-0 shadow-sm cursor-pointer hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+        onClick={handleCardClick}
+        onKeyDown={handleKeyDown}
+        tabIndex={0}
+        role="link"
+        data-testid={`card-appointment-${appointment.id}`}
       >
-        {/* Swipe Actions Background (Mobile) */}
-        {canModify && (
-          <div className="absolute inset-y-0 right-0 flex items-stretch">
-            <button 
-              className="h-full w-16 bg-primary flex items-center justify-center text-primary-foreground"
-              onClick={handleEditClick}
-              data-testid={`button-edit-swipe-${appointment.id}`}
-            >
-              <Pencil className="w-5 h-5" />
-            </button>
-            <button 
-              className="h-full w-16 bg-destructive flex items-center justify-center text-destructive-foreground"
-              onClick={handleDeleteClick}
-              data-testid={`button-delete-swipe-${appointment.id}`}
-            >
-              <Trash2 className="w-5 h-5" />
-            </button>
-          </div>
-        )}
-
-        {/* Main Card */}
-        <Card 
-          className={`relative transition-transform duration-200 ease-out border-0 shadow-sm cursor-pointer hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${
-            swiped ? "-translate-x-32" : "translate-x-0"
-          }`}
-          onClick={handleCardClick}
-          onKeyDown={handleKeyDown}
-          tabIndex={0}
-          role="link"
-          data-testid={`card-appointment-${appointment.id}`}
-        >
-          <div className="flex items-stretch">
-            {/* Color-coded Left Border */}
-            {serviceInfo.hasBoth ? (
-              <div className="w-1.5 flex flex-col rounded-l-xl overflow-hidden">
-                <div className="flex-1 bg-amber-500" />
-                <div className="flex-1 bg-sky-500" />
-              </div>
-            ) : (
-              <div className={`w-1.5 ${serviceInfo.borderClass} rounded-l-xl`} />
-            )}
-
-            {/* Time */}
-            <div className="w-24 flex flex-col items-center justify-center py-4 px-2 text-center border-r border-border/30">
-              {appointment.status === "completed" && appointment.actualStart ? (
-                <>
-                  <span className="text-base font-bold text-primary leading-none">
-                    {formatTimeSlot(appointment.actualStart)}
-                  </span>
-                  <span className="text-sm font-medium text-primary/70 leading-none mt-0.5">
-                    - {appointment.actualEnd ? formatTimeSlot(appointment.actualEnd) : getEndTime(appointment)}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span className="text-base font-bold text-foreground leading-none">
-                    {formatTimeSlot(appointment.scheduledStart)}
-                  </span>
-                  <span className="text-sm font-medium text-muted-foreground leading-none mt-0.5">
-                    - {getEndTime(appointment)}
-                  </span>
-                </>
-              )}
+        <div className="flex items-stretch">
+          {serviceInfo.hasBoth ? (
+            <div className="w-1.5 flex flex-col rounded-l-xl overflow-hidden">
+              <div className="flex-1 bg-amber-500" />
+              <div className="flex-1 bg-sky-500" />
             </div>
+          ) : (
+            <div className={`w-1.5 ${serviceInfo.borderClass} rounded-l-xl`} />
+          )}
 
-            {/* Content */}
-            <div className="flex-1 py-3 px-4 min-w-0">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  {showDate && (
-                    <div className="text-xs text-muted-foreground mb-0.5">
-                      {format(parseISO(appointment.date), "EEEE, d. MMM", { locale: de })}
-                    </div>
-                  )}
-                  <h3 className="font-semibold text-foreground truncate">
+          <div className="w-[4.5rem] flex flex-col items-center justify-center py-2.5 px-1.5 text-center border-r border-border/30">
+            {appointment.status === "completed" && appointment.actualStart ? (
+              <>
+                <span className="text-sm font-bold text-primary leading-none">
+                  {formatTimeSlot(appointment.actualStart)}
+                </span>
+                <span className="text-xs font-medium text-primary/70 leading-none mt-0.5">
+                  – {appointment.actualEnd ? formatTimeSlot(appointment.actualEnd) : getEndTime(appointment)}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="text-sm font-bold text-foreground leading-none">
+                  {formatTimeSlot(appointment.scheduledStart)}
+                </span>
+                <span className="text-xs font-medium text-muted-foreground leading-none mt-0.5">
+                  – {getEndTime(appointment)}
+                </span>
+              </>
+            )}
+          </div>
+
+          <div className="flex-1 py-2.5 px-3 min-w-0">
+            <div className="flex items-start justify-between gap-1.5">
+              <div className="min-w-0 flex-1">
+                {showDate && (
+                  <div className="text-xs text-muted-foreground mb-0.5">
+                    {format(parseISO(appointment.date), "EEEE, d. MMM", { locale: de })}
+                  </div>
+                )}
+                <div className="flex items-center gap-1.5">
+                  <h3 className="font-semibold text-sm text-foreground truncate">
                     {appointment.customer?.name}
                   </h3>
-                  <div className="flex items-center text-xs text-muted-foreground mt-1">
-                    <MapPin className="w-3 h-3 mr-1 shrink-0" />
-                    <span className="truncate">{appointment.customer?.address || "Keine Adresse"}</span>
-                  </div>
-                  {user?.isAdmin && appointment.assignedEmployeeName && (
-                    <div className="flex items-center text-xs text-muted-foreground mt-0.5" data-testid={`text-employee-${appointment.id}`}>
-                      <User className="w-3 h-3 mr-1 shrink-0" />
-                      <span className="truncate">{appointment.assignedEmployeeName}</span>
-                    </div>
-                  )}
-                </div>
-                
-                {/* Quick Action Buttons + Status */}
-                <div className="shrink-0 flex items-center gap-1">
-                  {(() => {
-                    const phoneNumber = appointment.customer?.telefon || appointment.customer?.festnetz;
-                    return phoneNumber ? (
-                      <a
-                        href={`tel:${phoneNumber}`}
-                        className="p-2 rounded-full bg-green-50 text-green-600 hover:bg-green-100 active:bg-green-200 transition-colors"
-                        onClick={(e) => e.stopPropagation()}
-                        aria-label="Anrufen"
-                        data-testid={`button-call-${appointment.id}`}
-                      >
-                        <Phone className="w-4 h-4" />
-                      </a>
-                    ) : (
-                      <span
-                        className="p-2 rounded-full bg-gray-50 text-gray-300 cursor-default"
-                        aria-label="Keine Telefonnummer"
-                        data-testid={`button-call-disabled-${appointment.id}`}
-                      >
-                        <Phone className="w-4 h-4" />
-                      </span>
-                    );
-                  })()}
-
-                  {appointment.customer?.address ? (
-                    <a
-                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(appointment.customer.address)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-2 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 active:bg-blue-200 transition-colors"
-                      onClick={(e) => e.stopPropagation()}
-                      aria-label="In Google Maps öffnen"
-                      data-testid={`button-maps-${appointment.id}`}
-                    >
-                      <Navigation className="w-4 h-4" />
-                    </a>
-                  ) : (
-                    <span
-                      className="p-2 rounded-full bg-gray-50 text-gray-300 cursor-default"
-                      aria-label="Keine Adresse"
-                      data-testid={`button-maps-disabled-${appointment.id}`}
-                    >
-                      <Navigation className="w-4 h-4" />
-                    </span>
-                  )}
-
                   {getStatusIcon(appointment.status)}
-                  
-                  {/* Desktop Actions Menu */}
-                  <div onClick={(e) => e.stopPropagation()}>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button 
-                          className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary transition-opacity"
-                          data-testid={`button-menu-${appointment.id}`}
-                        >
-                          <MoreVertical className="w-4 h-4 text-muted-foreground" />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {canModify && (
-                          <>
-                            <DropdownMenuItem onClick={handleEditClick} data-testid={`button-edit-${appointment.id}`}>
-                              <Pencil className="w-4 h-4 mr-2" />
-                              Bearbeiten
-                            </DropdownMenuItem>
-                            <DropdownMenuItem 
-                              onClick={handleDeleteClick} 
-                              className="text-destructive focus:text-destructive"
-                              data-testid={`button-delete-${appointment.id}`}
-                            >
-                              <Trash2 className="w-4 h-4 mr-2" />
-                              Löschen
-                            </DropdownMenuItem>
-                          </>
-                        )}
-                        {canReopen && (
-                          <DropdownMenuItem 
-                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowReopenDialog(true); }}
-                            data-testid={`button-reopen-${appointment.id}`}
-                          >
-                            <RotateCcw className="w-4 h-4 mr-2" />
-                            Dokumentation korrigieren
-                          </DropdownMenuItem>
-                        )}
-                        <DropdownMenuItem onClick={handleCopyClick} data-testid={`button-copy-${appointment.id}`}>
-                          <Copy className="w-4 h-4 mr-2" />
-                          Kopieren
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                </div>
+                <div className="flex items-center text-xs text-muted-foreground mt-0.5">
+                  <MapPin className="w-3 h-3 mr-1 shrink-0" />
+                  <span className="truncate">{appointment.customer?.address || "Keine Adresse"}</span>
+                </div>
+                {user?.isAdmin && appointment.assignedEmployeeName && (
+                  <div className="flex items-center text-xs text-muted-foreground mt-0.5" data-testid={`text-employee-${appointment.id}`}>
+                    <User className="w-3 h-3 mr-1 shrink-0" />
+                    <span className="truncate">{appointment.assignedEmployeeName}</span>
                   </div>
+                )}
+                <div className="text-[11px] text-muted-foreground/70 mt-0.5">
+                  {serviceInfo.label}
                 </div>
               </div>
+              
+              <div className="shrink-0 flex items-center gap-0.5">
+                {(() => {
+                  const phoneNumber = appointment.customer?.telefon || appointment.customer?.festnetz;
+                  return phoneNumber ? (
+                    <a
+                      href={`tel:${phoneNumber}`}
+                      className="p-1.5 rounded-full bg-green-50 text-green-600 hover:bg-green-100 active:bg-green-200 transition-colors"
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label="Anrufen"
+                      data-testid={`button-call-${appointment.id}`}
+                    >
+                      <Phone className="w-3.5 h-3.5" />
+                    </a>
+                  ) : null;
+                })()}
 
-              {/* Subtle Type Indicator */}
-              <div className="mt-2 text-[11px] text-muted-foreground">
-                {serviceInfo.label}
+                {appointment.customer?.address ? (
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(appointment.customer.address)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1.5 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 active:bg-blue-200 transition-colors"
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label="In Google Maps öffnen"
+                    data-testid={`button-maps-${appointment.id}`}
+                  >
+                    <Navigation className="w-3.5 h-3.5" />
+                  </a>
+                ) : null}
               </div>
             </div>
           </div>
-        </Card>
-
-        {/* Swipe Hint for Mobile */}
-        {canModify && !swiped && (
-          <div className="absolute inset-y-0 right-0 w-1 bg-gradient-to-l from-muted/50 to-transparent pointer-events-none md:hidden" />
-        )}
-      </div>
-
-      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Termin löschen?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Möchten Sie den Termin bei {appointment.customer?.name} wirklich löschen? 
-              Diese Aktion kann nicht rückgängig gemacht werden.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Abbrechen</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={handleConfirmDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Löschen
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={showReopenDialog} onOpenChange={setShowReopenDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <RotateCcw className="w-5 h-5 text-primary" />
-              Dokumentation korrigieren?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              Die Dokumentation wird zur Korrektur geöffnet. Vorhandene Budget-Buchungen werden vorübergehend zurückgebucht und bei erneuter Dokumentation neu berechnet.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Abbrechen</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={() => reopenMutation.mutate()}
-              disabled={reopenMutation.isPending}
-            >
-              {reopenMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-              Zur Korrektur öffnen
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+        </div>
+      </Card>
+    </div>
   );
 }
 
