@@ -78,14 +78,17 @@ export default function AdminTimeEntries() {
     })).sort((a, b) => a.label.localeCompare(b.label, "de")) || []),
   ], [employees]);
 
+  const isApptFilter = selectedEntryType.startsWith("appt_");
+  const activeEntryType = isApptFilter ? "all" : selectedEntryType;
+
   const { data: entries, isLoading } = useQuery({
-    queryKey: ["admin-time-entries", selectedYear, selectedMonth, selectedUserId, selectedEntryType],
+    queryKey: ["admin-time-entries", selectedYear, selectedMonth, selectedUserId, activeEntryType],
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams();
       params.set("year", selectedYear.toString());
       params.set("month", selectedMonth.toString());
       if (selectedUserId !== "all") params.set("userId", selectedUserId);
-      if (selectedEntryType !== "all") params.set("entryType", selectedEntryType);
+      if (activeEntryType !== "all") params.set("entryType", activeEntryType);
       
       const result = await api.get<TimeEntryWithUser[]>(`/admin/time-entries?${params.toString()}`, signal);
       return unwrapResult(result);
@@ -108,15 +111,20 @@ export default function AdminTimeEntries() {
 
   const appointmentsByEmployeeId = useMemo(() => {
     if (!appointmentsData) return {} as Record<number, AdminAppointment[]>;
+    if (!isApptFilter && selectedEntryType !== "all") return {} as Record<number, AdminAppointment[]>;
+    const apptTypeFilter = selectedEntryType === "appt_erstberatung" ? "Erstberatung"
+      : selectedEntryType === "appt_kundentermin" ? "Kundentermin"
+      : null;
     const map: Record<number, AdminAppointment[]> = {};
     for (const appt of appointmentsData) {
       const empId = appt.assignedEmployeeId;
       if (empId == null) continue;
+      if (apptTypeFilter && appt.appointmentType !== apptTypeFilter) continue;
       if (!map[empId]) map[empId] = [];
       map[empId].push(appt);
     }
     return map;
-  }, [appointmentsData]);
+  }, [appointmentsData, selectedEntryType, isApptFilter]);
 
   const { data: selectedUserVacation, isLoading: vacationLoading } = useQuery({
     queryKey: ["admin-vacation-summary", vacationEditUser?.id, selectedYear],
@@ -264,18 +272,18 @@ export default function AdminTimeEntries() {
   });
 
   const entriesByEmployeeId = useMemo(() => {
-    if (!entries) return {} as Record<number, TimeEntryWithUser[]>;
+    if (!entries || isApptFilter) return {} as Record<number, TimeEntryWithUser[]>;
     return entries.reduce((acc, entry) => {
       const key = entry.userId;
       if (!acc[key]) acc[key] = [];
       acc[key].push(entry);
       return acc;
     }, {} as Record<number, TimeEntryWithUser[]>);
-  }, [entries]);
+  }, [entries, isApptFilter]);
 
   const stats = useMemo(() => {
     const base = { vacation: 0, sick: 0, other: 0, total: 0, appointments: 0 };
-    if (entries) {
+    if (entries && !isApptFilter) {
       for (const entry of entries) {
         base.total++;
         if (entry.entryType === "urlaub") base.vacation++;
@@ -283,9 +291,10 @@ export default function AdminTimeEntries() {
         else base.other++;
       }
     }
-    base.appointments = appointmentsData?.length || 0;
+    const apptList = Object.values(appointmentsByEmployeeId).flat();
+    base.appointments = apptList.length;
     return base;
-  }, [entries, appointmentsData]);
+  }, [entries, appointmentsByEmployeeId, isApptFilter]);
 
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
@@ -414,6 +423,8 @@ export default function AdminTimeEntries() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Alle Arten</SelectItem>
+                <SelectItem value="appt_erstberatung">Erstberatung</SelectItem>
+                <SelectItem value="appt_kundentermin">Kundentermin</SelectItem>
                 {Object.entries(TIME_ENTRY_TYPE_CONFIG).map(([type, config]) => (
                   <SelectItem key={type} value={type}>
                     {config.label}
