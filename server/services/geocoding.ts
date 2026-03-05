@@ -1,6 +1,7 @@
 import { db } from "../lib/db";
 import { customers } from "@shared/schema/customers";
 import { companySettings } from "@shared/schema/company";
+import { users } from "@shared/schema/users";
 import { eq, isNull, and, or, isNotNull } from "drizzle-orm";
 
 const NOMINATIM_BASE = "https://nominatim.openstreetmap.org/search";
@@ -88,6 +89,18 @@ export async function geocodeCompanySettings(): Promise<void> {
   }
 }
 
+export async function geocodeEmployee(userId: number): Promise<void> {
+  const [user] = await db.select().from(users).where(eq(users.id, userId));
+  if (!user) return;
+
+  const result = await geocodeAddress(user.strasse, user.hausnummer, user.plz, user.stadt);
+  if (result) {
+    await db.update(users)
+      .set({ latitude: result.latitude, longitude: result.longitude })
+      .where(eq(users.id, userId));
+  }
+}
+
 export async function geocodeAllMissing(): Promise<void> {
   console.log("[geocoding] Starting batch geocoding of addresses without coordinates...");
 
@@ -124,5 +137,34 @@ export async function geocodeAllMissing(): Promise<void> {
     }
   }
 
-  console.log(`[geocoding] Batch geocoding complete: ${geocoded}/${customersWithoutCoords.length} addresses geocoded`);
+  console.log(`[geocoding] Batch geocoding customers: ${geocoded}/${customersWithoutCoords.length} geocoded`);
+
+  const employeesWithoutCoords = await db.select({
+    id: users.id,
+    strasse: users.strasse,
+    hausnummer: users.hausnummer,
+    plz: users.plz,
+    stadt: users.stadt,
+  }).from(users).where(
+    and(
+      isNull(users.latitude),
+      eq(users.isActive, true),
+      isNotNull(users.strasse),
+      isNotNull(users.plz),
+      isNotNull(users.stadt),
+    )
+  );
+
+  let empGeocoded = 0;
+  for (const emp of employeesWithoutCoords) {
+    const result = await geocodeAddress(emp.strasse, emp.hausnummer, emp.plz, emp.stadt);
+    if (result) {
+      await db.update(users)
+        .set({ latitude: result.latitude, longitude: result.longitude })
+        .where(eq(users.id, emp.id));
+      empGeocoded++;
+    }
+  }
+
+  console.log(`[geocoding] Batch geocoding employees: ${empGeocoded}/${employeesWithoutCoords.length} geocoded`);
 }

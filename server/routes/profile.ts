@@ -7,6 +7,7 @@ import { documentStorage } from "../storage/documents";
 import { qualificationStorage } from "../storage/qualifications";
 import { usersCache, birthdaysCache } from "../services/cache";
 import { sanitizeUser } from "../utils/sanitize-user";
+import { geocodeEmployee } from "../services/geocoding";
 
 const router = Router();
 
@@ -62,6 +63,12 @@ router.patch("/", asyncHandler("Profil konnte nicht aktualisiert werden", async 
       message: "Benutzer nicht gefunden",
     });
     return;
+  }
+
+  const addressFields = ["strasse", "hausnummer", "plz", "stadt"] as const;
+  const addressChanged = addressFields.some(f => (f in result.data));
+  if (addressChanged) {
+    geocodeEmployee(req.user!.id).catch(err => console.error("[geocoding] Background employee geocoding failed:", err));
   }
 
   usersCache.invalidateAll();

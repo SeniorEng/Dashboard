@@ -40,6 +40,8 @@ export const users = pgTable("users", {
   notfallkontaktTelefon: text("notfallkontakt_telefon"),
   notfallkontaktBeziehung: text("notfallkontakt_beziehung"),
   onboardingCompleted: boolean("onboarding_completed").notNull().default(false),
+  latitude: real("latitude"),
+  longitude: real("longitude"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

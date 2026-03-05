@@ -19,6 +19,7 @@ import {
 } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
 import { auditService } from "../../services/audit";
+import { geocodeEmployee } from "../../services/geocoding";
 import { db } from "../../lib/db";
 import { eq, and, ne, or, isNull, inArray, gte, lte, sql, asc } from "drizzle-orm";
 import { z } from "zod";
@@ -265,7 +266,12 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
     await authService.setUserRoles(id, roles);
   }
 
-  // Invalidate caches after updating user (affects users list and birthdays)
+  const addressFields = ["strasse", "hausnummer", "plz", "stadt"] as const;
+  const addressChanged = addressFields.some(f => (f in userUpdates));
+  if (addressChanged) {
+    geocodeEmployee(id).catch(err => console.error("[geocoding] Background employee geocoding failed:", err));
+  }
+
   usersCache.invalidateAll();
   birthdaysCache.invalidateAll();
 
