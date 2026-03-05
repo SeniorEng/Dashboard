@@ -180,7 +180,14 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
              ${monthFilter}
            GROUP BY a.customer_id
          ) sub
-        )::numeric(10,1) AS "avgAppointmentsPerCustomer"
+        )::numeric(10,1) AS "avgAppointmentsPerCustomer",
+        (SELECT COUNT(*)
+         FROM appointments a
+         WHERE a.deleted_at IS NULL
+           AND a.appointment_type = 'Erstberatung'
+           AND a.status = 'scheduled'
+           AND a.date >= CURRENT_DATE
+        )::int AS "plannedConsultations"
       FROM customers c
     `),
 

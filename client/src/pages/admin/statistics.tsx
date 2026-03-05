@@ -542,9 +542,10 @@ export default function AdminStatistics() {
                       <StatCard label="Netto-Wachstum" value={(summary.netGrowth || 0) > 0 ? `+${summary.netGrowth}` : String(summary.netGrowth || 0)} icon={<TrendingUp className={iconSize.sm} />} color={(summary.netGrowth || 0) >= 0 ? "text-green-600" : "text-red-600"} sub={yoyGrowthPct !== null ? `YoY: ${yoyGrowthPct > 0 ? "+" : ""}${yoyGrowthPct}%` : undefined} testId="cust-net-growth" />
                     </div>
 
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
                       <StatCard label="Interessenten" value={customerStats.prospects || 0} color="text-blue-600" testId="cust-prospects" />
-                      <StatCard label="Erstberatung" value={customerStats.consultation || 0} color="text-amber-600" testId="cust-consultation" />
+                      <StatCard label="In Erstberatung" value={customerStats.consultation || 0} color="text-amber-600" testId="cust-consultation" />
+                      <StatCard label="Erstbesuche geplant" value={customerStats.plannedConsultations || 0} icon={<CalendarCheck className={iconSize.sm} />} color="text-orange-600" testId="cust-planned-consultations" />
                       <StatCard label="Inaktiv" value={customerStats.inactiveCustomers || 0} color="text-gray-500" testId="cust-inactive" />
                       <StatCard label="Gekündigt" value={customerStats.terminated || 0} color="text-red-600" testId="cust-terminated" />
                       <StatCard label="Ø Termine/Kunde" value={Number(customerStats.avgAppointmentsPerCustomer || 0).toFixed(1).replace(".", ",")} color="text-teal-600" testId="cust-avg-appts" />
