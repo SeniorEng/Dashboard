@@ -95,7 +95,7 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
     await storage.updateAppointmentServiceDocumentation(id, docResult.serviceUpdates);
   }
 
-  if (hasUsage) {
+  if (hasUsage && appointment.appointmentType !== "Erstberatung") {
     try {
       budgetTransaction = await budgetLedgerStorage.createConsumptionTransaction({
         customerId: appointment.customerId,
