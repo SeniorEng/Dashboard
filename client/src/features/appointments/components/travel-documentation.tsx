@@ -81,7 +81,7 @@ export function TravelDocumentation({
             <Navigation className={`${iconSize.sm} flex-shrink-0`} />
             <span>
               Berechnete Route: <strong>{suggestedKilometers} km</strong>
-              {suggestedMinutes != null && suggestedMinutes > 0 && (
+              {travelOriginType === "appointment" && suggestedMinutes != null && suggestedMinutes > 0 && (
                 <>, ca. <strong>{suggestedMinutes} Min.</strong> Fahrzeit</>
               )}
             </span>
