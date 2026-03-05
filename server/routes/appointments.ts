@@ -32,6 +32,7 @@ import type { Response } from "express";
 import appointmentDocumentationRouter from "./appointment-documentation";
 import { db } from "../lib/db";
 import { customerManagementStorage } from "../storage/customer-management";
+import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
 import { addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
 import { serviceRecordAppointments, monthlyServiceRecords } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -552,6 +553,28 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
     );
   }
 
+  if (updated && updated.date) {
+    const newEmployeeId = updated.assignedEmployeeId || updated.performedByEmployeeId;
+    const oldEmployeeId = existingAppointment.assignedEmployeeId || existingAppointment.performedByEmployeeId;
+    const employeesToRecalc = new Map<number, Set<string>>();
+
+    const addRecalc = (empId: number, date: string) => {
+      if (!employeesToRecalc.has(empId)) employeesToRecalc.set(empId, new Set());
+      employeesToRecalc.get(empId)!.add(date);
+    };
+
+    if (newEmployeeId) addRecalc(newEmployeeId, updated.date);
+    if (oldEmployeeId && existingAppointment.date) {
+      addRecalc(oldEmployeeId, existingAppointment.date);
+    }
+
+    for (const [empId, dates] of employeesToRecalc) {
+      for (const d of dates) {
+        checkAndRecalcDailyAutoBreak(empId, d);
+      }
+    }
+  }
+
   res.json(updated);
 }));
 
@@ -625,6 +648,13 @@ router.post("/:id/end", asyncHandler("Fehler beim Beenden des Besuchs", async (r
     status: "documenting",
     actualEnd: currentTimeHHMMSS(),
   });
+
+  if (appointment.date) {
+    const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
+    if (employeeId) {
+      checkAndRecalcDailyAutoBreak(employeeId, appointment.date);
+    }
+  }
   
   res.json(updatedAppointment);
 }));
@@ -798,6 +828,13 @@ router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins
     ip
   );
 
+  if (appointment.date) {
+    const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
+    if (employeeId) {
+      checkAndRecalcDailyAutoBreak(employeeId, appointment.date);
+    }
+  }
+
   res.json(updatedAppointment);
 }));
 
@@ -837,6 +874,13 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   const deleted = await storage.deleteAppointment(id);
   if (!deleted) {
     return sendServerError(res, ErrorMessages.deleteAppointmentFailed);
+  }
+
+  if (appointment.date) {
+    const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
+    if (employeeId) {
+      checkAndRecalcDailyAutoBreak(employeeId, appointment.date);
+    }
   }
   
   res.json({ success: true, message: "Termin erfolgreich gelöscht" });

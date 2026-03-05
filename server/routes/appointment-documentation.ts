@@ -11,6 +11,7 @@ import { checkCustomerAccess } from "./appointments";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { db } from "../lib/db";
 import { eq } from "drizzle-orm";
+import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
 
 const router = Router();
 router.use(requireAuth);
@@ -146,6 +147,13 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
       { customerId: appointment.customerId, signatureHash: sigHash },
       ip
     );
+  }
+
+  if (appointment.date) {
+    const employeeId = updatedAppointment?.performedByEmployeeId || appointment.assignedEmployeeId;
+    if (employeeId) {
+      checkAndRecalcDailyAutoBreak(employeeId, appointment.date);
+    }
   }
 
   res.json({

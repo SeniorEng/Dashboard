@@ -8,6 +8,7 @@ import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
 import { timeToMinutes, isWeekend, parseLocalDate, isPast, formatDateISO } from "@shared/utils/datetime";
 import { getEntryTypeLabel, formatTimeShort, timeRangesOverlap, getAppointmentEndMinutes } from "@shared/domain/time-entries";
+import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
 import monthClosingRouter from "./month-closing";
 
 /**
@@ -387,7 +388,11 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
       }, req.ip);
     }
 
-    // Return first entry for consistency, with count in header
+    const affectedDates = new Set(entries.map(e => e.entryDate));
+    for (const d of affectedDates) {
+      checkAndRecalcDailyAutoBreak(userId, d);
+    }
+
     res.setHeader("X-Entries-Created", entries.length.toString());
     return res.status(201).json({ 
       ...entries[0],
@@ -429,6 +434,8 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
     isFullDay: validatedData.isFullDay ?? false,
     ...(isAdminActingForOther ? { adminUserId: req.user!.id, targetUserId: userId } : {}),
   }, req.ip);
+
+  checkAndRecalcDailyAutoBreak(userId, validatedData.entryDate);
 
   res.status(201).json(entry);
 }));
@@ -514,6 +521,14 @@ router.put("/:id", asyncHandler("Zeiteintrag konnte nicht aktualisiert werden", 
     ...(isAdminEditingOther ? { adminUserId: req.user!.id, targetUserId: existing.userId } : {}),
   }, req.ip);
 
+  const datesToRecalc = new Set([existing.entryDate]);
+  if (validatedData.entryDate && validatedData.entryDate !== existing.entryDate) {
+    datesToRecalc.add(validatedData.entryDate);
+  }
+  for (const d of datesToRecalc) {
+    checkAndRecalcDailyAutoBreak(existing.userId, d);
+  }
+
   res.json(updated);
 }));
 
@@ -558,6 +573,8 @@ router.delete("/:id", asyncHandler("Zeiteintrag konnte nicht gelöscht werden", 
     isFullDay: existing.isFullDay,
     ...(isAdminDeletingOther ? { adminUserId: req.user!.id, targetUserId: existing.userId } : {}),
   }, req.ip);
+
+  checkAndRecalcDailyAutoBreak(existing.userId, existing.entryDate);
 
   res.status(204).send();
 }));
