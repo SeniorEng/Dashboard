@@ -83,6 +83,11 @@ const ROUTE_PERMISSION_MAP: Record<string, AdminPermissionKey> = {
   "/document-delivery": "documents",
 };
 
+const READ_PERMISSION_FALLBACKS: Partial<Record<AdminPermissionKey, AdminPermissionKey[]>> = {
+  insurance_providers: ["customers"],
+  services: ["customers", "billing"],
+};
+
 router.use(async (req: Request, res: Response, next) => {
   const user = req.user!;
   if (user.isSuperAdmin) {
@@ -101,6 +106,17 @@ router.use(async (req: Request, res: Response, next) => {
   if (permissionKey) {
     const hasPermission = await adminPermissionStorage.hasPermission(user.id, permissionKey);
     if (!hasPermission) {
+      if (req.method === "GET") {
+        const fallbacks = READ_PERMISSION_FALLBACKS[permissionKey];
+        if (fallbacks) {
+          const permissions = await adminPermissionStorage.getPermissions(user.id);
+          const hasFallback = fallbacks.some(fb => permissions.includes(fb));
+          if (hasFallback) {
+            next();
+            return;
+          }
+        }
+      }
       res.status(403).json({
         error: "FORBIDDEN",
         message: "Sie haben keine Berechtigung für diesen Bereich",
