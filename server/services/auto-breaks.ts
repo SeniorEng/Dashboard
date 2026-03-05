@@ -4,7 +4,6 @@ import {
   systemSettings,
   appointments,
 } from "@shared/schema";
-import { timeTrackingStorage } from "../storage/time-tracking";
 import { db, type DbOrTx } from "../lib/db";
 
 export interface AutoBreakResult {
@@ -56,7 +55,17 @@ export async function generateAutoBreaksForMonth(
   const endDate = `${year}-${monthStr}-${lastDay.toString().padStart(2, "0")}`;
 
   const [employeeAppointments, timeEntries] = await Promise.all([
-    timeTrackingStorage.getEmployeeAppointments(userId, startDate, endDate),
+    db
+      .select()
+      .from(appointments)
+      .where(
+        and(
+          sql`(${appointments.assignedEmployeeId} = ${userId} OR ${appointments.performedByEmployeeId} = ${userId})`,
+          gte(appointments.date, startDate),
+          lte(appointments.date, endDate),
+          isNull(appointments.deletedAt)
+        )
+      ),
     db
       .select()
       .from(employeeTimeEntries)
@@ -213,7 +222,16 @@ export async function checkAndRecalcDailyAutoBreak(
     if (!enabled) return;
 
     const [dayAppointments, dayEntries] = await Promise.all([
-      timeTrackingStorage.getEmployeeAppointments(userId, date, date),
+      db
+        .select()
+        .from(appointments)
+        .where(
+          and(
+            sql`(${appointments.assignedEmployeeId} = ${userId} OR ${appointments.performedByEmployeeId} = ${userId})`,
+            eq(appointments.date, date),
+            isNull(appointments.deletedAt)
+          )
+        ),
       db
         .select()
         .from(employeeTimeEntries)
