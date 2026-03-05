@@ -5,18 +5,26 @@ import { Users, Car, Palmtree, ChevronDown, AlertTriangle } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { MONTH_NAMES, formatMinutesToHours } from "../constants";
 
+interface ServiceHours {
+  hauswirtschaftMinutes?: number;
+  alltagsbegleitungMinutes?: number;
+  erstberatungMinutes?: number;
+}
+
+interface TravelInfo {
+  totalMinutes?: number;
+  totalKilometers?: number;
+  customerKilometers?: number;
+  timeEntryKilometers?: number;
+}
+
 interface TimeOverview {
-  serviceHours?: {
-    hauswirtschaftMinutes?: number;
-    alltagsbegleitungMinutes?: number;
-    erstberatungMinutes?: number;
-  };
-  travel?: {
-    totalMinutes?: number;
-    totalKilometers?: number;
-    customerKilometers?: number;
-    timeEntryKilometers?: number;
-  };
+  serviceHours?: ServiceHours;
+  completedServiceHours?: ServiceHours;
+  plannedServiceHours?: ServiceHours;
+  travel?: TravelInfo;
+  completedTravel?: Pick<TravelInfo, 'totalMinutes' | 'totalKilometers' | 'customerKilometers'>;
+  plannedTravel?: Pick<TravelInfo, 'totalMinutes' | 'totalKilometers' | 'customerKilometers'>;
   timeEntries?: {
     pauseMinutes?: number;
     bueroarbeitMinutes?: number;
@@ -94,17 +102,26 @@ function CollapsibleCard({
 }
 
 export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMonth, selectedYear, isEuRentner = false }: TimeOverviewSummaryProps) {
-  const hw = timeOverview?.serviceHours?.hauswirtschaftMinutes || 0;
-  const ab = timeOverview?.serviceHours?.alltagsbegleitungMinutes || 0;
-  const eb = timeOverview?.serviceHours?.erstberatungMinutes || 0;
-  const travel = timeOverview?.travel?.totalMinutes || 0;
+  const cHw = timeOverview?.completedServiceHours?.hauswirtschaftMinutes || 0;
+  const cAb = timeOverview?.completedServiceHours?.alltagsbegleitungMinutes || 0;
+  const cEb = timeOverview?.completedServiceHours?.erstberatungMinutes || 0;
+  const cTravel = timeOverview?.completedTravel?.totalMinutes || 0;
   const sonstigesMinutes =
     (timeOverview?.timeEntries?.bueroarbeitMinutes || 0) +
     (timeOverview?.timeEntries?.vertriebMinutes || 0) +
     (timeOverview?.timeEntries?.schulungMinutes || 0) +
     (timeOverview?.timeEntries?.besprechungMinutes || 0) +
     (timeOverview?.timeEntries?.sonstigesMinutes || 0);
-  const totalServiceMinutes = hw + ab + eb + travel + sonstigesMinutes;
+  const completedTotal = cHw + cAb + cEb + cTravel + sonstigesMinutes;
+
+  const pHw = timeOverview?.plannedServiceHours?.hauswirtschaftMinutes || 0;
+  const pAb = timeOverview?.plannedServiceHours?.alltagsbegleitungMinutes || 0;
+  const pEb = timeOverview?.plannedServiceHours?.erstberatungMinutes || 0;
+  const pTravel = timeOverview?.plannedTravel?.totalMinutes || 0;
+  const plannedTotal = pHw + pAb + pEb + pTravel;
+  const hasPlanned = plannedTotal > 0;
+
+  const totalServiceMinutes = completedTotal + plannedTotal;
 
   const euRentnerMonthWarning = (() => {
     if (!isEuRentner) return null;
@@ -119,7 +136,9 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
   })();
 
   const timeEntryKm = timeOverview?.travel?.timeEntryKilometers || 0;
-  const totalKm = (timeOverview?.travel?.totalKilometers || 0) + (timeOverview?.travel?.customerKilometers || 0) + timeEntryKm;
+  const completedKm = (timeOverview?.completedTravel?.totalKilometers || 0) + (timeOverview?.completedTravel?.customerKilometers || 0);
+  const plannedKm = (timeOverview?.plannedTravel?.totalKilometers || 0) + (timeOverview?.plannedTravel?.customerKilometers || 0);
+  const totalKm = completedKm + plannedKm + timeEntryKm;
 
   return (
     <div className="flex flex-col gap-4 mb-6">
@@ -131,11 +150,33 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
         testId="card-hours-summary"
       >
         <div className="space-y-2">
-          <SummaryRow label="Hauswirtschaft" value={formatMinutesToHours(hw)} color="text-teal-700" testId="text-hauswirtschaft-hours" />
-          <SummaryRow label="Alltagsbegleitung" value={formatMinutesToHours(ab)} color="text-blue-700" testId="text-alltagsbegleitung-hours" />
-          <SummaryRow label="Erstberatung" value={formatMinutesToHours(eb)} color="text-purple-700" testId="text-erstberatung-hours" />
-          <SummaryRow label="Anfahrt" value={formatMinutesToHours(travel)} color="text-amber-700" testId="text-travel-time-hours" />
+          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1" data-testid="label-completed-section">Geleistet</div>
+          <SummaryRow label="Hauswirtschaft" value={formatMinutesToHours(cHw)} color="text-teal-700" testId="text-hauswirtschaft-hours" />
+          <SummaryRow label="Alltagsbegleitung" value={formatMinutesToHours(cAb)} color="text-blue-700" testId="text-alltagsbegleitung-hours" />
+          <SummaryRow label="Erstberatung" value={formatMinutesToHours(cEb)} color="text-purple-700" testId="text-erstberatung-hours" />
+          <SummaryRow label="Anfahrt" value={formatMinutesToHours(cTravel)} color="text-amber-700" testId="text-travel-time-hours" />
           <SummaryRow label="Sonstiges" value={formatMinutesToHours(sonstigesMinutes)} color="text-gray-700" testId="text-sonstiges-hours" />
+          <div className="border-t pt-2 mt-2 flex justify-between items-center">
+            <span className="text-sm font-medium text-gray-700">Gesamt geleistet</span>
+            <span className="font-bold text-gray-900" data-testid="text-completed-service-hours">
+              {formatMinutesToHours(completedTotal)}
+            </span>
+          </div>
+          {hasPlanned && (
+            <>
+              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mt-3 mb-1" data-testid="label-planned-section">Geplant</div>
+              <SummaryRow label="Hauswirtschaft" value={formatMinutesToHours(pHw)} color="text-teal-400" testId="text-planned-hauswirtschaft-hours" />
+              <SummaryRow label="Alltagsbegleitung" value={formatMinutesToHours(pAb)} color="text-blue-400" testId="text-planned-alltagsbegleitung-hours" />
+              <SummaryRow label="Erstberatung" value={formatMinutesToHours(pEb)} color="text-purple-400" testId="text-planned-erstberatung-hours" />
+              <SummaryRow label="Anfahrt" value={formatMinutesToHours(pTravel)} color="text-amber-400" testId="text-planned-travel-time-hours" />
+              <div className="border-t border-dashed pt-2 mt-2 flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-500">Gesamt geplant</span>
+                <span className="font-semibold text-gray-500" data-testid="text-planned-service-hours">
+                  {formatMinutesToHours(plannedTotal)}
+                </span>
+              </div>
+            </>
+          )}
           <div className="border-t pt-2 mt-2 flex justify-between items-center">
             <span className="text-sm font-medium text-gray-700">Gesamt</span>
             <span className="font-bold text-gray-900" data-testid="text-total-service-hours">
@@ -169,8 +210,10 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
         testId="card-km-summary"
       >
         <div className="space-y-2">
-          <SummaryRow label="Anfahrt (Termine)" value={`${formatKm(timeOverview?.travel?.totalKilometers)} km`} color="text-amber-700" testId="text-anfahrt-km" />
-          <SummaryRow label="Kundenfahrten" value={`${formatKm(timeOverview?.travel?.customerKilometers)} km`} color="text-teal-700" testId="text-customer-km" />
+          <SummaryRow label="Anfahrt geleistet" value={`${formatKm(completedKm)} km`} color="text-amber-700" testId="text-anfahrt-km" />
+          {plannedKm > 0 && (
+            <SummaryRow label="Anfahrt geplant" value={`${formatKm(plannedKm)} km`} color="text-amber-400" testId="text-planned-anfahrt-km" />
+          )}
           <SummaryRow label="Sonstige Fahrten" value={`${formatKm(timeEntryKm)} km`} color="text-gray-700" testId="text-time-entry-km" />
           <div className="border-t pt-2 mt-2 flex justify-between items-center">
             <span className="text-sm font-medium text-gray-700">Gesamt</span>

@@ -105,7 +105,11 @@ export interface TimeEntrySummary {
 export interface TimeOverviewData {
   period: { year: number; month: number };
   serviceHours: ServiceHoursSummary;
+  completedServiceHours: ServiceHoursSummary;
+  plannedServiceHours: ServiceHoursSummary;
   travel: TravelSummary;
+  completedTravel: Pick<TravelSummary, 'totalKilometers' | 'customerKilometers' | 'totalMinutes'>;
+  plannedTravel: Pick<TravelSummary, 'totalKilometers' | 'customerKilometers' | 'totalMinutes'>;
   timeEntries: TimeEntrySummary;
   appointments: AppointmentWithCustomerName[];
   otherEntries: EmployeeTimeEntry[];
@@ -532,6 +536,16 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       alltagsbegleitungMinutes: 0,
       erstberatungMinutes: 0,
     };
+    const completedServiceHours: ServiceHoursSummary = {
+      hauswirtschaftMinutes: 0,
+      alltagsbegleitungMinutes: 0,
+      erstberatungMinutes: 0,
+    };
+    const plannedServiceHours: ServiceHoursSummary = {
+      hauswirtschaftMinutes: 0,
+      alltagsbegleitungMinutes: 0,
+      erstberatungMinutes: 0,
+    };
     
     const travel: TravelSummary = {
       totalKilometers: 0,
@@ -539,6 +553,8 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       timeEntryKilometers: 0,
       totalMinutes: 0,
     };
+    const completedTravel = { totalKilometers: 0, customerKilometers: 0, totalMinutes: 0 };
+    const plannedTravel = { totalKilometers: 0, customerKilometers: 0, totalMinutes: 0 };
     
     const servicesByAppointment = new Map<number, typeof serviceBreakdown>();
     for (const svc of serviceBreakdown) {
@@ -549,7 +565,11 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     }
     
     for (const appt of employeeAppointments) {
+      if (appt.status === 'cancelled') continue;
       const apptServices = servicesByAppointment.get(appt.id) || [];
+      const isDone = appt.status === 'completed' || appt.status === 'documenting';
+      const targetHours = isDone ? completedServiceHours : plannedServiceHours;
+      const targetTravel = isDone ? completedTravel : plannedTravel;
       
       for (const svc of apptServices) {
         let minutes = 0;
@@ -563,16 +583,25 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
         
         if (svc.serviceCode === 'hauswirtschaft') {
           serviceHours.hauswirtschaftMinutes += minutes;
+          targetHours.hauswirtschaftMinutes += minutes;
         } else if (svc.serviceCode === 'alltagsbegleitung') {
           serviceHours.alltagsbegleitungMinutes += minutes;
+          targetHours.alltagsbegleitungMinutes += minutes;
         } else if (svc.serviceCode === 'erstberatung') {
           serviceHours.erstberatungMinutes += minutes;
+          targetHours.erstberatungMinutes += minutes;
         }
       }
       
-      travel.totalKilometers += appt.travelKilometers || 0;
-      travel.customerKilometers += appt.customerKilometers || 0;
-      travel.totalMinutes += appt.travelMinutes || 0;
+      const km = appt.travelKilometers || 0;
+      const ckm = appt.customerKilometers || 0;
+      const tmin = appt.travelMinutes || 0;
+      travel.totalKilometers += km;
+      travel.customerKilometers += ckm;
+      travel.totalMinutes += tmin;
+      targetTravel.totalKilometers += km;
+      targetTravel.customerKilometers += ckm;
+      targetTravel.totalMinutes += tmin;
     }
     
     const timeEntrySummary: TimeEntrySummary = {
@@ -647,7 +676,11 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     return {
       period: { year, month },
       serviceHours,
+      completedServiceHours,
+      plannedServiceHours,
       travel,
+      completedTravel,
+      plannedTravel,
       timeEntries: timeEntrySummary,
       appointments: enrichedAppointments,
       otherEntries: timeEntries,
