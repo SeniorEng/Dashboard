@@ -20,6 +20,7 @@ export const timeEntryKeys = {
   all: ["time-entries"] as const,
   list: (year?: number, month?: number) => [...timeEntryKeys.all, "list", { year, month }] as const,
   detail: (id: number) => [...timeEntryKeys.all, "detail", id] as const,
+  byDate: (date: string) => [...timeEntryKeys.all, "by-date", date] as const,
   vacationSummary: (year: number) => [...timeEntryKeys.all, "vacation-summary", year] as const,
   overview: (year: number, month: number) => [...timeEntryKeys.all, "overview", { year, month }] as const,
   openTasks: [...["time-entries"], "open-tasks"] as const,
@@ -176,6 +177,21 @@ export function useTimesPageData(year: number, month: number) {
       return unwrapResult(result);
     },
     enabled: year >= 2020 && year <= 2100 && month >= 1 && month <= 12,
+    staleTime: 30000,
+  });
+}
+
+/**
+ * Fetch time entries for a specific day
+ */
+export function useDayTimeEntries(date: string) {
+  return useQuery({
+    queryKey: timeEntryKeys.byDate(date),
+    queryFn: async ({ signal }) => {
+      const result = await api.get<TimeEntry[]>(`/time-entries/by-date/${date}`, signal);
+      return unwrapResult(result);
+    },
+    enabled: /^\d{4}-\d{2}-\d{2}$/.test(date),
     staleTime: 30000,
   });
 }

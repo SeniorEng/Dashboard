@@ -150,6 +150,22 @@ router.get("/vacation-summary/:year", asyncHandler("Urlaubsübersicht konnte nic
 }));
 
 /**
+ * GET /time-entries/by-date/:date
+ * Get time entries for a specific day for the authenticated user
+ */
+router.get("/by-date/:date", asyncHandler("Zeiteinträge konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  const date = req.params.date;
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ error: "Ungültiges Datum" });
+  }
+
+  const entries = await timeTrackingStorage.getTimeEntriesForDate(userId, date);
+  res.json(entries);
+}));
+
+/**
  * GET /time-entries/page-data/:year/:month
  * Combined endpoint: overview + vacation-summary + open-tasks in one call
  */
