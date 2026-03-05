@@ -35,8 +35,8 @@ export function useInsuranceProviders(includeInactive = false) {
     queryKey: insuranceProviderKeys.list(includeInactive),
     queryFn: async ({ signal }) => {
       const url = includeInactive
-        ? "/admin/insurance-providers?all=true"
-        : "/admin/insurance-providers";
+        ? "/insurance-providers?all=true"
+        : "/insurance-providers";
       const result = await api.get<InsuranceProviderItem[]>(url, signal);
       return unwrapResult(result);
     },
