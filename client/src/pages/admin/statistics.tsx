@@ -183,7 +183,7 @@ export default function AdminStatistics() {
   }, [trends]);
 
   const periodLabel = selectedMonth !== "all"
-    ? `${MONTH_NAMES[parseInt(selectedMonth)]} ${selectedYear}`
+    ? `${MONTH_NAMES[parseInt(selectedMonth) - 1]} ${selectedYear}`
     : `${selectedYear}`;
 
   return (
@@ -222,7 +222,7 @@ export default function AdminStatistics() {
             <SelectContent>
               <SelectItem value="all">Gesamtjahr</SelectItem>
               {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-                <SelectItem key={m} value={String(m)}>{MONTH_NAMES[m]}</SelectItem>
+                <SelectItem key={m} value={String(m)}>{MONTH_NAMES[m - 1]}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -328,7 +328,7 @@ export default function AdminStatistics() {
                           const termine = Number(t.completedHauswirtschaft || 0) + Number(t.completedAlltagsbegleitung || 0) + Number(t.completedErstberatungen || 0);
                           return (
                             <div key={t.month} className="flex items-center gap-3">
-                              <span className="text-xs text-muted-foreground w-8 text-right">{MONTH_NAMES[t.month].slice(0, 3)}</span>
+                              <span className="text-xs text-muted-foreground w-8 text-right">{(MONTH_NAMES[t.month - 1] || "?").slice(0, 3)}</span>
                               <div className="flex-1">
                                 <BarStacked
                                   segments={[
@@ -701,7 +701,7 @@ export default function AdminStatistics() {
                             <div className="space-y-2">
                               {lifecycle.map((m: any) => (
                                 <div key={m.month} className="flex items-center gap-3">
-                                  <span className="text-xs text-muted-foreground w-8 text-right">{MONTH_NAMES[m.month].slice(0, 3)}</span>
+                                  <span className="text-xs text-muted-foreground w-8 text-right">{(MONTH_NAMES[m.month - 1] || "?").slice(0, 3)}</span>
                                   <div className="flex-1 flex gap-1">
                                     <div className="flex-1"><BarStacked segments={[{ value: m.customersGained, color: "bg-green-500" }]} max={maxLifecycle} /></div>
                                     <div className="flex-1"><BarStacked segments={[{ value: m.customersLost, color: "bg-red-400" }]} max={maxLifecycle} /></div>
@@ -916,7 +916,7 @@ export default function AdminStatistics() {
                                 const termine = Number(t.completedHauswirtschaft || 0) + Number(t.completedAlltagsbegleitung || 0) + Number(t.completedErstberatungen || 0);
                                 return (
                                   <div key={t.month} className="flex items-center gap-3">
-                                    <span className="text-xs text-muted-foreground w-8 text-right">{MONTH_NAMES[t.month].slice(0, 3)}</span>
+                                    <span className="text-xs text-muted-foreground w-8 text-right">{(MONTH_NAMES[t.month - 1] || "?").slice(0, 3)}</span>
                                     <div className="flex-1">
                                       <BarStacked
                                         segments={[
@@ -954,7 +954,7 @@ export default function AdminStatistics() {
                                 const maxCust = Math.max(...trends.map((tr: any) => Number(tr.activeCustomers || 0)), 1);
                                 return (
                                   <div key={t.month} className="flex items-center gap-3">
-                                    <span className="text-xs text-muted-foreground w-8 text-right">{MONTH_NAMES[t.month].slice(0, 3)}</span>
+                                    <span className="text-xs text-muted-foreground w-8 text-right">{(MONTH_NAMES[t.month - 1] || "?").slice(0, 3)}</span>
                                     <div className="flex-1">
                                       <BarSimple value={Number(t.activeCustomers)} max={maxCust} color="bg-purple-500" />
                                     </div>
