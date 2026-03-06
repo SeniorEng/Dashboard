@@ -1,0 +1,55 @@
+Das Kernproblem: Du beschreibst ein einziges System
+Alles was du beschreibst lässt sich auf drei Grundkonzepte herunterbrechen:
+Dokumententyp  →  definiert Regeln
+Dokument       →  die konkrete Instanz
+Trigger        →  wann wird ein Typ relevant
+
+Datenmodell (vereinfacht)
+1. document_types — die Konfigurationstabelle
+document_type
+├── name              (z.B. "Führerschein", "Arbeitsunterweisung")
+├── applies_to        (customer | employee | both)
+├── input_method      (upload | signature | both)
+├── template_id       → FK zu signature_templates (nullable)
+├── requires_renewal  (boolean)
+├── renewal_days      (z.B. 365 für jährlich)
+└── is_mandatory      (boolean – immer Pflicht, unabhängig von Trigger)
+2. document_type_triggers — wann wird ein Typ aktiv
+trigger
+├── document_type_id  → FK
+├── entity_type       (customer | employee)
+├── condition_field   (z.B. "budget_type", "can_care_children")
+└── condition_value   (z.B. "SGB_XI", "true")
+3. documents — die eigentliche Instanz
+document
+├── document_type_id  → FK
+├── entity_id         (customer_id oder employee_id)
+├── entity_type       (customer | employee)
+├── status            (pending | uploaded | signed | expired)
+├── file_url          (nullable)
+├── signed_at         (nullable)
+├── expires_at        (nullable – berechnet aus renewal_days)
+└── created_at
+
+Onboarding-Prozesse: Viel einfacher als gedacht
+Du brauchst keinen separaten Prozess pro Kundentyp. Stattdessen:
+Neuer Kunde wird angelegt
+        ↓
+Kundentyp wird gesetzt (Gesetzlich / Privat / Selbstzahler)
+        ↓
+System berechnet: Welche document_types gelten?
+  → is_mandatory = true für diesen entity_type
+  → PLUS alle Typen deren Trigger matchen
+        ↓
+Dokument-Checkliste wird generiert
+Das bedeutet: Der Onboarding-Wizard ist immer gleich – er zeigt nur dynamisch die relevanten Dokumente.
+
+Wiedervorlage: Auch kein Sondersystem
+Einfach ein täglicher Hintergrundjob:
+sqlSELECT * FROM documents
+WHERE expires_at <= NOW() + INTERVAL '30 days'
+AND status != 'expired'
+→ WhatsApp-Nachricht oder Dashboard-Hinweis auslösen.
+
+Trigger-Beispiele konkret
+FeldWertErgebnisbudget_typeSGB_XI_45b→ Dokument „Pflegegradnachweis" wird Pflichtbudget_typePrivat→ Dokument „SEPA-Lastschrift" wird Pflichtcan_care_childrentrue→ Dokument „Erweitertes Führungszeugnis" wird Pflichthas_cartrue→ Dokument „Führerscheinkopie" + Wiedervorlage 365 Tage
