@@ -72,6 +72,7 @@ interface BatchData {
   batchId: string;
   batchLabel: string | null;
   uploadedAt: string;
+  documentDate: string | null;
   files: DocumentFileData[];
 }
 
@@ -106,6 +107,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
   const [selectedDocTypeId, setSelectedDocTypeId] = useState("");
   const [batchLabel, setBatchLabel] = useState("");
   const [notes, setNotes] = useState("");
+  const [documentDate, setDocumentDate] = useState("");
   const [expandedTypes, setExpandedTypes] = useState<Set<number>>(new Set());
   const [showArchive, setShowArchive] = useState<number | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -181,7 +183,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
   });
 
   const saveMutation = useMutation({
-    mutationFn: async (data: { documentTypeId: number; fileName: string; objectPath: string; notes?: string | null; skipDeactivation?: boolean; batchId?: string; batchLabel?: string }) => {
+    mutationFn: async (data: { documentTypeId: number; fileName: string; objectPath: string; notes?: string | null; skipDeactivation?: boolean; batchId?: string; batchLabel?: string; documentDate?: string }) => {
       const result = await api.post(`/admin/customers/${customerId}/documents`, data);
       return unwrapResult(result);
     },
@@ -246,6 +248,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
         skipDeactivation: i > 0,
         batchId: uploadBatchId,
         batchLabel: batchLabel || undefined,
+        documentDate: documentDate || undefined,
       });
     }
 
@@ -255,9 +258,10 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
     setSelectedDocTypeId("");
     setBatchLabel("");
     setNotes("");
+    setDocumentDate("");
     clearAllFiles();
     toast({ title: count > 1 ? `${count} Dokumente hinzugefügt` : "Dokument hinzugefügt" });
-  }, [selectedFiles, selectedDocTypeId, notes, batchLabel, uploadFile, saveMutation, queryClient, customerId, toast, clearAllFiles]);
+  }, [selectedFiles, selectedDocTypeId, notes, batchLabel, documentDate, uploadFile, saveMutation, queryClient, customerId, toast, clearAllFiles]);
 
   const toggleType = (typeId: number) => {
     setExpandedTypes(prev => {
@@ -437,15 +441,27 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
             )}
           </div>
 
-          <div className="space-y-2">
-            <Label>Notiz (optional)</Label>
-            <Input
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="z.B. Gültig bis 2026"
-              className="text-base"
-              data-testid="input-customer-document-notes"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Dokument vom (optional)</Label>
+              <Input
+                type="date"
+                value={documentDate}
+                onChange={(e) => setDocumentDate(e.target.value)}
+                className="text-base"
+                data-testid="input-customer-document-date"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Notiz (optional)</Label>
+              <Input
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="z.B. Gültig bis 2026"
+                className="text-base"
+                data-testid="input-customer-document-notes"
+              />
+            </div>
           </div>
 
           <div className="flex gap-2">
@@ -458,7 +474,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                 <><Loader2 className={`mr-2 ${iconSize.sm} animate-spin`} />Wird hinzugefügt...</>
               ) : selectedFiles.length > 1 ? `${selectedFiles.length} Dateien hinzufügen` : "Hinzufügen"}
             </Button>
-            <Button variant="outline" onClick={() => { setIsUploadOpen(false); clearAllFiles(); setBatchLabel(""); setNotes(""); }}>
+            <Button variant="outline" onClick={() => { setIsUploadOpen(false); clearAllFiles(); setBatchLabel(""); setNotes(""); setDocumentDate(""); }}>
               Abbrechen
             </Button>
           </div>
@@ -511,7 +527,9 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                       <div key={batch.batchId} className="ml-2 pl-3 border-l-2 border-teal-100" data-testid={`customer-batch-${batch.batchId}`}>
                         <div className="flex items-center gap-2 mb-1.5">
                           <span className="text-xs text-gray-500">
-                            {formatDateForDisplay(batch.uploadedAt.split("T")[0])}
+                            {batch.documentDate
+                              ? `Dok. vom ${formatDateForDisplay(batch.documentDate)}`
+                              : formatDateForDisplay(batch.uploadedAt.split("T")[0])}
                           </span>
                           {batch.batchLabel && (
                             <span className="text-xs px-1.5 py-0.5 rounded bg-teal-50 text-teal-700">{batch.batchLabel}</span>
@@ -582,7 +600,9 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                               <div key={batch.batchId} className="pl-3 border-l-2 border-gray-200 opacity-60" data-testid={`customer-archived-batch-${batch.batchId}`}>
                                 <div className="flex items-center gap-2 mb-1">
                                   <span className="text-xs text-gray-500">
-                                    {formatDateForDisplay(batch.uploadedAt.split("T")[0])}
+                                    {batch.documentDate
+                                      ? `Dok. vom ${formatDateForDisplay(batch.documentDate)}`
+                                      : formatDateForDisplay(batch.uploadedAt.split("T")[0])}
                                   </span>
                                   {batch.batchLabel && (
                                     <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{batch.batchLabel}</span>

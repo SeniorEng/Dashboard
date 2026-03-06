@@ -30,6 +30,7 @@ export interface DocumentBatch {
   batchId: string;
   batchLabel: string | null;
   uploadedAt: string;
+  documentDate: string | null;
   files: (EmployeeDocument | CustomerDocument)[];
 }
 
@@ -220,10 +221,10 @@ export class DocumentStorage implements IDocumentStorage {
     const result: GroupedDocumentsByType[] = [];
     for (const entry of Array.from(typeMap.values())) {
       const { documentType, docs: typeDocs } = entry;
-      const batchMap = new Map<string, { batchLabel: string | null; uploadedAt: string; files: EmployeeDocument[] }>();
+      const batchMap = new Map<string, { batchLabel: string | null; uploadedAt: string; documentDate: string | null; files: EmployeeDocument[] }>();
       for (const doc of typeDocs) {
         if (!batchMap.has(doc.batchId)) {
-          batchMap.set(doc.batchId, { batchLabel: doc.batchLabel, uploadedAt: doc.uploadedAt as unknown as string, files: [] });
+          batchMap.set(doc.batchId, { batchLabel: doc.batchLabel, uploadedAt: doc.uploadedAt as unknown as string, documentDate: doc.documentDate as string | null, files: [] });
         }
         batchMap.get(doc.batchId)!.files.push(doc);
       }
@@ -231,7 +232,7 @@ export class DocumentStorage implements IDocumentStorage {
       const currentBatches: DocumentBatch[] = [];
       const archivedBatches: DocumentBatch[] = [];
       for (const [batchId, batch] of Array.from(batchMap.entries())) {
-        const batchObj: DocumentBatch = { batchId, batchLabel: batch.batchLabel, uploadedAt: batch.uploadedAt, files: batch.files };
+        const batchObj: DocumentBatch = { batchId, batchLabel: batch.batchLabel, uploadedAt: batch.uploadedAt, documentDate: batch.documentDate, files: batch.files };
         if (batch.files.some((f: EmployeeDocument) => f.isCurrent)) {
           currentBatches.push(batchObj);
         } else {
@@ -369,10 +370,10 @@ export class DocumentStorage implements IDocumentStorage {
     const result: GroupedDocumentsByType[] = [];
     for (const entry of Array.from(typeMap.values())) {
       const { documentType, docs: typeDocs } = entry;
-      const batchMap = new Map<string, { batchLabel: string | null; uploadedAt: string; files: CustomerDocument[] }>();
+      const batchMap = new Map<string, { batchLabel: string | null; uploadedAt: string; documentDate: string | null; files: CustomerDocument[] }>();
       for (const doc of typeDocs) {
         if (!batchMap.has(doc.batchId)) {
-          batchMap.set(doc.batchId, { batchLabel: doc.batchLabel, uploadedAt: doc.uploadedAt as unknown as string, files: [] });
+          batchMap.set(doc.batchId, { batchLabel: doc.batchLabel, uploadedAt: doc.uploadedAt as unknown as string, documentDate: doc.documentDate as string | null, files: [] });
         }
         batchMap.get(doc.batchId)!.files.push(doc);
       }
@@ -380,7 +381,7 @@ export class DocumentStorage implements IDocumentStorage {
       const currentBatches: DocumentBatch[] = [];
       const archivedBatches: DocumentBatch[] = [];
       for (const [batchId, batch] of Array.from(batchMap.entries())) {
-        const batchObj: DocumentBatch = { batchId, batchLabel: batch.batchLabel, uploadedAt: batch.uploadedAt, files: batch.files };
+        const batchObj: DocumentBatch = { batchId, batchLabel: batch.batchLabel, uploadedAt: batch.uploadedAt, documentDate: batch.documentDate, files: batch.files };
         if (batch.files.some((f: CustomerDocument) => f.isCurrent)) {
           currentBatches.push(batchObj);
         } else {
