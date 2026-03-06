@@ -338,10 +338,13 @@ export default function CustomerConvertPage() {
         email: c.email.trim() || undefined,
       }));
 
+    const is45bEnabled = formData.budgetTypeSettings.find(s => s.budgetType === "entlastungsbetrag_45b")?.enabled ?? false;
+    const is45aEnabled = formData.budgetTypeSettings.find(s => s.budgetType === "umwandlung_45a")?.enabled ?? false;
+    const is39Enabled = formData.budgetTypeSettings.find(s => s.budgetType === "ersatzpflege_39_42a")?.enabled ?? false;
     const budgetValues = {
-      entlastungsbetrag45b: Math.round(parseFloat(formData.entlastungsbetrag45b) * 100) || 0,
-      verhinderungspflege39: Math.round(parseFloat(formData.verhinderungspflege39) * 100) || 0,
-      pflegesachleistungen36: Math.round(parseFloat(formData.pflegesachleistungen36) * 100) || 0,
+      entlastungsbetrag45b: is45bEnabled ? (Math.round(parseFloat(formData.entlastungsbetrag45b) * 100) || 0) : 0,
+      verhinderungspflege39: is39Enabled ? (Math.round(parseFloat(formData.verhinderungspflege39) * 100) || 0) : 0,
+      pflegesachleistungen36: is45aEnabled ? (Math.round(parseFloat(formData.pflegesachleistungen36) * 100) || 0) : 0,
       validFrom: today,
     };
     const budgets = budgetValues.entlastungsbetrag45b > 0 || budgetValues.verhinderungspflege39 > 0 || budgetValues.pflegesachleistungen36 > 0
