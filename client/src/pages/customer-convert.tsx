@@ -109,6 +109,8 @@ export default function CustomerConvertPage() {
     contractPeriod: "weekly",
     documentDeliveryMethod: "email" as const,
     acceptsPrivatePayment: false,
+    vorjahrVerbraucht45b: "",
+    uebertrag45b: "",
   });
 
   const [appointmentNotesPrefilled, setAppointmentNotesPrefilled] = useState(false);
