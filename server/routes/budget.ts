@@ -311,6 +311,18 @@ router.post("/:customerId/initial-balance/:budgetType", requireAdmin, asyncHandl
     notes: `Startwert ab ${monthStr}/${yearStr}`,
   }, userId);
 
+  if (budgetType === "entlastungsbetrag_45b") {
+    const existingPrefs = await budgetLedgerStorage.getBudgetPreferences(customerId);
+    if (!existingPrefs?.budgetStartDate || validFromDate < existingPrefs.budgetStartDate) {
+      await budgetLedgerStorage.upsertBudgetPreferences({
+        customerId,
+        budgetStartDate: validFromDate,
+        monthlyLimitCents: existingPrefs?.monthlyLimitCents ?? null,
+        notes: existingPrefs?.notes ?? null,
+      }, userId);
+    }
+  }
+
   if (userId) {
     const ip = req.ip || req.socket.remoteAddress;
     await auditService.log(userId, "initial_balance_set", "budget", customerId, {

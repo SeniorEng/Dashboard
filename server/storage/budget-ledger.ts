@@ -294,24 +294,58 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       .from(budgetAllocations)
       .where(and(
         eq(budgetAllocations.customerId, customerId),
-        eq(budgetAllocations.source, "monthly_auto"),
+        eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
         isNull(budgetAllocations.deletedAt)
       ));
 
-    const existingSet = new Set(
-      existingAllocations.map(a => `${a.year}-${a.month}`)
+    const monthlyAutoSet = new Set(
+      existingAllocations
+        .filter(a => a.source === "monthly_auto")
+        .map(a => `${a.year}-${a.month}`)
+    );
+
+    const initialBalanceMonths = existingAllocations
+      .filter(a => a.source === "initial_balance" && a.month != null)
+      .map(a => ({ year: a.year, month: a.month! }));
+
+    let allocStartYear = startDate.getFullYear();
+    let allocStartMonth = startDate.getMonth() + 1;
+
+    if (initialBalanceMonths.length > 0) {
+      let latestIbYear = 0;
+      let latestIbMonth = 0;
+      for (const ib of initialBalanceMonths) {
+        if (ib.year > latestIbYear || (ib.year === latestIbYear && ib.month > latestIbMonth)) {
+          latestIbYear = ib.year;
+          latestIbMonth = ib.month;
+        }
+      }
+      let afterMonth = latestIbMonth + 1;
+      let afterYear = latestIbYear;
+      if (afterMonth > 12) {
+        afterMonth = 1;
+        afterYear++;
+      }
+      if (afterYear > allocStartYear || (afterYear === allocStartYear && afterMonth > allocStartMonth)) {
+        allocStartYear = afterYear;
+        allocStartMonth = afterMonth;
+      }
+    }
+
+    const initialBalanceSet = new Set(
+      initialBalanceMonths.map(ib => `${ib.year}-${ib.month}`)
     );
 
     const monthlyAmount = await this.getMonthlyBudgetAmountCents(customerId, _tx);
     const created: BudgetAllocation[] = [];
 
-    let year = startDate.getFullYear();
-    let month = startDate.getMonth() + 1;
+    let year = allocStartYear;
+    let month = allocStartMonth;
 
     while (year < currentYear || (year === currentYear && month <= currentMonth)) {
       const key = `${year}-${month}`;
 
-      if (!existingSet.has(key)) {
+      if (!monthlyAutoSet.has(key) && !initialBalanceSet.has(key)) {
         const validFrom = `${year}-${String(month).padStart(2, '0')}-01`;
         const result = await d.insert(budgetAllocations).values({
           customerId,
