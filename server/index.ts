@@ -120,7 +120,11 @@ process.on("uncaughtException", (error) => {
   await importPflegekassen();
 
   const { migrateBudgetSources } = await import("./startup/migrate-budget-sources");
-  await migrateBudgetSources();
+  try {
+    await migrateBudgetSources();
+  } catch (err) {
+    console.error("[startup] Budget-Source-Migration fehlgeschlagen:", err);
+  }
 
   const { geocodeAllMissing } = await import("./services/geocoding");
   geocodeAllMissing().catch(err => console.error("[geocoding] Batch geocoding error:", err));

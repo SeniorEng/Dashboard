@@ -51,7 +51,7 @@ export const budgetAllocations = pgTable("budget_allocations", {
   year: integer("year").notNull(),
   month: integer("month"), // null for carryover/initial entries
   amountCents: integer("amount_cents").notNull(), // Amount in cents (e.g., 13100 = 131€)
-  source: text("source").notNull(), // monthly, carryover, initial_balance, manual_adjustment
+  source: text("source").notNull(), // monthly_auto, carryover, initial_balance, manual_adjustment, yearly_auto
   validFrom: date("valid_from").notNull(), // When this allocation becomes available
   expiresAt: date("expires_at"), // null = never expires, set for carryover (June 30)
   notes: text("notes"),

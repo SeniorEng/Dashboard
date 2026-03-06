@@ -867,6 +867,18 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
   async getCustomerBudgetAmounts(customerId: number, _tx?: DbClient): Promise<{ pflegesachleistungen36: number; verhinderungspflege39: number }> {
     const d = _tx ?? db;
+
+    const typeSettings = await this.getBudgetTypeSettings(customerId, _tx);
+    const setting45a = typeSettings.find(s => s.budgetType === "umwandlung_45a");
+    const setting39 = typeSettings.find(s => s.budgetType === "ersatzpflege_39_42a");
+
+    if (setting45a?.monthlyLimitCents != null || setting39?.yearlyLimitCents != null) {
+      return {
+        pflegesachleistungen36: setting45a?.monthlyLimitCents ?? 0,
+        verhinderungspflege39: setting39?.yearlyLimitCents ?? 0,
+      };
+    }
+
     const result = await d.select().from(customerBudgets).where(and(eq(customerBudgets.customerId, customerId), isNull(customerBudgets.validTo))).limit(1);
     if (result[0]) {
       return {
