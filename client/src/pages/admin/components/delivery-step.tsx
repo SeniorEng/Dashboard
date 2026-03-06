@@ -70,14 +70,16 @@ export function DeliveryStep({ formData, onChange }: DeliveryStepProps) {
         })}
       </div>
 
-      {isEmailSelected && !hasEmail && (
-        <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 space-y-3">
-          <div className="flex items-start gap-2">
-            <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
-            <p className="text-sm text-amber-800">
-              Für den E-Mail-Versand wird eine E-Mail-Adresse benötigt. Bitte hier nacherfassen:
-            </p>
-          </div>
+      {isEmailSelected && (
+        <div className={`p-4 rounded-lg space-y-3 ${hasEmail ? "bg-green-50 border border-green-200" : "bg-amber-50 border border-amber-200"}`}>
+          {!hasEmail && (
+            <div className="flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+              <p className="text-sm text-amber-800">
+                Für den E-Mail-Versand wird eine E-Mail-Adresse benötigt.
+              </p>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="delivery-email">E-Mail-Adresse *</Label>
             <Input
@@ -90,15 +92,14 @@ export function DeliveryStep({ formData, onChange }: DeliveryStepProps) {
               data-testid="input-delivery-email"
             />
           </div>
-        </div>
-      )}
-
-      {isEmailSelected && hasEmail && (
-        <div className="flex items-center gap-2 p-3 rounded-lg bg-green-50 border border-green-200">
-          <Check className="h-4 w-4 text-green-600 shrink-0" />
-          <p className="text-sm text-green-800">
-            Versand an: <span className="font-medium">{formData.email}</span>
-          </p>
+          {hasEmail && (
+            <div className="flex items-center gap-2">
+              <Check className="h-4 w-4 text-green-600 shrink-0" />
+              <p className="text-sm text-green-800">
+                Versand an: <span className="font-medium">{formData.email}</span>
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>
