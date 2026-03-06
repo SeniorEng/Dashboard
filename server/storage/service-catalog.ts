@@ -64,6 +64,7 @@ const SYSTEM_SERVICE_DEFINITIONS: SystemServiceDefinition[] = [
 export interface IServiceCatalogStorage {
   getAllServices(includeInactive?: boolean): Promise<Service[]>;
   getServiceById(id: number): Promise<Service | null>;
+  getServicesByIds(ids: number[]): Promise<Service[]>;
   getServiceByCode(code: string): Promise<Service | null>;
   createService(data: InsertService): Promise<Service>;
   updateService(id: number, data: Partial<InsertService>): Promise<Service | null>;
@@ -85,6 +86,11 @@ export class ServiceCatalogStorage implements IServiceCatalogStorage {
   async getServiceById(id: number): Promise<Service | null> {
     const result = await db.select().from(services).where(eq(services.id, id)).limit(1);
     return result[0] || null;
+  }
+
+  async getServicesByIds(ids: number[]): Promise<Service[]> {
+    if (ids.length === 0) return [];
+    return db.select().from(services).where(inArray(services.id, ids));
   }
 
   async getServiceByCode(code: string): Promise<Service | null> {

@@ -81,8 +81,11 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
       `);
       const cspMap = new Map((cspResult.rows as any[]).map(r => [r.serviceId, r.priceCents]));
 
+      const allServices = await serviceCatalogStorage.getServicesByIds(serviceIds);
+      const serviceMap = new Map(allServices.map(s => [s.id, s]));
+
       for (let i = 0; i < serviceIds.length; i++) {
-        const service = await serviceCatalogStorage.getServiceById(serviceIds[i]);
+        const service = serviceMap.get(serviceIds[i]);
         if (!service || !service.isBillable) continue;
         
         const durationMinutes = durations[i] || 0;

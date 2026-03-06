@@ -261,20 +261,16 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return reversal[0];
   }
 
-  async getMonthlyBudgetAmountCents(customerId: number, _tx?: DbClient): Promise<number> {
+  async getMonthlyBudgetAmountCents(customerId: number, _tx?: DbClient, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<number> {
     const d = _tx ?? db;
 
-    const typeSettings = await d.select()
+    const settings = _typeSettings ?? await d.select()
       .from(customerBudgetTypeSettings)
-      .where(and(
-        eq(customerBudgetTypeSettings.customerId, customerId),
-        eq(customerBudgetTypeSettings.budgetType, "entlastungsbetrag_45b"),
-        eq(customerBudgetTypeSettings.enabled, true)
-      ))
-      .limit(1);
+      .where(eq(customerBudgetTypeSettings.customerId, customerId));
 
-    if (typeSettings[0]?.monthlyLimitCents != null) {
-      return typeSettings[0].monthlyLimitCents;
+    const s45b = settings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
+    if (s45b?.monthlyLimitCents != null) {
+      return s45b.monthlyLimitCents;
     }
 
     const customerBudget = await d.select()
@@ -292,7 +288,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return DEFAULT_MONTHLY_BUDGET_CENTS;
   }
 
-  async ensureMonthlyAllocations(customerId: number, _tx?: DbClient): Promise<BudgetAllocation[]> {
+  async ensureMonthlyAllocations(customerId: number, _tx?: DbClient, _preferences?: CustomerBudgetPreferences | undefined, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<BudgetAllocation[]> {
     const d = _tx ?? db;
 
     const existingAllocations = await d.select()
@@ -303,7 +299,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         isNull(budgetAllocations.deletedAt)
       ));
 
-    const preferences = await this.getBudgetPreferences(customerId, _tx);
+    const preferences = _preferences !== undefined ? _preferences : await this.getBudgetPreferences(customerId, _tx);
     let budgetStartDate = preferences?.budgetStartDate ?? null;
 
     if (!budgetStartDate) {
@@ -375,7 +371,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       initialBalanceMonths.map(ib => `${ib.year}-${ib.month}`)
     );
 
-    const monthlyAmount = await this.getMonthlyBudgetAmountCents(customerId, _tx);
+    const monthlyAmount = await this.getMonthlyBudgetAmountCents(customerId, _tx, _typeSettings);
     const created: BudgetAllocation[] = [];
 
     let year = allocStartYear;
@@ -412,8 +408,13 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return created;
   }
 
-  async getBudgetSummary(customerId: number): Promise<BudgetSummary> {
-    await this.ensureMonthlyAllocations(customerId);
+  async getBudgetSummary(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<BudgetSummary> {
+    const [preferences, typeSettings] = await Promise.all([
+      _preferences !== undefined ? _preferences : this.getBudgetPreferences(customerId),
+      _typeSettings ?? this.getBudgetTypeSettings(customerId),
+    ]);
+
+    await this.ensureMonthlyAllocations(customerId, undefined, preferences, typeSettings);
     await this.processExpiredCarryover(customerId);
 
     const today = todayISO();
@@ -430,7 +431,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       or(isNull(budgetAllocations.expiresAt), gte(budgetAllocations.expiresAt, today))
     );
 
-    const [allocResult, txResult, currentYearResult, carryoverResult, currentMonthResult, preferences] = await Promise.all([
+    const [allocResult, txResult, currentYearResult, carryoverResult, currentMonthResult] = await Promise.all([
       db.select({
         total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
       }).from(budgetAllocations).where(allocBaseWhere),
@@ -469,8 +470,6 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         eq(budgetTransactions.transactionType, "consumption"),
         gte(budgetTransactions.transactionDate, currentMonthStart)
       )),
-
-      this.getBudgetPreferences(customerId),
     ]);
 
     const totalAllocatedCents = Number(allocResult[0]?.total ?? 0);
@@ -498,18 +497,18 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       carryoverCents,
       carryoverExpiresAt,
       currentYearAllocatedCents,
-      monthlyLimitCents: await this.getEffectiveMonthlyLimitCents(customerId),
+      monthlyLimitCents: await this.getEffectiveMonthlyLimitCents(customerId, typeSettings, preferences),
       currentMonthUsedCents,
     };
   }
 
-  private async getEffectiveMonthlyLimitCents(customerId: number): Promise<number | null> {
-    const typeSettings = await this.getBudgetTypeSettings(customerId);
+  private async getEffectiveMonthlyLimitCents(customerId: number, _typeSettings?: CustomerBudgetTypeSetting[], _preferences?: CustomerBudgetPreferences | undefined): Promise<number | null> {
+    const typeSettings = _typeSettings ?? await this.getBudgetTypeSettings(customerId);
     const s45b = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
     if (s45b?.monthlyLimitCents != null) {
       return s45b.monthlyLimitCents;
     }
-    const preferences = await this.getBudgetPreferences(customerId);
+    const preferences = _preferences !== undefined ? _preferences : await this.getBudgetPreferences(customerId);
     return preferences?.monthlyLimitCents ?? null;
   }
 
@@ -865,10 +864,10 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return await db.transaction(async (tx) => doWork(tx));
   }
 
-  async getCustomerBudgetAmounts(customerId: number, _tx?: DbClient): Promise<{ pflegesachleistungen36: number; verhinderungspflege39: number }> {
+  async getCustomerBudgetAmounts(customerId: number, _tx?: DbClient, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<{ pflegesachleistungen36: number; verhinderungspflege39: number }> {
     const d = _tx ?? db;
 
-    const typeSettings = await this.getBudgetTypeSettings(customerId, _tx);
+    const typeSettings = _typeSettings ?? await this.getBudgetTypeSettings(customerId, _tx);
     const setting45a = typeSettings.find(s => s.budgetType === "umwandlung_45a");
     const setting39 = typeSettings.find(s => s.budgetType === "ersatzpflege_39_42a");
 
@@ -889,14 +888,14 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return { pflegesachleistungen36: 0, verhinderungspflege39: 0 };
   }
 
-  async ensureAllocations45a(customerId: number, _tx?: DbClient): Promise<BudgetAllocation[]> {
+  async ensureAllocations45a(customerId: number, _tx?: DbClient, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }): Promise<BudgetAllocation[]> {
     const d = _tx ?? db;
-    const preferences = await this.getBudgetPreferences(customerId, _tx);
+    const preferences = _preferences !== undefined ? _preferences : await this.getBudgetPreferences(customerId, _tx);
     if (!preferences?.budgetStartDate) {
       return [];
     }
 
-    const amounts = await this.getCustomerBudgetAmounts(customerId, _tx);
+    const amounts = _amounts ?? await this.getCustomerBudgetAmounts(customerId, _tx);
     if (!amounts.pflegesachleistungen36 || amounts.pflegesachleistungen36 === 0) {
       return [];
     }
@@ -957,14 +956,14 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return created;
   }
 
-  async ensureAllocations39_42a(customerId: number, _tx?: DbClient): Promise<BudgetAllocation[]> {
+  async ensureAllocations39_42a(customerId: number, _tx?: DbClient, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }): Promise<BudgetAllocation[]> {
     const d = _tx ?? db;
-    const preferences = await this.getBudgetPreferences(customerId, _tx);
+    const preferences = _preferences !== undefined ? _preferences : await this.getBudgetPreferences(customerId, _tx);
     if (!preferences?.budgetStartDate) {
       return [];
     }
 
-    const amounts = await this.getCustomerBudgetAmounts(customerId, _tx);
+    const amounts = _amounts ?? await this.getCustomerBudgetAmounts(customerId, _tx);
     if (!amounts.verhinderungspflege39 || amounts.verhinderungspflege39 === 0) {
       return [];
     }
@@ -1019,8 +1018,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return created;
   }
 
-  async getBudgetSummary45a(customerId: number): Promise<Budget45aSummary> {
-    await this.ensureAllocations45a(customerId);
+  async getBudgetSummary45a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }): Promise<Budget45aSummary> {
+    await this.ensureAllocations45a(customerId, undefined, _preferences, _amounts);
 
     const today = todayISO();
     const todayDate = parseLocalDate(today);
@@ -1029,7 +1028,9 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     const currentMonthStart = `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`;
     const currentMonthLastDay = lastDayOfMonth(currentYear, currentMonth);
 
-    const [allocResult, txResult, amounts] = await Promise.all([
+    const amounts = _amounts ?? await this.getCustomerBudgetAmounts(customerId);
+
+    const [allocResult, txResult] = await Promise.all([
       db.select({
         total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
       }).from(budgetAllocations).where(and(
@@ -1051,8 +1052,6 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         gte(budgetTransactions.transactionDate, currentMonthStart),
         lte(budgetTransactions.transactionDate, currentMonthLastDay)
       )),
-
-      this.getCustomerBudgetAmounts(customerId),
     ]);
 
     const currentMonthAllocatedCents = Number(allocResult[0]?.total ?? 0);
@@ -1067,8 +1066,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     };
   }
 
-  async getBudgetSummary39_42a(customerId: number): Promise<Budget39_42aSummary> {
-    await this.ensureAllocations39_42a(customerId);
+  async getBudgetSummary39_42a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }): Promise<Budget39_42aSummary> {
+    await this.ensureAllocations39_42a(customerId, undefined, _preferences, _amounts);
 
     const today = todayISO();
     const todayDate = parseLocalDate(today);
@@ -1076,7 +1075,9 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     const yearStart = `${currentYear}-01-01`;
     const yearEnd = `${currentYear}-12-31`;
 
-    const [allocResult, txResult, amounts] = await Promise.all([
+    const amounts = _amounts ?? await this.getCustomerBudgetAmounts(customerId);
+
+    const [allocResult, txResult] = await Promise.all([
       db.select({
         total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
       }).from(budgetAllocations).where(and(
@@ -1097,8 +1098,6 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         gte(budgetTransactions.transactionDate, yearStart),
         lte(budgetTransactions.transactionDate, yearEnd)
       )),
-
-      this.getCustomerBudgetAmounts(customerId),
     ]);
 
     const currentYearAllocatedCents = Number(allocResult[0]?.total ?? 0);
@@ -1114,10 +1113,16 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
   }
 
   async getAllBudgetSummaries(customerId: number): Promise<AllBudgetSummaries> {
+    const [preferences, typeSettings] = await Promise.all([
+      this.getBudgetPreferences(customerId),
+      this.getBudgetTypeSettings(customerId),
+    ]);
+    const amounts = await this.getCustomerBudgetAmounts(customerId, undefined, typeSettings);
+
     const [entlastungsbetrag45b, umwandlung45a, ersatzpflege39_42a] = await Promise.all([
-      this.getBudgetSummary(customerId),
-      this.getBudgetSummary45a(customerId),
-      this.getBudgetSummary39_42a(customerId),
+      this.getBudgetSummary(customerId, preferences, typeSettings),
+      this.getBudgetSummary45a(customerId, preferences, amounts),
+      this.getBudgetSummary39_42a(customerId, preferences, amounts),
     ]);
     return { entlastungsbetrag45b, umwandlung45a, ersatzpflege39_42a };
   }
@@ -1377,12 +1382,16 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         throw new Error(`Für diesen Termin wurde bereits eine Budget-Abbuchung erstellt (Transaktion #${existingTransaction.id})`);
       }
 
-      await this.ensureMonthlyAllocations(params.customerId, tx);
-      await this.ensureAllocations45a(params.customerId, tx);
-      await this.ensureAllocations39_42a(params.customerId, tx);
-      await this.processExpiredCarryover(params.customerId, tx);
+      const [preferences, typeSettings] = await Promise.all([
+        this.getBudgetPreferences(params.customerId, tx),
+        this.getBudgetTypeSettings(params.customerId, tx),
+      ]);
+      const amounts = await this.getCustomerBudgetAmounts(params.customerId, tx, typeSettings);
 
-      const typeSettings = await this.getBudgetTypeSettings(params.customerId, tx);
+      await this.ensureMonthlyAllocations(params.customerId, tx, preferences, typeSettings);
+      await this.ensureAllocations45a(params.customerId, tx, preferences, amounts);
+      await this.ensureAllocations39_42a(params.customerId, tx, preferences, amounts);
+      await this.processExpiredCarryover(params.customerId, tx);
 
       const defaultPriority: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null }> = [
         { budgetType: "umwandlung_45a", enabled: true, priority: 1, monthlyLimitCents: null },
@@ -1409,7 +1418,6 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           return aPrio - bPrio;
         });
       } else {
-        const preferences = await this.getBudgetPreferences(params.customerId, tx);
         priorityOrder = defaultPriority.map(d => ({
           ...d,
           monthlyLimitCents: d.budgetType === "entlastungsbetrag_45b" ? (preferences?.monthlyLimitCents ?? null) : null,

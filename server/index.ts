@@ -14,6 +14,9 @@ const app = express();
 app.set("trust proxy", 1);
 const httpServer = createServer(app);
 
+const intervals: NodeJS.Timeout[] = [];
+const timeouts: NodeJS.Timeout[] = [];
+
 const isDev = process.env.NODE_ENV !== "production";
 app.use(helmet({
   contentSecurityPolicy: {
@@ -146,7 +149,7 @@ process.on("uncaughtException", (error) => {
     }
   };
   runSessionCleanup();
-  setInterval(runSessionCleanup, 60 * 60 * 1000);
+  intervals.push(setInterval(runSessionCleanup, 60 * 60 * 1000));
 
   const { generateDocumentReviewTasks, shouldRunDocumentReview } = await import("./services/document-review");
   const runDocumentReviewIfDue = async () => {
@@ -160,7 +163,7 @@ process.on("uncaughtException", (error) => {
     }
   };
   runDocumentReviewIfDue();
-  const reviewInterval = setInterval(runDocumentReviewIfDue, 6 * 60 * 60 * 1000);
+  intervals.push(setInterval(runDocumentReviewIfDue, 6 * 60 * 60 * 1000));
 
   const { checkUpcomingBirthdays } = await import("./services/birthday-notification-checker");
   const runBirthdayCheck = async () => {
@@ -171,8 +174,8 @@ process.on("uncaughtException", (error) => {
       console.error("Fehler bei Geburtstags-Prüfung:", e);
     }
   };
-  setTimeout(runBirthdayCheck, 5 * 60 * 1000);
-  const birthdayInterval = setInterval(runBirthdayCheck, 6 * 60 * 60 * 1000);
+  timeouts.push(setTimeout(runBirthdayCheck, 5 * 60 * 1000));
+  intervals.push(setInterval(runBirthdayCheck, 6 * 60 * 60 * 1000));
 
   const { checkBudgetRenewals } = await import("./services/budget-renewal-checker");
   const runBudgetRenewalCheck = async () => {
@@ -183,8 +186,8 @@ process.on("uncaughtException", (error) => {
       console.error("Fehler bei Budget-Verlängerungs-Prüfung:", e);
     }
   };
-  setTimeout(runBudgetRenewalCheck, 7 * 60 * 1000);
-  const budgetRenewalInterval = setInterval(runBudgetRenewalCheck, 24 * 60 * 60 * 1000);
+  timeouts.push(setTimeout(runBudgetRenewalCheck, 7 * 60 * 1000));
+  intervals.push(setInterval(runBudgetRenewalCheck, 24 * 60 * 60 * 1000));
 
   try {
     const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || "alrikdegenkolb@seniorenengel-alltagsbegleitung.de";
@@ -223,6 +226,8 @@ process.on("uncaughtException", (error) => {
 
 function gracefulShutdown(signal: string) {
   log(`${signal} received, shutting down gracefully...`);
+  intervals.forEach(interval => clearInterval(interval));
+  timeouts.forEach(timeout => clearTimeout(timeout));
   httpServer.close(async () => {
     try {
       await closeBrowser();
