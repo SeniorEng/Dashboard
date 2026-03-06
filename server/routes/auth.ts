@@ -23,6 +23,7 @@ import { generateCsrfToken, setCsrfCookie, csrfProtection } from "../middleware/
 import { getOpenTaskCount } from "../storage/tasks";
 import { storage } from "../storage";
 import { sendEmail, buildPasswordResetEmailHtml } from "../services/email-service";
+import { resolveLogoToDataUrl } from "../services/logo-resolver";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { birthdaysCache } from "../services/cache";
 import { todayISO } from "@shared/utils/datetime";
@@ -187,12 +188,13 @@ router.post(
           const baseUrl = `${req.protocol}://${req.get("host")}`;
           const resetUrl = `${baseUrl}/reset-password?token=${token}`;
 
+          const resolvedLogo = await resolveLogoToDataUrl(companySettings.logoUrl);
           const html = buildPasswordResetEmailHtml({
             vorname: user.vorname || "",
             nachname: user.nachname || "",
             companyName: companySettings.companyName || "SeniorenEngel",
             resetUrl,
-            logoUrl: companySettings.logoUrl,
+            logoUrl: resolvedLogo,
           });
 
           await sendEmail(companySettings, {

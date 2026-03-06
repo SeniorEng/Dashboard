@@ -67,7 +67,7 @@ export function renderCoverLetterText(settings: CompanySettings, data: Placehold
   return replacePlaceholders(template, values);
 }
 
-export function renderEmailHtml(settings: CompanySettings, data: PlaceholderData): string {
+export function renderEmailHtml(settings: CompanySettings, data: PlaceholderData, resolvedLogoUrl?: string | null): string {
   const bodyText = renderCoverLetterText(settings, data);
   const values = buildPlaceholderValues(data);
 
@@ -81,7 +81,7 @@ export function renderEmailHtml(settings: CompanySettings, data: PlaceholderData
   }).join("");
 
   const companyName = data.firmenname;
-  const logoUrl = settings.logoUrl;
+  const logoUrl = resolvedLogoUrl || null;
 
   return `<!DOCTYPE html>
 <html lang="de">

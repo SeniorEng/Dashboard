@@ -4,6 +4,7 @@ import { getDocumentPdfBuffer } from "./document-pdf";
 import { renderEmailSubject, renderEmailHtml, renderCoverLetterPdf } from "./cover-letter";
 import { deliveryStorage } from "../storage/deliveries";
 import { storage } from "../storage";
+import { resolveLogoToDataUrl } from "./logo-resolver";
 import type { CompanySettings } from "@shared/schema";
 
 interface DeliveryOptions {
@@ -122,8 +123,9 @@ async function deliverByEmail(
     })
   );
 
+  const resolvedLogo = await resolveLogoToDataUrl(settings.logoUrl);
   const subject = renderEmailSubject(settings, placeholderData);
-  const html = renderEmailHtml(settings, placeholderData);
+  const html = renderEmailHtml(settings, placeholderData, resolvedLogo);
 
   await sendEmail(settings, {
     to: customer.email,
