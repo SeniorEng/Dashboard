@@ -350,6 +350,25 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
         validFrom: data.budgets.validFrom,
       }, userId);
 
+      const typeSettings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null }> = [];
+      if (data.budgets.entlastungsbetrag45b > 0) {
+        typeSettings.push({ budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: data.budgets.entlastungsbetrag45b });
+      }
+      if (data.budgets.pflegesachleistungen36 > 0) {
+        typeSettings.push({ budgetType: "umwandlung_45a", enabled: true, priority: 2, monthlyLimitCents: data.budgets.pflegesachleistungen36 });
+      }
+      if (data.budgets.verhinderungspflege39 > 0) {
+        typeSettings.push({ budgetType: "ersatzpflege_39_42a", enabled: true, priority: 3, yearlyLimitCents: data.budgets.verhinderungspflege39 });
+      }
+      if (typeSettings.length > 0) {
+        try {
+          await budgetLedgerStorage.upsertBudgetTypeSettings(customer.id, typeSettings);
+        } catch (err) {
+          console.error(`[POST /customers] Budget-Type-Settings fehlgeschlagen für Kunde ${customer.id}:`, err);
+          warnings.push("Budget-Einstellungen konnten nicht gespeichert werden");
+        }
+      }
+
       if (data.budgets.carryoverAmountCents && data.budgets.carryoverAmountCents > 0) {
         try {
           const validFrom = data.budgets.validFrom || todayISO();

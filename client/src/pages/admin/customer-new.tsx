@@ -445,6 +445,7 @@ export default function AdminCustomerNew() {
               warnings.push(`Budget ${bt.type} konnte nicht initialisiert werden`);
             }
           }
+
         }
 
         if (warnings.length > 0) {
