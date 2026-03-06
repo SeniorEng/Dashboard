@@ -698,7 +698,7 @@ function PasswordSection() {
 
 interface ProofItem {
   id: number;
-  qualificationId: number;
+  qualificationId: number | null;
   documentTypeId: number;
   status: string;
   fileName: string | null;
@@ -707,7 +707,7 @@ interface ProofItem {
   reviewedAt: string | null;
   rejectionReason: string | null;
   documentType: { id: number; name: string };
-  qualification: { id: number; name: string };
+  qualification: { id: number; name: string } | null;
 }
 
 function ProofsSection() {
@@ -741,7 +741,7 @@ function ProofsSection() {
 
   if (isLoading) {
     return (
-      <SectionCard title="Qualifikations-Nachweise" icon={<GraduationCap className={iconSize.sm} />}>
+      <SectionCard title="Dokumentennachweise" icon={<GraduationCap className={iconSize.sm} />}>
         <div className="flex justify-center py-4">
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
         </div>
@@ -752,14 +752,14 @@ function ProofsSection() {
   if (proofs.length === 0) return null;
 
   const grouped = proofs.reduce<Record<string, ProofItem[]>>((acc, proof) => {
-    const key = proof.qualification.name;
+    const key = proof.qualification?.name ?? "Dokumentenpflichten";
     if (!acc[key]) acc[key] = [];
     acc[key].push(proof);
     return acc;
   }, {});
 
   return (
-    <SectionCard title="Qualifikations-Nachweise" icon={<GraduationCap className={iconSize.sm} />}>
+    <SectionCard title="Dokumentennachweise" icon={<GraduationCap className={iconSize.sm} />}>
       <div className="space-y-4">
         {Object.entries(grouped).map(([qualName, qualProofs]) => (
           <div key={qualName}>

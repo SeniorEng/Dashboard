@@ -4,7 +4,6 @@ import { requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../lib/errors";
 import { authService } from "../services/auth";
 import { documentStorage } from "../storage/documents";
-import { qualificationStorage } from "../storage/qualifications";
 import { usersCache, birthdaysCache } from "../services/cache";
 import { sanitizeUser } from "../utils/sanitize-user";
 import { geocodeEmployee } from "../services/geocoding";
@@ -134,18 +133,13 @@ router.post("/documents", asyncHandler("Dokument konnte nicht hochgeladen werden
   res.status(201).json(doc);
 }));
 
-router.get("/qualifications", asyncHandler("Qualifikationen konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const qualifications = await qualificationStorage.getEmployeeQualifications(req.user!.id);
-  res.json(qualifications);
-}));
-
 router.get("/proofs", asyncHandler("Nachweise konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const proofs = await qualificationStorage.getEmployeeProofs(req.user!.id);
+  const proofs = await documentStorage.getEmployeeProofs(req.user!.id);
   res.json(proofs);
 }));
 
 router.get("/proofs/pending-count", asyncHandler("Anzahl ausstehender Nachweise konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const count = await qualificationStorage.getPendingProofCount(req.user!.id);
+  const count = await documentStorage.getPendingProofCount(req.user!.id);
   res.json({ count });
 }));
 
@@ -156,7 +150,7 @@ router.patch("/proofs/:proofId/upload", asyncHandler("Nachweis konnte nicht hoch
     return;
   }
 
-  const proof = await qualificationStorage.getProofById(proofId);
+  const proof = await documentStorage.getProofById(proofId);
   if (!proof || proof.employeeId !== req.user!.id) {
     res.status(404).json({ error: "NOT_FOUND", message: "Nachweis nicht gefunden" });
     return;
@@ -167,17 +161,17 @@ router.patch("/proofs/:proofId/upload", asyncHandler("Nachweis konnte nicht hoch
     return;
   }
 
-  const schema = z.object({
+  const proofSchema = z.object({
     fileName: z.string().min(1),
     objectPath: z.string().min(1),
   });
-  const result = schema.safeParse(req.body);
+  const result = proofSchema.safeParse(req.body);
   if (!result.success) {
     res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Daten" });
     return;
   }
 
-  const updated = await qualificationStorage.uploadProof(proofId, result.data.fileName, result.data.objectPath);
+  const updated = await documentStorage.uploadProof(proofId, result.data.fileName, result.data.objectPath);
   res.json(updated);
 }));
 

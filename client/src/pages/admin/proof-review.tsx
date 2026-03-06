@@ -29,14 +29,14 @@ import { iconSize } from "@/design-system";
 interface PendingProof {
   id: number;
   employeeId: number;
-  qualificationId: number;
+  qualificationId: number | null;
   documentTypeId: number;
   status: string;
   fileName: string | null;
   objectPath: string | null;
   uploadedAt: string | null;
   documentType: { id: number; name: string };
-  qualification: { id: number; name: string };
+  qualification: { id: number; name: string } | null;
   employee: { id: number; displayName: string };
 }
 
@@ -56,12 +56,12 @@ function ProofReviewContent() {
 
   const { data: proofs, isLoading } = useQuery<PendingProof[]>({
     queryKey: ["admin", "pending-proofs"],
-    queryFn: async () => unwrapResult(await api.get<PendingProof[]>("/admin/qualifications/proofs/pending-review")),
+    queryFn: async () => unwrapResult(await api.get<PendingProof[]>("/admin/proofs/pending-review")),
   });
 
   const reviewMutation = useMutation({
     mutationFn: async ({ proofId, approved, rejectionReason }: { proofId: number; approved: boolean; rejectionReason?: string }) =>
-      unwrapResult(await api.patch(`/admin/qualifications/proofs/${proofId}/review`, { approved, rejectionReason })),
+      unwrapResult(await api.patch(`/admin/proofs/${proofId}/review`, { approved, rejectionReason })),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["admin", "pending-proofs"] });
       toast({ title: variables.approved ? "Nachweis freigegeben" : "Nachweis abgelehnt" });
@@ -81,13 +81,13 @@ function ProofReviewContent() {
   return (
     <div className="max-w-2xl mx-auto">
       <div className="flex items-center gap-3 mb-6">
-        <Link href="/admin/qualifications">
+        <Link href="/admin">
           <Button variant="ghost" size="icon" aria-label="Zurück" data-testid="button-back">
             <ArrowLeft className={iconSize.md} />
           </Button>
         </Link>
         <div className="flex-1">
-          <h1 className="text-xl font-bold" data-testid="text-page-title">Nachweis-Prüfung</h1>
+          <h1 className="text-xl font-bold" data-testid="text-page-title">Dokument-Prüfung</h1>
           <p className="text-sm text-muted-foreground">
             {proofs?.length ?? 0} hochgeladene Nachweise zur Prüfung
           </p>
@@ -123,7 +123,7 @@ function ProofReviewContent() {
                         <p className="text-sm font-medium truncate">{proof.documentType.name}</p>
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           <GraduationCap className="h-3 w-3" />
-                          <span className="truncate">{proof.qualification.name}</span>
+                          <span className="truncate">{proof.qualification?.name ?? "Dokumentenpflicht"}</span>
                           {proof.uploadedAt && (
                             <>
                               <span>·</span>
@@ -188,7 +188,7 @@ function ProofReviewContent() {
             <div className="space-y-4">
               <div className="text-sm">
                 <p><strong>{rejectingProof.employee.displayName}</strong></p>
-                <p className="text-muted-foreground">{rejectingProof.documentType.name} — {rejectingProof.qualification.name}</p>
+                <p className="text-muted-foreground">{rejectingProof.documentType.name}{rejectingProof.qualification ? ` — ${rejectingProof.qualification.name}` : ""}</p>
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Ablehnungsgrund</label>

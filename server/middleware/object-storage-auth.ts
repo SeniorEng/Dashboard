@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { db } from "../lib/db";
 import { eq, or } from "drizzle-orm";
 import { customerDocuments, generatedDocuments, employeeDocuments } from "@shared/schema/documents";
-import { employeeDocumentProofs } from "@shared/schema/qualifications";
+import { employeeDocumentProofs } from "@shared/schema";
 import { companySettings } from "@shared/schema/company";
 import { storage } from "../storage";
 

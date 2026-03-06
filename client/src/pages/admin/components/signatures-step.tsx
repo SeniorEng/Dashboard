@@ -14,25 +14,20 @@ import { useToast } from "@/hooks/use-toast";
 import { DocumentPreview } from "@/features/documents/document-preview";
 import type { CustomerFormData } from "./customer-types";
 
-interface TemplateWithRequirement {
-  id: number;
-  slug: string;
-  name: string;
-  description: string | null;
-  htmlContent: string;
-  requirement: string;
-  sortOrder: number;
-}
-
-interface DocumentTypeWithTemplate {
-  id: number;
-  name: string;
-  description: string | null;
-  targetType: string;
-  context: string;
-  hasTemplate: boolean;
-  templateName: string | null;
-  templateSlug: string | null;
+interface DocumentRequirement {
+  documentType: {
+    id: number;
+    name: string;
+    description: string | null;
+    inputMethod: string;
+  };
+  requirement: "pflicht" | "optional";
+  triggeredBy: string;
+  template?: {
+    id: number;
+    slug: string;
+    name: string;
+  } | null;
 }
 
 export interface WizardUploadedDoc {
@@ -59,33 +54,20 @@ export function SignaturesStep({
   onUploadedDocumentsChange,
   formData,
 }: SignaturesStepProps) {
-  const { data: templates, isLoading: templatesLoading, isError, refetch } = useQuery({
-    queryKey: ["/api/customers/document-templates/billing-type", billingType],
+  const { data: requirements, isLoading, isError, refetch } = useQuery({
+    queryKey: ["/api/customers/document-requirements", billingType],
     queryFn: async () => {
-      const result = await api.get<TemplateWithRequirement[]>(
-        `/customers/document-templates/billing-type/${billingType}`
+      const result = await api.get<DocumentRequirement[]>(
+        `/customers/document-requirements/${billingType}`
       );
       return unwrapResult(result);
     },
     staleTime: 60000,
   });
-
-  const { data: docTypes, isLoading: docTypesLoading } = useQuery({
-    queryKey: ["customers", "document-types", "customer", "vertragsabschluss"],
-    queryFn: async () => {
-      const result = await api.get<DocumentTypeWithTemplate[]>(
-        "/customers/document-types/customer?context=vertragsabschluss"
-      );
-      return unwrapResult(result);
-    },
-    staleTime: 60000,
-  });
-
-  const isLoading = templatesLoading || docTypesLoading;
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-12">
+      <div className="flex items-center justify-center py-12" data-testid="loading-signatures">
         <Loader2 className="w-6 h-6 animate-spin text-teal-600" />
       </div>
     );
@@ -105,11 +87,8 @@ export function SignaturesStep({
     );
   }
 
-  const templateSlugs = new Set((templates || []).map(t => t.slug));
-  const uploadOnlyDocTypes = (docTypes || []).filter(dt => !dt.hasTemplate && !templateSlugs.has(dt.templateSlug || ""));
-
-  const pflichtDocs = templates?.filter(t => t.requirement === "pflicht") || [];
-  const optionalDocs = templates?.filter(t => t.requirement === "optional") || [];
+  const pflichtDocs = requirements?.filter(r => r.requirement === "pflicht") || [];
+  const optionalDocs = requirements?.filter(r => r.requirement === "optional") || [];
 
   return (
     <div className="space-y-6">
@@ -123,27 +102,21 @@ export function SignaturesStep({
             <AlertCircle className="w-4 h-4 text-red-500" />
             Pflichtdokumente
           </h3>
-          {pflichtDocs.map((doc) => (
-            <DocumentSignatureCard
-              key={doc.slug}
-              doc={doc}
-              signature={customerSignatures[doc.slug]}
-              onSignatureChange={(data, location) => onSignatureChange(doc.slug, data, location)}
-              uploadedDoc={uploadedDocuments.find(u => {
-                const matchingType = (docTypes || []).find(dt => dt.templateSlug === doc.slug);
-                return matchingType && u.documentTypeId === matchingType.id;
-              })}
-              documentTypeId={(docTypes || []).find(dt => dt.templateSlug === doc.slug)?.id}
+          {pflichtDocs.map((req) => (
+            <RequirementCard
+              key={req.documentType.id}
+              requirement={req}
+              signature={req.template ? customerSignatures[req.template.slug] : undefined}
+              onSignatureChange={(data, location) => {
+                if (req.template) onSignatureChange(req.template.slug, data, location);
+              }}
+              uploadedDoc={uploadedDocuments.find(u => u.documentTypeId === req.documentType.id)}
               onDocUploaded={(uploaded) => {
-                const matchingType = (docTypes || []).find(dt => dt.templateSlug === doc.slug);
-                if (!matchingType) return;
-                const filtered = uploadedDocuments.filter(u => u.documentTypeId !== matchingType.id);
+                const filtered = uploadedDocuments.filter(u => u.documentTypeId !== req.documentType.id);
                 onUploadedDocumentsChange([...filtered, uploaded]);
               }}
               onDocRemoved={() => {
-                const matchingType = (docTypes || []).find(dt => dt.templateSlug === doc.slug);
-                if (!matchingType) return;
-                onUploadedDocumentsChange(uploadedDocuments.filter(u => u.documentTypeId !== matchingType.id));
+                onUploadedDocumentsChange(uploadedDocuments.filter(u => u.documentTypeId !== req.documentType.id));
               }}
               formData={formData}
             />
@@ -152,43 +125,13 @@ export function SignaturesStep({
       )}
 
       {optionalDocs.length > 0 && (
-        <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-gray-700">
-            Optionale Dokumente
-          </h3>
-          {optionalDocs.map((doc) => (
-            <DocumentSignatureCard
-              key={doc.slug}
-              doc={doc}
-              signature={customerSignatures[doc.slug]}
-              onSignatureChange={(data, location) => onSignatureChange(doc.slug, data, location)}
-              uploadedDoc={uploadedDocuments.find(u => {
-                const matchingType = (docTypes || []).find(dt => dt.templateSlug === doc.slug);
-                return matchingType && u.documentTypeId === matchingType.id;
-              })}
-              documentTypeId={(docTypes || []).find(dt => dt.templateSlug === doc.slug)?.id}
-              onDocUploaded={(uploaded) => {
-                const matchingType = (docTypes || []).find(dt => dt.templateSlug === doc.slug);
-                if (!matchingType) return;
-                const filtered = uploadedDocuments.filter(u => u.documentTypeId !== matchingType.id);
-                onUploadedDocumentsChange([...filtered, uploaded]);
-              }}
-              onDocRemoved={() => {
-                const matchingType = (docTypes || []).find(dt => dt.templateSlug === doc.slug);
-                if (!matchingType) return;
-                onUploadedDocumentsChange(uploadedDocuments.filter(u => u.documentTypeId !== matchingType.id));
-              }}
-              formData={formData}
-            />
-          ))}
-        </div>
-      )}
-
-      {uploadOnlyDocTypes.length > 0 && (
         <OptionalDocsSection
-          uploadOnlyDocTypes={uploadOnlyDocTypes}
+          requirements={optionalDocs}
+          customerSignatures={customerSignatures}
+          onSignatureChange={onSignatureChange}
           uploadedDocuments={uploadedDocuments}
           onUploadedDocumentsChange={onUploadedDocumentsChange}
+          formData={formData}
         />
       )}
 
@@ -202,21 +145,19 @@ export function SignaturesStep({
   );
 }
 
-function DocumentSignatureCard({
-  doc,
+function RequirementCard({
+  requirement,
   signature,
   onSignatureChange,
   uploadedDoc,
-  documentTypeId,
   onDocUploaded,
   onDocRemoved,
   formData,
 }: {
-  doc: TemplateWithRequirement;
+  requirement: DocumentRequirement;
   signature?: string;
   onSignatureChange: (data: string, location?: string | null) => void;
   uploadedDoc?: WizardUploadedDoc;
-  documentTypeId?: number;
   onDocUploaded: (doc: WizardUploadedDoc) => void;
   onDocRemoved: () => void;
   formData?: CustomerFormData;
@@ -228,9 +169,15 @@ function DocumentSignatureCard({
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  const { documentType, template } = requirement;
+  const canSign = (documentType.inputMethod === "signature" || documentType.inputMethod === "both") && !!template;
+  const canUpload = documentType.inputMethod === "upload" || documentType.inputMethod === "both" || !template;
+
   const isSigned = !!signature;
   const isUploaded = !!uploadedDoc;
   const isFulfilled = isSigned || isUploaded;
+  const testSlug = template?.slug ?? `type-${documentType.id}`;
 
   const { uploadFile, isUploading } = useUpload({
     onError: (error) => {
@@ -239,17 +186,16 @@ function DocumentSignatureCard({
   });
 
   const handleFileSelect = useCallback(async (file: File) => {
-    if (!documentTypeId) return;
     const result = await uploadFile(file);
     if (result) {
       onDocUploaded({
-        documentTypeId,
+        documentTypeId: documentType.id,
         fileName: file.name,
         objectPath: result.objectPath,
       });
       setShowUpload(false);
     }
-  }, [documentTypeId, uploadFile, onDocUploaded]);
+  }, [documentType.id, uploadFile, onDocUploaded]);
 
   const handleSignatureSave = useCallback((signatureData: string, metadata?: SignatureMetadata) => {
     const location = metadata?.location ? `${metadata.location.lat},${metadata.location.lng}` : null;
@@ -265,7 +211,7 @@ function DocumentSignatureCard({
       return;
     }
 
-    if (!formData) {
+    if (!formData || !template) {
       toast({ title: "Hinweis", description: "Vorschau ist nur verfügbar, wenn Kundendaten ausgefüllt sind.", variant: "destructive" });
       return;
     }
@@ -273,7 +219,7 @@ function DocumentSignatureCard({
     setIsLoadingPreview(true);
     try {
       const result = await api.post("/admin/document-templates/render-preview", {
-        templateSlug: doc.slug,
+        templateSlug: template.slug,
         formData: {
           vorname: formData.vorname,
           nachname: formData.nachname,
@@ -320,12 +266,12 @@ function DocumentSignatureCard({
     } finally {
       setIsLoadingPreview(false);
     }
-  }, [previewHtml, formData, doc.slug, toast]);
+  }, [previewHtml, formData, template, toast]);
 
   return (
     <Card
       className={`transition-colors ${isFulfilled ? "border-green-200 bg-green-50/30" : "border-gray-200"}`}
-      data-testid={`signature-doc-${doc.slug}`}
+      data-testid={`signature-doc-${testSlug}`}
     >
       <CardContent className="p-4 space-y-3">
         <div className="flex items-center gap-3">
@@ -338,13 +284,13 @@ function DocumentSignatureCard({
             {isFulfilled ? <Check className={iconSize.sm} /> : <FileText className={iconSize.sm} />}
           </div>
           <div className="flex-1 min-w-0">
-            <h4 className="font-medium text-gray-900">{doc.name}</h4>
+            <h4 className="font-medium text-gray-900">{documentType.name}</h4>
             <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
               <Badge
-                variant={doc.requirement === "pflicht" ? "destructive" : "secondary"}
+                variant={requirement.requirement === "pflicht" ? "destructive" : "secondary"}
                 className="text-[10px] px-1.5 py-0.5 leading-none"
               >
-                {doc.requirement === "pflicht" ? "Pflicht" : "Optional"}
+                {requirement.requirement === "pflicht" ? "Pflicht" : "Optional"}
               </Badge>
               {isSigned && (
                 <Badge variant="default" className="text-[10px] px-1.5 py-0.5 leading-none bg-green-600">
@@ -359,8 +305,8 @@ function DocumentSignatureCard({
             </div>
           </div>
         </div>
-        {doc.description && (
-          <p className="text-sm text-gray-500">{doc.description}</p>
+        {documentType.description && (
+          <p className="text-sm text-gray-500">{documentType.description}</p>
         )}
 
         {showPreview && previewHtml && (
@@ -375,12 +321,12 @@ function DocumentSignatureCard({
                 size="sm"
                 onClick={() => setShowPreview(false)}
                 className="min-h-[44px]"
-                data-testid={`button-close-preview-${doc.slug}`}
+                data-testid={`button-close-preview-${testSlug}`}
               >
                 <ArrowLeft className={`${iconSize.sm} mr-1.5`} />
                 Vorschau schließen
               </Button>
-              {!isSigned && (
+              {canSign && !isSigned && (
                 <Button
                   type="button"
                   size="sm"
@@ -389,7 +335,7 @@ function DocumentSignatureCard({
                     setShowSignaturePad(true);
                   }}
                   className="min-h-[44px] bg-teal-600 hover:bg-teal-700"
-                  data-testid={`button-sign-after-preview-${doc.slug}`}
+                  data-testid={`button-sign-after-preview-${testSlug}`}
                 >
                   <Pen className={`${iconSize.sm} mr-1.5`} />
                   Jetzt unterschreiben
@@ -401,30 +347,30 @@ function DocumentSignatureCard({
 
         {!showPreview && (
           <div className="space-y-2">
-            {showSignaturePad ? (
+            {showSignaturePad && canSign ? (
               <SignaturePad
-                title={`Unterschrift: ${doc.name}`}
+                title={`Unterschrift: ${documentType.name}`}
                 onSave={handleSignatureSave}
                 onCancel={() => setShowSignaturePad(false)}
               />
-            ) : showUpload ? (
+            ) : showUpload && canUpload ? (
               <UploadArea
                 isUploading={isUploading}
                 onFileSelect={handleFileSelect}
                 onCancel={() => setShowUpload(false)}
                 cameraInputRef={cameraInputRef}
-                testIdSuffix={doc.slug}
+                testIdSuffix={testSlug}
               />
             ) : (
               <div className="flex flex-wrap gap-2">
-                {formData && (
+                {canSign && formData && (
                   <Button
                     type="button"
                     variant="outline"
                     onClick={handleShowPreview}
                     disabled={isLoadingPreview}
                     className="text-sm min-h-[44px]"
-                    data-testid={`button-preview-${doc.slug}`}
+                    data-testid={`button-preview-${testSlug}`}
                   >
                     {isLoadingPreview ? (
                       <><Loader2 className={`${iconSize.sm} mr-1.5 animate-spin`} />Wird geladen...</>
@@ -433,26 +379,28 @@ function DocumentSignatureCard({
                     )}
                   </Button>
                 )}
-                <Button
-                  type="button"
-                  variant={isSigned ? "outline" : "default"}
-                  onClick={() => setShowSignaturePad(true)}
-                  className={`text-sm min-h-[44px] ${!isSigned ? "bg-teal-600 hover:bg-teal-700" : ""}`}
-                  data-testid={`button-sign-${doc.slug}`}
-                >
-                  <Pen className={`${iconSize.sm} mr-1.5`} />
-                  {isSigned ? "Unterschrift ändern" : "Unterschreiben"}
-                </Button>
-                {documentTypeId && (
+                {canSign && (
                   <Button
                     type="button"
-                    variant="outline"
+                    variant={isSigned ? "outline" : "default"}
+                    onClick={() => setShowSignaturePad(true)}
+                    className={`text-sm min-h-[44px] ${!isSigned ? "bg-teal-600 hover:bg-teal-700" : ""}`}
+                    data-testid={`button-sign-${testSlug}`}
+                  >
+                    <Pen className={`${iconSize.sm} mr-1.5`} />
+                    {isSigned ? "Unterschrift ändern" : "Unterschreiben"}
+                  </Button>
+                )}
+                {canUpload && (
+                  <Button
+                    type="button"
+                    variant={canSign ? "outline" : (isUploaded ? "outline" : "default")}
                     onClick={() => setShowUpload(true)}
-                    className="text-sm min-h-[44px]"
-                    data-testid={`button-upload-alt-${doc.slug}`}
+                    className={`text-sm min-h-[44px] ${!canSign && !isUploaded ? "bg-teal-600 hover:bg-teal-700" : ""}`}
+                    data-testid={`button-upload-alt-${testSlug}`}
                   >
                     <Upload className={`${iconSize.sm} mr-1.5`} />
-                    {isUploaded ? "Erneut hochladen" : "Stattdessen hochladen"}
+                    {isUploaded ? "Erneut hochladen" : (canSign ? "Stattdessen hochladen" : "Hochladen")}
                   </Button>
                 )}
               </div>
@@ -467,7 +415,7 @@ function DocumentSignatureCard({
                   onClick={() => onDocRemoved()}
                   className="p-2 text-gray-400 hover:text-red-500 rounded-md"
                   aria-label="Upload entfernen"
-                  data-testid={`button-remove-upload-${doc.slug}`}
+                  data-testid={`button-remove-upload-${testSlug}`}
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -488,23 +436,32 @@ function DocumentSignatureCard({
           e.target.value = "";
         }}
         className="hidden"
-        data-testid={`input-camera-${doc.slug}`}
+        data-testid={`input-camera-${testSlug}`}
       />
     </Card>
   );
 }
 
 function OptionalDocsSection({
-  uploadOnlyDocTypes,
+  requirements,
+  customerSignatures,
+  onSignatureChange,
   uploadedDocuments,
   onUploadedDocumentsChange,
+  formData,
 }: {
-  uploadOnlyDocTypes: DocumentTypeWithTemplate[];
+  requirements: DocumentRequirement[];
+  customerSignatures: Record<string, string>;
+  onSignatureChange: (slug: string, signatureData: string, location?: string | null) => void;
   uploadedDocuments: WizardUploadedDoc[];
   onUploadedDocumentsChange: (docs: WizardUploadedDoc[]) => void;
+  formData?: CustomerFormData;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const uploadedCount = uploadOnlyDocTypes.filter(dt => uploadedDocuments.some(u => u.documentTypeId === dt.id)).length;
+  const uploadedCount = requirements.filter(r =>
+    uploadedDocuments.some(u => u.documentTypeId === r.documentType.id) ||
+    (r.template && customerSignatures[r.template.slug])
+  ).length;
 
   return (
     <div className="space-y-3">
@@ -516,152 +473,34 @@ function OptionalDocsSection({
       >
         <span className="flex items-center gap-2">
           <Upload className="w-4 h-4 text-gray-500" />
-          Weitere Dokumente ({uploadedCount}/{uploadOnlyDocTypes.length})
+          Optionale Dokumente ({uploadedCount}/{requirements.length})
         </span>
         {expanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
       </button>
       {expanded && (
         <div className="space-y-3">
-          {uploadOnlyDocTypes.map((dt) => (
-            <UploadOnlyCard
-              key={dt.id}
-              docType={dt}
-              uploadedDoc={uploadedDocuments.find(u => u.documentTypeId === dt.id)}
+          {requirements.map((req) => (
+            <RequirementCard
+              key={req.documentType.id}
+              requirement={req}
+              signature={req.template ? customerSignatures[req.template.slug] : undefined}
+              onSignatureChange={(data, location) => {
+                if (req.template) onSignatureChange(req.template.slug, data, location);
+              }}
+              uploadedDoc={uploadedDocuments.find(u => u.documentTypeId === req.documentType.id)}
               onDocUploaded={(uploaded) => {
-                const filtered = uploadedDocuments.filter(u => u.documentTypeId !== dt.id);
+                const filtered = uploadedDocuments.filter(u => u.documentTypeId !== req.documentType.id);
                 onUploadedDocumentsChange([...filtered, uploaded]);
               }}
               onDocRemoved={() => {
-                onUploadedDocumentsChange(uploadedDocuments.filter(u => u.documentTypeId !== dt.id));
+                onUploadedDocumentsChange(uploadedDocuments.filter(u => u.documentTypeId !== req.documentType.id));
               }}
+              formData={formData}
             />
           ))}
         </div>
       )}
     </div>
-  );
-}
-
-function UploadOnlyCard({
-  docType,
-  uploadedDoc,
-  onDocUploaded,
-  onDocRemoved,
-}: {
-  docType: DocumentTypeWithTemplate;
-  uploadedDoc?: WizardUploadedDoc;
-  onDocUploaded: (doc: WizardUploadedDoc) => void;
-  onDocRemoved: () => void;
-}) {
-  const { toast } = useToast();
-  const [showUpload, setShowUpload] = useState(false);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
-  const isUploaded = !!uploadedDoc;
-
-  const { uploadFile, isUploading } = useUpload({
-    onError: (error) => {
-      toast({ title: "Upload-Fehler", description: error.message, variant: "destructive" });
-    },
-  });
-
-  const handleFileSelect = useCallback(async (file: File) => {
-    const result = await uploadFile(file);
-    if (result) {
-      onDocUploaded({
-        documentTypeId: docType.id,
-        fileName: file.name,
-        objectPath: result.objectPath,
-      });
-      setShowUpload(false);
-    }
-  }, [docType.id, uploadFile, onDocUploaded]);
-
-  return (
-    <Card
-      className={`transition-colors ${isUploaded ? "border-green-200 bg-green-50/30" : "border-gray-200"}`}
-      data-testid={`upload-only-doc-${docType.id}`}
-    >
-      <CardContent className="p-4 space-y-3">
-        <div className="flex items-center gap-3">
-          <div
-            className={`flex items-center justify-center w-8 h-8 rounded-full shrink-0 ${
-              isUploaded ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"
-            }`}
-          >
-            {isUploaded ? <Check className={iconSize.sm} /> : <Upload className={iconSize.sm} />}
-          </div>
-          <div className="flex-1 min-w-0">
-            <h4 className="font-medium text-gray-900">{docType.name}</h4>
-            <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-              <Badge variant="secondary" className="text-[10px] px-1.5 py-0.5 leading-none">
-                Nur Upload
-              </Badge>
-              {isUploaded && (
-                <Badge variant="default" className="text-[10px] px-1.5 py-0.5 leading-none bg-blue-600">
-                  Hochgeladen
-                </Badge>
-              )}
-            </div>
-          </div>
-        </div>
-        {docType.description && (
-          <p className="text-sm text-gray-500">{docType.description}</p>
-        )}
-
-        <div className="space-y-2">
-          {showUpload ? (
-            <UploadArea
-              isUploading={isUploading}
-              onFileSelect={handleFileSelect}
-              onCancel={() => setShowUpload(false)}
-              cameraInputRef={cameraInputRef}
-              testIdSuffix={`type-${docType.id}`}
-            />
-          ) : (
-            <Button
-              type="button"
-              variant={isUploaded ? "outline" : "default"}
-              onClick={() => setShowUpload(true)}
-              className={`text-sm min-h-[44px] ${!isUploaded ? "bg-teal-600 hover:bg-teal-700" : ""}`}
-              data-testid={`button-upload-${docType.id}`}
-            >
-              <Upload className={`${iconSize.sm} mr-1.5`} />
-              {isUploaded ? "Erneut hochladen" : "Hochladen"}
-            </Button>
-          )}
-
-          {isUploaded && !showUpload && (
-            <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-md">
-              <FileText className="h-4 w-4 text-blue-500 shrink-0" />
-              <span className="text-xs text-blue-700 truncate flex-1">{uploadedDoc!.fileName}</span>
-              <button
-                type="button"
-                onClick={() => onDocRemoved()}
-                className="p-2 text-gray-400 hover:text-red-500 rounded-md"
-                aria-label="Upload entfernen"
-                data-testid={`button-remove-upload-type-${docType.id}`}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          )}
-        </div>
-      </CardContent>
-
-      <input
-        ref={cameraInputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) handleFileSelect(file);
-          e.target.value = "";
-        }}
-        className="hidden"
-        data-testid={`input-camera-type-${docType.id}`}
-      />
-    </Card>
   );
 }
 

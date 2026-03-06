@@ -71,6 +71,13 @@ router.get("/document-templates/billing-type/:billingType", asyncHandler("Vorlag
   res.json(templates);
 }));
 
+router.get("/document-requirements/:billingType", asyncHandler("Dokumentenanforderungen konnten nicht ermittelt werden", async (req, res) => {
+  const { evaluateTriggersForCustomer } = await import("../services/document-trigger-engine");
+  const billingType = req.params.billingType;
+  const requirements = await evaluateTriggersForCustomer({ billingType });
+  res.json(requirements);
+}));
+
 router.get("/", asyncHandler("Kunden konnten nicht geladen werden", async (req, res) => {
   const user = req.user!;
   const statusFilter = req.query.status as string | undefined;

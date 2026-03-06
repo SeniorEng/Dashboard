@@ -57,7 +57,7 @@ export const employeeQualifications = pgTable("employee_qualifications", {
 export const employeeDocumentProofs = pgTable("employee_document_proofs", {
   id: serial("id").primaryKey(),
   employeeId: integer("employee_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  qualificationId: integer("qualification_id").notNull().references(() => qualifications.id, { onDelete: "cascade" }),
+  qualificationId: integer("qualification_id").references(() => qualifications.id, { onDelete: "cascade" }),
   documentTypeId: integer("document_type_id").notNull().references(() => documentTypes.id, { onDelete: "cascade" }),
   status: text("status").notNull().default("pending"),
   fileName: text("file_name"),

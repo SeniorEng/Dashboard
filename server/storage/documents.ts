@@ -1,4 +1,4 @@
-import { eq, and, desc, asc, lte, sql, isNull } from "drizzle-orm";
+import { eq, and, desc, asc, lte, sql, isNull, inArray } from "drizzle-orm";
 import { formatDateISO } from "@shared/utils/datetime";
 import {
   documentTypes,
@@ -7,11 +7,16 @@ import {
   customers,
   documentTemplates,
   documentTemplateBillingTypes,
+  documentTypeTriggers,
   generatedDocuments,
   documentSigningTokens,
+  employeeDocumentProofs,
+  users,
   type DocumentType,
   type InsertDocumentType,
   type UpdateDocumentType,
+  type DocumentTypeTrigger,
+  type InsertDocumentTypeTrigger,
   type EmployeeDocument,
   type InsertEmployeeDocument,
   type CustomerDocument,
@@ -23,6 +28,7 @@ import {
   type GeneratedDocument,
   type InsertGeneratedDocument,
   type DocumentSigningToken,
+  type EmployeeDocumentProof,
 } from "@shared/schema";
 import { db } from "../lib/db";
 
@@ -62,6 +68,10 @@ export interface IDocumentStorage {
   softDeleteBatch(batchId: string): Promise<number>;
   softDeleteCustomerDocument(documentId: number): Promise<void>;
   softDeleteCustomerBatch(batchId: string): Promise<number>;
+
+  getTriggersForDocumentType(documentTypeId: number): Promise<DocumentTypeTrigger[]>;
+  upsertTriggers(documentTypeId: number, triggers: InsertDocumentTypeTrigger[]): Promise<DocumentTypeTrigger[]>;
+  getActiveTriggersForEntityType(entityType: string): Promise<(DocumentTypeTrigger & { documentType: DocumentType })[]>;
 }
 
 export class DocumentStorage implements IDocumentStorage {
@@ -744,7 +754,7 @@ export class DocumentStorage implements IDocumentStorage {
 
     for (const dt of defaultTypes) {
       if (!existingNames.has(dt.name)) {
-        await this.createDocumentType({ ...dt, isActive: true, reminderLeadTimeDays: 30 });
+        await this.createDocumentType({ ...dt, isActive: true, reminderLeadTimeDays: 30, inputMethod: "upload", isMandatory: false });
       }
     }
   }
@@ -782,6 +792,167 @@ export class DocumentStorage implements IDocumentStorage {
     if (mappings.length > 0) {
       await db.insert(documentTemplateBillingTypes).values(mappings);
     }
+  }
+
+  async getTriggersForDocumentType(documentTypeId: number): Promise<DocumentTypeTrigger[]> {
+    return db
+      .select()
+      .from(documentTypeTriggers)
+      .where(eq(documentTypeTriggers.documentTypeId, documentTypeId))
+      .orderBy(asc(documentTypeTriggers.sortOrder));
+  }
+
+  async upsertTriggers(documentTypeId: number, triggers: InsertDocumentTypeTrigger[]): Promise<DocumentTypeTrigger[]> {
+    await db.delete(documentTypeTriggers).where(eq(documentTypeTriggers.documentTypeId, documentTypeId));
+
+    if (triggers.length === 0) return [];
+
+    const rows = triggers.map((t, i) => ({
+      ...t,
+      documentTypeId,
+      sortOrder: t.sortOrder ?? i,
+    }));
+
+    return db.insert(documentTypeTriggers).values(rows).returning();
+  }
+
+  async getActiveTriggersForEntityType(entityType: string): Promise<(DocumentTypeTrigger & { documentType: DocumentType })[]> {
+    const results = await db
+      .select({
+        trigger: documentTypeTriggers,
+        documentType: documentTypes,
+      })
+      .from(documentTypeTriggers)
+      .innerJoin(documentTypes, eq(documentTypeTriggers.documentTypeId, documentTypes.id))
+      .where(and(
+        eq(documentTypeTriggers.entityType, entityType),
+        eq(documentTypeTriggers.isActive, true),
+        eq(documentTypes.isActive, true),
+      ))
+      .orderBy(asc(documentTypeTriggers.sortOrder));
+
+    return results.map((r) => ({
+      ...r.trigger,
+      documentType: r.documentType,
+    }));
+  }
+  async getEmployeeProofs(employeeId: number) {
+    const results = await db
+      .select({
+        id: employeeDocumentProofs.id,
+        employeeId: employeeDocumentProofs.employeeId,
+        qualificationId: employeeDocumentProofs.qualificationId,
+        documentTypeId: employeeDocumentProofs.documentTypeId,
+        status: employeeDocumentProofs.status,
+        fileName: employeeDocumentProofs.fileName,
+        objectPath: employeeDocumentProofs.objectPath,
+        uploadedAt: employeeDocumentProofs.uploadedAt,
+        reviewedAt: employeeDocumentProofs.reviewedAt,
+        reviewedByUserId: employeeDocumentProofs.reviewedByUserId,
+        rejectionReason: employeeDocumentProofs.rejectionReason,
+        createdAt: employeeDocumentProofs.createdAt,
+        updatedAt: employeeDocumentProofs.updatedAt,
+        deletedAt: employeeDocumentProofs.deletedAt,
+        documentType: {
+          id: documentTypes.id,
+          name: documentTypes.name,
+        },
+      })
+      .from(employeeDocumentProofs)
+      .innerJoin(documentTypes, eq(employeeDocumentProofs.documentTypeId, documentTypes.id))
+      .where(and(eq(employeeDocumentProofs.employeeId, employeeId), isNull(employeeDocumentProofs.deletedAt)))
+      .orderBy(asc(documentTypes.name));
+    return results;
+  }
+
+  async getProofById(id: number): Promise<EmployeeDocumentProof | null> {
+    const result = await db.select().from(employeeDocumentProofs).where(eq(employeeDocumentProofs.id, id)).limit(1);
+    return result[0] || null;
+  }
+
+  async uploadProof(proofId: number, fileName: string, objectPath: string): Promise<EmployeeDocumentProof | null> {
+    const [result] = await db
+      .update(employeeDocumentProofs)
+      .set({
+        status: "uploaded",
+        fileName,
+        objectPath,
+        uploadedAt: new Date(),
+        rejectionReason: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(employeeDocumentProofs.id, proofId))
+      .returning();
+    return result || null;
+  }
+
+  async reviewProof(proofId: number, approved: boolean, reviewedByUserId: number, rejectionReason?: string): Promise<EmployeeDocumentProof | null> {
+    const [result] = await db
+      .update(employeeDocumentProofs)
+      .set({
+        status: approved ? "approved" : "rejected",
+        reviewedAt: new Date(),
+        reviewedByUserId,
+        rejectionReason: approved ? null : (rejectionReason || null),
+        updatedAt: new Date(),
+      })
+      .where(eq(employeeDocumentProofs.id, proofId))
+      .returning();
+    return result || null;
+  }
+
+  async getPendingProofCount(employeeId: number): Promise<number> {
+    const results = await db
+      .select({ id: employeeDocumentProofs.id })
+      .from(employeeDocumentProofs)
+      .where(and(
+        eq(employeeDocumentProofs.employeeId, employeeId),
+        inArray(employeeDocumentProofs.status, ["pending", "rejected"]),
+        isNull(employeeDocumentProofs.deletedAt)
+      ));
+    return results.length;
+  }
+
+  async getPendingReviewProofs() {
+    const results = await db
+      .select({
+        id: employeeDocumentProofs.id,
+        employeeId: employeeDocumentProofs.employeeId,
+        qualificationId: employeeDocumentProofs.qualificationId,
+        documentTypeId: employeeDocumentProofs.documentTypeId,
+        status: employeeDocumentProofs.status,
+        fileName: employeeDocumentProofs.fileName,
+        objectPath: employeeDocumentProofs.objectPath,
+        uploadedAt: employeeDocumentProofs.uploadedAt,
+        reviewedAt: employeeDocumentProofs.reviewedAt,
+        reviewedByUserId: employeeDocumentProofs.reviewedByUserId,
+        rejectionReason: employeeDocumentProofs.rejectionReason,
+        createdAt: employeeDocumentProofs.createdAt,
+        updatedAt: employeeDocumentProofs.updatedAt,
+        deletedAt: employeeDocumentProofs.deletedAt,
+        documentType: {
+          id: documentTypes.id,
+          name: documentTypes.name,
+        },
+        employee: {
+          id: users.id,
+          displayName: users.displayName,
+        },
+      })
+      .from(employeeDocumentProofs)
+      .innerJoin(documentTypes, eq(employeeDocumentProofs.documentTypeId, documentTypes.id))
+      .innerJoin(users, eq(employeeDocumentProofs.employeeId, users.id))
+      .where(and(eq(employeeDocumentProofs.status, "uploaded"), isNull(employeeDocumentProofs.deletedAt)))
+      .orderBy(desc(employeeDocumentProofs.uploadedAt));
+    return results;
+  }
+
+  async getUploadedProofCountForAdmin(): Promise<number> {
+    const results = await db
+      .select({ id: employeeDocumentProofs.id })
+      .from(employeeDocumentProofs)
+      .where(and(eq(employeeDocumentProofs.status, "uploaded"), isNull(employeeDocumentProofs.deletedAt)));
+    return results.length;
   }
 }
 

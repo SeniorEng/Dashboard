@@ -99,12 +99,12 @@ export default function AdminDashboard() {
       permissionKey: "birthday_cards",
     },
     {
-      href: "/admin/qualifications",
-      testId: "card-qualifications",
+      href: "/admin/proof-review",
+      testId: "card-document-review",
       icon: <GraduationCap className={`${iconSize.lg} text-orange-600`} />,
       iconBg: "bg-orange-100",
-      title: "Qualifikationen",
-      description: "Qualifikationstypen definieren und Mitarbeitern zuweisen",
+      title: "Dokument-Prüfung",
+      description: "Hochgeladene Dokumentennachweise prüfen und freigeben",
       permissionKey: "users",
     },
     {

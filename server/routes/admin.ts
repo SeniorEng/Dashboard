@@ -13,7 +13,6 @@ import documentsRouter from "./admin/documents";
 import auditRouter from "./admin/audit";
 import lexwareExportRouter from "./admin/lexware-export";
 import documentDeliveryRouter from "./admin/document-delivery";
-import qualificationsRouter from "./admin/qualifications";
 import prospectsRouter from "./admin/prospects";
 import qontoRouter from "./admin/qonto";
 import whatsappRouter from "./admin/whatsapp";
@@ -80,7 +79,6 @@ const ROUTE_PERMISSION_MAP: Record<string, AdminPermissionKey> = {
   "/audit-log": "audit_log",
   "/verify-signature": "audit_log",
   "/revoke-signature": "audit_log",
-  "/qualifications": "users",
   "/lexware-export": "billing",
   "/document-delivery": "documents",
   "/whatsapp": "whatsapp",
@@ -142,7 +140,6 @@ router.use("/", documentsRouter);
 router.use("/", auditRouter);
 router.use("/", lexwareExportRouter);
 router.use("/", documentDeliveryRouter);
-router.use("/qualifications", qualificationsRouter);
 router.use("/", prospectsRouter);
 
 export default router;

@@ -13,12 +13,24 @@ export const DOCUMENT_TYPE_CONTEXT_LABELS: Record<DocumentTypeContext, string> =
   beide: "Immer verfügbar",
 };
 
+export const INPUT_METHODS = ["upload", "signature", "both"] as const;
+export type InputMethod = typeof INPUT_METHODS[number];
+
+export const INPUT_METHOD_LABELS: Record<InputMethod, string> = {
+  upload: "Nur Upload",
+  signature: "Nur digitale Unterschrift",
+  both: "Upload oder digitale Unterschrift",
+};
+
 export const documentTypes = pgTable("document_types", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description"),
   targetType: text("target_type").notNull().default("employee"),
   context: text("context").notNull().default("beide"),
+  inputMethod: text("input_method").notNull().default("upload"),
+  isMandatory: boolean("is_mandatory").notNull().default(false),
+  renewalDays: integer("renewal_days"),
   reviewIntervalMonths: integer("review_interval_months"),
   reminderLeadTimeDays: integer("reminder_lead_time_days").default(14),
   isActive: boolean("is_active").notNull().default(true),
@@ -104,6 +116,52 @@ export const documentTemplateBillingTypes = pgTable("document_template_billing_t
   index("dtbt_template_idx").on(table.templateId),
   index("dtbt_billing_type_idx").on(table.billingType),
   uniqueIndex("dtbt_template_billing_unique").on(table.templateId, table.billingType),
+]);
+
+export const TRIGGER_TYPES = ["field_match", "role", "always"] as const;
+export type TriggerType = typeof TRIGGER_TYPES[number];
+
+export const TRIGGER_TYPE_LABELS: Record<TriggerType, string> = {
+  field_match: "Feldabgleich",
+  role: "Mitarbeiter-Rolle",
+  always: "Immer (alle)",
+};
+
+export const TRIGGER_OPERATORS = ["equals", "greater_than", "is_true"] as const;
+export type TriggerOperator = typeof TRIGGER_OPERATORS[number];
+
+export const TRIGGER_OPERATOR_LABELS: Record<TriggerOperator, string> = {
+  equals: "ist gleich",
+  greater_than: "größer als",
+  is_true: "ist aktiv",
+};
+
+export const REQUIREMENT_LEVELS = ["pflicht", "optional"] as const;
+export type RequirementLevel = typeof REQUIREMENT_LEVELS[number];
+
+export const REQUIREMENT_LEVEL_LABELS: Record<RequirementLevel, string> = {
+  pflicht: "Pflicht",
+  optional: "Optional",
+};
+
+export const documentTypeTriggers = pgTable("document_type_triggers", {
+  id: serial("id").primaryKey(),
+  documentTypeId: integer("document_type_id").notNull().references(() => documentTypes.id, { onDelete: "cascade" }),
+  entityType: text("entity_type").notNull(),
+  triggerType: text("trigger_type").notNull(),
+  conditionField: text("condition_field"),
+  conditionOperator: text("condition_operator").notNull().default("equals"),
+  conditionValue: text("condition_value"),
+  requirement: text("requirement").notNull().default("pflicht"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  index("dtt_doc_type_idx").on(table.documentTypeId),
+  index("dtt_entity_type_idx").on(table.entityType),
+  index("dtt_active_idx").on(table.isActive),
+  uniqueIndex("dtt_unique").on(table.documentTypeId, table.entityType, table.triggerType, table.conditionField, table.conditionValue),
 ]);
 
 export const SIGNING_STATUSES = ["complete", "pending_employee_signature"] as const;
@@ -228,12 +286,27 @@ export const insertDocumentTypeSchema = z.object({
   description: z.string().max(500, "Maximal 500 Zeichen").nullable().optional(),
   targetType: z.enum(["employee", "customer"]).default("employee"),
   context: z.enum(DOCUMENT_TYPE_CONTEXTS).default("beide"),
+  inputMethod: z.enum(INPUT_METHODS).default("upload"),
+  isMandatory: z.boolean().default(false),
+  renewalDays: z.number().int().min(1, "Wiedervorlage muss mindestens 1 Tag sein").nullable().optional(),
   reviewIntervalMonths: z.number().int().min(1, "Prüfintervall muss mindestens 1 Monat sein").nullable().optional(),
   reminderLeadTimeDays: z.number().int().min(1, "Vorlaufzeit muss mindestens 1 Tag sein").max(365, "Vorlaufzeit darf maximal 365 Tage sein").default(14),
   isActive: z.boolean().default(true),
 });
 
 export const updateDocumentTypeSchema = insertDocumentTypeSchema.partial();
+
+export const insertDocumentTypeTriggerSchema = z.object({
+  documentTypeId: z.number().int(),
+  entityType: z.enum(["customer", "employee"]),
+  triggerType: z.enum(["field_match", "role", "always"]),
+  conditionField: z.string().nullable().optional(),
+  conditionOperator: z.enum(["equals", "greater_than", "is_true"]).default("equals"),
+  conditionValue: z.string().nullable().optional(),
+  requirement: z.enum(["pflicht", "optional"]).default("pflicht"),
+  sortOrder: z.number().int().default(0),
+  isActive: z.boolean().default(true),
+});
 
 export const insertEmployeeDocumentSchema = z.object({
   employeeId: z.number().int(),
@@ -254,6 +327,8 @@ export const insertCustomerDocumentSchema = z.object({
 export type DocumentType = typeof documentTypes.$inferSelect;
 export type InsertDocumentType = z.infer<typeof insertDocumentTypeSchema>;
 export type UpdateDocumentType = z.infer<typeof updateDocumentTypeSchema>;
+export type DocumentTypeTrigger = typeof documentTypeTriggers.$inferSelect;
+export type InsertDocumentTypeTrigger = z.infer<typeof insertDocumentTypeTriggerSchema>;
 export type EmployeeDocument = typeof employeeDocuments.$inferSelect;
 export type InsertEmployeeDocument = z.infer<typeof insertEmployeeDocumentSchema>;
 export type CustomerDocument = typeof customerDocuments.$inferSelect;

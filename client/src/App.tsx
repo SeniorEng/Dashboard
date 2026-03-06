@@ -40,7 +40,6 @@ const AdminBirthdayCards = lazy(() => import("@/pages/admin/birthday-cards"));
 const AdminStatistics = lazy(() => import("@/pages/admin/statistics"));
 const AdminBilling = lazy(() => import("@/pages/admin/billing"));
 const AdminHoursOverview = lazy(() => import("@/pages/admin/lexware-export"));
-const AdminQualifications = lazy(() => import("@/pages/admin/qualifications"));
 const AdminProspects = lazy(() => import("@/pages/admin/prospects"));
 const AdminProofReview = lazy(() => import("@/pages/admin/proof-review"));
 const AdminQonto = lazy(() => import("@/pages/admin/qonto"));
@@ -215,9 +214,6 @@ function Router() {
       </Route>
       <Route path="/admin/hours-overview">
         <AdminRoute component={AdminHoursOverview} />
-      </Route>
-      <Route path="/admin/qualifications">
-        <AdminRoute component={AdminQualifications} />
       </Route>
       <Route path="/admin/proof-review">
         <AdminRoute component={AdminProofReview} />

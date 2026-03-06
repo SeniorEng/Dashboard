@@ -52,7 +52,7 @@ import {
 import { UserForm } from "./components/user-form";
 import { EmployeeDocumentsSection } from "./components/employee-documents-section";
 import { EmployeeServiceRates } from "./components/employee-service-rates";
-import { EmployeeQualificationsSection } from "./components/employee-qualifications-section";
+import { EmployeeDocumentRequirementsSection } from "./components/employee-document-requirements-section";
 import { ResetPasswordForm } from "./components/reset-password-form";
 import { ADMIN_PERMISSION_KEYS, ADMIN_PERMISSION_LABELS } from "@shared/schema";
 
@@ -550,7 +550,7 @@ export default function AdminUsers() {
                 <AdminPermissionsSection userId={editingUser.id} />
               )}
               <EmployeeServiceRates />
-              <EmployeeQualificationsSection employeeId={editingUser.id} />
+              <EmployeeDocumentRequirementsSection employeeId={editingUser.id} />
               <EmployeeDocumentsSection employeeId={editingUser.id} userName={editingUser.displayName} isAdmin={true} />
             </>
           )}

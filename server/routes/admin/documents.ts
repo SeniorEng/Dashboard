@@ -2,10 +2,11 @@ import { Router, Request, Response } from "express";
 import { z } from "zod";
 import crypto from "crypto";
 import { documentStorage } from "../../storage/documents";
-import { insertDocumentTypeSchema, updateDocumentTypeSchema, insertEmployeeDocumentSchema, insertCustomerDocumentSchema, insertDocumentTemplateSchema, updateDocumentTemplateSchema } from "@shared/schema";
+import { insertDocumentTypeSchema, updateDocumentTypeSchema, insertEmployeeDocumentSchema, insertCustomerDocumentSchema, insertDocumentTemplateSchema, updateDocumentTemplateSchema, insertDocumentTypeTriggerSchema } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
 import { renderTemplateForCustomer, renderTemplateFromFormData, wrapInPrintableHtml, getPlaceholderCatalog, type WizardFormData } from "../../services/template-engine";
 import { generateAndStorePdf, getDocumentPdfBuffer } from "../../services/document-pdf";
+import { evaluateTriggersForCustomer, evaluateTriggersForEmployee } from "../../services/document-trigger-engine";
 
 const router = Router();
 
@@ -38,6 +39,68 @@ router.patch("/document-types/:id", asyncHandler("Dokumententyp konnte nicht akt
   const docType = await documentStorage.updateDocumentType(id, result.data);
   if (!docType) { res.status(404).json({ error: "NOT_FOUND", message: "Dokumententyp nicht gefunden" }); return; }
   res.json(docType);
+}));
+
+router.get("/document-types/:id/triggers", asyncHandler("Trigger konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" }); return; }
+  const triggers = await documentStorage.getTriggersForDocumentType(id);
+  res.json(triggers);
+}));
+
+const upsertTriggersSchema = z.object({
+  triggers: z.array(insertDocumentTypeTriggerSchema.omit({ documentTypeId: true })),
+});
+
+router.put("/document-types/:id/triggers", asyncHandler("Trigger konnten nicht gespeichert werden", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" }); return; }
+
+  const docType = await documentStorage.getDocumentType(id);
+  if (!docType) { res.status(404).json({ error: "NOT_FOUND", message: "Dokumententyp nicht gefunden" }); return; }
+
+  const result = upsertTriggersSchema.safeParse(req.body);
+  if (!result.success) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Daten", details: result.error.issues });
+    return;
+  }
+
+  const triggersWithDocTypeId = result.data.triggers.map((t) => ({
+    ...t,
+    documentTypeId: id,
+    entityType: t.entityType ?? docType.targetType,
+  }));
+
+  const saved = await documentStorage.upsertTriggers(id, triggersWithDocTypeId);
+  res.json(saved);
+}));
+
+router.get("/document-requirements/customer/:billingType", asyncHandler("Dokumentenanforderungen konnten nicht ermittelt werden", async (req: Request, res: Response) => {
+  const billingType = req.params.billingType;
+  const requirements = await evaluateTriggersForCustomer({ billingType });
+  res.json(requirements);
+}));
+
+router.get("/document-requirements/employee/:employeeId", asyncHandler("Dokumentenanforderungen konnten nicht ermittelt werden", async (req: Request, res: Response) => {
+  const employeeId = parseInt(req.params.employeeId);
+  if (isNaN(employeeId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Mitarbeiter-ID" }); return; }
+
+  const { db: dbInstance } = await import("../../lib/db");
+  const { users, userRoles } = await import("@shared/schema");
+  const { eq } = await import("drizzle-orm");
+
+  const [employee] = await dbInstance.select().from(users).where(eq(users.id, employeeId)).limit(1);
+  if (!employee) { res.status(404).json({ error: "NOT_FOUND", message: "Mitarbeiter nicht gefunden" }); return; }
+
+  const roles = await dbInstance.select().from(userRoles).where(eq(userRoles.userId, employeeId));
+  const roleNames = roles.map((r) => r.role);
+
+  const requirements = await evaluateTriggersForEmployee({
+    roles: roleNames,
+    employmentType: employee.employmentType ?? undefined,
+    haustierAkzeptiert: employee.haustierAkzeptiert ?? undefined,
+  });
+  res.json(requirements);
 }));
 
 router.get("/employees/:employeeId/documents", asyncHandler("Dokumente konnten nicht geladen werden", async (req: Request, res: Response) => {
@@ -446,6 +509,58 @@ router.get("/document-templates/by-context", asyncHandler("Vorlagen konnten nich
   const targetType = (req.query.targetType as string) || "beide";
   const templates = await documentStorage.getTemplatesByContext(context, targetType);
   res.json(templates);
+}));
+
+router.get("/employee/:employeeId/proofs", asyncHandler("Nachweise konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const employeeId = parseInt(req.params.employeeId);
+  if (isNaN(employeeId)) { res.status(400).json({ error: "Ungültige ID" }); return; }
+  const proofs = await documentStorage.getEmployeeProofs(employeeId);
+  res.json(proofs);
+}));
+
+router.get("/proofs/pending-review", asyncHandler("Ausstehende Prüfungen konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const proofs = await documentStorage.getPendingReviewProofs();
+  res.json(proofs);
+}));
+
+router.patch("/proofs/:proofId/upload", asyncHandler("Nachweis konnte nicht hochgeladen werden", async (req: Request, res: Response) => {
+  const proofId = parseInt(req.params.proofId);
+  if (isNaN(proofId)) { res.status(400).json({ error: "Ungültige ID" }); return; }
+
+  const proof = await documentStorage.getProofById(proofId);
+  if (!proof) { res.status(404).json({ error: "Nachweis nicht gefunden" }); return; }
+
+  if (proof.status !== "pending" && proof.status !== "rejected") {
+    res.status(400).json({ error: "Nachweis kann in diesem Status nicht hochgeladen werden" });
+    return;
+  }
+
+  const uploadSchema = z.object({ fileName: z.string().min(1), objectPath: z.string().min(1) });
+  const result = uploadSchema.safeParse(req.body);
+  if (!result.success) { res.status(400).json({ error: "Ungültige Daten" }); return; }
+
+  const updated = await documentStorage.uploadProof(proofId, result.data.fileName, result.data.objectPath);
+  res.json(updated);
+}));
+
+router.patch("/proofs/:proofId/review", asyncHandler("Prüfung konnte nicht gespeichert werden", async (req: Request, res: Response) => {
+  const proofId = parseInt(req.params.proofId);
+  if (isNaN(proofId)) { res.status(400).json({ error: "Ungültige ID" }); return; }
+
+  const existing = await documentStorage.getProofById(proofId);
+  if (!existing) { res.status(404).json({ error: "Nachweis nicht gefunden" }); return; }
+  if (existing.status !== "uploaded") { res.status(400).json({ error: "Nachweis ist nicht im Status 'Hochgeladen'" }); return; }
+
+  const reviewSchema = z.object({
+    approved: z.boolean(),
+    rejectionReason: z.string().max(500).optional(),
+  });
+  const result = reviewSchema.safeParse(req.body);
+  if (!result.success) { res.status(400).json({ error: "Validierungsfehler" }); return; }
+
+  const proof = await documentStorage.reviewProof(proofId, result.data.approved, req.user!.id, result.data.rejectionReason);
+  if (!proof) { res.status(404).json({ error: "Nachweis nicht gefunden" }); return; }
+  res.json(proof);
 }));
 
 export default router;
