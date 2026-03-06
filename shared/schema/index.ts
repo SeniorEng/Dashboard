@@ -20,3 +20,4 @@ export * from "./birthday-cards";
 export * from "./prospects";
 export * from "./notifications";
 export * from "./qonto";
+export * from "./whatsapp";

@@ -291,7 +291,7 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
 
   if (assignedEmployeeId !== user.id) {
     const customerName = `${customer.vorname} ${customer.nachname}`;
-    notificationService.notifyAppointmentCreated(appointment.id, customerName, validatedData.date, assignedEmployeeId);
+    notificationService.notifyAppointmentCreated(appointment.id, customerName, validatedData.date, assignedEmployeeId, user.id);
   }
 
   res.status(201).json(appointment);
@@ -365,7 +365,7 @@ router.post("/erstberatung", asyncHandler(ErrorMessages.createErstberatungFailed
 
   if (assignedEmployeeId !== user.id) {
     const customerName = `${validatedData.customer.vorname} ${validatedData.customer.nachname}`;
-    notificationService.notifyAppointmentCreated(appointment.id, customerName, validatedData.date, assignedEmployeeId);
+    notificationService.notifyAppointmentCreated(appointment.id, customerName, validatedData.date, assignedEmployeeId, user.id);
   }
   
   res.status(201).json({ appointment, customer });
@@ -551,6 +551,15 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
       { customerId: existingAppointment.customerId, changedFields },
       ip
     );
+  }
+
+  if (updated) {
+    const newEmployeeId = updated.assignedEmployeeId || updated.performedByEmployeeId;
+    if (newEmployeeId && updated.customerId) {
+      const customer = await storage.getCustomer(updated.customerId);
+      const customerName = customer ? `${customer.vorname} ${customer.nachname}` : "Unbekannt";
+      notificationService.notifyAppointmentUpdated(id, customerName, updated.date || "", newEmployeeId, req.user!.id);
+    }
   }
 
   if (updated && updated.date) {

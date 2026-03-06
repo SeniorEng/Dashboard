@@ -7,6 +7,7 @@ import { sql } from "drizzle-orm";
 export const NOTIFICATION_TYPES = [
   "customer_assigned",
   "appointment_created",
+  "appointment_updated",
   "task_assigned",
   "birthday_reminder",
 ] as const;

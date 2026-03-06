@@ -13,7 +13,8 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Loader2 } from "lucide-react";
+import { Loader2, MessageCircle } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import {
   UserData,
   UserFormData,
@@ -64,6 +65,7 @@ export function UserForm({
   const [lbnr, setLbnr] = useState(user?.lbnr ?? "");
   const [personalnummer, setPersonalnummer] = useState(user?.personalnummer ?? "");
   const [roles, setRoles] = useState<string[]>(user?.roles ?? []);
+  const [whatsappEnabled, setWhatsappEnabled] = useState(user?.whatsappEnabled ?? false);
 
   const updateVacationFromWorkDays = (days: number) => {
     const vacation = calculateVacationEntitlementByWorkDays(days);
@@ -138,6 +140,7 @@ export function UserForm({
       lbnr: lbnr || null,
       personalnummer: personalnummer || null,
       roles,
+      whatsappEnabled,
     };
     
     if (mode === "create" && password) {
@@ -424,6 +427,22 @@ export function UserForm({
               data-testid="checkbox-haustier-akzeptiert"
             />
             <Label htmlFor="haustierAkzeptiert">Akzeptiert Haustiere im Haushalt</Label>
+          </div>
+
+          <div className="flex items-center justify-between p-3 rounded-lg border">
+            <div className="flex items-center gap-2">
+              <MessageCircle className="h-4 w-4 text-green-600" />
+              <div>
+                <Label htmlFor="whatsappEnabled">WhatsApp-Benachrichtigungen</Label>
+                <p className="text-xs text-gray-500">Mitarbeiter erhält Benachrichtigungen per WhatsApp</p>
+              </div>
+            </div>
+            <Switch
+              id="whatsappEnabled"
+              checked={whatsappEnabled}
+              onCheckedChange={setWhatsappEnabled}
+              data-testid="switch-whatsapp-enabled"
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-4">

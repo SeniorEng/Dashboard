@@ -19,6 +19,7 @@ import holidaysRouter from "./holidays";
 import statisticsRouter from "./statistics";
 import webhookRouter from "./webhook";
 import notificationsRouter from "./notifications";
+import whatsappRouter from "./whatsapp";
 import { csrfProtection, csrfTokenHandler } from "../middleware/csrf";
 import { authMiddleware, requireAuth } from "../middleware/auth";
 import { cacheHeaders } from "../middleware/cache-headers";
@@ -105,6 +106,7 @@ router.use("/billing", billingRouter);
 router.use("/holidays", holidaysRouter);
 router.use("/statistics", statisticsRouter);
 router.use("/notifications", notificationsRouter);
+router.use("/whatsapp", whatsappRouter);
 
 router.get("/address-search", async (req, res) => {
   try {

@@ -24,6 +24,7 @@ export interface UserData {
   lbnr: string | null;
   personalnummer: string | null;
   roles: string[];
+  whatsappEnabled?: boolean;
   createdAt: string;
 }
 
@@ -50,6 +51,7 @@ export interface UserFormData {
   lbnr?: string | null;
   personalnummer?: string | null;
   roles: string[];
+  whatsappEnabled?: boolean;
 }
 
 export const ROLE_LABELS: Record<string, string> = {

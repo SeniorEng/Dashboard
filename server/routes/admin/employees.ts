@@ -62,7 +62,9 @@ router.get("/users/:id", asyncHandler("Benutzer konnte nicht geladen werden", as
     return;
   }
 
-  res.json(sanitizeUser(user));
+  const { getUserWhatsAppPreferences } = await import("../../storage/whatsapp");
+  const whatsappPrefs = await getUserWhatsAppPreferences(id);
+  res.json({ ...sanitizeUser(user), whatsappEnabled: whatsappPrefs?.enabled ?? false });
 }));
 
 router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", async (req: Request, res: Response) => {
@@ -228,7 +230,9 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
     }
   }
 
-  const result = updateUserSchema.safeParse(req.body);
+  const { whatsappEnabled, ...bodyWithoutWhatsapp } = req.body;
+
+  const result = updateUserSchema.safeParse(bodyWithoutWhatsapp);
   if (!result.success) {
     res.status(400).json({
       error: "VALIDATION_ERROR",
@@ -264,6 +268,11 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
 
   if (roles !== undefined) {
     await authService.setUserRoles(id, roles);
+  }
+
+  if (typeof whatsappEnabled === "boolean") {
+    const { upsertUserWhatsAppPreferences } = await import("../../storage/whatsapp");
+    await upsertUserWhatsAppPreferences(id, { enabled: whatsappEnabled });
   }
 
   const addressFields = ["strasse", "hausnummer", "plz", "stadt"] as const;

@@ -129,6 +129,13 @@ process.on("uncaughtException", (error) => {
     console.error("[startup] Budget-Source-Migration fehlgeschlagen:", err);
   }
 
+  const { seedWhatsAppRules } = await import("./startup/seed-whatsapp-rules");
+  try {
+    await seedWhatsAppRules();
+  } catch (err) {
+    console.error("[startup] WhatsApp-Regeln-Seed fehlgeschlagen:", err);
+  }
+
   const { geocodeAllMissing } = await import("./services/geocoding");
   geocodeAllMissing().catch(err => console.error("[geocoding] Batch geocoding error:", err));
 
@@ -188,6 +195,11 @@ process.on("uncaughtException", (error) => {
   };
   timeouts.push(setTimeout(runBudgetRenewalCheck, 7 * 60 * 1000));
   intervals.push(setInterval(runBudgetRenewalCheck, 24 * 60 * 60 * 1000));
+
+  const { startReminderScheduler } = await import("./services/whatsapp-reminder-scheduler");
+  const reminderScheduler = startReminderScheduler();
+  timeouts.push(reminderScheduler.timeout);
+  if (reminderScheduler.interval) intervals.push(reminderScheduler.interval);
 
   try {
     const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || "alrikdegenkolb@seniorenengel-alltagsbegleitung.de";

@@ -97,6 +97,7 @@ export const ADMIN_PERMISSION_KEYS = [
   "hours_overview",
   "settings",
   "audit_log",
+  "whatsapp",
 ] as const;
 
 export type AdminPermissionKey = typeof ADMIN_PERMISSION_KEYS[number];
@@ -115,6 +116,7 @@ export const ADMIN_PERMISSION_LABELS: Record<AdminPermissionKey, string> = {
   hours_overview: "Stundenübersicht",
   settings: "Einstellungen",
   audit_log: "Audit-Log",
+  whatsapp: "WhatsApp",
 };
 
 export const adminPermissions = pgTable("admin_permissions", {

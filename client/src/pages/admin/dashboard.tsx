@@ -6,7 +6,7 @@ import { Layout } from "@/components/layout";
 import {
   Users, ArrowLeft, Contact2, Clock, Settings,
   Building2, ClipboardList, FileText, Shield, Receipt, Gift, BarChart3, UserPlus,
-  GraduationCap, FileCheck, BookOpen, ScrollText, Landmark,
+  GraduationCap, FileCheck, BookOpen, ScrollText, Landmark, MessageSquare,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -223,6 +223,15 @@ export default function AdminDashboard() {
       title: "Einstellungen",
       description: "Firmendaten, E-Mail-Versand und Systemkonfiguration",
       permissionKey: "settings",
+    },
+    {
+      href: "/admin/whatsapp",
+      testId: "card-whatsapp",
+      icon: <MessageSquare className={`${iconSize.lg} text-green-600`} />,
+      iconBg: "bg-green-100",
+      title: "WhatsApp",
+      description: "WhatsApp-Benachrichtigungen konfigurieren und verwalten",
+      permissionKey: "whatsapp",
     },
     {
       href: "/admin/audit-log",

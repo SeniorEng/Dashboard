@@ -16,6 +16,7 @@ import documentDeliveryRouter from "./admin/document-delivery";
 import qualificationsRouter from "./admin/qualifications";
 import prospectsRouter from "./admin/prospects";
 import qontoRouter from "./admin/qonto";
+import whatsappRouter from "./admin/whatsapp";
 
 const router = Router();
 
@@ -82,6 +83,7 @@ const ROUTE_PERMISSION_MAP: Record<string, AdminPermissionKey> = {
   "/qualifications": "users",
   "/lexware-export": "billing",
   "/document-delivery": "documents",
+  "/whatsapp": "whatsapp",
 };
 
 const READ_PERMISSION_FALLBACKS: Partial<Record<AdminPermissionKey, AdminPermissionKey[]>> = {
@@ -130,6 +132,7 @@ router.use(async (req: Request, res: Response, next) => {
 });
 
 router.use("/qonto", qontoRouter);
+router.use("/whatsapp", whatsappRouter);
 router.use("/", employeesRouter);
 router.use("/", customersRouter);
 router.use("/", insuranceProvidersRouter);
