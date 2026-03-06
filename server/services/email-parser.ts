@@ -247,15 +247,89 @@ function isPflegeDeEmail(body: string, subject?: string): boolean {
   const lower = body.toLowerCase();
   const subjectLower = (subject || "").toLowerCase();
   return (subjectLower.includes("pflege.de") && subjectLower.includes("anfrage"))
-    || (lower.includes("pflege.de") && lower.includes("produktgruppe"));
+    || (lower.includes("pflege.de") && lower.includes("produktgruppe"))
+    || lower.includes("tblcustomer");
+}
+
+function extractHtmlTableValues(html: string): Map<string, string> {
+  const result = new Map<string, string>();
+  const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+
+  let rowMatch;
+  while ((rowMatch = rowRegex.exec(html)) !== null) {
+    const rowContent = rowMatch[1];
+    const cells: string[] = [];
+    let cellMatch;
+    cellRegex.lastIndex = 0;
+    while ((cellMatch = cellRegex.exec(rowContent)) !== null) {
+      const cellText = cellMatch[1]
+        .replace(/<[^>]*>/g, "")
+        .replace(/&nbsp;/g, " ")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&auml;/gi, "ä")
+        .replace(/&ouml;/gi, "ö")
+        .replace(/&uuml;/gi, "ü")
+        .replace(/&Auml;/gi, "Ä")
+        .replace(/&Ouml;/gi, "Ö")
+        .replace(/&Uuml;/gi, "Ü")
+        .replace(/&szlig;/gi, "ß")
+        .replace(/&#\d+;/g, "")
+        .replace(/&\w+;/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      cells.push(cellText);
+    }
+    if (cells.length >= 2 && cells[0].length > 0) {
+      result.set(cells[0].toLowerCase(), cells[1]);
+    }
+  }
+  return result;
+}
+
+function extractHtmlKommentar(html: string): string | undefined {
+  const match = html.match(/Kommentar\s*:?\s*<br\s*\/?>\s*([\s\S]*?)(?:<br\s*\/?>|<\/td>|<\/div>)/i);
+  if (match) {
+    const val = match[1].replace(/<[^>]*>/g, "").replace(/&\w+;/g, "").trim();
+    if (val && val !== "-") return val;
+  }
+  return undefined;
+}
+
+function extractPflegeDeLeadId(html: string, subject?: string): string | undefined {
+  const subjectMatch = (subject || "").match(/ID:\s*(PT-\d+)/i);
+  if (subjectMatch) return subjectMatch[1];
+
+  const idParamMatch = html.match(/[?&]ID=([a-zA-Z0-9]+)/i);
+  if (idParamMatch) return idParamMatch[1];
+
+  const textMatch = html.match(/ID:\s*(PT-\d+)/i);
+  if (textMatch) return textMatch[1];
+
+  return undefined;
 }
 
 function parsePflegeDeEmail(body: string, subject?: string): ParsedLead {
+  const tableValues = extractHtmlTableValues(body);
   const text = stripHtml(body);
+
+  const getTableVal = (key: string): string | undefined => {
+    const keyLower = key.toLowerCase();
+    const exact = tableValues.get(keyLower);
+    if (exact && exact.length > 0) return exact;
+    for (const [k, v] of tableValues) {
+      if (k.endsWith(keyLower) && v.length > 0) return v;
+    }
+    return undefined;
+  };
 
   let vorname = "";
   let nachname = "";
-  const rawName = extractTableValue(text, "Ansprechpartner Name")
+  const rawName = getTableVal("Name") || getTableVal("Ansprechpartner Name")
+    || extractTableValue(text, "Ansprechpartner Name")
     || extractTableValue(text, "Name");
   if (rawName) {
     const parsed = parseName(rawName);
@@ -263,14 +337,16 @@ function parsePflegeDeEmail(body: string, subject?: string): ParsedLead {
     nachname = parsed.nachname;
   }
 
-  const rawTelefon = extractTableValue(text, "Telefon")
+  const rawTelefon = getTableVal("Telefon") || getTableVal("Tel")
+    || extractTableValue(text, "Telefon")
     || extractTableValue(text, "Tel");
 
-  const rawEmail = extractTableValue(text, "Email")
+  const rawEmailVal = getTableVal("Email") || getTableVal("E-Mail")
+    || extractTableValue(text, "Email")
     || extractTableValue(text, "E-Mail");
   let email: string | undefined;
-  if (rawEmail) {
-    const emailMatch = rawEmail.match(/[\w.+-]+@[\w.-]+\.\w{2,}/);
+  if (rawEmailVal) {
+    const emailMatch = rawEmailVal.match(/[\w.+-]+@[\w.-]+\.\w{2,}/);
     if (emailMatch) {
       const addr = emailMatch[0].toLowerCase();
       if (!addr.endsWith("@pflege.de")) {
@@ -279,27 +355,25 @@ function parsePflegeDeEmail(body: string, subject?: string): ParsedLead {
     }
   }
 
-  const strasseRaw = extractTableValue(text, "Strasse")
+  const strasseRaw = getTableVal("Strasse") || getTableVal("Straße")
+    || extractTableValue(text, "Strasse")
     || extractTableValue(text, "Straße");
   const addressFromStrasse = strasseRaw ? splitAddress(strasseRaw) : {};
 
-  const plzOrtRaw = extractTableValue(text, "PLZ Ort")
+  const plzOrtRaw = getTableVal("PLZ Ort") || getTableVal("PLZ/Ort")
+    || extractTableValue(text, "PLZ Ort")
     || extractTableValue(text, "PLZ/Ort");
   let plz = addressFromStrasse.plz;
   let stadt = addressFromStrasse.stadt;
   if (plzOrtRaw) {
-    const plzOrtMatch = plzOrtRaw.match(/(\d{5})\s+(.+)/);
+    const plzOrtMatch = plzOrtRaw.match(/(\d{4,5})\s+(.+)/);
     if (plzOrtMatch) {
       plz = plzOrtMatch[1];
       stadt = plzOrtMatch[2].trim();
     }
   }
 
-  const angefragtePlz = extractTableValue(text, "Angefragte PLZ");
-
-  const idMatch = text.match(/ID:\s*(PT-\d+)/i)
-    || (subject || "").match(/ID:\s*(PT-\d+)/i);
-  const leadId = idMatch ? idMatch[1] : undefined;
+  const leadId = extractPflegeDeLeadId(body, subject);
 
   let produktgruppe = "";
   if (subject) {
@@ -326,15 +400,20 @@ function parsePflegeDeEmail(body: string, subject?: string): ParsedLead {
     { key: "Gewünschter Betreuungsbeginn", label: "Gewünschter Betreuungsbeginn" },
     { key: "Budget", label: "Budget" },
     { key: "Unterbringungsmöglichkeit", label: "Unterbringungsmöglichkeit" },
+    { key: "Bezugspunkt der PLZ-Suche", label: "Bezugspunkt der PLZ-Suche" },
     { key: "Bezugspunkt", label: "Bezugspunkt der PLZ-Suche" },
   ];
 
   for (const { key, label } of fieldsToCapture) {
-    const val = extractTableValue(text, key);
-    if (val && val !== "-") notizenParts.push(`${label}: ${val}`);
+    const val = getTableVal(key) || extractTableValue(text, key);
+    if (val && val !== "-") {
+      if (!notizenParts.some(n => n.startsWith(label + ":"))) {
+        notizenParts.push(`${label}: ${val}`);
+      }
+    }
   }
 
-  const kommentar = extractTableValue(text, "Kommentar");
+  const kommentar = extractHtmlKommentar(body) || getTableVal("Kommentar") || extractTableValue(text, "Kommentar");
   if (kommentar && kommentar !== "-") notizenParts.push(`Kommentar: ${kommentar}`);
 
   return {
