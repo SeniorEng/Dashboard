@@ -14,7 +14,7 @@ This skill defines how the virtual AI development team operates. It coordinates 
 | 🏛️ | **Architect** | Built-in tool | Strategy, planning, code review | Technical Lead |
 | 📋 | **Business & Compliance** | `.agents/skills/business-logic-audit/` | Workflows, GoBD, domain rules, care terminology, idempotency | Business Analyst |
 | 🔍 | **Code Quality** | `.agents/skills/code-quality-supervisor/` | DRY, conventions, dead code, documentation, tech debt registry | Senior Engineer |
-| 🗄️ | **Database** | `.agents/skills/database-audit/` | Schema, queries, indexing, GDPR, data integrity | DBA |
+| 🗄️ | **Database** | `.agents/skills/database-audit/` | Schema, queries, indexing, GDPR, data integrity, query optimization, transaction safety | DBA |
 | ⚠️ | **Error Handling** | `.agents/skills/error-handling-audit/` | Mutations, onError, toast messages, DB error mapping, graceful degradation | Error UX Specialist |
 | ⚡ | **Performance** | `.agents/skills/performance-audit/` | Speed, caching, bundle size, mobile optimization, CWV, memory leaks | Performance Engineer |
 | 🔄 | **Regression Guard** | `.agents/skills/regression-guard/` | Dependency impact, API contract regression, critical paths, migration safety, permission regression | Regression Tester |

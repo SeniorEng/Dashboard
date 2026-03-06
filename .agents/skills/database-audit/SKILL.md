@@ -20,7 +20,7 @@ Run this audit after every significant code change that involves data persistenc
 
 ## Audit Process
 
-Work through all 11 categories. For each, report: PASS, WARN (non-critical), or FAIL (must fix).
+Work through all 13 categories. For each, report: PASS, WARN (non-critical), or FAIL (must fix).
 
 ---
 
@@ -330,6 +330,114 @@ someNewField        → ✓            → ✗ MISSING      → ✗ MISSING   �
 
 ---
 
+## Category 12: Query Optimization & Caching Opportunities
+
+**Goal**: Identify queries that are unnecessarily complex, frequently repeated, or candidates for caching.
+
+### Steps:
+1. **Redundant subqueries**:
+   ```bash
+   # Find complex subqueries or UNION patterns in storage
+   grep -rn "union\|UNION\|subquery\|\.where.*inArray.*select" server/storage/ --include="*.ts"
+   
+   # Find nested select statements
+   grep -rn "db\.select.*db\.select\|sql\`.*SELECT.*SELECT" server/storage/ --include="*.ts"
+   ```
+   - Check: Can subqueries be replaced with JOINs?
+   - Check: Can frequently-run subqueries be cached?
+
+2. **Frequently called queries without caching**:
+   ```bash
+   # Find storage methods called from multiple routes
+   grep -rn "storage\.\|Storage\." server/routes/ --include="*.ts" | sed 's/.*storage\.\([a-zA-Z]*\).*/\1/' | sort | uniq -c | sort -rn | head -15
+   ```
+   - Methods called 3+ times from different routes → consider caching
+   - Candidates: customer list, employee list, insurance providers, service catalog
+
+3. **Aggregate queries on large tables**:
+   ```bash
+   # Find COUNT, SUM, AVG without filtering
+   grep -rn "count(\|sum(\|avg(\|sql\`.*COUNT\|sql\`.*SUM" server/storage/ --include="*.ts"
+   ```
+   - Aggregations on full tables are expensive as data grows
+   - Consider: Materialized views or scheduled cache refresh
+
+4. **Batch query opportunities**:
+   ```bash
+   # Find patterns where individual lookups could be batched
+   grep -rn "Promise\.all\|\.map.*await\|for.*await.*get" server/ --include="*.ts" | head -10
+   ```
+   - `Promise.all(ids.map(id => getById(id)))` → replace with `getByIds(ids)` using `WHERE id IN (...)`
+
+5. **Connection pool efficiency**:
+   ```bash
+   # Check pool configuration
+   grep -rn "pool\|maxConnections\|max:\|connectionTimeoutMillis\|idleTimeoutMillis" server/ --include="*.ts"
+   ```
+   - Verify: Pool size is appropriate (typically 5-20 for this app size)
+   - Verify: Idle timeout is set (prevent stale connections)
+   - Verify: Connection timeout handles DB unavailability
+
+### Red Flags:
+- Same query executed 3+ times per page load → WARN (cache candidate)
+- Aggregate on full table without WHERE clause → WARN (will slow with data growth)
+- Individual lookups in a loop instead of batch query → FAIL (N+1 variant)
+- No connection pool configuration → WARN (risk of connection exhaustion)
+- Missing idle/connection timeout → WARN (resource leak risk)
+
+---
+
+## Category 13: Transaction Safety & Atomicity
+
+**Goal**: Multi-step database operations are wrapped in transactions to prevent partial writes and data corruption.
+
+### Steps:
+1. **Identify multi-write operations**:
+   ```bash
+   # Find functions with multiple db.insert/db.update/db.delete calls
+   grep -rn "db\.insert\|db\.update\|db\.delete" server/storage/ server/routes/ --include="*.ts" -l
+   ```
+   For each file, check if multiple write operations occur in the same function without a transaction.
+
+2. **Transaction coverage**:
+   ```bash
+   # Find existing transactions
+   grep -rn "db\.transaction\|\.transaction(" server/ --include="*.ts" -A3
+   ```
+   - Verify: All multi-table writes use transactions
+   - Verify: Transaction callbacks don't contain non-DB side effects (e.g., sending emails) that can't be rolled back
+
+3. **Critical operations requiring transactions**:
+   - **Budget booking**: Budget check + consumption insert must be atomic
+     ```bash
+     grep -rn "createConsumptionTransaction\|budget.*insert\|budget.*create" server/ --include="*.ts" -B5 -A10
+     ```
+   - **Documentation completion**: Status update + budget booking + service record update must be atomic
+   - **Customer creation with pricing**: Customer insert + pricing agreement insert
+   - **Signature operations**: Status update + audit log insert
+
+4. **Rollback behavior**:
+   ```bash
+   # Check for error handling inside transactions
+   grep -rn "\.transaction(" server/ --include="*.ts" -A20 | grep "catch\|throw\|rollback"
+   ```
+   - Verify: Errors inside transactions propagate and trigger rollback
+   - Verify: No `try/catch` inside transaction that swallows errors (prevents rollback)
+
+5. **Deadlock prevention**:
+   - Verify: Transactions access tables in consistent order
+   - Verify: Transactions are short-lived (no external API calls inside)
+   - Verify: No user interaction waits inside a transaction (long lock = deadlock risk)
+
+### Red Flags:
+- Budget check + insert without transaction → FAIL (race condition, double-booking possible)
+- Multi-table write without transaction → WARN (partial writes possible)
+- Error swallowed inside transaction → FAIL (prevents rollback, data corruption)
+- External API call inside transaction → WARN (long-running transaction, lock contention)
+- Same tables accessed in different order across transactions → WARN (deadlock risk)
+
+---
+
 ## Output Format
 
 After completing all checks, produce a summary:
@@ -342,6 +450,7 @@ After completing all checks, produce a summary:
 | 1. Schema-Storage | PASS/WARN/FAIL | Details |
 | 2. Storage-Frontend | PASS/WARN/FAIL | Details |
 | 3. Data Types | PASS/WARN/FAIL | Details |
+| 3b. Date/Time Conventions | PASS/WARN/FAIL | Details |
 | 4. Indexing | PASS/WARN/FAIL | Details |
 | 5. N+1 Queries | PASS/WARN/FAIL | Details |
 | 6. Schema Drift | PASS/WARN/FAIL | Details |
@@ -350,23 +459,32 @@ After completing all checks, produce a summary:
 | 9. Data Integrity | PASS/WARN/FAIL | Details |
 | 10. Update-Persistenz | PASS/WARN/FAIL | Details |
 | 11. Security | PASS/WARN/FAIL | Details |
+| 12. Query Optimization | PASS/WARN/FAIL | Details |
+| 13. Transaction Safety | PASS/WARN/FAIL | Details |
 
 ### Action Items
 - FAIL items: Must fix before completion
 - WARN items: Should fix, document if deferred
+
+### Query Performance Summary
+- Cached queries: [list]
+- Cache candidates: [list]
+- Transaction-protected operations: [list]
+- Operations needing transaction: [list]
 ```
 
 ---
 
 ## Cross-References to Other Audit Skills
 
-This audit covers the **data layer** (schema, storage, queries, GDPR). For complete coverage, also run:
+This audit covers the **data layer** (schema, storage, queries, GDPR, transactions, caching). For complete coverage, also run:
 
 | Skill | When to Also Run | What It Adds |
 |-------|-----------------|--------------|
 | `code-quality-supervisor` | **ALWAYS** after every task | Duplicate detection, convention compliance, migration completeness, dead code |
-| `business-logic-audit` | When workflows/status transitions are affected | Workflow completeness, domain rules, user perspective |
-| `security-audit` | When auth, API routes, or user input is affected | OWASP checks, secret exposure, CSRF, injection prevention |
-| `performance-audit` | When queries or large components are added | N+1 patterns (detailed), bundle size, rendering efficiency |
+| `business-logic-audit` | When workflows/status transitions are affected | Workflow completeness, domain rules, user perspective, idempotency |
+| `security-audit` | When auth, API routes, or user input is affected | OWASP API Top 10, secret exposure, CSRF, injection prevention, supply chain |
+| `performance-audit` | When queries or large components are added | CWV, memory leaks, bundle size, rendering efficiency, response budgets |
+| `regression-guard` | When schema changes or multi-file changes | Dependency impact, migration safety, critical path verification |
 
-See `.agents/skills/code-quality-supervisor/SKILL.md` for the orchestration rules that determine which audits run when.
+See `.agents/skills/team-orchestration/SKILL.md` for the orchestration rules that determine which audits run when.
