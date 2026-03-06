@@ -6,7 +6,7 @@ import { Layout } from "@/components/layout";
 import {
   Users, ArrowLeft, Contact2, Clock, Settings,
   Building2, ClipboardList, FileText, Shield, Receipt, Gift, BarChart3, UserPlus,
-  GraduationCap, FileCheck, BookOpen, ScrollText,
+  GraduationCap, FileCheck, BookOpen, ScrollText, Landmark,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -237,6 +237,20 @@ export default function AdminDashboard() {
 
   const filterCards = (cards: AdminCardData[]) =>
     cards.filter((card) => hasAdminPermission(card.permissionKey));
+
+  const isSuperAdmin = user?.isSuperAdmin ?? false;
+
+  if (isSuperAdmin) {
+    abrechnungCards.push({
+      href: "/admin/qonto",
+      testId: "card-qonto",
+      icon: <Landmark className={`${iconSize.lg} text-sky-600`} />,
+      iconBg: "bg-sky-100",
+      title: "Zahlungen & Qonto",
+      description: "Zahlungseingänge, Rechnungsabgleich und Avise",
+      permissionKey: "billing",
+    });
+  }
 
   const visiblePersonal = filterCards(personalCards);
   const visibleKunden = filterCards(kundenCards);

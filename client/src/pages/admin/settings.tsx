@@ -10,7 +10,8 @@ import { Input } from "@/components/ui/input";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, Loader2, Upload, Trash2, ImageIcon, Mail, Truck, CheckCircle2, XCircle, Eye, EyeOff, FileText, Smartphone, KeyRound, Wrench } from "lucide-react";
+import { ArrowLeft, Loader2, Upload, Trash2, ImageIcon, Mail, Truck, CheckCircle2, XCircle, Eye, EyeOff, FileText, Smartphone, KeyRound, Wrench, Landmark } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
@@ -123,11 +124,16 @@ const emptyCompanyForm = {
   epostTestMode: true,
   deliveryEmailSubject: "",
   deliveryCoverLetterText: "",
+  qontoLogin: "",
+  qontoSecretKey: "",
+  qontoIban: "",
 };
 
 export default function AdminSettings() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isSuperAdmin = user?.isSuperAdmin ?? false;
 
   const { data: settings, isLoading } = useQuery<SystemSettings>({
     queryKey: ["settings"],
@@ -181,6 +187,9 @@ export default function AdminSettings() {
         epostTestMode: companyData.epostTestMode ?? true,
         deliveryEmailSubject: companyData.deliveryEmailSubject ?? "",
         deliveryCoverLetterText: companyData.deliveryCoverLetterText ?? "",
+        qontoLogin: companyData.qontoLogin ?? "",
+        qontoSecretKey: companyData.qontoSecretKey ?? "",
+        qontoIban: companyData.qontoIban ?? "",
       });
     }
   }, [companyData]);
@@ -1149,6 +1158,60 @@ export default function AdminSettings() {
                   </div>
                 </CardContent>
               </Card>
+
+              {isSuperAdmin && (
+              <Card data-testid="card-qonto-settings">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Landmark className="h-5 w-5 text-sky-600" />
+                    Qonto-Bankverbindung
+                  </CardTitle>
+                  <CardDescription>
+                    Zugangsdaten für den automatischen Zahlungsabgleich über Qonto.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-col gap-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="qontoLogin">Qonto Login</Label>
+                        <Input
+                          id="qontoLogin"
+                          value={companyForm.qontoLogin}
+                          onChange={(e) => updateField("qontoLogin", e.target.value)}
+                          placeholder="organisation-slug"
+                          data-testid="input-qonto-login"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="qontoSecretKey">Secret Key</Label>
+                        <Input
+                          id="qontoSecretKey"
+                          type="password"
+                          value={companyForm.qontoSecretKey}
+                          onChange={(e) => updateField("qontoSecretKey", e.target.value)}
+                          placeholder="Qonto Secret Key"
+                          data-testid="input-qonto-secret-key"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="qontoIban">IBAN (Geschäftskonto)</Label>
+                      <Input
+                        id="qontoIban"
+                        value={companyForm.qontoIban}
+                        onChange={(e) => updateField("qontoIban", e.target.value)}
+                        placeholder="DE89 3704 0044 0532 0130 00"
+                        data-testid="input-qonto-iban"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Einstellungen werden beim Speichern der Firmendaten mit gespeichert. Zahlungsabgleich unter Zahlungen & Qonto.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+              )}
 
               <Card data-testid="card-cover-letter-settings">
                 <CardHeader>

@@ -1,0 +1,118 @@
+import { Router } from "express";
+import { requireSuperAdmin } from "../../middleware/auth";
+import { asyncHandler, badRequest, notFound } from "../../lib/errors";
+import { qontoService } from "../../services/qonto";
+import { qontoStorage } from "../../storage/qonto";
+import { z } from "zod";
+
+const router = Router();
+router.use(requireSuperAdmin);
+
+router.get("/status", asyncHandler("Qonto-Status konnte nicht geladen werden", async (_req, res) => {
+  const configured = await qontoService.isConfigured();
+  if (!configured) {
+    res.json({ configured: false, lastSync: null, connection: null });
+    return;
+  }
+  const lastSync = await qontoStorage.getLastSyncTime();
+  const connection = await qontoService.testConnection();
+  res.json({ configured: true, lastSync, connection });
+}));
+
+router.post("/sync", asyncHandler("Qonto-Synchronisation fehlgeschlagen", async (_req, res) => {
+  const result = await qontoService.syncTransactions();
+  res.json(result);
+}));
+
+router.get("/transactions", asyncHandler("Transaktionen konnten nicht geladen werden", async (req, res) => {
+  const { from, to, matched, limit, offset } = req.query;
+  const result = await qontoStorage.getTransactions({
+    from: from as string | undefined,
+    to: to as string | undefined,
+    matched: (matched as "matched" | "unmatched" | "all") || "all",
+    limit: limit ? parseInt(limit as string) : 50,
+    offset: offset ? parseInt(offset as string) : 0,
+  });
+  res.json(result);
+}));
+
+const matchSchema = z.object({
+  invoiceId: z.number().int().positive("Ungültige Rechnungs-ID"),
+});
+
+router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) throw badRequest("Ungültige Transaktions-ID");
+
+  const tx = await qontoStorage.getTransaction(id);
+  if (!tx) throw notFound("Transaktion nicht gefunden");
+
+  const { invoiceId } = matchSchema.parse(req.body);
+  const updated = await qontoStorage.updateTransactionMatch(id, invoiceId, "manual");
+
+  const { invoices } = await import("@shared/schema");
+  const { eq, and } = await import("drizzle-orm");
+  const { db } = await import("../../lib/db");
+  await db.update(invoices)
+    .set({ status: "bezahlt", paidAt: tx.emittedAt })
+    .where(and(eq(invoices.id, invoiceId), eq(invoices.status, "versendet")));
+
+  res.json(updated);
+}));
+
+router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht aufgehoben werden", async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) throw badRequest("Ungültige Transaktions-ID");
+
+  const tx = await qontoStorage.getTransaction(id);
+  if (!tx) throw notFound("Transaktion nicht gefunden");
+
+  if (tx.matchedInvoiceId) {
+    const { invoices } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    const { db } = await import("../../lib/db");
+    await db.update(invoices)
+      .set({ status: "versendet", paidAt: null })
+      .where(eq(invoices.id, tx.matchedInvoiceId));
+  }
+
+  const updated = await qontoStorage.updateTransactionMatch(id, null, null);
+  res.json(updated);
+}));
+
+router.post("/auto-match", asyncHandler("Auto-Abgleich fehlgeschlagen", async (_req, res) => {
+  const result = await qontoService.autoMatch();
+  res.json(result);
+}));
+
+const paymentAdviceSchema = z.object({
+  insuranceProviderName: z.string().optional().nullable(),
+  ikNummer: z.string().optional().nullable(),
+  objectPath: z.string().min(1, "Dateipfad fehlt"),
+  fileName: z.string().min(1, "Dateiname fehlt"),
+  notes: z.string().optional().nullable(),
+});
+
+router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeichert werden", async (req, res) => {
+  const data = paymentAdviceSchema.parse(req.body);
+  const advice = await qontoStorage.createPaymentAdvice({
+    ...data,
+    uploadedByUserId: req.user!.id,
+  });
+  res.json(advice);
+}));
+
+router.get("/payment-advices", asyncHandler("Zahlungsavise konnten nicht geladen werden", async (_req, res) => {
+  const advices = await qontoStorage.getPaymentAdvices();
+  res.json(advices);
+}));
+
+router.delete("/payment-advices/:id", asyncHandler("Zahlungsavis konnte nicht gelöscht werden", async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) throw badRequest("Ungültige ID");
+  const deleted = await qontoStorage.deletePaymentAdvice(id);
+  if (!deleted) throw notFound("Zahlungsavis nicht gefunden");
+  res.json({ success: true });
+}));
+
+export default router;

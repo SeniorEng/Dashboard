@@ -15,6 +15,7 @@ import lexwareExportRouter from "./admin/lexware-export";
 import documentDeliveryRouter from "./admin/document-delivery";
 import qualificationsRouter from "./admin/qualifications";
 import prospectsRouter from "./admin/prospects";
+import qontoRouter from "./admin/qonto";
 
 const router = Router();
 
@@ -128,6 +129,7 @@ router.use(async (req: Request, res: Response, next) => {
   next();
 });
 
+router.use("/qonto", qontoRouter);
 router.use("/", employeesRouter);
 router.use("/", customersRouter);
 router.use("/", insuranceProvidersRouter);
