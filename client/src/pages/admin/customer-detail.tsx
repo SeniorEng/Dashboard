@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import { BudgetLedgerSection } from "@/components/budget/BudgetLedgerSection";
 import { BudgetTypeSettings } from "@/components/budget/BudgetTypeSettings";
+import { PflegegradBudgetSection } from "@/components/budget/PflegegradBudgetSection";
 import { CustomerOverviewTab } from "./components/customer-overview-tab";
 import { CustomerInsuranceTab } from "./components/customer-insurance-tab";
 import { PricingSection } from "./components/customer-pricing-section";
@@ -286,15 +287,23 @@ function BudgetsTabContent({
   customerId,
   customerDisplayName,
   pflegegrad,
+  careLevelHistory,
   onRefresh,
 }: {
   customerId: number;
   customerDisplayName: string;
   pflegegrad?: number;
+  careLevelHistory?: Array<{ id: number; pflegegrad: number; validFrom: string; validTo: string | null; notes: string | null }>;
   onRefresh: () => void;
 }) {
   return (
     <>
+      <PflegegradBudgetSection
+        customerId={customerId}
+        pflegegrad={pflegegrad ?? null}
+        careLevelHistory={careLevelHistory ?? []}
+      />
+
       <SectionCard
         title="Budget-Einstellungen"
         icon={<Settings className={iconSize.sm} />}
@@ -653,6 +662,7 @@ export default function AdminCustomerDetail() {
                 customerId={customerId}
                 customerDisplayName={customerDisplayName}
                 pflegegrad={customer.pflegegrad ?? undefined}
+                careLevelHistory={customer.careLevelHistory}
                 onRefresh={refetch}
               />
             </TabsContent>

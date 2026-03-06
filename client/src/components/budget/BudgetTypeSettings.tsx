@@ -135,6 +135,7 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
       toast({ title: "Budget-Einstellungen gespeichert" });
       queryClient.invalidateQueries({ queryKey: ["budget-type-settings", customerId] });
       queryClient.invalidateQueries({ queryKey: ["budget-summary", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["budget-overview", customerId] });
       setHasChanges(false);
     },
     onError: (error: Error) => {
@@ -376,6 +377,7 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
       setAmount("");
       queryClient.invalidateQueries({ queryKey: ["initial-balances", customerId, budgetType] });
       queryClient.invalidateQueries({ queryKey: ["budget-summary", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["budget-overview", customerId] });
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
@@ -391,6 +393,7 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
       setDeleteConfirmId(null);
       queryClient.invalidateQueries({ queryKey: ["initial-balances", customerId, budgetType] });
       queryClient.invalidateQueries({ queryKey: ["budget-summary", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["budget-overview", customerId] });
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
