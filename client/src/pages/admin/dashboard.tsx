@@ -6,7 +6,7 @@ import { Layout } from "@/components/layout";
 import {
   Users, ArrowLeft, Contact2, Clock, Settings,
   Building2, ClipboardList, FileText, Shield, Receipt, Gift, BarChart3, UserPlus,
-  GraduationCap, FileCheck, BookOpen, ScrollText, Landmark, MessageSquare,
+  GraduationCap, FileCheck, Landmark, MessageSquare,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -153,24 +153,6 @@ export default function AdminDashboard() {
       iconBg: "bg-amber-100",
       title: "Dokumente & Vorlagen",
       description: "Dokumententypen, Vertragsvorlagen und Prüffristen",
-      permissionKey: "documents",
-    },
-    {
-      href: "/admin/document-types",
-      testId: "card-document-types",
-      icon: <BookOpen className={`${iconSize.lg} text-yellow-600`} />,
-      iconBg: "bg-yellow-100",
-      title: "Dokumentenkategorien",
-      description: "Dokumententypen und Prüffristen verwalten",
-      permissionKey: "documents",
-    },
-    {
-      href: "/admin/document-templates",
-      testId: "card-document-templates",
-      icon: <ScrollText className={`${iconSize.lg} text-lime-600`} />,
-      iconBg: "bg-lime-100",
-      title: "Dokumentenvorlagen",
-      description: "Vertragsvorlagen erstellen und bearbeiten",
       permissionKey: "documents",
     },
     {
