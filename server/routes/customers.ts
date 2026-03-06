@@ -5,7 +5,6 @@ import { insertCustomerSchema, insertCustomerContactSchema } from "@shared/schem
 import { requireAuth, requireAdmin, requireRoles } from "../middleware/auth";
 import { birthdaysCache, customerIdsCache } from "../services/cache";
 import { documentStorage } from "../storage/documents";
-import { BILLING_TYPES } from "@shared/domain/customers";
 import { isPflegekasseCustomer } from "@shared/domain/customers";
 import { renderTemplateForCustomer, wrapInPrintableHtml, extractInputPlaceholders } from "../services/template-engine";
 import { generateAndStorePdf, getDocumentPdfBuffer } from "../services/document-pdf";
@@ -19,7 +18,6 @@ import { sql } from "drizzle-orm";
 import { insertCustomerServicePriceSchema, customers } from "@shared/schema";
 import { auditService } from "../services/audit";
 
-const billingTypeEnum = z.enum(BILLING_TYPES as unknown as [string, ...string[]]);
 
 const router = Router();
 
@@ -59,16 +57,6 @@ router.get("/generated-documents/:docId/download", asyncHandler("PDF konnte nich
   res.setHeader("Content-Disposition", `inline; filename="${doc.fileName}"`);
   res.setHeader("Content-Length", pdfBuffer.length);
   res.send(pdfBuffer);
-}));
-
-router.get("/document-templates/billing-type/:billingType", asyncHandler("Vorlagen konnten nicht geladen werden", async (req, res) => {
-  const parsed = billingTypeEnum.safeParse(req.params.billingType);
-  if (!parsed.success) {
-    res.status(400).json({ error: "Ungültiger Kundentyp" });
-    return;
-  }
-  const templates = await documentStorage.getTemplatesForBillingType(parsed.data);
-  res.json(templates);
 }));
 
 router.get("/document-requirements/:billingType", asyncHandler("Dokumentenanforderungen konnten nicht ermittelt werden", async (req, res) => {

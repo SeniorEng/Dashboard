@@ -6,7 +6,6 @@ import {
   customerDocuments,
   customers,
   documentTemplates,
-  documentTemplateBillingTypes,
   documentTypeTriggers,
   generatedDocuments,
   documentSigningTokens,
@@ -24,7 +23,6 @@ import {
   type DocumentTemplate,
   type InsertDocumentTemplate,
   type UpdateDocumentTemplate,
-  type DocumentTemplateBillingType,
   type GeneratedDocument,
   type InsertGeneratedDocument,
   type DocumentSigningToken,
@@ -500,29 +498,6 @@ export class DocumentStorage implements IDocumentStorage {
     return result[0] || null;
   }
 
-  async getTemplatesForBillingType(billingType: string): Promise<(DocumentTemplate & { requirement: string; sortOrder: number })[]> {
-    const rows = await db
-      .select({
-        template: documentTemplates,
-        requirement: documentTemplateBillingTypes.requirement,
-        sortOrder: documentTemplateBillingTypes.sortOrder,
-      })
-      .from(documentTemplateBillingTypes)
-      .innerJoin(documentTemplates, eq(documentTemplateBillingTypes.templateId, documentTemplates.id))
-      .where(
-        and(
-          eq(documentTemplateBillingTypes.billingType, billingType),
-          eq(documentTemplates.isActive, true)
-        )
-      )
-      .orderBy(asc(documentTemplateBillingTypes.sortOrder));
-
-    return rows.map(r => ({
-      ...r.template,
-      requirement: r.requirement,
-      sortOrder: r.sortOrder,
-    }));
-  }
 
   async createDocumentTemplate(data: InsertDocumentTemplate): Promise<DocumentTemplate> {
     const [result] = await db.insert(documentTemplates).values({
@@ -645,41 +620,6 @@ export class DocumentStorage implements IDocumentStorage {
     return result || null;
   }
 
-  async getTemplateBillingTypes(templateId: number): Promise<DocumentTemplateBillingType[]> {
-    return db
-      .select()
-      .from(documentTemplateBillingTypes)
-      .where(eq(documentTemplateBillingTypes.templateId, templateId))
-      .orderBy(asc(documentTemplateBillingTypes.sortOrder));
-  }
-
-  async getAllTemplateBillingTypes(): Promise<DocumentTemplateBillingType[]> {
-    return db
-      .select()
-      .from(documentTemplateBillingTypes)
-      .orderBy(asc(documentTemplateBillingTypes.templateId), asc(documentTemplateBillingTypes.sortOrder));
-  }
-
-  async setTemplateBillingTypes(
-    templateId: number,
-    assignments: { billingType: string; requirement: string; sortOrder: number }[]
-  ): Promise<DocumentTemplateBillingType[]> {
-    return db.transaction(async (tx) => {
-      await tx
-        .delete(documentTemplateBillingTypes)
-        .where(eq(documentTemplateBillingTypes.templateId, templateId));
-
-      if (assignments.length === 0) return [];
-
-      const rows = await tx
-        .insert(documentTemplateBillingTypes)
-        .values(assignments.map(a => ({ templateId, ...a })))
-        .returning();
-
-      return rows;
-    });
-  }
-
   async createSigningToken(documentId: number, tokenHash: string, expiresAt: Date): Promise<DocumentSigningToken> {
     const [result] = await db.insert(documentSigningTokens).values({
       documentId,
@@ -756,41 +696,6 @@ export class DocumentStorage implements IDocumentStorage {
       if (!existingNames.has(dt.name)) {
         await this.createDocumentType({ ...dt, isActive: true, reminderLeadTimeDays: 30, inputMethod: "upload", isMandatory: false });
       }
-    }
-  }
-
-  async ensureTemplateBillingTypes(): Promise<void> {
-    const existing = await db.select().from(documentTemplateBillingTypes);
-    if (existing.length > 0) return;
-
-    const templates = await this.getDocumentTemplates(false);
-    const slugToId: Record<string, number> = {};
-    for (const t of templates) {
-      slugToId[t.slug] = t.id;
-    }
-
-    const mappings: { templateId: number; billingType: string; requirement: string; sortOrder: number }[] = [];
-
-    const addMapping = (slug: string, billingType: string, requirement: string, sortOrder: number) => {
-      if (slugToId[slug]) {
-        mappings.push({ templateId: slugToId[slug], billingType, requirement, sortOrder });
-      }
-    };
-
-    addMapping("betreuungsvertrag_pflegekasse", "pflegekasse_gesetzlich", "pflicht", 1);
-    addMapping("datenschutzvereinbarung", "pflegekasse_gesetzlich", "pflicht", 2);
-    addMapping("forderungsabtretung", "pflegekasse_gesetzlich", "pflicht", 3);
-
-    addMapping("betreuungsvertrag_pflegekasse", "pflegekasse_privat", "pflicht", 1);
-    addMapping("datenschutzvereinbarung", "pflegekasse_privat", "pflicht", 2);
-    addMapping("sepa_lastschriftmandat", "pflegekasse_privat", "optional", 3);
-
-    addMapping("dienstleistungsvertrag_selbstzahler", "selbstzahler", "pflicht", 1);
-    addMapping("datenschutzvereinbarung", "selbstzahler", "pflicht", 2);
-    addMapping("sepa_lastschriftmandat", "selbstzahler", "optional", 3);
-
-    if (mappings.length > 0) {
-      await db.insert(documentTemplateBillingTypes).values(mappings);
     }
   }
 

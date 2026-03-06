@@ -113,7 +113,6 @@ process.on("uncaughtException", (error) => {
   await serviceCatalogStorage.ensureSystemServices();
 
   const { documentStorage } = await import("./storage/documents");
-  await documentStorage.ensureTemplateBillingTypes();
   await documentStorage.ensureCustomerDocumentTypes();
 
   const { backfillAppointmentServices } = await import("./startup/backfill-appointment-services");

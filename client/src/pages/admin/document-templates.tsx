@@ -79,14 +79,6 @@ interface DocumentType {
   targetType: string;
 }
 
-interface BillingTypeAssignment {
-  id: number;
-  templateId: number;
-  billingType: string;
-  requirement: string;
-  sortOrder: number;
-}
-
 interface PlaceholderInfo {
   key: string;
   label: string;
@@ -118,14 +110,6 @@ const emptyForm: TemplateFormData = {
   requiresCustomerSignature: true,
   requiresEmployeeSignature: true,
 };
-
-const BILLING_TYPE_LABELS: Record<string, string> = {
-  pflegekasse_gesetzlich: "Pflegekasse (gesetzlich)",
-  pflegekasse_privat: "Pflegekasse (privat)",
-  selbstzahler: "Selbstzahler",
-};
-
-const BILLING_TYPES = ["pflegekasse_gesetzlich", "pflegekasse_privat", "selbstzahler"] as const;
 
 function toFormData(t: TemplateData): TemplateFormData {
   return {
@@ -159,21 +143,12 @@ export function DocumentTemplatesContent() {
   const [activeTab, setActiveTab] = useState("editor");
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
-  const [billingAssignments, setBillingAssignments] = useState<Record<string, { enabled: boolean; requirement: string; sortOrder: number }>>({});
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { data: templates, isLoading } = useQuery<TemplateData[]>({
     queryKey: ["admin", "document-templates"],
     queryFn: async () => {
       const result = await api.get<TemplateData[]>("/admin/document-templates?includeInactive=true");
-      return unwrapResult(result);
-    },
-  });
-
-  const { data: allBillingTypes, isLoading: isBillingLoading } = useQuery<BillingTypeAssignment[]>({
-    queryKey: ["admin", "document-templates-billing-types"],
-    queryFn: async () => {
-      const result = await api.get<BillingTypeAssignment[]>("/admin/document-templates-billing-types/all");
       return unwrapResult(result);
     },
   });
@@ -232,23 +207,13 @@ export function DocumentTemplatesContent() {
     return groups;
   }, [placeholders]);
 
-  const billingTypesByTemplate = useMemo(() => {
-    const map: Record<number, BillingTypeAssignment[]> = {};
-    allBillingTypes?.forEach(bt => {
-      if (!map[bt.templateId]) map[bt.templateId] = [];
-      map[bt.templateId].push(bt);
-    });
-    return map;
-  }, [allBillingTypes]);
-
   const createMutation = useMutation({
     mutationFn: async (data: { slug: string; name: string; description: string | null; htmlContent: string; isActive: boolean; documentTypeId: number | null; context: string; targetType: string; requiresCustomerSignature: boolean; requiresEmployeeSignature: boolean }) => {
       const result = await api.post("/admin/document-templates", data);
       return unwrapResult(result) as TemplateData;
     },
-    onSuccess: (newTemplate: TemplateData) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "document-templates"] });
-      saveBillingAssignments(newTemplate.id);
       handleClose();
       toast({ title: "Vorlage erstellt" });
     },
@@ -264,9 +229,6 @@ export function DocumentTemplatesContent() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "document-templates"] });
-      if (editingTemplate) {
-        saveBillingAssignments(editingTemplate.id);
-      }
       handleClose();
       toast({ title: "Vorlage aktualisiert" });
     },
@@ -275,51 +237,12 @@ export function DocumentTemplatesContent() {
     },
   });
 
-  const billingMutation = useMutation({
-    mutationFn: async ({ templateId, assignments }: { templateId: number; assignments: { billingType: string; requirement: string; sortOrder: number }[] }) => {
-      const result = await api.put(`/admin/document-templates/${templateId}/billing-types`, { assignments });
-      return unwrapResult(result);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "document-templates-billing-types"] });
-    },
-    onError: (error: Error) => {
-      toast({ title: "Zuordnungsfehler", description: error.message, variant: "destructive" });
-    },
-  });
-
-  const saveBillingAssignments = useCallback((templateId: number) => {
-    const assignments = BILLING_TYPES
-      .filter(bt => billingAssignments[bt]?.enabled)
-      .map(bt => ({
-        billingType: bt,
-        requirement: billingAssignments[bt].requirement,
-        sortOrder: billingAssignments[bt].sortOrder,
-      }));
-    billingMutation.mutate({ templateId, assignments });
-  }, [billingAssignments, billingMutation]);
-
-  const loadBillingAssignments = useCallback((templateId: number) => {
-    const existing = billingTypesByTemplate[templateId] || [];
-    const state: Record<string, { enabled: boolean; requirement: string; sortOrder: number }> = {};
-    BILLING_TYPES.forEach((bt, idx) => {
-      const found = existing.find(e => e.billingType === bt);
-      state[bt] = found
-        ? { enabled: true, requirement: found.requirement, sortOrder: found.sortOrder }
-        : { enabled: false, requirement: "pflicht", sortOrder: idx + 1 };
-    });
-    setBillingAssignments(state);
-  }, [billingTypesByTemplate]);
-
   const handleOpenCreate = () => {
     setFormData(emptyForm);
     setIsCreateMode(true);
     setEditingTemplate(null);
     setActiveTab("editor");
     setPreviewHtml(null);
-    setBillingAssignments(
-      Object.fromEntries(BILLING_TYPES.map((bt, idx) => [bt, { enabled: false, requirement: "pflicht", sortOrder: idx + 1 }]))
-    );
   };
 
   const handleOpenEdit = (t: TemplateData) => {
@@ -328,7 +251,6 @@ export function DocumentTemplatesContent() {
     setIsCreateMode(false);
     setActiveTab("editor");
     setPreviewHtml(null);
-    loadBillingAssignments(t.id);
   };
 
   const handleClose = () => {
@@ -443,9 +365,7 @@ export function DocumentTemplatesContent() {
             </Card>
           ) : (
             <div className="flex flex-col gap-3">
-              {templates?.map((t) => {
-                const assignments = billingTypesByTemplate[t.id] || [];
-                return (
+              {templates?.map((t) => (
                   <Card
                     key={t.id}
                     className={`cursor-pointer hover:shadow-lg transition-shadow ${!t.isActive ? "opacity-60" : ""}`}
@@ -487,24 +407,6 @@ export function DocumentTemplatesContent() {
                           {t.description && (
                             <p className="text-sm text-gray-500 mb-2 ml-6">{t.description}</p>
                           )}
-                          {assignments.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5 ml-6 mt-1">
-                              {assignments.map(a => (
-                                <span
-                                  key={a.billingType}
-                                  className={`text-xs px-2 py-0.5 rounded inline-flex items-center gap-1 ${
-                                    a.requirement === "pflicht"
-                                      ? "bg-amber-50 text-amber-700"
-                                      : "bg-gray-100 text-gray-600"
-                                  }`}
-                                >
-                                  <Tag className="h-3 w-3" />
-                                  {BILLING_TYPE_LABELS[a.billingType]}
-                                  <span className="text-[10px]">({a.requirement === "pflicht" ? "Pflicht" : "Optional"})</span>
-                                </span>
-                              ))}
-                            </div>
-                          )}
                         </div>
                         <Button
                           variant="ghost"
@@ -519,8 +421,7 @@ export function DocumentTemplatesContent() {
                       </div>
                     </CardContent>
                   </Card>
-                );
-              })}
+              ))}
             </div>
           )}
 
@@ -759,78 +660,6 @@ export function DocumentTemplatesContent() {
                     />
                   </div>
                 </div>
-                {formData.targetType === "customer" && (
-                  <>
-                    <hr className="my-4" />
-                    <div className="space-y-3">
-                      <Label className="text-sm font-semibold">Zuordnung zu Abrechnungsarten</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Für welche Abrechnungsarten wird diese Vorlage im Kundenanlage-Flow angezeigt?
-                      </p>
-                      {BILLING_TYPES.map((bt) => {
-                        const assignment = billingAssignments[bt] || { enabled: false, requirement: "pflicht", sortOrder: 0 };
-                        return (
-                          <Card key={bt} className={assignment.enabled ? "border-teal-200 bg-teal-50/30" : ""}>
-                            <CardContent className="p-3">
-                              <div className="flex items-center gap-3">
-                                <Switch
-                                  checked={assignment.enabled}
-                                  onCheckedChange={(enabled) => {
-                                    setBillingAssignments(prev => ({
-                                      ...prev,
-                                      [bt]: { ...prev[bt], enabled },
-                                    }));
-                                  }}
-                                  data-testid={`switch-billing-${bt}`}
-                                />
-                                <div className="flex-1">
-                                  <span className="text-sm font-medium">{BILLING_TYPE_LABELS[bt]}</span>
-                                </div>
-                              </div>
-                              {assignment.enabled && (
-                                <div className="flex items-center gap-3 mt-2 ml-11">
-                                  <Select
-                                    value={assignment.requirement}
-                                    onValueChange={(v) => {
-                                      setBillingAssignments(prev => ({
-                                        ...prev,
-                                        [bt]: { ...prev[bt], requirement: v },
-                                      }));
-                                    }}
-                                  >
-                                    <SelectTrigger className="w-28 h-8 text-xs" data-testid={`select-requirement-${bt}`}>
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="pflicht">Pflicht</SelectItem>
-                                      <SelectItem value="optional">Optional</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                  <div className="flex items-center gap-1.5">
-                                    <Label className="text-xs text-muted-foreground">Pos.</Label>
-                                    <Input
-                                      type="number"
-                                      min="1"
-                                      className="w-14 h-8 text-center text-xs"
-                                      value={assignment.sortOrder}
-                                      onChange={(e) => {
-                                        setBillingAssignments(prev => ({
-                                          ...prev,
-                                          [bt]: { ...prev[bt], sortOrder: parseInt(e.target.value) || 0 },
-                                        }));
-                                      }}
-                                      data-testid={`input-sort-${bt}`}
-                                    />
-                                  </div>
-                                </div>
-                              )}
-                            </CardContent>
-                          </Card>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
                 {editingTemplate && (
                   <p className="text-xs text-muted-foreground pt-4">
                     Version {editingTemplate.version} · Zuletzt aktualisiert: {formatDateForDisplay(editingTemplate.updatedAt.split("T")[0])}
@@ -887,7 +716,7 @@ export function DocumentTemplatesContent() {
             <Button
               className={`flex-1 ${componentStyles.btnPrimary}`}
               onClick={handleSubmit}
-              disabled={isPending || isBillingLoading || !formData.name.trim() || !formData.htmlContent.trim() || (isCreateMode && !formData.slug.trim())}
+              disabled={isPending || !formData.name.trim() || !formData.htmlContent.trim() || (isCreateMode && !formData.slug.trim())}
               data-testid="button-save-template"
             >
               {isPending && <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />}
