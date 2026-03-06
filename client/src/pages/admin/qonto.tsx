@@ -93,7 +93,7 @@ export default function AdminQonto() {
   const tabs: { id: Tab; label: string }[] = [
     { id: "status", label: "Verbindung" },
     { id: "transactions", label: "Transaktionen" },
-    { id: "advices", label: "Zahlungsavise" },
+    { id: "advices", label: "Avise" },
   ];
 
   return (
@@ -110,12 +110,12 @@ export default function AdminQonto() {
         </div>
       </div>
 
-      <div className="flex gap-2 mb-6 overflow-x-auto">
+      <div className="flex gap-1.5 mb-6">
         {tabs.map(t => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+            className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
               tab === t.id
                 ? "bg-teal-50 text-teal-700 border border-teal-200"
                 : "bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100"
