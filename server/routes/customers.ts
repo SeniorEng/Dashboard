@@ -430,30 +430,24 @@ router.post("/:id/signatures", asyncHandler("Unterschriften konnten nicht gespei
 
   for (const sig of parsed.data.signatures) {
     try {
-      const signatureOverrides: Record<string, string> = {
-        customer_signature: `<img src="${sig.customerSignatureData}" alt="Kundenunterschrift" style="max-height:240px;" />`,
-      };
-      const rendered = await renderTemplateForCustomer(sig.templateSlug, customerId, signatureOverrides);
-      const hash = computeDataHash(JSON.stringify({
-        customerId,
-        templateId: rendered.templateId,
-        templateVersion: rendered.templateVersion,
-        customerSignatureData: sig.customerSignatureData,
-      }));
+      const template = await documentStorage.getDocumentTemplateBySlug(sig.templateSlug);
+      if (!template) {
+        errors.push({ slug: sig.templateSlug, error: `Vorlage "${sig.templateSlug}" nicht gefunden` });
+        continue;
+      }
 
-      const doc = await documentStorage.createGeneratedDocument({
+      const result = await generateAndStorePdf({
+        template,
         customerId,
-        templateId: rendered.templateId,
-        templateVersion: rendered.templateVersion,
-        fileName: `${sig.templateSlug}_signed.html`,
-        objectPath: `generated/${customerId}/${sig.templateSlug}_${Date.now()}.html`,
         customerSignatureData: sig.customerSignatureData,
-        integrityHash: hash,
-        signingStatus: "complete" as const,
+        generatedByUserId: userId,
+        signingStatus: "complete",
         signingIp,
         signingLocation,
-      }, userId);
-      results.push(doc);
+      });
+
+      const doc = await documentStorage.getGeneratedDocument(result.generatedDocId);
+      if (doc) results.push(doc);
     } catch (err) {
       errors.push({ slug: sig.templateSlug, error: String(err) });
       console.error(`Signatur ${sig.templateSlug} fehlgeschlagen:`, err);
