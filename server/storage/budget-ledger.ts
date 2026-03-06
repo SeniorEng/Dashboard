@@ -319,7 +319,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
     if (!budgetStartDate) {
       const monthlyEntries = existingAllocations
-        .filter(a => (a.source === "monthly" || a.source === "monthly_auto" || a.source === "carryover") && a.validFrom);
+        .filter(a => (a.source === "monthly_auto" || a.source === "monthly" || a.source === "carryover") && a.validFrom);
       if (monthlyEntries.length > 0) {
         const earliest = monthlyEntries.reduce((min, a) =>
           a.validFrom < min.validFrom ? a : min
@@ -498,9 +498,19 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       carryoverCents,
       carryoverExpiresAt,
       currentYearAllocatedCents,
-      monthlyLimitCents: preferences?.monthlyLimitCents ?? null,
+      monthlyLimitCents: await this.getEffectiveMonthlyLimitCents(customerId),
       currentMonthUsedCents,
     };
+  }
+
+  private async getEffectiveMonthlyLimitCents(customerId: number): Promise<number | null> {
+    const typeSettings = await this.getBudgetTypeSettings(customerId);
+    const s45b = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
+    if (s45b?.monthlyLimitCents != null) {
+      return s45b.monthlyLimitCents;
+    }
+    const preferences = await this.getBudgetPreferences(customerId);
+    return preferences?.monthlyLimitCents ?? null;
   }
 
   async getBudgetPreferences(customerId: number, _tx?: DbClient): Promise<CustomerBudgetPreferences | undefined> {
@@ -776,10 +786,10 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
             effective39_42a = Math.min(effective39_42a, yearlyRemaining);
           }
         } else {
-          const preferences = await this.getBudgetPreferences(params.customerId);
-          if (preferences?.monthlyLimitCents !== null && preferences?.monthlyLimitCents !== undefined) {
+          const effectiveMonthlyLimit = await this.getEffectiveMonthlyLimitCents(params.customerId);
+          if (effectiveMonthlyLimit !== null) {
             const totalCarryover = await this.getTotalCarryoverCents(params.customerId, params.transactionDate);
-            const effectiveLimit = preferences.monthlyLimitCents + totalCarryover;
+            const effectiveLimit = effectiveMonthlyLimit + totalCarryover;
             const monthlyRemaining45b = Math.max(0, effectiveLimit - summaries.entlastungsbetrag45b.currentMonthUsedCents);
             effective45b = Math.min(effective45b, monthlyRemaining45b);
           }

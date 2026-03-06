@@ -342,14 +342,6 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
 
   if (data.budgets) {
     try {
-      await customerManagementStorage.addCustomerBudget({
-        customerId: customer.id,
-        entlastungsbetrag45b: data.budgets.entlastungsbetrag45b,
-        verhinderungspflege39: data.budgets.verhinderungspflege39,
-        pflegesachleistungen36: data.budgets.pflegesachleistungen36,
-        validFrom: data.budgets.validFrom,
-      }, userId);
-
       const typeSettings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null }> = [];
       if (data.budgets.entlastungsbetrag45b > 0) {
         typeSettings.push({ budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: data.budgets.entlastungsbetrag45b });

@@ -119,6 +119,9 @@ process.on("uncaughtException", (error) => {
   const { importPflegekassen } = await import("./startup/import-pflegekassen");
   await importPflegekassen();
 
+  const { migrateBudgetSources } = await import("./startup/migrate-budget-sources");
+  await migrateBudgetSources();
+
   const { geocodeAllMissing } = await import("./services/geocoding");
   geocodeAllMissing().catch(err => console.error("[geocoding] Batch geocoding error:", err));
 
