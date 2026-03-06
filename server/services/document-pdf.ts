@@ -75,7 +75,7 @@ export async function generateAndStorePdf(options: {
 
   const overrides: Record<string, string> = { ...placeholderOverrides };
   if (customerSignatureData) {
-    overrides.customer_signature = `<img src="${customerSignatureData}" alt="Kundenunterschrift" style="max-height:120px;" />`;
+    overrides.customer_signature = `<img src="${customerSignatureData}" alt="Kundenunterschrift" style="max-height:240px;" />`;
   }
   if (employeeSignatureData) {
     overrides.employee_signature = `<img src="${employeeSignatureData}" alt="Mitarbeiterunterschrift" style="max-height:60px;" />`;
