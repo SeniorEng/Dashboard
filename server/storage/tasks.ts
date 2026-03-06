@@ -67,7 +67,7 @@ export async function getTasksForUser(userId: number, includeCompleted: boolean 
     .where(and(...conditions))
     .orderBy(
       asc(tasks.status),
-      desc(sqlBuilder`CASE WHEN ${tasks.priority} = 'high' THEN 1 WHEN ${tasks.priority} = 'medium' THEN 2 ELSE 3 END`),
+      asc(sqlBuilder`CASE WHEN ${tasks.priority} = 'high' THEN 1 WHEN ${tasks.priority} = 'medium' THEN 2 ELSE 3 END`),
       asc(tasks.dueDate)
     );
 
@@ -86,7 +86,7 @@ export async function getAllTasks(includeCompleted: boolean = false): Promise<Ta
     .where(and(...conditions))
     .orderBy(
       asc(tasks.status),
-      desc(sqlBuilder`CASE WHEN ${tasks.priority} = 'high' THEN 1 WHEN ${tasks.priority} = 'medium' THEN 2 ELSE 3 END`),
+      asc(sqlBuilder`CASE WHEN ${tasks.priority} = 'high' THEN 1 WHEN ${tasks.priority} = 'medium' THEN 2 ELSE 3 END`),
       asc(tasks.dueDate)
     );
 
