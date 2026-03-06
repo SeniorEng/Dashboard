@@ -216,7 +216,7 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
   return (
     <div className={`min-h-screen ${colors.surface.page} font-sans text-foreground pb-20 md:pb-0`}>
       {/* Header */}
-      <header className="sticky top-0 z-50 w-full bg-white/90 backdrop-blur-none border-b border-border/40 shadow-sm">
+      <header className="sticky top-0 z-50 w-full bg-white border-b border-border/40 shadow-sm">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <Link href="/" className="shrink-0 hover:opacity-80 transition-opacity cursor-pointer" data-testid="link-logo-home">
             <img src={displayLogo} alt="Logo" className="h-10 w-10 object-contain rounded-lg shadow-sm pointer-events-none" />
