@@ -118,7 +118,7 @@ This agent validates that the application is production-ready, properly configur
 
 ## Category 3: Build & Startup Integrity
 
-**Goal**: The application builds cleanly and starts without errors.
+**Goal**: The application builds cleanly, starts without errors, and responds to health checks.
 
 ### Steps:
 1. **TypeScript compilation**:
@@ -156,12 +156,52 @@ This agent validates that the application is production-ready, properly configur
    - Verify: Source maps enabled for production debugging
    - Verify: Build output directory is correct
 
+5. **Health check endpoint** (MANDATORY):
+   ```bash
+   # Check for health/status endpoint
+   grep -rn "health\|/health\|/status\|/ready" server/routes/ --include="*.ts"
+   ```
+   - Verify: A `/api/health` or `/health` endpoint exists
+   - Verify: It returns 200 OK when the server is healthy
+   - Verify: It checks database connectivity (not just returns static OK)
+   - Verify: It returns 503 when the database is unreachable
+   - Recommended response format:
+     ```json
+     { "status": "ok", "db": "connected", "uptime": 12345 }
+     ```
+   - If no health check endpoint exists → FAIL (must be added before deployment)
+
+6. **Graceful shutdown (SIGTERM handling)**:
+   ```bash
+   # Check for process signal handling
+   grep -rn "SIGTERM\|SIGINT\|graceful.*shutdown\|process\.on.*signal" server/ --include="*.ts"
+   ```
+   - Verify: Server handles SIGTERM gracefully:
+     1. Stops accepting new connections
+     2. Waits for in-flight requests to complete (with timeout)
+     3. Closes database connections cleanly
+     4. Exits with code 0
+   - If no SIGTERM handler → WARN (Replit handles restart, but clean shutdown prevents data loss)
+   - Recommended pattern:
+     ```typescript
+     process.on('SIGTERM', async () => {
+       console.log('SIGTERM received, shutting down gracefully...');
+       server.close(() => {
+         // close DB pool
+         process.exit(0);
+       });
+       setTimeout(() => process.exit(1), 10000); // force exit after 10s
+     });
+     ```
+
 ### Red Flags:
 - TypeScript compilation errors → FAIL
 - Build fails → FAIL
 - Server crashes on startup → FAIL
+- No health check endpoint → FAIL
 - Missing database migration on startup → WARN
 - Large bundle without code splitting → WARN
+- No SIGTERM handling → WARN
 
 ---
 
@@ -205,19 +245,14 @@ This agent validates that the application is production-ready, properly configur
    - Verify: React error boundaries exist around critical sections
    - Verify: Client-side errors don't show blank white screens
 
-4. **Health checks**:
-   ```bash
-   # Check for health/status endpoint
-   grep -rn "health\|status\|ping\|ready" server/routes/ --include="*.ts" -i
-   ```
-   - Verify: A health check endpoint exists for monitoring
-   - Verify: It checks database connectivity
+4. **Health checks** (see Category 3, Step 5 — must exist):
+   - Verify: Health endpoint is monitored (Replit handles this for deployed apps)
 
 ### Red Flags:
 - No error middleware → FAIL
 - Sensitive data in console.log → FAIL
 - No React error boundary → WARN
-- No health check endpoint → WARN
+- No health check endpoint → FAIL (see Category 3)
 - Console.log with user data in production code → WARN
 
 ---
@@ -287,9 +322,11 @@ This agent validates that the application is production-ready, properly configur
    - [ ] Error responses don't leak internal details
 
 4. **Resilience**:
+   - [ ] Health check endpoint exists and checks DB connectivity
    - [ ] Error middleware handles all server errors
    - [ ] Database connection failures are handled gracefully
    - [ ] Client-side error boundaries prevent white screens
+   - [ ] SIGTERM is handled for graceful shutdown
 
 5. **Performance**:
    - [ ] Database queries are paginated where appropriate
@@ -302,10 +339,21 @@ This agent validates that the application is production-ready, properly configur
    - [ ] Seed data has been applied
    - [ ] No test/mock data in production database
 
+7. **Rollback Plan**:
+   - [ ] Previous working version is identified (git commit hash or Replit checkpoint)
+   - [ ] Schema changes are backward-compatible (can roll back code without breaking DB)
+   - [ ] If schema is NOT backward-compatible: data migration plan documented
+   - [ ] Rollback procedure tested or documented:
+     1. Revert to previous Replit checkpoint
+     2. Verify health check passes
+     3. Verify critical paths work (login, appointments, documentation)
+
 ### Red Flags:
 - Any unchecked item from the checklist → WARN or FAIL depending on severity
 - Build failure → FAIL (blocks deployment)
 - Critical security issue → FAIL (blocks deployment)
+- No rollback plan for schema changes → FAIL
+- No health check endpoint → FAIL (blocks deployment)
 
 ---
 
@@ -323,7 +371,17 @@ This agent validates that the application is production-ready, properly configur
 | 5. Database Operations | PASS/WARN/FAIL | Details |
 | 6. Pre-Deploy Checklist | PASS/WARN/FAIL | Details |
 
-### Deployment Readiness: ✅ READY / ⚠️ READY WITH WARNINGS / ❌ NOT READY
+### Deployment Readiness: READY / READY WITH WARNINGS / NOT READY
+
+### Health Check Status
+- Endpoint: /api/health (exists / MISSING)
+- DB connectivity check: Yes / No
+- SIGTERM handling: Yes / No
+
+### Rollback Plan
+- Previous version: [commit/checkpoint]
+- Schema backward-compatible: Yes / No
+- Rollback steps: [documented / NOT documented]
 
 ### Action Items
 - FAIL items: Must fix before deployment
@@ -345,7 +403,8 @@ This audit covers **deployment readiness and operations**. For complete coverage
 
 | Skill | When to Also Run | What It Adds |
 |-------|-----------------|--------------|
-| `security-audit` | **ALWAYS** before deployment | OWASP, auth bypass, CSRF, secrets |
-| `performance-audit` | Before deployment | Query efficiency, bundle size, mobile speed |
+| `security-audit` | **ALWAYS** before deployment | OWASP, auth bypass, CSRF, secrets, API security |
+| `performance-audit` | Before deployment | Query efficiency, bundle size, mobile speed, CWV |
 | `code-quality-supervisor` | After any changes | Convention compliance, dead code |
 | `database-audit` | When DB changes involved | Schema drift, indexing, data integrity |
+| `regression-guard` | When deploying multi-file changes | Dependency impact, critical path verification |

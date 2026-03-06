@@ -5,22 +5,37 @@ description: Master orchestration skill that coordinates all audit agents. Defin
 
 # AI Development Team — Master Orchestration
 
-This skill defines how the virtual AI development team operates. It coordinates 8 specialized audit agents plus the Architect to ensure comprehensive code quality.
+This skill defines how the virtual AI development team operates. It coordinates 9 specialized audit agents plus the Architect to ensure comprehensive code quality.
 
 ## The Team Roster
 
 | # | Agent | Location | Specialty | Metaphor |
 |---|-------|----------|-----------|----------|
 | 🏛️ | **Architect** | Built-in tool | Strategy, planning, code review | Technical Lead |
-| 📋 | **Business & Compliance** | `.agents/skills/business-logic-audit/` | Workflows, GoBD, domain rules, care terminology | Business Analyst |
-| 🔍 | **Code Quality** | `.agents/skills/code-quality-supervisor/` | DRY, conventions, dead code, documentation | Senior Engineer |
+| 📋 | **Business & Compliance** | `.agents/skills/business-logic-audit/` | Workflows, GoBD, domain rules, care terminology, idempotency | Business Analyst |
+| 🔍 | **Code Quality** | `.agents/skills/code-quality-supervisor/` | DRY, conventions, dead code, documentation, tech debt registry | Senior Engineer |
 | 🗄️ | **Database** | `.agents/skills/database-audit/` | Schema, queries, indexing, GDPR, data integrity | DBA |
-| ⚠️ | **Error Handling** | `.agents/skills/error-handling-audit/` | Mutations, onError, toast messages, DB error mapping | Error UX Specialist |
-| ⚡ | **Performance** | `.agents/skills/performance-audit/` | Speed, caching, bundle size, mobile optimization | Performance Engineer |
-| 🛡️ | **Security** | `.agents/skills/security-audit/` | OWASP, auth, CSRF, secrets, DSGVO | Security Officer |
-| 🎨 | **UI/UX & A11y** | `.agents/skills/ui-ux-audit/` | Touch targets, feedback, mobile, German wording, accessibility | UX Designer |
-| 🧪 | **QA & Testing** | `.agents/skills/qa-testing/` | Happy path, edge cases, regression, error handling | QA Tester |
-| 🚀 | **DevOps** | `.agents/skills/devops-release/` | Env vars, dependencies, build, logging, deployment | Release Manager |
+| ⚠️ | **Error Handling** | `.agents/skills/error-handling-audit/` | Mutations, onError, toast messages, DB error mapping, graceful degradation | Error UX Specialist |
+| ⚡ | **Performance** | `.agents/skills/performance-audit/` | Speed, caching, bundle size, mobile optimization, CWV, memory leaks | Performance Engineer |
+| 🔄 | **Regression Guard** | `.agents/skills/regression-guard/` | Dependency impact, API contract regression, critical paths, migration safety, permission regression | Regression Tester |
+| 🛡️ | **Security** | `.agents/skills/security-audit/` | OWASP, OWASP API Top 10, auth, CSRF, secrets, DSGVO, supply chain | Security Officer |
+| 🎨 | **UI/UX & A11y** | `.agents/skills/ui-ux-audit/` | Touch targets, feedback, skeleton loading, mobile, German wording, accessibility, PWA | UX Designer |
+| 🧪 | **QA & Testing** | `.agents/skills/qa-testing/` | Happy path, edge cases, regression, contract testing, smoke tests, proactive test recommendations | QA Tester |
+| 🚀 | **DevOps** | `.agents/skills/devops-release/` | Env vars, dependencies, build, logging, health checks, graceful shutdown, deployment | Release Manager |
+
+---
+
+## Risk-Based Testing Priorities
+
+Not all code changes carry equal risk. Allocate testing effort proportionally:
+
+| Risk Level | Modules | Testing Approach | Agents Required |
+|---|---|---|---|
+| **HOCH** (Critical) | Budget/Abrechnung, Auth/Sessions, Leistungsnachweise, Preisvereinbarungen, Unterschriften | Full audit: all paths, boundary values, idempotency, regression | Business Logic + Security + QA + Regression Guard + Database |
+| **MITTEL** (Important) | Workflows (Dokumentation, Erstberatung), Terminplanung, Zeiterfassung, Kundenverwaltung | Standard audit: happy + sad path, key edge cases, error handling | Business Logic + QA + relevant specialists |
+| **NIEDRIG** (Standard) | UI-Styling, Statistik-Anzeige, Settings, Onboarding | Quick check: happy path, visual verification | Code Quality + UI/UX |
+
+**Rule**: Never skip HOCH-risk module testing. For MITTEL modules, skip only boundary testing if time-constrained. For NIEDRIG, skip only if completely isolated from other modules.
 
 ---
 
@@ -34,17 +49,20 @@ This skill defines how the virtual AI development team operates. It coordinates 
 
 | What Changed | Agents to Run |
 |---|---|
-| Database schema, storage queries | Database + Code Quality |
-| API routes, endpoints | Security + Error Handling + Business Logic + Code Quality |
-| Business workflows, status transitions | Business Logic + QA + Code Quality |
+| Database schema, storage queries | Database + Code Quality + Regression Guard |
+| API routes, endpoints | Security + Error Handling + Business Logic + Code Quality + Regression Guard |
+| Business workflows, status transitions | Business Logic + QA + Code Quality + Regression Guard |
 | Frontend components, pages | UI/UX + Performance + Code Quality |
 | Forms, user input handling | Security + UI/UX + QA + Code Quality |
 | Frontend mutations (useMutation) | Error Handling + Code Quality |
-| Authentication, authorization | Security + Code Quality |
-| Dependencies (package.json) | DevOps + Security |
+| Authentication, authorization | Security + Regression Guard (permission regression) + Code Quality |
+| Dependencies (package.json) | DevOps + Security (supply chain) |
 | Build config, env vars | DevOps |
+| Shared modules (shared/, server/lib/) | Regression Guard + Code Quality + all affected specialists |
+| Schema migration (ALTER TABLE) | Database + Regression Guard (migration safety) + Code Quality |
 | Major feature (end-to-end) | ALL agents |
 | Before deployment/publishing | ALL agents (full audit) |
+| Multi-file change (3+ files) | Regression Guard + Code Quality + relevant specialists |
 
 ### Quick Reference: Minimum Audit Set
 
@@ -52,8 +70,9 @@ This skill defines how the virtual AI development team operates. It coordinates 
 |---|---|
 | Small fix (< 10 lines) | Code Quality + Architect |
 | Medium feature (10-100 lines) | Code Quality + 1-2 relevant specialists + Architect |
-| Large feature (100+ lines) | Code Quality + all relevant specialists + Architect |
-| Pre-deployment | Full team audit (all 8 agents) |
+| Large feature (100+ lines) | Code Quality + Regression Guard + all relevant specialists + Architect |
+| Multi-file refactor (3+ files) | Code Quality + Regression Guard + Architect |
+| Pre-deployment | Full team audit (all 9 agents) |
 
 ---
 
@@ -68,10 +87,13 @@ When agents give contradicting recommendations, resolve using this priority orde
 2. 📋 Business Logic & GoBD      (Must correctly model the real-world process)
    └─ "If it doesn't match the business workflow, it's wrong."
 
-3. 🎨 UX & ⚡ Performance        (User experience comes before code elegance)
+3. 🔄 Regression Guard           (Existing features must not break)
+   └─ "If it breaks something that was working, it's a regression."
+
+4. 🎨 UX & ⚡ Performance        (User experience comes before code elegance)
    └─ "If the user can't use it or it's too slow, it doesn't matter how clean the code is."
 
-4. 🔍 Code Quality               (Maintainability for the long term)
+5. 🔍 Code Quality               (Maintainability for the long term)
    └─ "If it works but is unmaintainable, it's technical debt."
 ```
 
@@ -80,8 +102,10 @@ When agents give contradicting recommendations, resolve using this priority orde
   → Security wins: Add rate limiting, but with generous limits and clear feedback
 - **Performance says** "cache this query" vs **Business says** "data must be real-time"
   → Business wins: Don't cache, optimize the query instead
+- **Regression Guard says** "this change breaks appointment list" vs **Code Quality says** "the old code was wrong"
+  → Regression Guard wins: Fix the regression first, then refactor properly
 - **Code Quality says** "extract this into a util" vs **UX says** "ship it now, the user is waiting"
-  → UX wins short-term: Ship, but create a follow-up task for refactoring
+  → UX wins short-term: Ship, but create a tech debt registry entry for refactoring
 
 ---
 
@@ -90,9 +114,22 @@ When agents give contradicting recommendations, resolve using this priority orde
 These are conceptual commands that trigger specific agent combinations:
 
 ### `/audit` — Full Team Audit
-Runs ALL 8 agents against the current codebase state (git diff).
+Runs ALL 9 agents against the current codebase state (git diff).
 **When**: Before deployment, after major milestones, monthly reviews.
-**Execution**: All 8 agents run as parallel subagents, each producing their audit report.
+**Execution**: All 9 agents run as parallel subagents, each producing their audit report.
+
+### `/smoke` — Post-Deploy Quick Check
+Quick validation that critical functionality still works after deployment.
+**When**: Immediately after every deployment/publishing.
+**Agents**: QA (Category 8: Smoke Test) + DevOps (Category 3: Health Check) + Regression Guard (Category 3: Critical Paths)
+**Execution**:
+1. Health check endpoint returns 200 OK with DB connected
+2. Login flow works
+3. Dashboard loads with data
+4. Appointment creation succeeds
+5. Documentation flow works (Kundentermin AND Erstberatung)
+6. Budget overview shows correct data
+**Time budget**: < 5 minutes
 
 ### `/plan [Feature]` — Architecture Planning
 The Architect creates a step-by-step implementation plan.
@@ -107,12 +144,17 @@ The most relevant agent analyzes the issue and proposes a fix.
 ### `/preflight` — Pre-Commit Quick Check
 Fast validation before committing code.
 **When**: Before every significant commit.
-**Execution**: Code Quality + Security + QA (happy path only).
+**Execution**: Code Quality + Security + QA (happy path only) + Regression Guard (dependency impact only).
 
 ### `/review` — Code Review
 Architect reviews recent changes for correctness and completeness.
 **When**: After completing a task, before marking it done.
 **Execution**: Architect (evaluate_task mode) with git diff.
+
+### `/regression [files]` — Regression Analysis
+Targeted regression check for specific changed files.
+**When**: After modifying shared modules, critical paths, or multi-file changes.
+**Execution**: Regression Guard full analysis on specified files.
 
 ---
 
@@ -125,16 +167,23 @@ When running a full team audit, the results are aggregated into a summary:
 
 | Agent | PASS | WARN | FAIL | Critical Finding |
 |-------|------|------|------|------------------|
-| Business Logic | 8/10 | 2 | 0 | — |
-| Code Quality | 5/6 | 1 | 0 | — |
+| Business Logic | 9/11 | 2 | 0 | — |
+| Code Quality | 6/8 | 2 | 0 | — |
 | Database | 9/10 | 1 | 0 | — |
-| Performance | 4/5 | 1 | 0 | — |
-| Security | 6/7 | 1 | 0 | — |
-| UI/UX | 5/6 | 1 | 0 | — |
-| QA Testing | 5/6 | 1 | 0 | — |
+| Error Handling | 6/7 | 1 | 0 | — |
+| Performance | 5/6 | 1 | 0 | — |
+| Regression Guard | 4/5 | 1 | 0 | — |
+| Security | 7/8 | 1 | 0 | — |
+| UI/UX | 6/8 | 2 | 0 | — |
+| QA Testing | 7/9 | 2 | 0 | — |
 | DevOps | 5/6 | 1 | 0 | — |
 
-### Overall: ✅ PASS (0 FAIL, 8 WARN)
+### Overall: PASS (0 FAIL, 14 WARN)
+
+### Risk Assessment
+- HOCH-risk modules checked: [list]
+- MITTEL-risk modules checked: [list]
+- NIEDRIG-risk modules skipped: [list]
 
 ### FAIL Items (Must Fix Now)
 [None / List]
@@ -143,7 +192,7 @@ When running a full team audit, the results are aggregated into a summary:
 [Consolidated list across all agents]
 
 ### Follow-Up Tasks
-[Generated from WARN items that are deferred]
+[Generated from WARN items that are deferred → added to Tech Debt Registry]
 ```
 
 ---
@@ -177,6 +226,7 @@ To extend the team with a new specialist:
 ┌─────────────────────────────────────────────────┐
 │           ARCHITECT (plan mode)                  │
 │   Break down into tasks, identify dependencies   │
+│   Assign risk level: HOCH / MITTEL / NIEDRIG     │
 └────────────────────┬────────────────────────────┘
                      ▼
 ┌─────────────────────────────────────────────────┐
@@ -191,14 +241,21 @@ To extend the team with a new specialist:
                      ▼
 ┌─────────────────────────────────────────────────┐
 │         SPECIALIST AUDITS (parallel)             │
-│   Run relevant agents based on change type       │
-│   Business + DB + Security + UX + QA + Perf      │
+│   Run based on risk level + change type          │
+│   HOCH: All 9 agents                             │
+│   MITTEL: Business + QA + Regression + relevant  │
+│   NIEDRIG: Code Quality + UI/UX                  │
 └────────────────────┬────────────────────────────┘
                      ▼
 ┌─────────────────────────────────────────────────┐
 │           FIX FINDINGS                           │
 │   FAIL → immediate fix                           │
-│   WARN → fix or document as follow-up            │
+│   WARN → fix or add to Tech Debt Registry        │
+└────────────────────┬────────────────────────────┘
+                     ▼
+┌─────────────────────────────────────────────────┐
+│           POST-DEPLOY SMOKE (/smoke)             │
+│   Health check + Critical paths + Login          │
 └────────────────────┬────────────────────────────┘
                      ▼
 ┌─────────────────────────────────────────────────┐

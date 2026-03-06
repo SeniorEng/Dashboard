@@ -67,11 +67,29 @@ Fix: Document endpoint sets fallback values when start/end weren't explicitly tr
 4. Verify domain functions are imported from `shared/domain/`, not reimplemented locally
 5. Check that error messages for rule violations are in German and actionable
 
+### Critical Domain Rules for This Project:
+
+#### Appointment Type Distinction:
+- **Kundentermin**: Regular customer appointment → triggers budget booking, costs against Pflegekassen budgets (§45b, §45a, §39/42a)
+- **Erstberatung**: Initial consultation → NO budget booking, NO cost calculation against customer budgets. Costs are internal (employee time + km only)
+- **Check**: Every code path that handles appointments must distinguish between these types
+  ```bash
+  # Find all places that trigger budget operations
+  grep -rn "createConsumptionTransaction\|budgetLedger\|budget.*booking\|budget.*buchung" server/ --include="*.ts"
+  ```
+  - Verify: Each budget operation checks `appointmentType !== "Erstberatung"` or equivalent guard
+  - Verify: Erstberatung appointments can be documented without budget errors
+
+#### Budget Cascade Order:
+- §45b (Entlastungsbetrag) → §39/42a (Verhinderungspflege) → §45a (Umwandlungsanspruch) → Private
+- Verify: This order is hardcoded in one place (budget-ledger) and not reimplemented elsewhere
+
 ### Red Flags:
 - Same business rule hardcoded in multiple files with different values
 - Frontend allows an action that the backend rejects (or vice versa)
 - Domain rule exists in code but has no corresponding database constraint
 - Validation message is generic ("Fehler") instead of specific ("Termin kann nicht dokumentiert werden, da noch kein Pflegegrad zugewiesen ist")
+- Budget booking triggered for Erstberatung appointments → FAIL
 
 ---
 
@@ -158,11 +176,13 @@ Fix: Document endpoint sets fallback values when start/end weren't explicitly tr
 ### Key Dependencies in This Project:
 ```
 Appointments → Leistungsnachweise (service records depend on completed appointments)
-Appointments → Budget Transactions (cost booking happens at documentation)
+Appointments → Budget Transactions (cost booking happens at documentation — ONLY for Kundentermine!)
 Appointments → Time Tracking (work hours derived from appointment times)
 Customer Pricing → Appointment Cost Calculation (rates from pricing agreement)
 Employee Assignment → Appointment Assignment (who can be assigned)
 Care Level → Budget Eligibility (Pflegegrad determines §45b eligibility)
+Erstberatung → Customer Conversion (converts prospect to customer, NO budget involvement)
+Insurance Providers → Customer Creation (Pflegekasse assignment)
 ```
 
 ### Red Flags:
@@ -311,12 +331,64 @@ Care Level → Budget Eligibility (Pflegegrad determines §45b eligibility)
    - Verify: If appointment type requires customer, customer must be set
    - Verify: If service requires Pflegegrad, customer must have one assigned
    - Verify: Budget booking only for customers with active budget
+   - Verify: Erstberatung type → no budget operations triggered
 
 ### Red Flags:
 - No time overlap validation for appointments → WARN
 - Negative values accepted for inherently positive fields → FAIL
 - No Pflegegrad range validation → FAIL
 - Missing cross-field dependency validation → WARN
+
+---
+
+## Category 11: Idempotency & Replay Safety
+
+**Goal**: Critical business operations are safe against duplicate execution. A user accidentally clicking "Submit" twice, or a network retry, must not cause double bookings or corrupt data.
+
+### Steps:
+1. **Budget booking idempotency**:
+   ```bash
+   # Check if budget consumption checks for existing transaction
+   grep -rn "createConsumptionTransaction" server/ --include="*.ts" -A10
+   ```
+   - Verify: Budget booking checks if a transaction already exists for this appointmentId
+   - Verify: Documenting an already-completed appointment is rejected (not double-booked)
+   - Test: Call documentation endpoint twice with same data — second call should be rejected or no-op
+
+2. **Leistungsnachweis generation idempotency**:
+   ```bash
+   grep -rn "generate.*nachweis\|create.*service.*record\|createServiceRecord" server/ --include="*.ts"
+   ```
+   - Verify: Generating a service record for the same month twice doesn't create duplicates
+   - Verify: Regeneration replaces or updates, not appends
+
+3. **Signature idempotency**:
+   ```bash
+   grep -rn "signatureData\|signedAt\|SIGNATURE_LOCKED" server/ --include="*.ts"
+   ```
+   - Verify: A signed appointment cannot be signed again
+   - Verify: Signature lock is checked before accepting new signature
+
+4. **Customer creation idempotency**:
+   ```bash
+   grep -rn "createCustomer\|insertCustomer" server/ --include="*.ts" -A5
+   ```
+   - Verify: Duplicate customer creation (same name + address) is detected or warned
+
+5. **Generic double-submit protection**:
+   ```bash
+   # Frontend: Check if submit buttons disable during submission
+   grep -rn "isPending\|isSubmitting\|disabled.*pending" client/src/ --include="*.tsx" | head -20
+   ```
+   - Verify: All mutation buttons are disabled while isPending
+   - Verify: Critical forms prevent double submission
+
+### Red Flags:
+- Budget booking without duplicate check → FAIL (financial data corruption)
+- Documentation endpoint allows re-documentation without check → FAIL
+- Signature endpoint allows overwriting existing signature → FAIL
+- Submit button not disabled during mutation → WARN
+- No unique constraint or check for duplicate records → WARN
 
 ---
 
@@ -339,6 +411,7 @@ After completing all checks, produce a summary:
 | 8. Documentation Sync | PASS/WARN/FAIL | Details |
 | 9. GoBD & Compliance | PASS/WARN/FAIL | Details |
 | 10. Plausibility Checks | PASS/WARN/FAIL | Details |
+| 11. Idempotency & Replay Safety | PASS/WARN/FAIL | Details |
 
 ### Action Items
 - FAIL items: Must fix before completion
@@ -361,5 +434,6 @@ This audit covers **business logic** (workflows, domain rules, user perspective)
 | `database-audit` | When schema, storage, or queries are affected | Schema consistency, data types, indexing, GDPR |
 | `security-audit` | When auth, API routes, or validation rules change | OWASP checks, secret exposure, access control |
 | `performance-audit` | When new features add complexity | Query efficiency, rendering, bundle size |
+| `regression-guard` | When multiple files changed | Dependency impact, critical path verification |
 
 See `.agents/skills/code-quality-supervisor/SKILL.md` for the orchestration rules that determine which audits run when.

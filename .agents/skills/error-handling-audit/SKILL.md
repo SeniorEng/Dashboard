@@ -92,6 +92,62 @@ For every Zod schema in `shared/schema/`:
 - [ ] Messages suggest a resolution where possible (e.g., "Bitte laden Sie die Seite neu")
 - [ ] No English error messages leak to the UI
 
+### Category 7: Graceful Degradation (MEDIUM)
+**Goal**: When external services fail, the app degrades gracefully instead of crashing.
+
+For each external dependency, verify fallback behavior:
+
+1. **Database connection failure**:
+   ```bash
+   # Check for connection error handling
+   grep -rn "connect\|pool\|neon\|DATABASE_URL" server/ --include="*.ts" | grep -i "error\|catch\|retry\|fail"
+   ```
+   - Verify: DB connection failures show "Datenbankverbindung fehlgeschlagen. Bitte versuchen Sie es in wenigen Minuten erneut."
+   - Verify: App doesn't crash on DB timeout — returns 503 with retry-after header
+
+2. **Geocoding service failure**:
+   ```bash
+   grep -rn "geocod\|nominatim\|coordinates\|latitude\|longitude" server/ --include="*.ts" | grep -i "error\|catch\|fail"
+   ```
+   - Verify: Geocoding failure doesn't block appointment creation
+   - Verify: Missing coordinates show "Adresse konnte nicht geocodiert werden" (non-blocking warning)
+
+3. **External API failures** (if any):
+   ```bash
+   grep -rn "fetch\|axios\|https\.\|http\." server/ --include="*.ts" | grep -v "node_modules"
+   ```
+   - Verify: Each external call has a timeout
+   - Verify: Failures are caught and produce user-friendly messages
+   - Verify: Critical operations don't depend on non-critical external services
+
+4. **Error recovery UX**:
+   ```bash
+   # Check if forms preserve user input on error
+   grep -rn "reset()\|resetForm\|form\.reset" client/src/ --include="*.tsx" --include="*.ts"
+   ```
+   - Verify: After a submission error, the form retains the user's input (not cleared)
+   - Verify: User can retry without re-entering data
+   - Verify: Error toasts have a "Erneut versuchen" action where applicable
+
+5. **Structured error logging**:
+   ```bash
+   # Check server-side error logging includes context
+   grep -rn "console\.error\|console\.warn" server/ --include="*.ts" -A1 | head -30
+   ```
+   - Verify: Server errors are logged with sufficient context for debugging:
+     - Request endpoint and method
+     - User ID (if authenticated)
+     - Relevant entity IDs (appointmentId, customerId)
+     - Error message and stack trace
+   - Verify: No personally identifiable information (PII) in error logs (names, addresses — IDs are OK)
+
+### Red Flags (Graceful Degradation):
+- External service failure crashes the app → FAIL
+- Form data lost after submission error → FAIL
+- No timeout on external API calls → WARN
+- Error logged without request context → WARN
+- PII in error logs → FAIL
+
 ---
 
 ## How to Run This Audit
@@ -104,6 +160,7 @@ When triggered (after adding routes, mutations, or modifying error handling):
 4. **Find generic messages**: `grep -rn "title: \"Fehler\"" client/src/` — verify each has a `description: error.message`
 5. **Find silent catches**: `grep -rn "catch\s*{}" client/src/ server/` — verify each is intentional
 6. **Find hardcoded error strings**: Look for `description: "Fehler beim..."` patterns that ignore `error.message`
+7. **Check form recovery**: Verify forms don't reset on error
 
 ## Severity Levels
 
@@ -111,9 +168,12 @@ When triggered (after adding routes, mutations, or modifying error handling):
 |----------|---------|---------|
 | **CRITICAL** | Missing `onError` on mutation | User clicks "Speichern", nothing happens, no feedback |
 | **CRITICAL** | Empty `catch {}` on user action | Error swallowed, user confused |
+| **CRITICAL** | External failure crashes app | Geocoding down → all appointments fail |
 | **HIGH** | Hardcoded generic message instead of `error.message` | "Fehler beim Speichern" when API says "Budget reicht nicht aus" |
 | **HIGH** | English error message shown to user | "Server error" instead of German |
+| **HIGH** | Form data lost on error | User types 5 minutes of notes, error, notes gone |
 | **MEDIUM** | Missing Zod German message | Technical Zod output like "Expected number, received string" |
+| **MEDIUM** | Error logged without context | `console.error(err)` without endpoint/user info |
 | **LOW** | Success toast missing | Action succeeds but no confirmation |
 
 ## Key Files

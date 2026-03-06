@@ -5,7 +5,7 @@ description: Automated QA and testing agent that validates happy paths, edge cas
 
 # QA & Testing Agent
 
-This agent acts as a systematic tester who validates that features work correctly, edge cases are handled, and existing functionality hasn't been broken. It combines manual verification strategies with automated test recommendations.
+This agent acts as a systematic tester who validates that features work correctly, edge cases are handled, and existing functionality hasn't been broken. It combines manual verification strategies with automated test recommendations, following Shift-Left Testing principles — catch bugs as early as possible, when they're cheapest to fix.
 
 ## When to Run
 
@@ -19,6 +19,18 @@ This agent acts as a systematic tester who validates that features work correctl
 ## Core Principle
 
 **If it wasn't tested, it doesn't work.** For every feature, systematically verify the happy path, the sad path, and the weird path. Assume users will do unexpected things.
+
+## Risk-Based Testing Priority
+
+Not all code changes carry equal risk. Prioritize testing effort based on module risk:
+
+| Risk Level | Modules | Testing Intensity |
+|---|---|---|
+| **HOCH** (Critical) | Budget/Abrechnung, Auth/Sessions, Leistungsnachweise, Preisvereinbarungen, Unterschriften | Full happy + sad + edge path, all boundary values |
+| **MITTEL** (Important) | Workflows (Dokumentation, Erstberatung), Terminplanung, Zeiterfassung, Kundenverwaltung | Happy path + key edge cases + error handling |
+| **NIEDRIG** (Standard) | UI-Styling, Statistik-Anzeige, Settings, Onboarding | Happy path + visual check |
+
+When time is limited, always test HOCH modules first. Never skip testing HOCH modules.
 
 ---
 
@@ -154,21 +166,32 @@ This agent acts as a systematic tester who validates that features work correctl
    - Test: Emojis in notes/comments
    - Test: Very long words without spaces (do they break layout?)
 
+6. **Domain-specific boundary values** (must be tested for HOCH-risk modules):
+   - Pflegegrad: Exactly 1 (minimum) and exactly 5 (maximum)
+   - Budget: Exactly 0.00 € remaining (edge between allowed and blocked)
+   - Budget: Exactly 1 cent remaining (partial booking scenario)
+   - Kilometer: 0.0 km (no travel) and 999.9 km (maximum plausible)
+   - Appointment duration: 0 minutes (cancelled), 1 minute (minimum), 1440 minutes (24h maximum)
+   - Month boundaries: Last day of month for budget calculations (carryover logic)
+   - Year boundaries: December → January for annual budget resets
+
 ### Red Flags:
 - Division by zero possible → FAIL
 - UI breaks with long text → WARN
 - No double-submit prevention on important forms → WARN
 - Date boundary produces wrong results → FAIL
 - Special characters cause errors → FAIL
+- Budget at exactly 0 allows booking → FAIL
+- Pflegegrad outside 1-5 accepted → FAIL
 
 ---
 
 ## Category 4: Regression Risk Assessment
 
-**Goal**: Changes haven't broken existing functionality.
+**Goal**: Changes haven't broken existing functionality. Apply risk-based prioritization.
 
 ### Steps:
-1. **Identify impacted areas**:
+1. **Identify impacted areas and assign risk level**:
    ```bash
    # What files were changed?
    git diff --name-only HEAD~5 2>/dev/null || echo "No git history available"
@@ -176,6 +199,11 @@ This agent acts as a systematic tester who validates that features work correctl
    # For each changed file, find what depends on it
    # Example: If storage.ts changed, check which routes use the changed methods
    ```
+   
+   **Risk classification per changed area:**
+   - `server/storage/budget-ledger.ts`, `server/routes/billing*`, auth files → HOCH
+   - `server/routes/appointment*`, `server/storage/customer*`, time-tracking → MITTEL
+   - `client/src/pages/admin/statistics*`, UI components, settings → NIEDRIG
 
 2. **Cross-feature dependencies** (from the project's dependency graph):
    ```
@@ -184,8 +212,10 @@ This agent acts as a systematic tester who validates that features work correctl
    Employee Assignment → Appointment Assignment
    Care Level → Budget Eligibility
    Services Catalog → Appointment Services → Documentation → Budget Booking
+   Erstberatung → Customer Conversion (NO budget booking!)
    ```
    - For each changed feature, check: Do downstream features still work?
+   - HOCH-risk downstream impacts require full verification
 
 3. **Shared code impact**:
    ```bash
@@ -210,6 +240,7 @@ This agent acts as a systematic tester who validates that features work correctl
 - Changed API response shape but didn't update frontend types → FAIL
 - Changed storage method signature but callers use old parameters → FAIL
 - Changed business rule but dependent features use old rule → FAIL
+- HOCH-risk module changed without full downstream verification → FAIL
 
 ---
 
@@ -290,6 +321,158 @@ This agent acts as a systematic tester who validates that features work correctl
 
 ---
 
+## Category 7: API Contract Validation
+
+**Goal**: Frontend types, API response shapes, and Zod schemas are synchronized. No silent data mismatches.
+
+### Steps:
+1. **Frontend type definitions match API responses**:
+   ```bash
+   # Find all frontend API type definitions
+   grep -rn "interface\|type " client/src/lib/api/types.ts 2>/dev/null || grep -rn "interface\|type " client/src/ --include="types.ts" | head -20
+   
+   # Find all API response shapes in routes
+   grep -rn "res\.json(" server/routes/ --include="*.ts" -A2 | head -30
+   ```
+   - For each API endpoint: compare the actual `res.json()` shape with the frontend type
+   - Verify: No fields in frontend type that the API doesn't return
+   - Verify: No fields returned by API that frontend ignores (potential unused data transfer)
+
+2. **Zod schema coverage**:
+   ```bash
+   # Find endpoints that accept data but might have schema gaps
+   grep -rn "req\.body" server/routes/ --include="*.ts" | grep -v "parse\|schema\|validate"
+   ```
+   - Verify: Every field in the Zod schema has a corresponding form field
+   - Verify: Every form field is in the Zod schema (no silently dropped fields)
+
+3. **Response shape consistency across related endpoints**:
+   ```bash
+   # Example: Check that GET /appointments/:id returns same shape as items in GET /appointments
+   grep -rn "getAppointment\b\|getAppointments\b" server/storage/ --include="*.ts" -A5
+   ```
+   - Verify: Detail endpoint returns a superset of list endpoint fields (not a different shape)
+   - Verify: Shared types are used (not two separate inline types)
+
+4. **Enum/constant synchronization**:
+   ```bash
+   # Find status values used in frontend vs backend
+   grep -rn "status.*===\|status.*!==\|status.*==" client/src/ --include="*.tsx" --include="*.ts" | grep -v "node_modules"
+   grep -rn "status.*===\|status.*!==\|status.*==" server/ --include="*.ts"
+   ```
+   - Verify: Status strings match exactly between frontend and backend
+   - Verify: Enum values in Zod schemas match domain constants
+
+### Red Flags:
+- Frontend type expects field X but API doesn't return it → FAIL (undefined access)
+- Form sends field Y but Zod schema doesn't include it → FAIL (silently dropped)
+- Different status string values between frontend and backend → FAIL
+- List vs detail endpoint return incompatible shapes → WARN
+
+---
+
+## Category 8: Post-Deploy Smoke Test
+
+**Goal**: After every deployment, verify the 5 most critical user flows work in production.
+
+### Critical Smoke Test Checklist:
+
+1. **Login / Auth Flow**:
+   - [ ] User can log in with valid credentials
+   - [ ] Invalid credentials show German error message
+   - [ ] Session persists across page refresh
+   - [ ] Logout works and redirects to login
+
+2. **Termine (Appointment Dashboard)**:
+   - [ ] Dashboard loads without errors
+   - [ ] Week navigation (prev/next) works
+   - [ ] Appointment cards display correct data (time, customer, service type)
+   - [ ] New appointment creation works (form opens, submits, appears in list)
+
+3. **Dokumentation (Appointment Documentation)**:
+   - [ ] Appointment detail page loads
+   - [ ] Documentation form accepts input (times, services, km)
+   - [ ] Documentation submission succeeds for Kundentermin (budget booking)
+   - [ ] Documentation submission succeeds for Erstberatung (NO budget booking)
+   - [ ] Signature capture works
+
+4. **Budget-Übersicht (Budget Overview)**:
+   - [ ] Customer budget page loads with correct amounts
+   - [ ] Budget categories (§45b, §45a, §39/42a) show correct values
+   - [ ] Budget transactions are listed
+   - [ ] Monthly limit warnings appear when applicable
+
+5. **Leistungsnachweis (Service Records)**:
+   - [ ] Service record list loads
+   - [ ] Service record can be generated for a month
+   - [ ] PDF/print view works
+   - [ ] Signature status is correctly displayed
+
+### How to Run:
+- After each deployment, trace through each checklist item
+- For API checks, verify key endpoints return expected data:
+  ```bash
+  # Production health check
+  curl -s https://<APP_URL>/api/health | head -5
+  ```
+- If ANY critical flow fails, flag as deployment issue and investigate immediately
+
+### Red Flags:
+- Login fails after deployment → FAIL (critical, rollback immediately)
+- Dashboard shows no data → FAIL (check DB connection)
+- Documentation fails with budget error for Erstberatung → FAIL (known bug pattern)
+- Service records show wrong data → FAIL (check query changes)
+
+---
+
+## Category 9: Proactive Test Recommendations
+
+**Goal**: For every code change, recommend specific test cases that should be verified — before bugs are discovered.
+
+### Steps:
+1. **Analyze the change type and generate test recommendations**:
+
+   | Change Type | Recommended Tests |
+   |---|---|
+   | New API endpoint | Happy path, 400 (invalid input), 401 (unauthenticated), 403 (unauthorized), 404 (not found) |
+   | Modified storage query | Before/after data comparison, empty result handling, large dataset performance |
+   | New form field | Valid input, empty input, boundary values, special characters, persistence round-trip |
+   | Status transition | Forward transition, reverse transition, invalid transition, concurrent transition |
+   | Budget calculation | Zero budget, exact budget match, 1 cent over, negative amounts, rounding edge cases |
+   | Permission change | Admin access, non-admin access, unauthenticated access, role-specific access |
+
+2. **Generate test scenarios for the specific change**:
+   ```
+   Feature: [Name of feature/change]
+   
+   Test Scenario 1: [Happy Path]
+   - Given: [precondition]
+   - When: [action]
+   - Then: [expected result]
+   
+   Test Scenario 2: [Error Case]
+   - Given: [precondition]
+   - When: [invalid action]
+   - Then: [expected error handling]
+   
+   Test Scenario 3: [Edge Case]
+   - Given: [boundary condition]
+   - When: [action at boundary]
+   - Then: [expected behavior]
+   ```
+
+3. **Cross-module impact tests**:
+   - For each change, identify downstream features and recommend integration tests
+   - Example: Changing appointment duration logic → test budget calculation, time tracking, service records
+
+### Output:
+List all recommended test scenarios with priority (MUST/SHOULD/NICE):
+- **MUST**: Tests for HOCH-risk modules — skip these and bugs will reach production
+- **SHOULD**: Tests for MITTEL-risk modules — important for reliability
+- **NICE**: Tests for NIEDRIG-risk modules — nice to have, catch cosmetic issues
+
+---
+
 ## Output Format
 
 After completing all checks, produce a summary:
@@ -301,10 +484,18 @@ After completing all checks, produce a summary:
 |----------|--------|----------|
 | 1. Happy Path | PASS/WARN/FAIL | Details |
 | 2. Input Validation | PASS/WARN/FAIL | Details |
-| 3. Edge Cases | PASS/WARN/FAIL | Details |
-| 4. Regression Risk | PASS/WARN/FAIL | Details |
+| 3. Edge Cases & Boundaries | PASS/WARN/FAIL | Details |
+| 4. Regression Risk (Risk-Based) | PASS/WARN/FAIL | Details |
 | 5. State Management | PASS/WARN/FAIL | Details |
 | 6. Error Recovery | PASS/WARN/FAIL | Details |
+| 7. API Contract Validation | PASS/WARN/FAIL | Details |
+| 8. Post-Deploy Smoke Test | PASS/WARN/FAIL | Details |
+| 9. Proactive Test Recommendations | — | List of recommended tests |
+
+### Risk Assessment
+- HOCH-risk modules tested: [list]
+- MITTEL-risk modules tested: [list]
+- NIEDRIG-risk modules skipped: [list, with justification]
 
 ### Test Scenarios Checked
 [List specific scenarios tested and results]
@@ -313,8 +504,8 @@ After completing all checks, produce a summary:
 - FAIL items: Must fix before marking feature complete
 - WARN items: Should fix, document if deferred
 
-### Recommended Automated Tests
-[Suggest specific unit/integration tests that should be written]
+### Recommended Test Scenarios (Proactive)
+[Prioritized list: MUST / SHOULD / NICE]
 ```
 
 ---
@@ -330,3 +521,4 @@ This audit covers **functional correctness and stability**. For complete coverag
 | `database-audit` | When data operations are tested | Schema consistency, N+1 queries, data integrity |
 | `ui-ux-audit` | When UI changes are tested | Touch targets, visual feedback, accessibility |
 | `security-audit` | When inputs are tested | Injection prevention, auth bypass |
+| `regression-guard` | When multiple files changed | Dependency impact, permission regression, critical path smoke |

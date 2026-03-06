@@ -67,7 +67,7 @@ This agent validates that the user interface is usable, accessible, and appropri
 **Goal**: Every user action provides immediate, clear feedback so the user never wonders "Did that work?"
 
 ### Steps:
-1. **Loading states**:
+1. **Loading states** (prefer skeleton loading over spinners):
    ```bash
    # Find mutations without loading indicators
    grep -rn "useMutation\|isPending\|isLoading\|isSubmitting" client/src/ --include="*.tsx" --include="*.ts" | head -30
@@ -78,6 +78,17 @@ This agent validates that the user interface is usable, accessible, and appropri
    - Verify: Every form submission shows a loading spinner or disables the button
    - Verify: Every mutation has a pending state indicator
    - Verify: Page loads show a skeleton or spinner (not a blank screen)
+
+   **Skeleton Loading Best Practice**:
+   ```bash
+   # Check for skeleton patterns
+   grep -rn "Skeleton\|skeleton\|animate-pulse\|shimmer" client/src/ --include="*.tsx" | head -10
+   ```
+   - Prefer: Skeleton loading (gray shapes matching content layout) over simple spinners
+   - Skeleton preserves layout during loading → no Cumulative Layout Shift (CLS)
+   - Use spinners only for short actions (<500ms) or overlay actions (form submission)
+   - Pattern: `isLoading ? <SkeletonCard /> : <ActualCard />`
+   - Skeleton should match the approximate size and shape of the real content
 
 2. **Success/Error feedback**:
    ```bash
@@ -101,8 +112,10 @@ This agent validates that the user interface is usable, accessible, and appropri
 ### Red Flags:
 - Form without loading state during submission → FAIL
 - Mutation without error feedback → FAIL
+- Page load with blank screen (no skeleton/spinner) → WARN
 - Empty list without message → WARN
 - Success action without confirmation → WARN
+- Spinner used for initial page load instead of skeleton → WARN
 
 ---
 
@@ -343,6 +356,59 @@ This agent validates that the user interface is usable, accessible, and appropri
 
 ---
 
+## Category 8: PWA & Offline Readiness
+
+**Goal**: The app provides a good experience even with poor connectivity, and can be installed as a PWA for quick access.
+
+### Steps:
+1. **PWA manifest**:
+   ```bash
+   # Check for manifest.json or manifest.webmanifest
+   find client/public/ client/ -name "manifest*" -type f 2>/dev/null
+   ls client/public/manifest.json 2>/dev/null || ls client/public/manifest.webmanifest 2>/dev/null || echo "No manifest found"
+   
+   # Check if manifest is linked in index.html
+   grep -rn "manifest" client/index.html
+   ```
+   - Verify: Web app manifest exists with name, icons, theme_color, display: "standalone"
+   - Verify: Linked in `<head>` of index.html
+
+2. **App icons**:
+   ```bash
+   # Check for PWA icons
+   find client/public/ -name "icon-*" -o -name "apple-touch-icon*" -o -name "favicon*" 2>/dev/null
+   ```
+   - Verify: Icons in multiple sizes (192x192, 512x512 minimum)
+   - Verify: Apple touch icon for iOS home screen
+
+3. **Service Worker** (nice-to-have for this project):
+   ```bash
+   grep -rn "serviceWorker\|service-worker\|workbox\|sw.js" client/ --include="*.ts" --include="*.tsx" --include="*.html" --include="*.js"
+   ```
+   - Note: Full offline support is complex — for this app, focus on:
+     - Caching static assets (CSS, JS, fonts)
+     - Showing "Keine Internetverbindung" message when offline
+     - Not losing form data when connection drops
+
+4. **Offline fallback UX**:
+   ```bash
+   # Check for online/offline detection
+   grep -rn "navigator\.onLine\|offline\|online.*event\|addEventListener.*offline" client/src/ --include="*.ts" --include="*.tsx"
+   
+   # Check for network error handling in queries
+   grep -rn "retry\|networkMode\|onError.*network\|offline" client/src/ --include="*.ts" --include="*.tsx"
+   ```
+   - Verify: TanStack Query handles network failures gracefully
+   - Verify: User sees clear offline indicator (not just failed toasts)
+
+### Red Flags:
+- No web app manifest → WARN (can't install as PWA)
+- No offline/network error handling → WARN
+- Form data lost on network failure → FAIL
+- No favicon or app icon → WARN
+
+---
+
 ## Output Format
 
 After completing all checks, produce a summary:
@@ -353,12 +419,13 @@ After completing all checks, produce a summary:
 | Category | Status | Findings |
 |----------|--------|----------|
 | 1. Touch Targets | PASS/WARN/FAIL | Details |
-| 2. Visual Feedback | PASS/WARN/FAIL | Details |
+| 2. Visual Feedback & Loading | PASS/WARN/FAIL | Details |
 | 3. Mobile Layout | PASS/WARN/FAIL | Details |
 | 4. German Wording | PASS/WARN/FAIL | Details |
 | 5. Accessibility | PASS/WARN/FAIL | Details |
 | 6. Design System & Layout | PASS/WARN/FAIL | Details |
 | 7. Navigation | PASS/WARN/FAIL | Details |
+| 8. PWA & Offline | PASS/WARN/FAIL | Details |
 
 ### Critical Findings (must fix)
 - [FAIL items affecting usability]
@@ -380,5 +447,6 @@ This audit covers **user interface and accessibility**. For complete coverage, a
 |-------|-----------------|--------------|
 | `code-quality-supervisor` | **ALWAYS** after every task | Convention compliance, dead code |
 | `business-logic-audit` | When workflows are affected | User perspective validation (Category 5 overlaps) |
-| `performance-audit` | When new components are added | Rendering efficiency, bundle size, mobile speed |
+| `performance-audit` | When new components are added | Rendering efficiency, bundle size, mobile speed, CWV |
 | `security-audit` | When forms or inputs change | Input validation, XSS prevention |
+| `regression-guard` | When UI components change | Impact on existing pages using the component |

@@ -301,6 +301,47 @@ This agent acts as a skeptical Senior Engineer who questions every change before
 
 ---
 
+## Category 8: Technical Debt Registry
+
+**Goal**: Track WARN items that aren't fixed immediately, so they don't get lost. Maintain a lightweight debt registry for future cleanup.
+
+### Steps:
+1. **Collect deferred WARN items** from all audit runs:
+   - Source: This audit's WARN findings that aren't fixed immediately
+   - Source: Other audit agent WARN findings deferred to "follow-up"
+   - Source: TODO/FIXME comments in code
+
+2. **Registry format** (maintain in `replit.md` or a dedicated section):
+   ```
+   ### Technical Debt Items
+   | # | Location | Issue | Risk | Reported | Agent |
+   |---|----------|-------|------|----------|-------|
+   | 1 | server/storage/budget-ledger.ts:245 | Complex nested query could be simplified | LOW | 2026-03-06 | Performance |
+   | 2 | client/src/pages/admin/statistics.tsx | File is 960 lines, should be split | MEDIUM | 2026-03-06 | Code Quality |
+   ```
+
+3. **Review existing debt items**:
+   - Check if any previously logged items have been resolved (remove from registry)
+   - Check if any items have escalated in severity (upgrade from WARN to FAIL)
+   - Flag items older than 30 days that haven't been addressed
+
+4. **File size monitoring**:
+   ```bash
+   # Find files exceeding 500 lines (excluding schema files and auto-generated code)
+   find client/src/ server/ shared/ -name "*.ts" -o -name "*.tsx" | xargs wc -l | sort -rn | head -20
+   ```
+   - Files > 500 lines → WARN (consider splitting)
+   - Files > 800 lines → FAIL (must split)
+   - Exception: Schema definition files, auto-generated code
+
+### Red Flags:
+- Debt item unaddressed for > 30 days → WARN (escalate priority)
+- File > 500 lines → WARN (split into focused modules)
+- File > 800 lines → FAIL (must be split)
+- More than 10 open debt items → WARN (schedule cleanup sprint)
+
+---
+
 ## Output Format
 
 After completing all checks, produce a summary:
@@ -317,6 +358,16 @@ After completing all checks, produce a summary:
 | 5. Dead Code | PASS/WARN/FAIL | Details |
 | 6. Update Pipeline | PASS/WARN/FAIL | Details |
 | 7. Documentation Alignment | PASS/WARN/FAIL | Details |
+| 8. Technical Debt | PASS/WARN/FAIL | Details |
+
+### File Size Report
+- Files > 500 lines: [list with line counts]
+- Files > 800 lines: [list — MUST split]
+
+### Technical Debt Registry Update
+- New items added: [count]
+- Items resolved: [count]
+- Total open items: [count]
 
 ### Action Items
 - FAIL items: Must fix before telling user "fertig"

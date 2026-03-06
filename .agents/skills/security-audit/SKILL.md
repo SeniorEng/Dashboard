@@ -1,11 +1,11 @@
 ---
 name: security-audit
-description: Dedicated security audit agent that checks for OWASP vulnerabilities, secret exposure, authentication bypass, CSRF protection, input validation, and dependency security. Use after ANY code change that touches authentication, API routes, user input handling, or external dependencies. More thorough than database-audit Category 10 — this is the dedicated security specialist.
+description: Dedicated security audit agent that checks for OWASP vulnerabilities, secret exposure, authentication bypass, CSRF protection, input validation, dependency security, and API-specific threats. Use after ANY code change that touches authentication, API routes, user input handling, or external dependencies. More thorough than database-audit Category 10 — this is the dedicated security specialist.
 ---
 
 # Security Audit Agent
 
-This agent performs deep security analysis following OWASP guidelines and security best practices. It goes beyond the basic security checks in database-audit Category 10 to provide comprehensive vulnerability detection.
+This agent performs deep security analysis following OWASP guidelines, OWASP API Security Top 10, and security best practices. It goes beyond the basic security checks in database-audit Category 10 to provide comprehensive vulnerability detection.
 
 ## When to Run
 
@@ -64,6 +64,22 @@ This agent performs deep security analysis following OWASP guidelines and securi
    - Verify: Tokens expire after reasonable time
    - Verify: Tokens are single-use (invalidated after use)
 
+5. **Rate limiting on sensitive endpoints**:
+   ```bash
+   # Check for rate limiting middleware
+   grep -rn "rateLimit\|rateLimiter\|throttle\|limiter" server/ --include="*.ts"
+   
+   # Check login endpoint specifically
+   grep -rn "login\|signin\|authenticate" server/routes/ --include="*.ts" -B5 -A5
+   
+   # Check password reset endpoint
+   grep -rn "reset.*password\|forgot.*password\|passwordReset" server/routes/ --include="*.ts" -B5 -A5
+   ```
+   - Verify: Login endpoint has rate limiting (prevent brute force)
+   - Verify: Password reset endpoint has rate limiting (prevent enumeration)
+   - Verify: API endpoints with expensive operations have rate limiting
+   - Recommended limits: Login: 5 attempts per 15 minutes per IP, Password reset: 3 per hour per email
+
 ### Red Flags:
 - Plaintext password in any variable, log, or response → FAIL
 - Missing httpOnly/secure on session cookies → FAIL
@@ -71,6 +87,8 @@ This agent performs deep security analysis following OWASP guidelines and securi
 - Token generated with Math.random → FAIL
 - Password reset token without expiry → FAIL
 - Session without expiry → WARN
+- No rate limiting on login endpoint → WARN
+- No rate limiting on password reset → WARN
 
 ---
 
@@ -250,14 +268,14 @@ This agent performs deep security analysis following OWASP guidelines and securi
 
 ---
 
-## Category 6: Dependency Security
+## Category 6: Dependency & Supply Chain Security
 
-**Goal**: No known vulnerabilities in npm dependencies.
+**Goal**: No known vulnerabilities in npm dependencies. No malicious packages.
 
 ### Steps:
 1. **Audit dependencies**:
    ```bash
-   npm audit --production 2>/dev/null || echo "npm audit not available"
+   npm audit --production 2>&1
    ```
 2. **Check for outdated critical packages**:
    ```bash
@@ -272,10 +290,36 @@ This agent performs deep security analysis following OWASP guidelines and securi
    grep -i "event-stream\|ua-parser\|colors\|faker" package.json
    ```
 
+4. **Lock file integrity**:
+   ```bash
+   # Verify lock file exists and is consistent
+   ls -la package-lock.json 2>/dev/null || echo "No lock file!"
+   
+   # Check for integrity hashes in lock file
+   grep -c "integrity" package-lock.json 2>/dev/null || echo "No integrity hashes"
+   ```
+   - Verify: Lock file exists and is committed to git
+   - Verify: Lock file has integrity hashes (sha512)
+
+5. **Postinstall script safety**:
+   ```bash
+   # Check for packages with postinstall scripts
+   grep -rn "postinstall\|preinstall\|install" node_modules/*/package.json 2>/dev/null | grep -v "node_modules/.*node_modules" | head -10
+   ```
+   - Review: Any package running scripts at install time could execute arbitrary code
+   - Verify: Known packages only (not typosquatting or unknown packages)
+
+6. **Typosquatting check**:
+   - Review: Package names in package.json for potential typosquats of popular packages
+   - Example: `expres` instead of `express`, `lodasch` instead of `lodash`
+
 ### Red Flags:
 - Critical/high severity npm audit findings → FAIL
 - Severely outdated security-critical packages (express, bcrypt) → WARN
 - Excessive number of dependencies (>100 direct) → WARN
+- Missing lock file → FAIL
+- Package with suspicious postinstall script → FAIL
+- Potential typosquatting package name → FAIL
 
 ---
 
@@ -312,6 +356,83 @@ This agent performs deep security analysis following OWASP guidelines and securi
 
 ---
 
+## Category 8: API-Specific Security (OWASP API Top 10)
+
+**Goal**: API endpoints are protected against the most common API-specific attack vectors.
+
+### Steps:
+1. **API1:2023 — Broken Object Level Authorization (BOLA)**:
+   ```bash
+   # Find all endpoints that access resources by ID
+   grep -rn "req\.params\.\|/:id\|/:.*Id" server/routes/ --include="*.ts"
+   ```
+   - Verify: Every resource access checks that the requesting user has permission
+   - Verify: Non-admin users can't access other users' resources by changing the ID
+
+2. **API2:2023 — Broken Authentication**:
+   - Verify: Authentication tokens/sessions can't be reused after logout
+   - Verify: Password complexity is enforced
+   - Verify: Account lockout or rate limiting after failed attempts
+
+3. **API3:2023 — Broken Object Property Level Authorization**:
+   ```bash
+   # Check for mass assignment vulnerabilities
+   grep -rn "\.set(req\.body)\|\.set(data)\|spread.*req\.body\|\.\.\.req\.body" server/routes/ --include="*.ts"
+   ```
+   - Verify: API doesn't blindly accept all fields from request body
+   - Verify: Zod schemas explicitly define allowed fields (no passthrough)
+   - Verify: Sensitive fields (isAdmin, role, id) can't be set via API
+
+4. **API4:2023 — Unrestricted Resource Consumption**:
+   ```bash
+   # Check for endpoints that could consume excessive resources
+   grep -rn "\.findMany\|\.select()\|getAll\|findAll" server/storage/ --include="*.ts" | grep -v "limit\|take\|paginate"
+   ```
+   - Verify: List endpoints have pagination or limits
+   - Verify: File upload endpoints have size limits
+   - Verify: No endpoint allows unbounded queries
+
+5. **API5:2023 — Broken Function Level Authorization**:
+   ```bash
+   # Check admin-only operations are properly protected
+   grep -rn "router\.\(post\|put\|patch\|delete\)" server/routes/ --include="*.ts" -B3 | grep -v "requireAuth\|requireAdmin\|isAdmin\|requireRoles"
+   ```
+   - Verify: Destructive operations (delete, admin actions) require admin role
+   - Verify: No admin function accessible to regular users
+
+6. **API6:2023 — Unrestricted Access to Sensitive Business Flows**:
+   - Verify: Critical business operations have confirmation steps
+   - Verify: Budget operations have idempotency protection (no double-booking)
+   - Verify: Signature operations are irreversible (properly locked)
+
+7. **Excessive Data Exposure**:
+   ```bash
+   # Check for endpoints that return more data than needed
+   grep -rn "SELECT \*\|select()\." server/storage/ --include="*.ts" | head -10
+   ```
+   - Verify: API responses don't include internal fields (created_by_user_id, password hashes)
+   - Verify: Admin-only data isn't exposed to regular users
+
+8. **Content Security Policy (CSP)**:
+   ```bash
+   # Check for CSP headers
+   grep -rn "Content-Security-Policy\|helmet\|csp\|CSP" server/ --include="*.ts"
+   ```
+   - Verify: CSP headers are set in production
+   - Verify: `script-src` restricts inline scripts
+   - Verify: `frame-ancestors` prevents clickjacking
+
+### Red Flags:
+- Resource accessible by changing ID without permission check → FAIL (BOLA)
+- `...req.body` spread into database update → FAIL (Mass Assignment)
+- Admin endpoint without role check → FAIL (Broken Function Auth)
+- List endpoint without pagination → WARN (Resource Consumption)
+- No CSP headers → WARN
+- Sensitive fields (isAdmin, role) settable via API → FAIL
+- Budget operation without idempotency check → WARN
+
+---
+
 ## Output Format
 
 ```
@@ -324,8 +445,9 @@ This agent performs deep security analysis following OWASP guidelines and securi
 | 3. Input Validation | PASS/WARN/FAIL | Details |
 | 4. Secret Safety | PASS/WARN/FAIL | Details |
 | 5. Access Control | PASS/WARN/FAIL | Details |
-| 6. Dependencies | PASS/WARN/FAIL | Details |
-| 7. Data Protection | PASS/WARN/FAIL | Details |
+| 6. Dependencies & Supply Chain | PASS/WARN/FAIL | Details |
+| 7. Data Protection (DSGVO) | PASS/WARN/FAIL | Details |
+| 8. API Security (OWASP API Top 10) | PASS/WARN/FAIL | Details |
 
 ### Critical Findings (must fix immediately)
 - [List any FAIL items]
