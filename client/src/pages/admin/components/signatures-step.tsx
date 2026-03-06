@@ -202,6 +202,7 @@ function RequirementCard({
     onSignatureChange(signatureData, location);
     setShowSignaturePad(false);
     setShowPreview(false);
+    setPreviewHtml(null);
     if (isUploaded) onDocRemoved();
   }, [onSignatureChange, isUploaded, onDocRemoved]);
 
@@ -253,6 +254,9 @@ function RequirementCard({
           })),
           insuranceProviderId: formData.insuranceProviderId,
         },
+        overrides: signature ? {
+          customer_signature: `<img src="${signature}" alt="Kundenunterschrift" style="max-height:60px;" />`,
+        } : undefined,
       });
       const data = unwrapResult(result) as { html: string };
       setPreviewHtml(data.html);
