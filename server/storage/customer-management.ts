@@ -76,6 +76,7 @@ export interface CustomerListItem {
   billingType: string;
   primaryEmployee: { id: number; displayName: string } | null;
   hasActiveContract: boolean;
+  hasBetreuer: boolean;
   createdAt: Date;
 }
 
@@ -178,6 +179,19 @@ export class CustomerManagementStorage {
       .groupBy(customerContracts.customerId)
       .as('active_contracts');
 
+    const betreuerSubquery = db
+      .select({
+        customerId: customerContacts.customerId,
+        hasBetreuer: sqlBuilder<boolean>`true`.as('has_betreuer')
+      })
+      .from(customerContacts)
+      .where(and(
+        eq(customerContacts.contactType, "betreuer"),
+        eq(customerContacts.isActive, true)
+      ))
+      .groupBy(customerContacts.customerId)
+      .as('betreuer_contacts');
+
     let fullConditions = [...baseConditions];
     if (filters?.hasActiveContract === true) {
       fullConditions.push(isNotNull(activeContractSubquery.customerId));
@@ -217,10 +231,12 @@ export class CustomerManagementStorage {
         primaryEmployeeId: customers.primaryEmployeeId,
         primaryEmployeeName: users.displayName,
         hasActiveContract: activeContractSubquery.hasContract,
+        hasBetreuer: betreuerSubquery.hasBetreuer,
       })
       .from(customers)
       .leftJoin(users, eq(customers.primaryEmployeeId, users.id))
-      .leftJoin(activeContractSubquery, eq(customers.id, activeContractSubquery.customerId));
+      .leftJoin(activeContractSubquery, eq(customers.id, activeContractSubquery.customerId))
+      .leftJoin(betreuerSubquery, eq(customers.id, betreuerSubquery.customerId));
     if (insuranceSubquery) {
       dataQueryBuilder = dataQueryBuilder.leftJoin(insuranceSubquery, eq(customers.id, insuranceSubquery.customerId)) as any;
     }
@@ -277,6 +293,7 @@ export class CustomerManagementStorage {
         ? { id: r.primaryEmployeeId, displayName: r.primaryEmployeeName }
         : null,
       hasActiveContract: r.hasActiveContract === true,
+      hasBetreuer: r.hasBetreuer === true,
       createdAt: r.createdAt,
     }));
 

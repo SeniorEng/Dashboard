@@ -28,6 +28,7 @@ import {
   Search,
   SlidersHorizontal,
   ChevronLeft,
+  AlertTriangle,
   ChevronRight,
   User2,
   MapPin,
@@ -403,6 +404,12 @@ export default function AdminCustomers() {
                   {customer.primaryEmployee && (
                     <div className="mt-3 pt-3 border-t border-gray-100 text-sm text-gray-600">
                       Betreut von: {customer.primaryEmployee.displayName}
+                    </div>
+                  )}
+                  {!customer.hasBetreuer && customer.status !== "erstberatung" && (
+                    <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5" data-testid={`banner-no-betreuer-${customer.id}`}>
+                      <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+                      <span>Kein Betreuer / Vertreter hinterlegt</span>
                     </div>
                   )}
                 </DataListItem>
