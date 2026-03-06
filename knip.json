@@ -1,0 +1,20 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "server/index.ts",
+    "client/src/main.tsx",
+    "shared/schema/index.ts"
+  ],
+  "project": [
+    "server/**/*.ts",
+    "client/src/**/*.{ts,tsx}",
+    "shared/**/*.ts"
+  ],
+  "ignore": [
+    "drizzle.config.ts"
+  ],
+  "ignoreDependencies": [
+    "tw-animate-css"
+  ],
+  "ignoreExportsUsedInFile": true
+}
