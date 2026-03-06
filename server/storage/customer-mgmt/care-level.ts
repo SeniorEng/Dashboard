@@ -33,16 +33,29 @@ export async function getCustomerCurrentCareLevel(customerId: number): Promise<C
 
 export async function addCareLevelHistory(data: InsertCareLevelHistory, userId?: number): Promise<CustomerCareLevelHistory> {
   const validFromDate = parseLocalDate(data.validFrom);
-  validFromDate.setDate(validFromDate.getDate() - 1);
-  const dayBeforeValidFrom = formatDateISO(validFromDate);
+  const dayBeforeDate = new Date(validFromDate);
+  dayBeforeDate.setDate(dayBeforeDate.getDate() - 1);
+  const dayBeforeValidFrom = formatDateISO(dayBeforeDate);
   
-  await db
-    .update(customerCareLevelHistory)
-    .set({ validTo: dayBeforeValidFrom })
+  const currentEntries = await db
+    .select()
+    .from(customerCareLevelHistory)
     .where(and(
       eq(customerCareLevelHistory.customerId, data.customerId),
       isNull(customerCareLevelHistory.validTo)
     ));
+
+  for (const entry of currentEntries) {
+    const entryFrom = parseLocalDate(entry.validFrom);
+    if (entryFrom >= validFromDate) {
+      await db.delete(customerCareLevelHistory).where(eq(customerCareLevelHistory.id, entry.id));
+    } else {
+      await db
+        .update(customerCareLevelHistory)
+        .set({ validTo: dayBeforeValidFrom })
+        .where(eq(customerCareLevelHistory.id, entry.id));
+    }
+  }
   
   const result = await db.insert(customerCareLevelHistory).values({
     ...data,

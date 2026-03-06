@@ -182,7 +182,9 @@ export function PflegegradBudgetSection({ customerId, pflegegrad, careLevelHisto
           <div className="relative">
             <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200" />
             <div className="space-y-3">
-              {careLevelHistory.map((entry, index) => (
+              {careLevelHistory
+                .filter((entry) => !entry.validTo || entry.validTo >= entry.validFrom)
+                .map((entry, index) => (
                 <div key={entry.id} className="relative pl-10">
                   <div
                     className={`absolute left-2.5 w-3 h-3 rounded-full ${
@@ -193,8 +195,9 @@ export function PflegegradBudgetSection({ customerId, pflegegrad, careLevelHisto
                     <div className="flex items-center justify-between">
                       <StatusBadge type="pflegegrad" value={entry.pflegegrad} />
                       <span className="text-xs text-gray-500">
-                        {formatDateForDisplay(entry.validFrom)}
-                        {entry.validTo && ` - ${formatDateForDisplay(entry.validTo)}`}
+                        {entry.validTo
+                          ? `${formatDateForDisplay(entry.validFrom)} - ${formatDateForDisplay(entry.validTo)}`
+                          : `seit ${formatDateForDisplay(entry.validFrom)}`}
                       </span>
                     </div>
                     {entry.notes && (
