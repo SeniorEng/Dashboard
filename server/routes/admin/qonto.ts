@@ -116,6 +116,7 @@ const paymentAdviceSchema = z.object({
   fileName: z.string().min(1, "Dateiname fehlt"),
   notes: z.string().optional().nullable(),
   csvContent: z.string().optional().nullable(),
+  force: z.boolean().optional(),
 });
 
 router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeichert werden", async (req, res) => {
@@ -126,6 +127,30 @@ router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeich
     if (parsed.items.length === 0) {
       return res.status(400).json({ message: "CSV enthält keine Positionen" });
     }
+
+    if (!data.force) {
+      const existing = await qontoStorage.findDuplicateAdvice(
+        data.fileName,
+        parsed.header.avisNummer,
+        parsed.header.gesamtBetragCents,
+        parsed.header.zahlungsDatum,
+      );
+      if (existing) {
+        return res.status(409).json({
+          message: "Ein Zahlungsavis mit diesem Dateinamen oder dieser Avisnummer existiert bereits.",
+          code: "DUPLICATE_ADVICE",
+          details: {
+            duplicate: true,
+            existingAdvice: {
+              id: existing.id,
+              fileName: existing.fileName,
+              uploadedAt: existing.uploadedAt,
+            },
+          },
+        });
+      }
+    }
+
     const advice = await qontoStorage.createPaymentAdviceWithItems(
       {
         fileName: data.fileName,
@@ -171,6 +196,24 @@ router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeich
 
   if (!data.objectPath) {
     throw badRequest("Dateipfad oder CSV-Inhalt erforderlich");
+  }
+
+  if (!data.force) {
+    const existing = await qontoStorage.findDuplicateAdvice(data.fileName);
+    if (existing) {
+      return res.status(409).json({
+        message: "Ein Zahlungsavis mit diesem Dateinamen existiert bereits.",
+        code: "DUPLICATE_ADVICE",
+        details: {
+          duplicate: true,
+          existingAdvice: {
+            id: existing.id,
+            fileName: existing.fileName,
+            uploadedAt: existing.uploadedAt,
+          },
+        },
+      });
+    }
   }
 
   const advice = await qontoStorage.createPaymentAdvice({

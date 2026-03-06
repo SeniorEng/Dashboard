@@ -119,6 +119,29 @@ class QontoStorage {
     return result?.syncedAt ?? null;
   }
 
+  async findDuplicateAdvice(fileName: string, avisNummer?: string | null, gesamtBetragCents?: number | null, zahlungsDatum?: string | null): Promise<PaymentAdvice | null> {
+    const fileMatch = await db.select()
+      .from(paymentAdvices)
+      .where(and(eq(paymentAdvices.fileName, fileName), isNull(paymentAdvices.deletedAt)))
+      .limit(1);
+    if (fileMatch.length > 0) return fileMatch[0];
+
+    if (avisNummer && gesamtBetragCents != null && zahlungsDatum) {
+      const fieldMatch = await db.select()
+        .from(paymentAdvices)
+        .where(and(
+          eq(paymentAdvices.avisNummer, avisNummer),
+          eq(paymentAdvices.gesamtBetragCents, gesamtBetragCents),
+          eq(paymentAdvices.zahlungsDatum, zahlungsDatum),
+          isNull(paymentAdvices.deletedAt),
+        ))
+        .limit(1);
+      if (fieldMatch.length > 0) return fieldMatch[0];
+    }
+
+    return null;
+  }
+
   async createPaymentAdvice(data: InsertPaymentAdvice): Promise<PaymentAdvice> {
     const [created] = await db.insert(paymentAdvices)
       .values(data)

@@ -8,9 +8,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, unwrapResult } from "@/lib/api";
+import { api, unwrapResult, ApiError } from "@/lib/api";
 import { useUpload } from "@/hooks/use-upload";
 import { iconSize, componentStyles } from "@/design-system";
 import {
@@ -482,6 +492,7 @@ function AdvicesTab() {
   const [uploading, setUploading] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
+  const [duplicateDialog, setDuplicateDialog] = useState<{ open: boolean; message: string; pendingData: Record<string, unknown> | null }>({ open: false, message: "", pendingData: null });
 
   const advicesQuery = useQuery<PaymentAdvice[]>({
     queryKey: ["qonto", "payment-advices"],
@@ -521,15 +532,24 @@ function AdvicesTab() {
     if (!file) return;
 
     setUploading(true);
+    const csvContent = await file.text();
+    const payload: Record<string, unknown> = {
+      csvContent,
+      fileName: file.name,
+      notes: notes || null,
+    };
     try {
-      const csvContent = await file.text();
-      await createMutation.mutateAsync({
-        csvContent,
-        fileName: file.name,
-        notes: notes || null,
-      });
+      await createMutation.mutateAsync(payload);
     } catch (err) {
-      toast({ title: "Fehler", description: err instanceof Error ? err.message : "CSV konnte nicht verarbeitet werden", variant: "destructive" });
+      if (err instanceof ApiError && err.details?.duplicate) {
+        setDuplicateDialog({
+          open: true,
+          message: err.message,
+          pendingData: payload,
+        });
+      } else {
+        toast({ title: "Fehler", description: err instanceof Error ? err.message : "CSV konnte nicht verarbeitet werden", variant: "destructive" });
+      }
     } finally {
       setUploading(false);
       e.target.value = "";
@@ -541,20 +561,44 @@ function AdvicesTab() {
     if (!file) return;
 
     setUploading(true);
+    let uploadedObjectPath: string | null = null;
     try {
-      const objectPath = await uploadFile(file);
-      if (!objectPath) throw new Error("Upload fehlgeschlagen");
+      const uploadResult = await uploadFile(file);
+      if (!uploadResult) throw new Error("Upload fehlgeschlagen");
+      uploadedObjectPath = uploadResult.objectPath;
 
-      await createMutation.mutateAsync({
-        objectPath,
+      const payload: Record<string, unknown> = {
+        objectPath: uploadedObjectPath,
         fileName: file.name,
         notes: notes || null,
-      });
+      };
+      await createMutation.mutateAsync(payload);
     } catch (err) {
-      toast({ title: "Fehler", description: err instanceof Error ? err.message : "Upload fehlgeschlagen", variant: "destructive" });
+      if (err instanceof ApiError && err.details?.duplicate && uploadedObjectPath) {
+        setDuplicateDialog({
+          open: true,
+          message: err.message,
+          pendingData: { objectPath: uploadedObjectPath, fileName: file.name, notes: notes || null },
+        });
+      } else {
+        toast({ title: "Fehler", description: err instanceof Error ? err.message : "Upload fehlgeschlagen", variant: "destructive" });
+      }
     } finally {
       setUploading(false);
       e.target.value = "";
+    }
+  };
+
+  const handleForceCreate = async () => {
+    if (!duplicateDialog.pendingData) return;
+    setDuplicateDialog({ open: false, message: "", pendingData: null });
+    setUploading(true);
+    try {
+      await createMutation.mutateAsync({ ...duplicateDialog.pendingData, force: true });
+    } catch (err) {
+      toast({ title: "Fehler", description: err instanceof Error ? err.message : "Speichern fehlgeschlagen", variant: "destructive" });
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -562,6 +606,20 @@ function AdvicesTab() {
 
   return (
     <div className="space-y-4">
+      <AlertDialog open={duplicateDialog.open} onOpenChange={(open) => { if (!open) setDuplicateDialog({ open: false, message: "", pendingData: null }); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Mögliche Doppelerfassung</AlertDialogTitle>
+            <AlertDialogDescription>
+              {duplicateDialog.message || "Ein ähnlicher Zahlungsavis existiert bereits."} Möchten Sie die Datei trotzdem importieren?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-duplicate">Abbrechen</AlertDialogCancel>
+            <AlertDialogAction onClick={handleForceCreate} data-testid="button-force-save">Trotzdem speichern</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
