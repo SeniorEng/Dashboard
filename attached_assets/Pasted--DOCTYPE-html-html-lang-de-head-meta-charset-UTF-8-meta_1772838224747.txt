@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Abtretungserklärung – {{company_name}}</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Pontano+Sans:wght@300..700&display=swap');
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Pontano Sans', Arial, sans-serif;
+      font-size: 11pt;
+      color: #000000;
+      background: #f0f0f0;
+      padding: 30px;
+    }
+
+    .page {
+      background: #ffffff;
+      width: 210mm;
+      min-height: 297mm;
+      margin: 0 auto;
+      padding: 20mm 20mm 20mm 20mm;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+    }
+
+    /* ── Logo ── */
+    .logo-container {
+      text-align: right;
+      margin-bottom: 18pt;
+    }
+    .logo-container img {
+      max-width: 260px;
+      height: auto;
+    }
+
+    /* ── Haupttitel ── */
+    h1.title {
+      font-size: 14pt;
+      font-weight: bold;
+      color: #000000;
+      margin-bottom: 20pt;
+      text-align: left;
+    }
+
+    /* ── Abschnitt-Boxen ── */
+    .section-box {
+      border: 1px solid #4a4a4a;
+      margin-bottom: 12pt;
+      padding: 0;
+    }
+
+    .section-header {
+      background-color: #4a4a4a;
+      color: #ffffff;
+      font-weight: bold;
+      font-size: 10.5pt;
+      padding: 4pt 8pt;
+    }
+
+    .section-body {
+      padding: 8pt 10pt;
+      font-size: 10.5pt;
+      line-height: 1.5;
+    }
+
+    /* ── Felder in Leistungsempfänger ── */
+    .field-row {
+      display: flex;
+      align-items: baseline;
+      margin-bottom: 5pt;
+      gap: 6pt;
+    }
+    .field-label {
+      min-width: 190px;
+      font-size: 10.5pt;
+      color: #000;
+    }
+    .field-value {
+      border-bottom: 1px solid #4a4a4a;
+      flex: 1;
+      min-height: 14pt;
+      font-size: 10.5pt;
+      padding-bottom: 1pt;
+      color: #1a1a1a;
+    }
+
+    /* ── Brieftext ── */
+    .letter-body {
+      margin-top: 16pt;
+      font-size: 10.5pt;
+      line-height: 1.6;
+    }
+
+    .letter-body p {
+      margin-bottom: 10pt;
+    }
+
+    /* ── Aufzählung ── */
+    .letter-body ul {
+      margin: 8pt 0 10pt 22pt;
+      padding: 0;
+    }
+    .letter-body ul li {
+      margin-bottom: 4pt;
+      font-size: 10.5pt;
+    }
+
+    /* ── Unterschrift ── */
+    .signature-section {
+      margin-top: 30pt;
+      display: flex;
+      align-items: flex-end;
+      gap: 30pt;
+    }
+    .signature-block {
+      flex: 1;
+    }
+    .signature-line {
+      border-bottom: 1px solid #4a4a4a;
+      min-height: 40pt;
+      margin-bottom: 4pt;
+      display: flex;
+      align-items: flex-end;
+      padding-bottom: 2pt;
+    }
+    .signature-label {
+      font-size: 9pt;
+      color: #444;
+    }
+
+    /* Print */
+    @media print {
+      body { background: white; padding: 0; }
+      .page { box-shadow: none; margin: 0; padding: 20mm; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Logo -->
+  <div class="logo-container">
+    <img src="{{company_logo_url}}" alt="{{company_name}} Logo">
+  </div>
+
+  <!-- Titel -->
+  <h1 class="title">Abtretungserklärung</h1>
+
+  <!-- Leistungserbringer -->
+  <div class="section-box">
+    <div class="section-header">Leistungserbringer</div>
+    <div class="section-body">
+      {{company_name}} | {{company_strasse}} | {{company_plz}} {{company_stadt}}<br>
+      Telefon: {{company_telefon}} | E-Mail: {{company_email}}<br>
+      Institutskennzeichen (IK): {{company_ik_nummer}} | Steuernummer: {{company_steuernummer}}
+    </div>
+  </div>
+
+  <!-- Leistungsempfänger -->
+  <div class="section-box">
+    <div class="section-header">Leistungsempfänger/Leistungsempfängerin</div>
+    <div class="section-body">
+
+      <div class="field-row">
+        <span class="field-label">Vorname, Name:</span>
+        <span class="field-value">{{customer_vorname}} {{customer_nachname}}</span>
+      </div>
+      <div class="field-row">
+        <span class="field-label">Anschrift:</span>
+        <span class="field-value">{{customer_strasse}} {{customer_hausnummer}}, {{customer_plz}} {{customer_stadt}}</span>
+      </div>
+      <div class="field-row">
+        <span class="field-label">Geburtsdatum:</span>
+        <span class="field-value">{{customer_birthdate}}</span>
+      </div>
+      <div class="field-row">
+        <span class="field-label">Versicherten-Nummer:</span>
+        <span class="field-value">{{versichertennummer}}</span>
+      </div>
+      <div class="field-row">
+        <span class="field-label">Pflegekasse:</span>
+        <span class="field-value">{{insurance_name}}</span>
+      </div>
+      <div class="field-row">
+        <span class="field-label">Institutskennzeichen (IK):</span>
+        <span class="field-value">{{ik_nummer}}</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Brieftext -->
+  <div class="letter-body">
+    <p>Sehr geehrte Damen und Herren,</p>
+    <p>
+      mit diesem Brief erteile ich eine Abtretungserklärung und gebe mein Einverständnis,
+      dass der oben genannte Leistungserbringer folgende Positionen direkt mit ihnen abrechnen darf:
+    </p>
+    <ul>
+      <li>Entlastungsbetrag nach § 45b SGB XI</li>
+      <li>Umwandlungsanspruch nach § 45a SGB XI</li>
+      <li>Verhinderungspflege § 39 SGB XI</li>
+      <li>Kurzzeitpflege § 42 SGB XI</li>
+      <li>Haushaltshilfe § 38 SGB V</li>
+    </ul>
+    <p>Mit freundlichen Grüßen</p>
+  </div>
+
+  <!-- Unterschrift -->
+  <div class="signature-section">
+    <div class="signature-block">
+      <div class="signature-line">{{customer_stadt}}, {{current_date}}</div>
+      <div class="signature-label">Ort, Datum</div>
+    </div>
+    <div class="signature-block">
+      <div class="signature-line">{{customer_signature}}</div>
+      <div class="signature-label">Unterschrift Antragsteller/in oder Bevollmächtigte/r</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
