@@ -23,6 +23,7 @@ import { csrfProtection, csrfTokenHandler } from "../middleware/csrf";
 import { authMiddleware, requireAuth } from "../middleware/auth";
 import { cacheHeaders } from "../middleware/cache-headers";
 import { customerManagementStorage } from "../storage/customer-management";
+import { asyncHandler } from "../lib/errors";
 
 const router = Router();
 
@@ -81,16 +82,11 @@ router.use(csrfProtection);
 
 router.use("/admin", adminRouter);
 
-router.get("/insurance-providers", requireAuth, async (req, res) => {
-  try {
-    const activeOnly = req.query.all !== "true";
-    const providers = await customerManagementStorage.getInsuranceProviders(activeOnly);
-    res.json(providers);
-  } catch (err) {
-    console.error("Insurance providers fetch failed:", err);
-    res.status(500).json({ error: "INTERNAL_ERROR", message: "Pflegekassen konnten nicht geladen werden" });
-  }
-});
+router.get("/insurance-providers", requireAuth, asyncHandler("Pflegekassen konnten nicht geladen werden", async (req, res) => {
+  const activeOnly = req.query.all !== "true";
+  const providers = await customerManagementStorage.getInsuranceProviders(activeOnly);
+  res.json(providers);
+}));
 
 router.use("/appointments", appointmentsRouter);
 router.use("/customers", customersRouter);

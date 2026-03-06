@@ -349,8 +349,9 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
     return sendNotFound(res, "Leistungsnachweis nicht gefunden.");
   }
 
-  await db.delete(serviceRecordAppointments).where(eq(serviceRecordAppointments.serviceRecordId, id));
-  await db.delete(monthlyServiceRecords).where(eq(monthlyServiceRecords.id, id));
+  await db.update(monthlyServiceRecords)
+    .set({ deletedAt: new Date() })
+    .where(eq(monthlyServiceRecords.id, id));
 
   await auditService.log(
     req.user.id,
@@ -360,7 +361,7 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
     { customerId: record.customerId, employeeId: record.employeeId, year: record.year, month: record.month, status: record.status }
   );
 
-  res.json({ success: true, message: "Leistungsnachweis und Verknüpfungen gelöscht" });
+  res.json({ success: true, message: "Leistungsnachweis gelöscht" });
 }));
 
 export default router;

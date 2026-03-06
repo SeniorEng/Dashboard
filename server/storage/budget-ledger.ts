@@ -99,7 +99,7 @@ export interface BudgetLedgerStorage {
     travelKilometers: number;
     customerKilometers: number;
     userId?: number;
-  }): Promise<BudgetTransaction>;
+  }, outerTx?: DbClient): Promise<BudgetTransaction>;
   
   getCustomerBudgetAmounts(customerId: number): Promise<{ pflegesachleistungen36: number; verhinderungspflege39: number }>;
   
@@ -173,13 +173,14 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         .from(budgetAllocations)
         .where(and(
           eq(budgetAllocations.customerId, customerId),
-          eq(budgetAllocations.year, year)
+          eq(budgetAllocations.year, year),
+          isNull(budgetAllocations.deletedAt)
         ))
         .orderBy(asc(budgetAllocations.month), asc(budgetAllocations.validFrom));
     }
     return await db.select()
       .from(budgetAllocations)
-      .where(eq(budgetAllocations.customerId, customerId))
+      .where(and(eq(budgetAllocations.customerId, customerId), isNull(budgetAllocations.deletedAt)))
       .orderBy(desc(budgetAllocations.year), asc(budgetAllocations.month));
   }
 
@@ -293,7 +294,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       .from(budgetAllocations)
       .where(and(
         eq(budgetAllocations.customerId, customerId),
-        eq(budgetAllocations.source, "monthly_auto")
+        eq(budgetAllocations.source, "monthly_auto"),
+        isNull(budgetAllocations.deletedAt)
       ));
 
     const existingSet = new Set(
@@ -351,6 +353,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
       lte(budgetAllocations.validFrom, today),
+      isNull(budgetAllocations.deletedAt),
       or(isNull(budgetAllocations.expiresAt), gte(budgetAllocations.expiresAt, today))
     );
 
@@ -504,6 +507,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         eq(budgetAllocations.budgetType, params.budgetType),
         eq(budgetAllocations.source, "initial_balance"),
         eq(budgetAllocations.year, params.year),
+        isNull(budgetAllocations.deletedAt),
       ))
       .orderBy(desc(budgetAllocations.id));
 
@@ -520,7 +524,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
       if (existing.length > 1) {
         for (let i = 1; i < existing.length; i++) {
-          await db.delete(budgetAllocations)
+          await db.update(budgetAllocations)
+            .set({ deletedAt: new Date() })
             .where(eq(budgetAllocations.id, existing[i].id));
         }
       }
@@ -547,6 +552,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       .where(and(
         eq(budgetAllocations.customerId, customerId),
         eq(budgetAllocations.budgetType, budgetType),
+        isNull(budgetAllocations.deletedAt),
         or(
           eq(budgetAllocations.source, "initial_balance"),
           eq(budgetAllocations.source, "carryover"),
@@ -625,7 +631,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     travelKilometers: number;
     customerKilometers: number;
     userId?: number;
-  }): Promise<BudgetTransaction> {
+  }, outerTx?: DbClient): Promise<BudgetTransaction> {
+    const client = outerTx || db;
     const costs = await this.calculateAppointmentCost({
       customerId: params.customerId,
       hauswirtschaftMinutes: params.hauswirtschaftMinutes,
@@ -635,7 +642,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       date: params.transactionDate,
     });
 
-    const [customer] = await db.select({ acceptsPrivatePayment: customers.acceptsPrivatePayment })
+    const [customer] = await client.select({ acceptsPrivatePayment: customers.acceptsPrivatePayment })
       .from(customers).where(eq(customers.id, params.customerId)).limit(1);
     const acceptsPrivatePayment = customer?.acceptsPrivatePayment ?? false;
 
@@ -655,12 +662,12 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         customerKilometers: 0,
         customerKilometersCents: 0,
         userId: params.userId,
-      });
+      }, outerTx);
       return cascadeResult.transactions[0];
     }
 
-    return await db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(${sql.raw(String(params.customerId))})`);
+    const doWork = async (tx: DbClient) => {
+      await (tx as typeof db).execute(sql`SELECT pg_advisory_xact_lock(${sql.raw(String(params.customerId))})`);
 
       if (!acceptsPrivatePayment) {
         const summaries = await this.getAllBudgetSummaries(params.customerId);
@@ -767,7 +774,12 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       }
 
       return cascadeResult.transactions[0];
-    });
+    };
+
+    if (outerTx) {
+      return await doWork(outerTx);
+    }
+    return await db.transaction(async (tx) => doWork(tx));
   }
 
   async getCustomerBudgetAmounts(customerId: number, _tx?: DbClient): Promise<{ pflegesachleistungen36: number; verhinderungspflege39: number }> {
@@ -805,7 +817,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       .where(and(
         eq(budgetAllocations.customerId, customerId),
         eq(budgetAllocations.budgetType, "umwandlung_45a"),
-        eq(budgetAllocations.source, "monthly_auto")
+        eq(budgetAllocations.source, "monthly_auto"),
+        isNull(budgetAllocations.deletedAt)
       ));
 
     const existingSet = new Set(
@@ -872,7 +885,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       .where(and(
         eq(budgetAllocations.customerId, customerId),
         eq(budgetAllocations.budgetType, "ersatzpflege_39_42a"),
-        eq(budgetAllocations.source, "yearly_auto")
+        eq(budgetAllocations.source, "yearly_auto"),
+        isNull(budgetAllocations.deletedAt)
       ));
 
     const existingYears = new Set(
@@ -929,6 +943,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         eq(budgetAllocations.year, currentYear),
         eq(budgetAllocations.month, currentMonth),
         lte(budgetAllocations.validFrom, today),
+        isNull(budgetAllocations.deletedAt),
         or(isNull(budgetAllocations.expiresAt), gte(budgetAllocations.expiresAt, today))
       )),
 
@@ -974,6 +989,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         eq(budgetAllocations.budgetType, "ersatzpflege_39_42a"),
         eq(budgetAllocations.year, currentYear),
         lte(budgetAllocations.validFrom, today),
+        isNull(budgetAllocations.deletedAt),
         or(isNull(budgetAllocations.expiresAt), gte(budgetAllocations.expiresAt, today))
       )),
 
@@ -1021,6 +1037,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         eq(budgetAllocations.customerId, customerId),
         eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
         eq(budgetAllocations.source, "carryover"),
+        isNull(budgetAllocations.deletedAt),
         lte(budgetAllocations.validFrom, asOfDate),
         or(
           isNull(budgetAllocations.expiresAt),
@@ -1039,6 +1056,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         eq(budgetAllocations.customerId, customerId),
         eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
         eq(budgetAllocations.source, "carryover"),
+        isNull(budgetAllocations.deletedAt),
         lte(budgetAllocations.validFrom, asOfDate),
         or(
           isNull(budgetAllocations.expiresAt),
@@ -1081,6 +1099,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         eq(budgetAllocations.customerId, customerId),
         eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
         eq(budgetAllocations.source, "carryover"),
+        isNull(budgetAllocations.deletedAt),
         sql`${budgetAllocations.expiresAt} IS NOT NULL`,
         sql`${budgetAllocations.expiresAt} < ${today}`
       ))
@@ -1163,6 +1182,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       .where(and(
         eq(budgetAllocations.customerId, customerId),
         eq(budgetAllocations.budgetType, budgetType),
+        isNull(budgetAllocations.deletedAt),
         lte(budgetAllocations.validFrom, today),
         or(
           isNull(budgetAllocations.expiresAt),
@@ -1255,8 +1275,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     customerKilometers: number;
     customerKilometersCents: number;
     userId?: number;
-  }): Promise<CascadeResult> {
-    return await db.transaction(async (tx: DbClient) => {
+  }, outerTx?: DbClient): Promise<CascadeResult> {
+    const doWork = async (tx: DbClient) => {
       const existingTransaction = await this.getTransactionByAppointmentId(params.appointmentId, tx);
       if (existingTransaction) {
         throw new Error(`Für diesen Termin wurde bereits eine Budget-Abbuchung erstellt (Transaktion #${existingTransaction.id})`);
@@ -1411,7 +1431,12 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         outstandingCents: remaining,
         breakdown,
       };
-    });
+    };
+
+    if (outerTx) {
+      return await doWork(outerTx);
+    }
+    return await db.transaction(async (tx: DbClient) => doWork(tx));
   }
 }
 

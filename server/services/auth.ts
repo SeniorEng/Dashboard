@@ -309,16 +309,18 @@ export class AuthService {
   }
 
   async setUserRoles(userId: number, roles: EmployeeRole[]): Promise<void> {
-    await db.delete(userRoles).where(eq(userRoles.userId, userId));
+    await db.transaction(async (tx) => {
+      await tx.delete(userRoles).where(eq(userRoles.userId, userId));
 
-    if (roles.length > 0) {
-      await db.insert(userRoles).values(
-        roles.map((role) => ({
-          userId,
-          role,
-        }))
-      );
-    }
+      if (roles.length > 0) {
+        await tx.insert(userRoles).values(
+          roles.map((role) => ({
+            userId,
+            role,
+          }))
+        );
+      }
+    });
     sessionCache.invalidateByUserId(userId);
   }
 

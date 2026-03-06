@@ -55,6 +55,7 @@ export const budgetAllocations = pgTable("budget_allocations", {
   validFrom: date("valid_from").notNull(), // When this allocation becomes available
   expiresAt: date("expires_at"), // null = never expires, set for carryover (June 30)
   notes: text("notes"),
+  deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
 }, (table) => [

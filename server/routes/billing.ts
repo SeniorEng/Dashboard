@@ -65,7 +65,8 @@ async function getServiceRecordsForPeriod(customerId: number, year: number, mont
     .where(and(
       eq(monthlyServiceRecords.customerId, customerId),
       eq(monthlyServiceRecords.year, year),
-      eq(monthlyServiceRecords.month, month)
+      eq(monthlyServiceRecords.month, month),
+      isNull(monthlyServiceRecords.deletedAt)
     ));
 }
 
@@ -373,7 +374,8 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
     .from(monthlyServiceRecords)
     .where(and(
       eq(monthlyServiceRecords.year, billingYear),
-      eq(monthlyServiceRecords.month, billingMonth)
+      eq(monthlyServiceRecords.month, billingMonth),
+      isNull(monthlyServiceRecords.deletedAt)
     ));
 
   const uniqueCustomerIds = Array.from(new Set(allServiceRecords.map(sr => sr.customerId)));
@@ -687,7 +689,8 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
     .where(and(
       eq(monthlyServiceRecords.customerId, invoice.customerId),
       eq(monthlyServiceRecords.year, invoice.billingYear),
-      eq(monthlyServiceRecords.month, invoice.billingMonth)
+      eq(monthlyServiceRecords.month, invoice.billingMonth),
+      isNull(monthlyServiceRecords.deletedAt)
     ));
 
   const signedRecords = serviceRecords.filter(r =>

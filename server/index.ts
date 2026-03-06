@@ -180,7 +180,7 @@ process.on("uncaughtException", (error) => {
   const budgetRenewalInterval = setInterval(runBudgetRenewalCheck, 24 * 60 * 60 * 1000);
 
   try {
-    const superAdminEmail = "alrikdegenkolb@seniorenengel-alltagsbegleitung.de";
+    const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || "alrikdegenkolb@seniorenengel-alltagsbegleitung.de";
     const promoteResult = await db.execute(sqlBuilder`
       UPDATE users SET is_super_admin = true 
       WHERE email = ${superAdminEmail} AND is_admin = true AND is_super_admin = false

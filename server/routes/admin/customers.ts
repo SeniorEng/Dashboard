@@ -8,7 +8,7 @@ import { budgetLedgerStorage } from "../../storage/budget-ledger";
 import { computeDataHash } from "../../services/signature-integrity";
 import { auditService } from "../../services/audit";
 import { geocodeCustomer } from "../../services/geocoding";
-import { formatDateISO, isChild } from "@shared/utils/datetime";
+import { formatDateISO, isChild, parseLocalDate } from "@shared/utils/datetime";
 import { 
   insertCustomerInsuranceSchema,
   insertCustomerContactSchema,
@@ -353,7 +353,7 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
       if (data.budgets.carryoverAmountCents && data.budgets.carryoverAmountCents > 0) {
         try {
           const validFrom = data.budgets.validFrom || todayISO();
-          const validFromDate = new Date(validFrom + "T00:00:00");
+          const validFromDate = parseLocalDate(validFrom);
           const currentYear = validFromDate.getFullYear();
           await budgetLedgerStorage.createBudgetAllocation({
             customerId: customer.id,
@@ -1232,6 +1232,7 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
     isNotNull(appointments.actualStart),
     isNotNull(appointments.actualEnd),
     isNull(appointments.deletedAt),
+    sql`${appointments.appointmentType} != 'Erstberatung'`,
     sql`${appointments.id} NOT IN (SELECT appointment_id FROM budget_transactions WHERE appointment_id IS NOT NULL)`,
   ];
   if (customerIdFilter) {

@@ -31,7 +31,7 @@ export const createFullCustomerSchema = z.object({
   stadt: z.string().min(1, "Stadt ist erforderlich"),
   
   // Insurance (optional for Selbstzahler)
-  insuranceProviderId: z.number().min(1).optional().nullable(),
+  insuranceProviderId: z.number().min(1, "Bitte wählen Sie eine Pflegekasse aus").optional().nullable(),
   versichertennummer: versichertennummerSchema.optional().nullable(),
   
   // Primary emergency contact (required)
@@ -45,16 +45,16 @@ export const createFullCustomerSchema = z.object({
   // Additional emergency contacts (optional)
   additionalContacts: z.array(z.object({
     contactType: z.enum(CONTACT_TYPES),
-    vorname: z.string().min(1),
-    nachname: z.string().min(1),
+    vorname: z.string().min(1, "Vorname ist erforderlich"),
+    nachname: z.string().min(1, "Nachname ist erforderlich"),
     telefon: germanPhoneTransformSchema,
   })).optional().default([]),
   
   // Needs assessment (pflegegrad optional for Selbstzahler)
-  householdSize: z.number().min(1).default(1),
-  pflegegrad: z.number().min(1).max(5).optional().nullable(),
+  householdSize: z.number().min(1, "Haushaltsgröße muss mindestens 1 sein").default(1),
+  pflegegrad: z.number().min(1, "Pflegegrad muss zwischen 1 und 5 liegen").max(5, "Pflegegrad muss zwischen 1 und 5 liegen").optional().nullable(),
   pflegegradSeit: z.string().optional().nullable(),
-  pflegegradBeantragt: z.number().min(1).max(5).optional().nullable(),
+  pflegegradBeantragt: z.number().min(1, "Pflegegrad muss zwischen 1 und 5 liegen").max(5, "Pflegegrad muss zwischen 1 und 5 liegen").optional().nullable(),
   pflegedienstBeauftragt: z.boolean().default(false),
   anamnese: z.string().max(2000).optional().nullable(),
   
@@ -85,7 +85,7 @@ export const createFullCustomerSchema = z.object({
   pflegesachleistungen36: z.number().min(0).default(0),
   
   // Contract
-  contractHours: z.number().min(1),
+  contractHours: z.number().min(1, "Vertragsstunden müssen mindestens 1 sein"),
   contractPeriod: z.enum(CONTRACT_PERIOD_TYPES),
   contractStart: z.string().optional().nullable(),
   

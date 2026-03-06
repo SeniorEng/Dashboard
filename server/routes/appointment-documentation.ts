@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { storage } from "../storage";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
-import { documentKundenterminSchema, appointments } from "@shared/schema";
+import { documentKundenterminSchema } from "@shared/schema";
 import { appointmentService } from "../services/appointments";
 import { auditService } from "../services/audit";
 import { computeDataHash } from "../services/signature-integrity";
@@ -10,7 +10,6 @@ import { requireAuth } from "../middleware/auth";
 import { checkCustomerAccess } from "./appointments";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { db } from "../lib/db";
-import { eq } from "drizzle-orm";
 import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
 
 const router = Router();
@@ -86,51 +85,60 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
   let budgetTransaction = null;
   let budgetWarning: string | null = null;
 
-  const updatedAppointment = await storage.updateAppointment(id, updateData);
-  if (!updatedAppointment) {
-    throw new AppError(500, "SERVER_ERROR", "Fehler beim Speichern der Dokumentation");
-  }
-
-  if (docResult.serviceUpdates && docResult.serviceUpdates.length > 0) {
-    await storage.updateAppointmentServiceDocumentation(id, docResult.serviceUpdates);
-  }
-
-  if (hasUsage && appointment.appointmentType !== "Erstberatung") {
-    try {
-      budgetTransaction = await budgetLedgerStorage.createConsumptionTransaction({
-        customerId: appointment.customerId,
-        appointmentId: id,
-        transactionDate: appointment.date,
-        hauswirtschaftMinutes,
-        alltagsbegleitungMinutes,
-        travelKilometers,
-        customerKilometers,
-        userId: req.user?.id,
-      });
-
-      try {
-        const summary = await budgetLedgerStorage.getBudgetSummary(appointment.customerId);
-        if (summary.monthlyLimitCents !== null && summary.currentMonthUsedCents > summary.monthlyLimitCents) {
-          const limitEuro = (summary.monthlyLimitCents / 100).toFixed(2);
-          const usedEuro = (summary.currentMonthUsedCents / 100).toFixed(2);
-          budgetWarning = `Hinweis: Das vereinbarte Monatslimit von ${limitEuro} € wurde überschritten (aktuell ${usedEuro} €).`;
-        }
-      } catch {
-      }
-    } catch (budgetError: unknown) {
-      const errorMessage = budgetError instanceof Error ? budgetError.message : "Budget-Abbuchung fehlgeschlagen";
-      if (errorMessage.includes("Preisvereinbarung")) {
-        await db.update(appointments).set({ status: appointment.status }).where(eq(appointments.id, id));
-        throw badRequest(`${errorMessage}. Bitte hinterlegen Sie zuerst eine Preisvereinbarung für diesen Kunden.`);
-      }
-      if (errorMessage.includes("Budget reicht nicht aus")) {
-        await db.update(appointments).set({ status: appointment.status }).where(eq(appointments.id, id));
-        throw badRequest(errorMessage);
-      }
-      budgetWarning = errorMessage;
-      console.warn("Budget booking warning:", budgetError);
+  const updatedAppointment = await db.transaction(async (tx) => {
+    const result = await storage.updateAppointment(id, updateData, tx);
+    if (!result) {
+      throw new AppError(500, "SERVER_ERROR", "Fehler beim Speichern der Dokumentation");
     }
-  }
+
+    if (docResult.serviceUpdates && docResult.serviceUpdates.length > 0) {
+      await storage.updateAppointmentServiceDocumentation(id, docResult.serviceUpdates, tx);
+    }
+
+    if (hasUsage && appointment.appointmentType !== "Erstberatung") {
+      try {
+        budgetTransaction = await budgetLedgerStorage.createConsumptionTransaction({
+          customerId: appointment.customerId,
+          appointmentId: id,
+          transactionDate: appointment.date,
+          hauswirtschaftMinutes,
+          alltagsbegleitungMinutes,
+          travelKilometers,
+          customerKilometers,
+          userId: req.user?.id,
+        }, tx);
+
+        try {
+          const summary = await budgetLedgerStorage.getBudgetSummary(appointment.customerId);
+          if (summary.monthlyLimitCents !== null && summary.currentMonthUsedCents > summary.monthlyLimitCents) {
+            const limitEuro = (summary.monthlyLimitCents / 100).toFixed(2);
+            const usedEuro = (summary.currentMonthUsedCents / 100).toFixed(2);
+            budgetWarning = `Hinweis: Das vereinbarte Monatslimit von ${limitEuro} € wurde überschritten (aktuell ${usedEuro} €).`;
+          }
+        } catch {
+        }
+      } catch (budgetError: unknown) {
+        const errorMessage = budgetError instanceof Error ? budgetError.message : "Budget-Abbuchung fehlgeschlagen";
+        if (errorMessage.includes("Preisvereinbarung") || errorMessage.includes("Budget reicht nicht aus")) {
+          throw budgetError;
+        }
+        budgetWarning = errorMessage;
+        console.warn("Budget booking warning:", budgetError);
+      }
+    }
+
+    return result;
+  }).catch((err) => {
+    if (err instanceof AppError) throw err;
+    const errorMessage = err instanceof Error ? err.message : "Budget-Abbuchung fehlgeschlagen";
+    if (errorMessage.includes("Preisvereinbarung")) {
+      throw badRequest(`${errorMessage}. Bitte hinterlegen Sie zuerst eine Preisvereinbarung für diesen Kunden.`);
+    }
+    if (errorMessage.includes("Budget reicht nicht aus")) {
+      throw badRequest(errorMessage);
+    }
+    throw err;
+  });
 
   const ip = req.ip || req.socket.remoteAddress;
   await auditService.documentationSubmitted(

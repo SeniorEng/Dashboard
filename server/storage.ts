@@ -172,7 +172,7 @@ export interface IStorage {
   getAppointment(id: number): Promise<Appointment | undefined>;
   getAppointmentIncludeDeleted(id: number): Promise<Appointment | undefined>;
   createAppointment(appointment: InsertAppointment): Promise<Appointment>;
-  updateAppointment(id: number, appointment: UpdateAppointment): Promise<Appointment | undefined>;
+  updateAppointment(id: number, appointment: UpdateAppointment, tx?: import("./lib/db").DbOrTx): Promise<Appointment | undefined>;
   deleteAppointment(id: number): Promise<boolean>;
   getAppointmentsByDate(date: string): Promise<Appointment[]>;
   
@@ -223,7 +223,7 @@ export interface IStorage {
   getBatchAppointmentServices(appointmentIds: number[]): Promise<Record<number, AppointmentServiceWithDetails[]>>;
   createAppointmentServices(appointmentId: number, services: { serviceId: number; plannedDurationMinutes: number }[]): Promise<void>;
   replaceAppointmentServices(appointmentId: number, services: { serviceId: number; plannedDurationMinutes: number }[]): Promise<void>;
-  updateAppointmentServiceDocumentation(appointmentId: number, serviceUpdates: { serviceId: number; actualDurationMinutes: number; details?: string | null }[]): Promise<void>;
+  updateAppointmentServiceDocumentation(appointmentId: number, serviceUpdates: { serviceId: number; actualDurationMinutes: number; details?: string | null }[], tx?: import("./lib/db").DbOrTx): Promise<void>;
   getServicesByIds(serviceIds: number[]): Promise<{ id: number; code: string }[]>;
 
   // User Onboarding
@@ -528,8 +528,9 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async updateAppointment(id: number, appointment: UpdateAppointment): Promise<Appointment | undefined> {
-    const result = await db.update(appointments)
+  async updateAppointment(id: number, appointment: UpdateAppointment, tx?: import("./lib/db").DbOrTx): Promise<Appointment | undefined> {
+    const client = tx || db;
+    const result = await client.update(appointments)
       .set(appointment)
       .where(eq(appointments.id, id))
       .returning();
@@ -690,7 +691,7 @@ export class DatabaseStorage implements IStorage {
 
   // Monthly Service Records (Leistungsnachweise)
   async getServiceRecordsForEmployee(employeeId: number, year?: number, month?: number, customerId?: number): Promise<MonthlyServiceRecord[]> {
-    let conditions = [eq(monthlyServiceRecords.employeeId, employeeId)];
+    let conditions = [eq(monthlyServiceRecords.employeeId, employeeId), isNull(monthlyServiceRecords.deletedAt)];
     if (year !== undefined) {
       conditions.push(eq(monthlyServiceRecords.year, year));
     }
@@ -709,14 +710,14 @@ export class DatabaseStorage implements IStorage {
   async getServiceRecordsForCustomer(customerId: number): Promise<MonthlyServiceRecord[]> {
     return await db.select()
       .from(monthlyServiceRecords)
-      .where(eq(monthlyServiceRecords.customerId, customerId))
+      .where(and(eq(monthlyServiceRecords.customerId, customerId), isNull(monthlyServiceRecords.deletedAt)))
       .orderBy(monthlyServiceRecords.year, monthlyServiceRecords.month);
   }
 
   async getServiceRecord(id: number): Promise<MonthlyServiceRecord | undefined> {
     const result = await db.select()
       .from(monthlyServiceRecords)
-      .where(eq(monthlyServiceRecords.id, id));
+      .where(and(eq(monthlyServiceRecords.id, id), isNull(monthlyServiceRecords.deletedAt)));
     return result[0];
   }
 
@@ -727,7 +728,8 @@ export class DatabaseStorage implements IStorage {
         eq(monthlyServiceRecords.customerId, customerId),
         eq(monthlyServiceRecords.employeeId, employeeId),
         eq(monthlyServiceRecords.year, year),
-        eq(monthlyServiceRecords.month, month)
+        eq(monthlyServiceRecords.month, month),
+        isNull(monthlyServiceRecords.deletedAt)
       ));
     return result[0];
   }
@@ -885,7 +887,8 @@ export class DatabaseStorage implements IStorage {
       .from(monthlyServiceRecords)
       .where(and(
         eq(monthlyServiceRecords.employeeId, employeeId),
-        ne(monthlyServiceRecords.status, 'completed')
+        ne(monthlyServiceRecords.status, 'completed'),
+        isNull(monthlyServiceRecords.deletedAt)
       ))
       .orderBy(monthlyServiceRecords.year, monthlyServiceRecords.month);
   }
@@ -899,6 +902,7 @@ export class DatabaseStorage implements IStorage {
       .innerJoin(monthlyServiceRecords, eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id))
       .where(and(
         eq(serviceRecordAppointments.appointmentId, appointmentId),
+        isNull(monthlyServiceRecords.deletedAt),
         or(
           eq(monthlyServiceRecords.status, 'employee_signed'),
           eq(monthlyServiceRecords.status, 'completed')
@@ -956,7 +960,8 @@ export class DatabaseStorage implements IStorage {
         eq(monthlyServiceRecords.employeeId, employeeId),
         eq(monthlyServiceRecords.year, year),
         eq(monthlyServiceRecords.month, month),
-        inArray(monthlyServiceRecords.customerId, assignedCustomerIds)
+        inArray(monthlyServiceRecords.customerId, assignedCustomerIds),
+        isNull(monthlyServiceRecords.deletedAt)
       ));
 
     const recordMap = new Map(existingRecords.map(r => [r.customerId, { id: r.id, status: r.status }]));
@@ -1080,13 +1085,13 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async updateAppointmentServiceDocumentation(appointmentId: number, serviceUpdates: { serviceId: number; actualDurationMinutes: number; details?: string | null }[]): Promise<void> {
+  async updateAppointmentServiceDocumentation(appointmentId: number, serviceUpdates: { serviceId: number; actualDurationMinutes: number; details?: string | null }[], tx?: import("./lib/db").DbOrTx): Promise<void> {
     if (serviceUpdates.length === 0) return;
     const { appointmentServices } = await import("@shared/schema");
     const { eq, and } = await import("drizzle-orm");
-    await db.transaction(async (tx) => {
+    const runUpdates = async (client: import("./lib/db").DbOrTx) => {
       await Promise.all(serviceUpdates.map(su =>
-        tx.update(appointmentServices)
+        client.update(appointmentServices)
           .set({
             actualDurationMinutes: su.actualDurationMinutes,
             details: su.details ?? null,
@@ -1098,7 +1103,12 @@ export class DatabaseStorage implements IStorage {
             )
           )
       ));
-    });
+    };
+    if (tx) {
+      await runUpdates(tx);
+    } else {
+      await db.transaction(async (innerTx) => runUpdates(innerTx));
+    }
   }
 
   async getServicesByIds(serviceIds: number[]): Promise<{ id: number; code: string }[]> {

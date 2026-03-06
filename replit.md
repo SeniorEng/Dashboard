@@ -32,7 +32,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 ### Data Storage
 - **Database**: PostgreSQL via Neon serverless with Drizzle ORM.
 - **Schema**: Tables include `customers`, `appointments`, `insurance_providers`, `employee_time_entries`, with historization (`valid_from`/`valid_to`) and `withTimezone: true` for all timestamps.
-- **Soft-Delete**: `deletedAt` for GoBD compliance. Partial indexes on appointments for `deleted_at IS NULL` queries.
+- **Soft-Delete**: `deletedAt` for GoBD compliance on `appointments`, `customers`, `tasks`, `time_entries`, `documents`, `qualifications`, `prospects`, `monthly_service_records`, `budget_allocations`. Partial indexes on appointments for `deleted_at IS NULL` queries. All queries filter by `isNull(deletedAt)`. Service record deletion and budget allocation deletion use soft-delete (SET deletedAt) instead of hard DELETE for GoBD Aufbewahrungspflicht.
 - **Data Layer**: `IStorage` interface abstraction.
 - **Caching**: In-memory cache for assigned customer IDs, sessions, and birthdays.
 - **Performance**: Combined API endpoints, scoped auth middleware, single JOIN for session validation, batch cleanup. Configurable `staleTime` for frontend data stability.

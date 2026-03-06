@@ -28,6 +28,7 @@ export function useUnreadCount() {
 
 export function useMarkAsRead() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   return useMutation({
     mutationFn: async (id: number) => {
@@ -38,7 +39,7 @@ export function useMarkAsRead() {
       queryClient.invalidateQueries({ queryKey: ["notifications"] });
     },
     onError: (error: Error) => {
-      console.error("Benachrichtigung konnte nicht als gelesen markiert werden:", error);
+      toast({ title: "Fehler", description: error.message || "Benachrichtigung konnte nicht als gelesen markiert werden", variant: "destructive" });
     },
   });
 }

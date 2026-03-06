@@ -336,12 +336,13 @@ router.delete("/:customerId/initial-balance/:allocationId", requireAdmin, asyncH
   const userId = req.user?.id;
   const { db: database } = await import("../lib/db");
   const { budgetAllocations } = await import("@shared/schema");
-  const { eq, and, or } = await import("drizzle-orm");
+  const { eq, and, or, isNull } = await import("drizzle-orm");
   const existing = await database.select()
     .from(budgetAllocations)
     .where(and(
       eq(budgetAllocations.id, allocationId),
       eq(budgetAllocations.customerId, customerId),
+      isNull(budgetAllocations.deletedAt),
       or(
         eq(budgetAllocations.source, "initial_balance"),
         eq(budgetAllocations.source, "carryover"),
@@ -354,7 +355,8 @@ router.delete("/:customerId/initial-balance/:allocationId", requireAdmin, asyncH
     return;
   }
 
-  await database.delete(budgetAllocations)
+  await database.update(budgetAllocations)
+    .set({ deletedAt: new Date() })
     .where(eq(budgetAllocations.id, allocationId));
 
   if (userId) {

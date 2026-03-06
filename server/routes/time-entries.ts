@@ -322,7 +322,7 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
     
     // Collect weekday dates (skip weekends)
     const weekdayDates: string[] = [];
-    const collectDate = new Date(startDate);
+    const collectDate = new Date(startDate.getTime());
     while (collectDate <= end) {
       const dateStr = formatDateISO(collectDate);
       if (!isWeekend(dateStr)) {

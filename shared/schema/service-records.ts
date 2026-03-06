@@ -39,6 +39,7 @@ export const monthlyServiceRecords = pgTable("monthly_service_records", {
   customerSigningIp: text("customer_signing_ip"),
   customerSigningLocation: text("customer_signing_location"),
   // Metadata
+  deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [
