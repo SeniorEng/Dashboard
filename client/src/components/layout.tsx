@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, BookOpen, Bell } from "lucide-react";
+import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, BookOpen, Bell, CalendarPlus, UserPlus } from "lucide-react";
 import { type LayoutVariant, layoutVariants, colors } from "@/design-system";
 import { useUnreadCount } from "@/features/notifications/use-notifications";
 
@@ -241,6 +241,19 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
                   <p className="text-sm font-medium">{user.displayName}</p>
                   <p className="text-xs text-muted-foreground">{user.email}</p>
                 </div>
+                {user.isAdmin && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => navigate("/new-appointment")} data-testid="menu-quick-appointment">
+                      <CalendarPlus className="mr-2 h-4 w-4 text-teal-600" />
+                      + Termin
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate("/admin/customers/new")} data-testid="menu-quick-customer">
+                      <UserPlus className="mr-2 h-4 w-4 text-teal-600" />
+                      + Interessent
+                    </DropdownMenuItem>
+                  </>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => navigate("/profile")} data-testid="menu-profile">
                   <Settings className="mr-2 h-4 w-4" />
