@@ -270,7 +270,7 @@ function RequirementCard({
     } finally {
       setIsLoadingPreview(false);
     }
-  }, [previewHtml, formData, template, toast]);
+  }, [previewHtml, formData, template, toast, signature]);
 
   return (
     <Card
