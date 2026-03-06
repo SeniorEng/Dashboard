@@ -263,6 +263,20 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
   async getMonthlyBudgetAmountCents(customerId: number, _tx?: DbClient): Promise<number> {
     const d = _tx ?? db;
+
+    const typeSettings = await d.select()
+      .from(customerBudgetTypeSettings)
+      .where(and(
+        eq(customerBudgetTypeSettings.customerId, customerId),
+        eq(customerBudgetTypeSettings.budgetType, "entlastungsbetrag_45b"),
+        eq(customerBudgetTypeSettings.enabled, true)
+      ))
+      .limit(1);
+
+    if (typeSettings[0]?.monthlyLimitCents != null) {
+      return typeSettings[0].monthlyLimitCents;
+    }
+
     const customerBudget = await d.select()
       .from(customerBudgets)
       .where(and(
@@ -280,15 +294,6 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
   async ensureMonthlyAllocations(customerId: number, _tx?: DbClient): Promise<BudgetAllocation[]> {
     const d = _tx ?? db;
-    const preferences = await this.getBudgetPreferences(customerId, _tx);
-    if (!preferences?.budgetStartDate) {
-      return [];
-    }
-
-    const startDate = parseLocalDate(preferences.budgetStartDate);
-    const todayDate = parseLocalDate(todayISO());
-    const currentYear = todayDate.getFullYear();
-    const currentMonth = todayDate.getMonth() + 1;
 
     const existingAllocations = await d.select()
       .from(budgetAllocations)
@@ -298,9 +303,43 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         isNull(budgetAllocations.deletedAt)
       ));
 
-    const monthlyAutoSet = new Set(
+    const preferences = await this.getBudgetPreferences(customerId, _tx);
+    let budgetStartDate = preferences?.budgetStartDate ?? null;
+
+    if (!budgetStartDate) {
+      const initialBalances = existingAllocations
+        .filter(a => a.source === "initial_balance" && a.validFrom);
+      if (initialBalances.length > 0) {
+        const earliest = initialBalances.reduce((min, a) =>
+          a.validFrom < min.validFrom ? a : min
+        );
+        budgetStartDate = earliest.validFrom;
+      }
+    }
+
+    if (!budgetStartDate) {
+      const monthlyEntries = existingAllocations
+        .filter(a => (a.source === "monthly" || a.source === "monthly_auto" || a.source === "carryover") && a.validFrom);
+      if (monthlyEntries.length > 0) {
+        const earliest = monthlyEntries.reduce((min, a) =>
+          a.validFrom < min.validFrom ? a : min
+        );
+        budgetStartDate = earliest.validFrom;
+      }
+    }
+
+    if (!budgetStartDate) {
+      return [];
+    }
+
+    const startDate = parseLocalDate(budgetStartDate);
+    const todayDate = parseLocalDate(todayISO());
+    const currentYear = todayDate.getFullYear();
+    const currentMonth = todayDate.getMonth() + 1;
+
+    const existingMonthlySet = new Set(
       existingAllocations
-        .filter(a => a.source === "monthly_auto")
+        .filter(a => a.source === "monthly_auto" || a.source === "monthly")
         .map(a => `${a.year}-${a.month}`)
     );
 
@@ -345,7 +384,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     while (year < currentYear || (year === currentYear && month <= currentMonth)) {
       const key = `${year}-${month}`;
 
-      if (!monthlyAutoSet.has(key) && !initialBalanceSet.has(key)) {
+      if (!existingMonthlySet.has(key) && !initialBalanceSet.has(key)) {
         const validFrom = `${year}-${String(month).padStart(2, '0')}-01`;
         const result = await d.insert(budgetAllocations).values({
           customerId,
