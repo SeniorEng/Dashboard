@@ -114,7 +114,9 @@ export default function AdminCustomerNew() {
   });
 
   const [customerSignatures, setCustomerSignatures] = useState<Record<string, string>>({});
+  const customerSignaturesRef = useRef<Record<string, string>>({});
   const [uploadedDocuments, setUploadedDocuments] = useState<WizardUploadedDoc[]>([]);
+  const uploadedDocumentsRef = useRef<WizardUploadedDoc[]>([]);
   const signingLocationRef = useRef<string | null>(null);
   const [draftDialog, setDraftDialog] = useState<{ timestamp: string } | null>(null);
   const createdRef = useRef(false);
@@ -188,7 +190,11 @@ export default function AdminCustomerNew() {
   }, [formData]);
 
   const handleSignatureChange = useCallback((slug: string, signatureData: string, location?: string | null) => {
-    setCustomerSignatures((prev) => ({ ...prev, [slug]: signatureData }));
+    setCustomerSignatures((prev) => {
+      const next = { ...prev, [slug]: signatureData };
+      customerSignaturesRef.current = next;
+      return next;
+    });
     if (location) {
       signingLocationRef.current = location;
     }
@@ -387,7 +393,9 @@ export default function AdminCustomerNew() {
           }
         }
 
-        const signedSlugs = Object.entries(customerSignatures).filter(([, data]) => data && data.startsWith("data:image/"));
+        const signaturesSnapshot = customerSignaturesRef.current;
+        const signedSlugs = Object.entries(signaturesSnapshot).filter(([, data]) => data && data.startsWith("data:image/"));
+        console.log("[DEBUG] customerSignatures keys:", Object.keys(signaturesSnapshot), "signedSlugs count:", signedSlugs.length);
         if (signedSlugs.length > 0) {
           try {
             await api.post(`/customers/${customer.id}/signatures`, {
@@ -403,9 +411,10 @@ export default function AdminCustomerNew() {
           }
         }
 
-        if (uploadedDocuments.length > 0) {
+        const uploadsSnapshot = uploadedDocumentsRef.current;
+        if (uploadsSnapshot.length > 0) {
           try {
-            for (const doc of uploadedDocuments) {
+            for (const doc of uploadsSnapshot) {
               await api.post(`/customers/${customer.id}/documents`, {
                 documentTypeId: doc.documentTypeId,
                 fileName: doc.fileName,
@@ -706,7 +715,7 @@ export default function AdminCustomerNew() {
             customerSignatures={customerSignatures}
             onSignatureChange={handleSignatureChange}
             uploadedDocuments={uploadedDocuments}
-            onUploadedDocumentsChange={setUploadedDocuments}
+            onUploadedDocumentsChange={(docs) => { setUploadedDocuments(docs); uploadedDocumentsRef.current = docs; }}
             formData={formData}
           />
         );
