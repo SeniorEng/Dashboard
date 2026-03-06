@@ -101,6 +101,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Error handling**: All useMutation hooks have onError with German toast
 - **N+1 fixed**: upsertBudgetTypeSettings uses batch insert in transaction
 - **Dead code removed**: Duplicate BillingType/BILLING_TYPES from shared/schema/billing.ts
+- **Dead code audit tooling**: Knip installed (`npx knip`) for comprehensive dead code detection (unused files, exports, dependencies). Config in `knip.json`. 14 unused UI component files and 8 unused npm dependencies removed after initial audit. Run periodically to keep codebase clean.
 
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)
