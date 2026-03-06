@@ -255,7 +255,7 @@ function RequirementCard({
           insuranceProviderId: formData.insuranceProviderId,
         },
         overrides: signature ? {
-          customer_signature: `<img src="${signature}" alt="Kundenunterschrift" style="max-height:60px;" />`,
+          customer_signature: `<img src="${signature}" alt="Kundenunterschrift" style="max-height:120px;" />`,
         } : undefined,
       });
       const data = unwrapResult(result) as { html: string };
