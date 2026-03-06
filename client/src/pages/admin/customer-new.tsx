@@ -395,7 +395,6 @@ export default function AdminCustomerNew() {
 
         const signaturesSnapshot = customerSignaturesRef.current;
         const signedSlugs = Object.entries(signaturesSnapshot).filter(([, data]) => data && data.startsWith("data:image/"));
-        console.log("[DEBUG] customerSignatures keys:", Object.keys(signaturesSnapshot), "signedSlugs count:", signedSlugs.length);
         if (signedSlugs.length > 0) {
           try {
             await api.post(`/customers/${customer.id}/signatures`, {
