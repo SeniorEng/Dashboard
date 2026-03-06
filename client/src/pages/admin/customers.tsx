@@ -409,7 +409,7 @@ export default function AdminCustomers() {
                   {!customer.hasBetreuer && customer.status !== "erstberatung" && (
                     <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5" data-testid={`banner-no-betreuer-${customer.id}`}>
                       <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
-                      <span>Kein Betreuer / Vertreter hinterlegt</span>
+                      <span>Kein rechtl. Betreuer / Bevollmächtigter hinterlegt</span>
                     </div>
                   )}
                 </DataListItem>
