@@ -14,10 +14,16 @@ const emailWebhookSchema = z.object({
 });
 
 router.post("/email-lead", asyncHandler("Webhook-Verarbeitung fehlgeschlagen", async (req: Request, res: Response) => {
-  const secret = req.headers["x-webhook-secret"];
-  const expectedSecret = process.env.EMAIL_WEBHOOK_SECRET;
+  const headerKeys = Object.keys(req.headers);
+  const secretHeader = headerKeys.find(k => k.replace(/[\t\s]/g, "").toLowerCase() === "x-webhook-secret");
+  const secret = secretHeader ? String(req.headers[secretHeader]).trim() : undefined;
+  const expectedSecret = process.env.EMAIL_WEBHOOK_SECRET?.trim();
 
   if (!expectedSecret || secret !== expectedSecret) {
+    console.log("[webhook] Auth failed. Header key found:", secretHeader || "NONE",
+      "| Secret length:", secret?.length ?? 0,
+      "| Expected length:", expectedSecret?.length ?? 0,
+      "| Match:", secret === expectedSecret);
     res.status(401).json({ error: "Ungültiger Webhook-Schlüssel" });
     return;
   }
