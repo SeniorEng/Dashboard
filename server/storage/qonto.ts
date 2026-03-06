@@ -61,6 +61,14 @@ class QontoStorage {
     return tx;
   }
 
+  async getTransactionByQontoId(qontoId: string): Promise<QontoTransaction | null> {
+    const [result] = await db.select()
+      .from(qontoTransactions)
+      .where(eq(qontoTransactions.qontoTransactionId, qontoId))
+      .limit(1);
+    return result ?? null;
+  }
+
   async upsertTransaction(data: InsertQontoTransaction): Promise<QontoTransaction> {
     const existing = await db.select()
       .from(qontoTransactions)

@@ -4,6 +4,7 @@ import { asyncHandler, badRequest, notFound } from "../../lib/errors";
 import { qontoService } from "../../services/qonto";
 import { qontoStorage } from "../../storage/qonto";
 import { parseAvisCsv } from "../../services/avis-parser";
+import { parseQontoCsv } from "../../services/qonto-csv-parser";
 import { z } from "zod";
 import { db } from "../../lib/db";
 import { invoices } from "@shared/schema";
@@ -81,6 +82,30 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
 router.post("/auto-match", asyncHandler("Auto-Abgleich fehlgeschlagen", async (_req, res) => {
   const result = await qontoService.autoMatch();
   res.json(result);
+}));
+
+const csvImportSchema = z.object({
+  csvContent: z.string().min(1, "CSV-Inhalt fehlt"),
+});
+
+router.post("/transactions/import-csv", asyncHandler("CSV-Import fehlgeschlagen", async (req, res) => {
+  const { csvContent } = csvImportSchema.parse(req.body);
+  const { transactions, skippedRows } = parseQontoCsv(csvContent);
+
+  let imported = 0;
+  let updated = 0;
+
+  for (const tx of transactions) {
+    const existing = await qontoStorage.getTransactionByQontoId(tx.qontoTransactionId);
+    await qontoStorage.upsertTransaction(tx);
+    if (existing) {
+      updated++;
+    } else {
+      imported++;
+    }
+  }
+
+  res.json({ imported, updated, skipped: skippedRows });
 }));
 
 async function autoMatchAvisItems(items: Array<{ id: number; rechnungsNummer: string | null }>) {

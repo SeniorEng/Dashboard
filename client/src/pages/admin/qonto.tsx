@@ -337,6 +337,36 @@ function TransactionsTab({
     },
   });
 
+  const [csvImporting, setCsvImporting] = useState(false);
+  const csvImportMutation = useMutation({
+    mutationFn: async (csvContent: string) =>
+      unwrapResult(await api.post<{ imported: number; updated: number; skipped: number }>("/admin/qonto/transactions/import-csv", { csvContent })),
+    onSuccess: (data) => {
+      const parts: string[] = [];
+      if (data.imported > 0) parts.push(`${data.imported} importiert`);
+      if (data.updated > 0) parts.push(`${data.updated} aktualisiert`);
+      if (data.skipped > 0) parts.push(`${data.skipped} übersprungen`);
+      toast({ title: `CSV-Import: ${parts.join(", ")}` });
+      queryClient.invalidateQueries({ queryKey: ["qonto"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler beim CSV-Import", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleCsvImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCsvImporting(true);
+    try {
+      const csvContent = await file.text();
+      await csvImportMutation.mutateAsync(csvContent);
+    } finally {
+      setCsvImporting(false);
+      e.target.value = "";
+    }
+  };
+
   if (!configured) {
     return (
       <Card>
@@ -363,19 +393,42 @@ function TransactionsTab({
           </SelectContent>
         </Select>
 
-        <Button
-          variant="outline"
-          onClick={() => autoMatchMutation.mutate()}
-          disabled={autoMatchMutation.isPending}
-          data-testid="button-auto-match"
-        >
-          {autoMatchMutation.isPending ? (
-            <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
-          ) : (
-            <Zap className={`${iconSize.sm} mr-2`} />
-          )}
-          Auto-Abgleich
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => autoMatchMutation.mutate()}
+            disabled={autoMatchMutation.isPending}
+            data-testid="button-auto-match"
+          >
+            {autoMatchMutation.isPending ? (
+              <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+            ) : (
+              <Zap className={`${iconSize.sm} mr-2`} />
+            )}
+            Auto-Abgleich
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => document.getElementById("csv-import-input")?.click()}
+            disabled={csvImporting}
+            data-testid="button-csv-import"
+          >
+            {csvImporting ? (
+              <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+            ) : (
+              <Upload className={`${iconSize.sm} mr-2`} />
+            )}
+            CSV importieren
+          </Button>
+          <input
+            id="csv-import-input"
+            type="file"
+            accept=".csv"
+            className="hidden"
+            onChange={handleCsvImport}
+            data-testid="input-csv-import"
+          />
+        </div>
       </div>
 
       {transactionsQuery.isLoading ? (
