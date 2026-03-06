@@ -342,6 +342,54 @@ This agent acts as a skeptical Senior Engineer who questions every change before
 
 ---
 
+## Category 9: Knip Dead Code Scan (Automated)
+
+**Goal**: Catch unused files, exports, and dependencies that manual inspection misses. Knip is the authoritative tool for dead code detection in this project.
+
+**MANDATORY** — This check MUST be run on every audit. It is not optional.
+
+### Configuration
+
+Knip is configured via `knip.json` in the project root. Key settings:
+- **Entry points**: `server/index.ts`, `client/src/main.tsx`, `shared/schema/index.ts`
+- **Ignored dependencies**: `tw-animate-css` (CSS-only import, not a JS module)
+- **`ignoreExportsUsedInFile: true`**: Exports used within the same file are not flagged
+
+### Steps:
+
+1. **Run Knip**:
+   ```bash
+   npx knip 2>&1
+   ```
+   Knip reports:
+   - **Unused files** — `.ts`/`.tsx` files not reachable from any entry point
+   - **Unused exports** — Exported functions/types/constants with zero importers
+   - **Unused dependencies** — npm packages listed in `package.json` but never imported
+   - **Unlisted dependencies** — Packages imported in code but not in `package.json`
+
+2. **Evaluate each finding**:
+   - **Unused files** → FAIL: Delete the file (verify it's truly unused first)
+   - **Unused exports** → WARN: Remove the export keyword, or delete the function if entirely unused
+   - **Unused dependencies** → FAIL: Run `npm uninstall <package>`
+   - **Unlisted dependencies** → FAIL: Run `npm install <package>`
+
+3. **False positives**: Some findings may be false positives:
+   - CSS-only packages (like `tw-animate-css`) → Add to `ignoreDependencies` in `knip.json`
+   - Drizzle migration files → Add to `ignore` in `knip.json`
+   - Schema exports used only by Drizzle at runtime → Verify before removing
+   - Server middleware registered dynamically → Verify before removing
+
+4. **Update knip.json if needed**: If a legitimate false positive is found, add it to the appropriate ignore list in `knip.json` and document why.
+
+### Red Flags:
+- Any unused file → FAIL (delete after verification)
+- Any unused npm dependency → FAIL (uninstall)
+- Any unlisted dependency → FAIL (install)
+- Unused exports > 10 in a single file → WARN (file may need refactoring)
+- Knip itself not installed or broken → FAIL (fix immediately: `npm install -D knip`)
+
+---
+
 ## Output Format
 
 After completing all checks, produce a summary:
@@ -359,6 +407,7 @@ After completing all checks, produce a summary:
 | 6. Update Pipeline | PASS/WARN/FAIL | Details |
 | 7. Documentation Alignment | PASS/WARN/FAIL | Details |
 | 8. Technical Debt | PASS/WARN/FAIL | Details |
+| 9. Knip Scan | PASS/WARN/FAIL | Details |
 
 ### File Size Report
 - Files > 500 lines: [list with line counts]
