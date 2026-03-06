@@ -1,13 +1,20 @@
 import {
   qontoTransactions,
   paymentAdvices,
+  paymentAdviceItems,
   type QontoTransaction,
   type InsertQontoTransaction,
   type PaymentAdvice,
   type InsertPaymentAdvice,
+  type PaymentAdviceItem,
+  type InsertPaymentAdviceItem,
 } from "@shared/schema";
 import { eq, and, isNull, isNotNull, desc, gte, lte, sql } from "drizzle-orm";
 import { db } from "../lib/db";
+
+export interface PaymentAdviceWithItems extends PaymentAdvice {
+  items: PaymentAdviceItem[];
+}
 
 class QontoStorage {
   async getTransactions(filters: {
@@ -119,11 +126,80 @@ class QontoStorage {
     return created;
   }
 
-  async getPaymentAdvices(): Promise<PaymentAdvice[]> {
-    return db.select()
+  async createPaymentAdviceWithItems(
+    adviceData: InsertPaymentAdvice,
+    items: Omit<InsertPaymentAdviceItem, "paymentAdviceId">[]
+  ): Promise<PaymentAdviceWithItems> {
+    return await db.transaction(async (tx) => {
+      const [advice] = await tx.insert(paymentAdvices)
+        .values(adviceData)
+        .returning();
+
+      const createdItems: PaymentAdviceItem[] = [];
+      if (items.length > 0) {
+        const itemsWithAdviceId = items.map(item => ({
+          ...item,
+          paymentAdviceId: advice.id,
+        }));
+        const inserted = await tx.insert(paymentAdviceItems)
+          .values(itemsWithAdviceId)
+          .returning();
+        createdItems.push(...inserted);
+      }
+
+      return { ...advice, items: createdItems };
+    });
+  }
+
+  async getPaymentAdvices(): Promise<PaymentAdviceWithItems[]> {
+    const advices = await db.select()
       .from(paymentAdvices)
       .where(isNull(paymentAdvices.deletedAt))
       .orderBy(desc(paymentAdvices.uploadedAt));
+
+    if (advices.length === 0) return [];
+
+    const adviceIds = advices.map(a => a.id);
+    const allItems = await db.select()
+      .from(paymentAdviceItems)
+      .where(sql`${paymentAdviceItems.paymentAdviceId} IN (${sql.join(adviceIds.map(id => sql`${id}`), sql`, `)})`);
+
+    const itemsByAdviceId = new Map<number, PaymentAdviceItem[]>();
+    for (const item of allItems) {
+      const list = itemsByAdviceId.get(item.paymentAdviceId) || [];
+      list.push(item);
+      itemsByAdviceId.set(item.paymentAdviceId, list);
+    }
+
+    return advices.map(a => ({
+      ...a,
+      items: itemsByAdviceId.get(a.id) || [],
+    }));
+  }
+
+  async getPaymentAdviceById(id: number): Promise<PaymentAdviceWithItems | null> {
+    const [advice] = await db.select()
+      .from(paymentAdvices)
+      .where(and(eq(paymentAdvices.id, id), isNull(paymentAdvices.deletedAt)));
+
+    if (!advice) return null;
+
+    const items = await db.select()
+      .from(paymentAdviceItems)
+      .where(eq(paymentAdviceItems.paymentAdviceId, id));
+
+    return { ...advice, items };
+  }
+
+  async updatePaymentAdviceItemMatch(
+    itemId: number,
+    matchedInvoiceId: number | null
+  ): Promise<PaymentAdviceItem | undefined> {
+    const [updated] = await db.update(paymentAdviceItems)
+      .set({ matchedInvoiceId })
+      .where(eq(paymentAdviceItems.id, itemId))
+      .returning();
+    return updated;
   }
 
   async deletePaymentAdvice(id: number): Promise<boolean> {

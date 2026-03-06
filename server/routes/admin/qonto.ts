@@ -3,7 +3,11 @@ import { requireSuperAdmin } from "../../middleware/auth";
 import { asyncHandler, badRequest, notFound } from "../../lib/errors";
 import { qontoService } from "../../services/qonto";
 import { qontoStorage } from "../../storage/qonto";
+import { parseAvisCsv } from "../../services/avis-parser";
 import { z } from "zod";
+import { db } from "../../lib/db";
+import { invoices } from "@shared/schema";
+import { eq, and, ilike } from "drizzle-orm";
 
 const router = Router();
 router.use(requireSuperAdmin);
@@ -50,9 +54,6 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
   const { invoiceId } = matchSchema.parse(req.body);
   const updated = await qontoStorage.updateTransactionMatch(id, invoiceId, "manual");
 
-  const { invoices } = await import("@shared/schema");
-  const { eq, and } = await import("drizzle-orm");
-  const { db } = await import("../../lib/db");
   await db.update(invoices)
     .set({ status: "bezahlt", paidAt: tx.emittedAt })
     .where(and(eq(invoices.id, invoiceId), eq(invoices.status, "versendet")));
@@ -68,9 +69,6 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
   if (!tx) throw notFound("Transaktion nicht gefunden");
 
   if (tx.matchedInvoiceId) {
-    const { invoices } = await import("@shared/schema");
-    const { eq } = await import("drizzle-orm");
-    const { db } = await import("../../lib/db");
     await db.update(invoices)
       .set({ status: "versendet", paidAt: null })
       .where(eq(invoices.id, tx.matchedInvoiceId));
@@ -85,26 +83,116 @@ router.post("/auto-match", asyncHandler("Auto-Abgleich fehlgeschlagen", async (_
   res.json(result);
 }));
 
+async function autoMatchAvisItems(items: Array<{ id: number; rechnungsNummer: string | null }>) {
+  let matched = 0;
+  for (const item of items) {
+    if (!item.rechnungsNummer) continue;
+
+    const searchNum = item.rechnungsNummer;
+    let invoiceRows = await db.select({ id: invoices.id })
+      .from(invoices)
+      .where(eq(invoices.invoiceNumber, searchNum))
+      .limit(1);
+
+    if (invoiceRows.length === 0 && !searchNum.startsWith("RE-") && searchNum.length >= 6) {
+      invoiceRows = await db.select({ id: invoices.id })
+        .from(invoices)
+        .where(ilike(invoices.invoiceNumber, `%${searchNum}%`))
+        .limit(1);
+    }
+
+    if (invoiceRows.length > 0) {
+      await qontoStorage.updatePaymentAdviceItemMatch(item.id, invoiceRows[0].id);
+      matched++;
+    }
+  }
+  return matched;
+}
+
 const paymentAdviceSchema = z.object({
   insuranceProviderName: z.string().optional().nullable(),
   ikNummer: z.string().optional().nullable(),
-  objectPath: z.string().min(1, "Dateipfad fehlt"),
+  objectPath: z.string().optional().nullable(),
   fileName: z.string().min(1, "Dateiname fehlt"),
   notes: z.string().optional().nullable(),
+  csvContent: z.string().optional().nullable(),
 });
 
 router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeichert werden", async (req, res) => {
   const data = paymentAdviceSchema.parse(req.body);
+
+  if (data.csvContent) {
+    const parsed = parseAvisCsv(data.csvContent);
+    if (parsed.items.length === 0) {
+      return res.status(400).json({ message: "CSV enthält keine Positionen" });
+    }
+    const advice = await qontoStorage.createPaymentAdviceWithItems(
+      {
+        fileName: data.fileName,
+        objectPath: data.objectPath || null,
+        notes: data.notes || null,
+        insuranceProviderName: parsed.header.kostentraegerName || data.insuranceProviderName || null,
+        ikNummer: parsed.header.kostentraegerIk || data.ikNummer || null,
+        format: parsed.header.format,
+        avisNummer: parsed.header.avisNummer,
+        belegNummer: parsed.header.belegNummer,
+        gesamtBetragCents: parsed.header.gesamtBetragCents,
+        zahlungsDatum: parsed.header.zahlungsDatum,
+        kostentraegerIk: parsed.header.kostentraegerIk,
+        kostentraegerName: parsed.header.kostentraegerName,
+        zahlungsempfaengerIk: parsed.header.zahlungsempfaengerIk,
+        zahlungsempfaengerIban: parsed.header.zahlungsempfaengerIban,
+        skontoCents: parsed.header.skontoCents,
+        kuerzungCents: parsed.header.kuerzungCents,
+        uploadedByUserId: req.user!.id,
+      },
+      parsed.items.map(item => ({
+        belegNr: item.belegNr,
+        vorgangsNr: item.vorgangsNr,
+        rechnungsNummer: item.rechnungsNummer,
+        rechnungsDatum: item.rechnungsDatum,
+        verwendungszweck: item.verwendungszweck,
+        betragCents: item.betragCents,
+        skontoCents: item.skontoCents,
+        buchungsDatum: item.buchungsDatum,
+        matchedInvoiceId: null,
+      }))
+    );
+
+    const itemsToMatch = advice.items
+      .filter(i => i.rechnungsNummer)
+      .map(i => ({ id: i.id, rechnungsNummer: i.rechnungsNummer }));
+    const matchCount = await autoMatchAvisItems(itemsToMatch);
+
+    const refreshed = await qontoStorage.getPaymentAdviceById(advice.id);
+    res.json({ advice: refreshed, matched: matchCount });
+    return;
+  }
+
+  if (!data.objectPath) {
+    throw badRequest("Dateipfad oder CSV-Inhalt erforderlich");
+  }
+
   const advice = await qontoStorage.createPaymentAdvice({
     ...data,
+    objectPath: data.objectPath,
+    format: "manuell",
     uploadedByUserId: req.user!.id,
   });
-  res.json(advice);
+  res.json({ advice, matched: 0 });
 }));
 
 router.get("/payment-advices", asyncHandler("Zahlungsavise konnten nicht geladen werden", async (_req, res) => {
   const advices = await qontoStorage.getPaymentAdvices();
   res.json(advices);
+}));
+
+router.get("/payment-advices/:id", asyncHandler("Zahlungsavis konnte nicht geladen werden", async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) throw badRequest("Ungültige ID");
+  const advice = await qontoStorage.getPaymentAdviceById(id);
+  if (!advice) throw notFound("Zahlungsavis nicht gefunden");
+  res.json(advice);
 }));
 
 router.delete("/payment-advices/:id", asyncHandler("Zahlungsavis konnte nicht gelöscht werden", async (req, res) => {

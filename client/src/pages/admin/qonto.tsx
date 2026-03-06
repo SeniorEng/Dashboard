@@ -58,14 +58,40 @@ interface Invoice {
   status: string;
 }
 
+interface PaymentAdviceItem {
+  id: number;
+  paymentAdviceId: number;
+  belegNr: string | null;
+  vorgangsNr: string | null;
+  rechnungsNummer: string | null;
+  rechnungsDatum: string | null;
+  verwendungszweck: string | null;
+  betragCents: number;
+  skontoCents: number;
+  buchungsDatum: string | null;
+  matchedInvoiceId: number | null;
+}
+
 interface PaymentAdvice {
   id: number;
   insuranceProviderName: string | null;
   ikNummer: string | null;
-  objectPath: string;
+  objectPath: string | null;
   fileName: string;
   notes: string | null;
+  format: string;
+  avisNummer: string | null;
+  belegNummer: string | null;
+  gesamtBetragCents: number | null;
+  zahlungsDatum: string | null;
+  kostentraegerIk: string | null;
+  kostentraegerName: string | null;
+  zahlungsempfaengerIk: string | null;
+  zahlungsempfaengerIban: string | null;
+  skontoCents: number;
+  kuerzungCents: number;
   uploadedAt: string;
+  items: PaymentAdviceItem[];
 }
 
 type Tab = "status" | "transactions" | "advices";
@@ -454,7 +480,8 @@ function AdvicesTab() {
   const queryClient = useQueryClient();
   const { uploadFile } = useUpload();
   const [uploading, setUploading] = useState(false);
-  const [newAdvice, setNewAdvice] = useState({ insuranceProviderName: "", ikNummer: "", notes: "" });
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [notes, setNotes] = useState("");
 
   const advicesQuery = useQuery<PaymentAdvice[]>({
     queryKey: ["qonto", "payment-advices"],
@@ -463,11 +490,14 @@ function AdvicesTab() {
 
   const createMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) =>
-      unwrapResult(await api.post("/admin/qonto/payment-advices", data)),
-    onSuccess: () => {
-      toast({ title: "Zahlungsavis gespeichert" });
+      unwrapResult(await api.post<{ advice: PaymentAdvice; matched: number }>("/admin/qonto/payment-advices", data)),
+    onSuccess: (result) => {
+      const msg = result.matched > 0
+        ? `Avis gespeichert — ${result.matched} Rechnungen zugeordnet`
+        : "Zahlungsavis gespeichert";
+      toast({ title: msg });
       queryClient.invalidateQueries({ queryKey: ["qonto", "payment-advices"] });
-      setNewAdvice({ insuranceProviderName: "", ikNummer: "", notes: "" });
+      setNotes("");
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
@@ -486,7 +516,27 @@ function AdvicesTab() {
     },
   });
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCsvUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    try {
+      const csvContent = await file.text();
+      await createMutation.mutateAsync({
+        csvContent,
+        fileName: file.name,
+        notes: notes || null,
+      });
+    } catch (err) {
+      toast({ title: "Fehler", description: err instanceof Error ? err.message : "CSV konnte nicht verarbeitet werden", variant: "destructive" });
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  };
+
+  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -498,9 +548,7 @@ function AdvicesTab() {
       await createMutation.mutateAsync({
         objectPath,
         fileName: file.name,
-        insuranceProviderName: newAdvice.insuranceProviderName || null,
-        ikNummer: newAdvice.ikNummer || null,
-        notes: newAdvice.notes || null,
+        notes: notes || null,
       });
     } catch (err) {
       toast({ title: "Fehler", description: err instanceof Error ? err.message : "Upload fehlgeschlagen", variant: "destructive" });
@@ -518,61 +566,55 @@ function AdvicesTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Upload className={iconSize.sm} />
-            Neues Zahlungsavis hochladen
+            Zahlungsavis importieren
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="advice-provider">Pflegekasse (optional)</Label>
-              <Input
-                id="advice-provider"
-                value={newAdvice.insuranceProviderName}
-                onChange={e => setNewAdvice(prev => ({ ...prev, insuranceProviderName: e.target.value }))}
-                placeholder="z.B. AOK Bayern"
-                data-testid="input-advice-provider"
-              />
-            </div>
-            <div>
-              <Label htmlFor="advice-ik">IK-Nummer (optional)</Label>
-              <Input
-                id="advice-ik"
-                value={newAdvice.ikNummer}
-                onChange={e => setNewAdvice(prev => ({ ...prev, ikNummer: e.target.value }))}
-                placeholder="z.B. 108034103"
-                data-testid="input-advice-ik"
-              />
-            </div>
-          </div>
+          <p className="text-xs text-gray-500">
+            CSV-Dateien werden automatisch analysiert (DAVASO, Barmer). Rechnungen werden anhand der Rechnungsnummer zugeordnet.
+          </p>
           <div>
-            <Label htmlFor="advice-notes">Notizen (optional)</Label>
-            <Textarea
-              id="advice-notes"
-              value={newAdvice.notes}
-              onChange={e => setNewAdvice(prev => ({ ...prev, notes: e.target.value }))}
-              placeholder="Anmerkungen zum Zahlungsavis..."
-              rows={2}
+            <Label htmlFor="advice-notes-new">Notizen (optional)</Label>
+            <Input
+              id="advice-notes-new"
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="z.B. Februar-Abrechnung"
               data-testid="input-advice-notes"
             />
           </div>
-          <div>
-            <Label htmlFor="advice-file">Datei wählen (PDF, Bild)</Label>
-            <Input
-              id="advice-file"
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
-              onChange={handleFileUpload}
-              disabled={uploading}
-              className="mt-1"
-              data-testid="input-advice-file"
-            />
-            {uploading && (
-              <div className="flex items-center gap-2 mt-2 text-sm text-gray-500">
-                <Loader2 className={`${iconSize.sm} animate-spin`} />
-                Wird hochgeladen...
-              </div>
-            )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="advice-csv">CSV importieren</Label>
+              <Input
+                id="advice-csv"
+                type="file"
+                accept=".csv"
+                onChange={handleCsvUpload}
+                disabled={uploading}
+                className="mt-1"
+                data-testid="input-advice-csv"
+              />
+            </div>
+            <div>
+              <Label htmlFor="advice-pdf">Oder PDF hochladen</Label>
+              <Input
+                id="advice-pdf"
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                onChange={handlePdfUpload}
+                disabled={uploading}
+                className="mt-1"
+                data-testid="input-advice-pdf"
+              />
+            </div>
           </div>
+          {uploading && (
+            <div className="flex items-center gap-2 text-sm text-gray-500">
+              <Loader2 className={`${iconSize.sm} animate-spin`} />
+              Wird verarbeitet...
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -584,53 +626,146 @@ function AdvicesTab() {
         ) : advices.length === 0 ? (
           <Card>
             <CardContent className="py-8 text-center text-sm text-gray-500">
-              Noch keine Zahlungsavise hochgeladen.
+              Noch keine Zahlungsavise importiert.
             </CardContent>
           </Card>
         ) : (
-          advices.map(advice => (
-            <Card key={advice.id} data-testid={`advice-card-${advice.id}`}>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <FileText className={`${iconSize.sm} text-gray-400 shrink-0`} />
-                      <span className="font-medium text-sm truncate">{advice.fileName}</span>
-                      <span className="text-xs text-gray-500">{formatDate(advice.uploadedAt)}</span>
+          advices.map(advice => {
+            const isExpanded = expandedId === advice.id;
+            const matchedCount = advice.items.filter(i => i.matchedInvoiceId).length;
+            const totalItems = advice.items.length;
+            const isParsed = advice.format !== "manuell";
+
+            return (
+              <Card key={advice.id} data-testid={`advice-card-${advice.id}`}>
+                <CardContent className="p-4">
+                  <div
+                    className="flex items-center justify-between gap-2 cursor-pointer"
+                    onClick={() => isParsed && setExpandedId(isExpanded ? null : advice.id)}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <FileText className={`${iconSize.sm} text-gray-400 shrink-0`} />
+                        <span className="font-medium text-sm">
+                          {advice.kostentraegerName || advice.insuranceProviderName || advice.fileName}
+                        </span>
+                        {isParsed && (
+                          <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                            {advice.format.toUpperCase()}
+                          </Badge>
+                        )}
+                        {advice.gesamtBetragCents != null && (
+                          <span className="font-semibold text-sm text-green-700">
+                            {formatCents(advice.gesamtBetragCents)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 mt-1 flex-wrap">
+                        {advice.zahlungsDatum && (
+                          <span className="text-xs text-gray-500">Zahlung: {formatDate(advice.zahlungsDatum)}</span>
+                        )}
+                        {advice.kostentraegerIk && (
+                          <span className="text-xs text-gray-400">IK: {advice.kostentraegerIk}</span>
+                        )}
+                        {advice.belegNummer && (
+                          <span className="text-xs text-gray-400">Beleg: {advice.belegNummer}</span>
+                        )}
+                        {advice.avisNummer && (
+                          <span className="text-xs text-gray-400">Avis: {advice.avisNummer}</span>
+                        )}
+                        {isParsed && totalItems > 0 && (
+                          <Badge
+                            variant="outline"
+                            className={`text-xs ${matchedCount === totalItems
+                              ? "bg-green-50 text-green-700 border-green-200"
+                              : "bg-amber-50 text-amber-700 border-amber-200"
+                            }`}
+                          >
+                            {matchedCount}/{totalItems} zugeordnet
+                          </Badge>
+                        )}
+                        {(advice.skontoCents > 0 || advice.kuerzungCents > 0) && (
+                          <Badge variant="outline" className="text-xs bg-red-50 text-red-700 border-red-200">
+                            {advice.skontoCents > 0 ? `Skonto: ${formatCents(advice.skontoCents)}` : ""}
+                            {advice.skontoCents > 0 && advice.kuerzungCents > 0 ? " / " : ""}
+                            {advice.kuerzungCents > 0 ? `Kürzung: ${formatCents(advice.kuerzungCents)}` : ""}
+                          </Badge>
+                        )}
+                      </div>
+                      {advice.notes && (
+                        <p className="text-xs text-gray-400 mt-0.5">{advice.notes}</p>
+                      )}
                     </div>
-                    {advice.insuranceProviderName && (
-                      <p className="text-xs text-gray-600 mt-1">{advice.insuranceProviderName}{advice.ikNummer ? ` (IK: ${advice.ikNummer})` : ""}</p>
-                    )}
-                    {advice.notes && (
-                      <p className="text-xs text-gray-400 mt-0.5">{advice.notes}</p>
-                    )}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {advice.objectPath && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={(e) => { e.stopPropagation(); window.open(`/api/object-storage/download?path=${encodeURIComponent(advice.objectPath!)}`, "_blank"); }}
+                          aria-label="PDF anzeigen"
+                          data-testid={`button-view-advice-${advice.id}`}
+                        >
+                          <Eye className={iconSize.sm} />
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        onClick={(e) => { e.stopPropagation(); deleteMutation.mutate(advice.id); }}
+                        disabled={deleteMutation.isPending}
+                        aria-label="Avis löschen"
+                        data-testid={`button-delete-advice-${advice.id}`}
+                      >
+                        <Trash2 className={iconSize.sm} />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => window.open(`/api/object-storage/download?path=${encodeURIComponent(advice.objectPath)}`, "_blank")}
-                      aria-label="Avis anzeigen"
-                      data-testid={`button-view-advice-${advice.id}`}
-                    >
-                      <Eye className={iconSize.sm} />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                      onClick={() => deleteMutation.mutate(advice.id)}
-                      disabled={deleteMutation.isPending}
-                      aria-label="Avis löschen"
-                      data-testid={`button-delete-advice-${advice.id}`}
-                    >
-                      <Trash2 className={iconSize.sm} />
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))
+
+                  {isExpanded && advice.items.length > 0 && (
+                    <div className="mt-3 pt-3 border-t">
+                      <div className="space-y-1.5">
+                        {advice.items.map((item, idx) => (
+                          <div
+                            key={item.id}
+                            className={`flex items-center justify-between gap-2 p-2 rounded text-sm ${
+                              item.matchedInvoiceId ? "bg-green-50" : "bg-amber-50"
+                            }`}
+                            data-testid={`advice-item-${item.id}`}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-mono text-gray-500">#{idx + 1}</span>
+                                {item.verwendungszweck && (
+                                  <span className="text-sm truncate">{item.verwendungszweck}</span>
+                                )}
+                                {item.rechnungsNummer && (
+                                  <span className="text-xs font-mono text-blue-600">
+                                    {item.rechnungsNummer}
+                                  </span>
+                                )}
+                              </div>
+                              {item.buchungsDatum && (
+                                <span className="text-xs text-gray-400">Buchung: {item.buchungsDatum}</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="font-medium text-sm">{formatCents(item.betragCents)}</span>
+                              {item.matchedInvoiceId ? (
+                                <CheckCircle2 className={`${iconSize.sm} text-green-600`} />
+                              ) : (
+                                <XCircle className={`${iconSize.sm} text-amber-500`} />
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })
         )}
       </div>
     </div>
