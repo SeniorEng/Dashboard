@@ -430,7 +430,10 @@ router.post("/:id/signatures", asyncHandler("Unterschriften konnten nicht gespei
 
   for (const sig of parsed.data.signatures) {
     try {
-      const rendered = await renderTemplateForCustomer(sig.templateSlug, customerId);
+      const signatureOverrides: Record<string, string> = {
+        customer_signature: `<img src="${sig.customerSignatureData}" alt="Kundenunterschrift" style="max-height:60px;" />`,
+      };
+      const rendered = await renderTemplateForCustomer(sig.templateSlug, customerId, signatureOverrides);
       const hash = computeDataHash(JSON.stringify({
         customerId,
         templateId: rendered.templateId,

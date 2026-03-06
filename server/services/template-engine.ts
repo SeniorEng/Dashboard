@@ -156,7 +156,7 @@ export async function buildPlaceholdersFromFormData(
     customer_vorname: formData.vorname || "",
     customer_nachname: formData.nachname || "",
     customer_address: [formData.strasse ? `${formData.strasse} ${formData.nr || ""}`.trim() : "", `${formData.plz || ""} ${formData.stadt || ""}`.trim()].filter(Boolean).join(", "),
-    customer_strasse: formData.strasse ? `${formData.strasse} ${formData.nr || ""}`.trim() : "",
+    customer_strasse: formData.strasse || "",
     customer_hausnummer: formData.nr || "",
     customer_plz: formData.plz || "",
     customer_stadt: formData.stadt || "",
