@@ -93,15 +93,6 @@ export function isWeekend(dateStr: string): boolean {
 }
 
 /**
- * Prüft ob zwei Datums-Strings den gleichen Tag repräsentieren
- * @param date1 - Datum als "YYYY-MM-DD" String
- * @param date2 - Datum als "YYYY-MM-DD" String
- */
-export function isSameDay(date1: string, date2: string): boolean {
-  return date1 === date2;
-}
-
-/**
  * Formatiert einen Datumsstring für die deutsche Anzeige mit Intl.DateTimeFormat.
  * Flexibler als formatDateGerman() - akzeptiert beliebige DateTimeFormatOptions.
  * @param dateString - Datumsstring im Format "YYYY-MM-DD"
@@ -113,13 +104,6 @@ export function formatDateForDisplay(
 ): string {
   const date = parseLocalDate(dateString);
   return date.toLocaleDateString("de-DE", options);
-}
-
-/**
- * Prüft ob ein Datumsstring heute ist.
- */
-export function isToday(dateString: string): boolean {
-  return dateString === todayISO();
 }
 
 /**
@@ -225,15 +209,6 @@ export function timeToMinutes(time: string | null | undefined): number {
   const hours = parts[0] || 0;
   const minutes = parts[1] || 0;
   return hours * 60 + minutes;
-}
-
-/**
- * Konvertiert Minuten seit Mitternacht zu "HH:MM:SS"
- */
-export function minutesToTime(totalMinutes: number): string {
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:00`;
 }
 
 /**

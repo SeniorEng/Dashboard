@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useSyncExternalStore, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import logo from "@assets/Logo-04_250x250_1764898165379.jpg";
 import { useAuth } from "@/hooks/use-auth";
@@ -12,9 +12,21 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, BookOpen, Bell, CalendarPlus, UserPlus } from "lucide-react";
+import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, BookOpen, Bell, CalendarPlus, UserPlus, WifiOff } from "lucide-react";
 import { type LayoutVariant, layoutVariants, colors } from "@/design-system";
 import { useUnreadCount } from "@/features/notifications/use-notifications";
+
+function useOnlineStatus() {
+  const subscribe = useCallback((callback: () => void) => {
+    window.addEventListener("online", callback);
+    window.addEventListener("offline", callback);
+    return () => {
+      window.removeEventListener("online", callback);
+      window.removeEventListener("offline", callback);
+    };
+  }, []);
+  return useSyncExternalStore(subscribe, () => navigator.onLine);
+}
 
 interface SearchResult {
   type: "customer" | "appointment";
@@ -136,6 +148,30 @@ function GlobalSearch() {
   );
 }
 
+function OfflineBanner() {
+  const isOnline = useOnlineStatus();
+  const [dismissed, setDismissed] = useState(false);
+
+  if (isOnline || dismissed) return null;
+
+  return (
+    <div className="bg-amber-500 text-white px-4 py-2 flex items-center justify-between text-sm" data-testid="banner-offline">
+      <div className="flex items-center gap-2">
+        <WifiOff className="w-4 h-4" />
+        <span>Keine Internetverbindung</span>
+      </div>
+      <button
+        onClick={() => setDismissed(true)}
+        className="ml-4 p-1 rounded hover:bg-amber-600 transition-colors"
+        aria-label="Hinweis schließen"
+        data-testid="button-dismiss-offline"
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
 export function Layout({ children, variant = 'default' }: { children: React.ReactNode; variant?: LayoutVariant }) {
   const [location, navigate] = useLocation();
   const { user, logout, isAuthenticated, badgeCount, birthdayCount } = useAuth();
@@ -215,6 +251,7 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
 
   return (
     <div className={`min-h-screen ${colors.surface.page} font-sans text-foreground pb-20 md:pb-0`}>
+      <OfflineBanner />
       {/* Header */}
       <header className="sticky top-0 z-50 w-full bg-white border-b border-border/40 shadow-sm">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">

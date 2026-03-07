@@ -50,16 +50,6 @@ export interface AuthUser {
   roles: EmployeeRole[];
 }
 
-export interface AuthResponse {
-  user: AuthUser;
-  availableServices: string[];
-}
-
-export interface LoginRequest {
-  email: string;
-  password: string;
-}
-
 // ============================================
 // EMPLOYEES
 // ============================================
@@ -274,35 +264,6 @@ export interface CreateCustomerRequest {
 // Re-export from shared for consistency
 export type { AppointmentWithCustomer } from "@shared/types";
 
-
-export interface CreateErstberatungRequest {
-  customer: {
-    vorname: string;
-    nachname: string;
-    telefon: string;
-    strasse: string;
-    nr: string;
-    plz: string;
-    stadt: string;
-    pflegegrad: number;
-  };
-  date: string;
-  scheduledStart: string;
-  erstberatungDauer: number;
-  notes?: string;
-}
-
-export interface UpdateAppointmentRequest {
-  status?: string;
-  actualStart?: string;
-  actualEnd?: string;
-  date?: string;
-  scheduledStart?: string;
-  scheduledEnd?: string;
-  notes?: string;
-  servicesDone?: string[];
-  signatureData?: string;
-}
 
 export interface DocumentAppointmentRequest {
   services: Array<{ serviceId: number; actualDurationMinutes: number; details?: string | null }>;

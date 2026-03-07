@@ -64,10 +64,6 @@ export function forbidden(error: string, message: string): AppError {
   return new AppError(403, ErrorCodes.FORBIDDEN, message, error);
 }
 
-export function conflict(error: string, message: string): AppError {
-  return new AppError(409, ErrorCodes.CONFLICT, message, error);
-}
-
 type AsyncRouteHandler = (req: Request, res: Response, next: NextFunction) => Promise<any>;
 
 function extractUserFriendlyDbError(error: unknown): string | null {
@@ -189,16 +185,3 @@ export function sendServerError(res: Response, message: string): void {
   });
 }
 
-export function handleRouteError(
-  res: Response, 
-  error: unknown, 
-  defaultMessage: string,
-  logContext?: string
-): void {
-  if (error instanceof ZodError) {
-    return handleZodError(res, error);
-  }
-  
-  console.error(logContext || "Route error:", error);
-  sendServerError(res, defaultMessage);
-}

@@ -14,7 +14,7 @@ import { serviceCatalogStorage } from "../storage/service-catalog";
 import { suggestTravelOrigin } from "@shared/domain/appointments";
 import { calculateRoute } from "../services/routing";
 import { geocodeCustomer } from "../services/geocoding";
-import { isWeekend, currentTimeHHMMSS, todayISO } from "@shared/utils/datetime";
+import { isWeekend, currentTimeHHMMSS, todayISO, parseLocalDate } from "@shared/utils/datetime";
 import { 
   ErrorMessages, 
   asyncHandler,
@@ -39,6 +39,14 @@ import { serviceRecordAppointments, monthlyServiceRecords } from "@shared/schema
 import { eq } from "drizzle-orm";
 
 const router = Router();
+
+function isDateMoreThan3MonthsInPast(dateStr: string): boolean {
+  const date = parseLocalDate(dateStr);
+  const threeMonthsAgo = new Date();
+  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+  threeMonthsAgo.setHours(0, 0, 0, 0);
+  return date < threeMonthsAgo;
+}
 
 export async function checkCustomerAccess(user: { id: number; isAdmin: boolean }, customerId: number, res: Response): Promise<boolean> {
   if (user.isAdmin) return true;
@@ -208,6 +216,15 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
   if (isWeekend(validatedData.date)) {
     return sendBadRequest(res, "Termine können nicht an Samstagen oder Sonntagen erstellt werden.");
   }
+
+  const farPastDate = isDateMoreThan3MonthsInPast(validatedData.date);
+  let _warning: string | undefined;
+  if (farPastDate) {
+    if (!user.isAdmin) {
+      return sendBadRequest(res, "Termine können nicht mehr als 3 Monate in der Vergangenheit erstellt werden.");
+    }
+    _warning = "Achtung: Dieser Termin liegt mehr als 3 Monate in der Vergangenheit.";
+  }
   
   const customer = await storage.getCustomer(validatedData.customerId);
   if (!customer) {
@@ -294,7 +311,7 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     notificationService.notifyAppointmentCreated(appointment.id, customerName, validatedData.date, assignedEmployeeId, user.id);
   }
 
-  res.status(201).json(appointment);
+  res.status(201).json(_warning ? { ...appointment, _warning } : appointment);
 }));
 
 router.post("/erstberatung", asyncHandler(ErrorMessages.createErstberatungFailed, async (req, res) => {
@@ -303,6 +320,15 @@ router.post("/erstberatung", asyncHandler(ErrorMessages.createErstberatungFailed
   
   if (isWeekend(validatedData.date)) {
     return sendBadRequest(res, "Termine können nicht an Samstagen oder Sonntagen erstellt werden.");
+  }
+
+  const farPastDateErstberatung = isDateMoreThan3MonthsInPast(validatedData.date);
+  let _warningErstberatung: string | undefined;
+  if (farPastDateErstberatung) {
+    if (!user.isAdmin) {
+      return sendBadRequest(res, "Termine können nicht mehr als 3 Monate in der Vergangenheit erstellt werden.");
+    }
+    _warningErstberatung = "Achtung: Dieser Termin liegt mehr als 3 Monate in der Vergangenheit.";
   }
   
   let assignedEmployeeId: number;
@@ -368,7 +394,7 @@ router.post("/erstberatung", asyncHandler(ErrorMessages.createErstberatungFailed
     notificationService.notifyAppointmentCreated(appointment.id, customerName, validatedData.date, assignedEmployeeId, user.id);
   }
   
-  res.status(201).json({ appointment, customer });
+  res.status(201).json(_warningErstberatung ? { appointment, customer, _warning: _warningErstberatung } : { appointment, customer });
 }));
 
 const updateErstberatungSchema = z.object({

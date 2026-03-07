@@ -445,7 +445,7 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
               <button
                 type="button"
                 onClick={() => setDeleteConfirmId(latestAllocation.id)}
-                className="p-0.5 text-gray-400 hover:text-red-500 rounded"
+                className="p-0.5 text-gray-500 hover:text-red-500 rounded"
                 title="Startwert löschen"
                 data-testid={`btn-delete-balance-${budgetType}`}
               >
@@ -578,7 +578,7 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
                   <button
                     type="button"
                     onClick={() => setDeleteConfirmId(alloc.id)}
-                    className="p-0.5 text-gray-400 hover:text-red-500 rounded"
+                    className="p-0.5 text-gray-500 hover:text-red-500 rounded"
                     title="Startwert löschen"
                   >
                     <Trash2 className="h-3 w-3" />

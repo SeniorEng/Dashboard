@@ -25,11 +25,6 @@ export function sortAppointmentsByPriority(appointments: AppointmentWithCustomer
   });
 }
 
-export function calculateDuration(startTime: Date | null, endTime: Date | null): number | null {
-  if (!startTime || !endTime) return null;
-  return Math.round((endTime.getTime() - startTime.getTime()) / 60000);
-}
-
 export function getEndTime(appointment: AppointmentWithCustomer): string {
   return sharedGetEndTime(
     appointment.scheduledStart,

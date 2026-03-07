@@ -143,7 +143,7 @@ export function EPostSettingsCard({ companyForm, updateField, onSaveFirst }: EPo
                     />
                     <button
                       type="button"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-600"
                       onClick={() => setShowEpostPass(!showEpostPass)}
                     >
                       {showEpostPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -268,7 +268,7 @@ export function EPostSettingsCard({ companyForm, updateField, onSaveFirst }: EPo
                         />
                         <button
                           type="button"
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-600"
                           onClick={() => setShowEpostNewPass(!showEpostNewPass)}
                         >
                           {showEpostNewPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}

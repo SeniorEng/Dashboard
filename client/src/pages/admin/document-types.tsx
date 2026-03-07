@@ -220,7 +220,7 @@ function TriggerRow({
       <Button
         variant="ghost"
         size="sm"
-        className="absolute top-1 right-1 h-6 w-6 p-0 text-gray-400 hover:text-red-500"
+        className="absolute top-1 right-1 h-6 w-6 p-0 text-gray-500 hover:text-red-500"
         onClick={() => onRemove(index)}
         data-testid={`button-remove-trigger-${index}`}
       >
@@ -684,7 +684,7 @@ export function DocumentTypesContent() {
           </div>
 
           {triggers.length === 0 ? (
-            <div className="text-center py-3 text-sm text-gray-400 border border-dashed rounded-lg" data-testid="text-no-triggers">
+            <div className="text-center py-3 text-sm text-gray-500 border border-dashed rounded-lg" data-testid="text-no-triggers">
               {formData.isMandatory
                 ? "Keine weiteren Bedingungen nötig (gilt bereits für alle)"
                 : "Keine Bedingungen — wird nur manuell zugewiesen"}

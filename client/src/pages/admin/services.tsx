@@ -348,7 +348,7 @@ export default function AdminServices() {
                           <p className="text-xs text-gray-500 mt-1 truncate" data-testid={`text-description-${service.id}`}>{service.description}</p>
                         )}
                       </div>
-                      <Pencil className={`${iconSize.sm} text-gray-400 shrink-0`} />
+                      <Pencil className={`${iconSize.sm} text-gray-500 shrink-0`} />
                     </div>
                   </CardContent>
                 </Card>

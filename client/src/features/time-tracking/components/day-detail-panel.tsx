@@ -257,7 +257,7 @@ export function DayDetailPanel({
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="text-gray-400 hover:text-teal-600"
+                          className="text-gray-500 hover:text-teal-600"
                           onClick={() => onEditEntry(entry)}
                           data-testid={`button-edit-entry-${entry.id}`}
                           aria-label="Eintrag bearbeiten"
@@ -267,7 +267,7 @@ export function DayDetailPanel({
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="text-gray-400 hover:text-red-600"
+                          className="text-gray-500 hover:text-red-600"
                           onClick={() => onDeleteEntry(entry.id)}
                           disabled={isDeleting}
                           data-testid={`button-delete-entry-${entry.id}`}
@@ -325,7 +325,7 @@ export function DayDetailPanel({
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="text-gray-400 hover:text-teal-600"
+                              className="text-gray-500 hover:text-teal-600"
                               onClick={() => onEditEntry(entry)}
                               data-testid={`button-edit-entry-${entry.id}`}
                               aria-label="Eintrag bearbeiten"
@@ -335,7 +335,7 @@ export function DayDetailPanel({
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="text-gray-400 hover:text-red-600"
+                              className="text-gray-500 hover:text-red-600"
                               onClick={() => onDeleteEntry(entry.id)}
                               disabled={isDeleting}
                               data-testid={`button-delete-entry-${entry.id}`}

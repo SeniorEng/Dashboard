@@ -11,7 +11,6 @@ import type {
   TimeEntry, 
   CreateTimeEntryRequest, 
   UpdateTimeEntryRequest,
-  VacationSummary,
   TimeOverviewData,
   TimesPageData 
 } from "@/lib/api/types";
@@ -21,7 +20,6 @@ export const timeEntryKeys = {
   list: (year?: number, month?: number) => [...timeEntryKeys.all, "list", { year, month }] as const,
   detail: (id: number) => [...timeEntryKeys.all, "detail", id] as const,
   byDate: (date: string) => [...timeEntryKeys.all, "by-date", date] as const,
-  vacationSummary: (year: number) => [...timeEntryKeys.all, "vacation-summary", year] as const,
   overview: (year: number, month: number) => [...timeEntryKeys.all, "overview", { year, month }] as const,
   openTasks: [...["time-entries"], "open-tasks"] as const,
 };
@@ -64,21 +62,6 @@ export function useTimeEntry(id: number) {
       return unwrapResult(result);
     },
     enabled: id > 0,
-  });
-}
-
-/**
- * Fetch vacation summary for a year
- */
-export function useVacationSummary(year: number) {
-  return useQuery({
-    queryKey: timeEntryKeys.vacationSummary(year),
-    queryFn: async ({ signal }) => {
-      const result = await api.get<VacationSummary>(`/time-entries/vacation-summary/${year}`, signal);
-      return unwrapResult(result);
-    },
-    enabled: year >= 2020 && year <= 2100,
-    staleTime: 60000,
   });
 }
 

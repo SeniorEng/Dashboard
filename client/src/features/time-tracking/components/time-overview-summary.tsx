@@ -85,7 +85,7 @@ function CollapsibleCard({
               <span className="text-sm font-semibold text-gray-900">{summaryText}</span>
             )}
             <ChevronDown
-              className={`${iconSize.sm} text-gray-400 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+              className={`${iconSize.sm} text-gray-500 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
             />
           </div>
         </div>
@@ -164,7 +164,7 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
           </div>
           {hasPlanned && (
             <>
-              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mt-3 mb-1" data-testid="label-planned-section">Geplant</div>
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-3 mb-1" data-testid="label-planned-section">Geplant</div>
               <SummaryRow label="Hauswirtschaft" value={formatMinutesToHours(pHw)} color="text-teal-400" testId="text-planned-hauswirtschaft-hours" />
               <SummaryRow label="Alltagsbegleitung" value={formatMinutesToHours(pAb)} color="text-blue-400" testId="text-planned-alltagsbegleitung-hours" />
               <SummaryRow label="Erstberatung" value={formatMinutesToHours(pEb)} color="text-purple-400" testId="text-planned-erstberatung-hours" />
@@ -250,7 +250,7 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
             </div>
           </div>
         ) : (
-          <div className="text-center py-4 text-gray-400 text-sm">Laden...</div>
+          <div className="text-center py-4 text-gray-500 text-sm">Laden...</div>
         )}
       </CollapsibleCard>
     </div>

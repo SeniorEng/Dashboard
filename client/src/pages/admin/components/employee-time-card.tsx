@@ -241,7 +241,7 @@ function AppointmentRow({ appointment }: { appointment: AppointmentWithCustomerN
               <span className="text-xs text-gray-500">{appointment.serviceType === "hauswirtschaft" ? "Hauswirtschaft" : appointment.serviceType === "alltagsbegleitung" ? "Alltagsbegleitung" : appointment.serviceType === "erstberatung" ? "Erstberatung" : appointment.serviceType}</span>
             )}
             {appointment.travelKilometers != null && appointment.travelKilometers > 0 && (
-              <span className="text-xs text-gray-400 flex items-center gap-0.5">
+              <span className="text-xs text-gray-500 flex items-center gap-0.5">
                 <MapPin className="h-3 w-3" />
                 {appointment.travelKilometers} km
               </span>

@@ -52,7 +52,7 @@ const DayCell = memo(function DayCell({
       disabled={isWeekend && isCurrentMonth}
       className={`
         relative p-2 min-h-[60px] rounded-lg text-sm transition-colors
-        ${isCurrentMonth ? "bg-white" : "bg-gray-50 text-gray-400"}
+        ${isCurrentMonth ? "bg-white" : "bg-gray-50 text-gray-500"}
         ${isWeekend && isCurrentMonth ? "bg-gray-100 opacity-50 cursor-not-allowed" : ""}
         ${isWeekend && !isCurrentMonth ? "opacity-30" : ""}
         ${isHoliday && !isSelected ? "bg-red-50 ring-1 ring-red-200" : ""}
@@ -67,7 +67,7 @@ const DayCell = memo(function DayCell({
       data-testid={`calendar-day-${date}`}
       title={isWeekend && isCurrentMonth ? "Wochenende – keine Einträge möglich" : holidayName ? `Feiertag: ${holidayName}` : hasMissingBreak ? "Fehlende Pausendokumentation" : undefined}
     >
-      <span className={`font-medium ${isHoliday ? "text-red-700" : ""} ${isToday && !isHoliday ? "text-teal-700" : ""} ${hasMissingBreak && !isHoliday ? "text-blue-800" : ""} ${isWeekend && isCurrentMonth ? "text-gray-400" : ""}`}>{day}</span>
+      <span className={`font-medium ${isHoliday ? "text-red-700" : ""} ${isToday && !isHoliday ? "text-teal-700" : ""} ${hasMissingBreak && !isHoliday ? "text-blue-800" : ""} ${isWeekend && isCurrentMonth ? "text-gray-500" : ""}`}>{day}</span>
       {hasMissingBreak && !isHoliday && (
         <div className="absolute top-1 right-1">
           <Coffee className={`${iconSize.xs} text-blue-500`} />

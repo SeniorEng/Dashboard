@@ -391,7 +391,7 @@ function RulesTab() {
                     />
                   </div>
 
-                  <div className="text-xs text-gray-400" data-testid={`text-deeplink-${rule.eventType}`}>
+                  <div className="text-xs text-gray-500" data-testid={`text-deeplink-${rule.eventType}`}>
                     Deep-Link: <code className="bg-gray-100 px-1.5 py-0.5 rounded">{deepLink}</code>
                   </div>
                 </div>
@@ -504,7 +504,7 @@ function LogTab() {
                         An: {entry.phoneNumber}
                         {(entry as any).userName && <> — {(entry as any).userName}</>}
                       </p>
-                      <p className="text-xs text-gray-400 mt-0.5">
+                      <p className="text-xs text-gray-500 mt-0.5">
                         Template: {entry.templateName}
                       </p>
                       {entry.errorMessage && (

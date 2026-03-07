@@ -119,7 +119,7 @@ export function MatchingStep({ formData, onChange }: MatchingStepProps) {
             </SelectContent>
           </Select>
           {!employees?.length && (
-            <p className="text-xs text-gray-400">Keine aktiven Mitarbeiter verfügbar.</p>
+            <p className="text-xs text-gray-500">Keine aktiven Mitarbeiter verfügbar.</p>
           )}
         </div>
       )}

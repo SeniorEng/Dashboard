@@ -255,7 +255,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
               </div>
             ) : (
               <div className="flex items-center justify-between">
-                <p className="text-sm text-gray-400" data-testid="text-no-contract">Kein aktiver Vertrag vorhanden</p>
+                <p className="text-sm text-gray-500" data-testid="text-no-contract">Kein aktiver Vertrag vorhanden</p>
                 <Button
                   variant="outline"
                   size="sm"

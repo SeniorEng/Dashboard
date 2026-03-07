@@ -102,7 +102,7 @@ export function MonthClosingSection({ year, month }: MonthClosingSectionProps) {
                 )
               )}
               <ChevronDown
-                className={`${iconSize.sm} text-gray-400 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+                className={`${iconSize.sm} text-gray-500 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
               />
             </div>
           </div>

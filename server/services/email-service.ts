@@ -113,38 +113,6 @@ function buildButtonHtml(label: string, url: string): string {
   </table>`;
 }
 
-export function buildContractEmailHtml(options: {
-  customerName: string;
-  companyName: string;
-  documentNames: string[];
-  logoUrl?: string | null;
-}): string {
-  const { customerName, companyName, documentNames, logoUrl } = options;
-  const docList = documentNames.map((name) => `<li style="padding: 4px 0;">${name}</li>`).join("");
-
-  const body = `
-    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">
-      Sehr geehrte/r ${customerName},
-    </p>
-    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">
-      anbei erhalten Sie Ihre unterschriebenen Vertragsunterlagen:
-    </p>
-    <div style="background-color: #f0fdfa; border: 1px solid #99f6e4; border-radius: 8px; padding: 16px; margin: 16px 0;">
-      <ul style="margin: 0; padding-left: 20px; color: #0f766e; font-size: 15px; line-height: 1.8;">
-        ${docList}
-      </ul>
-    </div>
-    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 16px 0 0;">
-      Bitte bewahren Sie diese Unterlagen sorgfältig auf. Bei Fragen stehen wir Ihnen jederzeit gerne zur Verfügung.
-    </p>
-    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 16px 0 0;">
-      Mit freundlichen Grüßen<br />
-      <strong>${companyName}</strong>
-    </p>`;
-
-  return buildEmailLayout(companyName, logoUrl, body);
-}
-
 export function buildWelcomeEmailHtml(options: {
   vorname: string;
   nachname: string;

@@ -14,10 +14,6 @@ export type TravelOriginType = "home" | "appointment";
 // CONSTANTS
 // ============================================
 
-export const APPOINTMENT_STATUSES: AppointmentStatus[] = ["scheduled", "in-progress", "documenting", "completed", "cancelled"];
-export const APPOINTMENT_TYPES: AppointmentType[] = ["Erstberatung", "Kundentermin"];
-export const SERVICE_TYPES: ServiceType[] = ["Hauswirtschaft", "Alltagsbegleitung", "Erstberatung"];
-export const TRAVEL_ORIGIN_TYPES: TravelOriginType[] = ["home", "appointment"];
 
 export const STATUS_ORDER: Record<AppointmentStatus, number> = {
   "scheduled": 0,
@@ -57,12 +53,6 @@ export const STATUS_LABELS: Record<AppointmentStatus, string> = {
 // - Status = "in-progress" (läuft gerade)
 // - Status = "documenting" (Dokumentation noch nicht abgeschlossen)
 // ============================================
-
-/**
- * Status, die als "dokumentiert" für Leistungsnachweise gelten.
- * Nur Termine mit diesen Status werden in einen Leistungsnachweis aufgenommen.
- */
-export const DOCUMENTED_STATUSES: AppointmentStatus[] = ["completed"];
 
 /**
  * Status, die einen Leistungsnachweis blockieren.

@@ -281,7 +281,7 @@ function RequirementCard({
         <div className="flex items-center gap-3">
           <div
             className={`flex items-center justify-center w-8 h-8 rounded-full shrink-0 ${
-              isFulfilled ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"
+              isFulfilled ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-500"
             }`}
             aria-label={isFulfilled ? "Erledigt" : "Noch offen"}
           >
@@ -417,7 +417,7 @@ function RequirementCard({
                 <button
                   type="button"
                   onClick={() => onDocRemoved()}
-                  className="p-2 text-gray-400 hover:text-red-500 rounded-md"
+                  className="p-2 text-gray-500 hover:text-red-500 rounded-md"
                   aria-label="Upload entfernen"
                   data-testid={`button-remove-upload-${testSlug}`}
                 >
@@ -479,7 +479,7 @@ function OptionalDocsSection({
           <Upload className="w-4 h-4 text-gray-500" />
           Optionale Dokumente ({uploadedCount}/{requirements.length})
         </span>
-        {expanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+        {expanded ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
       </button>
       {expanded && (
         <div className="space-y-3">

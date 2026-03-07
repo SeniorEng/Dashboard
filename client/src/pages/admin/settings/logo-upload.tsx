@@ -111,7 +111,7 @@ export function LogoUploadCard({ companyData }: LogoUploadCardProps) {
                     data-testid="img-company-logo"
                   />
                 ) : (
-                  <ImageIcon className="h-6 w-6 text-gray-400" />
+                  <ImageIcon className="h-6 w-6 text-gray-500" />
                 )}
               </div>
               <div className="flex flex-col gap-1.5">
@@ -173,7 +173,7 @@ export function LogoUploadCard({ companyData }: LogoUploadCardProps) {
                     data-testid="img-pdf-logo"
                   />
                 ) : (
-                  <ImageIcon className="h-6 w-6 text-gray-400" />
+                  <ImageIcon className="h-6 w-6 text-gray-500" />
                 )}
               </div>
               <div className="flex flex-col gap-1.5">

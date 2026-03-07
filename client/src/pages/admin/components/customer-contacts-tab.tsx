@@ -411,7 +411,7 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-8 w-8 p-0 text-gray-400 hover:text-red-500"
+                          className="h-8 w-8 p-0 text-gray-500 hover:text-red-500"
                           onClick={() => setDeleteConfirmId(contact.id)}
                           data-testid={`button-delete-contact-${contact.id}`}
                         >

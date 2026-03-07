@@ -364,9 +364,9 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                     </div>
                     <div className="shrink-0">
                       {isExpanded ? (
-                        <ChevronUp className={`${iconSize.sm} text-gray-400`} />
+                        <ChevronUp className={`${iconSize.sm} text-gray-500`} />
                       ) : (
-                        <ChevronDown className={`${iconSize.sm} text-gray-400`} />
+                        <ChevronDown className={`${iconSize.sm} text-gray-500`} />
                       )}
                     </div>
                   </div>
@@ -378,7 +378,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                       <div key={doc.id} className="p-2 bg-gray-50 rounded-lg" data-testid={`uploaded-doc-${doc.id}`}>
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 min-w-0 flex-1">
-                            <Upload className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                            <Upload className="h-3.5 w-3.5 text-gray-500 shrink-0" />
                             <span className="text-xs text-gray-700 truncate">{doc.fileName}</span>
                             <span className="text-xs text-gray-500 shrink-0">
                               {formatDateForDisplay(doc.uploadedAt.split("T")[0])}
@@ -405,7 +405,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                                 }}
                                 data-testid={`button-history-${doc.id}`}
                               >
-                                <Clock className="h-3.5 w-3.5 text-gray-400" />
+                                <Clock className="h-3.5 w-3.5 text-gray-500" />
                               </Button>
                             )}
                           </div>
@@ -424,7 +424,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                                     <span className="truncate flex-1">{h.fileName}</span>
                                     <span className="shrink-0 ml-2">{formatDateForDisplay(h.uploadedAt.split("T")[0])}</span>
                                     <a href={h.objectPath} target="_blank" rel="noopener noreferrer" className="ml-2 shrink-0">
-                                      <Download className="h-3 w-3 text-gray-400 hover:text-gray-600" />
+                                      <Download className="h-3 w-3 text-gray-500 hover:text-gray-600" />
                                     </a>
                                   </div>
                                 ))}
@@ -611,7 +611,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                         <button
                           type="button"
                           onClick={clearAllFiles}
-                          className="text-xs text-gray-400 hover:text-red-500"
+                          className="text-xs text-gray-500 hover:text-red-500"
                           data-testid="button-clear-files"
                         >
                           Alle entfernen
@@ -624,7 +624,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                               <img src={item.preview} alt={item.file.name} className="w-full h-20 object-cover" />
                             ) : (
                               <div className="w-full h-20 flex flex-col items-center justify-center gap-1">
-                                <FileText className="h-5 w-5 text-gray-400" />
+                                <FileText className="h-5 w-5 text-gray-500" />
                                 <span className="text-[10px] text-gray-500 px-1 truncate max-w-full">{item.file.name.split('.').pop()?.toUpperCase()}</span>
                               </div>
                             )}

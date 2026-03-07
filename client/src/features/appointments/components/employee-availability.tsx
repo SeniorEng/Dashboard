@@ -125,7 +125,7 @@ export function EmployeeAvailability({ date, selectedEmployeeId, onSelectEmploye
                     ))}
                   </div>
                 ) : (
-                  <span className="text-xs text-gray-400">Keine Verfügbarkeit gemeldet</span>
+                  <span className="text-xs text-gray-500">Keine Verfügbarkeit gemeldet</span>
                 )}
 
                 {emp.appointments.length > 0 && (

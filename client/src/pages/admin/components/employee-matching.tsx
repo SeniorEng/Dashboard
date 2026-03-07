@@ -186,7 +186,7 @@ export function EmployeeMatching({ customerId, inlineCriteria, onSelect, selecte
               <CardContent className="p-3">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-gray-400">#{index + 1}</span>
+                    <span className="text-xs font-bold text-gray-500">#{index + 1}</span>
                     <span className="font-medium text-sm">{emp.displayName}</span>
                     {isSelected && (
                       <Check className={`${iconSize.sm} text-teal-600`} />

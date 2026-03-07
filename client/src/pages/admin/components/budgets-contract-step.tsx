@@ -159,7 +159,7 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
                 />
                 <Label
                   htmlFor={`budget-enable-${budgetType}`}
-                  className={`font-medium ${isEnabled ? "text-gray-900" : "text-gray-400"}`}
+                  className={`font-medium ${isEnabled ? "text-gray-900" : "text-gray-500"}`}
                 >
                   {BUDGET_TYPE_LABELS[budgetType]}
                 </Label>

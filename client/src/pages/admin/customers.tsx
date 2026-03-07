@@ -192,7 +192,7 @@ export default function AdminCustomers() {
 
           <div className="flex gap-3 mb-6">
             <div className="flex-1 relative">
-              <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 ${iconSize.sm} text-gray-400`} />
+              <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 ${iconSize.sm} text-gray-500`} />
               <Input
                 placeholder="Name, Telefon oder Adresse suchen..."
                 value={searchQuery}

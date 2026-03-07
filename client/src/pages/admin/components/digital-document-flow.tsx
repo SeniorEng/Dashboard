@@ -492,7 +492,7 @@ export function DigitalDocumentFlow({
           <div className="flex flex-col items-center justify-center py-12 gap-4">
             <Loader2 className={`${iconSize.xl} animate-spin text-teal-600`} />
             <p className="text-sm text-gray-600">PDF wird erstellt und gespeichert...</p>
-            <p className="text-xs text-gray-400">Dies kann einen Moment dauern.</p>
+            <p className="text-xs text-gray-500">Dies kann einen Moment dauern.</p>
           </div>
         )}
 
@@ -522,7 +522,7 @@ export function DigitalDocumentFlow({
                       Kopieren
                     </Button>
                   </div>
-                  <p className="text-xs text-gray-400 mt-2">Der Link ist 7 Tage gültig und kann nur einmal verwendet werden.</p>
+                  <p className="text-xs text-gray-500 mt-2">Der Link ist 7 Tage gültig und kann nur einmal verwendet werden.</p>
                 </div>
               </div>
             ) : (

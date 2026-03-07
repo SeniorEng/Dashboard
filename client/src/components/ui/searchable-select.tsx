@@ -72,7 +72,7 @@ export function SearchableSelect({
       disabled={disabled || isLoading}
       className={cn(
         "w-full justify-between min-h-[44px] font-normal text-left bg-white text-gray-900",
-        !value && "text-gray-400",
+        !value && "text-gray-500",
         className
       )}
       data-testid={testId}

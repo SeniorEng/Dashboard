@@ -139,7 +139,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
   if (loadingServices || loadingPrices) {
     return (
       <div className="flex justify-center py-4">
-        <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+        <Loader2 className="h-5 w-5 animate-spin text-gray-500" />
       </div>
     );
   }
@@ -307,7 +307,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
                       onClick={() => startEdit(service.id, effectivePrice)}
                       data-testid={`btn-edit-price-${service.id}`}
                     >
-                      <Pencil className="h-3.5 w-3.5 text-gray-400" />
+                      <Pencil className="h-3.5 w-3.5 text-gray-500" />
                     </Button>
                     {isCustom && (
                       <Button
@@ -318,7 +318,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
                         disabled={deleteMutation.isPending}
                         data-testid={`btn-reset-price-${service.id}`}
                       >
-                        <RotateCcw className="h-3.5 w-3.5 text-gray-400" />
+                        <RotateCcw className="h-3.5 w-3.5 text-gray-500" />
                       </Button>
                     )}
                   </>
@@ -371,7 +371,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
           </div>
         )}
         {showHistory && (!allPrices || allPrices.length === 0) && (
-          <p className="text-xs text-gray-400 text-center py-2">Keine Preishistorie vorhanden.</p>
+          <p className="text-xs text-gray-500 text-center py-2">Keine Preishistorie vorhanden.</p>
         )}
       </div>
     </div>

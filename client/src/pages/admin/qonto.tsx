@@ -461,7 +461,7 @@ function TransactionsTab({
                         </Badge>
                       )}
                       {tx.matchConfidence && (
-                        <span className="text-xs text-gray-400">
+                        <span className="text-xs text-gray-500">
                           ({tx.matchConfidence === "manual" ? "manuell" : "automatisch"})
                         </span>
                       )}
@@ -473,7 +473,7 @@ function TransactionsTab({
                       <p className="text-xs text-gray-500 mt-0.5 truncate">Ref: {tx.reference}</p>
                     )}
                     {tx.label && tx.label !== tx.reference && (
-                      <p className="text-xs text-gray-400 mt-0.5 truncate">{tx.label}</p>
+                      <p className="text-xs text-gray-500 mt-0.5 truncate">{tx.label}</p>
                     )}
                   </div>
 
@@ -529,7 +529,7 @@ function TransactionsTab({
               </CardContent>
             </Card>
           ))}
-          <p className="text-xs text-gray-400 text-center pt-2">
+          <p className="text-xs text-gray-500 text-center pt-2">
             {transactionsQuery.data?.total ?? 0} Transaktionen gesamt
           </p>
         </div>
@@ -756,7 +756,7 @@ function AdvicesTab() {
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <FileText className={`${iconSize.sm} text-gray-400 shrink-0`} />
+                        <FileText className={`${iconSize.sm} text-gray-500 shrink-0`} />
                         <span className="font-medium text-sm">
                           {advice.kostentraegerName || advice.insuranceProviderName || advice.fileName}
                         </span>
@@ -776,13 +776,13 @@ function AdvicesTab() {
                           <span className="text-xs text-gray-500">Zahlung: {formatDate(advice.zahlungsDatum)}</span>
                         )}
                         {advice.kostentraegerIk && (
-                          <span className="text-xs text-gray-400">IK: {advice.kostentraegerIk}</span>
+                          <span className="text-xs text-gray-500">IK: {advice.kostentraegerIk}</span>
                         )}
                         {advice.belegNummer && (
-                          <span className="text-xs text-gray-400">Beleg: {advice.belegNummer}</span>
+                          <span className="text-xs text-gray-500">Beleg: {advice.belegNummer}</span>
                         )}
                         {advice.avisNummer && (
-                          <span className="text-xs text-gray-400">Avis: {advice.avisNummer}</span>
+                          <span className="text-xs text-gray-500">Avis: {advice.avisNummer}</span>
                         )}
                         {isParsed && totalItems > 0 && (
                           <Badge
@@ -804,7 +804,7 @@ function AdvicesTab() {
                         )}
                       </div>
                       {advice.notes && (
-                        <p className="text-xs text-gray-400 mt-0.5">{advice.notes}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{advice.notes}</p>
                       )}
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
@@ -857,7 +857,7 @@ function AdvicesTab() {
                                 )}
                               </div>
                               {item.buchungsDatum && (
-                                <span className="text-xs text-gray-400">Buchung: {item.buchungsDatum}</span>
+                                <span className="text-xs text-gray-500">Buchung: {item.buchungsDatum}</span>
                               )}
                             </div>
                             <div className="flex items-center gap-2 shrink-0">

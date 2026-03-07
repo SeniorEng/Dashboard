@@ -11,11 +11,6 @@ interface EpostLetterResponse {
   letterId: string;
 }
 
-interface EpostStatusResponse {
-  status: string;
-  details?: string;
-}
-
 function validateEpostConfig(settings: CompanySettings): void {
   if (!settings.epostVendorId || !settings.epostEkp || !settings.epostPassword || !settings.epostSecret) {
     throw new Error("E-POST-Konfiguration unvollständig. Bitte in den Einstellungen konfigurieren.");
@@ -188,28 +183,6 @@ export async function sendEpostLetter(
 
   const data = (await response.json()) as EpostLetterResponse;
   return { letterId: data.letterId };
-}
-
-export async function getEpostLetterStatus(
-  settings: CompanySettings,
-  letterId: string
-): Promise<{ status: string; details?: string }> {
-  const token = await loginEpost(settings);
-
-  const response = await fetch(`${EPOST_API_BASE}/api/Letter/${letterId}/status`, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    signal: AbortSignal.timeout(EPOST_TIMEOUT_MS),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => "Unbekannter Fehler");
-    throw new Error(`E-POST Status-Abfrage fehlgeschlagen (${response.status}): ${errorText}`);
-  }
-
-  return (await response.json()) as EpostStatusResponse;
 }
 
 export async function testEpostConnection(settings: CompanySettings): Promise<{ success: boolean; error?: string }> {

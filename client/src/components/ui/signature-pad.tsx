@@ -166,7 +166,7 @@ export function SignaturePad({
 
           <div className="absolute left-6 right-6 bottom-[30%] border-b-2 border-gray-300 pointer-events-none" />
           <div className="absolute left-6 bottom-[30%] -translate-y-2 pointer-events-none">
-            <span className="text-xs text-gray-400 select-none">✕</span>
+            <span className="text-xs text-gray-500 select-none">✕</span>
           </div>
 
           {isEmpty && (

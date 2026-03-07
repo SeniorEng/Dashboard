@@ -404,7 +404,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                   <button
                     type="button"
                     onClick={clearAllFiles}
-                    className="text-xs text-gray-400 hover:text-red-500 transition-colors"
+                    className="text-xs text-gray-500 hover:text-red-500 transition-colors"
                     data-testid="button-clear-all-files"
                   >
                     Alle entfernen
@@ -421,7 +421,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                         />
                       ) : (
                         <div className="w-full h-20 flex flex-col items-center justify-center gap-1">
-                          <FileText className="h-5 w-5 text-gray-400" />
+                          <FileText className="h-5 w-5 text-gray-500" />
                           <span className="text-[10px] text-gray-500 px-1 truncate max-w-full">{item.file.name.split('.').pop()?.toUpperCase()}</span>
                         </div>
                       )}
@@ -503,7 +503,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                   <div className="flex items-center gap-2 flex-1 min-w-0">
                     <FolderOpen className={`${iconSize.sm} text-teal-600 shrink-0`} />
                     <span className="text-sm font-medium text-gray-900 truncate">{group.documentType.name}</span>
-                    <span className="text-xs text-gray-400 shrink-0">
+                    <span className="text-xs text-gray-500 shrink-0">
                       {group.currentBatches.length === 1 && totalFiles === 1
                         ? "1 Datei"
                         : group.currentBatches.length === 1
@@ -515,9 +515,9 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                     )}
                   </div>
                   {isExpanded ? (
-                    <ChevronDown className={`${iconSize.sm} text-gray-400 shrink-0`} />
+                    <ChevronDown className={`${iconSize.sm} text-gray-500 shrink-0`} />
                   ) : (
-                    <ChevronRight className={`${iconSize.sm} text-gray-400 shrink-0`} />
+                    <ChevronRight className={`${iconSize.sm} text-gray-500 shrink-0`} />
                   )}
                 </button>
 
@@ -535,7 +535,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                             <span className="text-xs px-1.5 py-0.5 rounded bg-teal-50 text-teal-700">{batch.batchLabel}</span>
                           )}
                           {batch.files.length > 1 && (
-                            <span className="text-xs text-gray-400">{batch.files.length} Dateien</span>
+                            <span className="text-xs text-gray-500">{batch.files.length} Dateien</span>
                           )}
                           {batch.files.length > 1 && (
                             <button
@@ -552,7 +552,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                           {batch.files.map((file) => (
                             <div key={file.id} className="flex items-center justify-between gap-2 py-1 px-2 rounded hover:bg-gray-50" data-testid={`customer-doc-${file.id}`}>
                               <div className="flex items-center gap-2 flex-1 min-w-0">
-                                <FileText className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                                <FileText className="h-3.5 w-3.5 text-gray-500 shrink-0" />
                                 <span className="text-xs text-gray-700 truncate">{file.fileName}</span>
                               </div>
                               <div className="flex items-center gap-0.5 shrink-0">
@@ -587,7 +587,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                       <div className="ml-2">
                         <button
                           onClick={() => setShowArchive(showArchive === group.documentType.id ? null : group.documentType.id)}
-                          className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1 mt-1"
+                          className="text-xs text-gray-500 hover:text-gray-600 flex items-center gap-1 mt-1"
                           data-testid={`button-customer-archive-${group.documentType.id}`}
                         >
                           <History className="h-3 w-3" />
@@ -612,7 +612,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                                   {batch.files.map((file) => (
                                     <div key={file.id} className="flex items-center justify-between gap-2 py-1 px-2 rounded">
                                       <div className="flex items-center gap-2 flex-1 min-w-0">
-                                        <FileText className="h-3 w-3 text-gray-400 shrink-0" />
+                                        <FileText className="h-3 w-3 text-gray-500 shrink-0" />
                                         <span className="text-[11px] text-gray-500 truncate">{file.fileName}</span>
                                       </div>
                                       <a
@@ -621,7 +621,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                                         rel="noopener noreferrer"
                                         className="ml-2 shrink-0"
                                       >
-                                        <Download className="h-3 w-3 text-gray-400 hover:text-gray-600" />
+                                        <Download className="h-3 w-3 text-gray-500 hover:text-gray-600" />
                                       </a>
                                     </div>
                                   ))}

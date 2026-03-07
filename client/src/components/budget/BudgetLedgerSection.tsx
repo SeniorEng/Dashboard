@@ -150,7 +150,7 @@ export function BudgetLedgerSection({ customerId, customerName, onRefresh }: Bud
     return (
       <Card className="border-dashed border-2">
         <CardContent className="py-6 text-center">
-          <Wallet className={`${iconSize.xl} text-gray-400 mx-auto mb-3`} />
+          <Wallet className={`${iconSize.xl} text-gray-500 mx-auto mb-3`} />
           <h3 className="font-medium text-gray-900">Noch kein Budget zugewiesen</h3>
           <p className="text-sm text-gray-500 mt-1">
             Aktivieren Sie die Budget-Einstellungen oben und legen Sie ggf. einen Startwert fest.

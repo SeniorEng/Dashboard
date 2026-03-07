@@ -29,10 +29,6 @@ export {
   type CardServiceInfo,
   type TravelOriginSuggestion,
   // Constants
-  APPOINTMENT_TYPES,
-  APPOINTMENT_STATUSES,
-  SERVICE_TYPES,
-  TRAVEL_ORIGIN_TYPES,
   PFLEGEGRAD_OPTIONS,
   DURATION_OPTIONS,
   STATUS_ORDER,

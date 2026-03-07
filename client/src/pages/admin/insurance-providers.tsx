@@ -259,7 +259,7 @@ export default function AdminInsuranceProviders() {
           ) : (
             <>
               <div className="relative mb-4">
-                <Search className={`${iconSize.sm} absolute left-3 top-1/2 -translate-y-1/2 text-gray-400`} />
+                <Search className={`${iconSize.sm} absolute left-3 top-1/2 -translate-y-1/2 text-gray-500`} />
                 <Input
                   value={searchQuery}
                   onChange={(e) => {
@@ -273,7 +273,7 @@ export default function AdminInsuranceProviders() {
                 {searchQuery && (
                   <button
                     onClick={() => { setSearchQuery(""); setVisibleCount(PAGE_SIZE); }}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-600"
                     data-testid="button-clear-search"
                   >
                     <X className={iconSize.sm} />
@@ -327,7 +327,7 @@ export default function AdminInsuranceProviders() {
                               </div>
                             )}
                           </div>
-                          <Pencil className={`${iconSize.sm} text-gray-400 shrink-0`} />
+                          <Pencil className={`${iconSize.sm} text-gray-500 shrink-0`} />
                         </div>
                       </CardContent>
                     </Card>

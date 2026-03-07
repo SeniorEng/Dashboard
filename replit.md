@@ -126,6 +126,11 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
   - W28: Webhook auth log no longer exposes secret lengths
   - W12: validateGeburtsdatum() added (future dates, >120 years rejected with German messages)
   - W13: ArbZG §3 10h daily maximum warning in time-entry create/update responses
+  - W18: Dead code cleanup — removed unused exports (APPOINTMENT_STATUSES/TYPES, SERVICE_TYPES, TRAVEL_ORIGIN_TYPES, isSameDay, isToday, minutesToTime, conflict(), handleRouteError(), buildContractEmailHtml(), getEpostLetterStatus(), calculateDuration()), unused hooks (useUpdateAppointment, useUpdateCustomer, useDeleteCustomer, useOpenTasks, useVacationSummary), unused API types (AuthResponse, LoginRequest, CreateErstberatungRequest, UpdateAppointmentRequest), unused design tokens (typography, spacing, semanticSpacing, radius, shadow, containerWidth, datePicker)
+  - W24: text-gray-400 → text-gray-500 across 34 files for WCAG AA contrast compliance
+  - W30: Appointment date validation — non-admins blocked from creating appointments >3 months in past; admins get _warning field
+  - W23: PWA manifest (client/public/manifest.json) + theme-color meta tag + offline detection banner ("Keine Internetverbindung") in Layout
+  - W15: Playwright E2E test infrastructure — playwright.config.ts, e2e/health.spec.ts, e2e/login.spec.ts
 - **TypeScript**: 0 errors (fixed: audit action types, DayTimeEntry.kilometers, AppointmentWithCustomerName fields, isLocked type, documentDate mutation type, Set iteration, asyncHandler signature)
 - **Build**: Clean (535.8 KB gzipped, 105 chunks, code-split)
 - **npm audit**: 0 critical/high/moderate vulns (4 moderate esbuild in dev-only drizzle-kit — not fixable without breaking change)

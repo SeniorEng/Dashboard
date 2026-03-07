@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { AppointmentWithCustomer, UpdateAppointmentPayload } from "@shared/types";
-import type { Appointment } from "@shared/schema";
+import type { AppointmentWithCustomer } from "@shared/types";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useToast } from "@/hooks/use-toast";
 
@@ -14,11 +13,6 @@ async function fetchAppointments(date?: string): Promise<AppointmentWithCustomer
 
 async function fetchAppointment(id: number): Promise<AppointmentWithCustomer> {
   const result = await api.get<AppointmentWithCustomer>(`/appointments/${id}`);
-  return unwrapResult(result);
-}
-
-async function updateAppointment(id: number, data: UpdateAppointmentPayload): Promise<Appointment> {
-  const result = await api.patch<Appointment>(`/appointments/${id}`, data);
   return unwrapResult(result);
 }
 
@@ -55,39 +49,6 @@ export function useAppointment(id: number) {
     queryFn: () => fetchAppointment(id),
     enabled: id > 0,
     staleTime: 30000,
-  });
-}
-
-export function useUpdateAppointment() {
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: ({ id, data }: { id: number; data: UpdateAppointmentPayload }) =>
-      updateAppointment(id, data),
-    onMutate: async ({ id, data }) => {
-      await queryClient.cancelQueries({ queryKey: [QUERY_KEY] });
-      await queryClient.cancelQueries({ queryKey: [QUERY_KEY, id] });
-      
-      const previousAppointment = queryClient.getQueryData<AppointmentWithCustomer>([QUERY_KEY, id]);
-      
-      if (previousAppointment) {
-        queryClient.setQueryData<AppointmentWithCustomer>([QUERY_KEY, id], {
-          ...previousAppointment,
-          ...data,
-        });
-      }
-      
-      return { previousAppointment };
-    },
-    onError: (err, { id }, context) => {
-      if (context?.previousAppointment) {
-        queryClient.setQueryData([QUERY_KEY, id], context.previousAppointment);
-      }
-    },
-    onSettled: (_, __, { id }) => {
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}/services`] });
-    },
   });
 }
 
