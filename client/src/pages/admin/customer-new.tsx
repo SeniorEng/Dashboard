@@ -16,6 +16,7 @@ import {
   Check,
   FileText,
   Trash2,
+  AlertTriangle,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { CustomerFormData, ContactFormData, BudgetTypeSettingForm, getStepsForBillingType, DEFAULT_BUDGETS, EMPTY_CONTACT, MAX_CONTACTS } from "./components/customer-types";
@@ -119,6 +120,7 @@ export default function AdminCustomerNew() {
   const uploadedDocumentsRef = useRef<WizardUploadedDoc[]>([]);
   const signingLocationRef = useRef<string | null>(null);
   const [draftDialog, setDraftDialog] = useState<{ timestamp: string } | null>(null);
+  const [duplicateWarning, setDuplicateWarning] = useState<{ duplicates: Array<{ id: number; vorname: string; nachname: string; geburtsdatum: string | null; stadt: string | null; strasse: string | null; nr: string | null; status: string | null }>; pendingPayload: any } | null>(null);
   const createdRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftRestoringRef = useRef(false);
@@ -273,7 +275,7 @@ export default function AdminCustomerNew() {
     });
   }, []);
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     const today = todayISO();
     
     const phoneValidationErrors: string[] = [];
@@ -374,6 +376,25 @@ export default function AdminCustomerNew() {
       contract,
     };
 
+    try {
+      const params = new URLSearchParams({
+        vorname: payload.vorname,
+        nachname: payload.nachname,
+      });
+      if (payload.geburtsdatum) params.set("geburtsdatum", payload.geburtsdatum);
+      const dupResult = await api.get<{ duplicates: Array<{ id: number; vorname: string; nachname: string; geburtsdatum: string | null; stadt: string | null; strasse: string | null; nr: string | null; status: string | null }> }>(`/admin/customers/check-duplicate?${params.toString()}`);
+      if (dupResult.duplicates && dupResult.duplicates.length > 0) {
+        setDuplicateWarning({ duplicates: dupResult.duplicates, pendingPayload: payload });
+        return;
+      }
+    } catch (dupError) {
+      console.warn("Duplikatprüfung fehlgeschlagen:", dupError);
+    }
+
+    submitCustomer(payload);
+  };
+
+  const submitCustomer = (payload: any) => {
     const warnings: string[] = [];
     createMutation.mutate(payload, {
       onSuccess: async (customer) => {
@@ -770,6 +791,50 @@ export default function AdminCustomerNew() {
                 <AlertDialogAction onClick={restoreDraft} data-testid="button-restore-draft">
                   <FileText className="w-4 h-4 mr-1" />
                   Entwurf laden
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          <AlertDialog open={!!duplicateWarning} onOpenChange={() => setDuplicateWarning(null)}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle className="flex items-center gap-2 text-amber-600">
+                  <AlertTriangle className={iconSize.md} />
+                  Mögliches Duplikat erkannt
+                </AlertDialogTitle>
+                <AlertDialogDescription asChild>
+                  <div>
+                    <p className="mb-3">
+                      Es gibt bereits {duplicateWarning?.duplicates.length === 1 ? "einen Kunden" : `${duplicateWarning?.duplicates.length} Kunden`} mit gleichem Namen{duplicateWarning?.duplicates[0]?.geburtsdatum ? " und Geburtsdatum" : ""}:
+                    </p>
+                    <div className="space-y-2 mb-3">
+                      {duplicateWarning?.duplicates.map((d) => (
+                        <div key={d.id} className="p-2 bg-muted rounded-md text-sm">
+                          <span className="font-medium">{d.nachname}, {d.vorname}</span>
+                          {d.geburtsdatum && <span className="ml-2 text-muted-foreground">geb. {d.geburtsdatum}</span>}
+                          {d.stadt && <span className="ml-2 text-muted-foreground">{d.strasse} {d.nr}, {d.stadt}</span>}
+                          {d.status && <span className="ml-2 text-muted-foreground">({d.status})</span>}
+                        </div>
+                      ))}
+                    </div>
+                    <p>Möchtest du den Kunden trotzdem anlegen?</p>
+                  </div>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => setDuplicateWarning(null)} data-testid="button-cancel-duplicate">
+                  Abbrechen
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    const payload = duplicateWarning?.pendingPayload;
+                    setDuplicateWarning(null);
+                    if (payload) submitCustomer(payload);
+                  }}
+                  data-testid="button-confirm-duplicate"
+                >
+                  Trotzdem anlegen
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>

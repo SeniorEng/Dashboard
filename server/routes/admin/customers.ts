@@ -37,6 +37,43 @@ import { eq, and, sql, gte, lte, isNull, or, count, notInArray, isNotNull } from
 
 const router = Router();
 
+router.get("/customers/check-duplicate", asyncHandler("Duplikatprüfung fehlgeschlagen", async (req: Request, res: Response) => {
+  const vorname = String(req.query.vorname || "").trim();
+  const nachname = String(req.query.nachname || "").trim();
+  const geburtsdatum = req.query.geburtsdatum ? String(req.query.geburtsdatum).trim() : null;
+
+  if (!vorname || !nachname) {
+    res.json({ duplicates: [] });
+    return;
+  }
+
+  const conditions = [
+    sql`LOWER(${customers.vorname}) = LOWER(${vorname})`,
+    sql`LOWER(${customers.nachname}) = LOWER(${nachname})`,
+    isNull(customers.deletedAt),
+  ];
+
+  if (geburtsdatum) {
+    conditions.push(eq(customers.geburtsdatum, geburtsdatum));
+  }
+
+  const existing = await db.select({
+    id: customers.id,
+    vorname: customers.vorname,
+    nachname: customers.nachname,
+    geburtsdatum: customers.geburtsdatum,
+    stadt: customers.stadt,
+    strasse: customers.strasse,
+    nr: customers.nr,
+    status: customers.status,
+  })
+    .from(customers)
+    .where(and(...conditions))
+    .limit(5);
+
+  res.json({ duplicates: existing });
+}));
+
 const assignCustomerSchema = z.object({
   primaryEmployeeId: z.number().nullable(),
   backupEmployeeId: z.number().nullable(),
