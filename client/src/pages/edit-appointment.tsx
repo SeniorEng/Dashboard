@@ -131,13 +131,13 @@ export default function EditAppointment() {
     const active = employees.filter(e => e.isActive);
     if (appointment?.customer) {
       const c = appointment.customer;
-      const assignedIds = [c.primaryEmployeeId, c.backupEmployeeId].filter(Boolean);
+      const assignedIds = [c.primaryEmployeeId, c.backupEmployeeId, c.backupEmployeeId2].filter(Boolean);
       if (assignedIds.length > 0) {
         return active
           .filter(e => assignedIds.includes(e.id))
           .map((e) => ({
             value: e.id.toString(),
-            label: e.displayName + (e.id === c.primaryEmployeeId ? " (Haupt)" : " (Vertretung)"),
+            label: e.displayName + (e.id === c.primaryEmployeeId ? " (Haupt)" : e.id === c.backupEmployeeId ? " (Vertretung)" : " (2. Vertretung)"),
           }))
           .sort((a, b) => a.label.localeCompare(b.label, "de"));
       }

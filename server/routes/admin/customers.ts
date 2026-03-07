@@ -78,6 +78,7 @@ router.get("/customers/check-duplicate", asyncHandler("Duplikatprüfung fehlgesc
 const assignCustomerSchema = z.object({
   primaryEmployeeId: z.number().nullable(),
   backupEmployeeId: z.number().nullable(),
+  backupEmployeeId2: z.number().nullable(),
 });
 
 router.patch("/customers/:id/assign", asyncHandler("Zuordnung konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
@@ -109,12 +110,14 @@ router.patch("/customers/:id/assign", asyncHandler("Zuordnung konnte nicht aktua
     return;
   }
 
-  const { primaryEmployeeId, backupEmployeeId } = result.data;
+  const { primaryEmployeeId, backupEmployeeId, backupEmployeeId2 } = result.data;
 
-  if (primaryEmployeeId && backupEmployeeId && primaryEmployeeId === backupEmployeeId) {
+  const assignedIds = [primaryEmployeeId, backupEmployeeId, backupEmployeeId2].filter(id => id != null);
+  const uniqueIds = new Set(assignedIds);
+  if (assignedIds.length !== uniqueIds.size) {
     res.status(400).json({
       error: "VALIDATION_ERROR",
-      message: "Hauptansprechpartner und Vertretung müssen unterschiedlich sein",
+      message: "Hauptansprechpartner, 1. Vertretung und 2. Vertretung müssen unterschiedlich sein",
     });
     return;
   }
@@ -141,12 +144,23 @@ router.patch("/customers/:id/assign", asyncHandler("Zuordnung konnte nicht aktua
     }
   }
 
+  if (backupEmployeeId2) {
+    const backupEmployee2 = await authService.getUser(backupEmployeeId2);
+    if (!backupEmployee2 || !backupEmployee2.isActive) {
+      res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "2. Vertretung nicht gefunden oder nicht aktiv",
+      });
+      return;
+    }
+  }
+
   const oldPrimary = customer.primaryEmployeeId;
   const oldBackup = customer.backupEmployeeId;
+  const oldBackup2 = customer.backupEmployeeId2;
 
-  const updatedCustomer = await customerManagementStorage.updateCustomerAssignment(id, primaryEmployeeId, backupEmployeeId, req.user?.id);
+  const updatedCustomer = await customerManagementStorage.updateCustomerAssignment(id, primaryEmployeeId, backupEmployeeId, req.user?.id, backupEmployeeId2);
   
-  // Invalidate birthday cache (employee assignments affect which customers appear for each user)
   birthdaysCache.invalidateAll();
 
   const customerName = `${customer.vorname} ${customer.nachname}`;
@@ -155,6 +169,9 @@ router.patch("/customers/:id/assign", asyncHandler("Zuordnung konnte nicht aktua
   }
   if (backupEmployeeId && backupEmployeeId !== oldBackup) {
     notificationService.notifyCustomerAssigned(id, customerName, backupEmployeeId, "backup");
+  }
+  if (backupEmployeeId2 && backupEmployeeId2 !== oldBackup2) {
+    notificationService.notifyCustomerAssigned(id, customerName, backupEmployeeId2, "backup2");
   }
   
   res.json(updatedCustomer);
@@ -489,6 +506,7 @@ const updateCustomerSchema = z.object({
   status: z.enum(VALID_CUSTOMER_STATUSES).optional(),
   primaryEmployeeId: z.number().nullable().optional(),
   backupEmployeeId: z.number().nullable().optional(),
+  backupEmployeeId2: z.number().nullable().optional(),
   vorerkrankungen: z.string().max(2000).nullable().optional(),
   haustierVorhanden: z.boolean().optional(),
   haustierDetails: z.string().max(500).nullable().optional(),

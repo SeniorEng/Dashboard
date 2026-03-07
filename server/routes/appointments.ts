@@ -231,7 +231,8 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     
     const isAssignedEmployee = 
       customer.primaryEmployeeId === assignedEmployeeId || 
-      customer.backupEmployeeId === assignedEmployeeId;
+      customer.backupEmployeeId === assignedEmployeeId ||
+      customer.backupEmployeeId2 === assignedEmployeeId;
     
     if (!isAssignedEmployee) {
       return sendBadRequest(

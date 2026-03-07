@@ -78,6 +78,7 @@ export interface CustomerListItem {
   hasActiveContract: boolean;
   hasBetreuer: boolean;
   hasBackupEmployee: boolean;
+  hasBackupEmployee2: boolean;
   createdAt: Date;
 }
 
@@ -231,6 +232,7 @@ export class CustomerManagementStorage {
         createdAt: customers.createdAt,
         primaryEmployeeId: customers.primaryEmployeeId,
         backupEmployeeId: customers.backupEmployeeId,
+        backupEmployeeId2: customers.backupEmployeeId2,
         primaryEmployeeName: users.displayName,
         hasActiveContract: activeContractSubquery.hasContract,
         hasBetreuer: betreuerSubquery.hasBetreuer,
@@ -297,6 +299,7 @@ export class CustomerManagementStorage {
       hasActiveContract: r.hasActiveContract === true,
       hasBetreuer: r.hasBetreuer === true,
       hasBackupEmployee: r.backupEmployeeId != null,
+      hasBackupEmployee2: r.backupEmployeeId2 != null,
       createdAt: r.createdAt,
     }));
 
@@ -318,6 +321,7 @@ export class CustomerManagementStorage {
       contract,
       primaryEmployee,
       backupEmployee,
+      backupEmployee2,
     ] = await Promise.all([
       this.getCustomerCurrentInsurance(customerId),
       this.getCustomerContacts(customerId),
@@ -331,6 +335,9 @@ export class CustomerManagementStorage {
       customer.backupEmployeeId
         ? db.select({ id: users.id, displayName: users.displayName }).from(users).where(eq(users.id, customer.backupEmployeeId)).then(r => r[0])
         : Promise.resolve(undefined),
+      customer.backupEmployeeId2
+        ? db.select({ id: users.id, displayName: users.displayName }).from(users).where(eq(users.id, customer.backupEmployeeId2)).then(r => r[0])
+        : Promise.resolve(undefined),
     ]);
 
     return {
@@ -343,6 +350,7 @@ export class CustomerManagementStorage {
       contract: contract ?? undefined,
       primaryEmployee,
       backupEmployee,
+      backupEmployee2,
     };
   }
 
@@ -362,6 +370,7 @@ export class CustomerManagementStorage {
     billingType: string;
     primaryEmployeeId: number | null;
     backupEmployeeId: number | null;
+    backupEmployeeId2: number | null;
     vorerkrankungen: string | null;
     haustierVorhanden: boolean;
     haustierDetails: string | null;
@@ -397,7 +406,7 @@ export class CustomerManagementStorage {
     const result = await tx.update(customers).set(updateData).where(eq(customers.id, id)).returning();
     const updated = result[0];
     
-    if (data.primaryEmployeeId !== undefined || data.backupEmployeeId !== undefined) {
+    if (data.primaryEmployeeId !== undefined || data.backupEmployeeId !== undefined || data.backupEmployeeId2 !== undefined) {
       const today = todayISO();
 
       if (data.primaryEmployeeId !== undefined && oldCustomer.primaryEmployeeId !== data.primaryEmployeeId) {
@@ -442,8 +451,29 @@ export class CustomerManagementStorage {
         }
       }
 
-      customerIdsCache.invalidateForCustomer(oldCustomer.primaryEmployeeId, oldCustomer.backupEmployeeId);
-      customerIdsCache.invalidateForCustomer(updated.primaryEmployeeId, updated.backupEmployeeId);
+      if (data.backupEmployeeId2 !== undefined && oldCustomer.backupEmployeeId2 !== data.backupEmployeeId2) {
+        if (oldCustomer.backupEmployeeId2) {
+          await tx.update(customerAssignmentHistory)
+            .set({ validTo: today })
+            .where(and(
+              eq(customerAssignmentHistory.customerId, id),
+              eq(customerAssignmentHistory.employeeId, oldCustomer.backupEmployeeId2),
+              eq(customerAssignmentHistory.role, "backup2"),
+              isNull(customerAssignmentHistory.validTo)
+            ));
+        }
+        if (data.backupEmployeeId2) {
+          await tx.insert(customerAssignmentHistory).values({
+            customerId: id,
+            employeeId: data.backupEmployeeId2,
+            role: "backup2",
+            validFrom: today,
+          });
+        }
+      }
+
+      customerIdsCache.invalidateForCustomer(oldCustomer.primaryEmployeeId, oldCustomer.backupEmployeeId, oldCustomer.backupEmployeeId2);
+      customerIdsCache.invalidateForCustomer(updated.primaryEmployeeId, updated.backupEmployeeId, updated.backupEmployeeId2);
     }
     
     return updated;
@@ -454,9 +484,11 @@ export class CustomerManagementStorage {
     customerId: number,
     primaryEmployeeId: number | null,
     backupEmployeeId: number | null,
-    changedByUserId?: number
+    changedByUserId?: number,
+    backupEmployeeId2?: number | null
   ) {
     const today = todayISO();
+    const backup2 = backupEmployeeId2 ?? undefined;
 
     const updated = await db.transaction(async (tx) => {
       const [existing] = await tx.select().from(customers).where(eq(customers.id, customerId));
@@ -505,19 +537,46 @@ export class CustomerManagementStorage {
             });
           }
         }
+
+        if (backup2 !== undefined && existing.backupEmployeeId2 !== backup2) {
+          if (existing.backupEmployeeId2) {
+            await tx.update(customerAssignmentHistory)
+              .set({ validTo: today })
+              .where(and(
+                eq(customerAssignmentHistory.customerId, customerId),
+                eq(customerAssignmentHistory.employeeId, existing.backupEmployeeId2),
+                eq(customerAssignmentHistory.role, "backup2"),
+                isNull(customerAssignmentHistory.validTo)
+              ));
+          }
+          if (backup2) {
+            await tx.insert(customerAssignmentHistory).values({
+              customerId,
+              employeeId: backup2,
+              role: "backup2",
+              validFrom: today,
+              changedByUserId: changedByUserId ?? null,
+            });
+          }
+        }
+      }
+
+      const setData: any = { primaryEmployeeId, backupEmployeeId };
+      if (backup2 !== undefined) {
+        setData.backupEmployeeId2 = backup2;
       }
 
       const [result] = await tx
         .update(customers)
-        .set({ primaryEmployeeId, backupEmployeeId })
+        .set(setData)
         .where(eq(customers.id, customerId))
         .returning();
 
       return { result, existing };
     });
 
-    customerIdsCache.invalidateForCustomer(updated.existing?.primaryEmployeeId ?? null, updated.existing?.backupEmployeeId ?? null);
-    customerIdsCache.invalidateForCustomer(primaryEmployeeId, backupEmployeeId);
+    customerIdsCache.invalidateForCustomer(updated.existing?.primaryEmployeeId ?? null, updated.existing?.backupEmployeeId ?? null, updated.existing?.backupEmployeeId2 ?? null);
+    customerIdsCache.invalidateForCustomer(primaryEmployeeId, backupEmployeeId, backup2 ?? null);
 
     return updated.result;
   }

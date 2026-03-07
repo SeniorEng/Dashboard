@@ -13,6 +13,7 @@ export type CustomerWithDetails = Customer & {
   contract?: CustomerContract & { rates: CustomerContractRate[] };
   primaryEmployee?: { id: number; displayName: string };
   backupEmployee?: { id: number; displayName: string };
+  backupEmployee2?: { id: number; displayName: string };
   pricingHistory?: CustomerPricing[];
   currentPricing?: CustomerPricing;
   budgetSummary?: BudgetSummary;

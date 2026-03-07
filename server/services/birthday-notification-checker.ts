@@ -56,6 +56,7 @@ export async function checkUpcomingBirthdays(): Promise<number> {
     const employeeIds = new Set<number>();
     if (cust.primaryEmployeeId) employeeIds.add(cust.primaryEmployeeId);
     if (cust.backupEmployeeId) employeeIds.add(cust.backupEmployeeId);
+    if (cust.backupEmployeeId2) employeeIds.add(cust.backupEmployeeId2);
 
     for (const empId of Array.from(employeeIds)) {
       const alreadyNotified = await hasRecentNotification(empId, "birthday_reminder", cust.id, 48);

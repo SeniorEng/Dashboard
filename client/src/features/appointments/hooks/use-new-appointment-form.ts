@@ -339,6 +339,8 @@ export function useNewAppointmentForm() {
       setKtAssignedEmployeeId(selectedCustomer.primaryEmployeeId.toString());
     } else if (selectedCustomer.backupEmployeeId) {
       setKtAssignedEmployeeId(selectedCustomer.backupEmployeeId.toString());
+    } else if (selectedCustomer.backupEmployeeId2) {
+      setKtAssignedEmployeeId(selectedCustomer.backupEmployeeId2.toString());
     } else {
       setKtAssignedEmployeeId("");
     }
@@ -347,13 +349,13 @@ export function useNewAppointmentForm() {
   const employeeOptions = useMemo(() => {
     const active = employees.filter(e => e.isActive);
     if (selectedCustomer) {
-      const assignedIds = [selectedCustomer.primaryEmployeeId, selectedCustomer.backupEmployeeId].filter(Boolean);
+      const assignedIds = [selectedCustomer.primaryEmployeeId, selectedCustomer.backupEmployeeId, selectedCustomer.backupEmployeeId2].filter(Boolean);
       if (assignedIds.length > 0) {
         return active
           .filter(e => assignedIds.includes(e.id))
           .map((e) => ({
             value: e.id.toString(),
-            label: e.displayName + (e.id === selectedCustomer.primaryEmployeeId ? " (Haupt)" : " (Vertretung)"),
+            label: e.displayName + (e.id === selectedCustomer.primaryEmployeeId ? " (Haupt)" : e.id === selectedCustomer.backupEmployeeId ? " (Vertretung)" : " (2. Vertretung)"),
           }))
           .sort((a, b) => a.label.localeCompare(b.label, "de"));
       }

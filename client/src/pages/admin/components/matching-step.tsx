@@ -123,6 +123,54 @@ export function MatchingStep({ formData, onChange }: MatchingStepProps) {
           )}
         </div>
       )}
+
+      <div className="border-t pt-4 space-y-4">
+        <div className="space-y-3">
+          <Label htmlFor="backup-employee-select" className="text-sm font-medium text-gray-700">
+            1. Vertretung (optional)
+          </Label>
+          <Select
+            value={formData.backupEmployeeId || undefined}
+            onValueChange={(value) => onChange("backupEmployeeId", value)}
+          >
+            <SelectTrigger id="backup-employee-select" data-testid="select-backup-employee">
+              <SelectValue placeholder="Vertretung wählen..." />
+            </SelectTrigger>
+            <SelectContent>
+              {employees
+                ?.filter(emp => emp.id.toString() !== formData.primaryEmployeeId && emp.id.toString() !== formData.backupEmployeeId2)
+                .map(emp => (
+                  <SelectItem key={emp.id} value={emp.id.toString()} data-testid={`option-backup-employee-${emp.id}`}>
+                    {emp.displayName}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-3">
+          <Label htmlFor="backup-employee-2-select" className="text-sm font-medium text-gray-700">
+            2. Vertretung (optional)
+          </Label>
+          <Select
+            value={formData.backupEmployeeId2 || undefined}
+            onValueChange={(value) => onChange("backupEmployeeId2", value)}
+          >
+            <SelectTrigger id="backup-employee-2-select" data-testid="select-backup-employee-2">
+              <SelectValue placeholder="2. Vertretung wählen..." />
+            </SelectTrigger>
+            <SelectContent>
+              {employees
+                ?.filter(emp => emp.id.toString() !== formData.primaryEmployeeId && emp.id.toString() !== formData.backupEmployeeId)
+                .map(emp => (
+                  <SelectItem key={emp.id} value={emp.id.toString()} data-testid={`option-backup-employee-2-${emp.id}`}>
+                    {emp.displayName}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
     </div>
   );
 }

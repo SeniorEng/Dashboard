@@ -35,6 +35,7 @@ export interface CustomerFormData {
   pflegegradSeit: string;
   primaryEmployeeId: string;
   backupEmployeeId: string;
+  backupEmployeeId2: string;
   vorerkrankungen: string;
   haustierVorhanden: boolean;
   haustierDetails: string;

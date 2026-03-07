@@ -115,9 +115,9 @@ export const notificationService = {
     customerId: number,
     customerName: string,
     employeeId: number,
-    role: "primary" | "backup"
+    role: "primary" | "backup" | "backup2"
   ) {
-    const roleLabel = role === "primary" ? "Hauptmitarbeiter/in" : "Vertretung";
+    const roleLabel = role === "primary" ? "Hauptmitarbeiter/in" : role === "backup2" ? "2. Vertretung" : "Vertretung";
     fireAndForget(async () => {
       await createNotification({
         userId: employeeId,

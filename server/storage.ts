@@ -160,7 +160,7 @@ export interface IStorage {
 
   // Birthday queries
   getActiveEmployeesWithBirthday(): Promise<{ id: number; displayName: string; geburtsdatum: string | null; strasse: string | null; plz: string | null; stadt: string | null }[]>;
-  getActiveCustomersWithBirthday(): Promise<{ id: number; name: string; geburtsdatum: string | null; strasse: string | null; plz: string | null; stadt: string | null; primaryEmployeeId: number | null; backupEmployeeId: number | null }[]>;
+  getActiveCustomersWithBirthday(): Promise<{ id: number; name: string; geburtsdatum: string | null; strasse: string | null; plz: string | null; stadt: string | null; primaryEmployeeId: number | null; backupEmployeeId: number | null; backupEmployeeId2: number | null }[]>;
   getAdminUserIds(): Promise<number[]>;
   
   // Optimized search
@@ -272,7 +272,7 @@ export class DatabaseStorage implements IStorage {
   async createCustomer(customer: InsertCustomer): Promise<Customer> {
     const result = await db.insert(customers).values(customer).returning();
     const created = result[0];
-    customerIdsCache.invalidateForCustomer(created.primaryEmployeeId, created.backupEmployeeId);
+    customerIdsCache.invalidateForCustomer(created.primaryEmployeeId, created.backupEmployeeId, created.backupEmployeeId2);
     return created;
   }
 
@@ -284,7 +284,7 @@ export class DatabaseStorage implements IStorage {
       .where(eq(customers.id, id))
       .returning();
     if (result.length > 0 && existing) {
-      customerIdsCache.invalidateForCustomer(existing.primaryEmployeeId, existing.backupEmployeeId);
+      customerIdsCache.invalidateForCustomer(existing.primaryEmployeeId, existing.backupEmployeeId, existing.backupEmployeeId2);
     }
     return result.length > 0;
   }
@@ -296,7 +296,7 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           isNull(customers.deletedAt),
-          sqlBuilder`(${customers.primaryEmployeeId} = ${employeeId} OR ${customers.backupEmployeeId} = ${employeeId})`
+          sqlBuilder`(${customers.primaryEmployeeId} = ${employeeId} OR ${customers.backupEmployeeId} = ${employeeId} OR ${customers.backupEmployeeId2} = ${employeeId})`
         )
       );
     return result.map(r => r.id);
@@ -317,6 +317,7 @@ export class DatabaseStorage implements IStorage {
           or(
             eq(customers.primaryEmployeeId, employeeId),
             eq(customers.backupEmployeeId, employeeId),
+            eq(customers.backupEmployeeId2, employeeId),
             inArray(customers.id,
               db.select({ id: appointments.customerId })
                 .from(appointments)
@@ -351,7 +352,7 @@ export class DatabaseStorage implements IStorage {
 
     return customerRows.map(c => ({
       ...c,
-      isCurrentlyAssigned: c.primaryEmployeeId === employeeId || c.backupEmployeeId === employeeId,
+      isCurrentlyAssigned: c.primaryEmployeeId === employeeId || c.backupEmployeeId === employeeId || c.backupEmployeeId2 === employeeId,
     })).sort((a, b) => {
       const aLegacy = a.isCurrentlyAssigned ? 0 : 1;
       const bLegacy = b.isCurrentlyAssigned ? 0 : 1;
@@ -384,7 +385,7 @@ export class DatabaseStorage implements IStorage {
       ));
   }
 
-  async getActiveCustomersWithBirthday(): Promise<{ id: number; name: string; geburtsdatum: string | null; strasse: string | null; plz: string | null; stadt: string | null; primaryEmployeeId: number | null; backupEmployeeId: number | null }[]> {
+  async getActiveCustomersWithBirthday(): Promise<{ id: number; name: string; geburtsdatum: string | null; strasse: string | null; plz: string | null; stadt: string | null; primaryEmployeeId: number | null; backupEmployeeId: number | null; backupEmployeeId2: number | null }[]> {
     return await db
       .select({
         id: customers.id,
@@ -395,6 +396,7 @@ export class DatabaseStorage implements IStorage {
         stadt: customers.stadt,
         primaryEmployeeId: customers.primaryEmployeeId,
         backupEmployeeId: customers.backupEmployeeId,
+        backupEmployeeId2: customers.backupEmployeeId2,
       })
       .from(customers)
       .where(isNotNull(customers.geburtsdatum));

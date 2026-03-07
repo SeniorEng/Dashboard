@@ -30,6 +30,7 @@ export const customers = pgTable("customers", {
   // Employee assignments
   primaryEmployeeId: integer("primary_employee_id").references(() => users.id),
   backupEmployeeId: integer("backup_employee_id").references(() => users.id),
+  backupEmployeeId2: integer("backup_employee_id_2").references(() => users.id),
   // Health
   vorerkrankungen: text("vorerkrankungen"),
   // Pet info (for employee-customer matching)
@@ -60,6 +61,7 @@ export const customers = pgTable("customers", {
 }, (table) => [
   index("customers_primary_employee_id_idx").on(table.primaryEmployeeId),
   index("customers_backup_employee_id_idx").on(table.backupEmployeeId),
+  index("customers_backup_employee_id_2_idx").on(table.backupEmployeeId2),
   index("customers_name_idx").on(table.name),
 ]);
 

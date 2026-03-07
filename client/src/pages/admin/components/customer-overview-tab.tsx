@@ -58,6 +58,7 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
   const [employeeData, setEmployeeData] = useState({
     primaryEmployeeId: "",
     backupEmployeeId: "",
+    backupEmployeeId2: "",
   });
 
   const [newPflegegrad, setNewPflegegrad] = useState<string>("");
@@ -105,6 +106,7 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
     setEmployeeData({
       primaryEmployeeId: customer.primaryEmployee?.id?.toString() || "",
       backupEmployeeId: customer.backupEmployee?.id?.toString() || "",
+      backupEmployeeId2: customer.backupEmployee2?.id?.toString() || "",
     });
   };
 
@@ -204,8 +206,11 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
   const handleSaveEmployees = async () => {
     const primaryId = employeeData.primaryEmployeeId ? parseInt(employeeData.primaryEmployeeId) : null;
     const backupId = employeeData.backupEmployeeId ? parseInt(employeeData.backupEmployeeId) : null;
-    if (primaryId && backupId && primaryId === backupId) {
-      toast({ title: "Ungültige Auswahl", description: "Haupt- und Vertretungsmitarbeiter dürfen nicht identisch sein.", variant: "destructive" });
+    const backupId2 = employeeData.backupEmployeeId2 ? parseInt(employeeData.backupEmployeeId2) : null;
+    const ids = [primaryId, backupId, backupId2].filter((id): id is number => id !== null);
+    const uniqueIds = new Set(ids);
+    if (ids.length !== uniqueIds.size) {
+      toast({ title: "Ungültige Auswahl", description: "Alle zugewiesenen Mitarbeiter müssen unterschiedlich sein.", variant: "destructive" });
       return;
     }
     setSaving(true);
@@ -213,6 +218,7 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
       const result = await api.patch(`/admin/customers/${customerId}`, {
         primaryEmployeeId: primaryId,
         backupEmployeeId: backupId,
+        backupEmployeeId2: backupId2,
       });
       unwrapResult(result);
       toast({ title: "Mitarbeiterzuordnung gespeichert" });
@@ -492,7 +498,7 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
             </div>
 
             <div className="space-y-2">
-              <Label>Vertretung</Label>
+              <Label>1. Vertretung</Label>
               <SearchableSelect
                 options={employeeOptions}
                 value={employeeData.backupEmployeeId}
@@ -501,6 +507,19 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
                 searchPlaceholder="Mitarbeiter suchen..."
                 emptyText="Kein Mitarbeiter gefunden."
                 data-testid="select-backup-employee"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>2. Vertretung</Label>
+              <SearchableSelect
+                options={employeeOptions}
+                value={employeeData.backupEmployeeId2}
+                onValueChange={(value) => setEmployeeData((prev) => ({ ...prev, backupEmployeeId2: value }))}
+                placeholder="Mitarbeiter auswählen"
+                searchPlaceholder="Mitarbeiter suchen..."
+                emptyText="Kein Mitarbeiter gefunden."
+                data-testid="select-backup-employee-2"
               />
             </div>
 
@@ -523,9 +542,15 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
               </p>
             </div>
             <div>
-              <p className="text-sm text-gray-500">Vertretung</p>
+              <p className="text-sm text-gray-500">1. Vertretung</p>
               <p className="font-medium" data-testid="text-backup-employee">
                 {customer.backupEmployee?.displayName || "Nicht zugewiesen"}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">2. Vertretung</p>
+              <p className="font-medium" data-testid="text-backup-employee-2">
+                {customer.backupEmployee2?.displayName || "Nicht zugewiesen"}
               </p>
             </div>
           </div>

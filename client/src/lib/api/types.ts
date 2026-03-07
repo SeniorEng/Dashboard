@@ -93,6 +93,8 @@ export interface CustomerListItem {
   pflegegrad: number | null;
   status: string;
   primaryEmployee: { displayName: string } | null;
+  hasBackupEmployee: boolean;
+  hasBackupEmployee2: boolean;
   hasActiveContract: boolean;
   createdAt: string;
 }
@@ -146,6 +148,7 @@ export interface CustomerDetail extends Customer {
   currentContract: CustomerContractInfo | null;
   primaryEmployee: { id: number; displayName: string } | null;
   backupEmployee: { id: number; displayName: string } | null;
+  backupEmployee2: { id: number; displayName: string } | null;
   pricingHistory: CustomerPricingInfo[];
   currentPricing: CustomerPricingInfo | null;
   budgetSummary: BudgetSummaryInfo | null;

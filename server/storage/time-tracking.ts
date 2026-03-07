@@ -440,7 +440,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
         and(
           sqlBuilder`(
             ${appointments.assignedEmployeeId} = ${userId} 
-            OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId}))
+            OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId} OR ${customers.backupEmployeeId2} = ${userId}))
           )`,
           gte(appointments.date, startDate),
           lte(appointments.date, endDate),
@@ -710,7 +710,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
           and(
             sqlBuilder`(
               ${appointments.assignedEmployeeId} = ${userId} 
-              OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId}))
+              OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId} OR ${customers.backupEmployeeId2} = ${userId}))
             )`,
             gte(appointments.date, startDateStr),
             lte(appointments.date, todayStr),
@@ -839,7 +839,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
         and(
           sqlBuilder`(
             ${appointments.assignedEmployeeId} = ${userId} 
-            OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId}))
+            OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId} OR ${customers.backupEmployeeId2} = ${userId}))
           )`,
           gte(appointments.date, startDate),
           lte(appointments.date, endDate),
@@ -869,7 +869,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
         and(
           sqlBuilder`(
             ${appointments.assignedEmployeeId} = ${userId} 
-            OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId}))
+            OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId} OR ${customers.backupEmployeeId2} = ${userId}))
           )`,
           gte(appointments.date, startDate),
           lte(appointments.date, endDate),

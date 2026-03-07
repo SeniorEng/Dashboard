@@ -85,12 +85,15 @@ class CustomerIdsCacheService {
     this.cache.delete(this.getKey(employeeId));
   }
 
-  invalidateForCustomer(primaryEmployeeId?: number | null, backupEmployeeId?: number | null): void {
+  invalidateForCustomer(primaryEmployeeId?: number | null, backupEmployeeId?: number | null, backupEmployeeId2?: number | null): void {
     if (primaryEmployeeId) {
       this.invalidateForEmployee(primaryEmployeeId);
     }
     if (backupEmployeeId) {
       this.invalidateForEmployee(backupEmployeeId);
+    }
+    if (backupEmployeeId2) {
+      this.invalidateForEmployee(backupEmployeeId2);
     }
   }
 

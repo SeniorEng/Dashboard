@@ -377,7 +377,7 @@ router.post("/", asyncHandler("Kunde konnte nicht erstellt werden", async (req, 
     return result[0];
   });
 
-  customerIdsCache.invalidateForCustomer(customer.primaryEmployeeId, customer.backupEmployeeId);
+  customerIdsCache.invalidateForCustomer(customer.primaryEmployeeId, customer.backupEmployeeId, customer.backupEmployeeId2);
   birthdaysCache.invalidateAll();
   
   res.status(201).json(customer);
@@ -514,6 +514,7 @@ const convertCustomerSchema = z.object({
   }).optional(),
   primaryEmployeeId: z.number().nullable().optional(),
   backupEmployeeId: z.number().nullable().optional(),
+  backupEmployeeId2: z.number().nullable().optional(),
 });
 
 router.post("/:id/convert", requireRoles("erstberatung"), asyncHandler("Konvertierung fehlgeschlagen", async (req, res) => {
@@ -663,12 +664,13 @@ router.post("/:id/convert", requireRoles("erstberatung"), asyncHandler("Konverti
     }
   }
 
-  if (data.primaryEmployeeId !== undefined || data.backupEmployeeId !== undefined) {
+  if (data.primaryEmployeeId !== undefined || data.backupEmployeeId !== undefined || data.backupEmployeeId2 !== undefined) {
     try {
-      await customerManagementStorage.updateCustomer(id, {
-        primaryEmployeeId: data.primaryEmployeeId ?? null,
-        backupEmployeeId: data.backupEmployeeId ?? null,
-      });
+      const assignmentUpdate: Record<string, unknown> = {};
+      if (data.primaryEmployeeId !== undefined) assignmentUpdate.primaryEmployeeId = data.primaryEmployeeId ?? null;
+      if (data.backupEmployeeId !== undefined) assignmentUpdate.backupEmployeeId = data.backupEmployeeId ?? null;
+      if (data.backupEmployeeId2 !== undefined) assignmentUpdate.backupEmployeeId2 = data.backupEmployeeId2 ?? null;
+      await customerManagementStorage.updateCustomer(id, assignmentUpdate as any);
     } catch (err) {
       console.error(`[POST /:id/convert] Mitarbeiter-Zuordnung fehlgeschlagen:`, err);
       warnings.push("Mitarbeiter-Zuordnung konnte nicht gespeichert werden");

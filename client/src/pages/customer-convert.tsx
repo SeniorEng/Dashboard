@@ -86,6 +86,7 @@ export default function CustomerConvertPage() {
     pflegegradSeit: "",
     primaryEmployeeId: "",
     backupEmployeeId: "",
+    backupEmployeeId2: "",
     vorerkrankungen: "",
     haustierVorhanden: false,
     haustierDetails: "",
@@ -133,6 +134,7 @@ export default function CustomerConvertPage() {
         billingType: (customer.billingType as BillingType) || "pflegekasse_gesetzlich",
         primaryEmployeeId: customer.primaryEmployeeId ? customer.primaryEmployeeId.toString() : "",
         backupEmployeeId: customer.backupEmployeeId ? customer.backupEmployeeId.toString() : "",
+        backupEmployeeId2: customer.backupEmployeeId2 ? customer.backupEmployeeId2.toString() : "",
         haustierVorhanden: customer.haustierVorhanden || false,
         haustierDetails: customer.haustierDetails || "",
         personenbefoerderungGewuenscht: customer.personenbefoerderungGewuenscht || false,
@@ -391,6 +393,7 @@ export default function CustomerConvertPage() {
       contract,
       primaryEmployeeId: formData.primaryEmployeeId ? parseInt(formData.primaryEmployeeId) : null,
       backupEmployeeId: formData.backupEmployeeId ? parseInt(formData.backupEmployeeId) : null,
+      backupEmployeeId2: formData.backupEmployeeId2 ? parseInt(formData.backupEmployeeId2) : null,
     };
 
     convertMutation.mutate(payload);

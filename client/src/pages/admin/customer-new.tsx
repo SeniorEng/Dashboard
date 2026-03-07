@@ -87,6 +87,7 @@ export default function AdminCustomerNew() {
     pflegegradSeit: "",
     primaryEmployeeId: "",
     backupEmployeeId: "",
+    backupEmployeeId2: "",
     vorerkrankungen: "",
     haustierVorhanden: false,
     haustierDetails: "",
@@ -394,11 +395,13 @@ export default function AdminCustomerNew() {
         clearDraft();
         const primaryId = formData.primaryEmployeeId ? parseInt(formData.primaryEmployeeId) : null;
         const backupId = formData.backupEmployeeId ? parseInt(formData.backupEmployeeId) : null;
-        if (primaryId || backupId) {
+        const backupId2 = formData.backupEmployeeId2 ? parseInt(formData.backupEmployeeId2) : null;
+        if (primaryId || backupId || backupId2) {
           try {
             await api.patch(`/admin/customers/${customer.id}/assign`, {
               primaryEmployeeId: primaryId,
               backupEmployeeId: backupId,
+              backupEmployeeId2: backupId2,
             });
           } catch (assignError) {
             console.error("Mitarbeiter-Zuordnung fehlgeschlagen:", assignError);
