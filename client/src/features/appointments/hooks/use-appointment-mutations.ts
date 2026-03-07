@@ -32,7 +32,7 @@ export function useCreateKundentermin() {
       toast({ title: "Erfolg", description: "Termin wurde erstellt" });
     },
     onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Termin konnte nicht erstellt werden", variant: "destructive" });
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }
@@ -52,7 +52,7 @@ export function useCreateErstberatung() {
       toast({ title: "Erfolg", description: "Erstberatung wurde erstellt" });
     },
     onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Erstberatung konnte nicht erstellt werden", variant: "destructive" });
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }
@@ -74,7 +74,7 @@ export function useDocumentAppointment(id: number) {
       toast({ title: "Erfolg", description: "Termin wurde dokumentiert" });
     },
     onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Dokumentation konnte nicht gespeichert werden", variant: "destructive" });
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }

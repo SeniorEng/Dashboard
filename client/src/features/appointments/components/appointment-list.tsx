@@ -31,7 +31,7 @@ function AppointmentListComponent({ appointments, isLoading, error, onRetry }: A
       <div className="min-h-[200px]" data-testid="error-appointments">
         <ErrorState
           title="Termine konnten nicht geladen werden"
-          description={error.message || "Bitte versuchen Sie es erneut."}
+          description={error.message}
           onRetry={onRetry}
         />
       </div>

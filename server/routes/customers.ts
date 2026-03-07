@@ -12,6 +12,7 @@ import { computeDataHash } from "../services/signature-integrity";
 import crypto from "crypto";
 import { customerManagementStorage } from "../storage/customer-management";
 import { asyncHandler, forbidden } from "../lib/errors";
+import { authService } from "../services/auth";
 import { todayISO, addDays } from "@shared/utils/datetime";
 import { db } from "../lib/db";
 import { sql } from "drizzle-orm";
@@ -666,11 +667,26 @@ router.post("/:id/convert", requireRoles("erstberatung"), asyncHandler("Konverti
 
   if (data.primaryEmployeeId !== undefined || data.backupEmployeeId !== undefined || data.backupEmployeeId2 !== undefined) {
     try {
-      const assignmentUpdate: Record<string, unknown> = {};
-      if (data.primaryEmployeeId !== undefined) assignmentUpdate.primaryEmployeeId = data.primaryEmployeeId ?? null;
-      if (data.backupEmployeeId !== undefined) assignmentUpdate.backupEmployeeId = data.backupEmployeeId ?? null;
-      if (data.backupEmployeeId2 !== undefined) assignmentUpdate.backupEmployeeId2 = data.backupEmployeeId2 ?? null;
-      await customerManagementStorage.updateCustomer(id, assignmentUpdate as any);
+      const empIds = [data.primaryEmployeeId, data.backupEmployeeId, data.backupEmployeeId2].filter((id): id is number => id != null);
+      const uniqueEmpIds = new Set(empIds);
+      if (empIds.length !== uniqueEmpIds.size) {
+        warnings.push("Mitarbeiter-Zuordnung übersprungen: Alle zugewiesenen Mitarbeiter müssen unterschiedlich sein");
+      } else {
+        for (const empId of empIds) {
+          const emp = await authService.getUser(empId);
+          if (!emp || !emp.isActive) {
+            warnings.push(`Mitarbeiter-Zuordnung übersprungen: Mitarbeiter ${empId} nicht gefunden oder nicht aktiv`);
+            break;
+          }
+        }
+        if (!warnings.some(w => w.startsWith("Mitarbeiter-Zuordnung übersprungen"))) {
+          const assignmentUpdate: Record<string, unknown> = {};
+          if (data.primaryEmployeeId !== undefined) assignmentUpdate.primaryEmployeeId = data.primaryEmployeeId ?? null;
+          if (data.backupEmployeeId !== undefined) assignmentUpdate.backupEmployeeId = data.backupEmployeeId ?? null;
+          if (data.backupEmployeeId2 !== undefined) assignmentUpdate.backupEmployeeId2 = data.backupEmployeeId2 ?? null;
+          await customerManagementStorage.updateCustomer(id, assignmentUpdate as any);
+        }
+      }
     } catch (err) {
       console.error(`[POST /:id/convert] Mitarbeiter-Zuordnung fehlgeschlagen:`, err);
       warnings.push("Mitarbeiter-Zuordnung konnte nicht gespeichert werden");
