@@ -182,14 +182,14 @@ export const customerPricingHistory = pgTable("customer_pricing_history", {
 // CUSTOMER ASSIGNMENT HISTORY (ZUWEISUNGS-HISTORIE)
 // ============================================
 
-export const ASSIGNMENT_ROLES = ["primary", "backup"] as const;
+export const ASSIGNMENT_ROLES = ["primary", "backup", "backup2"] as const;
 export type AssignmentRole = typeof ASSIGNMENT_ROLES[number];
 
 export const customerAssignmentHistory = pgTable("customer_assignment_history", {
   id: serial("id").primaryKey(),
   customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
   employeeId: integer("employee_id").notNull().references(() => users.id),
-  role: text("role").notNull(), // "primary" | "backup"
+  role: text("role").notNull(), // "primary" | "backup" | "backup2"
   validFrom: date("valid_from").notNull(),
   validTo: date("valid_to"), // null = currently active
   changedByUserId: integer("changed_by_user_id").references(() => users.id),

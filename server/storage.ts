@@ -71,6 +71,7 @@ const appointmentWithCustomerSelectFields = {
     pflegegrad: customers.pflegegrad,
     primaryEmployeeId: customers.primaryEmployeeId,
     backupEmployeeId: customers.backupEmployeeId,
+    backupEmployeeId2: customers.backupEmployeeId2,
     createdAt: customers.createdAt,
     updatedAt: customers.updatedAt,
     createdByUserId: customers.createdByUserId,

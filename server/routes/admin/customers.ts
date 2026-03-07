@@ -1195,6 +1195,7 @@ router.get("/customers/:id/match-employees", asyncHandler("Matching konnte nicht
   const excludeIds: number[] = [];
   if (customer.primaryEmployeeId) excludeIds.push(customer.primaryEmployeeId);
   if (customer.backupEmployeeId) excludeIds.push(customer.backupEmployeeId);
+  if (customer.backupEmployeeId2) excludeIds.push(customer.backupEmployeeId2);
 
   const results = await matchEmployees({
     plz: customer.plz,
