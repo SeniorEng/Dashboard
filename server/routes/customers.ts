@@ -10,6 +10,7 @@ import { generateAndStorePdf } from "../services/document-pdf";
 import { computeDataHash } from "../services/signature-integrity";
 import { customerManagementStorage } from "../storage/customer-management";
 import { asyncHandler } from "../lib/errors";
+import { requireIntParam } from "../lib/params";
 import { authService } from "../services/auth";
 import { todayISO } from "@shared/utils/datetime";
 import { db } from "../lib/db";
@@ -50,11 +51,8 @@ router.get("/", asyncHandler("Kunden konnten nicht geladen werden", async (req, 
 
 router.get("/:id", asyncHandler("Kunde konnte nicht geladen werden", async (req, res) => {
   const user = req.user!;
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "Ungültige Kunden-ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   
   if (!user.isAdmin) {
     const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
@@ -74,11 +72,8 @@ router.get("/:id", asyncHandler("Kunde konnte nicht geladen werden", async (req,
 
 router.get("/:id/details", asyncHandler("Kundendetails konnten nicht geladen werden", async (req, res) => {
   const user = req.user!;
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "Ungültige Kunden-ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   
   if (!user.isAdmin) {
     const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
@@ -124,8 +119,8 @@ const employeeUpdateCustomerSchema = z.object({
 
 router.patch("/:id", asyncHandler("Kundendaten konnten nicht aktualisiert werden", async (req, res) => {
   const user = req.user!;
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" }); return; }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
   if (!user.isAdmin && !assignedCustomerIds.includes(id)) {
@@ -170,8 +165,8 @@ const employeeCareLevelSchema = z.object({
 
 router.post("/:id/care-level", asyncHandler("Pflegegrad konnte nicht aktualisiert werden", async (req, res) => {
   const user = req.user!;
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" }); return; }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
   if (!user.isAdmin && !assignedCustomerIds.includes(id)) {
@@ -208,8 +203,8 @@ const employeeContractUpdateSchema = z.object({
 
 router.patch("/:id/contract", asyncHandler("Vertragsdaten konnten nicht aktualisiert werden", async (req, res) => {
   const user = req.user!;
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" }); return; }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
   if (!user.isAdmin && !assignedCustomerIds.includes(id)) {
@@ -262,11 +257,8 @@ const signaturePayloadSchema = z.object({
 });
 
 router.post("/:id/signatures", asyncHandler("Unterschriften konnten nicht gespeichert werden", async (req, res) => {
-  const customerId = parseInt(req.params.id);
-  if (isNaN(customerId)) {
-    res.status(400).json({ error: "Ungültige Kunden-ID" });
-    return;
-  }
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
 
   const user = req.user!;
   if (!user.isAdmin) {
@@ -388,11 +380,8 @@ const convertCustomerSchema = z.object({
 });
 
 router.post("/:id/convert", requireRoles("erstberatung"), asyncHandler("Konvertierung fehlgeschlagen", async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   if (!req.user!.isAdmin) {
     const assignedCustomerIds = await storage.getAssignedCustomerIds(req.user!.id);
@@ -568,11 +557,8 @@ router.post("/:id/convert", requireRoles("erstberatung"), asyncHandler("Konverti
 }));
 
 router.post("/:id/reject", requireRoles("erstberatung"), asyncHandler("Ablehnung fehlgeschlagen", async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   if (!req.user!.isAdmin) {
     const assignedCustomerIds = await storage.getAssignedCustomerIds(req.user!.id);

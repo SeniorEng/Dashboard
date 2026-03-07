@@ -6,6 +6,7 @@ import { documentStorage } from "../../storage/documents";
 import { renderTemplateForCustomer, wrapInPrintableHtml, extractInputPlaceholders } from "../../services/template-engine";
 import { generateAndStorePdf, getDocumentPdfBuffer } from "../../services/document-pdf";
 import { asyncHandler } from "../../lib/errors";
+import { requireIntParam } from "../../lib/params";
 
 const router = Router();
 
@@ -22,8 +23,8 @@ router.get("/document-types/customer", asyncHandler("Dokumententypen konnten nic
 
 router.get("/generated-documents/:docId/download", asyncHandler("PDF konnte nicht heruntergeladen werden", async (req, res) => {
   const user = req.user!;
-  const docId = parseInt(req.params.docId);
-  if (isNaN(docId)) { res.status(400).json({ error: "Ungültige ID" }); return; }
+  const docId = requireIntParam(req.params.docId, res);
+  if (docId === null) return;
 
   const doc = await documentStorage.getGeneratedDocument(docId);
   if (!doc) {
@@ -54,8 +55,8 @@ router.get("/document-requirements/:billingType", asyncHandler("Dokumentenanford
 
 router.get("/:id/documents", asyncHandler("Kundendokumente konnten nicht geladen werden", async (req, res) => {
   const user = req.user!;
-  const customerId = parseInt(req.params.id);
-  if (isNaN(customerId)) { res.status(400).json({ error: "Ungültige Kunden-ID" }); return; }
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
 
   if (!user.isAdmin) {
     const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
@@ -70,9 +71,9 @@ router.get("/:id/documents", asyncHandler("Kundendokumente konnten nicht geladen
 
 router.get("/:id/documents/:documentTypeId/history", asyncHandler("Dokumentenhistorie konnte nicht geladen werden", async (req, res) => {
   const user = req.user!;
-  const customerId = parseInt(req.params.id);
-  const documentTypeId = parseInt(req.params.documentTypeId);
-  if (isNaN(customerId) || isNaN(documentTypeId)) { res.status(400).json({ error: "Ungültige ID" }); return; }
+  const customerId = requireIntParam(req.params.id, res);
+  const documentTypeId = requireIntParam(req.params.documentTypeId, res);
+  if (customerId === null || documentTypeId === null) return;
 
   if (!user.isAdmin) {
     const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
@@ -87,8 +88,8 @@ router.get("/:id/documents/:documentTypeId/history", asyncHandler("Dokumentenhis
 
 router.post("/:id/documents", asyncHandler("Kundendokument konnte nicht hochgeladen werden", async (req, res) => {
   const user = req.user!;
-  const customerId = parseInt(req.params.id);
-  if (isNaN(customerId)) { res.status(400).json({ error: "Ungültige Kunden-ID" }); return; }
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
 
   if (!user.isAdmin) {
     const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
@@ -112,8 +113,8 @@ router.post("/:id/documents", asyncHandler("Kundendokument konnte nicht hochgela
 
 router.get("/:id/document-templates", asyncHandler("Vorlagen konnten nicht geladen werden", async (req, res) => {
   const user = req.user!;
-  const customerId = parseInt(req.params.id);
-  if (isNaN(customerId)) { res.status(400).json({ error: "Ungültige Kunden-ID" }); return; }
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
 
   if (!user.isAdmin) {
     const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
@@ -137,8 +138,8 @@ const renderSchema = z.object({
 
 router.post("/:id/document-templates/render", asyncHandler("Vorlage konnte nicht gerendert werden", async (req, res) => {
   const user = req.user!;
-  const customerId = parseInt(req.params.id);
-  if (isNaN(customerId)) { res.status(400).json({ error: "Ungültige Kunden-ID" }); return; }
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
 
   if (!user.isAdmin) {
     const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
@@ -175,8 +176,8 @@ const generatePdfSchema = z.object({
 
 router.post("/:id/documents/generate-pdf", asyncHandler("PDF konnte nicht erstellt werden", async (req, res) => {
   const user = req.user!;
-  const customerId = parseInt(req.params.id);
-  if (isNaN(customerId)) { res.status(400).json({ error: "Ungültige Kunden-ID" }); return; }
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
 
   if (!user.isAdmin) {
     const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
@@ -238,8 +239,8 @@ router.post("/:id/documents/generate-pdf", asyncHandler("PDF konnte nicht erstel
 
 router.get("/:id/generated-documents", asyncHandler("Generierte Dokumente konnten nicht geladen werden", async (req, res) => {
   const user = req.user!;
-  const customerId = parseInt(req.params.id);
-  if (isNaN(customerId)) { res.status(400).json({ error: "Ungültige Kunden-ID" }); return; }
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
 
   if (!user.isAdmin) {
     const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { asyncHandler } from "../lib/errors";
+import { requireIntParam } from "../lib/params";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { insertTimeEntrySchema, updateTimeEntrySchema } from "@shared/schema";
 import { storage } from "../storage";
@@ -140,9 +141,10 @@ router.get("/", asyncHandler("Zeiteinträge konnten nicht geladen werden", async
  */
 router.get("/vacation-summary/:year", asyncHandler("Urlaubsübersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
   const userId = req.user!.id;
-  const year = parseInt(req.params.year);
+  const year = requireIntParam(req.params.year, res);
+  if (year === null) return;
   
-  if (isNaN(year) || year < 2020 || year > 2100) {
+  if (year < 2020 || year > 2100) {
     return res.status(400).json({ error: "Ungültiges Jahr" });
   }
   
@@ -172,14 +174,15 @@ router.get("/by-date/:date", asyncHandler("Zeiteinträge konnten nicht geladen w
  */
 router.get("/page-data/:year/:month", asyncHandler("Zeitdaten konnten nicht geladen werden", async (req: Request, res: Response) => {
   const userId = req.user!.id;
-  const year = parseInt(req.params.year);
-  const month = parseInt(req.params.month);
+  const year = requireIntParam(req.params.year, res);
+  const month = requireIntParam(req.params.month, res);
+  if (year === null || month === null) return;
   
-  if (isNaN(year) || year < 2020 || year > 2100) {
+  if (year < 2020 || year > 2100) {
     return res.status(400).json({ error: "Ungültiges Jahr" });
   }
   
-  if (isNaN(month) || month < 1 || month > 12) {
+  if (month < 1 || month > 12) {
     return res.status(400).json({ error: "Ungültiger Monat" });
   }
   
@@ -198,14 +201,15 @@ router.get("/page-data/:year/:month", asyncHandler("Zeitdaten konnten nicht gela
  */
 router.get("/overview/:year/:month", asyncHandler("Zeitübersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
   const userId = req.user!.id;
-  const year = parseInt(req.params.year);
-  const month = parseInt(req.params.month);
+  const year = requireIntParam(req.params.year, res);
+  const month = requireIntParam(req.params.month, res);
+  if (year === null || month === null) return;
   
-  if (isNaN(year) || year < 2020 || year > 2100) {
+  if (year < 2020 || year > 2100) {
     return res.status(400).json({ error: "Ungültiges Jahr" });
   }
   
-  if (isNaN(month) || month < 1 || month > 12) {
+  if (month < 1 || month > 12) {
     return res.status(400).json({ error: "Ungültiger Monat" });
   }
   
@@ -258,8 +262,8 @@ router.post("/check-conflicts", asyncHandler("Konfliktprüfung fehlgeschlagen", 
  */
 router.get("/:id", asyncHandler("Zeiteintrag konnte nicht geladen werden", async (req: Request, res: Response) => {
   const userId = req.user!.id;
-  const entryId = parseInt(req.params.id);
-  if (isNaN(entryId)) return res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" });
+  const entryId = requireIntParam(req.params.id, res);
+  if (entryId === null) return;
   
   const entry = await timeTrackingStorage.getTimeEntry(entryId);
   
@@ -455,8 +459,8 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
  */
 router.put("/:id", asyncHandler("Zeiteintrag konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
   const userId = req.user!.id;
-  const entryId = parseInt(req.params.id);
-  if (isNaN(entryId)) return res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" });
+  const entryId = requireIntParam(req.params.id, res);
+  if (entryId === null) return;
   
   const existing = await timeTrackingStorage.getTimeEntry(entryId);
   if (!existing) {
@@ -558,8 +562,8 @@ router.put("/:id", asyncHandler("Zeiteintrag konnte nicht aktualisiert werden", 
  */
 router.delete("/:id", asyncHandler("Zeiteintrag konnte nicht gelöscht werden", async (req: Request, res: Response) => {
   const userId = req.user!.id;
-  const entryId = parseInt(req.params.id);
-  if (isNaN(entryId)) return res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" });
+  const entryId = requireIntParam(req.params.id, res);
+  if (entryId === null) return;
   
   const existing = await timeTrackingStorage.getTimeEntry(entryId);
   if (!existing) {

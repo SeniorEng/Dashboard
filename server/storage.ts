@@ -1145,19 +1145,35 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
+  private companySettingsCache: { data: CompanySettings; expiresAt: number } | null = null;
+  private static COMPANY_SETTINGS_TTL_MS = 5 * 60 * 1000;
+
   async getCompanySettings(): Promise<CompanySettings> {
+    if (this.companySettingsCache && Date.now() < this.companySettingsCache.expiresAt) {
+      return this.companySettingsCache.data;
+    }
     const { companySettings } = await import("@shared/schema");
     const existing = await db.select().from(companySettings).limit(1);
-    if (existing.length > 0) return existing[0];
-    const [created] = await db.insert(companySettings).values({}).returning();
-    return created;
+    const result = existing.length > 0
+      ? existing[0]
+      : (await db.insert(companySettings).values({}).returning())[0];
+    this.companySettingsCache = {
+      data: result,
+      expiresAt: Date.now() + DatabaseStorage.COMPANY_SETTINGS_TTL_MS,
+    };
+    return result;
   }
 
   async updateCompanySettings(data: Partial<CompanySettings>, userId: number): Promise<CompanySettings> {
+    this.companySettingsCache = null;
     const { companySettings } = await import("@shared/schema");
     const existing = await db.select().from(companySettings).limit(1);
     if (existing.length === 0) {
       const [created] = await db.insert(companySettings).values({ ...data, updatedByUserId: userId }).returning();
+      this.companySettingsCache = {
+        data: created,
+        expiresAt: Date.now() + DatabaseStorage.COMPANY_SETTINGS_TTL_MS,
+      };
       return created;
     }
     const { eq } = await import("drizzle-orm");
@@ -1165,6 +1181,10 @@ export class DatabaseStorage implements IStorage {
       .set({ ...data, updatedAt: new Date(), updatedByUserId: userId })
       .where(eq(companySettings.id, existing[0].id))
       .returning();
+    this.companySettingsCache = {
+      data: updated,
+      expiresAt: Date.now() + DatabaseStorage.COMPANY_SETTINGS_TTL_MS,
+    };
     return updated;
   }
 

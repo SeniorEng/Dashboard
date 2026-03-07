@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { storage } from "../../../storage";
 import { customerManagementStorage } from "../../../storage/customer-management";
 import { asyncHandler } from "../../../lib/errors";
+import { requireIntParam } from "../../../lib/params";
 import { z } from "zod";
 import {
   customerContracts,
@@ -50,11 +51,8 @@ const createContractSchema = z.object({
 });
 
 router.post("/customers/:id/contract", asyncHandler("Vertrag konnte nicht angelegt werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const customer = await storage.getCustomer(id);
   if (!customer) {
@@ -94,11 +92,8 @@ router.post("/customers/:id/contract", asyncHandler("Vertrag konnte nicht angele
 }));
 
 router.patch("/customers/:id/contract", asyncHandler("Vertrag konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const customer = await storage.getCustomer(id);
   if (!customer) {
@@ -132,11 +127,8 @@ router.patch("/customers/:id/contract", asyncHandler("Vertrag konnte nicht aktua
 }));
 
 router.patch("/customers/:id/needs-assessment", asyncHandler("Leistungen konnten nicht aktualisiert werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const validatedData = updateNeedsAssessmentSchema.parse(req.body);
   const result = await customerManagementStorage.updateNeedsAssessment(id, validatedData);
@@ -150,11 +142,8 @@ router.patch("/customers/:id/needs-assessment", asyncHandler("Leistungen konnten
 }));
 
 router.get("/customers/:id/conversion-readiness", asyncHandler("Konvertierungsprüfung fehlgeschlagen", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const customer = await storage.getCustomer(id);
   if (!customer) {

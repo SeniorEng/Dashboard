@@ -3,6 +3,7 @@ import { budgetLedgerStorage } from "../storage/budget-ledger";
 import { requireAuth, requireAdmin, requireCustomerAccess } from "../middleware/auth";
 import { storage } from "../storage";
 import { asyncHandler } from "../lib/errors";
+import { requireIntParam } from "../lib/params";
 import { 
   insertBudgetAllocationSchema, 
   insertBudgetPreferencesSchema,
@@ -22,13 +23,15 @@ const checkCustomerAccess = requireCustomerAccess(
 );
 
 router.get("/:customerId/summary", checkCustomerAccess, asyncHandler("Budget-Übersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
   const summary = await budgetLedgerStorage.getBudgetSummary(customerId);
   res.json(summary);
 }));
 
 router.get("/:customerId/allocations", checkCustomerAccess, asyncHandler("Budget-Zuweisungen konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
   const year = req.query.year ? parseInt(req.query.year as string) : undefined;
 
   const allocations = await budgetLedgerStorage.getBudgetAllocations(customerId, year);
@@ -36,7 +39,8 @@ router.get("/:customerId/allocations", checkCustomerAccess, asyncHandler("Budget
 }));
 
 router.get("/:customerId/transactions", checkCustomerAccess, asyncHandler("Budget-Transaktionen konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
   const year = req.query.year ? parseInt(req.query.year as string) : undefined;
   const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
 
@@ -46,14 +50,16 @@ router.get("/:customerId/transactions", checkCustomerAccess, asyncHandler("Budge
 }));
 
 router.get("/:customerId/preferences", checkCustomerAccess, asyncHandler("Budget-Einstellungen konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
 
   const preferences = await budgetLedgerStorage.getBudgetPreferences(customerId);
   res.json(preferences || { customerId, monthlyLimitCents: null, budgetStartDate: null, notes: null });
 }));
 
 router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kostenschätzung konnte nicht berechnet werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
   const date = (req.query.date as string) || todayISO();
 
   const { serviceCatalogStorage } = await import("../storage/service-catalog");
@@ -207,7 +213,8 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
 }));
 
 router.get("/:customerId/overview", checkCustomerAccess, asyncHandler("Budget-Übersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
   const summaries = await budgetLedgerStorage.getAllBudgetSummaries(customerId);
 
   res.json({
@@ -238,11 +245,8 @@ router.get("/:customerId/overview", checkCustomerAccess, asyncHandler("Budget-Ü
 router.use(requireAdmin);
 
 router.get("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
-  if (isNaN(customerId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
   const settings = await budgetLedgerStorage.getBudgetTypeSettings(customerId);
   const defaults: { budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null; yearlyLimitCents: number | null }[] = [
     { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null },
@@ -267,12 +271,9 @@ router.get("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
 }));
 
 router.get("/:customerId/initial-balances/:budgetType", asyncHandler("Startwert-Historie konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
   const budgetType = req.params.budgetType;
-  if (isNaN(customerId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
   const allocations = await budgetLedgerStorage.getInitialBalanceAllocations(customerId, budgetType);
   res.json(allocations);
 }));
@@ -283,12 +284,9 @@ const initialBalanceSchema = z.object({
 });
 
 router.post("/:customerId/initial-balance/:budgetType", requireAdmin, asyncHandler("Startwert konnte nicht gespeichert werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
   const budgetType = req.params.budgetType;
-  if (isNaN(customerId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
 
   const result = initialBalanceSchema.safeParse(req.body);
   if (!result.success) {
@@ -341,12 +339,9 @@ router.post("/:customerId/initial-balance/:budgetType", requireAdmin, asyncHandl
 }));
 
 router.delete("/:customerId/initial-balance/:allocationId", requireAdmin, asyncHandler("Startwert konnte nicht gelöscht werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
-  const allocationId = parseInt(req.params.allocationId);
-  if (isNaN(customerId) || isNaN(allocationId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Parameter" });
-    return;
-  }
+  const customerId = requireIntParam(req.params.customerId, res);
+  const allocationId = requireIntParam(req.params.allocationId, res);
+  if (customerId === null || allocationId === null) return;
 
   const userId = req.user?.id;
   const { db: database } = await import("../lib/db");
@@ -398,11 +393,8 @@ const bulkBudgetTypeSettingsSchema = z.object({
 });
 
 router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen konnten nicht gespeichert werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
-  if (isNaN(customerId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
 
   const result = bulkBudgetTypeSettingsSchema.safeParse(req.body);
   if (!result.success) {
@@ -437,14 +429,8 @@ router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
 }));
 
 router.post("/:customerId/allocations", asyncHandler("Budget-Zuweisung konnte nicht erstellt werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
-  if (isNaN(customerId)) {
-    res.status(400).json({
-      error: "VALIDATION_ERROR",
-      message: "Ungültige Kunden-ID",
-    });
-    return;
-  }
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
 
   const result = insertBudgetAllocationSchema.safeParse({ ...req.body, customerId });
   if (!result.success) {
@@ -469,14 +455,8 @@ const initialBudgetSchema = z.object({
 });
 
 router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nicht erfasst werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
-  if (isNaN(customerId)) {
-    res.status(400).json({
-      error: "VALIDATION_ERROR",
-      message: "Ungültige Kunden-ID",
-    });
-    return;
-  }
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
 
   const result = initialBudgetSchema.safeParse(req.body);
   if (!result.success) {
@@ -551,14 +531,8 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
 }));
 
 router.put("/:customerId/preferences", asyncHandler("Budget-Einstellungen konnten nicht gespeichert werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
-  if (isNaN(customerId)) {
-    res.status(400).json({
-      error: "VALIDATION_ERROR",
-      message: "Ungültige Kunden-ID",
-    });
-    return;
-  }
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
 
   const result = insertBudgetPreferencesSchema.safeParse({ ...req.body, customerId });
   if (!result.success) {
@@ -593,14 +567,8 @@ const manualAdjustmentSchema = z.object({
 });
 
 router.post("/:customerId/manual-adjustment", asyncHandler("Manuelle Korrektur konnte nicht durchgeführt werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
-  if (isNaN(customerId)) {
-    res.status(400).json({
-      error: "VALIDATION_ERROR",
-      message: "Ungültige Kunden-ID",
-    });
-    return;
-  }
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
 
   const result = manualAdjustmentSchema.safeParse(req.body);
   if (!result.success) {
@@ -672,14 +640,8 @@ router.post("/:customerId/manual-adjustment", asyncHandler("Manuelle Korrektur k
 }));
 
 router.post("/transactions/:transactionId/reverse", asyncHandler("Storno konnte nicht durchgeführt werden", async (req: Request, res: Response) => {
-  const transactionId = parseInt(req.params.transactionId);
-  if (isNaN(transactionId)) {
-    res.status(400).json({
-      error: "VALIDATION_ERROR",
-      message: "Ungültige Transaktions-ID",
-    });
-    return;
-  }
+  const transactionId = requireIntParam(req.params.transactionId, res);
+  if (transactionId === null) return;
 
   const userId = req.user?.id;
   const reversal = await budgetLedgerStorage.reverseBudgetTransaction(transactionId, userId);

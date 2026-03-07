@@ -3,6 +3,7 @@ import { storage } from "../storage";
 import { requireAuth, canAccessCustomer } from "../middleware/auth";
 import { insertServiceRecordSchema, signServiceRecordSchema, serviceRecordAppointments, monthlyServiceRecords } from "@shared/schema";
 import { asyncHandler, sendForbidden, sendNotFound } from "../lib/errors";
+import { requireIntParam } from "../lib/params";
 import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
 import { db } from "../lib/db";
@@ -113,10 +114,8 @@ router.get("/check-period", requireAuth, asyncHandler("Periodendaten konnten nic
 }));
 
 router.get("/customer/:customerId", requireAuth, asyncHandler("Leistungsnachweise konnten nicht geladen werden", async (req, res) => {
-  const customerId = parseInt(req.params.customerId);
-  if (isNaN(customerId)) {
-    return res.status(400).json({ message: "Ungültige Kunden-ID" });
-  }
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
   
   const hasAccess = await canAccessCustomer(
     req.user!.id,
@@ -136,10 +135,8 @@ router.get("/customer/:customerId", requireAuth, asyncHandler("Leistungsnachweis
 }));
 
 router.get("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht geladen werden", async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    return res.status(400).json({ message: "Ungültige ID" });
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   
   const record = await storage.getServiceRecord(id);
   if (!record) {
@@ -163,10 +160,8 @@ router.get("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht gel
 }));
 
 router.get("/:id/appointments", requireAuth, asyncHandler("Termine konnten nicht geladen werden", async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    return res.status(400).json({ message: "Ungültige ID" });
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   
   const record = await storage.getServiceRecord(id);
   if (!record) {
@@ -267,10 +262,8 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
 }));
 
 router.post("/:id/sign", requireAuth, asyncHandler("Unterschrift konnte nicht gespeichert werden", async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    return res.status(400).json({ message: "Ungültige ID" });
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   
   const existingRecord = await storage.getServiceRecord(id);
   if (!existingRecord) {
@@ -339,10 +332,8 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
     return sendForbidden(res, "FORBIDDEN", "Nur Admins können Leistungsnachweise löschen.");
   }
 
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    return res.status(400).json({ message: "Ungültige ID" });
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const record = await storage.getServiceRecord(id);
   if (!record) {

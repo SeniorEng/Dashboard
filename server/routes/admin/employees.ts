@@ -19,6 +19,7 @@ import {
   employeeTimeEntries,
 } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
+import { requireIntParam } from "../../lib/params";
 import { auditService } from "../../services/audit";
 import { geocodeEmployee } from "../../services/geocoding";
 import { db } from "../../lib/db";
@@ -46,14 +47,8 @@ router.get("/users", asyncHandler("Benutzer konnten nicht geladen werden", async
 }));
 
 router.get("/users/:id", asyncHandler("Benutzer konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({
-      error: "VALIDATION_ERROR",
-      message: "Ungültige Benutzer-ID",
-    });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const user = await authService.getUser(id);
   if (!user) {
@@ -197,14 +192,8 @@ const updateUserSchema = z.object({
 });
 
 router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({
-      error: "VALIDATION_ERROR",
-      message: "Ungültige Benutzer-ID",
-    });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   if (id === req.user!.id && req.body.isActive === false) {
     res.status(400).json({
@@ -292,14 +281,8 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
 }));
 
 router.post("/users/:id/reset-password", asyncHandler("Passwort konnte nicht zurückgesetzt werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({
-      error: "VALIDATION_ERROR",
-      message: "Ungültige Benutzer-ID",
-    });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const { newPassword } = req.body;
   if (!newPassword || newPassword.length < 8) {
@@ -333,11 +316,8 @@ router.post("/users/:id/reset-password", asyncHandler("Passwort konnte nicht zur
 }));
 
 router.post("/users/:id/resend-welcome", asyncHandler("Willkommens-E-Mail konnte nicht erneut gesendet werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Benutzer-ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const user = await authService.getUser(id);
   if (!user) {
@@ -377,14 +357,8 @@ router.post("/users/:id/resend-welcome", asyncHandler("Willkommens-E-Mail konnte
 }));
 
 router.post("/users/:id/deactivate", asyncHandler("Benutzer konnte nicht deaktiviert werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({
-      error: "VALIDATION_ERROR",
-      message: "Ungültige Benutzer-ID",
-    });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   if (id === req.user!.id) {
     res.status(400).json({
@@ -414,14 +388,8 @@ router.post("/users/:id/deactivate", asyncHandler("Benutzer konnte nicht deaktiv
 }));
 
 router.post("/users/:id/activate", asyncHandler("Benutzer konnte nicht aktiviert werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({
-      error: "VALIDATION_ERROR",
-      message: "Ungültige Benutzer-ID",
-    });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   let success: boolean;
   try {
@@ -454,14 +422,8 @@ router.post("/users/:id/activate", asyncHandler("Benutzer konnte nicht aktiviert
 }));
 
 router.delete("/users/:id", asyncHandler("Benutzer konnte nicht deaktiviert werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({
-      error: "VALIDATION_ERROR",
-      message: "Ungültige Benutzer-ID",
-    });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   if (id === req.user!.id) {
     res.status(400).json({
@@ -490,11 +452,8 @@ router.delete("/users/:id", asyncHandler("Benutzer konnte nicht deaktiviert werd
 }));
 
 router.post("/users/:id/anonymize", asyncHandler("Mitarbeiter konnte nicht anonymisiert werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Benutzer-ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   if (id === req.user!.id) {
     res.status(400).json({ error: "VALIDATION_ERROR", message: "Sie können sich nicht selbst anonymisieren" });

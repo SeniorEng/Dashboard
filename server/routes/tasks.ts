@@ -15,6 +15,7 @@ import { storage } from "../storage";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { todayISO } from "@shared/utils/datetime";
 import { asyncHandler } from "../lib/errors";
+import { requireIntParam } from "../lib/params";
 import { notificationService } from "../services/notification-service";
 
 const router = Router();
@@ -100,10 +101,8 @@ router.get("/month-closing-reminder", requireAuth, asyncHandler("Monatsabschluss
 }));
 
 router.get("/:id", requireAuth, asyncHandler("Aufgabe konnte nicht geladen werden", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) {
-    return res.status(400).json({ error: "Ungültige Aufgaben-ID" });
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const task = await getTaskById(id);
   if (!task) {
@@ -152,10 +151,8 @@ router.post("/", requireAuth, asyncHandler("Aufgabe konnte nicht erstellt werden
 }));
 
 router.patch("/:id", requireAuth, asyncHandler("Aufgabe konnte nicht aktualisiert werden", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) {
-    return res.status(400).json({ error: "Ungültige Aufgaben-ID" });
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const parseResult = updateTaskSchema.safeParse(req.body);
   if (!parseResult.success) {
@@ -184,10 +181,8 @@ router.patch("/:id", requireAuth, asyncHandler("Aufgabe konnte nicht aktualisier
 }));
 
 router.delete("/:id", requireAuth, asyncHandler("Aufgabe konnte nicht gelöscht werden", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) {
-    return res.status(400).json({ error: "Ungültige Aufgaben-ID" });
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const userId = req.user!.id;
   const isAdmin = req.user!.isAdmin;

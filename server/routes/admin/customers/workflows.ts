@@ -3,6 +3,7 @@ import { storage } from "../../../storage";
 import { birthdaysCache } from "../../../services/cache";
 import { auditService } from "../../../services/audit";
 import { asyncHandler } from "../../../lib/errors";
+import { requireIntParam } from "../../../lib/params";
 import { z } from "zod";
 import { todayISO } from "@shared/utils/datetime";
 import {
@@ -23,11 +24,8 @@ const declineErstberatungSchema = z.object({
 });
 
 router.post("/customers/:id/decline-erstberatung", asyncHandler("Erstberatung konnte nicht abgelehnt werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const customer = await storage.getCustomer(id);
   if (!customer) {
@@ -89,11 +87,8 @@ const mergeErstberatungSchema = z.object({
 });
 
 router.post("/customers/:id/merge-erstberatung", asyncHandler("Erstberatung konnte nicht zusammengeführt werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const { targetCustomerId, note } = mergeErstberatungSchema.parse(req.body);
 
@@ -180,11 +175,8 @@ router.post("/customers/:id/merge-erstberatung", asyncHandler("Erstberatung konn
 }));
 
 router.post("/customers/:id/anonymize", asyncHandler("Kunde konnte nicht anonymisiert werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const customer = await storage.getCustomer(id);
   if (!customer) {

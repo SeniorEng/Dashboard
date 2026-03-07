@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { customerManagementStorage } from "../../../storage/customer-management";
 import { asyncHandler } from "../../../lib/errors";
+import { requireIntParam } from "../../../lib/params";
 import {
   insertCustomerInsuranceSchema,
   insertCustomerContactSchema,
@@ -10,22 +11,16 @@ import {
 const router = Router();
 
 router.get("/customers/:id/insurance", asyncHandler("Versicherungshistorie konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   
   const history = await customerManagementStorage.getCustomerInsuranceHistory(id);
   res.json(history);
 }));
 
 router.post("/customers/:id/insurance", asyncHandler("Versicherung konnte nicht hinzugefügt werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.id);
-  if (isNaN(customerId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
   
   const data = insertCustomerInsuranceSchema.parse({ ...req.body, customerId });
   const insurance = await customerManagementStorage.addCustomerInsurance(data, req.user!.id);
@@ -33,22 +28,16 @@ router.post("/customers/:id/insurance", asyncHandler("Versicherung konnte nicht 
 }));
 
 router.get("/customers/:id/contacts", asyncHandler("Kontakte konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   
   const contacts = await customerManagementStorage.getCustomerContacts(id);
   res.json(contacts);
 }));
 
 router.post("/customers/:id/contacts", asyncHandler("Kontakt konnte nicht hinzugefügt werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.id);
-  if (isNaN(customerId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
   
   const validatedData = insertCustomerContactSchema.parse({ ...req.body, customerId });
   const contact = await customerManagementStorage.addCustomerContact(validatedData);
@@ -60,11 +49,8 @@ const updateCustomerContactSchema = insertCustomerContactSchema
   .partial();
 
 router.patch("/customers/:customerId/contacts/:contactId", asyncHandler("Kontakt konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
-  const contactId = parseInt(req.params.contactId);
-  if (isNaN(contactId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kontakt-ID" });
-    return;
-  }
+  const contactId = requireIntParam(req.params.contactId, res);
+  if (contactId === null) return;
   
   const result = updateCustomerContactSchema.safeParse(req.body);
   if (!result.success) {
@@ -86,11 +72,8 @@ router.patch("/customers/:customerId/contacts/:contactId", asyncHandler("Kontakt
 }));
 
 router.delete("/customers/:customerId/contacts/:contactId", asyncHandler("Kontakt konnte nicht gelöscht werden", async (req: Request, res: Response) => {
-  const contactId = parseInt(req.params.contactId);
-  if (isNaN(contactId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kontakt-ID" });
-    return;
-  }
+  const contactId = requireIntParam(req.params.contactId, res);
+  if (contactId === null) return;
   
   const deleted = await customerManagementStorage.deleteCustomerContact(contactId);
   if (!deleted) {
@@ -102,22 +85,16 @@ router.delete("/customers/:customerId/contacts/:contactId", asyncHandler("Kontak
 }));
 
 router.get("/customers/:id/care-level", asyncHandler("Pflegegrad-Historie konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   
   const history = await customerManagementStorage.getCustomerCareLevelHistory(id);
   res.json(history);
 }));
 
 router.post("/customers/:id/care-level", asyncHandler("Pflegegrad konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.id);
-  if (isNaN(customerId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
   
   const validatedData = insertCareLevelHistorySchema.parse({ ...req.body, customerId });
   const careLevel = await customerManagementStorage.addCareLevelHistory(validatedData, req.user!.id);

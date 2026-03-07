@@ -25,6 +25,7 @@ import {
   sendServerError
 } from "../lib/errors";
 import { requireAuth } from "../middleware/auth";
+import { requireIntParam } from "../lib/params";
 import { notificationService } from "../services/notification-service";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
@@ -150,8 +151,8 @@ router.get("/batch-services", asyncHandler("Fehler beim Laden der Batch-Services
 
 router.get("/:id/services", asyncHandler("Fehler beim Laden der Termin-Services", async (req, res) => {
   const user = req.user!;
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) return sendBadRequest(res, "Ungültige Termin-ID");
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   
   const appointment = await storage.getAppointment(id);
   if (!appointment) return sendNotFound(res, "Termin nicht gefunden");
@@ -164,10 +165,8 @@ router.get("/:id/services", asyncHandler("Fehler beim Laden der Termin-Services"
 
 router.get("/:id", asyncHandler(ErrorMessages.fetchAppointmentFailed, async (req, res) => {
   const user = req.user!;
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   
   const appointment = await storage.getAppointmentWithCustomer(id);
   
@@ -382,10 +381,8 @@ const updateErstberatungSchema = z.object({
 });
 
 router.patch("/:id/erstberatung", asyncHandler("Erstberatung konnte nicht aktualisiert werden", async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const existingAppointment = await storage.getAppointment(id);
   if (!existingAppointment) {
@@ -483,10 +480,8 @@ router.patch("/:id/erstberatung", asyncHandler("Erstberatung konnte nicht aktual
 }));
 
 router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   
   const existingAppointment = await storage.getAppointment(id);
   if (!existingAppointment) {
@@ -589,10 +584,8 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
 }));
 
 router.post("/:id/start", asyncHandler("Fehler beim Starten des Besuchs", async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   
   const appointment = await storage.getAppointment(id);
   if (!appointment) {
@@ -626,10 +619,8 @@ router.post("/:id/start", asyncHandler("Fehler beim Starten des Besuchs", async 
 }));
 
 router.post("/:id/end", asyncHandler("Fehler beim Beenden des Besuchs", async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   
   const appointment = await storage.getAppointment(id);
   if (!appointment) {
@@ -670,10 +661,8 @@ router.post("/:id/end", asyncHandler("Fehler beim Beenden des Besuchs", async (r
 }));
 
 router.get("/:id/travel-suggestion", asyncHandler("Fehler beim Laden der Fahrvorschläge", async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   
   const appointment = await storage.getAppointmentWithCustomer(id);
   if (!appointment) {
@@ -728,10 +717,8 @@ router.get("/:id/travel-suggestion", asyncHandler("Fehler beim Laden der Fahrvor
 }));
 
 router.get("/:id/route-calculation", asyncHandler("Fehler bei der Routenberechnung", async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const originType = req.query.originType as string;
   const fromAppointmentId = req.query.fromAppointmentId ? parseInt(req.query.fromAppointmentId as string) : null;
@@ -778,10 +765,8 @@ router.get("/:id/route-calculation", asyncHandler("Fehler bei der Routenberechnu
 }));
 
 router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins", async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const appointment = await storage.getAppointment(id);
   if (!appointment) {
@@ -851,10 +836,8 @@ router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins
 router.use(appointmentDocumentationRouter);
 
 router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    return sendBadRequest(res, ErrorMessages.invalidAppointmentId);
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   
   const appointment = await storage.getAppointment(id);
   if (!appointment) {

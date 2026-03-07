@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prospectStorage } from "../../storage/prospects";
 import { insertProspectSchema, updateProspectSchema, insertProspectNoteSchema, PROSPECT_STATUSES } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
+import { requireIntParam } from "../../lib/params";
 import { parseLeadEmail } from "../../services/email-parser";
 
 const router = Router();
@@ -22,11 +23,8 @@ router.get("/prospects", asyncHandler("Interessenten konnten nicht geladen werde
 }));
 
 router.get("/prospects/:id", asyncHandler("Interessent konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "Ungültige ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const prospect = await prospectStorage.getById(id);
   if (!prospect) {
@@ -68,11 +66,8 @@ router.post("/prospects", asyncHandler("Interessent konnte nicht erstellt werden
 }));
 
 router.patch("/prospects/:id", asyncHandler("Interessent konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "Ungültige ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const parsed = updateProspectSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -106,11 +101,8 @@ router.patch("/prospects/:id", asyncHandler("Interessent konnte nicht aktualisie
 }));
 
 router.post("/prospects/:id/notes", asyncHandler("Notiz konnte nicht erstellt werden", async (req: Request, res: Response) => {
-  const prospectId = parseInt(req.params.id);
-  if (isNaN(prospectId)) {
-    res.status(400).json({ error: "Ungültige ID" });
-    return;
-  }
+  const prospectId = requireIntParam(req.params.id, res);
+  if (prospectId === null) return;
 
   const prospect = await prospectStorage.getById(prospectId);
   if (!prospect) {
@@ -134,11 +126,8 @@ router.post("/prospects/:id/notes", asyncHandler("Notiz konnte nicht erstellt we
 }));
 
 router.post("/prospects/:id/reparse", asyncHandler("E-Mail konnte nicht neu geparst werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "Ungültige ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const prospect = await prospectStorage.getById(id);
   if (!prospect) {
@@ -186,11 +175,8 @@ router.post("/prospects/:id/reparse", asyncHandler("E-Mail konnte nicht neu gepa
 }));
 
 router.delete("/prospects/:id", asyncHandler("Interessent konnte nicht gelöscht werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "Ungültige ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const deleted = await prospectStorage.softDelete(id);
   if (!deleted) {

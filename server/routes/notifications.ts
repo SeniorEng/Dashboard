@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../lib/errors";
+import { requireIntParam } from "../lib/params";
 import {
   getNotifications,
   getUnreadCount,
@@ -24,10 +25,8 @@ router.get("/unread-count", requireAuth, asyncHandler("Ungelesene Anzahl konnte 
 }));
 
 router.patch("/:id/read", requireAuth, asyncHandler("Benachrichtigung konnte nicht als gelesen markiert werden", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) {
-    return res.status(400).json({ error: "Ungültige ID" });
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   const userId = req.user!.id;
   await markAsRead(id, userId);
   res.json({ success: true });

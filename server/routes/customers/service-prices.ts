@@ -2,6 +2,7 @@ import { Router } from "express";
 import { insertCustomerServicePriceSchema } from "@shared/schema";
 import { requireAdmin } from "../../middleware/auth";
 import { asyncHandler } from "../../lib/errors";
+import { requireIntParam } from "../../lib/params";
 import { todayISO, addDays } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
 import { sql } from "drizzle-orm";
@@ -9,8 +10,8 @@ import { sql } from "drizzle-orm";
 const router = Router();
 
 router.get("/:id/service-prices", requireAdmin, asyncHandler("Kundenpreise konnten nicht geladen werden", async (req, res) => {
-  const customerId = parseInt(req.params.id);
-  if (isNaN(customerId)) { res.status(400).json({ error: "Ungültige Kunden-ID" }); return; }
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
   const dateParam = req.query.date as string | undefined;
   const targetDate = dateParam || todayISO();
 
@@ -30,8 +31,8 @@ router.get("/:id/service-prices", requireAdmin, asyncHandler("Kundenpreise konnt
 }));
 
 router.get("/:id/service-prices/all", requireAdmin, asyncHandler("Preishistorie konnte nicht geladen werden", async (req, res) => {
-  const customerId = parseInt(req.params.id);
-  if (isNaN(customerId)) { res.status(400).json({ error: "Ungültige Kunden-ID" }); return; }
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
   const result = await db.execute(sql`
     SELECT csp.id, csp.customer_id AS "customerId", csp.service_id AS "serviceId",
            csp.price_cents AS "priceCents", csp.valid_from AS "validFrom", csp.valid_to AS "validTo",
@@ -46,8 +47,8 @@ router.get("/:id/service-prices/all", requireAdmin, asyncHandler("Preishistorie 
 }));
 
 router.get("/:id/service-prices/future", requireAdmin, asyncHandler("Zukünftige Preise konnten nicht geladen werden", async (req, res) => {
-  const customerId = parseInt(req.params.id);
-  if (isNaN(customerId)) { res.status(400).json({ error: "Ungültige Kunden-ID" }); return; }
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
   const today = todayISO();
   const result = await db.execute(sql`
     SELECT csp.id, csp.customer_id AS "customerId", csp.service_id AS "serviceId",
@@ -64,7 +65,8 @@ router.get("/:id/service-prices/future", requireAdmin, asyncHandler("Zukünftige
 }));
 
 router.post("/:id/service-prices", requireAdmin, asyncHandler("Kundenpreis konnte nicht gespeichert werden", async (req, res) => {
-  const customerId = parseInt(req.params.id);
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
   const parsed = insertCustomerServicePriceSchema.safeParse({ ...req.body, customerId });
   if (!parsed.success) {
     res.status(400).json({ error: "VALIDATION_ERROR", message: parsed.error.message });
@@ -126,8 +128,10 @@ router.post("/:id/service-prices", requireAdmin, asyncHandler("Kundenpreis konnt
 }));
 
 router.delete("/:id/service-prices/:priceId", requireAdmin, asyncHandler("Kundenpreis konnte nicht gelöscht werden", async (req, res) => {
-  const customerId = parseInt(req.params.id);
-  const priceId = parseInt(req.params.priceId);
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
+  const priceId = requireIntParam(req.params.priceId, res);
+  if (priceId === null) return;
   const today = todayISO();
 
   await db.transaction(async (tx) => {

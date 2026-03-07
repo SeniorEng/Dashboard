@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { customerManagementStorage } from "../../storage/customer-management";
 import { insertInsuranceProviderSchema } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
+import { requireIntParam } from "../../lib/params";
 
 const router = Router();
 
@@ -26,11 +27,8 @@ router.post("/insurance-providers", asyncHandler("Pflegekasse konnte nicht erste
 }));
 
 router.get("/insurance-providers/:id", asyncHandler("Pflegekasse konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   const provider = await customerManagementStorage.getInsuranceProvider(id);
   if (!provider) {
     res.status(404).json({ error: "NOT_FOUND", message: "Pflegekasse nicht gefunden" });
@@ -40,21 +38,15 @@ router.get("/insurance-providers/:id", asyncHandler("Pflegekasse konnte nicht ge
 }));
 
 router.get("/insurance-providers/:id/active-customers", asyncHandler("Kundenzuweisungen konnten nicht geprüft werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   const count = await customerManagementStorage.getActiveCustomerCountForProvider(id);
   res.json({ count });
 }));
 
 router.put("/insurance-providers/:id", asyncHandler("Pflegekasse konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   
   const validatedData = insertInsuranceProviderSchema.partial().parse(req.body);
   

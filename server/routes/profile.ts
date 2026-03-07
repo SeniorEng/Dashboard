@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../lib/errors";
+import { requireIntParam } from "../lib/params";
 import { authService } from "../services/auth";
 import { documentStorage } from "../storage/documents";
 import { usersCache, birthdaysCache } from "../services/cache";
@@ -93,11 +94,8 @@ router.get("/documents", asyncHandler("Dokumente konnten nicht geladen werden", 
 }));
 
 router.get("/documents/:documentTypeId/history", asyncHandler("Dokumentenhistorie konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const documentTypeId = parseInt(req.params.documentTypeId);
-  if (isNaN(documentTypeId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Dokumententyp-ID" });
-    return;
-  }
+  const documentTypeId = requireIntParam(req.params.documentTypeId, res);
+  if (documentTypeId === null) return;
   const docs = await documentStorage.getDocumentHistory(req.user!.id, documentTypeId);
   res.json(docs);
 }));
@@ -144,11 +142,8 @@ router.get("/proofs/pending-count", asyncHandler("Anzahl ausstehender Nachweise 
 }));
 
 router.patch("/proofs/:proofId/upload", asyncHandler("Nachweis konnte nicht hochgeladen werden", async (req: Request, res: Response) => {
-  const proofId = parseInt(req.params.proofId);
-  if (isNaN(proofId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" });
-    return;
-  }
+  const proofId = requireIntParam(req.params.proofId, res);
+  if (proofId === null) return;
 
   const proof = await documentStorage.getProofById(proofId);
   if (!proof || proof.employeeId !== req.user!.id) {

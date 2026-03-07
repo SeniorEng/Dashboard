@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { documentStorage } from "../../storage/documents";
 import { insertDocumentTypeSchema, updateDocumentTypeSchema, insertEmployeeDocumentSchema, insertCustomerDocumentSchema, insertDocumentTemplateSchema, updateDocumentTemplateSchema, insertDocumentTypeTriggerSchema } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
+import { requireIntParam } from "../../lib/params";
 import { renderTemplateForCustomer, renderTemplateFromFormData, wrapInPrintableHtml, getPlaceholderCatalog, type WizardFormData } from "../../services/template-engine";
 import { generateAndStorePdf, getDocumentPdfBuffer } from "../../services/document-pdf";
 import { evaluateTriggersForCustomer, evaluateTriggersForEmployee } from "../../services/document-trigger-engine";
@@ -28,8 +29,8 @@ router.post("/document-types", asyncHandler("Dokumententyp konnte nicht erstellt
 }));
 
 router.patch("/document-types/:id", asyncHandler("Dokumententyp konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" }); return; }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const result = updateDocumentTypeSchema.safeParse(req.body);
   if (!result.success) {
@@ -42,8 +43,8 @@ router.patch("/document-types/:id", asyncHandler("Dokumententyp konnte nicht akt
 }));
 
 router.get("/document-types/:id/triggers", asyncHandler("Trigger konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" }); return; }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   const triggers = await documentStorage.getTriggersForDocumentType(id);
   res.json(triggers);
 }));
@@ -53,8 +54,8 @@ const upsertTriggersSchema = z.object({
 });
 
 router.put("/document-types/:id/triggers", asyncHandler("Trigger konnten nicht gespeichert werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" }); return; }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const docType = await documentStorage.getDocumentType(id);
   if (!docType) { res.status(404).json({ error: "NOT_FOUND", message: "Dokumententyp nicht gefunden" }); return; }
@@ -82,8 +83,8 @@ router.get("/document-requirements/customer/:billingType", asyncHandler("Dokumen
 }));
 
 router.get("/document-requirements/employee/:employeeId", asyncHandler("Dokumentenanforderungen konnten nicht ermittelt werden", async (req: Request, res: Response) => {
-  const employeeId = parseInt(req.params.employeeId);
-  if (isNaN(employeeId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Mitarbeiter-ID" }); return; }
+  const employeeId = requireIntParam(req.params.employeeId, res);
+  if (employeeId === null) return;
 
   const { db: dbInstance } = await import("../../lib/db");
   const { users, userRoles } = await import("@shared/schema");
@@ -104,8 +105,8 @@ router.get("/document-requirements/employee/:employeeId", asyncHandler("Dokument
 }));
 
 router.get("/employees/:employeeId/documents", asyncHandler("Dokumente konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const employeeId = parseInt(req.params.employeeId);
-  if (isNaN(employeeId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Mitarbeiter-ID" }); return; }
+  const employeeId = requireIntParam(req.params.employeeId, res);
+  if (employeeId === null) return;
   const grouped = req.query.grouped === "true";
   if (grouped) {
     const docs = await documentStorage.getGroupedDocuments(employeeId);
@@ -117,16 +118,16 @@ router.get("/employees/:employeeId/documents", asyncHandler("Dokumente konnten n
 }));
 
 router.get("/employees/:employeeId/documents/:documentTypeId/history", asyncHandler("Dokumentenhistorie konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const employeeId = parseInt(req.params.employeeId);
-  const documentTypeId = parseInt(req.params.documentTypeId);
-  if (isNaN(employeeId) || isNaN(documentTypeId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" }); return; }
+  const employeeId = requireIntParam(req.params.employeeId, res);
+  const documentTypeId = requireIntParam(req.params.documentTypeId, res);
+  if (employeeId === null || documentTypeId === null) return;
   const docs = await documentStorage.getDocumentHistory(employeeId, documentTypeId);
   res.json(docs);
 }));
 
 router.post("/employees/:employeeId/documents", asyncHandler("Dokument konnte nicht hochgeladen werden", async (req: Request, res: Response) => {
-  const employeeId = parseInt(req.params.employeeId);
-  if (isNaN(employeeId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Mitarbeiter-ID" }); return; }
+  const employeeId = requireIntParam(req.params.employeeId, res);
+  if (employeeId === null) return;
 
   const data = { ...req.body, employeeId };
   const result = insertEmployeeDocumentSchema.safeParse(data);
@@ -152,15 +153,15 @@ router.delete("/employees/:employeeId/documents/batch/:batchId", asyncHandler("B
 }));
 
 router.delete("/employees/:employeeId/documents/:documentId", asyncHandler("Dokument konnte nicht gelöscht werden", async (req: Request, res: Response) => {
-  const documentId = parseInt(req.params.documentId);
-  if (isNaN(documentId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Dokument-ID" }); return; }
+  const documentId = requireIntParam(req.params.documentId, res);
+  if (documentId === null) return;
   await documentStorage.softDeleteDocument(documentId);
   res.json({ success: true });
 }));
 
 router.get("/customers/:customerId/documents", asyncHandler("Kundendokumente konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
-  if (isNaN(customerId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" }); return; }
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
   const grouped = req.query.grouped === "true";
   if (grouped) {
     const docs = await documentStorage.getGroupedCustomerDocuments(customerId);
@@ -172,16 +173,16 @@ router.get("/customers/:customerId/documents", asyncHandler("Kundendokumente kon
 }));
 
 router.get("/customers/:customerId/documents/:documentTypeId/history", asyncHandler("Dokumentenhistorie konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
-  const documentTypeId = parseInt(req.params.documentTypeId);
-  if (isNaN(customerId) || isNaN(documentTypeId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" }); return; }
+  const customerId = requireIntParam(req.params.customerId, res);
+  const documentTypeId = requireIntParam(req.params.documentTypeId, res);
+  if (customerId === null || documentTypeId === null) return;
   const docs = await documentStorage.getCustomerDocumentHistory(customerId, documentTypeId);
   res.json(docs);
 }));
 
 router.post("/customers/:customerId/documents", asyncHandler("Kundendokument konnte nicht hochgeladen werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
-  if (isNaN(customerId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" }); return; }
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
 
   const data = { ...req.body, customerId };
   const result = insertCustomerDocumentSchema.safeParse(data);
@@ -207,8 +208,8 @@ router.delete("/customers/:customerId/documents/batch/:batchId", asyncHandler("K
 }));
 
 router.delete("/customers/:customerId/documents/:documentId", asyncHandler("Kundendokument konnte nicht gelöscht werden", async (req: Request, res: Response) => {
-  const documentId = parseInt(req.params.documentId);
-  if (isNaN(documentId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Dokument-ID" }); return; }
+  const documentId = requireIntParam(req.params.documentId, res);
+  if (documentId === null) return;
   await documentStorage.softDeleteCustomerDocument(documentId);
   res.json({ success: true });
 }));
@@ -315,8 +316,8 @@ router.post("/document-templates/render-preview", asyncHandler("Vorschau konnte 
 }));
 
 router.get("/document-templates/:id", asyncHandler("Dokumentenvorlage konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" }); return; }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   const template = await documentStorage.getDocumentTemplate(id);
   if (!template) { res.status(404).json({ error: "NOT_FOUND", message: "Vorlage nicht gefunden" }); return; }
   res.json(template);
@@ -333,8 +334,8 @@ router.post("/document-templates", asyncHandler("Dokumentenvorlage konnte nicht 
 }));
 
 router.patch("/document-templates/:id", asyncHandler("Dokumentenvorlage konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" }); return; }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const result = updateDocumentTemplateSchema.safeParse(req.body);
   if (!result.success) {
@@ -347,15 +348,15 @@ router.patch("/document-templates/:id", asyncHandler("Dokumentenvorlage konnte n
 }));
 
 router.get("/customers/:customerId/generated-documents", asyncHandler("Generierte Dokumente konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
-  if (isNaN(customerId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" }); return; }
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
   const docs = await documentStorage.getGeneratedDocuments(customerId);
   res.json(docs);
 }));
 
 router.get("/employees/:employeeId/generated-documents", asyncHandler("Generierte Dokumente konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const employeeId = parseInt(req.params.employeeId);
-  if (isNaN(employeeId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Mitarbeiter-ID" }); return; }
+  const employeeId = requireIntParam(req.params.employeeId, res);
+  if (employeeId === null) return;
   const docs = await documentStorage.getGeneratedDocumentsByEmployee(employeeId);
   res.json(docs);
 }));
@@ -440,8 +441,8 @@ router.post("/documents/generate-pdf", asyncHandler("PDF konnte nicht erstellt w
 }));
 
 router.get("/generated-documents/:id/download", asyncHandler("PDF konnte nicht heruntergeladen werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" }); return; }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const doc = await documentStorage.getGeneratedDocument(id);
   if (!doc) {
@@ -465,8 +466,8 @@ router.get("/document-templates/by-context", asyncHandler("Vorlagen konnten nich
 }));
 
 router.get("/employee/:employeeId/proofs", asyncHandler("Nachweise konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const employeeId = parseInt(req.params.employeeId);
-  if (isNaN(employeeId)) { res.status(400).json({ error: "Ungültige ID" }); return; }
+  const employeeId = requireIntParam(req.params.employeeId, res);
+  if (employeeId === null) return;
   const proofs = await documentStorage.getEmployeeProofs(employeeId);
   res.json(proofs);
 }));
@@ -477,8 +478,8 @@ router.get("/proofs/pending-review", asyncHandler("Ausstehende Prüfungen konnte
 }));
 
 router.patch("/proofs/:proofId/upload", asyncHandler("Nachweis konnte nicht hochgeladen werden", async (req: Request, res: Response) => {
-  const proofId = parseInt(req.params.proofId);
-  if (isNaN(proofId)) { res.status(400).json({ error: "Ungültige ID" }); return; }
+  const proofId = requireIntParam(req.params.proofId, res);
+  if (proofId === null) return;
 
   const proof = await documentStorage.getProofById(proofId);
   if (!proof) { res.status(404).json({ error: "Nachweis nicht gefunden" }); return; }
@@ -497,8 +498,8 @@ router.patch("/proofs/:proofId/upload", asyncHandler("Nachweis konnte nicht hoch
 }));
 
 router.patch("/proofs/:proofId/review", asyncHandler("Prüfung konnte nicht gespeichert werden", async (req: Request, res: Response) => {
-  const proofId = parseInt(req.params.proofId);
-  if (isNaN(proofId)) { res.status(400).json({ error: "Ungültige ID" }); return; }
+  const proofId = requireIntParam(req.params.proofId, res);
+  if (proofId === null) return;
 
   const existing = await documentStorage.getProofById(proofId);
   if (!existing) { res.status(404).json({ error: "Nachweis nicht gefunden" }); return; }

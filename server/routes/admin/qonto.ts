@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireSuperAdmin } from "../../middleware/auth";
 import { asyncHandler, badRequest, notFound } from "../../lib/errors";
+import { requireIntParam } from "../../lib/params";
 import { qontoService } from "../../services/qonto";
 import { qontoStorage } from "../../storage/qonto";
 import { parseAvisCsv } from "../../services/avis-parser";
@@ -46,8 +47,8 @@ const matchSchema = z.object({
 });
 
 router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) throw badRequest("Ungültige Transaktions-ID");
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const tx = await qontoStorage.getTransaction(id);
   if (!tx) throw notFound("Transaktion nicht gefunden");
@@ -63,8 +64,8 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
 }));
 
 router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht aufgehoben werden", async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) throw badRequest("Ungültige Transaktions-ID");
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const tx = await qontoStorage.getTransaction(id);
   if (!tx) throw notFound("Transaktion nicht gefunden");
@@ -256,16 +257,16 @@ router.get("/payment-advices", asyncHandler("Zahlungsavise konnten nicht geladen
 }));
 
 router.get("/payment-advices/:id", asyncHandler("Zahlungsavis konnte nicht geladen werden", async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) throw badRequest("Ungültige ID");
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   const advice = await qontoStorage.getPaymentAdviceById(id);
   if (!advice) throw notFound("Zahlungsavis nicht gefunden");
   res.json(advice);
 }));
 
 router.delete("/payment-advices/:id", asyncHandler("Zahlungsavis konnte nicht gelöscht werden", async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) throw badRequest("Ungültige ID");
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   const deleted = await qontoStorage.deletePaymentAdvice(id);
   if (!deleted) throw notFound("Zahlungsavis nicht gefunden");
   res.json({ success: true });

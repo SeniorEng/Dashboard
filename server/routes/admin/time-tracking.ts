@@ -6,6 +6,7 @@ import {
   services as servicesTable,
 } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
+import { requireIntParam } from "../../lib/params";
 import { db } from "../../lib/db";
 import { eq, inArray } from "drizzle-orm";
 
@@ -83,13 +84,10 @@ router.get("/employee-appointments", asyncHandler("Termine konnten nicht geladen
 }));
 
 router.get("/time-entries/vacation-summary/:userId/:year", asyncHandler("Urlaubsübersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const userId = parseInt(req.params.userId);
-  const year = parseInt(req.params.year);
-  
-  if (isNaN(userId) || isNaN(year)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Parameter" });
-    return;
-  }
+  const userId = requireIntParam(req.params.userId, res);
+  if (userId === null) return;
+  const year = requireIntParam(req.params.year, res);
+  if (year === null) return;
   
   const summary = await timeTrackingStorage.getVacationSummary(userId, year);
   res.json(summary);

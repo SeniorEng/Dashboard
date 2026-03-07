@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { asyncHandler, badRequest } from "../lib/errors";
+import { requireIntParam } from "../lib/params";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { closeMonthSchema, reopenMonthSchema } from "@shared/schema";
 import { auditService } from "../services/audit";
@@ -13,10 +14,11 @@ const router = Router();
 router.use(requireAuth);
 
 router.get("/month-closings/admin/:year/:month", requireAdmin, asyncHandler("Monatsabschlüsse konnten nicht geladen werden", async (req, res) => {
-  const year = parseInt(req.params.year);
-  const month = parseInt(req.params.month);
+  const year = requireIntParam(req.params.year, res);
+  const month = requireIntParam(req.params.month, res);
+  if (year === null || month === null) return;
 
-  if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
+  if (month < 1 || month > 12) {
     throw badRequest("Ungültiges Jahr oder Monat");
   }
 
@@ -26,10 +28,11 @@ router.get("/month-closings/admin/:year/:month", requireAdmin, asyncHandler("Mon
 
 router.get("/month-closing/:year/:month", asyncHandler("Monatsabschluss konnte nicht geladen werden", async (req, res) => {
   const userId = req.user!.id;
-  const year = parseInt(req.params.year);
-  const month = parseInt(req.params.month);
+  const year = requireIntParam(req.params.year, res);
+  const month = requireIntParam(req.params.month, res);
+  if (year === null || month === null) return;
 
-  if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
+  if (month < 1 || month > 12) {
     throw badRequest("Ungültiges Jahr oder Monat");
   }
 
@@ -39,10 +42,11 @@ router.get("/month-closing/:year/:month", asyncHandler("Monatsabschluss konnte n
 
 router.get("/month-closing/:year/:month/readiness", asyncHandler("Bereitschaftsprüfung fehlgeschlagen", async (req, res) => {
   const userId = req.user!.id;
-  const year = parseInt(req.params.year);
-  const month = parseInt(req.params.month);
+  const year = requireIntParam(req.params.year, res);
+  const month = requireIntParam(req.params.month, res);
+  if (year === null || month === null) return;
 
-  if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
+  if (month < 1 || month > 12) {
     throw badRequest("Ungültiges Jahr oder Monat");
   }
 
@@ -52,10 +56,11 @@ router.get("/month-closing/:year/:month/readiness", asyncHandler("Bereitschaftsp
 
 router.get("/month-closing/:year/:month/preview", asyncHandler("Vorschau konnte nicht erstellt werden", async (req, res) => {
   const userId = req.user!.id;
-  const year = parseInt(req.params.year);
-  const month = parseInt(req.params.month);
+  const year = requireIntParam(req.params.year, res);
+  const month = requireIntParam(req.params.month, res);
+  if (year === null || month === null) return;
 
-  if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
+  if (month < 1 || month > 12) {
     throw badRequest("Ungültiges Jahr oder Monat");
   }
 

@@ -7,6 +7,7 @@ import { Router, Request, Response } from "express";
 import { customerPricingStorage } from "../../storage/customer-pricing";
 import { insertCustomerPricingSchema } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
+import { requireIntParam } from "../../lib/params";
 import { todayISO } from "@shared/utils/datetime";
 
 const router = Router();
@@ -16,33 +17,24 @@ const router = Router();
 // ============================================
 
 router.get("/customers/:customerId/pricing", asyncHandler("Preishistorie konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
-  if (isNaN(customerId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
 
   const history = await customerPricingStorage.getPricingHistory(customerId);
   res.json(history);
 }));
 
 router.get("/customers/:customerId/pricing/current", asyncHandler("Aktuelle Preise konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
-  if (isNaN(customerId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
 
   const current = await customerPricingStorage.getCurrentPricing(customerId);
   res.json(current);
 }));
 
 router.post("/customers/:customerId/pricing", asyncHandler("Preise konnten nicht hinzugefügt werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
-  if (isNaN(customerId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
 
   const data = { ...req.body, customerId };
   const validatedData = insertCustomerPricingSchema.parse(data);

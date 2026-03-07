@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { requireAdmin, requireAdminPermission, requireSuperAdmin } from "../middleware/auth";
 import { adminPermissionStorage } from "../storage/admin-permissions";
 import { asyncHandler } from "../lib/errors";
+import { requireIntParam } from "../lib/params";
 import { ADMIN_PERMISSION_KEYS, type AdminPermissionKey } from "@shared/schema";
 import { z } from "zod";
 import employeesRouter from "./admin/employees";
@@ -32,11 +33,8 @@ router.get("/my-permissions", asyncHandler("Berechtigungen konnten nicht geladen
 }));
 
 router.get("/users/:id/permissions", requireSuperAdmin, asyncHandler("Berechtigungen konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const userId = parseInt(req.params.id);
-  if (isNaN(userId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Benutzer-ID" });
-    return;
-  }
+  const userId = requireIntParam(req.params.id, res);
+  if (userId === null) return;
   const permissions = await adminPermissionStorage.getPermissions(userId);
   res.json({ permissions });
 }));
@@ -46,11 +44,8 @@ const setPermissionsSchema = z.object({
 });
 
 router.put("/users/:id/permissions", requireSuperAdmin, asyncHandler("Berechtigungen konnten nicht gespeichert werden", async (req: Request, res: Response) => {
-  const userId = parseInt(req.params.id);
-  if (isNaN(userId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Benutzer-ID" });
-    return;
-  }
+  const userId = requireIntParam(req.params.id, res);
+  if (userId === null) return;
   const data = setPermissionsSchema.parse(req.body);
   await adminPermissionStorage.setPermissions(userId, data.permissions as AdminPermissionKey[]);
   res.json({ success: true, permissions: data.permissions });

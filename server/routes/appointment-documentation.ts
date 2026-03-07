@@ -6,6 +6,7 @@ import { appointmentService } from "../services/appointments";
 import { auditService } from "../services/audit";
 import { computeDataHash } from "../services/signature-integrity";
 import { asyncHandler, badRequest, notFound, forbidden, AppError, ErrorMessages } from "../lib/errors";
+import { requireIntParam } from "../lib/params";
 import { requireAuth } from "../middleware/auth";
 import { checkCustomerAccess } from "./appointments";
 import { timeTrackingStorage } from "../storage/time-tracking";
@@ -16,10 +17,8 @@ const router = Router();
 router.use(requireAuth);
 
 router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentation", async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    throw badRequest(ErrorMessages.invalidAppointmentId);
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const appointment = await storage.getAppointment(id);
   if (!appointment) {

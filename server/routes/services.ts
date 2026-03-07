@@ -4,6 +4,7 @@ import { insertServiceSchema, updateServiceSchema } from "@shared/schema";
 import { requireAdmin } from "../middleware/auth";
 import { requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../lib/errors";
+import { requireIntParam } from "../lib/params";
 import { fromError } from "zod-validation-error";
 
 const router = Router();
@@ -29,8 +30,8 @@ router.get("/all", requireAdmin, asyncHandler("Dienstleistungen konnten nicht ge
 }));
 
 router.get("/:id", requireAuth, asyncHandler("Dienstleistung konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) return res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" });
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   const service = await serviceCatalogStorage.getServiceById(id);
   if (!service) {
     return res.status(404).json({ error: "NOT_FOUND", message: "Dienstleistung nicht gefunden" });
@@ -50,8 +51,8 @@ router.post("/", requireAdmin, asyncHandler("Dienstleistung konnte nicht erstell
 }));
 
 router.put("/:id", requireAdmin, asyncHandler("Dienstleistung konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) return res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" });
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   const result = updateServiceSchema.safeParse(req.body);
   if (!result.success) {
     return res.status(400).json({ error: "VALIDATION_ERROR", message: fromError(result.error).message });

@@ -3,6 +3,7 @@ import { insertCustomerContactSchema } from "@shared/schema";
 import { storage } from "../../storage";
 import { customerManagementStorage } from "../../storage/customer-management";
 import { asyncHandler } from "../../lib/errors";
+import { requireIntParam } from "../../lib/params";
 import { auditService } from "../../services/audit";
 
 const router = Router();
@@ -13,8 +14,8 @@ const employeeContactUpdateSchema = insertCustomerContactSchema
 
 router.get("/:id/contacts", asyncHandler("Kontakte konnten nicht geladen werden", async (req, res) => {
   const user = req.user!;
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" }); return; }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   if (!user.isAdmin) {
     const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
@@ -27,8 +28,8 @@ router.get("/:id/contacts", asyncHandler("Kontakte konnten nicht geladen werden"
 
 router.post("/:id/contacts", asyncHandler("Kontakt konnte nicht hinzugefügt werden", async (req, res) => {
   const user = req.user!;
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" }); return; }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   if (!user.isAdmin) {
     const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
@@ -49,9 +50,10 @@ router.post("/:id/contacts", asyncHandler("Kontakt konnte nicht hinzugefügt wer
 
 router.patch("/:id/contacts/:contactId", asyncHandler("Kontakt konnte nicht aktualisiert werden", async (req, res) => {
   const user = req.user!;
-  const customerId = parseInt(req.params.id);
-  const contactId = parseInt(req.params.contactId);
-  if (isNaN(customerId) || isNaN(contactId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" }); return; }
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
+  const contactId = requireIntParam(req.params.contactId, res);
+  if (contactId === null) return;
 
   if (!user.isAdmin) {
     const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
@@ -78,9 +80,10 @@ router.patch("/:id/contacts/:contactId", asyncHandler("Kontakt konnte nicht aktu
 
 router.delete("/:id/contacts/:contactId", asyncHandler("Kontakt konnte nicht gelöscht werden", async (req, res) => {
   const user = req.user!;
-  const customerId = parseInt(req.params.id);
-  const contactId = parseInt(req.params.contactId);
-  if (isNaN(customerId) || isNaN(contactId)) { res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" }); return; }
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
+  const contactId = requireIntParam(req.params.contactId, res);
+  if (contactId === null) return;
 
   if (!user.isAdmin) {
     const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);

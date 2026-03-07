@@ -5,6 +5,7 @@ import { authService } from "../../../services/auth";
 import { birthdaysCache } from "../../../services/cache";
 import { notificationService } from "../../../services/notification-service";
 import { asyncHandler } from "../../../lib/errors";
+import { requireIntParam } from "../../../lib/params";
 import { z } from "zod";
 import { formatDateISO, isChild } from "@shared/utils/datetime";
 import {
@@ -25,14 +26,8 @@ const assignCustomerSchema = z.object({
 });
 
 router.patch("/customers/:id/assign", asyncHandler("Zuordnung konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({
-      error: "VALIDATION_ERROR",
-      message: "Ungültige Kunden-ID",
-    });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const result = assignCustomerSchema.safeParse(req.body);
   if (!result.success) {
@@ -325,11 +320,8 @@ async function matchEmployees(criteria: MatchCriteria, excludeEmployeeIds: numbe
 }
 
 router.get("/customers/:id/match-employees", asyncHandler("Matching konnte nicht durchgeführt werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const customer = await db
     .select()
