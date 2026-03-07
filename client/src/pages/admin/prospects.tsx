@@ -60,6 +60,8 @@ import { iconSize, componentStyles } from "@/design-system";
 import { useProspects, useProspectStats, useProspect, useCreateProspect, useUpdateProspect, useAddProspectNote, useReparseProspect, useDeleteProspect } from "@/features/prospects";
 import { PROSPECT_STATUS_LABELS, PROSPECT_STATUSES, PROSPECT_NOTE_TYPE_LABELS, type ProspectStatus, type ProspectNoteType } from "@shared/schema";
 import { formatDateForDisplay, todayISO } from "@shared/utils/datetime";
+import { formatPhoneForDisplay } from "@shared/utils/phone";
+import { formatAddress } from "@shared/utils/format";
 
 const STATUS_COLORS: Record<ProspectStatus, string> = {
   neu: "bg-blue-100 text-blue-800",
@@ -376,7 +378,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                   <CardContent className="space-y-2 text-sm">
                     {prospect.telefon && (
                       <a href={`tel:${prospect.telefon}`} className="flex items-center gap-2 text-primary" data-testid="link-prospect-phone">
-                        <Phone className="h-3.5 w-3.5" /> {prospect.telefon}
+                        <Phone className="h-3.5 w-3.5" /> {formatPhoneForDisplay(prospect.telefon)}
                       </a>
                     )}
                     {prospect.email && (
@@ -387,9 +389,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                     {(prospect.strasse || prospect.stadt) && (
                       <div className="flex items-center gap-2 text-muted-foreground">
                         <MapPin className="h-3.5 w-3.5" />
-                        {[prospect.strasse, prospect.nr].filter(Boolean).join(" ")}
-                        {prospect.plz || prospect.stadt ? ", " : ""}
-                        {[prospect.plz, prospect.stadt].filter(Boolean).join(" ")}
+                        {formatAddress(prospect)}
                       </div>
                     )}
                     {prospect.pflegegrad && (
@@ -716,7 +716,7 @@ export default function AdminProspects() {
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                       {prospect.telefon && (
                         <span className="flex items-center gap-1">
-                          <Phone className="h-3 w-3" /> {prospect.telefon}
+                          <Phone className="h-3 w-3" /> {formatPhoneForDisplay(prospect.telefon)}
                         </span>
                       )}
                       {prospect.stadt && (

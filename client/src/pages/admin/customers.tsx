@@ -36,6 +36,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { PFLEGEGRAD_SELECT_OPTIONS, BILLING_TYPE_SELECT_OPTIONS } from "@shared/domain/customers";
+import { formatPhoneForDisplay } from "@shared/utils/phone";
 
 export default function AdminCustomers() {
   const [, setLocation] = useLocation();
@@ -381,7 +382,7 @@ export default function AdminCustomers() {
                         {customer.telefon && (
                           <div className="flex items-center gap-1 text-sm text-gray-600">
                             <Phone className={iconSize.xs} />
-                            <span>{customer.telefon}</span>
+                            <span>{formatPhoneForDisplay(customer.telefon)}</span>
                           </div>
                         )}
                     </div>
