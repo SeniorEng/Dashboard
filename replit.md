@@ -19,7 +19,15 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Date/Time Handling**: German local time, no UTC conversion.
 - **API Calls**: Central API client (`@/lib/api/client.ts`) for all HTTP requests, including CSRF protection, with `unwrapResult()` for data extraction. Direct `fetch()` calls are forbidden.
 - **Feedback**: German toast notifications on success and error for all `useMutation` hooks.
-- **Phone Number Handling**: `libphonenumber-js/min` for German numbers in E.164 format.
+- **Phone Number Handling** (zentral in `@shared/utils/phone`):
+  - **Speicherung**: Immer E.164 (`+4917632238795`) via `normalizePhone()`.
+  - **Anzeige**: Immer `formatPhoneForDisplay()` verwenden — zeigt deutsches Nationalformat (z.B. `0176 32238795`) oder internationales Format für Nicht-DE-Nummern. Niemals rohe E.164-Werte im UI anzeigen.
+  - **Eingabefelder**: `formatPhoneAsYouType()` für Live-Formatierung während der Eingabe.
+  - **Validierung**: `validateGermanPhone()` vor dem Speichern aufrufen.
+  - **tel:-Links**: `href="tel:${rawE164}"` mit dem rohen E.164-Wert, aber Anzeigetext immer via `formatPhoneForDisplay()`.
+- **Adressformatierung** (zentral in `@shared/utils/format`):
+  - **Anzeige**: Immer `formatAddress()` verwenden. Akzeptiert Objekte mit `strasse`, `nr`/`hausnummer`, `plz`, `stadt` und fällt auf das `address`-Feld zurück. Ausgabe: `"Strasse Nr, PLZ Stadt"`.
+  - Niemals Adresskomponenten manuell im JSX zusammensetzen.
 
 ### Backend
 - **Framework**: Express.js with TypeScript.
