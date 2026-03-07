@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useLocation } from "wouter";
+import { useState, useEffect } from "react";
+import { Link, useLocation, useSearch } from "wouter";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -616,10 +616,18 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
 }
 
 export default function AdminProspects() {
+  const searchString = useSearch();
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [showCreateSheet, setShowCreateSheet] = useState(false);
   const [selectedProspectId, setSelectedProspectId] = useState<number | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchString);
+    if (params.get("create") === "true") {
+      setShowCreateSheet(true);
+    }
+  }, []);
 
   const { data: stats } = useProspectStats();
   const { data: prospects, isLoading } = useProspects({
