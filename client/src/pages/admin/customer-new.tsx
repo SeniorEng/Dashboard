@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
-import { Link, useLocation } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Layout } from "@/components/layout";
@@ -67,6 +67,9 @@ function clearDraft() {
 
 export default function AdminCustomerNew() {
   const [, setLocation] = useLocation();
+  const searchString = useSearch();
+  const searchParams = new URLSearchParams(searchString);
+  const isErstberatung = searchParams.get("status") === "erstberatung";
   const { toast } = useToast();
   const [currentStep, setCurrentStep] = useState(0);
 
@@ -372,6 +375,7 @@ export default function AdminCustomerNew() {
       contacts: contacts.length > 0 ? contacts : undefined,
       budgets: isPflegekasse ? budgets : undefined,
       contract,
+      ...(isErstberatung ? { status: "erstberatung" } : {}),
     };
 
     const warnings: string[] = [];
@@ -458,10 +462,11 @@ export default function AdminCustomerNew() {
 
         }
 
+        const label = isErstberatung ? "Interessent" : "Kunde";
         if (warnings.length > 0) {
-          toast({ title: "Kunde erstellt mit Hinweisen", description: warnings.join("; ") });
+          toast({ title: `${label} erstellt mit Hinweisen`, description: warnings.join("; ") });
         } else {
-          toast({ title: "Kunde erfolgreich erstellt" });
+          toast({ title: `${label} erfolgreich erstellt` });
         }
         setLocation(`/admin/customers/${customer.id}`);
       },
@@ -780,7 +785,7 @@ export default function AdminCustomerNew() {
                 <ArrowLeft className={iconSize.md} />
               </Button>
             </Link>
-            <h1 className={componentStyles.pageTitle}>Neuen Kunden anlegen</h1>
+            <h1 className={componentStyles.pageTitle}>{isErstberatung ? "Neuen Interessenten anlegen" : "Neuen Kunden anlegen"}</h1>
           </div>
 
           <div className="mb-6">
@@ -843,7 +848,7 @@ export default function AdminCustomerNew() {
                       </>
                     ) : (
                       <>
-                        Kunde erstellen
+                        {isErstberatung ? "Interessent erstellen" : "Kunde erstellen"}
                         <Check className={`${iconSize.sm} ml-2`} />
                       </>
                     )}

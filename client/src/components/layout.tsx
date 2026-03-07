@@ -248,9 +248,13 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
                       <CalendarPlus className="mr-2 h-4 w-4 text-teal-600" />
                       + Termin
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => navigate("/admin/customers/new")} data-testid="menu-quick-customer">
+                    <DropdownMenuItem onClick={() => navigate("/admin/customers/new?status=erstberatung")} data-testid="menu-quick-interessent">
                       <UserPlus className="mr-2 h-4 w-4 text-teal-600" />
                       + Interessent
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate("/admin/customers/new")} data-testid="menu-quick-customer">
+                      <UserPlus className="mr-2 h-4 w-4 text-teal-600" />
+                      + Kunde
                     </DropdownMenuItem>
                   </>
                 )}
