@@ -120,7 +120,8 @@ export default function AdminCustomerNew() {
   const uploadedDocumentsRef = useRef<WizardUploadedDoc[]>([]);
   const signingLocationRef = useRef<string | null>(null);
   const [draftDialog, setDraftDialog] = useState<{ timestamp: string } | null>(null);
-  const [duplicateWarning, setDuplicateWarning] = useState<{ duplicates: Array<{ id: number; vorname: string; nachname: string; geburtsdatum: string | null; stadt: string | null; strasse: string | null; nr: string | null; status: string | null }>; pendingPayload: any } | null>(null);
+  const [duplicateWarning, setDuplicateWarning] = useState<{ duplicates: Array<{ id: number; vorname: string; nachname: string; geburtsdatum: string | null; stadt: string | null; strasse: string | null; nr: string | null; status: string | null }> } | null>(null);
+  const duplicateCheckedRef = useRef(false);
   const createdRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftRestoringRef = useRef(false);
@@ -275,7 +276,7 @@ export default function AdminCustomerNew() {
     });
   }, []);
 
-  const handleCreate = async () => {
+  const handleCreate = () => {
     const today = todayISO();
     
     const phoneValidationErrors: string[] = [];
@@ -386,25 +387,6 @@ export default function AdminCustomerNew() {
       contract,
     };
 
-    try {
-      const params = new URLSearchParams({
-        vorname: payload.vorname,
-        nachname: payload.nachname,
-      });
-      if (payload.geburtsdatum) params.set("geburtsdatum", payload.geburtsdatum);
-      const dupResult = await api.get<{ duplicates: Array<{ id: number; vorname: string; nachname: string; geburtsdatum: string | null; stadt: string | null; strasse: string | null; nr: string | null; status: string | null }> }>(`/admin/customers/check-duplicate?${params.toString()}`);
-      if (dupResult.duplicates && dupResult.duplicates.length > 0) {
-        setDuplicateWarning({ duplicates: dupResult.duplicates, pendingPayload: payload });
-        return;
-      }
-    } catch (dupError) {
-      console.warn("Duplikatprüfung fehlgeschlagen:", dupError);
-    }
-
-    submitCustomer(payload);
-  };
-
-  const submitCustomer = (payload: any) => {
     const warnings: string[] = [];
     createMutation.mutate(payload, {
       onSuccess: async (customer) => {
@@ -618,7 +600,18 @@ export default function AdminCustomerNew() {
     return getStepErrors(stepId).length === 0;
   };
 
-  const handleNext = () => {
+  const [duplicateChecking, setDuplicateChecking] = useState(false);
+
+  const prevNameRef = useRef({ vorname: "", nachname: "", geburtsdatum: "" });
+  useEffect(() => {
+    const cur = { vorname: formData.vorname.trim(), nachname: formData.nachname.trim(), geburtsdatum: formData.geburtsdatum };
+    if (cur.vorname !== prevNameRef.current.vorname || cur.nachname !== prevNameRef.current.nachname || cur.geburtsdatum !== prevNameRef.current.geburtsdatum) {
+      duplicateCheckedRef.current = false;
+    }
+    prevNameRef.current = cur;
+  }, [formData.vorname, formData.nachname, formData.geburtsdatum]);
+
+  const handleNext = async () => {
     if (currentStepId === "contacts") {
       const emptyContacts = formData.contacts.filter(c => !c.vorname.trim() && !c.nachname.trim());
       if (emptyContacts.length > 0) {
@@ -637,16 +630,40 @@ export default function AdminCustomerNew() {
       }
     }
     const errors = getStepErrors(currentStepId);
-    if (errors.length === 0) {
-      if (currentStep < steps.length - 1) {
-        goToStep(currentStep + 1);
-      }
-    } else {
+    if (errors.length > 0) {
       toast({
         title: "Bitte korrigieren",
         description: errors.join(" · "),
         variant: "destructive",
       });
+      return;
+    }
+
+    if (currentStepId === "personal" && !duplicateCheckedRef.current) {
+      const vorname = formData.vorname.trim();
+      const nachname = formData.nachname.trim();
+      if (vorname && nachname) {
+        try {
+          setDuplicateChecking(true);
+          const params = new URLSearchParams({ vorname, nachname });
+          if (formData.geburtsdatum) params.set("geburtsdatum", formData.geburtsdatum);
+          const dupResult = await api.get<{ duplicates: Array<{ id: number; vorname: string; nachname: string; geburtsdatum: string | null; stadt: string | null; strasse: string | null; nr: string | null; status: string | null }> }>(`/admin/customers/check-duplicate?${params.toString()}`);
+          if (dupResult.duplicates && dupResult.duplicates.length > 0) {
+            setDuplicateWarning({ duplicates: dupResult.duplicates });
+            setDuplicateChecking(false);
+            return;
+          }
+        } catch (dupError) {
+          console.warn("Duplikatprüfung fehlgeschlagen:", dupError);
+        } finally {
+          setDuplicateChecking(false);
+        }
+        duplicateCheckedRef.current = true;
+      }
+    }
+
+    if (currentStep < steps.length - 1) {
+      goToStep(currentStep + 1);
     }
   };
 
@@ -838,13 +855,15 @@ export default function AdminCustomerNew() {
                 </AlertDialogCancel>
                 <AlertDialogAction
                   onClick={() => {
-                    const payload = duplicateWarning?.pendingPayload;
+                    duplicateCheckedRef.current = true;
                     setDuplicateWarning(null);
-                    if (payload) submitCustomer(payload);
+                    if (currentStep < steps.length - 1) {
+                      goToStep(currentStep + 1);
+                    }
                   }}
                   data-testid="button-confirm-duplicate"
                 >
-                  Trotzdem anlegen
+                  Trotzdem fortfahren
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -928,10 +947,20 @@ export default function AdminCustomerNew() {
                   <Button
                     className="bg-teal-600 hover:bg-teal-700"
                     onClick={handleNext}
+                    disabled={duplicateChecking}
                     data-testid="button-step-next"
                   >
-                    Weiter
-                    <ChevronRight className={`${iconSize.sm} ml-2`} />
+                    {duplicateChecking ? (
+                      <>
+                        Prüfe...
+                        <Loader2 className={`${iconSize.sm} ml-2 animate-spin`} />
+                      </>
+                    ) : (
+                      <>
+                        Weiter
+                        <ChevronRight className={`${iconSize.sm} ml-2`} />
+                      </>
+                    )}
                   </Button>
                 )}
               </div>
