@@ -48,8 +48,8 @@ export const insertTaskSchema = z.object({
 });
 
 export const updateTaskSchema = z.object({
-  title: z.string().min(1).max(200).optional(),
-  description: z.string().max(2000).optional().nullable(),
+  title: z.string().min(1, "Titel ist erforderlich").max(200, "Maximal 200 Zeichen").optional(),
+  description: z.string().max(2000, "Maximal 2000 Zeichen").optional().nullable(),
   dueDate: z.string().optional().nullable(),
   priority: z.enum(TASK_PRIORITIES).optional(),
   status: z.enum(TASK_STATUSES).optional(),

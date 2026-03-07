@@ -101,7 +101,7 @@ export const insertCustomerInsuranceSchema = z.object({
   versichertennummer: versichertennummerSchema,
   validFrom: z.string(), // Date string
   validTo: z.string().optional().nullable(),
-  notes: z.string().max(500).optional().nullable(),
+  notes: z.string().max(500, "Maximal 500 Zeichen").optional().nullable(),
 });
 
 export type CustomerInsuranceHistory = typeof customerInsuranceHistory.$inferSelect;

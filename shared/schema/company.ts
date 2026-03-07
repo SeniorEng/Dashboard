@@ -95,7 +95,7 @@ export const updateCompanySettingsSchema = z.object({
   epostEkp: z.string().optional().nullable(),
   epostPassword: z.string().optional().nullable(),
   epostSecret: z.string().optional().nullable(),
-  minijobEarningsLimitCents: z.number().int().min(0).optional(),
+  minijobEarningsLimitCents: z.number().int().min(0, "Betrag darf nicht negativ sein").optional(),
   epostTestMode: z.boolean().optional(),
   qontoLogin: z.string().optional().nullable(),
   qontoSecretKey: z.string().optional().nullable(),

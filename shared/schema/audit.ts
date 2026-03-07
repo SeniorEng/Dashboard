@@ -85,8 +85,8 @@ export const auditLogFilterSchema = z.object({
   action: z.enum(AUDIT_ACTIONS).optional(),
   from: z.string().optional(),
   to: z.string().optional(),
-  limit: z.number().min(1).max(200).default(50),
-  offset: z.number().min(0).default(0),
+  limit: z.number().min(1, "Limit muss mindestens 1 sein").max(200, "Limit darf maximal 200 sein").default(50),
+  offset: z.number().min(0, "Offset darf nicht negativ sein").default(0),
 });
 
 export type AuditLogFilter = z.infer<typeof auditLogFilterSchema>;
