@@ -444,10 +444,11 @@ export default function AdminCustomerNew() {
 
           for (const bt of budgetTypes) {
             try {
+              const carryover = bt.type === "entlastungsbetrag_45b" ? (carryoverAmount || 0) : 0;
               await api.post(`/budgets/${customer.id}/initial-budget`, {
                 budgetType: bt.type,
                 currentYearAmountCents: bt.cents,
-                carryoverAmountCents: 0,
+                carryoverAmountCents: carryover,
                 budgetStartDate: budgetStart,
               });
             } catch (budgetErr) {

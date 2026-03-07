@@ -21,7 +21,7 @@ import { asyncHandler } from "../../lib/errors";
 import { auditService } from "../../services/audit";
 import { geocodeEmployee } from "../../services/geocoding";
 import { db } from "../../lib/db";
-import { eq, and, ne, or, isNull, inArray, gte, lte, sql, asc } from "drizzle-orm";
+import { eq, and, ne, or, isNull, inArray, sql, asc } from "drizzle-orm";
 import { z } from "zod";
 import { sendEmail, buildWelcomeEmailHtml } from "../../services/email-service";
 import { resolveLogoToDataUrl } from "../../services/logo-resolver";
@@ -305,6 +305,13 @@ router.post("/users/:id/reset-password", asyncHandler("Passwort konnte nicht zur
     res.status(400).json({
       error: "VALIDATION_ERROR",
       message: "Passwort muss mindestens 8 Zeichen haben",
+    });
+    return;
+  }
+  if (!/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+    res.status(400).json({
+      error: "VALIDATION_ERROR",
+      message: "Passwort muss mindestens einen Großbuchstaben, einen Kleinbuchstaben und eine Ziffer enthalten",
     });
     return;
   }

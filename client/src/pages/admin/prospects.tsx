@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link, useLocation, useSearch } from "wouter";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -629,11 +629,18 @@ export default function AdminProspects() {
     }
   }, []);
 
-  const { data: stats } = useProspectStats();
-  const { data: prospects, isLoading } = useProspects({
+  const queryParams = useMemo(() => ({
     status: statusFilter === "all" ? undefined : statusFilter,
     search: searchQuery || undefined,
-  });
+  }), [statusFilter, searchQuery]);
+
+  const { data: stats } = useProspectStats();
+  const { data: prospects, isLoading } = useProspects(queryParams);
+
+  const handleOpenCreate = useCallback(() => setShowCreateSheet(true), []);
+  const handleCloseCreate = useCallback(() => setShowCreateSheet(false), []);
+  const handleSelectProspect = useCallback((id: number) => setSelectedProspectId(id), []);
+  const handleCloseDetail = useCallback(() => setSelectedProspectId(null), []);
 
   return (
     <Layout variant="admin">
@@ -647,7 +654,7 @@ export default function AdminProspects() {
           <h1 className={componentStyles.pageTitle}>Interessenten</h1>
           <p className="text-sm text-muted-foreground">Lead-Pipeline & Kontaktverwaltung</p>
         </div>
-        <Button size="sm" onClick={() => setShowCreateSheet(true)} data-testid="button-new-prospect">
+        <Button size="sm" onClick={handleOpenCreate} data-testid="button-new-prospect">
           <UserPlus className="h-4 w-4 mr-1" /> Neu
         </Button>
       </div>
@@ -687,8 +694,11 @@ export default function AdminProspects() {
           {prospects.map((prospect) => (
             <Card
               key={prospect.id}
-              className="cursor-pointer hover:shadow-md transition-shadow"
-              onClick={() => setSelectedProspectId(prospect.id)}
+              className="cursor-pointer hover:shadow-md transition-shadow focus-visible:ring-2 focus-visible:ring-primary"
+              onClick={() => handleSelectProspect(prospect.id)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleSelectProspect(prospect.id); } }}
+              role="button"
+              tabIndex={0}
               data-testid={`card-prospect-${prospect.id}`}
             >
               <CardContent className="p-3">
@@ -741,11 +751,11 @@ export default function AdminProspects() {
         </div>
       )}
 
-      <CreateProspectSheet open={showCreateSheet} onClose={() => setShowCreateSheet(false)} />
+      <CreateProspectSheet open={showCreateSheet} onClose={handleCloseCreate} />
       <ProspectDetailSheet
         prospectId={selectedProspectId}
         open={!!selectedProspectId}
-        onClose={() => setSelectedProspectId(null)}
+        onClose={handleCloseDetail}
       />
     </Layout>
   );

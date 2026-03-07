@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import crypto from "crypto";
 import { z } from "zod";
 import { prospectStorage } from "../storage/prospects";
 import { parseLeadEmail } from "../services/email-parser";
@@ -19,11 +20,16 @@ router.post("/email-lead", asyncHandler("Webhook-Verarbeitung fehlgeschlagen", a
   const secret = secretHeader ? String(req.headers[secretHeader]).trim() : undefined;
   const expectedSecret = process.env.EMAIL_WEBHOOK_SECRET?.trim();
 
-  if (!expectedSecret || secret !== expectedSecret) {
+  const secretBuf = secret ? Buffer.from(secret) : Buffer.alloc(0);
+  const expectedBuf = expectedSecret ? Buffer.from(expectedSecret) : Buffer.alloc(0);
+  const secretsMatch = expectedSecret && secret && secretBuf.length === expectedBuf.length
+    ? crypto.timingSafeEqual(secretBuf, expectedBuf)
+    : false;
+  if (!secretsMatch) {
     console.log("[webhook] Auth failed. Header key found:", secretHeader || "NONE",
       "| Secret length:", secret?.length ?? 0,
       "| Expected length:", expectedSecret?.length ?? 0,
-      "| Match:", secret === expectedSecret);
+      "| Match:", secretsMatch);
     res.status(401).json({ error: "Ungültiger Webhook-Schlüssel" });
     return;
   }

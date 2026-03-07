@@ -2,15 +2,6 @@ import type { CompanySettings } from "@shared/schema";
 import { formatDateForDisplay, todayISO } from "@shared/utils/datetime";
 import { generatePdfFromHtml } from "./pdf-generator";
 
-export const COVER_LETTER_PLACEHOLDERS = {
-  "{{kundenname}}": "Vollständiger Kundenname",
-  "{{vorname}}": "Vorname des Kunden",
-  "{{nachname}}": "Nachname des Kunden",
-  "{{firmenname}}": "Name Ihres Unternehmens",
-  "{{datum}}": "Heutiges Datum",
-  "{{dokumentenliste}}": "Liste der beigefügten Dokumente",
-} as const;
-
 const DEFAULT_EMAIL_SUBJECT = "Ihre Vertragsunterlagen — {{firmenname}}";
 
 const DEFAULT_COVER_LETTER_TEXT = `Sehr geehrte/r {{kundenname}},

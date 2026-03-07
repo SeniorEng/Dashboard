@@ -297,7 +297,7 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
 
         {/* Desktop Navigation */}
         {isAuthenticated && user && (
-          <nav className="hidden md:block border-t border-border/30 bg-white/80" data-testid="nav-desktop">
+          <nav className="hidden md:block border-t border-border/30 bg-white/80" aria-label="Hauptnavigation" data-testid="nav-desktop">
             <div className="container mx-auto px-4">
               <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
                 {isAdmin && (

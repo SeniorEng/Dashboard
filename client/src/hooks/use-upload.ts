@@ -87,7 +87,7 @@ export function useUpload(options: UseUploadOptions = {}) {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to upload file to storage");
+        throw new Error("Datei konnte nicht hochgeladen werden");
       }
     },
     []

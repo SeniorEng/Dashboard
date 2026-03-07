@@ -33,7 +33,6 @@ import {
   User2,
   MapPin,
   Phone,
-  FileText,
   AlertCircle,
 } from "lucide-react";
 import { PFLEGEGRAD_SELECT_OPTIONS, BILLING_TYPE_SELECT_OPTIONS } from "@shared/domain/customers";
