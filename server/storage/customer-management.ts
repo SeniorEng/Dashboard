@@ -76,6 +76,7 @@ export interface CustomerListItem {
   primaryEmployee: { id: number; displayName: string } | null;
   hasActiveContract: boolean;
   hasBetreuer: boolean;
+  hasBackupEmployee: boolean;
   createdAt: Date;
 }
 
@@ -228,6 +229,7 @@ export class CustomerManagementStorage {
         billingType: customers.billingType,
         createdAt: customers.createdAt,
         primaryEmployeeId: customers.primaryEmployeeId,
+        backupEmployeeId: customers.backupEmployeeId,
         primaryEmployeeName: users.displayName,
         hasActiveContract: activeContractSubquery.hasContract,
         hasBetreuer: betreuerSubquery.hasBetreuer,
@@ -293,6 +295,7 @@ export class CustomerManagementStorage {
         : null,
       hasActiveContract: r.hasActiveContract === true,
       hasBetreuer: r.hasBetreuer === true,
+      hasBackupEmployee: r.backupEmployeeId != null,
       createdAt: r.createdAt,
     }));
 
