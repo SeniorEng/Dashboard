@@ -61,3 +61,4 @@ integrations = ["javascript_object_storage:2.0.0"]
 [userenv.development]
 
 [userenv.shared]
+SUPER_ADMIN_EMAIL = "alrikdegenkolb@seniorenengel-alltagsbegleitung.de"

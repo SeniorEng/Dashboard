@@ -193,13 +193,17 @@ process.on("uncaughtException", (error) => {
   if (reminderScheduler.interval) intervals.push(reminderScheduler.interval);
 
   try {
-    const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || "alrikdegenkolb@seniorenengel-alltagsbegleitung.de";
-    const promoteResult = await db.execute(sqlBuilder`
-      UPDATE users SET is_super_admin = true 
-      WHERE email = ${superAdminEmail} AND is_admin = true AND is_super_admin = false
-    `);
-    if (promoteResult.rowCount && promoteResult.rowCount > 0) {
-      log(`Superadmin-Promotion: ${superAdminEmail}`);
+    const superAdminEmail = process.env.SUPER_ADMIN_EMAIL;
+    if (!superAdminEmail) {
+      log("SUPER_ADMIN_EMAIL nicht gesetzt, Superadmin-Promotion übersprungen", "startup");
+    } else {
+      const promoteResult = await db.execute(sqlBuilder`
+        UPDATE users SET is_super_admin = true 
+        WHERE email = ${superAdminEmail} AND is_admin = true AND is_super_admin = false
+      `);
+      if (promoteResult.rowCount && promoteResult.rowCount > 0) {
+        log(`Superadmin-Promotion: ${superAdminEmail}`);
+      }
     }
   } catch (e) {
     console.error("Fehler bei Superadmin-Promotion:", e);

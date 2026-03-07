@@ -1,7 +1,8 @@
 import { db } from "../lib/db";
 import { companySettings, whatsappMessageLog, type InsertWhatsAppMessageLog, type CompanySettings } from "@shared/schema";
 
-const META_API_BASE = "https://graph.facebook.com/v21.0";
+const META_API_VERSION = "v21.0";
+const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`;
 
 interface TemplateComponent {
   type: "body" | "button";
