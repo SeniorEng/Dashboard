@@ -303,10 +303,20 @@ export default function AdminCustomerNew() {
       return;
     }
     
-    const insurance = formData.insuranceProviderId && formData.versichertennummer.trim() 
+    const versNr = formData.versichertennummer.trim();
+    if (formData.insuranceProviderId && versNr && !/^[A-Z]\d{9}$/.test(versNr)) {
+      toast({
+        title: "Ungültige Versichertennummer",
+        description: "Format: 1 Buchstabe + 9 Ziffern (z.B. A123456789)",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const insurance = formData.insuranceProviderId && versNr
       ? {
           providerId: parseInt(formData.insuranceProviderId),
-          versichertennummer: formData.versichertennummer.trim(),
+          versichertennummer: versNr,
           validFrom: today,
         } 
       : undefined;

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { storage } from "../storage";
-import { insertCustomerSchema, insertCustomerContactSchema } from "@shared/schema";
+import { insertCustomerSchema, insertCustomerContactSchema, versichertennummerSchema } from "@shared/schema";
 import { requireAuth, requireAdmin, requireRoles } from "../middleware/auth";
 import { birthdaysCache, customerIdsCache } from "../services/cache";
 import { documentStorage } from "../storage/documents";
@@ -484,7 +484,7 @@ const convertCustomerSchema = z.object({
   documentDeliveryMethod: z.enum(["email", "post"]).optional(),
   insurance: z.object({
     providerId: z.number(),
-    versichertennummer: z.string(),
+    versichertennummer: versichertennummerSchema,
     validFrom: z.string(),
   }).optional(),
   contacts: z.array(z.object({

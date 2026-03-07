@@ -14,6 +14,7 @@ import {
   insertCustomerContactSchema,
   insertCareLevelHistorySchema,
   insertCustomerBudgetSchema,
+  versichertennummerSchema,
   customers,
   users,
   userRoles,
@@ -268,7 +269,7 @@ const simpleCreateCustomerSchema = z.object({
   documentDeliveryMethod: z.enum(["email", "post"]).optional(),
   insurance: z.object({
     providerId: z.number(),
-    versichertennummer: z.string(),
+    versichertennummer: versichertennummerSchema,
     validFrom: z.string(),
   }).optional(),
   contacts: z.array(z.object({
