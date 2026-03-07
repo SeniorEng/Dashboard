@@ -7,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useInsuranceProviders, useCreateCustomer } from "@/features/customers";
 import { api } from "@/lib/api";
 import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
-import { todayISO } from "@shared/utils/datetime";
+import { todayISO, parseLocalDate } from "@shared/utils/datetime";
 import {
   ArrowLeft,
   Loader2,
@@ -540,7 +540,7 @@ export default function AdminCustomerNew() {
         const prevYear = curYear - 1;
         let eligibleMonths = 12;
         if (pgSeit) {
-          const pgStart = new Date(pgSeit);
+          const pgStart = parseLocalDate(pgSeit);
           const pgStartYear = pgStart.getFullYear();
           if (pgStartYear > prevYear) {
             eligibleMonths = 0;

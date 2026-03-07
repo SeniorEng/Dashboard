@@ -384,6 +384,9 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
     return res.json({ created: 0, skipped: 0, errors: [], message: "Keine Leistungsnachweise für diesen Zeitraum vorhanden." });
   }
 
+  const allCustomers = await storage.getCustomersByIds(uniqueCustomerIds);
+  const customerMap = new Map(allCustomers.map(c => [c.id, c]));
+
   const results: { created: number; skipped: { customerName: string; reason: string }[]; errors: { customerId: number; customerName: string; reason: string }[] } = {
     created: 0,
     skipped: [],
@@ -392,7 +395,7 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
 
   for (const customerId of uniqueCustomerIds) {
     try {
-      const customer = await storage.getCustomer(customerId);
+      const customer = customerMap.get(customerId);
       const custName = customer ? (customer.vorname && customer.nachname ? `${customer.vorname} ${customer.nachname}` : customer.name) : `Kunde #${customerId}`;
 
       if (!customer) {
@@ -500,7 +503,7 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
       await storage.createInvoice(invoiceData, lineItems as Record<string, unknown>[], req.user!.id);
       results.created++;
     } catch (err: unknown) {
-      const customer = await storage.getCustomer(customerId);
+      const customer = customerMap.get(customerId);
       const name = customer ? (customer.vorname && customer.nachname ? `${customer.vorname} ${customer.nachname}` : customer.name) : `ID ${customerId}`;
       results.errors.push({ customerId, customerName: name || `ID ${customerId}`, reason: err instanceof Error ? err.message : "Unbekannter Fehler" });
     }

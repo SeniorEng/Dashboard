@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
 import { CustomerFormData, BudgetTypeSettingForm, PFLEGEGRAD_OPTIONS } from "./customer-types";
+import { parseLocalDate } from "@shared/utils/datetime";
 import { 
   BUDGET_45B_MAX_MONTHLY_CENTS, 
   BUDGET_45A_MAX_BY_PFLEGEGRAD, 
@@ -84,7 +85,7 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
   const previousYear = currentYear - 1;
   let eligibleMonthsLastYear = 12;
   if (formData.pflegegradSeit) {
-    const pgStart = new Date(formData.pflegegradSeit);
+    const pgStart = parseLocalDate(formData.pflegegradSeit);
     const pgStartYear = pgStart.getFullYear();
     if (pgStartYear > previousYear) {
       eligibleMonthsLastYear = 0;

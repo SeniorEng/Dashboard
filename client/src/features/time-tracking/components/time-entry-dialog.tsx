@@ -13,6 +13,7 @@ import type { TimeEntryType } from "@/lib/api/types";
 import type { TimeEntryFormState } from "../hooks/use-time-entry-form";
 import type { UseTimeEntryConflictResult } from "../hooks/use-time-entry-conflict";
 import { TIME_ENTRY_TYPE_CONFIG } from "../constants";
+import { parseLocalDate } from "@shared/utils/datetime";
 
 export interface TimeEntryDialogProps {
   open: boolean;
@@ -82,7 +83,7 @@ function TimeEntryFormContent({
             <Label>Bis</Label>
             <DatePicker
               value={formState.endDate || formState.entryDate || null}
-              minDate={formState.entryDate ? new Date(formState.entryDate) : undefined}
+              minDate={formState.entryDate ? parseLocalDate(formState.entryDate) : undefined}
               onChange={(val) => onFieldChange("endDate", val || undefined)}
               disableWeekends
               data-testid={`${prefix}input-end-date`}

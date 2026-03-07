@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { api, unwrapResult } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Pencil, Check, X, RotateCcw, Calendar, ChevronDown, ChevronUp } from "lucide-react";
+import { parseLocalDate } from "@shared/utils/datetime";
 
 interface CatalogService {
   id: number;
@@ -39,7 +40,7 @@ const UNIT_LABELS: Record<string, string> = {
 
 function formatDateDisplay(dateStr: string): string {
   try {
-    const d = new Date(dateStr);
+    const d = parseLocalDate(dateStr);
     return d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
   } catch {
     return dateStr;

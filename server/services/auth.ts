@@ -425,32 +425,33 @@ export class AuthService {
       }
     }
 
+    const nullableStringFields = [
+      "telefon", "strasse", "hausnummer", "plz", "stadt",
+      "geburtsdatum", "eintrittsdatum", "austrittsDatum",
+      "lbnr", "personalnummer",
+      "notfallkontaktName", "notfallkontaktTelefon", "notfallkontaktBeziehung",
+    ] as const;
+
+    const directFields = [
+      "email", "vorname", "nachname",
+      "vacationDaysPerYear", "isActive", "isAdmin",
+      "haustierAkzeptiert", "isEuRentner", "employmentType",
+      "weeklyWorkDays", "monthlyWorkHours", "employmentStatus",
+    ] as const;
+
     const dbUpdates: Record<string, unknown> = { updatedAt: new Date() };
-    if (updates.email !== undefined) dbUpdates.email = updates.email;
-    if (updates.vorname !== undefined) dbUpdates.vorname = updates.vorname;
-    if (updates.nachname !== undefined) dbUpdates.nachname = updates.nachname;
-    if (updates.telefon !== undefined) dbUpdates.telefon = updates.telefon || null;
-    if (updates.strasse !== undefined) dbUpdates.strasse = updates.strasse || null;
-    if (updates.hausnummer !== undefined) dbUpdates.hausnummer = updates.hausnummer || null;
-    if (updates.plz !== undefined) dbUpdates.plz = updates.plz || null;
-    if (updates.stadt !== undefined) dbUpdates.stadt = updates.stadt || null;
-    if (updates.geburtsdatum !== undefined) dbUpdates.geburtsdatum = updates.geburtsdatum || null;
-    if (updates.eintrittsdatum !== undefined) dbUpdates.eintrittsdatum = updates.eintrittsdatum || null;
-    if (updates.vacationDaysPerYear !== undefined) dbUpdates.vacationDaysPerYear = updates.vacationDaysPerYear;
-    if (updates.isActive !== undefined) dbUpdates.isActive = updates.isActive;
-    if (updates.isAdmin !== undefined) dbUpdates.isAdmin = updates.isAdmin;
-    if (updates.haustierAkzeptiert !== undefined) dbUpdates.haustierAkzeptiert = updates.haustierAkzeptiert;
-    if (updates.austrittsDatum !== undefined) dbUpdates.austrittsDatum = updates.austrittsDatum || null;
-    if (updates.isEuRentner !== undefined) dbUpdates.isEuRentner = updates.isEuRentner;
-    if (updates.employmentType !== undefined) dbUpdates.employmentType = updates.employmentType;
-    if (updates.weeklyWorkDays !== undefined) dbUpdates.weeklyWorkDays = updates.weeklyWorkDays;
-    if (updates.monthlyWorkHours !== undefined) dbUpdates.monthlyWorkHours = updates.monthlyWorkHours;
-    if (updates.employmentStatus !== undefined) dbUpdates.employmentStatus = updates.employmentStatus;
-    if (updates.lbnr !== undefined) dbUpdates.lbnr = updates.lbnr || null;
-    if (updates.personalnummer !== undefined) dbUpdates.personalnummer = updates.personalnummer || null;
-    if (updates.notfallkontaktName !== undefined) dbUpdates.notfallkontaktName = updates.notfallkontaktName || null;
-    if (updates.notfallkontaktTelefon !== undefined) dbUpdates.notfallkontaktTelefon = updates.notfallkontaktTelefon || null;
-    if (updates.notfallkontaktBeziehung !== undefined) dbUpdates.notfallkontaktBeziehung = updates.notfallkontaktBeziehung || null;
+
+    for (const field of nullableStringFields) {
+      if (updates[field] !== undefined) {
+        dbUpdates[field] = updates[field] || null;
+      }
+    }
+
+    for (const field of directFields) {
+      if (updates[field] !== undefined) {
+        dbUpdates[field] = updates[field];
+      }
+    }
 
     if (updates.vorname !== undefined || updates.nachname !== undefined) {
       const currentUser = await db.select().from(users).where(eq(users.id, id)).limit(1);

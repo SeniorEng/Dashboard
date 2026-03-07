@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@/hooks/use-upload";
 import { api, unwrapResult } from "@/lib/api/client";
+import { parseLocalDate } from "@shared/utils/datetime";
 import { iconSize } from "@/design-system";
 import {
   FileCheck2,
@@ -95,7 +96,7 @@ const STATUS_CONFIG: Record<string, { icon: React.ReactNode; label: string; badg
 
 function getOverdueInfo(reviewDueDate: string | null): { isOverdue: boolean; isDueSoon: boolean } {
   if (!reviewDueDate) return { isOverdue: false, isDueSoon: false };
-  const due = new Date(reviewDueDate);
+  const due = parseLocalDate(reviewDueDate);
   const now = new Date();
   const diffDays = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
   return {
@@ -353,7 +354,7 @@ function RequirementItem({
             )}
             {reviewDueDate && (
               <span>
-                Fällig: {new Date(reviewDueDate).toLocaleDateString("de-DE")}
+                Fällig: {parseLocalDate(reviewDueDate).toLocaleDateString("de-DE")}
               </span>
             )}
           </div>
