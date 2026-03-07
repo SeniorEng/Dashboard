@@ -1,4 +1,5 @@
 import { eq, asc, inArray } from "drizzle-orm";
+import { log } from "../lib/log";
 import {
   services,
   serviceBudgetPots,
@@ -210,10 +211,10 @@ export class ServiceCatalogStorage implements IServiceCatalogStorage {
             }))
           );
         }
-        console.log(`System-Service "${def.name}" (${def.code}) angelegt.`);
+        log(`System-Service "${def.name}" (${def.code}) angelegt.`, "startup");
       } else if (!existing.isSystem) {
         await db.update(services).set({ isSystem: true }).where(eq(services.id, existing.id));
-        console.log(`Service "${def.name}" (${def.code}) als System-Service markiert.`);
+        log(`Service "${def.name}" (${def.code}) als System-Service markiert.`, "startup");
       }
     }
   }

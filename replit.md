@@ -28,6 +28,12 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Adressformatierung** (zentral in `@shared/utils/format`):
   - **Anzeige**: Immer `formatAddress()` verwenden. Akzeptiert Objekte mit `strasse`, `nr`/`hausnummer`, `plz`, `stadt` und fällt auf das `address`-Feld zurück. Ausgabe: `"Strasse Nr, PLZ Stadt"`.
   - Niemals Adresskomponenten manuell im JSX zusammensetzen.
+- **Km-Formatierung** (zentral in `@shared/utils/format`):
+  - **Anzeige**: Immer `formatKm()` verwenden — gibt `"1,5"` zurück (deutsches Komma-Format, 1 Dezimalstelle). Re-Export in `@/lib/utils` für Frontend-Kompatibilität.
+- **Logging** (zentral in `server/index.ts`):
+  - **Alle Server-Logs**: Immer die zentrale `log(message, source)` Funktion verwenden. `console.log` ist nur innerhalb der `log`-Funktion selbst erlaubt. `console.error` für echte Fehler ist weiterhin OK.
+  - **Format**: `"HH:MM:SS AM/PM [source] message"` — z.B. `5:12:54 PM [startup] Pflegekassen-Import: ...`
+  - **Import**: `import { log } from "../lib/log"` (oder relativer Pfad je nach Tiefe). Re-Export in `server/index.ts` für Abwärtskompatibilität.
 
 ### Backend
 - **Framework**: Express.js with TypeScript.

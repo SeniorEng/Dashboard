@@ -3,6 +3,7 @@ import { randomBytes } from "crypto";
 import { authService } from "../../services/auth";
 import { storage } from "../../storage";
 import { usersCache, birthdaysCache } from "../../services/cache";
+import { log } from "../../lib/log";
 import { sanitizeUser } from "../../utils/sanitize-user";
 import { 
   insertUserSchema, 
@@ -132,7 +133,7 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
   try {
     const companySettings = await storage.getCompanySettings();
     if (companySettings.smtpHost && companySettings.smtpUser) {
-      console.log(`[email] Sende Willkommens-E-Mail an ${result.data.email}...`);
+      log(`Sende Willkommens-E-Mail an ${result.data.email}...`, "email");
       const welcomeToken = await authService.createWelcomeToken(user.id);
       const baseUrl = `${req.protocol}://${req.get("host")}`;
       const resetUrl = `${baseUrl}/reset-password?token=${welcomeToken}`;
@@ -152,9 +153,9 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
         subject: `Willkommen bei ${companySettings.companyName || "SeniorenEngel"} – Ihr Zugang`,
         html,
       });
-      console.log(`[email] Willkommens-E-Mail erfolgreich gesendet: ${emailResult.messageId}`);
+      log(`Willkommens-E-Mail erfolgreich gesendet: ${emailResult.messageId}`, "email");
     } else {
-      console.log("[email] SMTP nicht konfiguriert, keine Willkommens-E-Mail gesendet");
+      log("SMTP nicht konfiguriert, keine Willkommens-E-Mail gesendet", "email");
     }
   } catch (emailError: unknown) {
     const emailErrMsg = emailError instanceof Error ? emailError.message : String(emailError);
@@ -370,7 +371,7 @@ router.post("/users/:id/resend-welcome", asyncHandler("Willkommens-E-Mail konnte
     html,
   });
 
-  console.log(`[email] Willkommens-E-Mail erneut gesendet an ${user.email}: ${emailResult.messageId}`);
+  log(`Willkommens-E-Mail erneut gesendet an ${user.email}: ${emailResult.messageId}`, "email");
 
   res.json({ success: true, message: "Willkommens-E-Mail wurde erneut gesendet" });
 }));

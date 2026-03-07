@@ -73,16 +73,8 @@ app.post("/api/auth/login", loginLimiter);
 app.use("/api/auth/password-reset/", passwordResetLimiter);
 app.use("/api/", apiLimiter);
 
-export function log(message: string, source = "express") {
-  const formattedTime = new Date().toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
-
-  console.log(`${formattedTime} [${source}] ${message}`);
-}
+import { log } from "./lib/log";
+export { log };
 
 app.use((req, res, next) => {
   const start = Date.now();

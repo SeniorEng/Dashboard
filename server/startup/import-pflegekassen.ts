@@ -1,6 +1,7 @@
 import { db } from "../lib/db";
 import { sql } from "drizzle-orm";
 import { insuranceProviders } from "@shared/schema";
+import { log } from "../lib/log";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -205,7 +206,7 @@ export async function importPflegekassen(): Promise<void> {
     }
 
     if (created > 0 || updated > 0) {
-      console.log(`[startup] Pflegekassen-Import: ${created} neu erstellt, ${updated} aktualisiert (von ${kassen.length} in EDIFACT)`);
+      log(`Pflegekassen-Import: ${created} neu erstellt, ${updated} aktualisiert (von ${kassen.length} in EDIFACT)`, "startup");
     }
   } catch (error) {
     console.error("[startup] Pflegekassen-Import fehlgeschlagen:", error);

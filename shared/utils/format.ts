@@ -36,6 +36,10 @@ export function formatCurrency(cents: number, options?: { showSign?: boolean }):
   return formatted;
 }
 
+export function formatKm(km: number | string | null | undefined): string {
+  return Number(km ?? 0).toFixed(1).replace(".", ",");
+}
+
 export function formatAddress(entity: {
   strasse?: string | null;
   nr?: string | null;

@@ -3,6 +3,7 @@ import { customers } from "@shared/schema/customers";
 import { companySettings } from "@shared/schema/company";
 import { users } from "@shared/schema/users";
 import { eq, isNull, and, or, isNotNull } from "drizzle-orm";
+import { log } from "../lib/log";
 
 const NOMINATIM_BASE = "https://nominatim.openstreetmap.org/search";
 const USER_AGENT = "CareConnect/1.0 (care-management-app)";
@@ -102,12 +103,12 @@ export async function geocodeEmployee(userId: number): Promise<void> {
 }
 
 export async function geocodeAllMissing(): Promise<void> {
-  console.log("[geocoding] Starting batch geocoding of addresses without coordinates...");
+  log("Starting batch geocoding of addresses without coordinates...", "geocoding");
 
   const [settings] = await db.select().from(companySettings);
   if (settings && !settings.latitude && settings.strasse && settings.plz && settings.stadt) {
     await geocodeCompanySettings();
-    console.log("[geocoding] Company address geocoded");
+    log("Company address geocoded", "geocoding");
   }
 
   const customersWithoutCoords = await db.select({
@@ -137,7 +138,7 @@ export async function geocodeAllMissing(): Promise<void> {
     }
   }
 
-  console.log(`[geocoding] Batch geocoding customers: ${geocoded}/${customersWithoutCoords.length} geocoded`);
+  log(`Batch geocoding customers: ${geocoded}/${customersWithoutCoords.length} geocoded`, "geocoding");
 
   const employeesWithoutCoords = await db.select({
     id: users.id,
@@ -166,5 +167,5 @@ export async function geocodeAllMissing(): Promise<void> {
     }
   }
 
-  console.log(`[geocoding] Batch geocoding employees: ${empGeocoded}/${employeesWithoutCoords.length} geocoded`);
+  log(`Batch geocoding employees: ${empGeocoded}/${employeesWithoutCoords.length} geocoded`, "geocoding");
 }

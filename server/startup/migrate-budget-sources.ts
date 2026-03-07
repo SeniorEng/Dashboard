@@ -1,5 +1,6 @@
 import { db } from "../lib/db";
 import { sql } from "drizzle-orm";
+import { log } from "../lib/log";
 
 export async function migrateBudgetSources(): Promise<void> {
   await db.execute(sql`
@@ -26,6 +27,6 @@ export async function migrateBudgetSources(): Promise<void> {
 
   const renamed = (result as any).rowCount ?? 0;
   if (renamed > 0) {
-    console.log(`[startup] Budget-Migration: ${renamed} Allocations von 'monthly' auf 'monthly_auto' umbenannt`);
+    log(`Budget-Migration: ${renamed} Allocations von 'monthly' auf 'monthly_auto' umbenannt`, "startup");
   }
 }

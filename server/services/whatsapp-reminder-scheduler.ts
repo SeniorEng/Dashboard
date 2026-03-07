@@ -4,6 +4,7 @@ import { eq, and, ne, isNull } from "drizzle-orm";
 import { todayISO, addDays } from "@shared/utils/datetime";
 import { getEnabledRuleByEvent, getUsersWithWhatsAppEnabled } from "../storage/whatsapp";
 import { whatsAppService } from "./whatsapp-service";
+import { log } from "../lib/log";
 
 export async function sendDailyAppointmentReminders(): Promise<number> {
   const rule = await getEnabledRuleByEvent("appointment_reminder");
@@ -111,7 +112,7 @@ export function startReminderScheduler(): { timeout: NodeJS.Timeout; interval?: 
     try {
       const sent = await sendDailyAppointmentReminders();
       if (sent > 0) {
-        console.log(`[WhatsApp-Reminder] ${sent} Termin-Erinnerungen gesendet`);
+        log(`${sent} Termin-Erinnerungen gesendet`, "WhatsApp-Reminder");
       }
     } catch (err) {
       console.error("[WhatsApp-Reminder] Fehler:", err);
@@ -121,7 +122,7 @@ export function startReminderScheduler(): { timeout: NodeJS.Timeout; interval?: 
       try {
         const sent = await sendDailyAppointmentReminders();
         if (sent > 0) {
-          console.log(`[WhatsApp-Reminder] ${sent} Termin-Erinnerungen gesendet`);
+          log(`${sent} Termin-Erinnerungen gesendet`, "WhatsApp-Reminder");
         }
       } catch (err) {
         console.error("[WhatsApp-Reminder] Fehler:", err);

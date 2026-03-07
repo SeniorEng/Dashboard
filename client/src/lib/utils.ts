@@ -5,6 +5,4 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function formatKm(km: number | string | null | undefined): string {
-  return Number(km ?? 0).toFixed(1).replace(".", ",");
-}
+export { formatKm } from "@shared/utils/format";

@@ -1,5 +1,6 @@
 import { db } from "../lib/db";
 import { sql } from "drizzle-orm";
+import { log } from "../lib/log";
 
 export async function backfillAppointmentServices(): Promise<void> {
   try {
@@ -19,7 +20,7 @@ export async function backfillAppointmentServices(): Promise<void> {
 
     const count = result.rowCount ?? 0;
     if (count > 0) {
-      console.log(`[startup] Backfill: ${count} fehlende appointment_services-Einträge erstellt`);
+      log(`Backfill: ${count} fehlende appointment_services-Einträge erstellt`, "startup");
     }
   } catch (error) {
     console.error("[startup] Backfill appointment_services fehlgeschlagen:", error);
