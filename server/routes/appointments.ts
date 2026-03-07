@@ -178,7 +178,7 @@ router.get("/:id", asyncHandler(ErrorMessages.fetchAppointmentFailed, async (req
   if (!user.isAdmin) {
     const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
     if (!assignedCustomerIds.includes(appointment.customerId)) {
-      return sendForbidden(res, "Zugriff verweigert", "Access denied");
+      return sendForbidden(res, "Zugriff verweigert", "Sie haben keinen Zugriff auf diesen Termin.");
     }
   }
 

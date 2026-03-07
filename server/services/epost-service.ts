@@ -1,6 +1,7 @@
 import type { CompanySettings } from "@shared/schema";
 
 const EPOST_API_BASE = "https://api.epost.docuguide.com";
+const EPOST_TIMEOUT_MS = 15000;
 
 interface EpostLoginResponse {
   token: string;
@@ -33,6 +34,7 @@ async function loginEpost(settings: CompanySettings): Promise<string> {
       password: settings.epostPassword,
       secret: settings.epostSecret,
     }),
+    signal: AbortSignal.timeout(EPOST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -60,6 +62,7 @@ export async function requestSmsCode(
         vendorID: vendorId,
         ekp: ekp,
       }),
+      signal: AbortSignal.timeout(EPOST_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -90,6 +93,7 @@ export async function setEpostPassword(
         newPassword: newPassword,
         smsCode: smsCode,
       }),
+      signal: AbortSignal.timeout(EPOST_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -112,6 +116,7 @@ export async function checkEpostHealthCheck(): Promise<{ success: boolean; error
   try {
     const response = await fetch(`${EPOST_API_BASE}/api/Login/HealthCheck`, {
       method: "GET",
+      signal: AbortSignal.timeout(EPOST_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -173,6 +178,7 @@ export async function sendEpostLetter(
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(letterPayload),
+    signal: AbortSignal.timeout(30000),
   });
 
   if (!response.ok) {
@@ -195,6 +201,7 @@ export async function getEpostLetterStatus(
     headers: {
       Authorization: `Bearer ${token}`,
     },
+    signal: AbortSignal.timeout(EPOST_TIMEOUT_MS),
   });
 
   if (!response.ok) {

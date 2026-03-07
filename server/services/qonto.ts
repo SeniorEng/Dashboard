@@ -65,6 +65,7 @@ class QontoService {
         "Authorization": `${creds.login}:${creds.secretKey}`,
         "Content-Type": "application/json",
       },
+      signal: AbortSignal.timeout(15000),
     });
 
     if (!response.ok) {

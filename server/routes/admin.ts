@@ -82,6 +82,7 @@ const ROUTE_PERMISSION_MAP: Record<string, AdminPermissionKey> = {
   "/lexware-export": "billing",
   "/document-delivery": "documents",
   "/whatsapp": "whatsapp",
+  "/budget": "customers",
 };
 
 const READ_PERMISSION_FALLBACKS: Partial<Record<AdminPermissionKey, AdminPermissionKey[]>> = {

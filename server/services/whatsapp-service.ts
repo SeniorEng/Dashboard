@@ -79,6 +79,7 @@ export class WhatsAppService {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15000),
       });
 
       if (!response.ok) {
@@ -137,6 +138,7 @@ export class WhatsAppService {
           headers: {
             Authorization: `Bearer ${config.whatsappAccessToken}`,
           },
+          signal: AbortSignal.timeout(15000),
         }
       );
 
