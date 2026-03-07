@@ -91,7 +91,7 @@ export function useCloseMonth() {
       toast({ title: "Erfolg", description: "Monat wurde abgeschlossen" });
     },
     onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Monat konnte nicht abgeschlossen werden", variant: "destructive" });
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }

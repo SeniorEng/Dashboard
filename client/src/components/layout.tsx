@@ -185,7 +185,7 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
     onError: (error: Error) => {
       toast({
         title: "Fehler",
-        description: error.message || "Ein Fehler ist aufgetreten",
+        description: error.message,
         variant: "destructive",
       });
     },

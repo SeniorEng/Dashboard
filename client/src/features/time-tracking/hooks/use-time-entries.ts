@@ -100,7 +100,7 @@ export function useCreateTimeEntry() {
       toast({ title: "Erfolg", description: "Zeiteintrag wurde erstellt" });
     },
     onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Zeiteintrag konnte nicht erstellt werden", variant: "destructive" });
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }
@@ -122,7 +122,7 @@ export function useUpdateTimeEntry() {
       toast({ title: "Erfolg", description: "Zeiteintrag wurde aktualisiert" });
     },
     onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Zeiteintrag konnte nicht aktualisiert werden", variant: "destructive" });
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }
@@ -145,7 +145,7 @@ export function useDeleteTimeEntry() {
       toast({ title: "Erfolg", description: "Zeiteintrag wurde gelöscht" });
     },
     onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Zeiteintrag konnte nicht gelöscht werden", variant: "destructive" });
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }

@@ -39,7 +39,7 @@ export function useMarkAsRead() {
       queryClient.invalidateQueries({ queryKey: ["notifications"] });
     },
     onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Benachrichtigung konnte nicht als gelesen markiert werden", variant: "destructive" });
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }

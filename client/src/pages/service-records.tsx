@@ -126,7 +126,7 @@ export default function ServiceRecordsPage() {
       navigate(`/service-records/${newRecord.id}`);
     },
     onError: (error: Error) => {
-      toast({ variant: "destructive", title: "Fehler", description: error.message || "Fehler beim Erstellen des Leistungsnachweises" });
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
     },
   });
 

@@ -486,7 +486,7 @@ export default function Dashboard() {
           <div className="min-h-[200px]" data-testid="error-appointments">
             <ErrorState
               title="Daten konnten nicht geladen werden"
-              description={error.message || "Bitte versuchen Sie es erneut."}
+              description={error.message}
               onRetry={() => refetch()}
             />
           </div>

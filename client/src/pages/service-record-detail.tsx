@@ -100,7 +100,7 @@ export default function ServiceRecordDetailPage() {
     mutationFn: async ({ signatureData, signerType, signingLocation }: { signatureData: string; signerType: "employee" | "customer"; signingLocation?: string | null }) => {
       const result = await api.post<MonthlyServiceRecord>(`/service-records/${recordId}/sign`, { signatureData, signerType, signingLocation });
       if (!result.success) {
-        throw new Error(result.error.message || "Unterschrift konnte nicht gespeichert werden");
+        throw new Error(result.error.message);
       }
       return result.data;
     },

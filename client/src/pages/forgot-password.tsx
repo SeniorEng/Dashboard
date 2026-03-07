@@ -88,7 +88,7 @@ export default function ForgotPasswordPage() {
               <Alert variant="destructive">
                 <AlertCircle className={iconSize.sm} />
                 <AlertDescription>
-                  {(requestResetMutation.error as Error)?.message || "Ein Fehler ist aufgetreten"}
+                  {(requestResetMutation.error as Error)?.message}
                 </AlertDescription>
               </Alert>
             )}

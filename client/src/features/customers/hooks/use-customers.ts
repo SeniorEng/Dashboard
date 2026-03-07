@@ -97,7 +97,7 @@ export function useCreateCustomer() {
       toast({ title: "Erfolg", description: "Kunde wurde angelegt" });
     },
     onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Kunde konnte nicht angelegt werden", variant: "destructive" });
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }
@@ -120,7 +120,7 @@ export function useUpdateCustomer() {
       toast({ title: "Erfolg", description: "Kundendaten wurden aktualisiert" });
     },
     onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Kundendaten konnten nicht aktualisiert werden", variant: "destructive" });
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }
@@ -142,7 +142,7 @@ export function useDeleteCustomer() {
       toast({ title: "Erfolg", description: "Kunde wurde deaktiviert" });
     },
     onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Kunde konnte nicht deaktiviert werden", variant: "destructive" });
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }

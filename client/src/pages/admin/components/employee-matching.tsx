@@ -60,7 +60,7 @@ export function EmployeeMatching({ customerId, inlineCriteria, onSelect, selecte
     onError: (error: Error) => {
       toast({
         title: "Fehler",
-        description: error.message || "Ein Fehler ist aufgetreten",
+        description: error.message,
         variant: "destructive",
       });
     },

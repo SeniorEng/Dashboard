@@ -30,47 +30,35 @@ const router = Router();
 
 router.use("/webhook", webhookRouter);
 
-router.get("/health", async (_req, res) => {
-  try {
-    const { pool } = await import("../lib/db");
-    await pool.query("SELECT 1");
-    res.json({ status: "ok", timestamp: new Date().toISOString() });
-  } catch {
-    res.status(503).json({ status: "error", message: "Database connection failed" });
-  }
-});
+router.get("/health", asyncHandler("Health check fehlgeschlagen", async (_req, res) => {
+  const { pool } = await import("../lib/db");
+  await pool.query("SELECT 1");
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
+}));
 
-router.get("/public/branding", async (_req, res) => {
-  try {
-    const { storage } = await import("../storage");
-    const settings = await storage.getCompanySettings();
-    res.json({
-      logoUrl: settings?.logoUrl ? "/api/public/logo/main" : null,
-      pdfLogoUrl: settings?.pdfLogoUrl ? "/api/public/logo/pdf" : null,
-      companyName: settings?.companyName || null,
-    });
-  } catch {
-    res.json({ logoUrl: null, pdfLogoUrl: null, companyName: null });
-  }
-});
+router.get("/public/branding", asyncHandler("Branding konnte nicht geladen werden", async (_req, res) => {
+  const { storage } = await import("../storage");
+  const settings = await storage.getCompanySettings();
+  res.json({
+    logoUrl: settings?.logoUrl ? "/api/public/logo/main" : null,
+    pdfLogoUrl: settings?.pdfLogoUrl ? "/api/public/logo/pdf" : null,
+    companyName: settings?.companyName || null,
+  });
+}));
 
-router.get("/public/logo/:type", async (req, res) => {
-  try {
-    const { storage } = await import("../storage");
-    const settings = await storage.getCompanySettings();
-    const logoPath = req.params.type === "pdf" ? settings?.pdfLogoUrl : settings?.logoUrl;
-    if (!logoPath) {
-      return res.status(404).json({ error: "Logo not found" });
-    }
-    res.setHeader("Cache-Control", "public, max-age=300");
-    const { ObjectStorageService } = await import("../replit_integrations/object_storage/objectStorage");
-    const objectStorageService = new ObjectStorageService();
-    const objectFile = await objectStorageService.getObjectEntityFile(logoPath);
-    await objectStorageService.downloadObject(objectFile, res);
-  } catch {
-    res.status(404).json({ error: "Logo not found" });
+router.get("/public/logo/:type", asyncHandler("Logo konnte nicht geladen werden", async (req, res) => {
+  const { storage } = await import("../storage");
+  const settings = await storage.getCompanySettings();
+  const logoPath = req.params.type === "pdf" ? settings?.pdfLogoUrl : settings?.logoUrl;
+  if (!logoPath) {
+    return res.status(404).json({ error: "Logo not found" });
   }
-});
+  res.setHeader("Cache-Control", "public, max-age=300");
+  const { ObjectStorageService } = await import("../replit_integrations/object_storage/objectStorage");
+  const objectStorageService = new ObjectStorageService();
+  const objectFile = await objectStorageService.getObjectEntityFile(logoPath);
+  await objectStorageService.downloadObject(objectFile, res);
+}));
 
 router.use(authMiddleware);
 router.use(cacheHeaders);
@@ -108,58 +96,54 @@ router.use("/statistics", statisticsRouter);
 router.use("/notifications", notificationsRouter);
 router.use("/whatsapp", whatsappRouter);
 
-router.get("/address-search", async (req, res) => {
-  try {
-    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
-    if (q.length < 3) {
-      return res.json([]);
-    }
-
-    const { rateLimitedFetch } = await import("../services/geocoding");
-    const params = new URLSearchParams({
-      q,
-      format: "jsonv2",
-      addressdetails: "1",
-      countrycodes: "de",
-      limit: "5",
-    });
-    const url = `https://nominatim.openstreetmap.org/search?${params}`;
-    const response = await rateLimitedFetch(url);
-    if (!response.ok) {
-      return res.json([]);
-    }
-
-    const results = await response.json() as Array<{
-      display_name: string;
-      lat: string;
-      lon: string;
-      address: {
-        road?: string;
-        house_number?: string;
-        postcode?: string;
-        city?: string;
-        town?: string;
-        village?: string;
-        municipality?: string;
-      };
-    }>;
-
-    const suggestions = results
-      .filter(r => r.address?.road)
-      .map(r => ({
-        displayName: r.display_name,
-        strasse: r.address.road || "",
-        hausnummer: r.address.house_number || "",
-        plz: r.address.postcode || "",
-        stadt: r.address.city || r.address.town || r.address.village || r.address.municipality || "",
-        latitude: parseFloat(r.lat),
-        longitude: parseFloat(r.lon),
-      }));
-
-    res.json(suggestions);
-  } catch {
-    res.json([]);
+router.get("/address-search", asyncHandler("Adresssuche fehlgeschlagen", async (req, res) => {
+  const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  if (q.length < 3) {
+    return res.json([]);
   }
-});
+
+  const { rateLimitedFetch } = await import("../services/geocoding");
+  const params = new URLSearchParams({
+    q,
+    format: "jsonv2",
+    addressdetails: "1",
+    countrycodes: "de",
+    limit: "5",
+  });
+  const url = `https://nominatim.openstreetmap.org/search?${params}`;
+  const response = await rateLimitedFetch(url);
+  if (!response.ok) {
+    return res.json([]);
+  }
+
+  const results = await response.json() as Array<{
+    display_name: string;
+    lat: string;
+    lon: string;
+    address: {
+      road?: string;
+      house_number?: string;
+      postcode?: string;
+      city?: string;
+      town?: string;
+      village?: string;
+      municipality?: string;
+    };
+  }>;
+
+  const suggestions = results
+    .filter(r => r.address?.road)
+    .map(r => ({
+      displayName: r.display_name,
+      strasse: r.address.road || "",
+      hausnummer: r.address.house_number || "",
+      plz: r.address.postcode || "",
+      stadt: r.address.city || r.address.town || r.address.village || r.address.municipality || "",
+      latitude: parseFloat(r.lat),
+      longitude: parseFloat(r.lon),
+    }));
+
+  res.json(suggestions);
+}));
 
 export default router;

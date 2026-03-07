@@ -61,7 +61,7 @@ export function useCreateInsuranceProvider() {
       toast({ title: "Erfolg", description: "Pflegekasse wurde angelegt" });
     },
     onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Pflegekasse konnte nicht angelegt werden", variant: "destructive" });
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }
@@ -83,7 +83,7 @@ export function useUpdateInsuranceProvider() {
       toast({ title: "Erfolg", description: "Pflegekasse wurde aktualisiert" });
     },
     onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Pflegekasse konnte nicht aktualisiert werden", variant: "destructive" });
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }

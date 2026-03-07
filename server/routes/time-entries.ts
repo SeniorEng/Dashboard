@@ -259,6 +259,7 @@ router.post("/check-conflicts", asyncHandler("Konfliktprüfung fehlgeschlagen", 
 router.get("/:id", asyncHandler("Zeiteintrag konnte nicht geladen werden", async (req: Request, res: Response) => {
   const userId = req.user!.id;
   const entryId = parseInt(req.params.id);
+  if (isNaN(entryId)) return res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" });
   
   const entry = await timeTrackingStorage.getTimeEntry(entryId);
   
@@ -455,6 +456,7 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
 router.put("/:id", asyncHandler("Zeiteintrag konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
   const userId = req.user!.id;
   const entryId = parseInt(req.params.id);
+  if (isNaN(entryId)) return res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" });
   
   const existing = await timeTrackingStorage.getTimeEntry(entryId);
   if (!existing) {
@@ -557,6 +559,7 @@ router.put("/:id", asyncHandler("Zeiteintrag konnte nicht aktualisiert werden", 
 router.delete("/:id", asyncHandler("Zeiteintrag konnte nicht gelöscht werden", async (req: Request, res: Response) => {
   const userId = req.user!.id;
   const entryId = parseInt(req.params.id);
+  if (isNaN(entryId)) return res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige ID" });
   
   const existing = await timeTrackingStorage.getTimeEntry(entryId);
   if (!existing) {

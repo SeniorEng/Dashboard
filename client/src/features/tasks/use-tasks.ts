@@ -46,7 +46,7 @@ export function useCreateTask() {
       toast({ title: "Erfolg", description: "Aufgabe wurde erstellt" });
     },
     onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Aufgabe konnte nicht erstellt werden", variant: "destructive" });
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }
@@ -74,7 +74,7 @@ export function useUpdateTask() {
       toast({ title: "Erfolg", description: "Aufgabe wurde aktualisiert" });
     },
     onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Aufgabe konnte nicht aktualisiert werden", variant: "destructive" });
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }
@@ -93,7 +93,7 @@ export function useDeleteTask() {
       toast({ title: "Erfolg", description: "Aufgabe wurde gelöscht" });
     },
     onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Aufgabe konnte nicht gelöscht werden", variant: "destructive" });
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }
@@ -114,7 +114,7 @@ export function useToggleTaskStatus() {
       toast({ title: "Erfolg", description: message });
     },
     onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Status konnte nicht geändert werden", variant: "destructive" });
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 }

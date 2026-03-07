@@ -63,7 +63,7 @@ export default function PublicSigningPage() {
       const signingLocation = metadata?.location ? `${metadata.location.lat},${metadata.location.lng}` : null;
       const result = await api.post(`/public/sign/${token}`, { signatureData, signingLocation });
       if (!result.success) {
-        setErrorMessage(result.error.message || "Fehler beim Speichern der Unterschrift.");
+        setErrorMessage(result.error.message);
         setPageState("ready");
         return;
       }

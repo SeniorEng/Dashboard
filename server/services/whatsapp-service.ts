@@ -192,7 +192,7 @@ export class WhatsAppService {
   buildAppUrl(path: string): string {
     const baseUrl = process.env.REPLIT_DEV_DOMAIN
       ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-      : process.env.APP_URL || "https://app.example.com";
+      : process.env.APP_URL || "";
     return `${baseUrl}${path}`;
   }
 
