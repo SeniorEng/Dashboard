@@ -111,13 +111,27 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 
 ### Audit Status
 - **Data Integrity Audit (03.03.2026)**: Comprehensive audit of billing, budgets, time tracking flows. 6 fixes applied: atomic budget+appointment transactions, LN signing validation, customer-specific pricing in billing, FIFO split detail proportioning, missing price error handling, test data cleanup. Full report in `.local/audit-report.md`.
-- **Last Full Audit**: 8-agent team audit completed with 0 FAIL, all WARN items resolved
+- **Full 10-Agent Tiefenanalyse (09.03.2026)**: 10 audit agents ran (Database, Business Logic, Code Quality, Error Handling, Performance, Regression Guard, Security, UI/UX, QA, DevOps). Result: 1 FAIL, 31 WARN. Reports in `.local/audit-reports/`.
+- **Audit Fixes Applied**:
+  - W1: English error message → German ("Sie haben keinen Zugriff auf diesen Termin.")
+  - F2: Missing npm deps installed (@radix-ui/react-visually-hidden, nanoid)
+  - W7: `/budget` added to ROUTE_PERMISSION_MAP in admin.ts
+  - W8: AbortSignal.timeout on all external fetch() calls (epost, qonto, whatsapp)
+  - W2: ~100 parseInt(req.params.*) replaced with requireIntParam() + NaN guard (server/lib/params.ts)
+  - W10: getCompanySettings() cached with 5-min TTL, invalidated on update
+  - W3: Calendar DayButton aria-label added (only genuinely missing one)
+  - W6: updateUser field-mapping refactored to loop pattern (nullableStringFields + directFields)
+  - W11: N+1 billing query → batch getCustomersByIds() before loop
+  - W14: 6× new Date(dateString) → parseLocalDate() for date-only strings
+  - W28: Webhook auth log no longer exposes secret lengths
+  - W12: validateGeburtsdatum() added (future dates, >120 years rejected with German messages)
+  - W13: ArbZG §3 10h daily maximum warning in time-entry create/update responses
 - **TypeScript**: 0 errors (fixed: audit action types, DayTimeEntry.kilometers, AppointmentWithCustomerName fields, isLocked type, documentDate mutation type, Set iteration, asyncHandler signature)
 - **Build**: Clean (535.8 KB gzipped, 105 chunks, code-split)
 - **npm audit**: 0 critical/high/moderate vulns (4 moderate esbuild in dev-only drizzle-kit — not fixable without breaking change)
 - **Responsive grids**: All grid-cols-3/4 have sm: responsive fallbacks
 - **Error handling**: All useMutation hooks have onError with German toast
-- **N+1 fixed**: upsertBudgetTypeSettings uses batch insert in transaction
+- **N+1 fixed**: upsertBudgetTypeSettings uses batch insert in transaction; billing batch creation uses getCustomersByIds
 - **Dead code removed**: Duplicate BillingType/BILLING_TYPES from shared/schema/billing.ts
 - **Dead code audit tooling**: Knip installed (`npx knip`) for comprehensive dead code detection (unused files, exports, dependencies). Config in `knip.json`. 14 unused UI component files and 8 unused npm dependencies removed after initial audit. Run periodically to keep codebase clean.
 

@@ -273,6 +273,41 @@ export function formatDurationDisplay(totalMinutes: number, style: "compact" | "
   return `${hours}:${String(minutes).padStart(2, "0")} Std`;
 }
 
+/**
+ * Validiert ein Geburtsdatum auf Plausibilität.
+ * @param geburtsdatum - Datum als "YYYY-MM-DD" String
+ * @returns null wenn gültig, sonst deutsche Fehlermeldung
+ */
+export function validateGeburtsdatum(geburtsdatum: string | null | undefined): string | null {
+  if (!geburtsdatum) return null;
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(geburtsdatum)) {
+    return "Geburtsdatum muss im Format YYYY-MM-DD sein";
+  }
+
+  const birth = parseLocalDate(geburtsdatum);
+  if (isNaN(birth.getTime())) {
+    return "Ungültiges Geburtsdatum";
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  if (birth >= today) {
+    return "Geburtsdatum muss in der Vergangenheit liegen";
+  }
+
+  const ageDiff = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+  const age = monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate()) ? ageDiff - 1 : ageDiff;
+
+  if (age > 120) {
+    return "Geburtsdatum ist unplausibel (Person wäre über 120 Jahre alt)";
+  }
+
+  return null;
+}
+
 export function isChild(geburtsdatum: string | null): boolean {
   if (!geburtsdatum) return false;
   const birth = parseLocalDate(geburtsdatum);

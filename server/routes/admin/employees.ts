@@ -18,6 +18,7 @@ import {
   customers,
   employeeTimeEntries,
 } from "@shared/schema";
+import { validateGeburtsdatum } from "@shared/utils/datetime";
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
 import { auditService } from "../../services/audit";
@@ -85,6 +86,12 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
       error: "FORBIDDEN",
       message: "Nur der Hauptadministrator kann Administratoren anlegen",
     });
+    return;
+  }
+
+  const geburtsdatumError = validateGeburtsdatum(result.data.geburtsdatum);
+  if (geburtsdatumError) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: geburtsdatumError });
     return;
   }
 
@@ -232,6 +239,14 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
       details: result.error.issues,
     });
     return;
+  }
+
+  if (result.data.geburtsdatum !== undefined) {
+    const geburtsdatumError = validateGeburtsdatum(result.data.geburtsdatum);
+    if (geburtsdatumError) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: geburtsdatumError });
+      return;
+    }
   }
 
   const { roles, ...userUpdates } = result.data;

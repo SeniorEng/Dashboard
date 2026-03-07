@@ -26,7 +26,7 @@ router.post("/email-lead", asyncHandler("Webhook-Verarbeitung fehlgeschlagen", a
     ? crypto.timingSafeEqual(secretBuf, expectedBuf)
     : false;
   if (!secretsMatch) {
-    console.error(`[webhook] Auth failed. Header key found: ${secretHeader || "NONE"} | Secret length: ${secret?.length ?? 0} | Expected length: ${expectedSecret?.length ?? 0}`);
+    console.error(`[webhook] Auth failed. Header key found: ${secretHeader ? "yes" : "NONE"} | Secret provided: ${secret ? "yes" : "no"} | Expected configured: ${expectedSecret ? "yes" : "no"}`);
     res.status(401).json({ error: "Ungültiger Webhook-Schlüssel" });
     return;
   }

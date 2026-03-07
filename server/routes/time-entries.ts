@@ -9,7 +9,7 @@ import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
 import { timeToMinutes, isWeekend, parseLocalDate, isPast, formatDateISO } from "@shared/utils/datetime";
 import { getEntryTypeLabel, formatTimeShort, timeRangesOverlap, getAppointmentEndMinutes } from "@shared/domain/time-entries";
-import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
+import { checkAndRecalcDailyAutoBreak, checkDailyMaximum } from "../services/auto-breaks";
 import monthClosingRouter from "./month-closing";
 
 /**
@@ -398,11 +398,23 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
       checkAndRecalcDailyAutoBreak(userId, d);
     }
 
+    const warnings: string[] = [];
+    for (const d of affectedDates) {
+      const maxCheck = await checkDailyMaximum(userId, d);
+      if (maxCheck) {
+        warnings.push(`${d.split('-').reverse().join('.')}: ${maxCheck.warning}`);
+      }
+    }
+
     res.setHeader("X-Entries-Created", entries.length.toString());
-    return res.status(201).json({ 
+    const response: Record<string, unknown> = { 
       ...entries[0],
       _multiDay: { count: entries.length, message: `${entries.length} Einträge erstellt` }
-    });
+    };
+    if (warnings.length > 0) {
+      response._warning = warnings.join(" ");
+    }
+    return res.status(201).json(response);
   }
   
   // Check month closing for single day
@@ -449,6 +461,11 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
   }, req.ip);
 
   checkAndRecalcDailyAutoBreak(userId, validatedData.entryDate);
+
+  const dailyMaxWarning = await checkDailyMaximum(userId, validatedData.entryDate);
+  if (dailyMaxWarning) {
+    return res.status(201).json({ ...entry, _warning: dailyMaxWarning.warning });
+  }
 
   res.status(201).json(entry);
 }));
@@ -551,6 +568,12 @@ router.put("/:id", asyncHandler("Zeiteintrag konnte nicht aktualisiert werden", 
   }
   for (const d of datesToRecalc) {
     checkAndRecalcDailyAutoBreak(existing.userId, d);
+  }
+
+  const effectiveDate = validatedData.entryDate ?? existing.entryDate;
+  const dailyMaxWarning = await checkDailyMaximum(existing.userId, effectiveDate);
+  if (dailyMaxWarning) {
+    return res.json({ ...updated, _warning: dailyMaxWarning.warning });
   }
 
   res.json(updated);

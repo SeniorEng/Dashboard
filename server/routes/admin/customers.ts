@@ -5,7 +5,7 @@ import { birthdaysCache } from "../../services/cache";
 import { budgetLedgerStorage } from "../../storage/budget-ledger";
 import { auditService } from "../../services/audit";
 import { geocodeCustomer } from "../../services/geocoding";
-import { parseLocalDate, todayISO } from "@shared/utils/datetime";
+import { parseLocalDate, todayISO, validateGeburtsdatum } from "@shared/utils/datetime";
 import { 
   versichertennummerSchema,
   customers,
@@ -204,6 +204,13 @@ const simpleCreateCustomerSchema = z.object({
 
 router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", async (req: Request, res: Response) => {
   const data = simpleCreateCustomerSchema.parse(req.body);
+
+  const geburtsdatumError = validateGeburtsdatum(data.geburtsdatum);
+  if (geburtsdatumError) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: geburtsdatumError });
+    return;
+  }
+
   const userId = req.user!.id;
 
   const customerData: Record<string, unknown> = {
@@ -411,6 +418,14 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
   }
   
   const validatedData = updateCustomerSchema.parse(req.body);
+
+  if (validatedData.geburtsdatum !== undefined) {
+    const geburtsdatumError = validateGeburtsdatum(validatedData.geburtsdatum);
+    if (geburtsdatumError) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: geburtsdatumError });
+      return;
+    }
+  }
 
   const existingCustomer = await storage.getCustomer(id);
   if (!existingCustomer) {

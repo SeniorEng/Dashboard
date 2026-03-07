@@ -12,7 +12,7 @@ import { customerManagementStorage } from "../storage/customer-management";
 import { asyncHandler } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { authService } from "../services/auth";
-import { todayISO } from "@shared/utils/datetime";
+import { todayISO, validateGeburtsdatum } from "@shared/utils/datetime";
 import { db } from "../lib/db";
 import { customers } from "@shared/schema";
 import { auditService } from "../services/audit";
@@ -237,6 +237,12 @@ router.patch("/:id/contract", asyncHandler("Vertragsdaten konnten nicht aktualis
 router.post("/", asyncHandler("Kunde konnte nicht erstellt werden", async (req, res) => {
   const validatedData = insertCustomerSchema.parse(req.body);
 
+  const geburtsdatumError = validateGeburtsdatum(validatedData.geburtsdatum);
+  if (geburtsdatumError) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: geburtsdatumError });
+    return;
+  }
+
   const customer = await db.transaction(async (tx) => {
     const result = await tx.insert(customers).values(validatedData).returning();
     return result[0];
@@ -403,6 +409,13 @@ router.post("/:id/convert", requireRoles("erstberatung"), asyncHandler("Konverti
   }
 
   const data = convertCustomerSchema.parse(req.body);
+
+  const geburtsdatumError = validateGeburtsdatum(data.geburtsdatum);
+  if (geburtsdatumError) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: geburtsdatumError });
+    return;
+  }
+
   const userId = req.user!.id;
   const today = todayISO();
   const warnings: string[] = [];

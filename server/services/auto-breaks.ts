@@ -308,3 +308,62 @@ export async function checkAndRecalcDailyAutoBreak(
     console.error(`[auto-breaks] Fehler bei täglicher Pausenberechnung für User ${userId}, Datum ${date}:`, err);
   }
 }
+
+const ARBZG_MAX_DAILY_MINUTES = 600;
+
+export async function checkDailyMaximum(
+  userId: number,
+  date: string,
+  excludeEntryId?: number
+): Promise<{ warning: string; totalMinutes: number } | null> {
+  const [dayAppointments, dayEntries] = await Promise.all([
+    db
+      .select()
+      .from(appointments)
+      .where(
+        and(
+          sql`(${appointments.assignedEmployeeId} = ${userId} OR ${appointments.performedByEmployeeId} = ${userId})`,
+          eq(appointments.date, date),
+          isNull(appointments.deletedAt)
+        )
+      ),
+    db
+      .select()
+      .from(employeeTimeEntries)
+      .where(
+        and(
+          eq(employeeTimeEntries.userId, userId),
+          eq(employeeTimeEntries.entryDate, date),
+          isNull(employeeTimeEntries.deletedAt)
+        )
+      ),
+  ]);
+
+  let workMinutes = 0;
+
+  for (const appt of dayAppointments) {
+    if (appt.status === "completed" || appt.status === "documenting") {
+      workMinutes += appt.durationPromised || 0;
+    }
+  }
+
+  for (const entry of dayEntries) {
+    if (entry.id === excludeEntryId) continue;
+    if (entry.entryType === "pause") continue;
+    if (
+      ["bueroarbeit", "vertrieb", "schulung", "besprechung", "sonstiges"].includes(entry.entryType)
+    ) {
+      workMinutes += getEntryDuration(entry);
+    }
+  }
+
+  if (workMinutes > ARBZG_MAX_DAILY_MINUTES) {
+    const hours = Math.round((workMinutes / 60) * 10) / 10;
+    return {
+      warning: `Achtung: Die tägliche Arbeitszeit beträgt ${hours}h und überschreitet das Maximum von 10h gemäß §3 ArbZG.`,
+      totalMinutes: workMinutes,
+    };
+  }
+
+  return null;
+}
