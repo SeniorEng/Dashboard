@@ -222,6 +222,8 @@ router.get("/:customerId/overview", checkCustomerAccess, asyncHandler("Budget-Ü
       totalAllocatedCents: summaries.entlastungsbetrag45b.totalAllocatedCents,
       totalUsedCents: summaries.entlastungsbetrag45b.totalUsedCents,
       availableCents: summaries.entlastungsbetrag45b.availableCents,
+      plannedCents: summaries.entlastungsbetrag45b.plannedCents,
+      availableAfterPlannedCents: summaries.entlastungsbetrag45b.availableAfterPlannedCents,
       currentMonthUsedCents: summaries.entlastungsbetrag45b.currentMonthUsedCents,
       monthlyLimitCents: summaries.entlastungsbetrag45b.monthlyLimitCents,
     },

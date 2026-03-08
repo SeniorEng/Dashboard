@@ -237,8 +237,13 @@ export function useNewAppointmentForm() {
       notes: ktNotes || undefined,
       assignedEmployeeId: isAdmin && ktAssignedEmployeeId ? parseInt(ktAssignedEmployeeId) : undefined,
     }, {
-      onSuccess: () => {
+      onSuccess: (data: any) => {
         toast({ title: "Termin erstellt", description: "Der Kundentermin wurde erfolgreich angelegt." });
+        if (data?._warning) {
+          setTimeout(() => {
+            toast({ title: "Budget-Hinweis", description: data._warning, variant: "destructive" });
+          }, 500);
+        }
         setLocation(ktDate ? `/?date=${ktDate}` : "/");
       },
       onError: (error: Error) => {

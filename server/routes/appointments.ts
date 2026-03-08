@@ -311,6 +311,14 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     notificationService.notifyAppointmentCreated(appointment.id, customerName, validatedData.date, assignedEmployeeId, user.id);
   }
 
+  try {
+    const budgetSummary = await budgetLedgerStorage.getBudgetSummary(validatedData.customerId);
+    if (budgetSummary.availableAfterPlannedCents < 0) {
+      _warning = "Achtung: Das Budget dieses Kunden reicht möglicherweise nicht für alle geplanten Termine.";
+    }
+  } catch {
+  }
+
   res.status(201).json(_warning ? { ...appointment, _warning } : appointment);
 }));
 

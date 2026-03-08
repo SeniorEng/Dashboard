@@ -7,6 +7,8 @@ import {
   customers,
   customerServicePrices,
   services,
+  appointments,
+  appointmentServices,
   type BudgetAllocation,
   type InsertBudgetAllocation,
   type BudgetTransaction,
@@ -30,6 +32,8 @@ export interface BudgetSummary {
   totalAllocatedCents: number;
   totalUsedCents: number;
   availableCents: number;
+  plannedCents: number;
+  availableAfterPlannedCents: number;
   carryoverCents: number;
   carryoverExpiresAt: string | null;
   currentYearAllocatedCents: number;
@@ -107,6 +111,7 @@ export interface BudgetLedgerStorage {
   ensureAllocations39_42a(customerId: number): Promise<BudgetAllocation[]>;
   getBudgetSummary45a(customerId: number): Promise<Budget45aSummary>;
   getBudgetSummary39_42a(customerId: number): Promise<Budget39_42aSummary>;
+  getPlannedCostCents(customerId: number): Promise<number>;
   getAllBudgetSummaries(customerId: number): Promise<AllBudgetSummaries>;
   
   getBudgetTypeSettings(customerId: number): Promise<CustomerBudgetTypeSetting[]>;
@@ -497,11 +502,16 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     const carryoverExpiresAt = carryoverCents > 0 ? (carryoverResult[0]?.expiresAt ?? null) : null;
     const currentMonthUsedCents = Number(currentMonthResult[0]?.total ?? 0);
 
+    const availableCents = totalAllocatedCents - netUsedCents;
+    const plannedCents = await this.getPlannedCostCents(customerId);
+
     return {
       customerId,
       totalAllocatedCents,
       totalUsedCents: netUsedCents,
-      availableCents: totalAllocatedCents - netUsedCents,
+      availableCents,
+      plannedCents,
+      availableAfterPlannedCents: availableCents - plannedCents,
       carryoverCents,
       carryoverExpiresAt,
       currentYearAllocatedCents,
@@ -710,6 +720,67 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       customerKilometersCents,
       totalCents,
     };
+  }
+
+  async getPlannedCostCents(customerId: number): Promise<number> {
+    const rows = await db.execute(sql`
+      SELECT 
+        a.id AS "appointmentId",
+        s.lohnart_kategorie AS "lohnartKategorie",
+        aps.planned_duration_minutes AS "plannedMinutes",
+        a.date AS "appointmentDate",
+        a.travel_kilometers AS "travelKm",
+        a.customer_kilometers AS "customerKm"
+      FROM appointments a
+      INNER JOIN appointment_services aps ON aps.appointment_id = a.id
+      INNER JOIN services s ON s.id = aps.service_id
+      WHERE a.customer_id = ${customerId}
+        AND a.appointment_type = 'Kundentermin'
+        AND a.status IN ('scheduled', 'in_progress', 'documenting')
+        AND a.deleted_at IS NULL
+    `);
+
+    if (rows.rows.length === 0) {
+      return 0;
+    }
+
+    const perAppointment = new Map<number, { date: string; hwMinutes: number; abMinutes: number; travelKm: number; customerKm: number }>();
+
+    for (const row of rows.rows as any[]) {
+      const apptId = row.appointmentId as number;
+      if (!perAppointment.has(apptId)) {
+        perAppointment.set(apptId, {
+          date: `${row.appointmentDate}`,
+          hwMinutes: 0,
+          abMinutes: 0,
+          travelKm: row.travelKm || 0,
+          customerKm: row.customerKm || 0,
+        });
+      }
+      const data = perAppointment.get(apptId)!;
+      const minutes = row.plannedMinutes || 0;
+      if (row.lohnartKategorie === "hauswirtschaft") {
+        data.hwMinutes += minutes;
+      } else if (row.lohnartKategorie === "alltagsbegleitung") {
+        data.abMinutes += minutes;
+      }
+    }
+
+    let totalPlannedCents = 0;
+
+    for (const [, data] of perAppointment) {
+      const costs = await this.calculateAppointmentCost({
+        customerId,
+        hauswirtschaftMinutes: data.hwMinutes,
+        alltagsbegleitungMinutes: data.abMinutes,
+        travelKilometers: data.travelKm,
+        customerKilometers: data.customerKm,
+        date: data.date,
+      });
+      totalPlannedCents += costs.totalCents;
+    }
+
+    return totalPlannedCents;
   }
 
   async createConsumptionTransaction(params: {

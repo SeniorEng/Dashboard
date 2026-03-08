@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Wallet, History, AlertTriangle, Calendar, Euro } from "lucide-react";
+import { Plus, Wallet, History, AlertTriangle, Calendar, Euro, Clock } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system/tokens";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -20,6 +20,8 @@ interface BudgetOverview {
     totalAllocatedCents: number;
     totalUsedCents: number;
     availableCents: number;
+    plannedCents: number;
+    availableAfterPlannedCents: number;
     currentMonthUsedCents: number;
     monthlyLimitCents: number | null;
   };
@@ -44,6 +46,8 @@ interface BudgetSummary {
   totalAllocatedCents: number;
   totalUsedCents: number;
   availableCents: number;
+  plannedCents: number;
+  availableAfterPlannedCents: number;
   carryoverCents: number;
   carryoverExpiresAt: string | null;
   currentYearAllocatedCents: number;
@@ -247,9 +251,16 @@ function BudgetPot45b({
     ? Math.min(100, (data.totalUsedCents / data.totalAllocatedCents) * 100)
     : 0;
 
+  const plannedPercent = data.totalAllocatedCents > 0
+    ? Math.min(100 - usagePercent, (data.plannedCents / data.totalAllocatedCents) * 100)
+    : 0;
+
   const monthlyUsagePercent = data.monthlyLimitCents
     ? Math.min(100, (data.currentMonthUsedCents / data.monthlyLimitCents) * 100)
     : 0;
+
+  const hasPlanned = data.plannedCents > 0;
+  const budgetExceeded = data.availableAfterPlannedCents < 0;
 
   const hasData = data.totalAllocatedCents > 0;
 
@@ -263,22 +274,53 @@ function BudgetPot45b({
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card className="bg-green-50 border-green-100">
+      {budgetExceeded && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 border border-red-200" data-testid="warning-budget-exceeded">
+          <AlertTriangle className={`${iconSize.sm} text-red-600 flex-shrink-0`} />
+          <p className="text-sm text-red-700 font-medium">
+            Budget reicht nicht für alle geplanten Termine ({formatCurrency(Math.abs(data.availableAfterPlannedCents))} über Budget)
+          </p>
+        </div>
+      )}
+
+      <div className={`grid gap-4 ${hasPlanned ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
+        <Card className={budgetExceeded ? "bg-red-50 border-red-100" : "bg-green-50 border-green-100"}>
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
-              <p className="text-sm text-gray-600">Verfügbar</p>
-              <Euro className={`${iconSize.sm} text-green-600`} />
+              <p className="text-sm text-gray-600">{hasPlanned ? "Verfügbar (nach Planung)" : "Verfügbar"}</p>
+              <Euro className={`${iconSize.sm} ${budgetExceeded ? "text-red-600" : "text-green-600"}`} />
             </div>
-            <p className="text-2xl font-bold text-green-700 mt-1" data-testid="text-45b-available">
-              {formatCurrency(data.availableCents)}
+            <p className={`text-2xl font-bold mt-1 ${budgetExceeded ? "text-red-700" : "text-green-700"}`} data-testid="text-45b-available">
+              {formatCurrency(hasPlanned ? data.availableAfterPlannedCents : data.availableCents)}
             </p>
-            <div className="mt-2 h-2 w-full rounded-full bg-gray-200 overflow-hidden" role="progressbar" data-testid="progress-45b-available">
-              <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.max(0, Math.min(100, 100 - usagePercent))}%` }} />
+            <div className="mt-2 h-2 w-full rounded-full bg-gray-200 overflow-hidden flex" role="progressbar" data-testid="progress-45b-available">
+              <div className="h-full bg-primary transition-all" style={{ width: `${Math.max(0, usagePercent)}%` }} />
+              {hasPlanned && (
+                <div className="h-full bg-orange-400 transition-all" style={{ width: `${Math.max(0, plannedPercent)}%` }} />
+              )}
             </div>
-            <p className="text-xs text-gray-500 mt-1">{usagePercent.toFixed(0)}% verbraucht</p>
+            <p className="text-xs text-gray-500 mt-1">
+              {usagePercent.toFixed(0)}% verbraucht{hasPlanned ? ` · ${plannedPercent.toFixed(0)}% geplant` : ""}
+            </p>
           </CardContent>
         </Card>
+
+        {hasPlanned && (
+          <Card className="bg-orange-50 border-orange-100">
+            <CardContent className="pt-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-600">Geplant</p>
+                <Clock className={`${iconSize.sm} text-orange-600`} />
+              </div>
+              <p className="text-2xl font-bold text-orange-700 mt-1" data-testid="text-45b-planned">
+                {formatCurrency(data.plannedCents)}
+              </p>
+              <p className="text-xs text-gray-500 mt-2">
+                Offene Termine (noch nicht dokumentiert)
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         <Card className="bg-blue-50 border-blue-100">
           <CardContent className="pt-4">

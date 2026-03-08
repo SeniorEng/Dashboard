@@ -29,6 +29,8 @@ export function useCreateKundentermin() {
       queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
       queryClient.invalidateQueries({ queryKey: ["customers"] });
       queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+      queryClient.invalidateQueries({ queryKey: ["budget-overview"] });
+      queryClient.invalidateQueries({ queryKey: ["budget-summary"] });
       toast({ title: "Erfolg", description: "Termin wurde erstellt" });
     },
     onError: (error: Error) => {
