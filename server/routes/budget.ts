@@ -25,6 +25,7 @@ const checkCustomerAccess = requireCustomerAccess(
 router.get("/:customerId/summary", checkCustomerAccess, asyncHandler("Budget-Übersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
   const customerId = requireIntParam(req.params.customerId, res);
   if (customerId === null) return;
+  await budgetLedgerStorage.syncBudgetAllocations(customerId);
   const summary = await budgetLedgerStorage.getBudgetSummary(customerId);
   res.json(summary);
 }));
@@ -217,15 +218,19 @@ router.get("/:customerId/overview", checkCustomerAccess, asyncHandler("Budget-Ü
   if (customerId === null) return;
   const summaries = await budgetLedgerStorage.getAllBudgetSummaries(customerId);
 
+  const s45b = summaries.entlastungsbetrag45b;
   res.json({
     entlastungsbetrag45b: {
-      totalAllocatedCents: summaries.entlastungsbetrag45b.totalAllocatedCents,
-      totalUsedCents: summaries.entlastungsbetrag45b.totalUsedCents,
-      availableCents: summaries.entlastungsbetrag45b.availableCents,
-      plannedCents: summaries.entlastungsbetrag45b.plannedCents,
-      availableAfterPlannedCents: summaries.entlastungsbetrag45b.availableAfterPlannedCents,
-      currentMonthUsedCents: summaries.entlastungsbetrag45b.currentMonthUsedCents,
-      monthlyLimitCents: summaries.entlastungsbetrag45b.monthlyLimitCents,
+      totalAllocatedCents: s45b.totalAllocatedCents,
+      totalUsedCents: s45b.totalUsedCents,
+      availableCents: s45b.availableCents,
+      plannedCents: s45b.plannedCents,
+      availableAfterPlannedCents: s45b.availableAfterPlannedCents,
+      currentMonthUsedCents: s45b.currentMonthUsedCents,
+      monthlyLimitCents: s45b.monthlyLimitCents,
+      carryoverCents: s45b.carryoverCents,
+      carryoverExpiresAt: s45b.carryoverExpiresAt,
+      currentYearAllocatedCents: s45b.currentYearAllocatedCents,
     },
     umwandlung45a: {
       monthlyBudgetCents: summaries.umwandlung45a.monthlyBudgetCents,

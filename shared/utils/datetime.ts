@@ -283,6 +283,28 @@ export function validateGeburtsdatum(geburtsdatum: string | null | undefined): s
   return null;
 }
 
+export function lastDayOfMonth(year: number, month: number): string {
+  const d = new Date(year, month, 0);
+  return `${year}-${String(month).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export function firstDayOfMonth(year: number, month: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-01`;
+}
+
+export function lastDayOfYear(year: number): string {
+  return `${year}-12-31`;
+}
+
+export function firstDayOfYear(year: number): string {
+  return `${year}-01-01`;
+}
+
+export function currentYearAndMonth(): { year: number; month: number } {
+  const d = parseLocalDate(todayISO());
+  return { year: d.getFullYear(), month: d.getMonth() + 1 };
+}
+
 export function isChild(geburtsdatum: string | null): boolean {
   if (!geburtsdatum) return false;
   const birth = parseLocalDate(geburtsdatum);

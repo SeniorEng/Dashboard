@@ -24,6 +24,9 @@ interface BudgetOverview {
     availableAfterPlannedCents: number;
     currentMonthUsedCents: number;
     monthlyLimitCents: number | null;
+    carryoverCents: number;
+    carryoverExpiresAt: string | null;
+    currentYearAllocatedCents: number;
   };
   umwandlung45a: {
     monthlyBudgetCents: number;
@@ -39,20 +42,6 @@ interface BudgetOverview {
     currentYearAvailableCents: number;
     label: string;
   };
-}
-
-interface BudgetSummary {
-  customerId: number;
-  totalAllocatedCents: number;
-  totalUsedCents: number;
-  availableCents: number;
-  plannedCents: number;
-  availableAfterPlannedCents: number;
-  carryoverCents: number;
-  carryoverExpiresAt: string | null;
-  currentYearAllocatedCents: number;
-  monthlyLimitCents: number | null;
-  currentMonthUsedCents: number;
 }
 
 interface BudgetTypeSetting {
@@ -125,19 +114,12 @@ export function BudgetLedgerSection({ customerId, customerName, onRefresh }: Bud
     staleTime: 30000,
   });
 
-  const { data: summary45b } = useQuery<BudgetSummary>({
-    queryKey: ["budget-summary", customerId],
-    queryFn: async () => unwrapResult(await api.get<BudgetSummary>(`/budget/${customerId}/summary`)),
-    staleTime: 30000,
-  });
-
   const enabledTypes = (typeSettings || [])
     .filter(s => s.enabled)
     .sort((a, b) => a.priority - b.priority);
 
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["budget-overview", customerId] });
-    queryClient.invalidateQueries({ queryKey: ["budget-summary", customerId] });
     queryClient.invalidateQueries({ queryKey: ["budget-type-settings", customerId] });
     onRefresh?.();
   };
@@ -181,7 +163,6 @@ export function BudgetLedgerSection({ customerId, customerName, onRefresh }: Bud
               <BudgetPot45b
                 customerId={customerId}
                 data={data}
-                summary45b={summary45b}
                 onRefresh={handleRefresh}
               />
             </SectionCard>
@@ -223,12 +204,10 @@ export function BudgetLedgerSection({ customerId, customerName, onRefresh }: Bud
 function BudgetPot45b({
   customerId,
   data,
-  summary45b,
   onRefresh,
 }: {
   customerId: number;
   data: BudgetOverview["entlastungsbetrag45b"];
-  summary45b?: BudgetSummary | null;
   onRefresh: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -338,26 +317,26 @@ function BudgetPot45b({
         </Card>
       </div>
 
-      {summary45b && summary45b.carryoverCents > 0 && (
+      {data.carryoverCents > 0 && (
         <Card className={`border ${
-          summary45b.carryoverExpiresAt && parseLocalDate(summary45b.carryoverExpiresAt) < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+          data.carryoverExpiresAt && parseLocalDate(data.carryoverExpiresAt) < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
             ? "bg-amber-50 border-amber-200"
             : "bg-gray-50 border-gray-200"
         }`}>
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
               <p className="text-sm text-gray-600">Übertrag</p>
-              {summary45b.carryoverExpiresAt && parseLocalDate(summary45b.carryoverExpiresAt) < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) && (
+              {data.carryoverExpiresAt && parseLocalDate(data.carryoverExpiresAt) < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) && (
                 <AlertTriangle className={`${iconSize.sm} text-amber-600`} />
               )}
             </div>
             <p className="text-2xl font-bold text-gray-700 mt-1" data-testid="text-45b-carryover">
-              {formatCurrency(summary45b.carryoverCents)}
+              {formatCurrency(data.carryoverCents)}
             </p>
-            {summary45b.carryoverExpiresAt && (
+            {data.carryoverExpiresAt && (
               <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
                 <Calendar className="w-3 h-3" />
-                Verfällt am {formatDateForDisplay(summary45b.carryoverExpiresAt)}
+                Verfällt am {formatDateForDisplay(data.carryoverExpiresAt)}
               </p>
             )}
           </CardContent>

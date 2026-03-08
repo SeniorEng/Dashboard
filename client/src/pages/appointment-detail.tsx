@@ -76,7 +76,7 @@ export default function AppointmentDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}`] });
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
-      queryClient.invalidateQueries({ queryKey: ["budget-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["budget-overview"] });
       toast({ title: "Dokumentation zur Korrektur geöffnet" });
       setShowReopenDialog(false);
       setLocation(`/document-appointment/${id}`);

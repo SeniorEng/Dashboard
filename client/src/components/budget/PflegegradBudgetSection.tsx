@@ -46,7 +46,6 @@ export function PflegegradBudgetSection({ customerId, pflegegrad, careLevelHisto
       queryClient.invalidateQueries({ queryKey: customerKeys.detail(customerId) });
       queryClient.invalidateQueries({ queryKey: customerKeys.lists() });
       queryClient.invalidateQueries({ queryKey: ["budget-overview", customerId] });
-      queryClient.invalidateQueries({ queryKey: ["budget-summary", customerId] });
       setEditing(false);
     },
     onError: (error: Error) => {

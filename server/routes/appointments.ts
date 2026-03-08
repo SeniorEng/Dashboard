@@ -312,6 +312,7 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
   }
 
   try {
+    await budgetLedgerStorage.syncBudgetAllocations(validatedData.customerId);
     const budgetSummary = await budgetLedgerStorage.getBudgetSummary(validatedData.customerId);
     if (budgetSummary.availableAfterPlannedCents < 0) {
       _warning = "Achtung: Das Budget dieses Kunden reicht möglicherweise nicht für alle geplanten Termine.";

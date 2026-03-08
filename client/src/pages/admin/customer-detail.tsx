@@ -223,7 +223,7 @@ function BackfillSection({ customerId, onRefresh }: { customerId: number; onRefr
       const res = await api.post("/admin/budget/backfill-transactions", { customerId, dateFrom: backfillDateFrom, dateTo: backfillDateTo });
       const data = unwrapResult(res) as { total: number; created: number; skipped: number; errors: number };
       setResult(data);
-      queryClient.invalidateQueries({ queryKey: ["budget-summary", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["budget-overview", customerId] });
       queryClient.invalidateQueries({ queryKey: ["budget-transactions", customerId] });
       queryClient.invalidateQueries({ queryKey: ["backfill-preview", customerId] });
       onRefresh();
