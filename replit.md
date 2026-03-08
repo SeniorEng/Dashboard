@@ -143,6 +143,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 
 ## Integration Tests
 - **Budget Integration Tests** (`tests/budget-integration.test.ts`): 29 tests across 10 groups (INT-1 through INT-10) covering §45b/§45a/§39-42a allocation, cascade consumption, manual adjustments, cost estimation, double-booking protection, deactivation, and initial balances.
+- **Bug-Fix (08.03.2026): Initial-Budget Route Typo**: `customer-new.tsx` called `/api/budgets/` (Plural) statt `/api/budget/` (Singular) — Carryover/Startwert ging bei Kundenanlage verloren. SPA-Fallback antwortete mit 200+HTML statt 404, `api.post()` wirft bei HTTP-Fehlern keine Exception (gibt `{success:false}`), Fehler wurde still geschluckt. Fix: URL korrigiert + `result.success`-Check hinzugefügt.
 - **Test Utilities** (`tests/test-utils.ts`): Shared auth/API helpers.
 - **Run command**: `TEST_USER_PASSWORD="$TEST_USER_PASSWORD_INTERNAL" TEST_USER_EMAIL="e2e-test@seniorenengel.test" npx vitest run tests/budget-integration.test.ts --reporter=verbose`
 - **e2e test user**: id=8, `e2e-test@seniorenengel.test`, `is_super_admin=true`.
