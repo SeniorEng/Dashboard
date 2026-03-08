@@ -325,7 +325,15 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     }
 
     if (!budgetStartDate) {
-      return [];
+      const typeSettings = _typeSettings ?? await d.select()
+        .from(customerBudgetTypeSettings)
+        .where(eq(customerBudgetTypeSettings.customerId, customerId));
+      const s45bEnabled = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
+      if (!s45bEnabled) {
+        return [];
+      }
+      const today = parseLocalDate(todayISO());
+      budgetStartDate = `${today.getFullYear()}-01-01`;
     }
 
     const startDate = parseLocalDate(budgetStartDate);
@@ -891,8 +899,18 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
   async ensureAllocations45a(customerId: number, _tx?: DbClient, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }): Promise<BudgetAllocation[]> {
     const d = _tx ?? db;
     const preferences = _preferences !== undefined ? _preferences : await this.getBudgetPreferences(customerId, _tx);
-    if (!preferences?.budgetStartDate) {
-      return [];
+    let startDateStr = preferences?.budgetStartDate ?? null;
+
+    if (!startDateStr) {
+      const typeSettings = await d.select()
+        .from(customerBudgetTypeSettings)
+        .where(eq(customerBudgetTypeSettings.customerId, customerId));
+      const s45aEnabled = typeSettings.find(s => s.budgetType === "umwandlung_45a" && s.enabled);
+      if (!s45aEnabled) {
+        return [];
+      }
+      const today = parseLocalDate(todayISO());
+      startDateStr = `${today.getFullYear()}-01-01`;
     }
 
     const amounts = _amounts ?? await this.getCustomerBudgetAmounts(customerId, _tx);
@@ -901,7 +919,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     }
 
     const monthlyAmount = amounts.pflegesachleistungen36;
-    const startDate = parseLocalDate(preferences.budgetStartDate);
+    const startDate = parseLocalDate(startDateStr);
     const todayDate = parseLocalDate(todayISO());
     const currentYear = todayDate.getFullYear();
     const currentMonth = todayDate.getMonth() + 1;
@@ -959,8 +977,18 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
   async ensureAllocations39_42a(customerId: number, _tx?: DbClient, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }): Promise<BudgetAllocation[]> {
     const d = _tx ?? db;
     const preferences = _preferences !== undefined ? _preferences : await this.getBudgetPreferences(customerId, _tx);
-    if (!preferences?.budgetStartDate) {
-      return [];
+    let startDateStr39 = preferences?.budgetStartDate ?? null;
+
+    if (!startDateStr39) {
+      const typeSettings = await d.select()
+        .from(customerBudgetTypeSettings)
+        .where(eq(customerBudgetTypeSettings.customerId, customerId));
+      const s39Enabled = typeSettings.find(s => s.budgetType === "ersatzpflege_39_42a" && s.enabled);
+      if (!s39Enabled) {
+        return [];
+      }
+      const today = parseLocalDate(todayISO());
+      startDateStr39 = `${today.getFullYear()}-01-01`;
     }
 
     const amounts = _amounts ?? await this.getCustomerBudgetAmounts(customerId, _tx);
@@ -969,7 +997,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     }
 
     const yearlyAmount = amounts.verhinderungspflege39;
-    const startDate = parseLocalDate(preferences.budgetStartDate);
+    const startDate = parseLocalDate(startDateStr39);
     const todayDate = parseLocalDate(todayISO());
     const currentYear = todayDate.getFullYear();
     const startYear = startDate.getFullYear();
@@ -995,7 +1023,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       }
 
       const validFrom = (year === startYear)
-        ? preferences.budgetStartDate
+        ? startDateStr39
         : `${year}-01-01`;
       const expiresAt = `${year}-12-31`;
 
