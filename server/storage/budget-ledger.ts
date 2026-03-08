@@ -672,14 +672,14 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     params: { customerId: number; budgetType: string; year: number; month: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string },
     userId?: number
   ): Promise<void> {
-    const existing = await db.select({ id: budgetAllocations.id })
+    const existing = await db.select({ id: budgetAllocations.id, deletedAt: budgetAllocations.deletedAt })
       .from(budgetAllocations)
       .where(and(
         eq(budgetAllocations.customerId, params.customerId),
         eq(budgetAllocations.budgetType, params.budgetType),
         eq(budgetAllocations.source, "initial_balance"),
         eq(budgetAllocations.year, params.year),
-        isNull(budgetAllocations.deletedAt),
+        eq(budgetAllocations.month, params.month),
       ))
       .orderBy(desc(budgetAllocations.id));
 
@@ -691,6 +691,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           validFrom: params.validFrom,
           expiresAt: params.expiresAt,
           notes: params.notes ?? null,
+          deletedAt: null,
         })
         .where(eq(budgetAllocations.id, existing[0].id));
 

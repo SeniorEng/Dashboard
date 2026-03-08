@@ -141,6 +141,13 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Dead code removed**: Duplicate BillingType/BILLING_TYPES from shared/schema/billing.ts
 - **Dead code audit tooling**: Knip installed (`npx knip`) for comprehensive dead code detection (unused files, exports, dependencies). Config in `knip.json`. 14 unused UI component files and 8 unused npm dependencies removed after initial audit. Run periodically to keep codebase clean.
 
+## Integration Tests
+- **Budget Integration Tests** (`tests/budget-integration.test.ts`): 29 tests across 10 groups (INT-1 through INT-10) covering §45b/§45a/§39-42a allocation, cascade consumption, manual adjustments, cost estimation, double-booking protection, deactivation, and initial balances.
+- **Test Utilities** (`tests/test-utils.ts`): Shared auth/API helpers.
+- **Run command**: `TEST_USER_PASSWORD="$TEST_USER_PASSWORD_INTERNAL" TEST_USER_EMAIL="e2e-test@seniorenengel.test" npx vitest run tests/budget-integration.test.ts --reporter=verbose`
+- **e2e test user**: id=8, `e2e-test@seniorenengel.test`, `is_super_admin=true`.
+- Tests are idempotent and safe to run repeatedly. Appointment creation retries different dates/times on 409 conflicts.
+
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)
 - **Frontend Libraries**: React, TypeScript, Vite, Wouter, `shadcn/ui`, Radix UI, Tailwind CSS v4, TanStack Query, Zod.
