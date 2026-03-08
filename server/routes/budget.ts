@@ -363,6 +363,7 @@ router.delete("/:customerId/initial-balance/:allocationId", requireAdmin, asyncH
       or(
         eq(budgetAllocations.source, "initial_balance"),
         eq(budgetAllocations.source, "carryover"),
+        eq(budgetAllocations.source, "manual_adjustment"),
       ),
     ))
     .limit(1);

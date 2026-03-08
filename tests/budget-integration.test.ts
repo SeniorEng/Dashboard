@@ -80,6 +80,17 @@ afterAll(async () => {
     } catch {}
   }
 
+  try {
+    const allocRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?year=2026`);
+    if (allocRes.status === 200 && Array.isArray(allocRes.data)) {
+      for (const alloc of allocRes.data) {
+        if (alloc.source === "manual_adjustment" && alloc.notes === "INT-Test Korrektur") {
+          await apiDeleteRaw(`/api/budget/${testCustomerId}/initial-balance/${alloc.id}`);
+        }
+      }
+    }
+  } catch {}
+
   await runCleanup();
 });
 
@@ -377,7 +388,7 @@ describe("INT-6: Kaskadenverbrauch ueber Termin-Dokumentation", () => {
     });
     expect(docRes.status).toBe(200);
 
-    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?limit=10`);
+    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?limit=50`);
     expect(txRes.status).toBe(200);
 
     const consumption = txRes.data.find(
