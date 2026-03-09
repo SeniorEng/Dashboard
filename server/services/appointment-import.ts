@@ -192,8 +192,7 @@ function normalizeForMatch(s: string): string {
 export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
   const allCustomers = await db
     .select({ id: customers.id, vorname: customers.vorname, nachname: customers.nachname })
-    .from(customers)
-    .where(isNull(customers.deletedAt));
+    .from(customers);
 
   const allUsers = await db
     .select({ id: users.id, vorname: users.vorname, nachname: users.nachname, displayName: users.displayName })
