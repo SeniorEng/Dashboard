@@ -197,8 +197,7 @@ export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
 
   const allUsers = await db
     .select({ id: users.id, vorname: users.vorname, nachname: users.nachname, displayName: users.displayName })
-    .from(users)
-    .where(isNull(users.deletedAt));
+    .from(users);
 
   const existingAppts = await db
     .select({
