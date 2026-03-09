@@ -112,11 +112,9 @@ router.get(
   asyncHandler("Mitarbeiter konnten nicht geladen werden", async (_req: Request, res: Response) => {
     const { users } = await import("@shared/schema");
     const { db } = await import("../../lib/db");
-    const { isNull } = await import("drizzle-orm");
     const allUsers = await db
       .select({ id: users.id, displayName: users.displayName })
-      .from(users)
-      .where(isNull(users.deletedAt));
+      .from(users);
     res.json(allUsers);
   })
 );
