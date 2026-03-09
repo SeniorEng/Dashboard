@@ -411,7 +411,7 @@ interface CustomerOverviewCardProps {
 
 
 function CustomerOverviewCard({ item, selectedYear, selectedMonth }: CustomerOverviewCardProps) {
-  const href = item.existingRecord 
+  const href = item.existingRecord && item.uncoveredDocumentedCount === 0
     ? `/service-records/${item.existingRecord.id}`
     : `/service-records?customerId=${item.customerId}`;
 
