@@ -66,6 +66,7 @@ router.get("/overview", requireAuth, asyncHandler("Übersicht konnte nicht gelad
       documentedCount: item.documentedCount,
       undocumentedCount: item.undocumentedCount,
       totalAppointments: item.totalAppointments,
+      coveredBySingleCount: item.coveredBySingleCount,
       status,
       canCreateRecord: !hasMonthlyRecord && item.undocumentedCount === 0 && item.documentedCount > 0,
     };
@@ -106,12 +107,15 @@ router.get("/check-period", requireAuth, asyncHandler("Periodendaten konnten nic
     storage.getCustomer(customerId),
   ]);
 
+  const coveredBySingleCount = await storage.getCoveredBySingleCount(customerId, userId, year, month);
+
   const isErstberatung = customerData?.status === "erstberatung";
   
   res.json({
     existingRecord,
     documentedCount: counts.documentedCount,
     undocumentedCount: counts.undocumentedCount,
+    coveredBySingleCount,
     canCreateRecord: !isErstberatung && counts.undocumentedCount === 0 && counts.documentedCount > 0,
     isErstberatung,
   });

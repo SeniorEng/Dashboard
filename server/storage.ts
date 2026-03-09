@@ -220,6 +220,7 @@ export interface IStorage {
   
   // Optimized period check - counts only
   getAppointmentCountsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<{ documentedCount: number; undocumentedCount: number }>;
+  getCoveredBySingleCount(customerId: number, employeeId: number, year: number, month: number): Promise<number>;
 
   // Appointment Services
   getAppointmentServices(appointmentId: number): Promise<AppointmentServiceWithDetails[]>;
@@ -260,6 +261,7 @@ export interface ServiceRecordOverviewItem {
   documentedCount: number;
   undocumentedCount: number;
   totalAppointments: number;
+  coveredBySingleCount: number;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1012,11 +1014,32 @@ export class DatabaseStorage implements IStorage {
 
     const customerHasAnyRecord = new Set(existingRecords.map(r => r.customerId));
 
+    const singleRecordIds = existingRecords
+      .filter(r => r.recordType === "single")
+      .map(r => r.id);
+
+    let coveredAppointmentsByCustomer = new Map<number, number>();
+    if (singleRecordIds.length > 0) {
+      const coveredRows = await db.select({
+        customerId: appointments.customerId,
+        count: sqlBuilder<number>`COUNT(DISTINCT ${serviceRecordAppointments.appointmentId})::int`,
+      })
+        .from(serviceRecordAppointments)
+        .innerJoin(appointments, eq(serviceRecordAppointments.appointmentId, appointments.id))
+        .where(inArray(serviceRecordAppointments.serviceRecordId, singleRecordIds))
+        .groupBy(appointments.customerId);
+      
+      for (const row of coveredRows) {
+        coveredAppointmentsByCustomer.set(row.customerId, row.count);
+      }
+    }
+
     return overviewData
       .filter(item => item.totalAppointments > 0 || customerHasAnyRecord.has(item.customerId))
       .map(item => {
         const monthlyRecord = monthlyRecordMap.get(item.customerId);
         const singleRecords = singleRecordsMap.get(item.customerId) ?? [];
+        const coveredBySingleCount = coveredAppointmentsByCustomer.get(item.customerId) ?? 0;
         return {
           customerId: item.customerId,
           customerName: `${item.vorname} ${item.nachname}`,
@@ -1026,6 +1049,7 @@ export class DatabaseStorage implements IStorage {
           documentedCount: item.documentedCount,
           undocumentedCount: item.undocumentedCount,
           totalAppointments: item.totalAppointments,
+          coveredBySingleCount,
         };
       });
   }
@@ -1057,6 +1081,34 @@ export class DatabaseStorage implements IStorage {
       documentedCount: result[0]?.documentedCount ?? 0,
       undocumentedCount: result[0]?.undocumentedCount ?? 0,
     };
+  }
+
+  async getCoveredBySingleCount(customerId: number, employeeId: number, year: number, month: number): Promise<number> {
+    const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+    const endMonth = month === 12 ? 1 : month + 1;
+    const endYear = month === 12 ? year + 1 : year;
+    const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
+
+    const result = await db.select({
+      count: sqlBuilder<number>`COUNT(DISTINCT ${serviceRecordAppointments.appointmentId})::int`,
+    })
+      .from(serviceRecordAppointments)
+      .innerJoin(monthlyServiceRecords, eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id))
+      .innerJoin(appointments, eq(serviceRecordAppointments.appointmentId, appointments.id))
+      .where(and(
+        eq(monthlyServiceRecords.recordType, "single"),
+        eq(appointments.customerId, customerId),
+        or(
+          eq(appointments.assignedEmployeeId, employeeId),
+          eq(appointments.createdByUserId, employeeId)
+        ),
+        sqlBuilder`${appointments.date} >= ${startDate}`,
+        sqlBuilder`${appointments.date} < ${endDate}`,
+        isNull(monthlyServiceRecords.deletedAt),
+        isNull(appointments.deletedAt)
+      ));
+
+    return result[0]?.count ?? 0;
   }
 
   async getAppointmentServices(appointmentId: number): Promise<AppointmentServiceWithDetails[]> {

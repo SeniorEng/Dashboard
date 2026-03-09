@@ -26,6 +26,7 @@ interface PeriodCheckResponse {
   existingRecord: MonthlyServiceRecord | null;
   documentedCount: number;
   undocumentedCount: number;
+  coveredBySingleCount: number;
   canCreateRecord: boolean;
 }
 
@@ -37,6 +38,7 @@ interface CustomerOverviewItem {
   documentedCount: number;
   undocumentedCount: number;
   totalAppointments: number;
+  coveredBySingleCount: number;
   status: "undocumented" | "ready" | "pending" | "employee_signed" | "completed";
   canCreateRecord: boolean;
 }
@@ -284,10 +286,17 @@ export default function ServiceRecordsPage() {
                     <p className="font-medium text-green-700">
                       Alle {periodCheck.documentedCount} Termine dokumentiert
                     </p>
+                    {periodCheck.coveredBySingleCount > 0 && (
+                      <p className="text-sm text-blue-600 mt-1">
+                        {periodCheck.coveredBySingleCount} {periodCheck.coveredBySingleCount === 1 ? "Termin bereits in Einzeltermin-LN" : "Termine bereits in Einzeltermin-LN"} — {periodCheck.documentedCount - periodCheck.coveredBySingleCount} {periodCheck.documentedCount - periodCheck.coveredBySingleCount === 1 ? "verbleibender Termin" : "verbleibende Termine"} für monatlichen LN
+                      </p>
+                    )}
                     <p className="text-sm text-muted-foreground mt-1">
-                      {records && records.length > 0
-                        ? `Sie können einen monatlichen Leistungsnachweis für die verbleibenden Termine erstellen.`
-                        : `Sie können jetzt den Leistungsnachweis für ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear} erstellen.`
+                      {periodCheck.coveredBySingleCount > 0
+                        ? `Sie können einen monatlichen Leistungsnachweis für die verbleibenden ${periodCheck.documentedCount - periodCheck.coveredBySingleCount} Termine erstellen.`
+                        : records && records.length > 0
+                          ? `Sie können einen monatlichen Leistungsnachweis für die verbleibenden Termine erstellen.`
+                          : `Sie können jetzt den Leistungsnachweis für ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear} erstellen.`
                       }
                     </p>
                   </div>
@@ -437,7 +446,12 @@ function CustomerOverviewCard({ item, selectedYear, selectedMonth }: CustomerOve
                   <span className="text-red-600">{item.undocumentedCount} offen</span>
                 )}
                 {item.documentedCount > 0 && item.undocumentedCount === 0 && !item.existingRecord && (
-                  <span className="text-emerald-600">{item.documentedCount} dokumentiert</span>
+                  <span className="text-emerald-600">
+                    {item.coveredBySingleCount > 0
+                      ? `${item.documentedCount - item.coveredBySingleCount} verbleibend`
+                      : `${item.documentedCount} dokumentiert`
+                    }
+                  </span>
                 )}
               </div>
               <div className="flex flex-wrap items-center gap-1.5 mt-1">
