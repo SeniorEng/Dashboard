@@ -6,7 +6,6 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { ArrowLeft, Upload, CheckCircle, AlertTriangle, XCircle, FileSpreadsheet } from "lucide-react";
 import { Link } from "wouter";
 
@@ -326,7 +325,9 @@ export default function ImportAppointmentsPage() {
             </Card>
 
             {importing && (
-              <Progress value={progress} className="h-2" data-testid="progress-import" />
+              <div className="w-full bg-gray-200 rounded h-2" data-testid="progress-import">
+                <div className="bg-primary h-2 rounded transition-all" style={{ width: `${progress}%` }} />
+              </div>
             )}
 
             <div className="overflow-x-auto">
