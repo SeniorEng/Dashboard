@@ -631,6 +631,7 @@ function buildPdfData(invoice: Invoice, lineItems: InvoiceLineItem[], companySet
     customerName: invoice.customerName || invoice.recipientName,
     customerAddress: invoice.recipientAddress || "",
     lineItems: lineItems.map((item: InvoiceLineItem) => ({
+      appointmentId: item.appointmentId ?? null,
       appointmentDate: item.appointmentDate,
       startTime: item.startTime ?? null,
       endTime: item.endTime ?? null,
@@ -681,12 +682,14 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
   const pdfData = buildPdfData(invoice, lineItems, companySettings);
 
   const serviceRecords = await db.select({
+    id: monthlyServiceRecords.id,
     employeeSignatureData: monthlyServiceRecords.employeeSignatureData,
     employeeSignedAt: monthlyServiceRecords.employeeSignedAt,
     employeeId: monthlyServiceRecords.employeeId,
     customerSignatureData: monthlyServiceRecords.customerSignatureData,
     customerSignedAt: monthlyServiceRecords.customerSignedAt,
     status: monthlyServiceRecords.status,
+    recordType: monthlyServiceRecords.recordType,
   })
     .from(monthlyServiceRecords)
     .where(and(
@@ -701,11 +704,28 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
   );
 
   if (signedRecords.length > 0) {
+    const recordIds = signedRecords.map(r => r.id);
     const employeeIds = Array.from(new Set(signedRecords.map(r => r.employeeId)));
-    const employeeRows = await db.select({ id: users.id, displayName: users.displayName })
-      .from(users)
-      .where(inArray(users.id, employeeIds));
+    
+    const [employeeRows, recordAppointments] = await Promise.all([
+      db.select({ id: users.id, displayName: users.displayName })
+        .from(users)
+        .where(inArray(users.id, employeeIds)),
+      db.select({
+        serviceRecordId: serviceRecordAppointments.serviceRecordId,
+        appointmentId: serviceRecordAppointments.appointmentId,
+      })
+        .from(serviceRecordAppointments)
+        .where(inArray(serviceRecordAppointments.serviceRecordId, recordIds)),
+    ]);
+    
     const employeeMap = new Map(employeeRows.map(e => [e.id, e.displayName]));
+    const appointmentsByRecord = new Map<number, number[]>();
+    for (const ra of recordAppointments) {
+      const existing = appointmentsByRecord.get(ra.serviceRecordId) ?? [];
+      existing.push(ra.appointmentId);
+      appointmentsByRecord.set(ra.serviceRecordId, existing);
+    }
 
     pdfData.signatures = signedRecords.map(r => ({
       employeeSignatureData: r.employeeSignatureData,
@@ -714,6 +734,8 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
       customerSignatureData: r.customerSignatureData,
       customerSignedAt: r.customerSignedAt ? formatDateForDisplay(formatDateISO(r.customerSignedAt instanceof Date ? r.customerSignedAt : new Date(r.customerSignedAt))) : null,
       customerName: invoice.customerName || invoice.recipientName,
+      appointmentIds: appointmentsByRecord.get(r.id) ?? [],
+      recordType: r.recordType,
     }));
   }
 

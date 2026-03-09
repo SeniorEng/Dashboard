@@ -42,6 +42,7 @@ export interface InvoicePdfData {
   
   // Line items
   lineItems: {
+    appointmentId: number | null;
     appointmentDate: string;
     startTime: string | null;
     endTime: string | null;
@@ -72,6 +73,8 @@ export interface InvoicePdfData {
     customerSignatureData: string | null;
     customerSignedAt: string | null;
     customerName: string | null;
+    appointmentIds: number[];
+    recordType: string;
   }[];
 }
 
@@ -283,95 +286,247 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
 export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   const periodLabel = `${MONTH_NAMES[data.billingMonth - 1]} ${data.billingYear}`;
 
-  const sortedItems = [...data.lineItems].sort((a, b) => {
-    const dateCmp = a.appointmentDate.localeCompare(b.appointmentDate);
-    if (dateCmp !== 0) return dateCmp;
-    return (a.startTime || "").localeCompare(b.startTime || "");
-  });
+  const KM_CODES = ["travel_km", "customer_km"];
+  const isKmItem = (item: typeof data.lineItems[0]) => KM_CODES.includes(item.serviceCode || "");
 
-  const employeeNames = Array.from(new Set(sortedItems.map(i => i.employeeName).filter(Boolean))) as string[];
-  const employeeLbnrs = Array.from(new Set(sortedItems.map(i => i.employeeLbnr).filter(Boolean))) as string[];
+  type LineItem = typeof data.lineItems[0];
+  type AppointmentGroup = { dateTimeKey: string; date: string; time: string; services: LineItem[]; kmItems: LineItem[]; notes: string | null };
+
+  function sortItems(items: LineItem[]): LineItem[] {
+    return [...items].sort((a, b) => {
+      const dateCmp = a.appointmentDate.localeCompare(b.appointmentDate);
+      if (dateCmp !== 0) return dateCmp;
+      return (a.startTime || "").localeCompare(b.startTime || "");
+    });
+  }
+
+  function groupByAppointment(items: LineItem[]): AppointmentGroup[] {
+    const groups: AppointmentGroup[] = [];
+    let currentGroup: AppointmentGroup | null = null;
+    for (const item of items) {
+      const dateTimeKey = `${item.appointmentDate}|${item.startTime || ""}|${item.endTime || ""}`;
+      if (!currentGroup || currentGroup.dateTimeKey !== dateTimeKey) {
+        currentGroup = {
+          dateTimeKey,
+          date: formatDate(item.appointmentDate),
+          time: `${item.startTime ? item.startTime.slice(0, 5) : ""} - ${item.endTime ? item.endTime.slice(0, 5) : ""}`,
+          services: [],
+          kmItems: [],
+          notes: item.appointmentNotes || null,
+        };
+        groups.push(currentGroup);
+      }
+      if (!currentGroup.notes && item.appointmentNotes) {
+        currentGroup.notes = item.appointmentNotes;
+      }
+      if (isKmItem(item)) {
+        currentGroup.kmItems.push(item);
+      } else {
+        currentGroup.services.push(item);
+      }
+    }
+    return groups;
+  }
+
+  function renderTableRows(groups: AppointmentGroup[]): string {
+    return groups.map((group) => {
+      const rows: string[] = [];
+      for (let i = 0; i < group.services.length; i++) {
+        const svc = group.services[i];
+        const showDateCol = i === 0;
+        rows.push(`
+        <tr>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${showDateCol ? group.date : ""}</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${showDateCol ? group.time : ""}</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(svc.serviceDescription)}</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatMinutes(svc.durationMinutes)}</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(svc.unitPriceCents)}/Std.</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(svc.totalCents)}</td>
+        </tr>`);
+      }
+      if (group.kmItems.length > 0) {
+        const totalKm = group.kmItems.reduce((sum, k) => sum + k.durationMinutes, 0);
+        const totalKmCents = group.kmItems.reduce((sum, k) => sum + k.totalCents, 0);
+        const kmPrice = group.kmItems[0].unitPriceCents;
+        const showDateCol = group.services.length === 0;
+        rows.push(`
+        <tr>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${showDateCol ? group.date : ""}</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${showDateCol ? group.time : ""}</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">Kilometer</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${totalKm} km</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(kmPrice)}/km</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(totalKmCents)}</td>
+        </tr>`);
+      }
+      if (group.notes) {
+        rows.push(`
+        <tr>
+          <td colspan="6" style="padding: 4px 8px 8px 8px; border-bottom: 2px solid #e5e7eb; font-size: 9pt; color: #6b7280; font-style: italic;">
+            ${escapeHtml(group.notes)}
+          </td>
+        </tr>`);
+      }
+      return rows.join("");
+    }).join("");
+  }
+
+  function renderSignature(sig: NonNullable<InvoicePdfData["signatures"]>[0], fallbackEmployeeLabel: string): string {
+    const custSigValid = sig.customerSignatureData && isValidDataUrl(sig.customerSignatureData);
+    const empSigValid = sig.employeeSignatureData && isValidDataUrl(sig.employeeSignatureData);
+    return `
+    <div class="signature-area">
+      <div class="signature-box">
+        ${custSigValid ? `
+          <div style="margin-bottom: 4px;">
+            <img src="${sig.customerSignatureData}" style="max-width: 200px; max-height: 60px;" />
+          </div>
+          <div class="signature-line">
+            ${escapeHtml(sig.customerSignedAt || "")}, ${escapeHtml(sig.customerName || data.customerName)}<br>
+            <span style="color: #9ca3af;">(Leistungsempfänger/in)</span>
+          </div>
+        ` : `
+          <div class="signature-line">${escapeHtml(data.customerName)}<br><span style="color: #9ca3af;">(Leistungsempfänger/in oder gesetzl. Vertreter/in)</span></div>
+        `}
+      </div>
+      <div class="signature-box">
+        ${empSigValid ? `
+          <div style="margin-bottom: 4px;">
+            <img src="${sig.employeeSignatureData}" style="max-width: 200px; max-height: 60px;" />
+          </div>
+          <div class="signature-line">
+            ${escapeHtml(sig.employeeSignedAt || "")}, ${escapeHtml(sig.employeeName || "")}<br>
+            <span style="color: #9ca3af;">(Leistungserbringer/in)</span>
+          </div>
+        ` : `
+          <div class="signature-line">${fallbackEmployeeLabel}<br><span style="color: #9ca3af;">(Leistungserbringer/in)</span></div>
+        `}
+      </div>
+    </div>`;
+  }
+
+  const allSorted = sortItems(data.lineItems);
+  const employeeNames = Array.from(new Set(allSorted.map(i => i.employeeName).filter(Boolean))) as string[];
+  const employeeLbnrs = Array.from(new Set(allSorted.map(i => i.employeeLbnr).filter(Boolean))) as string[];
   const employeeLabel = employeeNames.length > 0 ? employeeNames.map(escapeHtml).join(", ") : "Leistungserbringer/in";
   const lbnrLabel = employeeLbnrs.map(escapeHtml).join(", ");
 
-  const KM_CODES = ["travel_km", "customer_km"];
-  const isKmItem = (item: typeof sortedItems[0]) => KM_CODES.includes(item.serviceCode || "");
+  const hasMultipleLNs = data.signatures && data.signatures.length > 1 && data.signatures.some(s => s.appointmentIds.length > 0);
 
-  type AppointmentGroup = { dateTimeKey: string; date: string; time: string; services: typeof sortedItems; kmItems: typeof sortedItems; notes: string | null };
-  const appointmentGroups: AppointmentGroup[] = [];
-  let currentGroup: AppointmentGroup | null = null;
+  let sectionsHtml: string;
 
-  for (const item of sortedItems) {
-    const dateTimeKey = `${item.appointmentDate}|${item.startTime || ""}|${item.endTime || ""}`;
-    if (!currentGroup || currentGroup.dateTimeKey !== dateTimeKey) {
-      currentGroup = {
-        dateTimeKey,
-        date: formatDate(item.appointmentDate),
-        time: `${item.startTime ? item.startTime.slice(0, 5) : ""} - ${item.endTime ? item.endTime.slice(0, 5) : ""}`,
-        services: [],
-        kmItems: [],
-        notes: item.appointmentNotes || null,
-      };
-      appointmentGroups.push(currentGroup);
+  if (hasMultipleLNs && data.signatures) {
+    const sections: string[] = [];
+    const confirmText = `Ich bestätige hiermit, dass die aufgeführten Leistungen wie oben beschrieben erbracht wurden
+      ${data.billingType !== "selbstzahler" ? "und zur Abrechnung des Entlastungsbetrags nach § 45b SGB XI bei meiner Pflegekasse eingereicht werden dürfen" : ""}.`;
+
+    for (let idx = 0; idx < data.signatures.length; idx++) {
+      const sig = data.signatures[idx];
+      const apptIdSet = new Set(sig.appointmentIds);
+      const sectionItems = sortItems(allSorted.filter(item => item.appointmentId !== null && apptIdSet.has(item.appointmentId)));
+
+      if (sectionItems.length === 0) continue;
+
+      const groups = groupByAppointment(sectionItems);
+      const tableRowsHtml = renderTableRows(groups);
+      const sectionServiceMinutes = sectionItems.filter(i => !isKmItem(i)).reduce((sum, item) => sum + item.durationMinutes, 0);
+      const sectionKm = sectionItems.filter(i => isKmItem(i)).reduce((sum, item) => sum + item.durationMinutes, 0);
+      const sectionCents = sectionItems.reduce((sum, item) => sum + item.totalCents, 0);
+
+      const sectionLabel = sig.recordType === "single" ? "Einzeltermin-Leistungsnachweis" : "Monatlicher Leistungsnachweis";
+      const sectionEmployeeLabel = sig.employeeName ? escapeHtml(sig.employeeName) : employeeLabel;
+
+      sections.push(`
+      ${sections.length > 0 ? '<div style="page-break-before: always;"></div>' : ''}
+      <div style="margin-bottom: 10px;">
+        <div style="font-size: 12pt; font-weight: bold; color: #0d9488; margin-bottom: 10px; border-bottom: 2px solid #0d9488; padding-bottom: 4px;">
+          ${sectionLabel}
+        </div>
+      </div>
+
+      <table class="items">
+        <thead>
+          <tr>
+            <th>Datum</th>
+            <th>Uhrzeit</th>
+            <th>Leistung</th>
+            <th>Dauer/Km</th>
+            <th>Einzelpreis</th>
+            <th>Betrag</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tableRowsHtml}
+          <tr class="total-row">
+            <td colspan="3">Zwischensumme</td>
+            <td style="text-align: right;">${formatMinutes(sectionServiceMinutes)}${sectionKm > 0 ? ` + ${sectionKm} km` : ""}</td>
+            <td></td>
+            <td style="text-align: right;">${formatCents(sectionCents)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="confirm-text">${confirmText}</div>
+
+      ${renderSignature(sig, sectionEmployeeLabel)}
+      `);
     }
-    if (!currentGroup.notes && item.appointmentNotes) {
-      currentGroup.notes = item.appointmentNotes;
-    }
-    if (isKmItem(item)) {
-      currentGroup.kmItems.push(item);
-    } else {
-      currentGroup.services.push(item);
-    }
+
+    sectionsHtml = sections.join("");
+  } else {
+    const groups = groupByAppointment(allSorted);
+    const tableRowsHtml = renderTableRows(groups);
+    const totalServiceMinutes = allSorted.filter(i => !isKmItem(i)).reduce((sum, item) => sum + item.durationMinutes, 0);
+    const totalKmAll = allSorted.filter(i => isKmItem(i)).reduce((sum, item) => sum + item.durationMinutes, 0);
+    const totalCentsAll = allSorted.reduce((sum, item) => sum + item.totalCents, 0);
+
+    const sig = data.signatures && data.signatures.length > 0 ? data.signatures[0] : null;
+
+    sectionsHtml = `
+    <table class="items">
+      <thead>
+        <tr>
+          <th>Datum</th>
+          <th>Uhrzeit</th>
+          <th>Leistung</th>
+          <th>Dauer/Km</th>
+          <th>Einzelpreis</th>
+          <th>Betrag</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${tableRowsHtml}
+        <tr class="total-row">
+          <td colspan="3">Gesamt</td>
+          <td style="text-align: right;">${formatMinutes(totalServiceMinutes)}${totalKmAll > 0 ? ` + ${totalKmAll} km` : ""}</td>
+          <td></td>
+          <td style="text-align: right;">${formatCents(totalCentsAll)}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div style="margin-top: 10px;">
+      <table style="width: 250px; margin-left: auto;">
+        <tr><td style="padding: 3px 8px;">Gesamtbetrag:</td><td style="text-align: right; font-weight: bold;">${formatCents(data.grossAmountCents)}</td></tr>
+      </table>
+    </div>
+
+    <div class="confirm-text">
+      Ich bestätige hiermit, dass die aufgeführten Leistungen wie oben beschrieben erbracht wurden
+      ${data.billingType !== "selbstzahler" ? "und zur Abrechnung des Entlastungsbetrags nach § 45b SGB XI bei meiner Pflegekasse eingereicht werden dürfen" : ""}.
+    </div>
+
+    ${data.signatures && data.signatures.length > 0 ? data.signatures.map(s => renderSignature(s, employeeLabel)).join("") : `
+    <div class="signature-area">
+      <div class="signature-box">
+        <div class="signature-line">${escapeHtml(data.customerName)}<br><span style="color: #9ca3af;">(Leistungsempfänger/in oder gesetzl. Vertreter/in)</span></div>
+      </div>
+      <div class="signature-box">
+        <div class="signature-line">${employeeLabel}<br><span style="color: #9ca3af;">(Leistungserbringer/in)</span></div>
+      </div>
+    </div>
+    `}`;
   }
-
-  const lineItemsHtml = appointmentGroups.map((group) => {
-    const rows: string[] = [];
-
-    for (let i = 0; i < group.services.length; i++) {
-      const svc = group.services[i];
-      const showDateCol = i === 0;
-      rows.push(`
-      <tr>
-        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${showDateCol ? group.date : ""}</td>
-        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${showDateCol ? group.time : ""}</td>
-        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(svc.serviceDescription)}</td>
-        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatMinutes(svc.durationMinutes)}</td>
-        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(svc.unitPriceCents)}/Std.</td>
-        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(svc.totalCents)}</td>
-      </tr>`);
-    }
-
-    if (group.kmItems.length > 0) {
-      const totalKm = group.kmItems.reduce((sum, k) => sum + k.durationMinutes, 0);
-      const totalKmCents = group.kmItems.reduce((sum, k) => sum + k.totalCents, 0);
-      const kmPrice = group.kmItems[0].unitPriceCents;
-      const showDateCol = group.services.length === 0;
-      rows.push(`
-      <tr>
-        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${showDateCol ? group.date : ""}</td>
-        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${showDateCol ? group.time : ""}</td>
-        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">Kilometer</td>
-        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${totalKm} km</td>
-        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(kmPrice)}/km</td>
-        <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(totalKmCents)}</td>
-      </tr>`);
-    }
-
-    if (group.notes) {
-      rows.push(`
-      <tr>
-        <td colspan="6" style="padding: 4px 8px 8px 8px; border-bottom: 2px solid #e5e7eb; font-size: 9pt; color: #6b7280; font-style: italic;">
-          ${escapeHtml(group.notes)}
-        </td>
-      </tr>`);
-    }
-
-    return rows.join("");
-  }).join("");
-
-  const totalServiceMinutes = sortedItems.filter(i => !isKmItem(i)).reduce((sum, item) => sum + item.durationMinutes, 0);
-  const totalKmAll = sortedItems.filter(i => isKmItem(i)).reduce((sum, item) => sum + item.durationMinutes, 0);
-  const totalCentsAll = sortedItems.reduce((sum, item) => sum + item.totalCents, 0);
 
   return `<!DOCTYPE html>
 <html lang="de">
@@ -433,81 +588,15 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     </div>
   </div>
 
-  <table class="items">
-    <thead>
-      <tr>
-        <th>Datum</th>
-        <th>Uhrzeit</th>
-        <th>Leistung</th>
-        <th>Dauer/Km</th>
-        <th>Einzelpreis</th>
-        <th>Betrag</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${lineItemsHtml}
-      <tr class="total-row">
-        <td colspan="3">Gesamt</td>
-        <td style="text-align: right;">${formatMinutes(totalServiceMinutes)}${totalKmAll > 0 ? ` + ${totalKmAll} km` : ""}</td>
-        <td></td>
-        <td style="text-align: right;">${formatCents(totalCentsAll)}</td>
-      </tr>
-    </tbody>
-  </table>
+  ${sectionsHtml}
 
-  <div style="margin-top: 10px;">
+  ${hasMultipleLNs ? `
+  <div style="margin-top: 30px; border-top: 2px solid #0d9488; padding-top: 10px;">
     <table style="width: 250px; margin-left: auto;">
-      <tr><td style="padding: 3px 8px;">Gesamtbetrag:</td><td style="text-align: right; font-weight: bold;">${formatCents(data.grossAmountCents)}</td></tr>
+      <tr><td style="padding: 3px 8px; font-weight: bold;">Gesamtbetrag:</td><td style="text-align: right; font-weight: bold;">${formatCents(data.grossAmountCents)}</td></tr>
     </table>
   </div>
-
-  <div class="confirm-text">
-    Ich bestätige hiermit, dass die aufgeführten Leistungen wie oben beschrieben erbracht wurden
-    ${data.billingType !== "selbstzahler" ? "und zur Abrechnung des Entlastungsbetrags nach § 45b SGB XI bei meiner Pflegekasse eingereicht werden dürfen" : ""}.
-  </div>
-
-  ${data.signatures && data.signatures.length > 0 ? data.signatures.map(sig => {
-    const custSigValid = sig.customerSignatureData && isValidDataUrl(sig.customerSignatureData);
-    const empSigValid = sig.employeeSignatureData && isValidDataUrl(sig.employeeSignatureData);
-    return `
-  <div class="signature-area">
-    <div class="signature-box">
-      ${custSigValid ? `
-        <div style="margin-bottom: 4px;">
-          <img src="${sig.customerSignatureData}" style="max-width: 200px; max-height: 60px;" />
-        </div>
-        <div class="signature-line">
-          ${escapeHtml(sig.customerSignedAt || "")}, ${escapeHtml(sig.customerName || data.customerName)}<br>
-          <span style="color: #9ca3af;">(Leistungsempfänger/in)</span>
-        </div>
-      ` : `
-        <div class="signature-line">${escapeHtml(data.customerName)}<br><span style="color: #9ca3af;">(Leistungsempfänger/in oder gesetzl. Vertreter/in)</span></div>
-      `}
-    </div>
-    <div class="signature-box">
-      ${empSigValid ? `
-        <div style="margin-bottom: 4px;">
-          <img src="${sig.employeeSignatureData}" style="max-width: 200px; max-height: 60px;" />
-        </div>
-        <div class="signature-line">
-          ${escapeHtml(sig.employeeSignedAt || "")}, ${escapeHtml(sig.employeeName || "")}<br>
-          <span style="color: #9ca3af;">(Leistungserbringer/in)</span>
-        </div>
-      ` : `
-        <div class="signature-line">${employeeLabel}<br><span style="color: #9ca3af;">(Leistungserbringer/in)</span></div>
-      `}
-    </div>
-  </div>
-  `; }).join("") : `
-  <div class="signature-area">
-    <div class="signature-box">
-      <div class="signature-line">${escapeHtml(data.customerName)}<br><span style="color: #9ca3af;">(Leistungsempfänger/in oder gesetzl. Vertreter/in)</span></div>
-    </div>
-    <div class="signature-box">
-      <div class="signature-line">${employeeLabel}<br><span style="color: #9ca3af;">(Leistungserbringer/in)</span></div>
-    </div>
-  </div>
-  `}
+  ` : ''}
 
   <div class="footer">
     ${data.companyName || ""} | ${data.companyAddress || ""} | ${data.companyPhone ? `Tel.: ${data.companyPhone}` : ""} | ${data.companyEmail || ""}
