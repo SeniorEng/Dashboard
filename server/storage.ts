@@ -221,6 +221,7 @@ export interface IStorage {
   // Optimized period check - counts only
   getAppointmentCountsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<{ documentedCount: number; undocumentedCount: number }>;
   getCoveredBySingleCount(customerId: number, employeeId: number, year: number, month: number): Promise<number>;
+  getCoveredByMonthlyCount(customerId: number, employeeId: number, year: number, month: number): Promise<number>;
 
   // Appointment Services
   getAppointmentServices(appointmentId: number): Promise<AppointmentServiceWithDetails[]>;
@@ -262,6 +263,7 @@ export interface ServiceRecordOverviewItem {
   undocumentedCount: number;
   totalAppointments: number;
   coveredBySingleCount: number;
+  coveredByMonthlyCount: number;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1014,23 +1016,31 @@ export class DatabaseStorage implements IStorage {
 
     const customerHasAnyRecord = new Set(existingRecords.map(r => r.customerId));
 
-    const singleRecordIds = existingRecords
-      .filter(r => r.recordType === "single")
-      .map(r => r.id);
+    const allRecordIds = existingRecords.map(r => r.id);
+    const singleRecordIds = existingRecords.filter(r => r.recordType === "single").map(r => r.id);
+    const monthlyRecordIds = existingRecords.filter(r => r.recordType === "monthly").map(r => r.id);
 
-    let coveredAppointmentsByCustomer = new Map<number, number>();
-    if (singleRecordIds.length > 0) {
+    let coveredBySingleByCustomer = new Map<number, number>();
+    let coveredByMonthlyByCustomer = new Map<number, number>();
+
+    if (allRecordIds.length > 0) {
       const coveredRows = await db.select({
         customerId: appointments.customerId,
+        recordType: monthlyServiceRecords.recordType,
         count: sqlBuilder<number>`COUNT(DISTINCT ${serviceRecordAppointments.appointmentId})::int`,
       })
         .from(serviceRecordAppointments)
+        .innerJoin(monthlyServiceRecords, eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id))
         .innerJoin(appointments, eq(serviceRecordAppointments.appointmentId, appointments.id))
-        .where(inArray(serviceRecordAppointments.serviceRecordId, singleRecordIds))
-        .groupBy(appointments.customerId);
+        .where(inArray(serviceRecordAppointments.serviceRecordId, allRecordIds))
+        .groupBy(appointments.customerId, monthlyServiceRecords.recordType);
       
       for (const row of coveredRows) {
-        coveredAppointmentsByCustomer.set(row.customerId, row.count);
+        if (row.recordType === "single") {
+          coveredBySingleByCustomer.set(row.customerId, row.count);
+        } else {
+          coveredByMonthlyByCustomer.set(row.customerId, row.count);
+        }
       }
     }
 
@@ -1039,7 +1049,8 @@ export class DatabaseStorage implements IStorage {
       .map(item => {
         const monthlyRecord = monthlyRecordMap.get(item.customerId);
         const singleRecords = singleRecordsMap.get(item.customerId) ?? [];
-        const coveredBySingleCount = coveredAppointmentsByCustomer.get(item.customerId) ?? 0;
+        const coveredBySingleCount = coveredBySingleByCustomer.get(item.customerId) ?? 0;
+        const coveredByMonthlyCount = coveredByMonthlyByCustomer.get(item.customerId) ?? 0;
         return {
           customerId: item.customerId,
           customerName: `${item.vorname} ${item.nachname}`,
@@ -1050,6 +1061,7 @@ export class DatabaseStorage implements IStorage {
           undocumentedCount: item.undocumentedCount,
           totalAppointments: item.totalAppointments,
           coveredBySingleCount,
+          coveredByMonthlyCount,
         };
       });
   }
@@ -1097,6 +1109,34 @@ export class DatabaseStorage implements IStorage {
       .innerJoin(appointments, eq(serviceRecordAppointments.appointmentId, appointments.id))
       .where(and(
         eq(monthlyServiceRecords.recordType, "single"),
+        eq(appointments.customerId, customerId),
+        or(
+          eq(appointments.assignedEmployeeId, employeeId),
+          eq(appointments.createdByUserId, employeeId)
+        ),
+        sqlBuilder`${appointments.date} >= ${startDate}`,
+        sqlBuilder`${appointments.date} < ${endDate}`,
+        isNull(monthlyServiceRecords.deletedAt),
+        isNull(appointments.deletedAt)
+      ));
+
+    return result[0]?.count ?? 0;
+  }
+
+  async getCoveredByMonthlyCount(customerId: number, employeeId: number, year: number, month: number): Promise<number> {
+    const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+    const endMonth = month === 12 ? 1 : month + 1;
+    const endYear = month === 12 ? year + 1 : year;
+    const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
+
+    const result = await db.select({
+      count: sqlBuilder<number>`COUNT(DISTINCT ${serviceRecordAppointments.appointmentId})::int`,
+    })
+      .from(serviceRecordAppointments)
+      .innerJoin(monthlyServiceRecords, eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id))
+      .innerJoin(appointments, eq(serviceRecordAppointments.appointmentId, appointments.id))
+      .where(and(
+        eq(monthlyServiceRecords.recordType, "monthly"),
         eq(appointments.customerId, customerId),
         or(
           eq(appointments.assignedEmployeeId, employeeId),

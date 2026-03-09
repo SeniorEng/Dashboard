@@ -47,17 +47,28 @@ router.get("/overview", requireAuth, asyncHandler("Übersicht konnte nicht gelad
   const overview = overviewData.map(item => {
     let status: "undocumented" | "ready" | "pending" | "employee_signed" | "completed";
     
-    if (item.existingRecordId) {
-      status = item.existingRecordStatus as "pending" | "employee_signed" | "completed";
-    } else if (item.undocumentedCount > 0) {
+    const hasSingleRecords = (item.singleRecords ?? []).length > 0;
+    const hasMonthlyRecord = !!item.existingRecordId;
+    const coveredCount = (item.coveredBySingleCount ?? 0) + (item.coveredByMonthlyCount ?? 0);
+    const uncoveredDocumentedCount = Math.max(0, item.documentedCount - coveredCount);
+
+    if (item.undocumentedCount > 0) {
       status = "undocumented";
+    } else if (uncoveredDocumentedCount > 0) {
+      status = "ready";
+    } else if (item.existingRecordId) {
+      status = item.existingRecordStatus as "pending" | "employee_signed" | "completed";
+    } else if (hasSingleRecords) {
+      const allCompleted = (item.singleRecords ?? []).every(r => r.status === "completed");
+      status = allCompleted ? "completed" : "pending";
     } else {
       status = "ready";
     }
-
-    const hasSingleRecords = (item.singleRecords ?? []).length > 0;
-    const hasMonthlyRecord = !!item.existingRecordId;
     
+    const canCreateRecord = item.undocumentedCount === 0 
+      && item.documentedCount > 0 
+      && uncoveredDocumentedCount > 0;
+
     return {
       customerId: item.customerId,
       customerName: item.customerName,
@@ -66,9 +77,11 @@ router.get("/overview", requireAuth, asyncHandler("Übersicht konnte nicht gelad
       documentedCount: item.documentedCount,
       undocumentedCount: item.undocumentedCount,
       totalAppointments: item.totalAppointments,
-      coveredBySingleCount: item.coveredBySingleCount,
+      coveredBySingleCount: item.coveredBySingleCount ?? 0,
+      coveredByMonthlyCount: item.coveredByMonthlyCount ?? 0,
+      uncoveredDocumentedCount,
       status,
-      canCreateRecord: !hasMonthlyRecord && item.undocumentedCount === 0 && item.documentedCount > 0,
+      canCreateRecord,
     };
   });
   
@@ -101,22 +114,26 @@ router.get("/check-period", requireAuth, asyncHandler("Periodendaten konnten nic
     });
   }
   
-  const [existingRecord, counts, customerData] = await Promise.all([
+  const [existingRecord, counts, customerData, coveredBySingleCount, coveredByMonthlyCount] = await Promise.all([
     storage.getServiceRecordByPeriod(customerId, userId, year, month),
     storage.getAppointmentCountsForPeriod(customerId, userId, year, month),
     storage.getCustomer(customerId),
+    storage.getCoveredBySingleCount(customerId, userId, year, month),
+    storage.getCoveredByMonthlyCount(customerId, userId, year, month),
   ]);
 
-  const coveredBySingleCount = await storage.getCoveredBySingleCount(customerId, userId, year, month);
-
   const isErstberatung = customerData?.status === "erstberatung";
+  const coveredCount = coveredBySingleCount + coveredByMonthlyCount;
+  const uncoveredDocumentedCount = Math.max(0, counts.documentedCount - coveredCount);
   
   res.json({
     existingRecord,
     documentedCount: counts.documentedCount,
     undocumentedCount: counts.undocumentedCount,
     coveredBySingleCount,
-    canCreateRecord: !isErstberatung && counts.undocumentedCount === 0 && counts.documentedCount > 0,
+    coveredByMonthlyCount,
+    uncoveredDocumentedCount,
+    canCreateRecord: !isErstberatung && counts.undocumentedCount === 0 && counts.documentedCount > 0 && uncoveredDocumentedCount > 0,
     isErstberatung,
   });
 }));
@@ -226,13 +243,6 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
     });
   }
 
-  const existingRecord = await storage.getServiceRecordByPeriod(customerId, userId, year, month);
-  if (existingRecord) {
-    return res.status(409).json({ 
-      message: "Für diesen Zeitraum existiert bereits ein monatlicher Leistungsnachweis" 
-    });
-  }
-  
   const undocumentedAppointments = await storage.getUndocumentedAppointmentsForPeriod(customerId, userId, year, month);
   if (undocumentedAppointments.length > 0) {
     return res.status(400).json({ 
@@ -254,7 +264,7 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
   
   if (remainingAppointments.length === 0) {
     return res.status(400).json({ 
-      message: "Alle dokumentierten Termine sind bereits durch Einzel-Leistungsnachweise abgedeckt." 
+      message: "Alle dokumentierten Termine sind bereits durch bestehende Leistungsnachweise abgedeckt." 
     });
   }
   

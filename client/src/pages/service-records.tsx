@@ -27,6 +27,8 @@ interface PeriodCheckResponse {
   documentedCount: number;
   undocumentedCount: number;
   coveredBySingleCount: number;
+  coveredByMonthlyCount: number;
+  uncoveredDocumentedCount: number;
   canCreateRecord: boolean;
 }
 
@@ -39,6 +41,8 @@ interface CustomerOverviewItem {
   undocumentedCount: number;
   totalAppointments: number;
   coveredBySingleCount: number;
+  coveredByMonthlyCount: number;
+  uncoveredDocumentedCount: number;
   status: "undocumented" | "ready" | "pending" | "employee_signed" | "completed";
   canCreateRecord: boolean;
 }
@@ -284,20 +288,17 @@ export default function ServiceRecordsPage() {
                   </div>
                   <div>
                     <p className="font-medium text-green-700">
-                      Alle {periodCheck.documentedCount} Termine dokumentiert
+                      {periodCheck.uncoveredDocumentedCount} {periodCheck.uncoveredDocumentedCount === 1 ? "Termin" : "Termine"} bereit für Leistungsnachweis
                     </p>
-                    {periodCheck.coveredBySingleCount > 0 && (
+                    {(periodCheck.coveredBySingleCount > 0 || periodCheck.coveredByMonthlyCount > 0) && (
                       <p className="text-sm text-blue-600 mt-1">
-                        {periodCheck.coveredBySingleCount} {periodCheck.coveredBySingleCount === 1 ? "Termin bereits in Einzeltermin-LN" : "Termine bereits in Einzeltermin-LN"} — {periodCheck.documentedCount - periodCheck.coveredBySingleCount} {periodCheck.documentedCount - periodCheck.coveredBySingleCount === 1 ? "verbleibender Termin" : "verbleibende Termine"} für monatlichen LN
+                        {periodCheck.coveredBySingleCount > 0 && `${periodCheck.coveredBySingleCount} in Einzeltermin-LN`}
+                        {periodCheck.coveredBySingleCount > 0 && periodCheck.coveredByMonthlyCount > 0 && ", "}
+                        {periodCheck.coveredByMonthlyCount > 0 && `${periodCheck.coveredByMonthlyCount} in monatlichem LN`}
                       </p>
                     )}
                     <p className="text-sm text-muted-foreground mt-1">
-                      {periodCheck.coveredBySingleCount > 0
-                        ? `Sie können einen monatlichen Leistungsnachweis für die verbleibenden ${periodCheck.documentedCount - periodCheck.coveredBySingleCount} Termine erstellen.`
-                        : records && records.length > 0
-                          ? `Sie können einen monatlichen Leistungsnachweis für die verbleibenden Termine erstellen.`
-                          : `Sie können jetzt den Leistungsnachweis für ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear} erstellen.`
-                      }
+                      Sie können einen monatlichen Leistungsnachweis für die verbleibenden {periodCheck.uncoveredDocumentedCount} Termine erstellen.
                     </p>
                   </div>
                   <Button
@@ -445,13 +446,11 @@ function CustomerOverviewCard({ item, selectedYear, selectedMonth }: CustomerOve
                 {item.undocumentedCount > 0 && (
                   <span className="text-red-600">{item.undocumentedCount} offen</span>
                 )}
-                {item.documentedCount > 0 && item.undocumentedCount === 0 && !item.existingRecord && (
-                  <span className="text-emerald-600">
-                    {item.coveredBySingleCount > 0
-                      ? `${item.documentedCount - item.coveredBySingleCount} verbleibend`
-                      : `${item.documentedCount} dokumentiert`
-                    }
-                  </span>
+                {item.undocumentedCount === 0 && item.uncoveredDocumentedCount > 0 && (
+                  <span className="text-emerald-600">{item.uncoveredDocumentedCount} bereit</span>
+                )}
+                {item.undocumentedCount === 0 && item.uncoveredDocumentedCount === 0 && item.documentedCount > 0 && (
+                  <span className="text-emerald-600">{item.documentedCount} dokumentiert</span>
                 )}
               </div>
               <div className="flex flex-wrap items-center gap-1.5 mt-1">
