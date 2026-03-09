@@ -44,6 +44,7 @@ const AdminProspects = lazy(() => import("@/pages/admin/prospects"));
 const AdminProofReview = lazy(() => import("@/pages/admin/proof-review"));
 const AdminQonto = lazy(() => import("@/pages/admin/qonto"));
 const AdminWhatsApp = lazy(() => import("@/pages/admin/whatsapp"));
+const AdminImportAppointments = lazy(() => import("@/pages/admin/import-appointments"));
 const UndocumentedAppointments = lazy(() => import("@/pages/undocumented-appointments"));
 const CustomerDetail = lazy(() => import("@/pages/customer-detail"));
 const CustomerConvert = lazy(() => import("@/pages/customer-convert"));
@@ -226,6 +227,9 @@ function Router() {
       </Route>
       <Route path="/admin/prospects">
         <AdminRoute component={AdminProspects} />
+      </Route>
+      <Route path="/admin/import-appointments">
+        <AdminRoute component={AdminImportAppointments} />
       </Route>
       <Route component={NotFound} />
     </Switch>

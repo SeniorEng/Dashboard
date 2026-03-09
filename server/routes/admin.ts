@@ -17,6 +17,7 @@ import documentDeliveryRouter from "./admin/document-delivery";
 import prospectsRouter from "./admin/prospects";
 import qontoRouter from "./admin/qonto";
 import whatsappRouter from "./admin/whatsapp";
+import importAppointmentsRouter from "./admin/import-appointments";
 
 const router = Router();
 
@@ -137,5 +138,6 @@ router.use("/", auditRouter);
 router.use("/", lexwareExportRouter);
 router.use("/", documentDeliveryRouter);
 router.use("/", prospectsRouter);
+router.use("/", importAppointmentsRouter);
 
 export default router;

@@ -6,7 +6,7 @@ import { Layout } from "@/components/layout";
 import {
   Users, ArrowLeft, Contact2, Clock, Settings,
   Building2, ClipboardList, FileText, Shield, Receipt, Gift, BarChart3, UserPlus,
-  GraduationCap, FileCheck, Landmark, MessageSquare,
+  GraduationCap, FileCheck, Landmark, MessageSquare, FileSpreadsheet,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -223,6 +223,15 @@ export default function AdminDashboard() {
       title: "Audit-Log",
       description: "Unveränderliches Protokoll aller Unterschriften und Änderungen",
       permissionKey: "audit_log",
+    },
+    {
+      href: "/admin/import-appointments",
+      testId: "card-import-appointments",
+      icon: <FileSpreadsheet className={`${iconSize.lg} text-amber-600`} />,
+      iconBg: "bg-amber-100",
+      title: "Termin-Import",
+      description: "Historische Termine aus Excel-Datei importieren",
+      permissionKey: "super_admin_only",
     },
   ];
 
