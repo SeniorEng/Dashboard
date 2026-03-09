@@ -6,7 +6,7 @@ import { users } from "./users";
 import { appointments } from "./appointments";
 
 // ============================================
-// MONTHLY SERVICE RECORDS (LEISTUNGSNACHWEISE) TABLES
+// SERVICE RECORDS (LEISTUNGSNACHWEISE) TABLES
 // ============================================
 
 export const SERVICE_RECORD_STATUSES = [
@@ -15,7 +15,13 @@ export const SERVICE_RECORD_STATUSES = [
   "completed",            // Both signatures collected, record finalized
 ] as const;
 
+export const SERVICE_RECORD_TYPES = [
+  "monthly",   // Traditional monthly service record (all appointments in a month)
+  "single",    // Single-appointment service record
+] as const;
+
 export type ServiceRecordStatus = typeof SERVICE_RECORD_STATUSES[number];
+export type ServiceRecordType = typeof SERVICE_RECORD_TYPES[number];
 
 export const monthlyServiceRecords = pgTable("monthly_service_records", {
   id: serial("id").primaryKey(),
@@ -23,6 +29,7 @@ export const monthlyServiceRecords = pgTable("monthly_service_records", {
   employeeId: integer("employee_id").notNull().references(() => users.id),
   year: integer("year").notNull(),
   month: integer("month").notNull(), // 1-12
+  recordType: text("record_type").notNull().default("monthly"), // "monthly" | "single"
   status: text("status").notNull().default("pending"), // ServiceRecordStatus
   // Employee signature
   employeeSignatureData: text("employee_signature_data"),
@@ -43,11 +50,11 @@ export const monthlyServiceRecords = pgTable("monthly_service_records", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [
-  unique("service_record_unique").on(table.customerId, table.employeeId, table.year, table.month),
   index("service_records_customer_idx").on(table.customerId),
   index("service_records_employee_idx").on(table.employeeId),
   index("service_records_period_idx").on(table.year, table.month),
   index("service_records_status_idx").on(table.status),
+  index("service_records_type_idx").on(table.recordType),
 ]);
 
 // Join table to link appointments to service records
@@ -68,6 +75,12 @@ export const insertServiceRecordSchema = z.object({
   employeeId: z.number(),
   year: z.number().min(2020, "Jahr muss zwischen 2020 und 2100 liegen").max(2100, "Jahr muss zwischen 2020 und 2100 liegen"),
   month: z.number().min(1, "Monat muss zwischen 1 und 12 liegen").max(12, "Monat muss zwischen 1 und 12 liegen"),
+  recordType: z.enum(["monthly", "single"]).default("monthly"),
+});
+
+export const insertSingleServiceRecordSchema = z.object({
+  customerId: z.number(),
+  appointmentId: z.number(),
 });
 
 export const signServiceRecordSchema = z.object({
@@ -78,5 +91,6 @@ export const signServiceRecordSchema = z.object({
 
 export type MonthlyServiceRecord = typeof monthlyServiceRecords.$inferSelect;
 export type InsertServiceRecord = z.infer<typeof insertServiceRecordSchema>;
+export type InsertSingleServiceRecord = z.infer<typeof insertSingleServiceRecordSchema>;
 export type SignServiceRecord = z.infer<typeof signServiceRecordSchema>;
 export type ServiceRecordAppointment = typeof serviceRecordAppointments.$inferSelect;

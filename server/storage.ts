@@ -212,6 +212,8 @@ export interface IStorage {
   getUndocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<AppointmentWithCustomer[]>;
   getPendingServiceRecords(employeeId: number): Promise<MonthlyServiceRecord[]>;
   isAppointmentLocked(appointmentId: number): Promise<boolean>;
+  getAppointmentIdsInServiceRecords(appointmentIds: number[]): Promise<number[]>;
+  getServiceRecordForAppointment(appointmentId: number): Promise<MonthlyServiceRecord | undefined>;
   
   // Optimized overview query
   getServiceRecordsOverview(employeeId: number, year: number, month: number): Promise<ServiceRecordOverviewItem[]>;
@@ -254,6 +256,7 @@ export interface ServiceRecordOverviewItem {
   customerName: string;
   existingRecordId: number | null;
   existingRecordStatus: string | null;
+  singleRecords: { id: number; status: string; recordType: string }[];
   documentedCount: number;
   undocumentedCount: number;
   totalAppointments: number;
@@ -732,6 +735,7 @@ export class DatabaseStorage implements IStorage {
         eq(monthlyServiceRecords.employeeId, employeeId),
         eq(monthlyServiceRecords.year, year),
         eq(monthlyServiceRecords.month, month),
+        eq(monthlyServiceRecords.recordType, "monthly"),
         isNull(monthlyServiceRecords.deletedAt)
       ));
     return result[0];
@@ -744,6 +748,7 @@ export class DatabaseStorage implements IStorage {
         employeeId: record.employeeId,
         year: record.year,
         month: record.month,
+        recordType: record.recordType ?? "monthly",
         status: "pending",
       })
       .returning();
@@ -896,6 +901,30 @@ export class DatabaseStorage implements IStorage {
       .orderBy(monthlyServiceRecords.year, monthlyServiceRecords.month);
   }
 
+  async getAppointmentIdsInServiceRecords(appointmentIds: number[]): Promise<number[]> {
+    if (appointmentIds.length === 0) return [];
+    const rows = await db.select({ appointmentId: serviceRecordAppointments.appointmentId })
+      .from(serviceRecordAppointments)
+      .innerJoin(monthlyServiceRecords, eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id))
+      .where(and(
+        inArray(serviceRecordAppointments.appointmentId, appointmentIds),
+        isNull(monthlyServiceRecords.deletedAt)
+      ));
+    return rows.map(r => r.appointmentId);
+  }
+
+  async getServiceRecordForAppointment(appointmentId: number): Promise<MonthlyServiceRecord | undefined> {
+    const result = await db.select({ record: monthlyServiceRecords })
+      .from(serviceRecordAppointments)
+      .innerJoin(monthlyServiceRecords, eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id))
+      .where(and(
+        eq(serviceRecordAppointments.appointmentId, appointmentId),
+        isNull(monthlyServiceRecords.deletedAt)
+      ))
+      .limit(1);
+    return result[0]?.record;
+  }
+
   async isAppointmentLocked(appointmentId: number): Promise<boolean> {
     const result = await db.select({ 
       serviceRecordId: serviceRecordAppointments.serviceRecordId,
@@ -957,6 +986,7 @@ export class DatabaseStorage implements IStorage {
       customerId: monthlyServiceRecords.customerId,
       id: monthlyServiceRecords.id,
       status: monthlyServiceRecords.status,
+      recordType: monthlyServiceRecords.recordType,
     })
       .from(monthlyServiceRecords)
       .where(and(
@@ -967,17 +997,32 @@ export class DatabaseStorage implements IStorage {
         isNull(monthlyServiceRecords.deletedAt)
       ));
 
-    const recordMap = new Map(existingRecords.map(r => [r.customerId, { id: r.id, status: r.status }]));
+    const monthlyRecordMap = new Map<number, { id: number; status: string }>();
+    const singleRecordsMap = new Map<number, { id: number; status: string; recordType: string }[]>();
+    
+    for (const r of existingRecords) {
+      if (r.recordType === "monthly") {
+        monthlyRecordMap.set(r.customerId, { id: r.id, status: r.status });
+      } else {
+        const existing = singleRecordsMap.get(r.customerId) ?? [];
+        existing.push({ id: r.id, status: r.status, recordType: r.recordType });
+        singleRecordsMap.set(r.customerId, existing);
+      }
+    }
+
+    const customerHasAnyRecord = new Set(existingRecords.map(r => r.customerId));
 
     return overviewData
-      .filter(item => item.totalAppointments > 0 || recordMap.has(item.customerId))
+      .filter(item => item.totalAppointments > 0 || customerHasAnyRecord.has(item.customerId))
       .map(item => {
-        const record = recordMap.get(item.customerId);
+        const monthlyRecord = monthlyRecordMap.get(item.customerId);
+        const singleRecords = singleRecordsMap.get(item.customerId) ?? [];
         return {
           customerId: item.customerId,
           customerName: `${item.vorname} ${item.nachname}`,
-          existingRecordId: record?.id ?? null,
-          existingRecordStatus: record?.status ?? null,
+          existingRecordId: monthlyRecord?.id ?? null,
+          existingRecordStatus: monthlyRecord?.status ?? null,
+          singleRecords,
           documentedCount: item.documentedCount,
           undocumentedCount: item.undocumentedCount,
           totalAppointments: item.totalAppointments,

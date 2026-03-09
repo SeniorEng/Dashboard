@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { SignaturePad, SignatureDisplay, type SignatureMetadata } from "@/components/ui/signature-pad";
 import { ErrorState } from "@/components/patterns/error-state";
 import { StatusBadge } from "@/components/patterns/status-badge";
+import { Badge } from "@/components/ui/badge";
 import { 
   ArrowLeft, Loader2, Calendar, Clock, MapPin, User,
   FileText, Check, AlertTriangle, Car
@@ -188,6 +189,15 @@ export default function ServiceRecordDetailPage() {
 
         <div className="flex items-center gap-2 mb-6">
           <StatusBadge type="record" value={record.status} />
+          {record.recordType === "single" ? (
+            <Badge className="text-xs bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-100" data-testid="badge-record-type-single">
+              Einzeltermin
+            </Badge>
+          ) : (
+            <Badge variant="secondary" className="text-xs" data-testid="badge-record-type-monthly">
+              Monatlich
+            </Badge>
+          )}
         </div>
 
         <Card className="mb-6">

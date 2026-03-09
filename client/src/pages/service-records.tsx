@@ -18,6 +18,7 @@ import { Link, useLocation, useSearch } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useAuth } from "@/hooks/use-auth";
+import { Badge } from "@/components/ui/badge";
 import type { MonthlyServiceRecord, Customer, Appointment } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 
@@ -32,6 +33,7 @@ interface CustomerOverviewItem {
   customerId: number;
   customerName: string;
   existingRecord: { id: number; status: string } | null;
+  singleRecords: { id: number; status: string; recordType: string }[];
   documentedCount: number;
   undocumentedCount: number;
   totalAppointments: number;
@@ -258,22 +260,20 @@ export default function ServiceRecordsPage() {
         </>
       )}
 
-      {/* Customer detail view - simplified: ONE state per month */}
+      {/* Customer detail view */}
       {customerId && periodCheck && (
         <>
-          {/* Case 1: Record already exists - show it (check both sources for robustness) */}
-          {(records && records.length > 0) || periodCheck.existingRecord ? (
+          {/* Show existing records (both single and monthly) */}
+          {records && records.length > 0 && (
             <div className="flex flex-col gap-3">
-              {records && records.length > 0 ? (
-                records.map((record) => (
-                  <ServiceRecordCard key={record.id} record={record} />
-                ))
-              ) : periodCheck.existingRecord ? (
-                <ServiceRecordCard key={periodCheck.existingRecord.id} record={periodCheck.existingRecord} />
-              ) : null}
+              {records.map((record) => (
+                <ServiceRecordCard key={record.id} record={record} />
+              ))}
             </div>
-          ) : periodCheck.canCreateRecord ? (
-            /* Case 2: Ready to create - show create button */
+          )}
+
+          {/* Show create monthly button when possible (even if single LNs exist) */}
+          {periodCheck.canCreateRecord ? (
             <Card>
               <CardContent className="py-6">
                 <div className="text-center space-y-4">
@@ -285,7 +285,10 @@ export default function ServiceRecordsPage() {
                       Alle {periodCheck.documentedCount} Termine dokumentiert
                     </p>
                     <p className="text-sm text-muted-foreground mt-1">
-                      Sie können jetzt den Leistungsnachweis für {MONTH_NAMES[selectedMonth - 1]} {selectedYear} erstellen.
+                      {records && records.length > 0
+                        ? `Sie können einen monatlichen Leistungsnachweis für die verbleibenden Termine erstellen.`
+                        : `Sie können jetzt den Leistungsnachweis für ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear} erstellen.`
+                      }
                     </p>
                   </div>
                   <Button
@@ -300,12 +303,12 @@ export default function ServiceRecordsPage() {
                     ) : (
                       <Plus className={`${iconSize.sm} mr-2`} />
                     )}
-                    Leistungsnachweis erstellen
+                    Monatlichen Leistungsnachweis erstellen
                   </Button>
                 </div>
               </CardContent>
             </Card>
-          ) : periodCheck.undocumentedCount > 0 ? (
+          ) : !(records && records.length > 0) && periodCheck.undocumentedCount > 0 ? (
             /* Case 3: Appointments still open - show warning */
             <Card className="border-amber-200 bg-amber-50/50">
               <CardContent className="py-6">
@@ -401,6 +404,20 @@ function CustomerOverviewCard({ item, selectedYear, selectedMonth }: CustomerOve
   const href = item.existingRecord 
     ? `/service-records/${item.existingRecord.id}`
     : `/service-records?customerId=${item.customerId}`;
+
+  const singleRecords = item.singleRecords || [];
+  
+  const singleRecordsSummary = useMemo(() => {
+    if (singleRecords.length === 0) return null;
+    const pending = singleRecords.filter(r => r.status === "pending").length;
+    const employeeSigned = singleRecords.filter(r => r.status === "employee_signed").length;
+    const completed = singleRecords.filter(r => r.status === "completed").length;
+    const parts: string[] = [];
+    if (pending > 0) parts.push(`${pending} ausstehend`);
+    if (employeeSigned > 0) parts.push(`${employeeSigned} MA unterschrieben`);
+    if (completed > 0) parts.push(`${completed} abgeschlossen`);
+    return `${singleRecords.length} Einzeltermin-LN (${parts.join(", ")})`;
+  }, [singleRecords]);
   
   return (
     <Link href={href}>
@@ -421,6 +438,18 @@ function CustomerOverviewCard({ item, selectedYear, selectedMonth }: CustomerOve
                 )}
                 {item.documentedCount > 0 && item.undocumentedCount === 0 && !item.existingRecord && (
                   <span className="text-emerald-600">{item.documentedCount} dokumentiert</span>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                {item.existingRecord && (
+                  <Badge variant="secondary" className="text-xs" data-testid="badge-record-type-monthly">
+                    Monatlich
+                  </Badge>
+                )}
+                {singleRecords.length > 0 && (
+                  <Badge className="text-xs bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-100" data-testid="badge-record-type-single">
+                    {singleRecordsSummary}
+                  </Badge>
                 )}
               </div>
             </div>

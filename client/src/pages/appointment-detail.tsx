@@ -88,6 +88,34 @@ export default function AppointmentDetail() {
   });
   
   const { data: appointment, isLoading } = useAppointment(id);
+
+  const { data: existingServiceRecord, isLoading: isLoadingServiceRecord } = useQuery<{
+    id: number;
+    status: string;
+  } | null>({
+    queryKey: [`/api/service-records/for-appointment/${id}`],
+    queryFn: async () => {
+      const result = await api.get<{ id: number; status: string } | null>(`/service-records/for-appointment/${id}`);
+      return unwrapResult(result);
+    },
+    enabled: !!id && !!appointment && appointment.status === "completed",
+  });
+
+  const createServiceRecordMutation = useMutation({
+    mutationFn: async ({ customerId, appointmentId }: { customerId: number; appointmentId: number }) => {
+      const result = await api.post<{ id: number }>("/service-records/single", { customerId, appointmentId });
+      return unwrapResult(result);
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: [`/api/service-records/for-appointment/${id}`] });
+      toast({ title: "Leistungsnachweis erstellt" });
+      setLocation(`/service-records/${data.id}`);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
   const { data: appointmentServices } = useQuery<Array<{ 
     id: number;
     serviceId: number; 
@@ -456,6 +484,44 @@ export default function AppointmentDetail() {
           <p className="text-sm text-muted-foreground whitespace-pre-wrap">
             {appointment.notes}
           </p>
+        </SectionCard>
+      )}
+
+      {isCompleted && !isLoadingServiceRecord && (
+        <SectionCard
+          title="Leistungsnachweis"
+          icon={<FileText className={iconSize.sm} />}
+          className="mb-4"
+        >
+          {existingServiceRecord ? (
+            <div className="flex items-center justify-between">
+              <StatusBadge
+                type="record"
+                value={existingServiceRecord.status}
+                data-testid="badge-service-record-status"
+              />
+              <Link
+                href={`/service-records/${existingServiceRecord.id}`}
+                data-testid="link-service-record"
+              >
+                <Button variant="outline" size="sm">
+                  {existingServiceRecord.status === "pending" ? "Leistungsnachweis unterschreiben" : "Leistungsnachweis anzeigen"}
+                  <ArrowRight className={`${iconSize.sm} ml-1`} />
+                </Button>
+              </Link>
+            </div>
+          ) : (
+            <Button
+              className={`w-full ${componentStyles.btnPrimary}`}
+              onClick={() => appointment.customerId && createServiceRecordMutation.mutate({ customerId: appointment.customerId, appointmentId: appointment.id })}
+              disabled={createServiceRecordMutation.isPending}
+              data-testid="button-create-service-record"
+            >
+              {createServiceRecordMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              <FileText className={`${iconSize.sm} mr-2`} />
+              Leistungsnachweis erstellen
+            </Button>
+          )}
         </SectionCard>
       )}
 

@@ -1,13 +1,13 @@
 import { Router, Request, Response } from "express";
 import { storage } from "../storage";
 import { requireAuth, canAccessCustomer } from "../middleware/auth";
-import { insertServiceRecordSchema, signServiceRecordSchema, serviceRecordAppointments, monthlyServiceRecords } from "@shared/schema";
+import { insertServiceRecordSchema, insertSingleServiceRecordSchema, signServiceRecordSchema, serviceRecordAppointments, monthlyServiceRecords, appointments } from "@shared/schema";
 import { asyncHandler, sendForbidden, sendNotFound } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
 import { db } from "../lib/db";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 
 const router = Router();
 
@@ -54,16 +54,20 @@ router.get("/overview", requireAuth, asyncHandler("Übersicht konnte nicht gelad
     } else {
       status = "ready";
     }
+
+    const hasSingleRecords = (item.singleRecords ?? []).length > 0;
+    const hasMonthlyRecord = !!item.existingRecordId;
     
     return {
       customerId: item.customerId,
       customerName: item.customerName,
       existingRecord: item.existingRecordId ? { id: item.existingRecordId, status: item.existingRecordStatus } : null,
+      singleRecords: item.singleRecords ?? [],
       documentedCount: item.documentedCount,
       undocumentedCount: item.undocumentedCount,
       totalAppointments: item.totalAppointments,
       status,
-      canCreateRecord: !item.existingRecordId && item.undocumentedCount === 0 && item.documentedCount > 0,
+      canCreateRecord: !hasMonthlyRecord && item.undocumentedCount === 0 && item.documentedCount > 0,
     };
   });
   
@@ -221,7 +225,7 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
   const existingRecord = await storage.getServiceRecordByPeriod(customerId, userId, year, month);
   if (existingRecord) {
     return res.status(409).json({ 
-      message: "Für diesen Zeitraum existiert bereits ein Leistungsnachweis" 
+      message: "Für diesen Zeitraum existiert bereits ein monatlicher Leistungsnachweis" 
     });
   }
   
@@ -239,15 +243,26 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
       message: "Es gibt keine dokumentierten Termine in diesem Monat." 
     });
   }
+
+  const allApptIds = documentedAppointments.map(apt => apt.id);
+  const alreadyCoveredIds = await storage.getAppointmentIdsInServiceRecords(allApptIds);
+  const remainingAppointments = documentedAppointments.filter(apt => !alreadyCoveredIds.includes(apt.id));
+  
+  if (remainingAppointments.length === 0) {
+    return res.status(400).json({ 
+      message: "Alle dokumentierten Termine sind bereits durch Einzel-Leistungsnachweise abgedeckt." 
+    });
+  }
   
   const record = await storage.createServiceRecord({
     customerId,
     employeeId: userId,
     year,
     month,
+    recordType: "monthly",
   });
   
-  const appointmentIds = documentedAppointments.map(apt => apt.id);
+  const appointmentIds = remainingAppointments.map(apt => apt.id);
   await storage.addAppointmentsToServiceRecord(record.id, appointmentIds);
 
   const ip = req.ip || req.socket.remoteAddress;
@@ -259,6 +274,118 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
   );
 
   res.status(201).json(record);
+}));
+
+router.post("/single", requireAuth, asyncHandler("Einzeltermin-Leistungsnachweis konnte nicht erstellt werden", async (req, res) => {
+  const userId = req.user!.id;
+  const parsed = insertSingleServiceRecordSchema.safeParse(req.body);
+  
+  if (!parsed.success) {
+    return res.status(400).json({ 
+      message: "Ungültige Eingabedaten",
+      errors: parsed.error.errors 
+    });
+  }
+  
+  const { customerId, appointmentId } = parsed.data;
+  
+  const hasAccess = await canAccessCustomer(
+    userId,
+    req.user!.isAdmin,
+    customerId,
+    (employeeId) => storage.getAssignedCustomerIds(employeeId)
+  );
+  if (!hasAccess) {
+    return res.status(403).json({ 
+      error: "FORBIDDEN",
+      message: "Sie haben keinen Zugriff auf diesen Kunden" 
+    });
+  }
+  
+  const customer = await storage.getCustomer(customerId);
+  if (customer?.status === "erstberatung") {
+    return res.status(400).json({
+      message: "Für Erstberatungskunden können keine Leistungsnachweise erstellt werden."
+    });
+  }
+
+  const [appointment] = await db.select()
+    .from(appointments)
+    .where(and(
+      eq(appointments.id, appointmentId),
+      eq(appointments.customerId, customerId),
+      isNull(appointments.deletedAt)
+    ))
+    .limit(1);
+  
+  if (!appointment) {
+    return res.status(404).json({ message: "Termin nicht gefunden" });
+  }
+  
+  if (appointment.status !== "completed") {
+    return res.status(400).json({ 
+      message: "Nur abgeschlossene Termine können einen Leistungsnachweis erhalten." 
+    });
+  }
+
+  const existingRecord = await storage.getServiceRecordForAppointment(appointmentId);
+  if (existingRecord) {
+    return res.status(409).json({ 
+      message: "Für diesen Termin existiert bereits ein Leistungsnachweis.",
+      existingRecordId: existingRecord.id
+    });
+  }
+
+  const appointmentDate = new Date(appointment.date as string);
+  const year = appointmentDate.getFullYear();
+  const month = appointmentDate.getMonth() + 1;
+  
+  const record = await storage.createServiceRecord({
+    customerId,
+    employeeId: userId,
+    year,
+    month,
+    recordType: "single",
+  });
+  
+  await storage.addAppointmentsToServiceRecord(record.id, [appointmentId]);
+
+  const ip = req.ip || req.socket.remoteAddress;
+  await auditService.serviceRecordCreated(
+    userId,
+    record.id,
+    { customerId, year, month, appointmentCount: 1, recordType: "single", appointmentId },
+    ip
+  );
+
+  res.status(201).json(record);
+}));
+
+router.get("/for-appointment/:appointmentId", requireAuth, asyncHandler("Leistungsnachweis konnte nicht geladen werden", async (req, res) => {
+  const appointmentId = requireIntParam(req.params.appointmentId, res);
+  if (appointmentId === null) return;
+
+  const [appointment] = await db.select()
+    .from(appointments)
+    .where(and(eq(appointments.id, appointmentId), isNull(appointments.deletedAt)))
+    .limit(1);
+  
+  if (!appointment) {
+    return res.status(404).json({ message: "Termin nicht gefunden" });
+  }
+
+  const hasAccess = await canAccessCustomer(
+    req.user!.id,
+    req.user!.isAdmin,
+    appointment.customerId,
+    (employeeId) => storage.getAssignedCustomerIds(employeeId)
+  );
+  if (!hasAccess) {
+    return res.status(403).json({ error: "FORBIDDEN", message: "Kein Zugriff" });
+  }
+  
+  const record = await storage.getServiceRecordForAppointment(appointmentId);
+  res.json(record || null);
 }));
 
 router.post("/:id/sign", requireAuth, asyncHandler("Unterschrift konnte nicht gespeichert werden", async (req, res) => {
