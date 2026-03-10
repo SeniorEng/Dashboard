@@ -23,8 +23,6 @@ export {
   type AppointmentType,
   type ServiceType,
   type TravelOriginType,
-  type Pflegegrad,
-  type DurationOption,
   type ServiceInfo,
   type CardServiceInfo,
   type TravelOriginSuggestion,
@@ -76,7 +74,7 @@ export interface AppointmentWithCustomer extends Appointment {
  * Payload für Termin-Updates
  * @deprecated Verwende stattdessen die Zod-Schemas aus schema.ts
  */
-export interface UpdateAppointmentPayload {
+interface UpdateAppointmentPayload {
   status?: "scheduled" | "in-progress" | "documenting" | "completed" | "cancelled";
   actualStart?: string;
   actualEnd?: string;

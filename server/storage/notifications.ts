@@ -16,7 +16,7 @@ export async function getNotifications(userId: number, limit = 50): Promise<Noti
     .limit(limit);
 }
 
-export async function getUnreadNotifications(userId: number): Promise<Notification[]> {
+async function getUnreadNotifications(userId: number): Promise<Notification[]> {
   return db
     .select()
     .from(notifications)

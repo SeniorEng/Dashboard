@@ -39,7 +39,7 @@ export interface PaginatedResponse<T> {
 // AUTH
 // ============================================
 
-export interface AuthUser {
+interface AuthUser {
   id: number;
   email: string;
   displayName: string;
@@ -265,7 +265,7 @@ export interface CreateCustomerRequest {
 export type { AppointmentWithCustomer } from "@shared/types";
 
 
-export interface DocumentAppointmentRequest {
+interface DocumentAppointmentRequest {
   services: Array<{ serviceId: number; actualDurationMinutes: number; details?: string | null }>;
   travelOriginType: 'home' | 'appointment';
   travelFromAppointmentId?: number | null;

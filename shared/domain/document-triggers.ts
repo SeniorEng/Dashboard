@@ -121,7 +121,7 @@ export function getTriggerFieldDefinition(field: string): TriggerFieldDefinition
   return TRIGGER_FIELD_REGISTRY.find((f) => f.field === field);
 }
 
-export function getValuesForTriggerField(field: string): Array<{ value: string; label: string }> {
+function getValuesForTriggerField(field: string): Array<{ value: string; label: string }> {
   const def = getTriggerFieldDefinition(field);
   return def?.values ?? [];
 }

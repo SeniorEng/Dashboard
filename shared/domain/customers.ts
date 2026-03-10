@@ -37,7 +37,7 @@ export function needsBudgetData(billingType: BillingType): boolean {
   return isPflegekasseCustomer(billingType);
 }
 
-export function needsPflegegradData(billingType: BillingType): boolean {
+function needsPflegegradData(billingType: BillingType): boolean {
   return isPflegekasseCustomer(billingType);
 }
 

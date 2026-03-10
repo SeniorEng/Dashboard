@@ -8,8 +8,6 @@ export {
   api, 
   apiRequest, 
   unwrapResult, 
-  createQueryFn,
-  isApiError,
   ApiError,
 } from './client';
 export type { ApiErrorInfo, ApiResult } from './client';

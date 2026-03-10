@@ -290,14 +290,14 @@ export function unwrapResult<T>(result: ApiResult<T>): T {
 /**
  * Type guard to check if an error is an ApiError
  */
-export function isApiError(error: unknown): error is ApiError {
+function isApiError(error: unknown): error is ApiError {
   return error instanceof ApiError;
 }
 
 /**
  * Create a query function that unwraps results for react-query
  */
-export function createQueryFn<T>(
+function createQueryFn<T>(
   fetcher: (signal?: AbortSignal) => Promise<ApiResult<T>>
 ) {
   return async ({ signal }: { signal?: AbortSignal }): Promise<T> => {
