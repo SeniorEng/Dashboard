@@ -12,9 +12,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, BookOpen, Bell, CalendarPlus, UserPlus, WifiOff } from "lucide-react";
+import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, BookOpen, Bell, CalendarPlus, UserPlus, WifiOff, Eye, ChevronDown } from "lucide-react";
 import { type LayoutVariant, layoutVariants, colors } from "@/design-system";
 import { useUnreadCount } from "@/features/notifications/use-notifications";
+import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
+import { useActiveEmployees } from "@/features/appointments/hooks/use-active-employees";
 
 function useOnlineStatus() {
   const subscribe = useCallback((callback: () => void) => {
@@ -148,6 +150,66 @@ function GlobalSearch() {
   );
 }
 
+function ViewAsEmployeeBanner() {
+  const { isViewingAsEmployee, viewAsEmployeeName, clearViewAs } = useViewAsEmployee();
+  if (!isViewingAsEmployee) return null;
+
+  return (
+    <div className="bg-amber-50 border-b border-amber-200 px-4 py-1.5 flex items-center justify-between text-sm" data-testid="banner-view-as-employee">
+      <div className="flex items-center gap-2 text-amber-800">
+        <Eye className="w-4 h-4" />
+        <span>Ansicht: <strong>{viewAsEmployeeName}</strong></span>
+      </div>
+      <button
+        onClick={clearViewAs}
+        className="ml-4 px-2 py-0.5 rounded text-xs font-medium text-amber-800 hover:bg-amber-100 transition-colors"
+        data-testid="button-clear-view-as"
+      >
+        Zurücksetzen
+      </button>
+    </div>
+  );
+}
+
+function ViewAsEmployeeSelector() {
+  const { user } = useAuth();
+  const { viewAsEmployeeId, setViewAsEmployee } = useViewAsEmployee();
+  const { data: employees = [] } = useActiveEmployees({ enabled: user?.isAdmin ?? false });
+
+  if (!user?.isAdmin) return null;
+
+  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    if (value === "") {
+      setViewAsEmployee(null, null);
+    } else {
+      const id = parseInt(value);
+      const emp = employees.find(e => e.id === id);
+      setViewAsEmployee(id, emp?.displayName ?? null);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-1.5 shrink-0" data-testid="selector-view-as-employee">
+      <Eye className="w-3.5 h-3.5 text-muted-foreground" />
+      <div className="relative">
+        <select
+          value={viewAsEmployeeId ?? ""}
+          onChange={handleChange}
+          className="appearance-none bg-muted/60 text-xs font-medium pl-2 pr-6 py-1 rounded-md border border-border/60 cursor-pointer hover:bg-muted transition-colors focus:outline-none focus:ring-1 focus:ring-primary/30"
+          data-testid="select-view-as-employee"
+        >
+          <option value="">Alle Mitarbeiter</option>
+          {employees.map(emp => (
+            <option key={emp.id} value={emp.id}>{emp.displayName}</option>
+          ))}
+        </select>
+        <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+      </div>
+    </div>
+  );
+}
+
 function OfflineBanner() {
   const isOnline = useOnlineStatus();
   const [dismissed, setDismissed] = useState(false);
@@ -252,6 +314,12 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
   return (
     <div className={`min-h-screen ${colors.surface.page} font-sans text-foreground pb-20 md:pb-0`}>
       <OfflineBanner />
+      <ViewAsEmployeeBanner />
+      {isAdmin && !isOnAdminPage && (
+        <div className="md:hidden bg-white border-b border-border/30 px-4 py-2 flex items-center justify-end">
+          <ViewAsEmployeeSelector />
+        </div>
+      )}
       {/* Header */}
       <header className="sticky top-0 z-50 w-full bg-white border-b border-border/40 shadow-sm">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
@@ -378,6 +446,12 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
                     </Link>
                   );
                 })}
+                {isAdmin && (
+                  <>
+                    <div className="w-px h-6 bg-border/60 mx-1" />
+                    <ViewAsEmployeeSelector />
+                  </>
+                )}
               </div>
             </div>
           </nav>

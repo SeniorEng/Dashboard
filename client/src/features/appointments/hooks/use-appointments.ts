@@ -3,11 +3,16 @@ import type { AppointmentWithCustomer } from "@shared/types";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useToast } from "@/hooks/use-toast";
 import { invalidateRelated } from "@/lib/query-invalidation";
+import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
 
 const QUERY_KEY = "appointments";
 
-async function fetchAppointments(date?: string): Promise<AppointmentWithCustomer[]> {
-  const endpoint = date ? `/appointments?date=${date}` : "/appointments";
+async function fetchAppointments(date?: string, viewAsEmployeeId?: number | null): Promise<AppointmentWithCustomer[]> {
+  const params = new URLSearchParams();
+  if (date) params.set("date", date);
+  if (viewAsEmployeeId) params.set("viewAsEmployeeId", viewAsEmployeeId.toString());
+  const qs = params.toString();
+  const endpoint = qs ? `/appointments?${qs}` : "/appointments";
   const result = await api.get<AppointmentWithCustomer[]>(endpoint);
   return unwrapResult(result);
 }
@@ -23,22 +28,29 @@ async function deleteAppointment(id: number): Promise<void> {
 }
 
 export function useAppointments(date?: string) {
+  const { viewAsEmployeeId } = useViewAsEmployee();
   return useQuery({
-    queryKey: date ? [QUERY_KEY, { date }] : [QUERY_KEY],
-    queryFn: () => fetchAppointments(date),
+    queryKey: date
+      ? [QUERY_KEY, { date, viewAsEmployeeId }]
+      : [QUERY_KEY, { viewAsEmployeeId }],
+    queryFn: () => fetchAppointments(date, viewAsEmployeeId),
     staleTime: 30000,
   });
 }
 
-async function fetchAppointmentCounts(dates: string[]): Promise<Record<string, number>> {
-  const result = await api.get<Record<string, number>>(`/appointments/counts?dates=${dates.join(",")}`);
+async function fetchAppointmentCounts(dates: string[], viewAsEmployeeId?: number | null): Promise<Record<string, number>> {
+  const params = new URLSearchParams();
+  params.set("dates", dates.join(","));
+  if (viewAsEmployeeId) params.set("viewAsEmployeeId", viewAsEmployeeId.toString());
+  const result = await api.get<Record<string, number>>(`/appointments/counts?${params.toString()}`);
   return unwrapResult(result);
 }
 
 export function useWeekAppointmentCounts(dates: string[]) {
+  const { viewAsEmployeeId } = useViewAsEmployee();
   return useQuery({
-    queryKey: [QUERY_KEY, "week-counts", dates.join(",")],
-    queryFn: () => fetchAppointmentCounts(dates),
+    queryKey: [QUERY_KEY, "week-counts", dates.join(","), { viewAsEmployeeId }],
+    queryFn: () => fetchAppointmentCounts(dates, viewAsEmployeeId),
     staleTime: 30000,
     enabled: dates.length > 0,
   });

@@ -72,15 +72,24 @@ router.get("/active-employees", asyncHandler("Mitarbeiter konnten nicht geladen 
 router.get("/", asyncHandler(ErrorMessages.fetchAppointmentsFailed, async (req, res) => {
   const date = req.query.date as string | undefined;
   const customerId = req.query.customerId ? parseInt(req.query.customerId as string) : undefined;
+  const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : undefined;
   const user = req.user!;
   
   let customerIds: number[] | undefined;
+  let employeeId: number | undefined;
   
-  if (!user.isAdmin) {
+  if (user.isAdmin && viewAsEmployeeId) {
+    customerIds = await storage.getAssignedCustomerIds(viewAsEmployeeId);
+    if (customerIds.length === 0) {
+      return res.json([]);
+    }
+    employeeId = viewAsEmployeeId;
+  } else if (!user.isAdmin) {
     customerIds = await storage.getAssignedCustomerIds(user.id);
     if (customerIds.length === 0) {
       return res.json([]);
     }
+    employeeId = user.id;
   }
   
   if (customerId) {
@@ -94,7 +103,6 @@ router.get("/", asyncHandler(ErrorMessages.fetchAppointmentsFailed, async (req, 
     }
   }
   
-  const employeeId = user.isAdmin ? undefined : user.id;
   const appointments = await storage.getAppointmentsWithCustomers(date, customerIds, employeeId);
   
   res.json(appointments);
@@ -103,6 +111,7 @@ router.get("/", asyncHandler(ErrorMessages.fetchAppointmentsFailed, async (req, 
 router.get("/counts", asyncHandler("Fehler beim Laden der Terminzähler", async (req, res) => {
   const user = req.user!;
   const datesParam = req.query.dates as string | undefined;
+  const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : undefined;
   if (!datesParam) {
     return sendBadRequest(res, "Datumsangaben fehlen");
   }
@@ -111,15 +120,23 @@ router.get("/counts", asyncHandler("Fehler beim Laden der Terminzähler", async 
     return sendBadRequest(res, "Ungültige Datumsangaben (max. 14 Tage)");
   }
 
-  const customerIds = user.isAdmin
-    ? undefined
-    : await storage.getAssignedCustomerIds(user.id);
+  let customerIds: number[] | undefined;
+  let employeeId: number | undefined;
 
-  if (customerIds && customerIds.length === 0) {
-    return res.json({});
+  if (user.isAdmin && viewAsEmployeeId) {
+    customerIds = await storage.getAssignedCustomerIds(viewAsEmployeeId);
+    if (customerIds.length === 0) {
+      return res.json({});
+    }
+    employeeId = viewAsEmployeeId;
+  } else if (!user.isAdmin) {
+    customerIds = await storage.getAssignedCustomerIds(user.id);
+    if (customerIds.length === 0) {
+      return res.json({});
+    }
+    employeeId = user.id;
   }
 
-  const employeeId = user.isAdmin ? undefined : user.id;
   const counts = await storage.getAppointmentCountsByDates(dates, customerIds, employeeId);
   res.json(counts);
 }));
@@ -127,16 +144,25 @@ router.get("/counts", asyncHandler("Fehler beim Laden der Terminzähler", async 
 router.get("/undocumented", asyncHandler("Fehler beim Laden der offenen Dokumentationen", async (req, res) => {
   const user = req.user!;
   const today = todayISO();
+  const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : undefined;
   
-  const customerIds = user.isAdmin 
-    ? undefined 
-    : await storage.getAssignedCustomerIds(user.id);
-  
-  if (customerIds && customerIds.length === 0) {
-    return res.json([]);
+  let customerIds: number[] | undefined;
+  let employeeId: number | undefined;
+
+  if (user.isAdmin && viewAsEmployeeId) {
+    customerIds = await storage.getAssignedCustomerIds(viewAsEmployeeId);
+    if (customerIds.length === 0) {
+      return res.json([]);
+    }
+    employeeId = viewAsEmployeeId;
+  } else if (!user.isAdmin) {
+    customerIds = await storage.getAssignedCustomerIds(user.id);
+    if (customerIds.length === 0) {
+      return res.json([]);
+    }
+    employeeId = user.id;
   }
 
-  const employeeId = user.isAdmin ? undefined : user.id;
   const appointments = await storage.getUndocumentedAppointments(today, customerIds, employeeId);
   
   res.json(appointments);

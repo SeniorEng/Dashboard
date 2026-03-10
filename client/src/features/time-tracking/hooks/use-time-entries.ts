@@ -8,6 +8,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { invalidateRelated } from "@/lib/query-invalidation";
+import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
 import type { 
   TimeEntry, 
   CreateTimeEntryRequest, 
@@ -18,12 +19,18 @@ import type {
 
 export const timeEntryKeys = {
   all: ["time-entries"] as const,
-  list: (year?: number, month?: number) => [...timeEntryKeys.all, "list", { year, month }] as const,
+  list: (year?: number, month?: number, viewAsEmployeeId?: number | null) => [...timeEntryKeys.all, "list", { year, month, viewAsEmployeeId }] as const,
   detail: (id: number) => [...timeEntryKeys.all, "detail", id] as const,
-  byDate: (date: string) => [...timeEntryKeys.all, "by-date", date] as const,
+  byDate: (date: string, viewAsEmployeeId?: number | null) => [...timeEntryKeys.all, "by-date", date, { viewAsEmployeeId }] as const,
   overview: (year: number, month: number) => [...timeEntryKeys.all, "overview", { year, month }] as const,
   openTasks: [...["time-entries"], "open-tasks"] as const,
 };
+
+function appendViewAs(endpoint: string, viewAsEmployeeId?: number | null): string {
+  if (!viewAsEmployeeId) return endpoint;
+  const separator = endpoint.includes("?") ? "&" : "?";
+  return `${endpoint}${separator}viewAsEmployeeId=${viewAsEmployeeId}`;
+}
 
 export interface TimeEntryFilters {
   year?: number;
@@ -35,16 +42,18 @@ export interface TimeEntryFilters {
  * Fetch time entries for the authenticated user
  */
 export function useTimeEntries(filters?: TimeEntryFilters) {
+  const { viewAsEmployeeId } = useViewAsEmployee();
   const queryParams = new URLSearchParams();
   if (filters?.year) queryParams.set("year", filters.year.toString());
   if (filters?.month) queryParams.set("month", filters.month.toString());
   if (filters?.entryType) queryParams.set("entryType", filters.entryType);
+  if (viewAsEmployeeId) queryParams.set("viewAsEmployeeId", viewAsEmployeeId.toString());
   
   const queryString = queryParams.toString();
   const endpoint = queryString ? `/time-entries?${queryString}` : "/time-entries";
   
   return useQuery({
-    queryKey: timeEntryKeys.list(filters?.year, filters?.month),
+    queryKey: timeEntryKeys.list(filters?.year, filters?.month, viewAsEmployeeId),
     queryFn: async ({ signal }) => {
       const result = await api.get<TimeEntry[]>(endpoint, signal);
       return unwrapResult(result);
@@ -136,10 +145,11 @@ export function useDeleteTimeEntry() {
  * Fetch complete time overview for a month (appointments + time entries)
  */
 export function useTimeOverview(year: number, month: number) {
+  const { viewAsEmployeeId } = useViewAsEmployee();
   return useQuery({
-    queryKey: timeEntryKeys.overview(year, month),
+    queryKey: [...timeEntryKeys.overview(year, month), { viewAsEmployeeId }],
     queryFn: async ({ signal }) => {
-      const result = await api.get<TimeOverviewData>(`/time-entries/overview/${year}/${month}`, signal);
+      const result = await api.get<TimeOverviewData>(appendViewAs(`/time-entries/overview/${year}/${month}`, viewAsEmployeeId), signal);
       return unwrapResult(result);
     },
     enabled: year >= 2020 && year <= 2100 && month >= 1 && month <= 12,
@@ -152,10 +162,11 @@ export function useTimeOverview(year: number, month: number) {
  * Combines: overview + vacation-summary + open-tasks
  */
 export function useTimesPageData(year: number, month: number) {
+  const { viewAsEmployeeId } = useViewAsEmployee();
   return useQuery({
-    queryKey: [...timeEntryKeys.all, "page-data", { year, month }] as const,
+    queryKey: [...timeEntryKeys.all, "page-data", { year, month, viewAsEmployeeId }] as const,
     queryFn: async ({ signal }) => {
-      const result = await api.get<TimesPageData>(`/time-entries/page-data/${year}/${month}`, signal);
+      const result = await api.get<TimesPageData>(appendViewAs(`/time-entries/page-data/${year}/${month}`, viewAsEmployeeId), signal);
       return unwrapResult(result);
     },
     enabled: year >= 2020 && year <= 2100 && month >= 1 && month <= 12,
@@ -167,10 +178,11 @@ export function useTimesPageData(year: number, month: number) {
  * Fetch time entries for a specific day
  */
 export function useDayTimeEntries(date: string) {
+  const { viewAsEmployeeId } = useViewAsEmployee();
   return useQuery({
-    queryKey: timeEntryKeys.byDate(date),
+    queryKey: timeEntryKeys.byDate(date, viewAsEmployeeId),
     queryFn: async ({ signal }) => {
-      const result = await api.get<TimeEntry[]>(`/time-entries/by-date/${date}`, signal);
+      const result = await api.get<TimeEntry[]>(appendViewAs(`/time-entries/by-date/${date}`, viewAsEmployeeId), signal);
       return unwrapResult(result);
     },
     enabled: /^\d{4}-\d{2}-\d{2}$/.test(date),

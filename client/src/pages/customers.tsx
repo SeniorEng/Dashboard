@@ -21,6 +21,7 @@ import {
 import { formatAddress } from "@shared/utils/format";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useAuth } from "@/hooks/use-auth";
+import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
 import type { CustomerWithAccess } from "@/features/appointments";
 import type { BirthdayEntry } from "@shared/types";
 
@@ -62,12 +63,15 @@ export default function CustomersPage() {
   const [activeTab, setActiveTab] = useState<CustomerTab>("kunden");
   const [searchQuery, setSearchQuery] = useState("");
   const { user } = useAuth();
+  const { viewAsEmployeeId } = useViewAsEmployee();
 
   const { data: customers = [], isLoading, error, refetch } = useQuery<CustomerWithAccess[]>({
-    queryKey: ["customers", "aktiv"],
+    queryKey: ["customers", "aktiv", { viewAsEmployeeId }],
     staleTime: 60000,
     queryFn: async () => {
-      const result = await api.get<CustomerWithAccess[]>("/customers?status=aktiv");
+      const params = new URLSearchParams({ status: "aktiv" });
+      if (viewAsEmployeeId) params.set("viewAsEmployeeId", viewAsEmployeeId.toString());
+      const result = await api.get<CustomerWithAccess[]>(`/customers?${params.toString()}`);
       return unwrapResult(result);
     },
   });

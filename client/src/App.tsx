@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { ViewAsEmployeeProvider } from "@/hooks/use-view-as-employee";
 import { SessionTimeoutWarning } from "@/components/session-timeout-warning";
 import { OnboardingDialog } from "@/components/onboarding-dialog";
 import { Loader2 } from "lucide-react";
@@ -269,12 +270,14 @@ function App() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <TooltipProvider>
-            <Toaster />
-            <SessionTimeoutWarning />
-            <OnboardingWrapper />
-            <Router />
-          </TooltipProvider>
+          <ViewAsEmployeeProvider>
+            <TooltipProvider>
+              <Toaster />
+              <SessionTimeoutWarning />
+              <OnboardingWrapper />
+              <Router />
+            </TooltipProvider>
+          </ViewAsEmployeeProvider>
         </AuthProvider>
       </QueryClientProvider>
     </ErrorBoundary>

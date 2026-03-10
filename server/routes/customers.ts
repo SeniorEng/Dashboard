@@ -32,8 +32,9 @@ router.use("/", servicePricesRouter);
 router.get("/", asyncHandler("Kunden konnten nicht geladen werden", async (req, res) => {
   const user = req.user!;
   const statusFilter = req.query.status as string | undefined;
+  const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : undefined;
   
-  if (user.isAdmin) {
+  if (user.isAdmin && !viewAsEmployeeId) {
     let allCustomers = await storage.getCustomers();
     if (statusFilter) {
       allCustomers = allCustomers.filter(c => c.status === statusFilter);
@@ -42,7 +43,8 @@ router.get("/", asyncHandler("Kunden konnten nicht geladen werden", async (req, 
     return;
   }
   
-  let customersWithAccess = await storage.getCustomersForEmployee(user.id);
+  const employeeId = (user.isAdmin && viewAsEmployeeId) ? viewAsEmployeeId : user.id;
+  let customersWithAccess = await storage.getCustomersForEmployee(employeeId);
   if (statusFilter) {
     customersWithAccess = customersWithAccess.filter(c => c.status === statusFilter);
   }

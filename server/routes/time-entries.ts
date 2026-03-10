@@ -123,7 +123,8 @@ router.use(requireAuth);
  * Query params: year, month, entryType
  */
 router.get("/", asyncHandler("Zeiteinträge konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const userId = req.user!.id;
+  const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : undefined;
+  const userId = (req.user!.isAdmin && viewAsEmployeeId) ? viewAsEmployeeId : req.user!.id;
   const { year, month, entryType } = req.query;
   
   const entries = await timeTrackingStorage.getTimeEntries(userId, {
@@ -157,7 +158,8 @@ router.get("/vacation-summary/:year", asyncHandler("Urlaubsübersicht konnte nic
  * Get time entries for a specific day for the authenticated user
  */
 router.get("/by-date/:date", asyncHandler("Zeiteinträge konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const userId = req.user!.id;
+  const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : undefined;
+  const userId = (req.user!.isAdmin && viewAsEmployeeId) ? viewAsEmployeeId : req.user!.id;
   const date = req.params.date;
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -173,7 +175,8 @@ router.get("/by-date/:date", asyncHandler("Zeiteinträge konnten nicht geladen w
  * Combined endpoint: overview + vacation-summary + open-tasks in one call
  */
 router.get("/page-data/:year/:month", asyncHandler("Zeitdaten konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const userId = req.user!.id;
+  const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : undefined;
+  const userId = (req.user!.isAdmin && viewAsEmployeeId) ? viewAsEmployeeId : req.user!.id;
   const year = requireIntParam(req.params.year, res);
   const month = requireIntParam(req.params.month, res);
   if (year === null || month === null) return;
@@ -200,7 +203,8 @@ router.get("/page-data/:year/:month", asyncHandler("Zeitdaten konnten nicht gela
  * Get complete time overview for a month (appointments + time entries)
  */
 router.get("/overview/:year/:month", asyncHandler("Zeitübersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const userId = req.user!.id;
+  const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : undefined;
+  const userId = (req.user!.isAdmin && viewAsEmployeeId) ? viewAsEmployeeId : req.user!.id;
   const year = requireIntParam(req.params.year, res);
   const month = requireIntParam(req.params.month, res);
   if (year === null || month === null) return;
