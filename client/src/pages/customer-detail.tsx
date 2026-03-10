@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo } from "react";
 import { useRoute, Link, useSearch, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { Layout } from "@/components/layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -143,8 +144,8 @@ export default function CustomerDetailPage() {
       return unwrapResult(result);
     },
     onSuccess: () => {
+      invalidateRelated(queryClient, "customers");
       queryClient.invalidateQueries({ queryKey: ["customer", customerId] });
-      queryClient.invalidateQueries({ queryKey: ["customers"] });
       toast({ title: "Kunde als inaktiv markiert" });
       setLocation("/customers");
     },
@@ -212,8 +213,8 @@ export default function CustomerDetailPage() {
       return unwrapResult(result);
     },
     onSuccess: () => {
+      invalidateRelated(queryClient, "customers");
       queryClient.invalidateQueries({ queryKey: ["customer", customerId] });
-      queryClient.invalidateQueries({ queryKey: ["customers"] });
       setEditingSection(null);
       toast({ title: "Kundendaten aktualisiert" });
     },
@@ -228,8 +229,8 @@ export default function CustomerDetailPage() {
       return unwrapResult(result);
     },
     onSuccess: () => {
+      invalidateRelated(queryClient, "customers");
       queryClient.invalidateQueries({ queryKey: ["customer", customerId] });
-      queryClient.invalidateQueries({ queryKey: ["customers"] });
       setEditingSection(null);
       toast({ title: "Pflegegrad aktualisiert" });
     },

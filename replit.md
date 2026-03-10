@@ -15,7 +15,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 ### Frontend
 - **Frameworks**: React 19 with TypeScript, Vite, Wouter for routing.
 - **UI/UX**: Mobile-first responsive design using `shadcn/ui` components on Radix UI primitives, styled with Tailwind CSS v4 and a "Care & Clarity" theme. Centralized `@/design-system` for consistent styling. Touch-optimized UI components. Layouts use a warm beige gradient background.
-- **State Management**: TanStack Query for data fetching.
+- **State Management**: TanStack Query for data fetching. `staleTime: 30s`, `refetchOnWindowFocus: true`. Centralized query invalidation system (`@/lib/query-invalidation.ts`): `invalidateRelated(queryClient, ...domains)` maps domain dependencies (e.g., appointment mutations auto-invalidate time-entries, service-records, budget, customers, notifications, auth). All mutations MUST use `invalidateRelated()` instead of manual `queryClient.invalidateQueries()` for cross-domain consistency.
 - **Date/Time Handling**: German local time, no UTC conversion.
 - **API Calls**: Central API client (`@/lib/api/client.ts`) for all HTTP requests, including CSRF protection, with `unwrapResult()` for data extraction. Direct `fetch()` calls are forbidden.
 - **Feedback**: German toast notifications on success and error for all `useMutation` hooks.

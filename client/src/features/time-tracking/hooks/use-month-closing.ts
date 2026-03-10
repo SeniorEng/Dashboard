@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useToast } from "@/hooks/use-toast";
+import { invalidateRelated } from "@/lib/query-invalidation";
 
 export interface MonthClosingStatus {
   id: number;
@@ -83,11 +84,8 @@ export function useCloseMonth() {
       );
       return unwrapResult(result);
     },
-    onSuccess: (_, { year, month }) => {
-      queryClient.invalidateQueries({ queryKey: ["month-closing", year, month] });
-      queryClient.invalidateQueries({ queryKey: ["month-closing-readiness", year, month] });
-      queryClient.invalidateQueries({ queryKey: ["time-overview"] });
-      queryClient.invalidateQueries({ queryKey: ["open-tasks"] });
+    onSuccess: () => {
+      invalidateRelated(queryClient, "time-entries");
       toast({ title: "Erfolg", description: "Monat wurde abgeschlossen" });
     },
     onError: (error: Error) => {

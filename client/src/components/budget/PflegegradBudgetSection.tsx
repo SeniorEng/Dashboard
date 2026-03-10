@@ -8,9 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DatePicker } from "@/components/ui/date-picker";
-import { customerKeys } from "@/features/customers";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { iconSize, componentStyles } from "@/design-system";
 import { Shield, History, Pencil, Save, X, Loader2 } from "lucide-react";
 
@@ -43,9 +43,7 @@ export function PflegegradBudgetSection({ customerId, pflegegrad, careLevelHisto
     },
     onSuccess: () => {
       toast({ title: "Pflegegrad aktualisiert", description: "Der Pflegegrad wurde mit Historisierung gespeichert." });
-      queryClient.invalidateQueries({ queryKey: customerKeys.detail(customerId) });
-      queryClient.invalidateQueries({ queryKey: customerKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: ["budget-overview", customerId] });
+      invalidateRelated(queryClient, "customers", "budget");
       setEditing(false);
     },
     onError: (error: Error) => {

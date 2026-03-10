@@ -8,6 +8,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import type {
   CustomerListItem,
   CustomerListParams,
@@ -93,7 +94,7 @@ export function useCreateCustomer() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: customerKeys.lists() });
+      invalidateRelated(queryClient, "customers");
       toast({ title: "Erfolg", description: "Kunde wurde angelegt" });
     },
     onError: (error: Error) => {

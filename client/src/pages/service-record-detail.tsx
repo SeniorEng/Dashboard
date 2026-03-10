@@ -17,6 +17,7 @@ import { iconSize, componentStyles } from "@/design-system";
 import { formatDateForDisplay, formatTimeHHMM } from "@shared/utils/datetime";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import type { MonthlyServiceRecord, Customer } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 
@@ -106,7 +107,7 @@ export default function ServiceRecordDetailPage() {
       return result.data;
     },
     onSuccess: (data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/service-records"] });
+      invalidateRelated(queryClient, "service-records");
       toast({
         title: variables.signerType === "employee"
           ? "Mitarbeiter-Unterschrift gespeichert"

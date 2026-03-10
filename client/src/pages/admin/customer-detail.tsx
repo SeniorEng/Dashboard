@@ -26,6 +26,7 @@ import { ResponsiveTabs, TabsContent } from "@/components/patterns/responsive-ta
 import { useCustomer, customerKeys } from "@/features/customers";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { iconSize, componentStyles } from "@/design-system";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
@@ -223,8 +224,7 @@ function BackfillSection({ customerId, onRefresh }: { customerId: number; onRefr
       const res = await api.post("/admin/budget/backfill-transactions", { customerId, dateFrom: backfillDateFrom, dateTo: backfillDateTo });
       const data = unwrapResult(res) as { total: number; created: number; skipped: number; errors: number };
       setResult(data);
-      queryClient.invalidateQueries({ queryKey: ["budget-overview", customerId] });
-      queryClient.invalidateQueries({ queryKey: ["budget-transactions", customerId] });
+      invalidateRelated(queryClient, "budget");
       queryClient.invalidateQueries({ queryKey: ["backfill-preview", customerId] });
       onRefresh();
       if (data.errors > 0 && data.created > 0) {
@@ -394,9 +394,7 @@ export default function AdminCustomerDetail() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: customerKeys.detail(customerId) });
-      queryClient.invalidateQueries({ queryKey: customerKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      invalidateRelated(queryClient, "customers");
       queryClient.invalidateQueries({ queryKey: ["conversion-readiness", customerId] });
       toast({ title: "Erfolgreich zusammengeführt", description: "Der Erstberatungskunde wurde mit dem bestehenden Kunden zusammengeführt." });
       setShowMergeDialog(false);
@@ -414,9 +412,7 @@ export default function AdminCustomerDetail() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: customerKeys.detail(customerId) });
-      queryClient.invalidateQueries({ queryKey: customerKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      invalidateRelated(queryClient, "customers");
       queryClient.invalidateQueries({ queryKey: ["conversion-readiness", customerId] });
       toast({ title: "Kundenstatus aktualisiert" });
       setShowDeactivateDialog(false);

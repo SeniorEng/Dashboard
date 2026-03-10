@@ -17,6 +17,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { useEmployees, customerKeys } from "@/features/customers";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { iconSize, componentStyles } from "@/design-system";
 import { AddressFields } from "./address-fields";
 import { EmployeeMatching } from "./employee-matching";
@@ -149,8 +150,7 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
   };
 
   const invalidateCustomer = () => {
-    queryClient.invalidateQueries({ queryKey: customerKeys.detail(customerId) });
-    queryClient.invalidateQueries({ queryKey: customerKeys.lists() });
+    invalidateRelated(queryClient, "customers");
   };
 
   const handlePhoneChange = (field: "telefon" | "festnetz", value: string) => {

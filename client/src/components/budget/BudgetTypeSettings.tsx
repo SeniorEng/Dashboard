@@ -9,6 +9,7 @@ import { ArrowUp, ArrowDown, Save, Plus, History, ChevronDown, ChevronUp, Chevro
 import { useToast } from "@/hooks/use-toast";
 import { BUDGET_TYPE_LABELS, type BudgetType, BUDGET_45B_MAX_MONTHLY_CENTS, BUDGET_39_42A_MAX_YEARLY_CENTS, BUDGET_45A_MAX_BY_PFLEGEGRAD } from "@shared/domain/budgets";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { formatCurrency } from "@shared/utils/format";
 
 interface BudgetTypeSetting {
@@ -133,8 +134,7 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
     },
     onSuccess: () => {
       toast({ title: "Budget-Einstellungen gespeichert" });
-      queryClient.invalidateQueries({ queryKey: ["budget-type-settings", customerId] });
-      queryClient.invalidateQueries({ queryKey: ["budget-overview", customerId] });
+      invalidateRelated(queryClient, "budget");
       setHasChanges(false);
     },
     onError: (error: Error) => {
@@ -374,8 +374,7 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
     onSuccess: () => {
       toast({ title: "Startwert gespeichert" });
       setAmount("");
-      queryClient.invalidateQueries({ queryKey: ["initial-balances", customerId, budgetType] });
-      queryClient.invalidateQueries({ queryKey: ["budget-overview", customerId] });
+      invalidateRelated(queryClient, "budget");
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
@@ -389,8 +388,7 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
     onSuccess: () => {
       toast({ title: "Startwert gelöscht" });
       setDeleteConfirmId(null);
-      queryClient.invalidateQueries({ queryKey: ["initial-balances", customerId, budgetType] });
-      queryClient.invalidateQueries({ queryKey: ["budget-overview", customerId] });
+      invalidateRelated(queryClient, "budget");
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Fehler", description: error.message });

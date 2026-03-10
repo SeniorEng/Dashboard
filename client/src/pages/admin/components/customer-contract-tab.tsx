@@ -18,6 +18,7 @@ import {
 import { customerKeys } from "@/features/customers";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { iconSize, componentStyles } from "@/design-system";
 import {
   FileText,
@@ -85,8 +86,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
   };
 
   const invalidateCustomer = () => {
-    queryClient.invalidateQueries({ queryKey: customerKeys.detail(customerId) });
-    queryClient.invalidateQueries({ queryKey: customerKeys.lists() });
+    invalidateRelated(queryClient, "customers");
   };
 
   const handleCreateContract = async () => {

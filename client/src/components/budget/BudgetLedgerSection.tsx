@@ -11,6 +11,7 @@ import { Plus, Wallet, History, AlertTriangle, Calendar, Euro, Clock } from "luc
 import { iconSize, componentStyles } from "@/design-system/tokens";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { formatCurrency } from "@shared/utils/format";
 import { formatDateForDisplay, parseLocalDate } from "@shared/utils/datetime";
 import { SectionCard } from "@/components/patterns/section-card";
@@ -119,8 +120,7 @@ export function BudgetLedgerSection({ customerId, customerName, onRefresh }: Bud
     .sort((a, b) => a.priority - b.priority);
 
   const handleRefresh = () => {
-    queryClient.invalidateQueries({ queryKey: ["budget-overview", customerId] });
-    queryClient.invalidateQueries({ queryKey: ["budget-type-settings", customerId] });
+    invalidateRelated(queryClient, "budget");
     onRefresh?.();
   };
 
@@ -222,7 +222,7 @@ function BudgetPot45b({
   });
 
   const handleRefresh = () => {
-    queryClient.invalidateQueries({ queryKey: ["budget-transactions", customerId, "entlastungsbetrag_45b"] });
+    invalidateRelated(queryClient, "budget");
     onRefresh();
   };
 
@@ -396,7 +396,7 @@ function BudgetPot45a({
   });
 
   const handleRefresh = () => {
-    queryClient.invalidateQueries({ queryKey: ["budget-transactions", customerId, "umwandlung_45a"] });
+    invalidateRelated(queryClient, "budget");
     onRefresh();
   };
 
@@ -482,7 +482,7 @@ function BudgetPot39_42a({
   });
 
   const handleRefresh = () => {
-    queryClient.invalidateQueries({ queryKey: ["budget-transactions", customerId, "ersatzpflege_39_42a"] });
+    invalidateRelated(queryClient, "budget");
     onRefresh();
   };
 
@@ -643,12 +643,14 @@ function ManualAdjustmentForm({ customerId, budgetType, onSuccess }: { customerI
   const [isNegative, setIsNegative] = useState(false);
   const [notes, setNotes] = useState("");
 
+  const queryClient = useQueryClient();
   const mutation = useMutation({
     mutationFn: async (data: { amountCents: number; notes: string; budgetType: string }) => {
       return unwrapResult(await api.post(`/budget/${customerId}/manual-adjustment`, data));
     },
     onSuccess: () => {
       toast({ title: "Korrektur erfolgreich gespeichert" });
+      invalidateRelated(queryClient, "budget");
       onSuccess();
     },
     onError: (error) => {

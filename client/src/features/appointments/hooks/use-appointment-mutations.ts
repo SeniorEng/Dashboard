@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useToast } from "@/hooks/use-toast";
+import { invalidateRelated } from "@/lib/query-invalidation";
 
 const QUERY_KEY = "appointments";
 
@@ -26,10 +27,7 @@ export function useCreateKundentermin() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: ["customers"] });
-      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
-      queryClient.invalidateQueries({ queryKey: ["budget-overview"] });
+      invalidateRelated(queryClient, "appointments");
       toast({ title: "Erfolg", description: "Termin wurde erstellt" });
     },
     onError: (error: Error) => {
@@ -47,9 +45,7 @@ export function useCreateErstberatung() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: ["customers"] });
-      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+      invalidateRelated(queryClient, "appointments");
       toast({ title: "Erfolg", description: "Erstberatung wurde erstellt" });
     },
     onError: (error: Error) => {
@@ -67,11 +63,8 @@ export function useDocumentAppointment(id: number) {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEY, id] });
+      invalidateRelated(queryClient, "appointments");
       queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}/services`] });
-      queryClient.invalidateQueries({ queryKey: ["time-entries"] });
-      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
       toast({ title: "Erfolg", description: "Termin wurde dokumentiert" });
     },
     onError: (error: Error) => {

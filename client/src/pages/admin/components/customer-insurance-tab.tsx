@@ -16,6 +16,7 @@ import {
 import { useInsuranceProviders, customerKeys } from "@/features/customers";
 import { api, unwrapResult } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { iconSize, componentStyles } from "@/design-system";
 import { formatDateForDisplay, todayISO } from "@shared/utils/datetime";
 import { Heart, Loader2, Clock, Plus, ArrowRightLeft } from "lucide-react";
@@ -81,7 +82,7 @@ export function CustomerInsuranceTab({ customerId, currentInsurance }: CustomerI
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: customerKeys.all });
+      invalidateRelated(queryClient, "customers");
       queryClient.invalidateQueries({ queryKey: ["customer-insurance-history", customerId] });
       toast({ title: currentInsurance ? "Pflegekasse gewechselt" : "Pflegekasse hinzugefügt" });
       setDialogOpen(false);

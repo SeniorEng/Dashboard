@@ -18,6 +18,7 @@ import { Link, useLocation, useSearch } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useAuth } from "@/hooks/use-auth";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { Badge } from "@/components/ui/badge";
 import type { MonthlyServiceRecord, Customer, Appointment } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
@@ -129,8 +130,7 @@ export default function ServiceRecordsPage() {
     },
     onSuccess: (newRecord) => {
       toast({ title: "Leistungsnachweis erstellt" });
-      queryClient.invalidateQueries({ queryKey: ["/api/service-records"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/service-records/check-period"] });
+      invalidateRelated(queryClient, "service-records");
       navigate(`/service-records/${newRecord.id}`);
     },
     onError: (error: Error) => {

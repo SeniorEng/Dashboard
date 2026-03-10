@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useRoute, useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -199,7 +200,7 @@ export default function EditAppointment() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      invalidateRelated(queryClient, "appointments");
       queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}/services`] });
       toast({ title: "Termin aktualisiert", description: "Die Änderungen wurden gespeichert." });
       setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");
@@ -215,9 +216,8 @@ export default function EditAppointment() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      invalidateRelated(queryClient, "appointments", "customers");
       queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}/services`] });
-      queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
       toast({ title: "Erstberatung aktualisiert", description: "Alle Änderungen wurden gespeichert." });
       setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");
     },

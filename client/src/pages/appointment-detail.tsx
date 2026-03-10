@@ -29,6 +29,7 @@ import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { formatTimeSlot, getEndTime } from "@/features/appointments/utils";
 import { 
   formatDuration, 
@@ -55,8 +56,8 @@ export default function AppointmentDetail() {
       return unwrapResult(result);
     },
     onSuccess: () => {
+      invalidateRelated(queryClient, "appointments", "customers");
       queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}`] });
-      queryClient.invalidateQueries({ queryKey: ["customers"] });
       toast({ title: "Erstberatung abgelehnt", description: "Der Kunde wurde als 'Kein Interesse' markiert." });
       setShowDeclineDialog(false);
       setDeclineNote("");
@@ -74,9 +75,8 @@ export default function AppointmentDetail() {
       return unwrapResult(result);
     },
     onSuccess: () => {
+      invalidateRelated(queryClient, "appointments");
       queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}`] });
-      queryClient.invalidateQueries({ queryKey: ["appointments"] });
-      queryClient.invalidateQueries({ queryKey: ["budget-overview"] });
       toast({ title: "Dokumentation zur Korrektur geöffnet" });
       setShowReopenDialog(false);
       setLocation(`/document-appointment/${id}`);
@@ -107,6 +107,7 @@ export default function AppointmentDetail() {
       return unwrapResult(result);
     },
     onSuccess: (data) => {
+      invalidateRelated(queryClient, "service-records");
       queryClient.invalidateQueries({ queryKey: [`/api/service-records/for-appointment/${id}`] });
       toast({ title: "Leistungsnachweis erstellt" });
       setLocation(`/service-records/${data.id}`);

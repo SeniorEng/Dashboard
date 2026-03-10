@@ -7,6 +7,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import type { 
   TimeEntry, 
   CreateTimeEntryRequest, 
@@ -78,8 +79,7 @@ export function useCreateTimeEntry() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: timeEntryKeys.all });
-      queryClient.invalidateQueries({ queryKey: timeEntryKeys.openTasks, refetchType: "all" });
+      invalidateRelated(queryClient, "time-entries");
       toast({ title: "Erfolg", description: "Zeiteintrag wurde erstellt" });
     },
     onError: (error: Error) => {
@@ -101,7 +101,7 @@ export function useUpdateTimeEntry() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: timeEntryKeys.all });
+      invalidateRelated(queryClient, "time-entries");
       toast({ title: "Erfolg", description: "Zeiteintrag wurde aktualisiert" });
     },
     onError: (error: Error) => {
@@ -123,8 +123,7 @@ export function useDeleteTimeEntry() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: timeEntryKeys.all });
-      queryClient.invalidateQueries({ queryKey: timeEntryKeys.openTasks, refetchType: "all" });
+      invalidateRelated(queryClient, "time-entries");
       toast({ title: "Erfolg", description: "Zeiteintrag wurde gelöscht" });
     },
     onError: (error: Error) => {
