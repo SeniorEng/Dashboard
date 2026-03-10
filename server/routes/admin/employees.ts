@@ -575,6 +575,247 @@ router.get("/employees", asyncHandler("Mitarbeiter konnten nicht geladen werden"
   res.json(safeEmployees);
 }));
 
+function computeFreeSlots(
+  availability: { startTime: string | null; endTime: string | null }[],
+  blockedSlots: { start: number; end: number }[]
+): { start: string; end: string }[] {
+  if (availability.length === 0) return [];
+  
+  const freeSlots: { start: string; end: string }[] = [];
+  
+  for (const slot of availability) {
+    if (!slot.startTime || !slot.endTime) continue;
+    const slotStart = timeToMinutesHelper(slot.startTime);
+    const slotEnd = timeToMinutesHelper(slot.endTime);
+    
+    const relevantBlocks = blockedSlots
+      .filter(b => b.start < slotEnd && b.end > slotStart)
+      .sort((a, b) => a.start - b.start);
+    
+    let cursor = slotStart;
+    for (const block of relevantBlocks) {
+      if (block.start > cursor) {
+        freeSlots.push({ start: minutesToHHMM(cursor), end: minutesToHHMM(block.start) });
+      }
+      cursor = Math.max(cursor, block.end);
+    }
+    if (cursor < slotEnd) {
+      freeSlots.push({ start: minutesToHHMM(cursor), end: minutesToHHMM(slotEnd) });
+    }
+  }
+  
+  return freeSlots;
+}
+
+function timeToMinutesHelper(t: string): number {
+  const [h, m] = t.split(":").map(Number);
+  return h * 60 + m;
+}
+
+function minutesToHHMM(mins: number): string {
+  const h = Math.floor(mins / 60) % 24;
+  const m = mins % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function addDaysISO(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d + days));
+  return date.toISOString().slice(0, 10);
+}
+
+function isValidCalendarDate(dateStr: string): boolean {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
+}
+
+router.get("/employees/weekly-availability", asyncHandler("Wochen-Verfügbarkeit konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const { startDate, days: daysParam, allEmployees: allEmployeesParam } = req.query;
+  if (!startDate || typeof startDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !isValidCalendarDate(startDate)) {
+    return res.status(400).json({ error: "Gültiges startDate im Format YYYY-MM-DD erforderlich" });
+  }
+  const days = Math.min(Math.max(parseInt(daysParam as string) || 5, 1), 7);
+  const showAllEmployees = allEmployeesParam === "true";
+
+  const dates: string[] = [];
+  for (let i = 0; i < days; i++) {
+    dates.push(addDaysISO(startDate, i));
+  }
+
+  let employeeIds: number[];
+  if (showAllEmployees) {
+    const activeEmployees = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.isActive, true));
+    employeeIds = activeEmployees.map(e => e.id);
+  } else {
+    const erstberatungEmployeeIds = await db
+      .select({ userId: userRoles.userId })
+      .from(userRoles)
+      .where(eq(userRoles.role, "erstberatung"));
+    employeeIds = erstberatungEmployeeIds.map(e => e.userId);
+  }
+
+  if (employeeIds.length === 0) {
+    return res.json({ dates, employees: [] });
+  }
+
+  const [employeeData, availabilityEntries, absenceEntries, rangeAppointments, timeEntries] = await Promise.all([
+    db.select({
+      id: users.id,
+      displayName: users.displayName,
+      vorname: users.vorname,
+      nachname: users.nachname,
+    })
+    .from(users)
+    .where(and(
+      inArray(users.id, employeeIds),
+      eq(users.isActive, true)
+    ))
+    .orderBy(asc(users.displayName)),
+
+    db.select({
+      userId: employeeTimeEntries.userId,
+      entryDate: employeeTimeEntries.entryDate,
+      startTime: employeeTimeEntries.startTime,
+      endTime: employeeTimeEntries.endTime,
+    })
+    .from(employeeTimeEntries)
+    .where(and(
+      inArray(employeeTimeEntries.userId, employeeIds),
+      inArray(employeeTimeEntries.entryDate, dates),
+      eq(employeeTimeEntries.entryType, "verfuegbar"),
+      isNull(employeeTimeEntries.deletedAt)
+    ))
+    .orderBy(asc(employeeTimeEntries.startTime)),
+
+    db.select({
+      userId: employeeTimeEntries.userId,
+      entryDate: employeeTimeEntries.entryDate,
+      entryType: employeeTimeEntries.entryType,
+    })
+    .from(employeeTimeEntries)
+    .where(and(
+      inArray(employeeTimeEntries.userId, employeeIds),
+      inArray(employeeTimeEntries.entryDate, dates),
+      inArray(employeeTimeEntries.entryType, ["urlaub", "krankheit"]),
+      isNull(employeeTimeEntries.deletedAt)
+    )),
+
+    db.select({
+      assignedEmployeeId: appointments.assignedEmployeeId,
+      date: appointments.date,
+      scheduledStart: appointments.scheduledStart,
+      scheduledEnd: appointments.scheduledEnd,
+      durationPromised: appointments.durationPromised,
+      customerName: sql`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as("customer_name"),
+      status: appointments.status,
+    })
+    .from(appointments)
+    .innerJoin(customers, eq(appointments.customerId, customers.id))
+    .where(and(
+      inArray(appointments.assignedEmployeeId, employeeIds),
+      inArray(appointments.date, dates),
+      isNull(appointments.deletedAt),
+      sql`${appointments.status} != 'cancelled'`
+    ))
+    .orderBy(asc(appointments.scheduledStart)),
+
+    db.select({
+      userId: employeeTimeEntries.userId,
+      entryDate: employeeTimeEntries.entryDate,
+      startTime: employeeTimeEntries.startTime,
+      endTime: employeeTimeEntries.endTime,
+      entryType: employeeTimeEntries.entryType,
+    })
+    .from(employeeTimeEntries)
+    .where(and(
+      inArray(employeeTimeEntries.userId, employeeIds),
+      inArray(employeeTimeEntries.entryDate, dates),
+      inArray(employeeTimeEntries.entryType, ["arbeitszeit", "pause", "fahrt"]),
+      isNull(employeeTimeEntries.deletedAt)
+    )),
+  ]);
+
+  const result = employeeData.map(emp => {
+    const empName = emp.displayName || `${emp.vorname || ""} ${emp.nachname || ""}`.trim();
+    
+    const daysData: Record<string, {
+      availability: { startTime: string | null; endTime: string | null }[];
+      appointments: { scheduledStart: string | null; scheduledEnd: string | null; durationMinutes: number; customerName: string; status: string }[];
+      absence: "urlaub" | "krankheit" | null;
+      freeSlots: { start: string; end: string }[];
+    }> = {};
+
+    for (const date of dates) {
+      const dayAvail = availabilityEntries
+        .filter(a => a.userId === emp.id && a.entryDate === date)
+        .map(a => ({
+          startTime: a.startTime?.slice(0, 5) || null,
+          endTime: a.endTime?.slice(0, 5) || null,
+        }));
+
+      const dayAppointments = rangeAppointments
+        .filter(a => a.assignedEmployeeId === emp.id && a.date === date)
+        .map(a => {
+          const start = a.scheduledStart?.slice(0, 5) || null;
+          let end = a.scheduledEnd?.slice(0, 5) || null;
+          if (!end && start && a.durationPromised) {
+            end = minutesToHHMM(timeToMinutesHelper(start) + a.durationPromised);
+          }
+          return {
+            scheduledStart: start,
+            scheduledEnd: end,
+            durationMinutes: a.durationPromised,
+            customerName: String(a.customerName),
+            status: a.status as string,
+          };
+        });
+
+      const dayTimeEntries = timeEntries
+        .filter(t => t.userId === emp.id && t.entryDate === date && t.startTime && t.endTime);
+
+      const absence = absenceEntries.find(a => a.userId === emp.id && a.entryDate === date);
+
+      const blockedSlots: { start: number; end: number }[] = [];
+      for (const appt of dayAppointments) {
+        if (appt.scheduledStart) {
+          const s = timeToMinutesHelper(appt.scheduledStart);
+          const e = appt.scheduledEnd ? timeToMinutesHelper(appt.scheduledEnd) : s + (appt.durationMinutes || 60);
+          blockedSlots.push({ start: s, end: e });
+        }
+      }
+      for (const te of dayTimeEntries) {
+        if (te.startTime && te.endTime) {
+          blockedSlots.push({
+            start: timeToMinutesHelper(te.startTime.slice(0, 5)),
+            end: timeToMinutesHelper(te.endTime.slice(0, 5)),
+          });
+        }
+      }
+
+      const freeSlots = absence ? [] : computeFreeSlots(dayAvail, blockedSlots);
+
+      daysData[date] = {
+        availability: dayAvail,
+        appointments: dayAppointments,
+        absence: absence ? absence.entryType as "urlaub" | "krankheit" : null,
+        freeSlots,
+      };
+    }
+
+    return {
+      id: emp.id,
+      displayName: empName,
+      days: daysData,
+    };
+  });
+
+  res.json({ dates, employees: result });
+}));
+
 router.get("/employees/availability", asyncHandler("Verfügbarkeiten konnten nicht geladen werden", async (req: Request, res: Response) => {
   const { date } = req.query;
   if (!date || typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {

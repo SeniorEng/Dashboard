@@ -93,10 +93,10 @@ export function useNewAppointmentForm() {
   const [ebStadt, setEbStadt] = useState<string>(urlParams.get("stadt") || "");
   const [ebPflegegrad, setEbPflegegrad] = useState<string>(urlParams.get("pflegegrad") || "1");
   const [ebDate, setEbDate] = useState<string>(initialDate);
-  const [ebStartTime, setEbStartTime] = useState<string>("09:00");
+  const [ebStartTime, setEbStartTime] = useState<string>(urlParams.get("time") || "09:00");
   const [ebErstberatungDauer, setEbErstberatungDauer] = useState<number>(60);
   const [ebNotes, setEbNotes] = useState<string>(urlParams.get("notes") || "");
-  const [ebAssignedEmployeeId, setEbAssignedEmployeeId] = useState<string>("");
+  const [ebAssignedEmployeeId, setEbAssignedEmployeeId] = useState<string>(urlParams.get("employeeId") || "");
 
   const defaultsInitialized = useRef(false);
   const copyFromInitialized = useRef(false);

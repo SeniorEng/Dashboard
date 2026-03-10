@@ -6,7 +6,7 @@ import { Layout } from "@/components/layout";
 import {
   Users, ArrowLeft, Contact2, Clock, Settings,
   Building2, ClipboardList, FileText, Shield, Receipt, Gift, BarChart3, UserPlus,
-  GraduationCap, FileCheck, Landmark, MessageSquare, FileSpreadsheet,
+  GraduationCap, FileCheck, Landmark, MessageSquare, FileSpreadsheet, CalendarCheck,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -88,6 +88,15 @@ export default function AdminDashboard() {
       title: "Zeiterfassung",
       description: "Zeiten nachtragen, Monatsabschluss öffnen/schließen, Urlaub & Krankheit",
       permissionKey: "time_entries",
+    },
+    {
+      href: "/admin/availability",
+      testId: "card-availability",
+      icon: <CalendarCheck className={`${iconSize.lg} text-emerald-600`} />,
+      iconBg: "bg-emerald-100",
+      title: "Verfügbarkeiten",
+      description: "Wochenübersicht freie Zeiten für Erstberatungen",
+      permissionKey: "users",
     },
     {
       href: "/admin/birthday-cards",
