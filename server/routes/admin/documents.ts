@@ -234,7 +234,7 @@ router.get("/document-templates/placeholders/catalog", asyncHandler("Platzhalter
 }));
 
 const renderTemplateSchema = z.object({
-  templateSlug: z.string().min(1),
+  templateSlug: z.string().min(1, "Template-Slug ist erforderlich"),
   customerId: z.number().int(),
   overrides: z.record(z.string()).optional(),
 });
@@ -259,7 +259,7 @@ router.post("/document-templates/render", asyncHandler("Vorlage konnte nicht ger
 }));
 
 const renderPreviewSchema = z.object({
-  templateSlug: z.string().min(1),
+  templateSlug: z.string().min(1, "Template-Slug ist erforderlich"),
   formData: z.object({
     vorname: z.string(),
     nachname: z.string(),
@@ -489,7 +489,7 @@ router.patch("/proofs/:proofId/upload", asyncHandler("Nachweis konnte nicht hoch
     return;
   }
 
-  const uploadSchema = z.object({ fileName: z.string().min(1), objectPath: z.string().min(1) });
+  const uploadSchema = z.object({ fileName: z.string().min(1, "Dateiname ist erforderlich"), objectPath: z.string().min(1, "Dateipfad ist erforderlich") });
   const result = uploadSchema.safeParse(req.body);
   if (!result.success) { res.status(400).json({ error: "Ungültige Daten" }); return; }
 
@@ -507,7 +507,7 @@ router.patch("/proofs/:proofId/review", asyncHandler("Prüfung konnte nicht gesp
 
   const reviewSchema = z.object({
     approved: z.boolean(),
-    rejectionReason: z.string().max(500).optional(),
+    rejectionReason: z.string().max(500, "Maximal 500 Zeichen erlaubt").optional(),
   });
   const result = reviewSchema.safeParse(req.body);
   if (!result.success) { res.status(400).json({ error: "Validierungsfehler" }); return; }

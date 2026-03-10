@@ -660,8 +660,8 @@ export default function AdminCustomerNew() {
           const params = new URLSearchParams({ vorname, nachname });
           if (formData.geburtsdatum) params.set("geburtsdatum", formData.geburtsdatum);
           const dupResult = await api.get<{ duplicates: Array<{ id: number; vorname: string; nachname: string; geburtsdatum: string | null; stadt: string | null; strasse: string | null; nr: string | null; status: string | null }> }>(`/admin/customers/check-duplicate?${params.toString()}`);
-          if (dupResult.duplicates && dupResult.duplicates.length > 0) {
-            setDuplicateWarning({ duplicates: dupResult.duplicates });
+          if (dupResult.success && dupResult.data.duplicates && dupResult.data.duplicates.length > 0) {
+            setDuplicateWarning({ duplicates: dupResult.data.duplicates });
             setDuplicateChecking(false);
             return;
           }

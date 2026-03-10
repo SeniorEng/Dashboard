@@ -22,7 +22,7 @@ export const TIME_ENTRY_TYPE_CONFIG: Record<TimeEntryType, { label: string; icon
   verfuegbar: { label: "Verfügbar", icon: CalendarCheck, color: "text-emerald-700", bgColor: "bg-emerald-100" },
 };
 
-export const FULL_DAY_TYPES = FULL_DAY_ENTRY_TYPES as unknown as TimeEntryType[];
+const FULL_DAY_TYPES = FULL_DAY_ENTRY_TYPES as unknown as TimeEntryType[];
 
 export const WEEKDAY_NAMES = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 

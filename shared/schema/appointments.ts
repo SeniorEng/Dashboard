@@ -144,6 +144,7 @@ export const documentAppointmentSchema = z.object({
 // Alias for backward compatibility
 export const documentKundenterminSchema = documentAppointmentSchema;
 
+
 export type DocumentAppointment = z.infer<typeof documentAppointmentSchema>;
 export type DocumentKundentermin = DocumentAppointment;
 

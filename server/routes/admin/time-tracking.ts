@@ -51,7 +51,7 @@ router.get("/employee-appointments", asyncHandler("Termine konnten nicht geladen
   }
 
   const apptIds = appts.map(a => a.id);
-  let servicesByAppt = new Map<number, Array<{ serviceCode: string; serviceName: string; actualMinutes: number | null; plannedMinutes: number }>>();
+  let servicesByAppt = new Map<number, Array<{ serviceCode: string | null; serviceName: string; actualMinutes: number | null; plannedMinutes: number }>>();
   if (apptIds.length > 0) {
     const svcRows = await db.select({
       appointmentId: appointmentServicesTable.appointmentId,

@@ -174,7 +174,7 @@ export function useAuth(): AuthContextType {
   return context;
 }
 
-export function useRequireAuth(): AuthContextType & { user: User } {
+function useRequireAuth(): AuthContextType & { user: User } {
   const auth = useAuth();
   if (!auth.user) {
     throw new Error("User is not authenticated");
@@ -187,16 +187,16 @@ export function canCreateHauswirtschaft(roles: string[], isAdmin: boolean): bool
   return roles.includes("hauswirtschaft") || roles.includes("alltagsbegleitung");
 }
 
-export function canCreateAlltagsbegleitung(roles: string[], isAdmin: boolean): boolean {
+function canCreateAlltagsbegleitung(roles: string[], isAdmin: boolean): boolean {
   if (isAdmin) return true;
   return roles.includes("alltagsbegleitung");
 }
 
-export function canCreateErstberatung(roles: string[], isAdmin: boolean): boolean {
+function canCreateErstberatung(roles: string[], isAdmin: boolean): boolean {
   if (isAdmin) return true;
   return roles.includes("erstberatung");
 }
 
-export function canCreateKundentermin(roles: string[], isAdmin: boolean): boolean {
+function canCreateKundentermin(roles: string[], isAdmin: boolean): boolean {
   return canCreateHauswirtschaft(roles, isAdmin);
 }

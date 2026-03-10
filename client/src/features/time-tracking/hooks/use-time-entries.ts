@@ -41,7 +41,7 @@ export interface TimeEntryFilters {
 /**
  * Fetch time entries for the authenticated user
  */
-export function useTimeEntries(filters?: TimeEntryFilters) {
+function useTimeEntries(filters?: TimeEntryFilters) {
   const { viewAsEmployeeId } = useViewAsEmployee();
   const queryParams = new URLSearchParams();
   if (filters?.year) queryParams.set("year", filters.year.toString());
@@ -64,7 +64,7 @@ export function useTimeEntries(filters?: TimeEntryFilters) {
 /**
  * Fetch a specific time entry
  */
-export function useTimeEntry(id: number) {
+function useTimeEntry(id: number) {
   return useQuery({
     queryKey: timeEntryKeys.detail(id),
     queryFn: async ({ signal }) => {
@@ -144,7 +144,7 @@ export function useDeleteTimeEntry() {
 /**
  * Fetch complete time overview for a month (appointments + time entries)
  */
-export function useTimeOverview(year: number, month: number) {
+function useTimeOverview(year: number, month: number) {
   const { viewAsEmployeeId } = useViewAsEmployee();
   return useQuery({
     queryKey: [...timeEntryKeys.overview(year, month), { viewAsEmployeeId }],

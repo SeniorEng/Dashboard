@@ -47,7 +47,7 @@ class AuditService {
   async serviceRecordCreated(
     userId: number,
     serviceRecordId: number,
-    metadata: { customerId: number; year: number; month: number; appointmentCount: number },
+    metadata: { customerId: number; year: number; month: number; appointmentCount: number; recordType?: string; appointmentId?: number },
     ipAddress?: string
   ): Promise<void> {
     await this.log(userId, "service_record_created", "service_record", serviceRecordId, metadata, ipAddress);

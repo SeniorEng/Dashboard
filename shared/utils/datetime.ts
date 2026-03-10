@@ -296,7 +296,7 @@ export function lastDayOfYear(year: number): string {
   return `${year}-12-31`;
 }
 
-export function firstDayOfYear(year: number): string {
+function firstDayOfYear(year: number): string {
   return `${year}-01-01`;
 }
 

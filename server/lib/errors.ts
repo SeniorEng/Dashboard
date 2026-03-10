@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { fromError } from "zod-validation-error";
 import { ZodError } from "zod";
 
-export interface ApiError {
+interface ApiError {
   code: string;
   message: string;
   details?: string;
@@ -140,7 +140,7 @@ export function errorMiddleware(err: Error, _req: Request, res: Response, _next:
   });
 }
 
-export function handleZodError(res: Response, error: ZodError): void {
+function handleZodError(res: Response, error: ZodError): void {
   res.status(400).json({
     code: ErrorCodes.VALIDATION_ERROR,
     message: fromError(error).toString(),

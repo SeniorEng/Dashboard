@@ -12,18 +12,20 @@ import { eq, and, isNull } from "drizzle-orm";
 const router = Router();
 
 router.get("/", requireAuth, asyncHandler("Leistungsnachweise konnten nicht geladen werden", async (req, res) => {
-  const userId = req.user!.id;
+  const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : null;
+  const effectiveUserId = (req.user!.isAdmin && viewAsEmployeeId) ? viewAsEmployeeId : req.user!.id;
   const year = req.query.year ? parseInt(req.query.year as string) : undefined;
   const month = req.query.month ? parseInt(req.query.month as string) : undefined;
   const customerId = req.query.customerId ? parseInt(req.query.customerId as string) : undefined;
   
-  const records = await storage.getServiceRecordsForEmployee(userId, year, month, customerId);
+  const records = await storage.getServiceRecordsForEmployee(effectiveUserId, year, month, customerId);
   res.json(records);
 }));
 
 router.get("/pending", requireAuth, asyncHandler("Ausstehende Leistungsnachweise konnten nicht geladen werden", async (req, res) => {
-  const userId = req.user!.id;
-  const records = await storage.getPendingServiceRecords(userId);
+  const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : null;
+  const effectiveUserId = (req.user!.isAdmin && viewAsEmployeeId) ? viewAsEmployeeId : req.user!.id;
+  const records = await storage.getPendingServiceRecords(effectiveUserId);
   res.json(records);
 }));
 
@@ -34,7 +36,8 @@ router.get("/employee-names", requireAuth, asyncHandler("Mitarbeiternamen konnte
 }));
 
 router.get("/overview", requireAuth, asyncHandler("Übersicht konnte nicht geladen werden", async (req, res) => {
-  const userId = req.user!.id;
+  const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : null;
+  const effectiveUserId = (req.user!.isAdmin && viewAsEmployeeId) ? viewAsEmployeeId : req.user!.id;
   const year = parseInt(req.query.year as string);
   const month = parseInt(req.query.month as string);
   
@@ -42,7 +45,7 @@ router.get("/overview", requireAuth, asyncHandler("Übersicht konnte nicht gelad
     return res.status(400).json({ message: "Jahr und Monat sind erforderlich" });
   }
   
-  const overviewData = await storage.getServiceRecordsOverview(userId, year, month);
+  const overviewData = await storage.getServiceRecordsOverview(effectiveUserId, year, month);
   
   const overview = overviewData.map(item => {
     let status: "undocumented" | "ready" | "pending" | "employee_signed" | "completed";
@@ -92,7 +95,8 @@ router.get("/overview", requireAuth, asyncHandler("Übersicht konnte nicht gelad
 }));
 
 router.get("/check-period", requireAuth, asyncHandler("Periodendaten konnten nicht geladen werden", async (req, res) => {
-  const userId = req.user!.id;
+  const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : null;
+  const effectiveUserId = (req.user!.isAdmin && viewAsEmployeeId) ? viewAsEmployeeId : req.user!.id;
   const customerId = parseInt(req.query.customerId as string);
   const year = parseInt(req.query.year as string);
   const month = parseInt(req.query.month as string);
@@ -102,7 +106,7 @@ router.get("/check-period", requireAuth, asyncHandler("Periodendaten konnten nic
   }
   
   const hasAccess = await canAccessCustomer(
-    userId,
+    effectiveUserId,
     req.user!.isAdmin,
     customerId,
     (employeeId) => storage.getAssignedCustomerIds(employeeId)
@@ -115,11 +119,11 @@ router.get("/check-period", requireAuth, asyncHandler("Periodendaten konnten nic
   }
   
   const [existingRecord, counts, customerData, coveredBySingleCount, coveredByMonthlyCount] = await Promise.all([
-    storage.getServiceRecordByPeriod(customerId, userId, year, month),
-    storage.getAppointmentCountsForPeriod(customerId, userId, year, month),
+    storage.getServiceRecordByPeriod(customerId, effectiveUserId, year, month),
+    storage.getAppointmentCountsForPeriod(customerId, effectiveUserId, year, month),
     storage.getCustomer(customerId),
-    storage.getCoveredBySingleCount(customerId, userId, year, month),
-    storage.getCoveredByMonthlyCount(customerId, userId, year, month),
+    storage.getCoveredBySingleCount(customerId, effectiveUserId, year, month),
+    storage.getCoveredByMonthlyCount(customerId, effectiveUserId, year, month),
   ]);
 
   const isErstberatung = customerData?.status === "erstberatung";

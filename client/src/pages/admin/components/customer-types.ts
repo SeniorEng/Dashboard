@@ -89,13 +89,13 @@ export function getStepsForBillingType(billingType: BillingType): StepConfig[] {
   return ALL_STEPS.filter((s) => s.id !== "insurance" && s.id !== "budgets");
 }
 
-export const STEPS = ALL_STEPS;
+const STEPS = ALL_STEPS;
 
 export const PFLEGEGRAD_OPTIONS = PFLEGEGRAD_SELECT_OPTIONS;
 
 export const CONTACT_TYPES = CONTACT_TYPE_SELECT_OPTIONS;
 
-export const PERIOD_TYPES = [
+const PERIOD_TYPES = [
   { value: "weekly", label: "Pro Woche" },
   { value: "monthly", label: "Pro Monat" },
 ];

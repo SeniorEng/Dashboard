@@ -18,6 +18,7 @@ import { Link, useLocation, useSearch } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useAuth } from "@/hooks/use-auth";
+import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import { Badge } from "@/components/ui/badge";
 import type { MonthlyServiceRecord, Customer, Appointment } from "@shared/schema";
@@ -65,6 +66,7 @@ export default function ServiceRecordsPage() {
   const searchParams = new URLSearchParams(searchString);
   const customerId = searchParams.get("customerId") ? parseInt(searchParams.get("customerId")!) : null;
   const { user } = useAuth();
+  const { viewAsEmployeeId } = useViewAsEmployee();
 
   const { data: selectedCustomer } = useQuery<Customer>({
     queryKey: ["customer", customerId],
@@ -76,39 +78,44 @@ export default function ServiceRecordsPage() {
   });
 
   const { data: records, isLoading, error, refetch } = useQuery<MonthlyServiceRecord[]>({
-    queryKey: ["/api/service-records", selectedYear, selectedMonth, customerId],
+    queryKey: ["/api/service-records", selectedYear, selectedMonth, customerId, viewAsEmployeeId],
     queryFn: async () => {
       let url = `/service-records?year=${selectedYear}&month=${selectedMonth}`;
       if (customerId) url += `&customerId=${customerId}`;
+      if (viewAsEmployeeId) url += `&viewAsEmployeeId=${viewAsEmployeeId}`;
       const result = await api.get<MonthlyServiceRecord[]>(url);
       return unwrapResult(result);
     },
   });
 
   const { data: pendingRecords } = useQuery<MonthlyServiceRecord[]>({
-    queryKey: ["/api/service-records/pending"],
+    queryKey: ["/api/service-records/pending", viewAsEmployeeId],
     queryFn: async () => {
-      const result = await api.get<MonthlyServiceRecord[]>("/service-records/pending");
+      let url = "/service-records/pending";
+      if (viewAsEmployeeId) url += `?viewAsEmployeeId=${viewAsEmployeeId}`;
+      const result = await api.get<MonthlyServiceRecord[]>(url);
       return unwrapResult(result);
     },
     enabled: !customerId,
   });
 
-  // Overview of all customers with their service record status
   const { data: overview, isLoading: isOverviewLoading } = useQuery<CustomerOverviewItem[]>({
-    queryKey: ["/api/service-records/overview", selectedYear, selectedMonth],
+    queryKey: ["/api/service-records/overview", selectedYear, selectedMonth, viewAsEmployeeId],
     queryFn: async () => {
-      const result = await api.get<CustomerOverviewItem[]>(`/service-records/overview?year=${selectedYear}&month=${selectedMonth}`);
+      let url = `/service-records/overview?year=${selectedYear}&month=${selectedMonth}`;
+      if (viewAsEmployeeId) url += `&viewAsEmployeeId=${viewAsEmployeeId}`;
+      const result = await api.get<CustomerOverviewItem[]>(url);
       return unwrapResult(result);
     },
     enabled: !customerId,
   });
 
-  // Check if we can create a service record for the selected period
   const { data: periodCheck, isLoading: isPeriodCheckLoading } = useQuery<PeriodCheckResponse>({
-    queryKey: ["/api/service-records/check-period", customerId, selectedYear, selectedMonth],
+    queryKey: ["/api/service-records/check-period", customerId, selectedYear, selectedMonth, viewAsEmployeeId],
     queryFn: async () => {
-      const result = await api.get<PeriodCheckResponse>(`/service-records/check-period?customerId=${customerId}&year=${selectedYear}&month=${selectedMonth}`);
+      let url = `/service-records/check-period?customerId=${customerId}&year=${selectedYear}&month=${selectedMonth}`;
+      if (viewAsEmployeeId) url += `&viewAsEmployeeId=${viewAsEmployeeId}`;
+      const result = await api.get<PeriodCheckResponse>(url);
       return unwrapResult(result);
     },
     enabled: !!customerId,

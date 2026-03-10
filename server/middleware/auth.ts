@@ -199,7 +199,7 @@ export function requireRoles(...requiredRoles: EmployeeRole[]) {
   };
 }
 
-export function canCreateServiceType(
+function canCreateServiceType(
   userRoles: EmployeeRole[],
   isAdmin: boolean,
   serviceType: "hauswirtschaft" | "alltagsbegleitung" | "erstberatung"
@@ -249,7 +249,7 @@ export function getAvailableServiceTypes(
   return services;
 }
 
-export function canCreateAppointmentType(
+function canCreateAppointmentType(
   userRoles: EmployeeRole[],
   isAdmin: boolean,
   appointmentType: "Kundentermin" | "Erstberatung"

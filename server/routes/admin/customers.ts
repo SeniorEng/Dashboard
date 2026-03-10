@@ -9,6 +9,7 @@ import { parseLocalDate, todayISO, validateGeburtsdatum } from "@shared/utils/da
 import { 
   versichertennummerSchema,
   customers,
+  type InsertCustomer,
 } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
 import { z } from "zod";
@@ -152,21 +153,21 @@ router.get("/customers/:id/details", asyncHandler("Kunde konnte nicht geladen we
 
 const simpleCreateCustomerSchema = z.object({
   billingType: z.enum(["pflegekasse_gesetzlich", "pflegekasse_privat", "selbstzahler"]).default("pflegekasse_gesetzlich"),
-  vorname: z.string().min(1),
-  nachname: z.string().min(1),
+  vorname: z.string().min(1, "Vorname ist erforderlich"),
+  nachname: z.string().min(1, "Nachname ist erforderlich"),
   geburtsdatum: z.string().optional().nullable(),
-  email: z.string().email().optional().nullable(),
+  email: z.string().email("Ungültige E-Mail-Adresse").optional().nullable(),
   telefon: z.string().optional().nullable(),
   festnetz: z.string().optional().nullable(),
-  strasse: z.string().min(1),
-  nr: z.string().min(1),
-  plz: z.string().regex(/^\d{5}$/),
-  stadt: z.string().min(1),
-  pflegegrad: z.number().min(1).max(5).optional(),
+  strasse: z.string().min(1, "Straße ist erforderlich"),
+  nr: z.string().min(1, "Hausnummer ist erforderlich"),
+  plz: z.string().regex(/^\d{5}$/, "Ungültige PLZ (5 Stellen erwartet)"),
+  stadt: z.string().min(1, "Stadt ist erforderlich"),
+  pflegegrad: z.number().min(1, "Pflegegrad muss zwischen 1 und 5 liegen").max(5, "Pflegegrad muss zwischen 1 und 5 liegen").optional(),
   pflegegradSeit: z.string().optional(),
-  vorerkrankungen: z.string().max(2000).optional().nullable(),
+  vorerkrankungen: z.string().max(2000, "Maximal 2000 Zeichen erlaubt").optional().nullable(),
   haustierVorhanden: z.boolean().optional(),
-  haustierDetails: z.string().max(500).optional().nullable(),
+  haustierDetails: z.string().max(500, "Maximal 500 Zeichen erlaubt").optional().nullable(),
   personenbefoerderungGewuenscht: z.boolean().optional(),
   documentDeliveryMethod: z.enum(["email", "post"]).optional(),
   insurance: z.object({
@@ -187,7 +188,7 @@ const simpleCreateCustomerSchema = z.object({
     verhinderungspflege39: z.number(),
     pflegesachleistungen36: z.number(),
     validFrom: z.string(),
-    carryoverAmountCents: z.number().min(0).optional(),
+    carryoverAmountCents: z.number().min(0, "Betrag darf nicht negativ sein").optional(),
   }).optional(),
   contract: z.object({
     contractStart: z.string(),
@@ -213,7 +214,7 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
 
   const userId = req.user!.id;
 
-  const customerData: Record<string, unknown> = {
+  const customerData: InsertCustomer = {
     name: `${data.nachname}, ${data.vorname}`,
     vorname: data.vorname,
     nachname: data.nachname,
@@ -384,30 +385,30 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
 const VALID_CUSTOMER_STATUSES = ["erstberatung", "aktiv", "inaktiv"] as const;
 
 const updateCustomerSchema = z.object({
-  vorname: z.string().min(1).optional(),
-  nachname: z.string().min(1).optional(),
+  vorname: z.string().min(1, "Vorname ist erforderlich").optional(),
+  nachname: z.string().min(1, "Nachname ist erforderlich").optional(),
   billingType: z.enum(["pflegekasse_gesetzlich", "pflegekasse_privat", "selbstzahler"]).optional(),
   geburtsdatum: z.string().nullable().optional(),
-  email: z.string().email().nullable().optional(),
+  email: z.string().email("Ungültige E-Mail-Adresse").nullable().optional(),
   festnetz: z.string().nullable().optional(),
   telefon: z.string().nullable().optional(),
-  strasse: z.string().min(1).optional(),
-  nr: z.string().min(1).optional(),
-  plz: z.string().regex(/^\d{5}$/).optional(),
-  stadt: z.string().min(1).optional(),
+  strasse: z.string().min(1, "Straße ist erforderlich").optional(),
+  nr: z.string().min(1, "Hausnummer ist erforderlich").optional(),
+  plz: z.string().regex(/^\d{5}$/, "Ungültige PLZ (5 Stellen erwartet)").optional(),
+  stadt: z.string().min(1, "Stadt ist erforderlich").optional(),
   status: z.enum(VALID_CUSTOMER_STATUSES).optional(),
   primaryEmployeeId: z.number().nullable().optional(),
   backupEmployeeId: z.number().nullable().optional(),
   backupEmployeeId2: z.number().nullable().optional(),
-  vorerkrankungen: z.string().max(2000).nullable().optional(),
+  vorerkrankungen: z.string().max(2000, "Maximal 2000 Zeichen erlaubt").nullable().optional(),
   haustierVorhanden: z.boolean().optional(),
-  haustierDetails: z.string().max(500).nullable().optional(),
+  haustierDetails: z.string().max(500, "Maximal 500 Zeichen erlaubt").nullable().optional(),
   personenbefoerderungGewuenscht: z.boolean().optional(),
   documentDeliveryMethod: z.enum(["email", "post"]).optional(),
   acceptsPrivatePayment: z.boolean().optional(),
   inaktivAb: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat (YYYY-MM-DD erwartet)").nullable().optional(),
   deactivationReason: z.string().nullable().optional(),
-  deactivationNote: z.string().max(1000).nullable().optional(),
+  deactivationNote: z.string().max(1000, "Maximal 1000 Zeichen erlaubt").nullable().optional(),
 });
 
 router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert werden", async (req: Request, res: Response) => {

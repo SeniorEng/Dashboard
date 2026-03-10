@@ -30,15 +30,15 @@ const updateNeedsAssessmentSchema = z.object({
   serviceSozialeKontakte: z.boolean().optional(),
   serviceFreizeitgestaltung: z.boolean().optional(),
   serviceKreativ: z.boolean().optional(),
-  sonstigeLeistungen: z.string().max(250).nullable().optional(),
+  sonstigeLeistungen: z.string().max(250, "Maximal 250 Zeichen erlaubt").nullable().optional(),
 });
 
 const updateContractSchema = z.object({
-  vereinbarteLeistungen: z.string().max(2000).nullable().optional(),
+  vereinbarteLeistungen: z.string().max(2000, "Maximal 2000 Zeichen erlaubt").nullable().optional(),
   contractDate: z.string().nullable().optional(),
   contractStart: z.string().optional(),
   contractEnd: z.string().nullable().optional(),
-  hoursPerPeriod: z.number().int().min(0).optional(),
+  hoursPerPeriod: z.number().int().min(0, "Muss mindestens 0 sein").optional(),
   periodType: z.enum(["week", "month", "year"]).optional(),
 });
 
@@ -46,7 +46,7 @@ const createContractSchema = z.object({
   contractStart: z.string(),
   contractDate: z.string().nullable().optional(),
   contractEnd: z.string().nullable().optional(),
-  hoursPerPeriod: z.number().int().min(0).optional(),
+  hoursPerPeriod: z.number().int().min(0, "Muss mindestens 0 sein").optional(),
   periodType: z.enum(["week", "month", "year"]).optional(),
 });
 

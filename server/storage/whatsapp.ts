@@ -38,7 +38,7 @@ export async function upsertWhatsAppNotificationRule(
   return result[0];
 }
 
-export async function deleteWhatsAppNotificationRule(id: number): Promise<void> {
+async function deleteWhatsAppNotificationRule(id: number): Promise<void> {
   await db
     .delete(whatsappNotificationRules)
     .where(eq(whatsappNotificationRules.id, id));
@@ -130,7 +130,7 @@ export async function getMessageLog(
   return { entries, total: countResult[0]?.count ?? 0 };
 }
 
-export async function createMessageLogEntry(
+async function createMessageLogEntry(
   entry: InsertWhatsAppMessageLog
 ): Promise<WhatsAppMessageLog> {
   const result = await db

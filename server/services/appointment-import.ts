@@ -72,7 +72,7 @@ function hoursToMinutes(hours: number): number {
 export function parseExcelFile(buffer: Buffer): ImportRow[] {
   const workbook = XLSX.read(buffer, { type: "buffer" });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { header: 1 }) as unknown[][];
+  const raw = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as unknown[][];
 
   const expectedHeaders: Record<string, string[]> = {
     kunde: ["Kunde"],
@@ -493,6 +493,7 @@ export async function createServiceRecordsForImported(userId: number): Promise<{
         employeeId: group.employeeId,
         year: group.year,
         month: group.month,
+        recordType: "monthly",
       });
 
       await storage.addAppointmentsToServiceRecord(sr.id, group.appointmentIds);

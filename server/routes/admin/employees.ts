@@ -170,9 +170,9 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
 }));
 
 const updateUserSchema = z.object({
-  email: z.string().email().optional(),
-  vorname: z.string().min(1).optional(),
-  nachname: z.string().min(1).optional(),
+  email: z.string().email("Ungültige E-Mail-Adresse").optional(),
+  vorname: z.string().min(1, "Vorname ist erforderlich").optional(),
+  nachname: z.string().min(1, "Nachname ist erforderlich").optional(),
   telefon: z.string().optional(),
   strasse: z.string().optional(),
   hausnummer: z.string().optional(),
@@ -181,15 +181,15 @@ const updateUserSchema = z.object({
   geburtsdatum: z.string().optional(),
   eintrittsdatum: z.string().optional(),
   austrittsDatum: z.string().nullable().optional(),
-  vacationDaysPerYear: z.number().int().min(0).max(365).optional(),
+  vacationDaysPerYear: z.number().int().min(0, "Muss mindestens 0 sein").max(365, "Maximal 365 Tage").optional(),
   isActive: z.boolean().optional(),
   isAdmin: z.boolean().optional(),
   haustierAkzeptiert: z.boolean().optional(),
   isEuRentner: z.boolean().optional(),
   employmentType: z.enum(EMPLOYMENT_TYPES).optional(),
   employmentStatus: z.enum(EMPLOYMENT_STATUSES).optional(),
-  weeklyWorkDays: z.number().int().min(1).max(7).optional(),
-  monthlyWorkHours: z.number().min(1).max(300).nullable().optional(),
+  weeklyWorkDays: z.number().int().min(1, "Muss mindestens 1 Tag sein").max(7, "Maximal 7 Tage").optional(),
+  monthlyWorkHours: z.number().min(1, "Muss mindestens 1 Stunde sein").max(300, "Maximal 300 Stunden").nullable().optional(),
   lbnr: z.string().nullable().optional(),
   personalnummer: z.string().nullable().optional(),
   notfallkontaktName: z.string().optional(),
@@ -514,28 +514,30 @@ router.post("/users/:id/anonymize", asyncHandler("Mitarbeiter konnte nicht anony
   const anonymizedLabel = `Ehem. Mitarbeiter #${id}`;
   const anonymizedEmail = `anonymized_${id}@deleted.local`;
 
-  await db.update(users).set({
-    displayName: anonymizedLabel,
-    vorname: null,
-    nachname: null,
-    email: anonymizedEmail,
-    telefon: null,
-    strasse: null,
-    hausnummer: null,
-    plz: null,
-    stadt: null,
-    geburtsdatum: null,
-    notfallkontaktName: null,
-    notfallkontaktTelefon: null,
-    notfallkontaktBeziehung: null,
-    passwordHash: "anonymized",
-    isAnonymized: true,
-    anonymizedAt: now,
-    updatedAt: now,
-  }).where(eq(users.id, id));
+  await db.transaction(async (tx) => {
+    await tx.update(users).set({
+      displayName: anonymizedLabel,
+      vorname: null,
+      nachname: null,
+      email: anonymizedEmail,
+      telefon: null,
+      strasse: null,
+      hausnummer: null,
+      plz: null,
+      stadt: null,
+      geburtsdatum: null,
+      notfallkontaktName: null,
+      notfallkontaktTelefon: null,
+      notfallkontaktBeziehung: null,
+      passwordHash: "anonymized",
+      isAnonymized: true,
+      anonymizedAt: now,
+      updatedAt: now,
+    }).where(eq(users.id, id));
 
-  await db.delete(sessions).where(eq(sessions.userId, id));
-  await db.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, id));
+    await tx.delete(sessions).where(eq(sessions.userId, id));
+    await tx.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, id));
+  });
 
   await auditService.log(
     req.user!.id,
