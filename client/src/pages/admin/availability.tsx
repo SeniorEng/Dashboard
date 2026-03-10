@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Layout } from "@/components/layout";
+import { colors } from "@/design-system/tokens";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -122,6 +123,7 @@ export default function AvailabilityPage() {
             size="icon"
             onClick={() => setCurrentWeekStart(subWeeks(currentWeekStart, 1))}
             data-testid="button-prev-week"
+            aria-label="Vorherige Woche"
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -134,6 +136,7 @@ export default function AvailabilityPage() {
             size="icon"
             onClick={() => setCurrentWeekStart(addWeeks(currentWeekStart, 1))}
             data-testid="button-next-week"
+            aria-label="Nächste Woche"
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
@@ -208,7 +211,7 @@ export default function AvailabilityPage() {
             <table className="w-full border-collapse" data-testid="table-availability">
               <thead>
                 <tr>
-                  <th className="text-left text-sm font-medium text-muted-foreground p-2 w-[160px] sticky left-0 bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4] z-10">
+                  <th className={`text-left text-sm font-medium text-muted-foreground p-2 w-[160px] sticky left-0 z-10 ${colors.surface.page}`}>
                     Mitarbeiter
                   </th>
                   {weekDates.map((date, idx) => {
@@ -232,7 +235,7 @@ export default function AvailabilityPage() {
               <tbody>
                 {employees.map((emp) => (
                   <tr key={emp.id} className="border-t border-border/40" data-testid={`row-employee-${emp.id}`}>
-                    <td className="p-2 align-top sticky left-0 bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4] z-10">
+                    <td className={`p-2 align-top sticky left-0 z-10 ${colors.surface.page}`}>
                       <div className="flex items-center gap-2">
                         <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold shrink-0">
                           {emp.displayName

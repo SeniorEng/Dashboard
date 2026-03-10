@@ -18,7 +18,7 @@ import {
   customers,
   employeeTimeEntries,
 } from "@shared/schema";
-import { validateGeburtsdatum } from "@shared/utils/datetime";
+import { validateGeburtsdatum, timeToMinutes, addDays as addDaysShared, minutesToTimeDisplay } from "@shared/utils/datetime";
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
 import { auditService } from "../../services/audit";
@@ -585,8 +585,8 @@ function computeFreeSlots(
   
   for (const slot of availability) {
     if (!slot.startTime || !slot.endTime) continue;
-    const slotStart = timeToMinutesHelper(slot.startTime);
-    const slotEnd = timeToMinutesHelper(slot.endTime);
+    const slotStart = timeToMinutes(slot.startTime);
+    const slotEnd = timeToMinutes(slot.endTime);
     
     const relevantBlocks = blockedSlots
       .filter(b => b.start < slotEnd && b.end > slotStart)
@@ -607,21 +607,12 @@ function computeFreeSlots(
   return freeSlots;
 }
 
-function timeToMinutesHelper(t: string): number {
-  const [h, m] = t.split(":").map(Number);
-  return h * 60 + m;
-}
-
 function minutesToHHMM(mins: number): string {
-  const h = Math.floor(mins / 60) % 24;
-  const m = mins % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  return minutesToTimeDisplay(((mins % 1440) + 1440) % 1440);
 }
 
 function addDaysISO(dateStr: string, days: number): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const date = new Date(Date.UTC(y, m - 1, d + days));
-  return date.toISOString().slice(0, 10);
+  return addDaysShared(dateStr, days);
 }
 
 function isValidCalendarDate(dateStr: string): boolean {
@@ -763,7 +754,7 @@ router.get("/employees/weekly-availability", asyncHandler("Wochen-Verfügbarkeit
           const start = a.scheduledStart?.slice(0, 5) || null;
           let end = a.scheduledEnd?.slice(0, 5) || null;
           if (!end && start && a.durationPromised) {
-            end = minutesToHHMM(timeToMinutesHelper(start) + a.durationPromised);
+            end = minutesToHHMM(timeToMinutes(start) + a.durationPromised);
           }
           return {
             scheduledStart: start,
@@ -782,16 +773,16 @@ router.get("/employees/weekly-availability", asyncHandler("Wochen-Verfügbarkeit
       const blockedSlots: { start: number; end: number }[] = [];
       for (const appt of dayAppointments) {
         if (appt.scheduledStart) {
-          const s = timeToMinutesHelper(appt.scheduledStart);
-          const e = appt.scheduledEnd ? timeToMinutesHelper(appt.scheduledEnd) : s + (appt.durationMinutes || 60);
+          const s = timeToMinutes(appt.scheduledStart);
+          const e = appt.scheduledEnd ? timeToMinutes(appt.scheduledEnd) : s + (appt.durationMinutes || 60);
           blockedSlots.push({ start: s, end: e });
         }
       }
       for (const te of dayTimeEntries) {
         if (te.startTime && te.endTime) {
           blockedSlots.push({
-            start: timeToMinutesHelper(te.startTime.slice(0, 5)),
-            end: timeToMinutesHelper(te.endTime.slice(0, 5)),
+            start: timeToMinutes(te.startTime.slice(0, 5)),
+            end: timeToMinutes(te.endTime.slice(0, 5)),
           });
         }
       }
