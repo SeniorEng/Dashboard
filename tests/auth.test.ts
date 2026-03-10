@@ -85,7 +85,10 @@ describe("Authentifizierung", () => {
 
       const logoutResponse = await fetch(`${BASE_URL}/api/auth/logout`, {
         method: "POST",
-        headers: { Cookie: auth.cookie },
+        headers: {
+          Cookie: `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`,
+          "x-csrf-token": auth.csrfToken,
+        },
       });
 
       expect(logoutResponse.status).toBe(200);

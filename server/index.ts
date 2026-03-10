@@ -55,7 +55,7 @@ const apiLimiter = rateLimit({
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: process.env.NODE_ENV === "development" ? 100 : 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Zu viele Anmeldeversuche, bitte später erneut versuchen." },

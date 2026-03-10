@@ -22,6 +22,30 @@ interface Appointment {
   actualEnd: string | null;
 }
 
+let hwServiceId: number;
+let abServiceId: number;
+
+async function loadServiceIds() {
+  if (hwServiceId && abServiceId) return;
+  const allServices = await apiGet<{ id: number; code: string | null }[]>("/api/services/all");
+  const hw = allServices.data.find((s) => s.code === "hauswirtschaft");
+  const ab = allServices.data.find((s) => s.code === "alltagsbegleitung");
+  if (!hw || !ab) throw new Error("Hauswirtschaft oder Alltagsbegleitung Service nicht gefunden");
+  hwServiceId = hw.id;
+  abServiceId = ab.id;
+}
+
+async function cleanupAppointmentsForCustomer(customerId: number) {
+  const res = await apiGet<any[]>(`/api/appointments?customerId=${customerId}`);
+  if (res.status === 200 && Array.isArray(res.data)) {
+    for (const appt of res.data) {
+      if (appt.status === "scheduled") {
+        await apiDelete(`/api/appointments/${appt.id}`);
+      }
+    }
+  }
+}
+
 describe("Termine (Appointments) CRUD", () => {
   let testCustomerId: number;
   let testAppointmentId: number;
@@ -29,6 +53,7 @@ describe("Termine (Appointments) CRUD", () => {
 
   beforeAll(async () => {
     const auth = await getAuthCookie();
+    await loadServiceIds();
     
     const customersRes = await apiGet<{ data: { id: number }[] }>("/api/admin/customers?limit=1");
     const customers = customersRes.data?.data;
@@ -41,7 +66,10 @@ describe("Termine (Appointments) CRUD", () => {
     await apiPatch(`/api/admin/customers/${testCustomerId}/assign`, {
       primaryEmployeeId: auth.user.id,
       backupEmployeeId: null,
+      backupEmployeeId2: null,
     });
+    
+    await cleanupAppointmentsForCustomer(testCustomerId);
     
     testDate = getFutureDate(14);
   });
@@ -60,8 +88,8 @@ describe("Termine (Appointments) CRUD", () => {
         date: testDate,
         scheduledStart: "10:00",
         services: [
-          { serviceId: 1, durationMinutes: 60 },
-          { serviceId: 2, durationMinutes: 30 },
+          { serviceId: hwServiceId, durationMinutes: 60 },
+          { serviceId: abServiceId, durationMinutes: 30 },
         ],
         assignedEmployeeId: auth.user.id,
       });
@@ -83,7 +111,7 @@ describe("Termine (Appointments) CRUD", () => {
         date: testDate,
         scheduledStart: "10:30",
         services: [
-          { serviceId: 1, durationMinutes: 60 },
+          { serviceId: hwServiceId, durationMinutes: 60 },
         ],
         assignedEmployeeId: auth.user.id,
       });
@@ -158,7 +186,7 @@ describe("Termine (Appointments) CRUD", () => {
         date: getFutureDate(15),
         scheduledStart: "14:00",
         services: [
-          { serviceId: 1, durationMinutes: 30 },
+          { serviceId: hwServiceId, durationMinutes: 30 },
         ],
         assignedEmployeeId: auth.user.id,
       });
@@ -188,8 +216,8 @@ describe("Termine (Appointments) CRUD", () => {
         date: getFutureDate(50),
         scheduledStart: "09:00",
         services: [
-          { serviceId: 1, durationMinutes: 60 },
-          { serviceId: 2, durationMinutes: 30 },
+          { serviceId: hwServiceId, durationMinutes: 60 },
+          { serviceId: abServiceId, durationMinutes: 30 },
         ],
         assignedEmployeeId: auth.user.id,
       });
@@ -214,6 +242,9 @@ describe("Termine (Appointments) CRUD", () => {
           travelOriginType: "home",
           travelKilometers: 15,
           travelMinutes: 20,
+          services: [
+            { serviceId: hwServiceId, actualDurationMinutes: 60, details: "Test-Hauswirtschaft" },
+          ],
         }
       );
 
@@ -257,7 +288,7 @@ describe("Termine (Appointments) CRUD", () => {
         date: getFutureDate(20),
         scheduledStart: "16:00",
         services: [
-          { serviceId: 1, durationMinutes: 45 },
+          { serviceId: hwServiceId, durationMinutes: 45 },
         ],
         assignedEmployeeId: auth.user.id,
       });
@@ -294,12 +325,14 @@ describe("Junction-Tabelle (appointment_services)", () => {
 
   beforeAll(async () => {
     const auth = await getAuthCookie();
+    await loadServiceIds();
     const customersRes = await apiGet<{ data: { id: number }[] }>("/api/admin/customers?limit=1");
     testCustomerId = customersRes.data.data[0].id;
 
     await apiPatch(`/api/admin/customers/${testCustomerId}/assign`, {
       primaryEmployeeId: auth.user.id,
       backupEmployeeId: null,
+      backupEmployeeId2: null,
     });
   });
 
@@ -316,8 +349,8 @@ describe("Junction-Tabelle (appointment_services)", () => {
       date: getFutureDate(160),
       scheduledStart: "08:00",
       services: [
-        { serviceId: 1, durationMinutes: 60 },
-        { serviceId: 2, durationMinutes: 45 },
+        { serviceId: hwServiceId, durationMinutes: 60 },
+        { serviceId: abServiceId, durationMinutes: 45 },
       ],
       assignedEmployeeId: auth.user.id,
     });
@@ -384,7 +417,7 @@ describe("Junction-Tabelle (appointment_services)", () => {
       date: getFutureDate(162),
       scheduledStart: "09:00",
       services: [
-        { serviceId: 1, durationMinutes: 30 },
+        { serviceId: hwServiceId, durationMinutes: 30 },
         { serviceId: newService.id, durationMinutes: 30 },
       ],
       assignedEmployeeId: auth.user.id,
@@ -409,8 +442,8 @@ describe("Junction-Tabelle (appointment_services)", () => {
       date: getFutureDate(163),
       scheduledStart: "10:00",
       services: [
-        { serviceId: 1, durationMinutes: 60 },
-        { serviceId: 2, durationMinutes: 45 },
+        { serviceId: hwServiceId, durationMinutes: 60 },
+        { serviceId: abServiceId, durationMinutes: 45 },
       ],
       assignedEmployeeId: auth.user.id,
     });
@@ -449,6 +482,7 @@ describe("Erstberatung (Initial Consultation)", () => {
         },
         date: getFutureDate(21),
         scheduledStart: "11:00",
+        erstberatungDauer: 60,
         assignedEmployeeId: auth.user.id,
       }
     );

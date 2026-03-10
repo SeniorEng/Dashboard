@@ -103,12 +103,25 @@ describe("Zeiterfassung (Time Entries) CRUD", () => {
     });
 
     it("sollte Mehrtages-Urlaub erstellen können", async () => {
-      const startOffset = 200;
-      let startDate = getFutureDate(startOffset);
-      const startDay = new Date(startDate).getDay();
-      const adjustedOffset = startDay === 0 ? startOffset + 1 : startDay === 6 ? startOffset + 2 : startOffset;
-      startDate = getFutureDate(adjustedOffset);
-      const endDate = getFutureDate(adjustedOffset + 2);
+      const startDate = getFutureDate(200);
+      const endDateObj = new Date(startDate + "T00:00:00");
+      endDateObj.setDate(endDateObj.getDate() + 2);
+      if (endDateObj.getDay() === 0) endDateObj.setDate(endDateObj.getDate() + 1);
+      else if (endDateObj.getDay() === 6) endDateObj.setDate(endDateObj.getDate() + 2);
+      const endDate = `${endDateObj.getFullYear()}-${String(endDateObj.getMonth() + 1).padStart(2, "0")}-${String(endDateObj.getDate()).padStart(2, "0")}`;
+
+      const cleanupMonth1 = new Date(startDate + "T00:00:00");
+      const cleanupMonth2 = new Date(endDate + "T00:00:00");
+      for (const d of [cleanupMonth1, cleanupMonth2]) {
+        const existing = await apiGet<TimeEntry[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
+        if (existing.status === 200 && Array.isArray(existing.data)) {
+          for (const entry of existing.data) {
+            if (entry.entryDate >= startDate && entry.entryDate <= endDate) {
+              await apiDelete(`/api/time-entries/${entry.id}`);
+            }
+          }
+        }
+      }
       
       const { status, data } = await apiPost<TimeEntry & { _multiDay?: { count: number } }>("/api/time-entries", {
         entryDate: startDate,

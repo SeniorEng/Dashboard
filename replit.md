@@ -144,12 +144,16 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Dead code audit tooling**: Knip installed (`npx knip`) for comprehensive dead code detection (unused files, exports, dependencies). Config in `knip.json`. 14 unused UI component files and 8 unused npm dependencies removed after initial audit. Run periodically to keep codebase clean.
 
 ## Integration Tests
+- **Test files**: `tests/appointments.test.ts`, `tests/auth.test.ts`, `tests/customers.test.ts`, `tests/services.test.ts`, `tests/time-entries.test.ts`, `tests/budget.test.ts`, `tests/budget-integration.test.ts` — 103 tests total, all passing.
 - **Budget Integration Tests** (`tests/budget-integration.test.ts`): 29 tests across 10 groups (INT-1 through INT-10) covering §45b/§45a/§39-42a allocation, cascade consumption, manual adjustments, cost estimation, double-booking protection, deactivation, and initial balances.
 - **Bug-Fix (08.03.2026): Initial-Budget Route Typo**: `customer-new.tsx` called `/api/budgets/` (Plural) statt `/api/budget/` (Singular) — Carryover/Startwert ging bei Kundenanlage verloren. SPA-Fallback antwortete mit 200+HTML statt 404, `api.post()` wirft bei HTTP-Fehlern keine Exception (gibt `{success:false}`), Fehler wurde still geschluckt. Fix: URL korrigiert + `result.success`-Check hinzugefügt.
-- **Test Utilities** (`tests/test-utils.ts`): Shared auth/API helpers.
-- **Run command**: `TEST_USER_PASSWORD="$TEST_USER_PASSWORD_INTERNAL" TEST_USER_EMAIL="e2e-test@seniorenengel.test" npx vitest run tests/budget-integration.test.ts --reporter=verbose`
+- **Test Utilities** (`tests/test-utils.ts`): Shared auth/API helpers. `loadServiceIds()` dynamically looks up service IDs by code (not hardcoded).
+- **Run command**: `TEST_USER_PASSWORD="$TEST_USER_PASSWORD_INTERNAL" TEST_USER_EMAIL="e2e-test@seniorenengel.test" npx vitest run --reporter=verbose`
 - **e2e test user**: id=8, `e2e-test@seniorenengel.test`, `is_super_admin=true`.
-- Tests are idempotent and safe to run repeatedly. Appointment creation retries different dates/times on 409 conflicts.
+- **Service IDs in test DB**: hauswirtschaft=15, alltagsbegleitung=16, travel_km=17, customer_km=18, erstberatung=19 (looked up dynamically).
+- Tests are idempotent and safe to run repeatedly. Appointment creation retries different dates/times on 409 conflicts. Appointments test cleans up leftover scheduled appointments in `beforeAll`.
+- **Vitest config**: `fileParallelism: false` to prevent rate-limit collisions across test files sharing backend state.
+- **Login rate limit**: 100 attempts in dev (10 in production) to accommodate test suite runs.
 
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)

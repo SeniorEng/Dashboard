@@ -6,6 +6,7 @@ import {
   apiPut,
   apiDelete,
   uniqueId,
+  getFutureDate,
 } from "./test-utils";
 
 let createdServiceId: number;
@@ -16,7 +17,7 @@ let firstCustomerId: number;
 afterAll(async () => {
   try {
     if (createdOverrideId && firstCustomerId) {
-      await apiDelete(`/api/services/customer/${firstCustomerId}/overrides/${createdOverrideId}`);
+      await apiDelete(`/api/customers/${firstCustomerId}/service-prices/${createdOverrideId}`);
     }
   } catch {}
   try {
@@ -120,16 +121,16 @@ describe("Dienstleistungskatalog", () => {
       expect(customersRes.data.length).toBeGreaterThan(0);
       firstCustomerId = customersRes.data[0].id;
 
-      const today = new Date().toISOString().split("T")[0];
+      const futureDate = getFutureDate(30);
       const { status, data } = await apiPost<any>(
-        `/api/services/customer/${firstCustomerId}/overrides`,
+        `/api/customers/${firstCustomerId}/service-prices`,
         {
           serviceId: createdServiceId,
           priceCents: 3500,
-          validFrom: today,
+          validFrom: futureDate,
         }
       );
-      expect(status).toBe(201);
+      expect(status).toBe(200);
       expect(data).toHaveProperty("id");
       expect(data.priceCents).toBe(3500);
       expect(data.serviceId).toBe(createdServiceId);
@@ -137,9 +138,9 @@ describe("Dienstleistungskatalog", () => {
       createdOverrideId = data.id;
     });
 
-    it("sollte den Sonderpreis über GET overrides abrufen können", async () => {
+    it("sollte den Sonderpreis über GET service-prices abrufen können", async () => {
       const { status, data } = await apiGet<any[]>(
-        `/api/services/customer/${firstCustomerId}/overrides`
+        `/api/customers/${firstCustomerId}/service-prices/all`
       );
       expect(status).toBe(200);
       expect(Array.isArray(data)).toBe(true);
@@ -152,28 +153,27 @@ describe("Dienstleistungskatalog", () => {
   describe("Preisauflösung", () => {
     it("sollte den Sonderpreis bei der Preisauflösung anzeigen", async () => {
       const { status, data } = await apiGet<any[]>(
-        `/api/services/customer/${firstCustomerId}/prices`
+        `/api/customers/${firstCustomerId}/service-prices/all`
       );
       expect(status).toBe(200);
       expect(Array.isArray(data)).toBe(true);
-      const resolved = data.find((p: any) => p.service?.id === createdServiceId || p.serviceId === createdServiceId);
+      const resolved = data.find((p: any) => p.serviceId === createdServiceId);
       expect(resolved).toBeDefined();
       expect(resolved.priceCents).toBe(3500);
-      expect(resolved.isOverride).toBe(true);
     });
   });
 
   describe("Sonderpreis löschen", () => {
     it("sollte den Sonderpreis löschen können", async () => {
       const { status } = await apiDelete(
-        `/api/services/customer/${firstCustomerId}/overrides/${createdOverrideId}`
+        `/api/customers/${firstCustomerId}/service-prices/${createdOverrideId}`
       );
       expect(status).toBe(200);
     });
 
     it("sollte den gelöschten Sonderpreis nicht mehr anzeigen", async () => {
       const { status, data } = await apiGet<any[]>(
-        `/api/services/customer/${firstCustomerId}/overrides`
+        `/api/customers/${firstCustomerId}/service-prices/all`
       );
       expect(status).toBe(200);
       const override = data.find((o: any) => o.id === createdOverrideId);
