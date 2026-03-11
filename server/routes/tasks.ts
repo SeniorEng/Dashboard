@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { insertTaskSchema, updateTaskSchema } from "@shared/schema";
+import { insertTaskSchema, updateTaskSchema, birthdayCardTracking } from "@shared/schema";
 import { 
   getTasksForUser, 
   getAllTasks, 
@@ -9,6 +9,9 @@ import {
   deleteTask,
   getOpenTaskCount,
   ensureMonthClosingTask,
+  parseBirthdayMarker,
+  completeAllBirthdayTasks,
+  reopenAllBirthdayTasks,
 } from "../storage/tasks";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { storage } from "../storage";
@@ -17,6 +20,8 @@ import { todayISO } from "@shared/utils/datetime";
 import { asyncHandler } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { notificationService } from "../services/notification-service";
+import { db } from "../lib/db";
+import { and, eq } from "drizzle-orm";
 
 const router = Router();
 
@@ -169,6 +174,47 @@ router.patch("/:id", requireAuth, asyncHandler("Aufgabe konnte nicht aktualisier
     const task = await updateTask(id, parseResult.data, userId, isAdmin);
     if (!task) {
       return res.status(404).json({ error: "Aufgabe nicht gefunden" });
+    }
+
+    if (parseResult.data.status && isAdmin) {
+      const marker = parseBirthdayMarker(task.description);
+      if (marker) {
+        const { personType, personId, year } = marker;
+        await db.transaction(async (tx) => {
+          if (parseResult.data.status === "completed") {
+            const existing = await tx.select().from(birthdayCardTracking)
+              .where(and(
+                eq(birthdayCardTracking.personType, personType),
+                eq(birthdayCardTracking.personId, personId),
+                eq(birthdayCardTracking.year, year),
+              ));
+
+            if (existing.length > 0) {
+              await tx.update(birthdayCardTracking)
+                .set({ sent: true, sentAt: new Date(), sentByUserId: userId })
+                .where(eq(birthdayCardTracking.id, existing[0].id));
+            } else {
+              await tx.insert(birthdayCardTracking)
+                .values({ personType, personId, year, sent: true, sentAt: new Date(), sentByUserId: userId });
+            }
+            await completeAllBirthdayTasks(personType, personId, year, tx);
+          } else {
+            const existing = await tx.select().from(birthdayCardTracking)
+              .where(and(
+                eq(birthdayCardTracking.personType, personType),
+                eq(birthdayCardTracking.personId, personId),
+                eq(birthdayCardTracking.year, year),
+              ));
+
+            if (existing.length > 0 && existing[0].sent) {
+              await tx.update(birthdayCardTracking)
+                .set({ sent: false, sentAt: null, sentByUserId: null })
+                .where(eq(birthdayCardTracking.id, existing[0].id));
+            }
+            await reopenAllBirthdayTasks(personType, personId, year, tx);
+          }
+        });
+      }
     }
 
     res.json(task);

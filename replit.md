@@ -134,6 +134,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
   - W23: PWA manifest (client/public/manifest.json) + theme-color meta tag + offline detection banner ("Keine Internetverbindung") in Layout
   - W15: Playwright E2E test infrastructure — playwright.config.ts, e2e/health.spec.ts, e2e/login.spec.ts
   - W25: Deutsche .message() Strings auf allen user-facing Zod-Validatoren (tasks, audit, system, billing, users, company, insurance)
+  - Birthday task automation: 7 Tage vor Geburtstag automatische Aufgabe für Admins (Kunden: "Geburtstagskarte versenden", Mitarbeiter: "Gutschein versenden"), bidirektionale Sync zwischen Aufgaben und Geburtstags-Tracking via `[birthday:type:id:year]` Marker in Task-Description
 - **TypeScript**: 0 errors (fixed: audit action types, DayTimeEntry.kilometers, AppointmentWithCustomerName fields, isLocked type, documentDate mutation type, Set iteration, asyncHandler signature)
 - **Build**: Clean (535.8 KB gzipped, 105 chunks, code-split)
 - **npm audit**: 0 critical/high/moderate vulns (4 moderate esbuild in dev-only drizzle-kit — not fixable without breaking change)

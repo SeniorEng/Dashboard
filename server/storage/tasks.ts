@@ -323,3 +323,175 @@ export async function reopenMonthClosingTask(
       .where(eq(tasks.id, existing.id));
   }
 }
+
+const BIRTHDAY_MARKER_PREFIX = "[birthday:";
+
+function getBirthdayTaskTitle(personType: "customer" | "employee", name: string): string {
+  return personType === "employee"
+    ? `Gutschein versenden für ${name}`
+    : `Geburtstagskarte versenden für ${name}`;
+}
+
+function getBirthdayTaskMarker(personType: string, personId: number, year: number): string {
+  return `${BIRTHDAY_MARKER_PREFIX}${personType}:${personId}:${year}]`;
+}
+
+export function parseBirthdayMarker(description: string | null): { personType: "customer" | "employee"; personId: number; year: number } | null {
+  if (!description) return null;
+  const match = description.match(/\[birthday:(customer|employee):(\d+):(\d+)\]/);
+  if (!match) return null;
+  return {
+    personType: match[1] as "customer" | "employee",
+    personId: parseInt(match[2], 10),
+    year: parseInt(match[3], 10),
+  };
+}
+
+export async function findBirthdayTask(
+  adminUserId: number,
+  personType: string,
+  personId: number,
+  year: number,
+  txOrDb: DbOrTx = db
+): Promise<Task | null> {
+  const marker = getBirthdayTaskMarker(personType, personId, year);
+  const result = await txOrDb
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.assignedToUserId, adminUserId),
+        sqlBuilder`${tasks.description} LIKE ${'%' + marker + '%'}`,
+        isNull(tasks.deletedAt)
+      )
+    )
+    .limit(1);
+  return result[0] || null;
+}
+
+export async function ensureBirthdayTask(
+  adminUserId: number,
+  personType: "customer" | "employee",
+  personId: number,
+  name: string,
+  birthdayDateISO: string,
+  year: number,
+  customerId: number | null = null,
+  txOrDb: DbOrTx = db
+): Promise<Task> {
+  const existing = await findBirthdayTask(adminUserId, personType, personId, year, txOrDb);
+  if (existing) return existing;
+
+  const title = getBirthdayTaskTitle(personType, name);
+  const marker = getBirthdayTaskMarker(personType, personId, year);
+  const description = personType === "employee"
+    ? `Amazon-Gutschein zum Geburtstag versenden.\n${marker}`
+    : `Geburtstagskarte versenden.\n${marker}`;
+
+  const today = new Date();
+  const birthdayDate = new Date(birthdayDateISO);
+  const nextBirthday = new Date(year, birthdayDate.getMonth(), birthdayDate.getDate());
+  const dueDate = `${nextBirthday.getFullYear()}-${(nextBirthday.getMonth() + 1).toString().padStart(2, "0")}-${nextBirthday.getDate().toString().padStart(2, "0")}`;
+
+  const result = await txOrDb
+    .insert(tasks)
+    .values({
+      title,
+      description,
+      dueDate,
+      priority: "high",
+      status: "open",
+      createdByUserId: adminUserId,
+      assignedToUserId: adminUserId,
+      customerId: personType === "customer" ? customerId ?? personId : null,
+    })
+    .returning();
+
+  return result[0];
+}
+
+export async function completeBirthdayTask(
+  adminUserId: number,
+  personType: string,
+  personId: number,
+  year: number,
+  txOrDb: DbOrTx = db
+): Promise<void> {
+  const existing = await findBirthdayTask(adminUserId, personType, personId, year, txOrDb);
+  if (existing && existing.status !== "completed") {
+    await txOrDb
+      .update(tasks)
+      .set({
+        status: "completed",
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(tasks.id, existing.id));
+  }
+}
+
+export async function reopenBirthdayTask(
+  adminUserId: number,
+  personType: string,
+  personId: number,
+  year: number,
+  txOrDb: DbOrTx = db
+): Promise<void> {
+  const existing = await findBirthdayTask(adminUserId, personType, personId, year, txOrDb);
+  if (existing && existing.status === "completed") {
+    await txOrDb
+      .update(tasks)
+      .set({
+        status: "open",
+        completedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(tasks.id, existing.id));
+  }
+}
+
+export async function completeAllBirthdayTasks(
+  personType: string,
+  personId: number,
+  year: number,
+  txOrDb: DbOrTx = db
+): Promise<void> {
+  const marker = getBirthdayTaskMarker(personType, personId, year);
+  await txOrDb
+    .update(tasks)
+    .set({
+      status: "completed",
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        sqlBuilder`${tasks.description} LIKE ${'%' + marker + '%'}`,
+        ne(tasks.status, "completed"),
+        isNull(tasks.deletedAt)
+      )
+    );
+}
+
+export async function reopenAllBirthdayTasks(
+  personType: string,
+  personId: number,
+  year: number,
+  txOrDb: DbOrTx = db
+): Promise<void> {
+  const marker = getBirthdayTaskMarker(personType, personId, year);
+  await txOrDb
+    .update(tasks)
+    .set({
+      status: "open",
+      completedAt: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        sqlBuilder`${tasks.description} LIKE ${'%' + marker + '%'}`,
+        eq(tasks.status, "completed"),
+        isNull(tasks.deletedAt)
+      )
+    );
+}

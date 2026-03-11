@@ -5,6 +5,7 @@ import { db } from "../lib/db";
 import { birthdayCardTracking } from "@shared/schema";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+import { completeAllBirthdayTasks, reopenAllBirthdayTasks } from "../storage/tasks";
 
 const router = Router();
 router.use(requireAuth);
@@ -36,39 +37,51 @@ router.post("/toggle", asyncHandler("Kartenstatus konnte nicht aktualisiert werd
 
   const { personType, personId, year, sent, notes } = parsed.data;
 
-  const existing = await db.select().from(birthdayCardTracking)
-    .where(and(
-      eq(birthdayCardTracking.personType, personType),
-      eq(birthdayCardTracking.personId, personId),
-      eq(birthdayCardTracking.year, year),
-    ));
+  const record = await db.transaction(async (tx) => {
+    const existing = await tx.select().from(birthdayCardTracking)
+      .where(and(
+        eq(birthdayCardTracking.personType, personType),
+        eq(birthdayCardTracking.personId, personId),
+        eq(birthdayCardTracking.year, year),
+      ));
 
-  if (existing.length > 0) {
-    const [updated] = await db.update(birthdayCardTracking)
-      .set({
-        sent,
-        sentAt: sent ? new Date() : null,
-        sentByUserId: sent ? req.user!.id : null,
-        notes: notes ?? existing[0].notes,
-      })
-      .where(eq(birthdayCardTracking.id, existing[0].id))
-      .returning();
-    return res.json(updated);
-  }
+    let result;
+    if (existing.length > 0) {
+      const [updated] = await tx.update(birthdayCardTracking)
+        .set({
+          sent,
+          sentAt: sent ? new Date() : null,
+          sentByUserId: sent ? req.user!.id : null,
+          notes: notes ?? existing[0].notes,
+        })
+        .where(eq(birthdayCardTracking.id, existing[0].id))
+        .returning();
+      result = updated;
+    } else {
+      const [created] = await tx.insert(birthdayCardTracking)
+        .values({
+          personType,
+          personId,
+          year,
+          sent,
+          sentAt: sent ? new Date() : null,
+          sentByUserId: sent ? req.user!.id : null,
+          notes,
+        })
+        .returning();
+      result = created;
+    }
 
-  const [created] = await db.insert(birthdayCardTracking)
-    .values({
-      personType,
-      personId,
-      year,
-      sent,
-      sentAt: sent ? new Date() : null,
-      sentByUserId: sent ? req.user!.id : null,
-      notes,
-    })
-    .returning();
+    if (sent) {
+      await completeAllBirthdayTasks(personType, personId, year, tx);
+    } else {
+      await reopenAllBirthdayTasks(personType, personId, year, tx);
+    }
 
-  res.json(created);
+    return result;
+  });
+
+  res.json(record);
 }));
 
 export default router;

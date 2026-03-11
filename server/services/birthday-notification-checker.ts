@@ -3,6 +3,7 @@ import { notificationService } from "./notification-service";
 import { hasRecentNotification } from "../storage/notifications";
 import { calculateDaysUntilBirthday } from "../routes/birthdays";
 import { parseLocalDate, todayISO } from "@shared/utils/datetime";
+import { ensureBirthdayTask } from "../storage/tasks";
 
 const BIRTHDAY_HORIZON_DAYS = 7;
 
@@ -35,15 +36,21 @@ export async function checkUpcomingBirthdays(): Promise<number> {
 
     const age = calculateUpcomingAge(emp.geburtsdatum, daysUntil);
 
+    const todayDate = parseLocalDate(todayISO());
+    const birthdayThisYear = new Date(todayDate.getFullYear(), parseLocalDate(emp.geburtsdatum).getMonth(), parseLocalDate(emp.geburtsdatum).getDate());
+    const birthdayYear = birthdayThisYear.getTime() >= todayDate.getTime() ? todayDate.getFullYear() : todayDate.getFullYear() + 1;
+
     for (const adminId of adminUsers) {
       if (adminId === emp.id) continue;
       const alreadyNotified = await hasRecentNotification(adminId, "birthday_reminder", emp.id, 48);
-      if (alreadyNotified) continue;
+      if (!alreadyNotified) {
+        await notificationService.notifyUpcomingBirthday(
+          adminId, emp.displayName, "employee", emp.geburtsdatum, age, emp.id
+        );
+        created++;
+      }
 
-      await notificationService.notifyUpcomingBirthday(
-        adminId, emp.displayName, "employee", emp.geburtsdatum, age, emp.id
-      );
-      created++;
+      await ensureBirthdayTask(adminId, "employee", emp.id, emp.displayName, emp.geburtsdatum, birthdayYear);
     }
   }
 
@@ -58,14 +65,22 @@ export async function checkUpcomingBirthdays(): Promise<number> {
     if (cust.backupEmployeeId) employeeIds.add(cust.backupEmployeeId);
     if (cust.backupEmployeeId2) employeeIds.add(cust.backupEmployeeId2);
 
+    const todayDateC = parseLocalDate(todayISO());
+    const custBirthdayThisYear = new Date(todayDateC.getFullYear(), parseLocalDate(cust.geburtsdatum).getMonth(), parseLocalDate(cust.geburtsdatum).getDate());
+    const custBirthdayYear = custBirthdayThisYear.getTime() >= todayDateC.getTime() ? todayDateC.getFullYear() : todayDateC.getFullYear() + 1;
+
     for (const empId of Array.from(employeeIds)) {
       const alreadyNotified = await hasRecentNotification(empId, "birthday_reminder", cust.id, 48);
-      if (alreadyNotified) continue;
+      if (!alreadyNotified) {
+        await notificationService.notifyUpcomingBirthday(
+          empId, cust.name, "customer", cust.geburtsdatum, age, cust.id
+        );
+        created++;
+      }
+    }
 
-      await notificationService.notifyUpcomingBirthday(
-        empId, cust.name, "customer", cust.geburtsdatum, age, cust.id
-      );
-      created++;
+    for (const adminId of adminUsers) {
+      await ensureBirthdayTask(adminId, "customer", cust.id, cust.name, cust.geburtsdatum, custBirthdayYear, cust.id);
     }
   }
 
