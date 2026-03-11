@@ -149,44 +149,67 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
         summaryText={formatMinutesToHours(totalServiceMinutes)}
         testId="card-hours-summary"
       >
-        <div className="space-y-2">
-          <div className={`grid grid-cols-1 ${hasPlanned ? "sm:grid-cols-2 gap-x-6" : ""} gap-y-0`}>
-            <div className="space-y-2">
-              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1" data-testid="label-completed-section">Dokumentiert</div>
-              <SummaryRow label="Hauswirtschaft" value={formatMinutesToHours(cHw)} color="text-gray-700" testId="text-hauswirtschaft-hours" />
-              <SummaryRow label="Alltagsbegleitung" value={formatMinutesToHours(cAb)} color="text-gray-700" testId="text-alltagsbegleitung-hours" />
-              <SummaryRow label="Erstberatung" value={formatMinutesToHours(cEb)} color="text-gray-700" testId="text-erstberatung-hours" />
-              <SummaryRow label="Anfahrt" value={formatMinutesToHours(cTravel)} color="text-gray-700" testId="text-travel-time-hours" />
-              <SummaryRow label="Sonstiges" value={formatMinutesToHours(sonstigesMinutes)} color="text-gray-700" testId="text-sonstiges-hours" />
-              <div className="border-t pt-2 mt-2 flex justify-between items-center">
-                <span className="text-sm font-medium text-gray-700">Gesamt</span>
-                <span className="font-bold text-gray-900" data-testid="text-completed-service-hours">
-                  {formatMinutesToHours(completedTotal)}
-                </span>
-              </div>
-            </div>
-            {hasPlanned && (
-              <div className="space-y-2 mt-3 sm:mt-0">
-                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1" data-testid="label-planned-section">Geplant</div>
-                <SummaryRow label="Hauswirtschaft" value={formatMinutesToHours(pHw)} color="text-gray-500" testId="text-planned-hauswirtschaft-hours" />
-                <SummaryRow label="Alltagsbegleitung" value={formatMinutesToHours(pAb)} color="text-gray-500" testId="text-planned-alltagsbegleitung-hours" />
-                <SummaryRow label="Erstberatung" value={formatMinutesToHours(pEb)} color="text-gray-500" testId="text-planned-erstberatung-hours" />
-                <SummaryRow label="Anfahrt" value={formatMinutesToHours(pTravel)} color="text-gray-500" testId="text-planned-travel-time-hours" />
-                <div className="border-t border-dashed pt-2 mt-2 flex justify-between items-center">
-                  <span className="text-sm font-medium text-gray-500">Gesamt</span>
-                  <span className="font-semibold text-gray-600" data-testid="text-planned-service-hours">
-                    {formatMinutesToHours(plannedTotal)}
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="border-t pt-2 mt-2 flex justify-between items-center">
-            <span className="text-sm font-medium text-gray-700">Gesamt</span>
-            <span className="font-bold text-gray-900" data-testid="text-total-service-hours">
-              {formatMinutesToHours(totalServiceMinutes)}
-            </span>
-          </div>
+        <div className="space-y-0">
+          <table className="w-full text-sm" data-testid="label-completed-section">
+            <thead>
+              <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                <th className="text-left font-semibold pb-2"></th>
+                <th className="text-right font-semibold pb-2">Dokumentiert</th>
+                {hasPlanned && (
+                  <th className="text-right font-semibold pb-2 pl-3" data-testid="label-planned-section">Geplant</th>
+                )}
+              </tr>
+            </thead>
+            <tbody className="text-gray-700">
+              <tr>
+                <td className="py-0.5 text-gray-600">Hauswirtschaft</td>
+                <td className="py-0.5 text-right font-semibold" data-testid="text-hauswirtschaft-hours">{formatMinutesToHours(cHw)}</td>
+                {hasPlanned && <td className="py-0.5 text-right font-semibold text-gray-500 pl-3" data-testid="text-planned-hauswirtschaft-hours">{formatMinutesToHours(pHw)}</td>}
+              </tr>
+              <tr>
+                <td className="py-0.5 text-gray-600">Alltagsbegleitung</td>
+                <td className="py-0.5 text-right font-semibold" data-testid="text-alltagsbegleitung-hours">{formatMinutesToHours(cAb)}</td>
+                {hasPlanned && <td className="py-0.5 text-right font-semibold text-gray-500 pl-3" data-testid="text-planned-alltagsbegleitung-hours">{formatMinutesToHours(pAb)}</td>}
+              </tr>
+              <tr>
+                <td className="py-0.5 text-gray-600">Erstberatung</td>
+                <td className="py-0.5 text-right font-semibold" data-testid="text-erstberatung-hours">{formatMinutesToHours(cEb)}</td>
+                {hasPlanned && <td className="py-0.5 text-right font-semibold text-gray-500 pl-3" data-testid="text-planned-erstberatung-hours">{formatMinutesToHours(pEb)}</td>}
+              </tr>
+              <tr>
+                <td className="py-0.5 text-gray-600">Anfahrt</td>
+                <td className="py-0.5 text-right font-semibold" data-testid="text-travel-time-hours">{formatMinutesToHours(cTravel)}</td>
+                {hasPlanned && <td className="py-0.5 text-right font-semibold text-gray-500 pl-3" data-testid="text-planned-travel-time-hours">{formatMinutesToHours(pTravel)}</td>}
+              </tr>
+              <tr>
+                <td className="py-0.5 text-gray-600">Sonstiges</td>
+                <td className="py-0.5 text-right font-semibold" data-testid="text-sonstiges-hours">{formatMinutesToHours(sonstigesMinutes)}</td>
+                {hasPlanned && <td className="py-0.5 text-right font-semibold text-gray-500 pl-3"></td>}
+              </tr>
+            </tbody>
+            <tfoot>
+              {hasPlanned ? (
+                <>
+                  <tr className="border-t">
+                    <td className="pt-2 font-medium text-gray-700">Zwischensumme</td>
+                    <td className="pt-2 text-right font-bold text-gray-900" data-testid="text-completed-service-hours">{formatMinutesToHours(completedTotal)}</td>
+                    <td className="pt-2 text-right font-semibold text-gray-600 pl-3" data-testid="text-planned-service-hours">{formatMinutesToHours(plannedTotal)}</td>
+                  </tr>
+                  <tr className="border-t">
+                    <td className="pt-2 font-medium text-gray-700">Gesamt</td>
+                    <td colSpan={2} className="pt-2 text-right font-bold text-gray-900" data-testid="text-total-service-hours">{formatMinutesToHours(totalServiceMinutes)}</td>
+                  </tr>
+                </>
+              ) : (
+                <tr className="border-t">
+                  <td className="pt-2 font-medium text-gray-700">Gesamt</td>
+                  <td className="pt-2 text-right font-bold text-gray-900" data-testid="text-completed-service-hours">
+                    <span data-testid="text-total-service-hours">{formatMinutesToHours(completedTotal)}</span>
+                  </td>
+                </tr>
+              )}
+            </tfoot>
+          </table>
           {(timeOverview?.timeEntries?.pauseMinutes || 0) > 0 && (
             <div className="flex justify-between items-center pt-1 text-gray-500">
               <span className="text-xs">davon Pause (unbezahlt)</span>
