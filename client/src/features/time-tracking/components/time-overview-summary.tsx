@@ -136,9 +136,9 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
   })();
 
   const timeEntryKm = timeOverview?.travel?.timeEntryKilometers || 0;
-  const completedKm = (timeOverview?.completedTravel?.totalKilometers || 0) + (timeOverview?.completedTravel?.customerKilometers || 0);
-  const plannedKm = (timeOverview?.plannedTravel?.totalKilometers || 0) + (timeOverview?.plannedTravel?.customerKilometers || 0);
-  const totalKm = completedKm + plannedKm + timeEntryKm;
+  const completedTravelKm = timeOverview?.completedTravel?.totalKilometers || 0;
+  const completedCustomerKm = timeOverview?.completedTravel?.customerKilometers || 0;
+  const totalKm = completedTravelKm + completedCustomerKm + timeEntryKm;
 
   return (
     <div className="flex flex-col gap-4 mb-6">
@@ -210,9 +210,9 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
         testId="card-km-summary"
       >
         <div className="space-y-2">
-          <SummaryRow label="Anfahrt geleistet" value={`${formatKm(completedKm)} km`} color="text-amber-700" testId="text-anfahrt-km" />
-          {plannedKm > 0 && (
-            <SummaryRow label="Anfahrt geplant" value={`${formatKm(plannedKm)} km`} color="text-amber-400" testId="text-planned-anfahrt-km" />
+          <SummaryRow label="Anfahrt" value={`${formatKm(completedTravelKm)} km`} color="text-amber-700" testId="text-anfahrt-km" />
+          {completedCustomerKm > 0 && (
+            <SummaryRow label="Km mit Kunden" value={`${formatKm(completedCustomerKm)} km`} color="text-blue-700" testId="text-customer-km" />
           )}
           <SummaryRow label="Sonstige Fahrten" value={`${formatKm(timeEntryKm)} km`} color="text-gray-700" testId="text-time-entry-km" />
           <div className="border-t pt-2 mt-2 flex justify-between items-center">
