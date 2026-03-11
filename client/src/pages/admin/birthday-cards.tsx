@@ -166,9 +166,9 @@ export default function AdminBirthdayCards() {
           <div>
             <h1 className={`${componentStyles.pageTitle} flex items-center gap-2`} data-testid="text-page-title">
               <Gift className={iconSize.lg} />
-              Geburtstagskarten
+              Geburtstage
             </h1>
-            <p className="text-sm text-muted-foreground">Versandstatus von Geburtstagskarten verwalten</p>
+            <p className="text-sm text-muted-foreground">Karten (Kunden) & Gutscheine (Mitarbeiter) verwalten</p>
           </div>
         </div>
 
@@ -298,10 +298,10 @@ export default function AdminBirthdayCards() {
                     {entry.cardSent ? (
                       <>
                         <Check className="w-4 h-4 mr-1" />
-                        Versendet
+                        {entry.type === "employee" ? "Gutschein versendet" : "Karte versendet"}
                       </>
                     ) : (
-                      "Als versendet markieren"
+                      entry.type === "employee" ? "Gutschein versenden" : "Karte versenden"
                     )}
                   </Button>
                 </CardContent>

@@ -103,8 +103,8 @@ export default function AdminDashboard() {
       testId: "card-birthday-cards",
       icon: <Gift className={`${iconSize.lg} text-rose-600`} />,
       iconBg: "bg-rose-100",
-      title: "Geburtstagskarten",
-      description: "Versandstatus von Geburtstagskarten verwalten",
+      title: "Geburtstage",
+      description: "Karten & Gutscheine verwalten",
       permissionKey: "birthday_cards",
     },
     {
