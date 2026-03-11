@@ -150,33 +150,37 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
         testId="card-hours-summary"
       >
         <div className="space-y-2">
-          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1" data-testid="label-completed-section">Geleistet</div>
-          <SummaryRow label="Hauswirtschaft" value={formatMinutesToHours(cHw)} color="text-teal-700" testId="text-hauswirtschaft-hours" />
-          <SummaryRow label="Alltagsbegleitung" value={formatMinutesToHours(cAb)} color="text-blue-700" testId="text-alltagsbegleitung-hours" />
-          <SummaryRow label="Erstberatung" value={formatMinutesToHours(cEb)} color="text-purple-700" testId="text-erstberatung-hours" />
-          <SummaryRow label="Anfahrt" value={formatMinutesToHours(cTravel)} color="text-amber-700" testId="text-travel-time-hours" />
-          <SummaryRow label="Sonstiges" value={formatMinutesToHours(sonstigesMinutes)} color="text-gray-700" testId="text-sonstiges-hours" />
-          <div className="border-t pt-2 mt-2 flex justify-between items-center">
-            <span className="text-sm font-medium text-gray-700">Gesamt geleistet</span>
-            <span className="font-bold text-gray-900" data-testid="text-completed-service-hours">
-              {formatMinutesToHours(completedTotal)}
-            </span>
-          </div>
-          {hasPlanned && (
-            <>
-              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-3 mb-1" data-testid="label-planned-section">Geplant</div>
-              <SummaryRow label="Hauswirtschaft" value={formatMinutesToHours(pHw)} color="text-teal-400" testId="text-planned-hauswirtschaft-hours" />
-              <SummaryRow label="Alltagsbegleitung" value={formatMinutesToHours(pAb)} color="text-blue-400" testId="text-planned-alltagsbegleitung-hours" />
-              <SummaryRow label="Erstberatung" value={formatMinutesToHours(pEb)} color="text-purple-400" testId="text-planned-erstberatung-hours" />
-              <SummaryRow label="Anfahrt" value={formatMinutesToHours(pTravel)} color="text-amber-400" testId="text-planned-travel-time-hours" />
-              <div className="border-t border-dashed pt-2 mt-2 flex justify-between items-center">
-                <span className="text-sm font-medium text-gray-500">Gesamt geplant</span>
-                <span className="font-semibold text-gray-500" data-testid="text-planned-service-hours">
-                  {formatMinutesToHours(plannedTotal)}
+          <div className={`grid grid-cols-1 ${hasPlanned ? "sm:grid-cols-2 gap-x-6" : ""} gap-y-0`}>
+            <div className="space-y-2">
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1" data-testid="label-completed-section">Dokumentiert</div>
+              <SummaryRow label="Hauswirtschaft" value={formatMinutesToHours(cHw)} color="text-gray-700" testId="text-hauswirtschaft-hours" />
+              <SummaryRow label="Alltagsbegleitung" value={formatMinutesToHours(cAb)} color="text-gray-700" testId="text-alltagsbegleitung-hours" />
+              <SummaryRow label="Erstberatung" value={formatMinutesToHours(cEb)} color="text-gray-700" testId="text-erstberatung-hours" />
+              <SummaryRow label="Anfahrt" value={formatMinutesToHours(cTravel)} color="text-gray-700" testId="text-travel-time-hours" />
+              <SummaryRow label="Sonstiges" value={formatMinutesToHours(sonstigesMinutes)} color="text-gray-700" testId="text-sonstiges-hours" />
+              <div className="border-t pt-2 mt-2 flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-700">Gesamt</span>
+                <span className="font-bold text-gray-900" data-testid="text-completed-service-hours">
+                  {formatMinutesToHours(completedTotal)}
                 </span>
               </div>
-            </>
-          )}
+            </div>
+            {hasPlanned && (
+              <div className="space-y-2 mt-3 sm:mt-0">
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1" data-testid="label-planned-section">Geplant</div>
+                <SummaryRow label="Hauswirtschaft" value={formatMinutesToHours(pHw)} color="text-gray-500" testId="text-planned-hauswirtschaft-hours" />
+                <SummaryRow label="Alltagsbegleitung" value={formatMinutesToHours(pAb)} color="text-gray-500" testId="text-planned-alltagsbegleitung-hours" />
+                <SummaryRow label="Erstberatung" value={formatMinutesToHours(pEb)} color="text-gray-500" testId="text-planned-erstberatung-hours" />
+                <SummaryRow label="Anfahrt" value={formatMinutesToHours(pTravel)} color="text-gray-500" testId="text-planned-travel-time-hours" />
+                <div className="border-t border-dashed pt-2 mt-2 flex justify-between items-center">
+                  <span className="text-sm font-medium text-gray-500">Gesamt</span>
+                  <span className="font-semibold text-gray-600" data-testid="text-planned-service-hours">
+                    {formatMinutesToHours(plannedTotal)}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
           <div className="border-t pt-2 mt-2 flex justify-between items-center">
             <span className="text-sm font-medium text-gray-700">Gesamt</span>
             <span className="font-bold text-gray-900" data-testid="text-total-service-hours">
@@ -210,9 +214,9 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
         testId="card-km-summary"
       >
         <div className="space-y-2">
-          <SummaryRow label="Anfahrt" value={`${formatKm(completedTravelKm)} km`} color="text-amber-700" testId="text-anfahrt-km" />
+          <SummaryRow label="Anfahrt" value={`${formatKm(completedTravelKm)} km`} color="text-gray-700" testId="text-anfahrt-km" />
           {completedCustomerKm > 0 && (
-            <SummaryRow label="Km mit Kunden" value={`${formatKm(completedCustomerKm)} km`} color="text-blue-700" testId="text-customer-km" />
+            <SummaryRow label="Km mit Kunden" value={`${formatKm(completedCustomerKm)} km`} color="text-gray-700" testId="text-customer-km" />
           )}
           <SummaryRow label="Sonstige Fahrten" value={`${formatKm(timeEntryKm)} km`} color="text-gray-700" testId="text-time-entry-km" />
           <div className="border-t pt-2 mt-2 flex justify-between items-center">
@@ -235,16 +239,16 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
           <div className="space-y-2">
             <SummaryRow label="Anspruch" value={`${vacationSummary.totalDays} ${vacationSummary.totalDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-700" testId="text-total-vacation" />
             {vacationSummary.carryOverDays > 0 && (
-              <SummaryRow label="Übertrag (bis 01.04.)" value={`${vacationSummary.carryOverDays} ${vacationSummary.carryOverDays === 1 ? 'Tag' : 'Tage'}`} color="text-amber-700" testId="text-carry-over" />
+              <SummaryRow label="Übertrag (bis 01.04.)" value={`${vacationSummary.carryOverDays} ${vacationSummary.carryOverDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-700" testId="text-carry-over" />
             )}
-            <SummaryRow label="Genommen" value={`${vacationSummary.usedDays} ${vacationSummary.usedDays === 1 ? 'Tag' : 'Tage'}`} color="text-green-700" testId="text-used-days" />
-            <SummaryRow label="Geplant" value={`${vacationSummary.plannedDays} ${vacationSummary.plannedDays === 1 ? 'Tag' : 'Tage'}`} color="text-blue-700" testId="text-planned-days" />
+            <SummaryRow label="Genommen" value={`${vacationSummary.usedDays} ${vacationSummary.usedDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-700" testId="text-used-days" />
+            <SummaryRow label="Geplant" value={`${vacationSummary.plannedDays} ${vacationSummary.plannedDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-700" testId="text-planned-days" />
             <div className="border-t pt-2 mt-2">
-              <SummaryRow label="Verfügbar" value={`${vacationSummary.remainingDays} ${vacationSummary.remainingDays === 1 ? 'Tag' : 'Tage'}`} color="text-teal-700" testId="text-remaining-days" bold />
+              <SummaryRow label="Verfügbar" value={`${vacationSummary.remainingDays} ${vacationSummary.remainingDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-900" testId="text-remaining-days" bold />
             </div>
             <div className="border-t pt-2 mt-2 flex justify-between items-center">
               <span className="text-sm text-gray-600">Krankheit</span>
-              <span className="font-semibold text-red-700" data-testid="text-sick-days">
+              <span className="font-semibold text-gray-700" data-testid="text-sick-days">
                 {vacationSummary.sickDays} {vacationSummary.sickDays === 1 ? 'Tag' : 'Tage'}
               </span>
             </div>
