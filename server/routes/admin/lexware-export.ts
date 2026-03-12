@@ -125,15 +125,15 @@ async function getMonthlyHoursBatch(
       EXTRACT(MONTH FROM a.date::date) as month_num,
       CASE
         WHEN s.code = 'erstberatung' THEN 'erstberatung'
-        WHEN s.lohnart_kategorie = 'alltagsbegleitung' THEN 'alltagsbegleitung'
-        WHEN s.lohnart_kategorie = 'hauswirtschaft' THEN 'hauswirtschaft'
+        WHEN s.code = 'alltagsbegleitung' THEN 'alltagsbegleitung'
+        WHEN s.code = 'hauswirtschaft' THEN 'hauswirtschaft'
         ELSE 'sonstiges'
       END as category,
       SUM(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes)) as minutes
     FROM appointments a
     JOIN appointment_services asvc ON asvc.appointment_id = a.id
     JOIN services s ON s.id = asvc.service_id
-    WHERE a.status IN ('completed', 'documented')
+    WHERE a.status IN ('completed')
       AND a.deleted_at IS NULL
       AND a.date >= ${startDate}
       AND a.date <= ${endDate}
@@ -289,7 +289,7 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
       performed_by_employee_id as employee_id,
       COALESCE(SUM(COALESCE(travel_kilometers, 0) + COALESCE(customer_kilometers, 0)), 0) as total_km
     FROM appointments
-    WHERE status IN ('completed', 'documented')
+    WHERE status IN ('completed')
       AND deleted_at IS NULL
       AND date >= ${startDate}
       AND date <= ${endDate}

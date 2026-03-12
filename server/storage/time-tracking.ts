@@ -567,7 +567,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     for (const appt of employeeAppointments) {
       if (appt.status === 'cancelled') continue;
       const apptServices = servicesByAppointment.get(appt.id) || [];
-      const isDone = appt.status === 'completed' || appt.status === 'documenting';
+      const isDone = appt.status === 'completed';
       const targetHours = isDone ? completedServiceHours : plannedServiceHours;
       const targetTravel = isDone ? completedTravel : plannedTravel;
       
