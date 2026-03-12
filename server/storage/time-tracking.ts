@@ -824,6 +824,11 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     const lastDay = new Date(year, month, 0).getDate();
     const endDate = `${year}-${monthStr}-${lastDay}`;
 
+    const employeeFilter = sqlBuilder`(
+      ${appointments.assignedEmployeeId} = ${userId} 
+      OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId} OR ${customers.backupEmployeeId2} = ${userId}))
+    )`;
+
     const openAppointments = await db
       .select({
         id: appointments.id,
@@ -837,14 +842,34 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       .innerJoin(customers, eq(appointments.customerId, customers.id))
       .where(
         and(
-          sqlBuilder`(
-            ${appointments.assignedEmployeeId} = ${userId} 
-            OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId} OR ${customers.backupEmployeeId2} = ${userId}))
-          )`,
+          employeeFilter,
           gte(appointments.date, startDate),
           lte(appointments.date, endDate),
           isNull(appointments.deletedAt),
           notInArray(appointments.status, ["completed", "cancelled"])
+        )
+      )
+      .orderBy(asc(appointments.date), asc(appointments.scheduledStart));
+
+    const unsignedAppointments = await db
+      .select({
+        id: appointments.id,
+        date: appointments.date,
+        scheduledStart: appointments.scheduledStart,
+        status: appointments.status,
+        customerId: appointments.customerId,
+        customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as('customer_name'),
+      })
+      .from(appointments)
+      .innerJoin(customers, eq(appointments.customerId, customers.id))
+      .where(
+        and(
+          employeeFilter,
+          gte(appointments.date, startDate),
+          lte(appointments.date, endDate),
+          isNull(appointments.deletedAt),
+          eq(appointments.status, "completed"),
+          isNull(appointments.signatureData)
         )
       )
       .orderBy(asc(appointments.date), asc(appointments.scheduledStart));
@@ -867,10 +892,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       .innerJoin(customers, eq(appointments.customerId, customers.id))
       .where(
         and(
-          sqlBuilder`(
-            ${appointments.assignedEmployeeId} = ${userId} 
-            OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId} OR ${customers.backupEmployeeId2} = ${userId}))
-          )`,
+          employeeFilter,
           gte(appointments.date, startDate),
           lte(appointments.date, endDate),
           isNull(appointments.deletedAt),
@@ -882,18 +904,46 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     const completedAppts = Number(completedAppointmentCount[0]?.count ?? 0);
     const hasActivity = timeEntries > 0 || completedAppts > 0;
 
+    const mapAppointment = (a: { id: number; date: string; scheduledStart: string | null; status: string; customerName: unknown }) => ({
+      id: a.id,
+      date: a.date,
+      scheduledStart: a.scheduledStart,
+      status: a.status,
+      customerName: String(a.customerName ?? "Unbekannt"),
+    });
+
     return {
-      ready: openAppointments.length === 0 && hasActivity,
-      openAppointments: openAppointments.map(a => ({
-        id: a.id,
-        date: a.date,
-        scheduledStart: a.scheduledStart,
-        status: a.status,
-        customerName: String(a.customerName ?? "Unbekannt"),
-      })),
+      ready: openAppointments.length === 0 && unsignedAppointments.length === 0 && hasActivity,
+      openAppointments: openAppointments.map(mapAppointment),
+      unsignedAppointments: unsignedAppointments.map(mapAppointment),
       hasTimeEntries: hasActivity,
       timeEntryCount: timeEntries + completedAppts,
     };
+  }
+
+  async getAdminMonthClosingReadiness(year: number, month: number) {
+    const activeEmployees = await db
+      .select({ id: users.id, displayName: users.displayName })
+      .from(users)
+      .where(and(eq(users.isActive, true), eq(users.isAdmin, false)));
+
+    const results = await Promise.all(
+      activeEmployees.map(async (emp) => {
+        const readiness = await this.getMonthClosingReadiness(emp.id, year, month);
+        const closing = await this.getMonthClosing(emp.id, year, month);
+        const isClosed = !!(closing && !closing.reopenedAt);
+
+        return {
+          userId: emp.id,
+          displayName: emp.displayName,
+          isClosed,
+          closingId: closing?.id ?? null,
+          ...readiness,
+        };
+      })
+    );
+
+    return results;
   }
 
   async getMonthClosing(userId: number, year: number, month: number) {

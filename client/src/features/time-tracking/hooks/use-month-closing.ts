@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api/client";
-import { useToast } from "@/hooks/use-toast";
 import { invalidateRelated } from "@/lib/query-invalidation";
 
 export interface MonthClosingStatus {
@@ -25,7 +24,7 @@ export interface AutoBreakPreview {
 export interface OpenAppointment {
   id: number;
   date: string;
-  scheduledStart: string;
+  scheduledStart: string | null;
   status: string;
   customerName: string;
 }
@@ -33,8 +32,16 @@ export interface OpenAppointment {
 export interface MonthClosingReadiness {
   ready: boolean;
   openAppointments: OpenAppointment[];
+  unsignedAppointments: OpenAppointment[];
   hasTimeEntries: boolean;
   timeEntryCount: number;
+}
+
+export interface AdminEmployeeReadiness extends MonthClosingReadiness {
+  userId: number;
+  displayName: string;
+  isClosed: boolean;
+  closingId: number | null;
 }
 
 export function useMonthClosingStatus(year: number, month: number) {
@@ -72,24 +79,69 @@ export function useMonthClosingPreview(year: number, month: number, enabled: boo
   });
 }
 
-export function useCloseMonth() {
+export function useAdminMonthClosingReadiness(year: number, month: number) {
+  return useQuery<{ employees: AdminEmployeeReadiness[] }>({
+    queryKey: ["admin-month-closing-readiness", year, month],
+    queryFn: async () => {
+      const result = await api.get<{ employees: AdminEmployeeReadiness[] }>(
+        `/time-entries/month-closings/admin/${year}/${month}/readiness`
+      );
+      return unwrapResult(result);
+    },
+    staleTime: 30000,
+  });
+}
+
+export function useAdminCloseMonth() {
   const queryClient = useQueryClient();
-  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({ userId, year, month }: { userId: number; year: number; month: number }) => {
+      const result = await api.post<{ message: string; autoBreaksInserted: number }>(
+        "/time-entries/admin/close-month",
+        { userId, year, month }
+      );
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      invalidateRelated(queryClient, "time-entries");
+      queryClient.invalidateQueries({ queryKey: ["admin-month-closing-readiness"] });
+    },
+  });
+}
+
+export function useAdminReopenMonth() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ userId, year, month }: { userId: number; year: number; month: number }) => {
+      const result = await api.post<{ message: string }>(
+        "/time-entries/reopen-month",
+        { userId, year, month }
+      );
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      invalidateRelated(queryClient, "time-entries");
+      queryClient.invalidateQueries({ queryKey: ["admin-month-closing-readiness"] });
+    },
+  });
+}
+
+export function useAdminBatchCloseMonth() {
+  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async ({ year, month }: { year: number; month: number }) => {
-      const result = await api.post<{ message: string; autoBreaksInserted: number }>(
-        "/time-entries/close-month",
+      const result = await api.post<{ message: string; closedCount: number; results: Array<{ userId: number; displayName: string; autoBreaksInserted: number }> }>(
+        "/time-entries/admin/batch-close-month",
         { year, month }
       );
       return unwrapResult(result);
     },
     onSuccess: () => {
       invalidateRelated(queryClient, "time-entries");
-      toast({ title: "Erfolg", description: "Monat wurde abgeschlossen" });
-    },
-    onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+      queryClient.invalidateQueries({ queryKey: ["admin-month-closing-readiness"] });
     },
   });
 }

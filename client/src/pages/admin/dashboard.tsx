@@ -6,7 +6,7 @@ import { Layout } from "@/components/layout";
 import {
   Users, ArrowLeft, Contact2, Clock, Settings,
   Building2, ClipboardList, FileText, Shield, Receipt, Gift, BarChart3, UserPlus,
-  GraduationCap, FileCheck, Landmark, MessageSquare, FileSpreadsheet, CalendarCheck,
+  GraduationCap, FileCheck, Landmark, MessageSquare, FileSpreadsheet, CalendarCheck, Lock,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -86,7 +86,7 @@ export default function AdminDashboard() {
       icon: <Clock className={`${iconSize.lg} text-green-600`} />,
       iconBg: "bg-green-100",
       title: "Zeiterfassung",
-      description: "Zeiten nachtragen, Monatsabschluss öffnen/schließen, Urlaub & Krankheit",
+      description: "Zeiten nachtragen, Urlaub & Krankheit verwalten",
       permissionKey: "time_entries",
     },
     {
@@ -176,6 +176,15 @@ export default function AdminDashboard() {
   ];
 
   const abrechnungCards: AdminCardData[] = [
+    {
+      href: "/admin/month-closing",
+      testId: "card-month-closing",
+      icon: <Lock className={`${iconSize.lg} text-teal-600`} />,
+      iconBg: "bg-teal-100",
+      title: "Monatsabschluss",
+      description: "Monate zentral für alle Mitarbeiter prüfen und abschließen",
+      permissionKey: "time_entries",
+    },
     {
       href: "/admin/billing",
       testId: "card-billing",

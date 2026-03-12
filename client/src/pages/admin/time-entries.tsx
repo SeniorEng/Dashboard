@@ -20,7 +20,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ArrowLeft, Calendar, Loader2, Unlock, Trash2, Lock } from "lucide-react";
+import { ArrowLeft, Calendar, Loader2, Trash2, Lock, ExternalLink } from "lucide-react";
 import type { TimeEntryType, TimeEntryWithUser, VacationSummary, TimeEntry, AppointmentWithCustomerName } from "@/lib/api/types";
 import { TIME_ENTRY_TYPE_CONFIG } from "@/features/time-tracking/constants";
 import { TimeEntryDialog } from "@/features/time-tracking/components/time-entry-dialog";
@@ -48,8 +48,6 @@ export default function AdminTimeEntries() {
   const [vacationEditUser, setVacationEditUser] = useState<{ id: number; name: string } | null>(null);
   const [vacationDays, setVacationDays] = useState("30");
   const [carryOverDays, setCarryOverDays] = useState("0");
-  const [reopenTarget, setReopenTarget] = useState<{ userId: number; userName: string } | null>(null);
-  const [closeMonthTarget, setCloseMonthTarget] = useState<{ userId: number; userName: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; label: string } | null>(null);
 
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -192,37 +190,6 @@ export default function AdminTimeEntries() {
         .map((c) => c.userId)
     );
   }, [monthClosings]);
-
-  const reopenMonthMutation = useMutation({
-    mutationFn: async (data: { userId: number; year: number; month: number }) => {
-      const result = await api.post("/time-entries/reopen-month", data);
-      return unwrapResult(result);
-    },
-    onSuccess: () => {
-      toast({ title: `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear} wieder geöffnet` });
-      invalidateAll();
-      setReopenTarget(null);
-    },
-    onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message, variant: "destructive" });
-    },
-  });
-
-  const closeMonthMutation = useMutation({
-    mutationFn: async (data: { userId: number; year: number; month: number }) => {
-      const result = await api.post("/time-entries/admin/close-month", data);
-      return unwrapResult(result);
-    },
-    onSuccess: (_data, variables) => {
-      const emp = employees?.find(e => e.id === variables.userId);
-      toast({ title: `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear} für ${emp?.displayName || "Mitarbeiter"} abgeschlossen` });
-      invalidateAll();
-      setCloseMonthTarget(null);
-    },
-    onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message, variant: "destructive" });
-    },
-  });
 
   const createMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
@@ -372,6 +339,15 @@ export default function AdminTimeEntries() {
                 <h1 className={componentStyles.pageTitle} data-testid="text-page-title">Zeiterfassung</h1>
               </div>
             </div>
+            <div className={componentStyles.pageHeaderActions}>
+              <Link href="/admin/month-closing">
+                <Button variant="outline" size="sm" data-testid="link-month-closing">
+                  <Lock className={`${iconSize.sm} mr-1`} />
+                  Monatsabschluss
+                  <ExternalLink className="h-3 w-3 ml-1" />
+                </Button>
+              </Link>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-gray-600 mb-4">
@@ -461,8 +437,6 @@ export default function AdminTimeEntries() {
                       employeeAppointments={appointmentsByEmployeeId[empId] || []}
                       employeeId={empId}
                       isClosed={closedUserIds.has(empId)}
-                      onCloseMonth={(id, name) => setCloseMonthTarget({ userId: id, userName: name })}
-                      onReopenMonth={(id, name) => setReopenTarget({ userId: id, userName: name })}
                       onAddEntry={handleOpenCreate}
                       onEditVacation={handleEditVacation}
                       onEditEntry={handleOpenEdit}
@@ -503,8 +477,6 @@ export default function AdminTimeEntries() {
                       employeeAppointments={[]}
                       employeeId={emp.id}
                       isClosed={true}
-                      onCloseMonth={(id, name) => setCloseMonthTarget({ userId: id, userName: name })}
-                      onReopenMonth={(id, name) => setReopenTarget({ userId: id, userName: name })}
                       onAddEntry={handleOpenCreate}
                       onEditVacation={handleEditVacation}
                       onEditEntry={handleOpenEdit}
@@ -575,80 +547,6 @@ export default function AdminTimeEntries() {
                     <><Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />Löschen...</>
                   ) : (
                     <><Trash2 className={`${iconSize.sm} mr-1`} />Löschen</>
-                  )}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-
-          <AlertDialog open={!!closeMonthTarget} onOpenChange={(open) => !open && setCloseMonthTarget(null)}>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Monat abschließen?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Der {MONTH_NAMES[selectedMonth - 1]} {selectedYear} für{" "}
-                  <span className="font-medium">{closeMonthTarget?.userName}</span> wird abgeschlossen.
-                  Fehlende Pausen werden automatisch ergänzt.
-                  Diese Aktion wird im Audit-Log als Admin-Abschluss protokolliert.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Abbrechen</AlertDialogCancel>
-                <AlertDialogAction
-                  className="bg-teal-600 hover:bg-teal-700"
-                  onClick={() => {
-                    if (closeMonthTarget) {
-                      closeMonthMutation.mutate({
-                        userId: closeMonthTarget.userId,
-                        year: selectedYear,
-                        month: selectedMonth,
-                      });
-                    }
-                  }}
-                  disabled={closeMonthMutation.isPending}
-                  data-testid="button-confirm-close-month"
-                >
-                  {closeMonthMutation.isPending ? (
-                    <><Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />Wird abgeschlossen...</>
-                  ) : (
-                    <><Lock className={`${iconSize.sm} mr-1`} />Abschließen</>
-                  )}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-
-          <AlertDialog open={!!reopenTarget} onOpenChange={(open) => !open && setReopenTarget(null)}>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Monat wiedereröffnen?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Der {MONTH_NAMES[selectedMonth - 1]} {selectedYear} für{" "}
-                  <span className="font-medium">{reopenTarget?.userName}</span> wird wieder
-                  geöffnet. Alle automatisch generierten Pausen werden dabei entfernt.
-                  Der Mitarbeiter kann danach wieder Einträge bearbeiten.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Abbrechen</AlertDialogCancel>
-                <AlertDialogAction
-                  className="bg-amber-600 hover:bg-amber-700"
-                  onClick={() => {
-                    if (reopenTarget) {
-                      reopenMonthMutation.mutate({
-                        userId: reopenTarget.userId,
-                        year: selectedYear,
-                        month: selectedMonth,
-                      });
-                    }
-                  }}
-                  disabled={reopenMonthMutation.isPending}
-                  data-testid="button-confirm-reopen"
-                >
-                  {reopenMonthMutation.isPending ? (
-                    <><Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />Wird geöffnet...</>
-                  ) : (
-                    <><Unlock className={`${iconSize.sm} mr-1`} />Wiedereröffnen</>
                   )}
                 </AlertDialogAction>
               </AlertDialogFooter>

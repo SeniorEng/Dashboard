@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { iconSize } from "@/design-system";
 import { StatusBadge } from "@/components/patterns/status-badge";
-import { Users, Unlock, Plus, Pencil, Trash2, Lock, Settings, CalendarCheck, MapPin } from "lucide-react";
+import { Users, Plus, Pencil, Trash2, Settings, CalendarCheck, MapPin } from "lucide-react";
 import type { TimeEntryType, TimeEntryWithUser, AppointmentWithCustomerName } from "@/lib/api/types";
 import { TIME_ENTRY_TYPE_CONFIG } from "@/features/time-tracking/constants";
 
@@ -23,8 +23,6 @@ interface EmployeeTimeCardProps {
   employeeAppointments?: AppointmentWithCustomerName[];
   employeeId?: number;
   isClosed: boolean;
-  onCloseMonth: (userId: number, userName: string) => void;
-  onReopenMonth: (userId: number, userName: string) => void;
   onAddEntry: (userId: number, userName: string) => void;
   onEditVacation: (userId: number, userName: string) => void;
   onEditEntry: (entry: TimeEntryWithUser) => void;
@@ -41,8 +39,6 @@ export function EmployeeTimeCard({
   employeeAppointments = [],
   employeeId,
   isClosed,
-  onCloseMonth,
-  onReopenMonth,
   onAddEntry,
   onEditVacation,
   onEditEntry,
@@ -77,30 +73,6 @@ export function EmployeeTimeCard({
             {isClosed && <StatusBadge type="month" value="closed" size="sm" />}
           </CardTitle>
           <div className="flex items-center gap-1 flex-wrap">
-            {employeeId && !isClosed && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-teal-700 hover:text-teal-800 hover:bg-teal-50"
-                onClick={() => onCloseMonth(employeeId, employeeName)}
-                data-testid={`button-close-month-${employeeId}`}
-              >
-                <Lock className={`${iconSize.sm} mr-1`} />
-                Abschließen
-              </Button>
-            )}
-            {employeeId && isClosed && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-amber-700 hover:text-amber-800 hover:bg-amber-50"
-                onClick={() => onReopenMonth(employeeId, employeeName)}
-                data-testid={`button-reopen-month-${employeeId}`}
-              >
-                <Unlock className={`${iconSize.sm} mr-1`} />
-                Wiedereröffnen
-              </Button>
-            )}
             {employeeId && (
               <Button
                 variant="ghost"
