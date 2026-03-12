@@ -430,7 +430,8 @@ export class DatabaseStorage implements IStorage {
         ilike(customers.name, searchTerm),
         ilike(customers.vorname, searchTerm),
         ilike(customers.nachname, searchTerm)
-      )
+      ),
+      ne(customers.status, 'erstberatung')
     ];
     
     if (assignedCustomerIds) {
