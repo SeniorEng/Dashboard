@@ -130,7 +130,7 @@ router.get("/me", asyncHandler("Benutzerinformationen konnten nicht geladen werd
           const assignedIds = await storage.getAssignedCustomerIds(userId);
           if (assignedIds.length > 0) {
             const customers = await storage.getCustomersByIds(assignedIds);
-            for (const cust of customers) {
+            for (const cust of customers.filter(c => c.status !== 'erstberatung')) {
               if (cust.geburtsdatum && calculateDaysUntilBirthday(cust.geburtsdatum) <= 7) count++;
             }
           }

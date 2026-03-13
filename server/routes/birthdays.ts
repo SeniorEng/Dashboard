@@ -154,7 +154,7 @@ router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (
     if (assignedCustomerIds.length > 0) {
       const assignedCustomers = await storage.getCustomersByIds(assignedCustomerIds);
 
-      for (const cust of assignedCustomers) {
+      for (const cust of assignedCustomers.filter(c => c.status !== 'erstberatung')) {
         if (cust.geburtsdatum) {
           const daysUntil = calculateDaysUntilBirthday(cust.geburtsdatum);
           if (daysUntil <= horizonDays) {

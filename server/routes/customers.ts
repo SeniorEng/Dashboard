@@ -35,7 +35,8 @@ router.get("/", asyncHandler("Kunden konnten nicht geladen werden", async (req, 
   const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : undefined;
   
   if (user.isAdmin && !viewAsEmployeeId) {
-    let allCustomers = await storage.getCustomers();
+    const includeErstberatung = statusFilter === 'erstberatung';
+    let allCustomers = await storage.getCustomers(includeErstberatung);
     if (statusFilter) {
       allCustomers = allCustomers.filter(c => c.status === statusFilter);
     }
@@ -69,6 +70,10 @@ router.get("/:id", asyncHandler("Kunde konnte nicht geladen werden", async (req,
     res.status(404).json({ error: "Kunde nicht gefunden" });
     return;
   }
+  if (!user.isAdmin && customer.status === 'erstberatung') {
+    res.status(403).json({ error: "Zugriff verweigert" });
+    return;
+  }
   res.json(customer);
 }));
 
@@ -80,6 +85,11 @@ router.get("/:id/details", asyncHandler("Kundendetails konnten nicht geladen wer
   if (!user.isAdmin) {
     const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
     if (!assignedCustomerIds.includes(id)) {
+      res.status(403).json({ error: "Zugriff verweigert" });
+      return;
+    }
+    const customer = await storage.getCustomer(id);
+    if (customer?.status === 'erstberatung') {
       res.status(403).json({ error: "Zugriff verweigert" });
       return;
     }

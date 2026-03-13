@@ -150,7 +150,7 @@ export interface SearchOptions {
 
 export interface IStorage {
   // Customers
-  getCustomers(): Promise<Customer[]>;
+  getCustomers(includeErstberatung?: boolean): Promise<Customer[]>;
   getCustomersByIds(ids: number[]): Promise<Customer[]>;
   getCustomersForEmployee(employeeId: number): Promise<(Customer & { isCurrentlyAssigned: boolean })[]>;
   getCustomer(id: number): Promise<Customer | undefined>;
@@ -268,8 +268,12 @@ export interface ServiceRecordOverviewItem {
 
 export class DatabaseStorage implements IStorage {
   // Customers
-  async getCustomers(): Promise<Customer[]> {
-    return await db.select().from(customers).where(isNull(customers.deletedAt));
+  async getCustomers(includeErstberatung = false): Promise<Customer[]> {
+    const conditions = [isNull(customers.deletedAt)];
+    if (!includeErstberatung) {
+      conditions.push(ne(customers.status, 'erstberatung'));
+    }
+    return await db.select().from(customers).where(and(...conditions));
   }
 
   async getCustomer(id: number): Promise<Customer | undefined> {
@@ -355,7 +359,7 @@ export class DatabaseStorage implements IStorage {
     const customerRows = await db
       .select()
       .from(customers)
-      .where(and(inArray(customers.id, assignedIds), isNull(customers.deletedAt)))
+      .where(and(inArray(customers.id, assignedIds), isNull(customers.deletedAt), ne(customers.status, 'erstberatung')))
       .orderBy(customers.nachname, customers.vorname);
 
     return customerRows.map(c => ({
@@ -407,7 +411,7 @@ export class DatabaseStorage implements IStorage {
         backupEmployeeId2: customers.backupEmployeeId2,
       })
       .from(customers)
-      .where(isNotNull(customers.geburtsdatum));
+      .where(and(isNotNull(customers.geburtsdatum), ne(customers.status, 'erstberatung'), isNull(customers.deletedAt)));
   }
 
   async getAdminUserIds(): Promise<number[]> {
