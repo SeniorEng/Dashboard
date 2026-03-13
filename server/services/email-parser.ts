@@ -150,6 +150,7 @@ function parsePflegehilfeEmail(body: string, subject?: string): ParsedLead {
   }
 
   const rawTelefon = extractTableValue(kontaktSection, "Mobil")
+    || extractTableValue(kontaktSection, "Festnetz")
     || extractTableValue(kontaktSection, "Telefon")
     || extractTableValue(kontaktSection, "Tel");
 
@@ -337,8 +338,10 @@ function parsePflegeDeEmail(body: string, subject?: string): ParsedLead {
     nachname = parsed.nachname;
   }
 
-  const rawTelefon = getTableVal("Telefon") || getTableVal("Tel")
+  const rawTelefon = getTableVal("Telefon") || getTableVal("Festnetz") || getTableVal("Mobil") || getTableVal("Tel")
     || extractTableValue(text, "Telefon")
+    || extractTableValue(text, "Festnetz")
+    || extractTableValue(text, "Mobil")
     || extractTableValue(text, "Tel");
 
   const rawEmailVal = getTableVal("Email") || getTableVal("E-Mail")
@@ -503,7 +506,7 @@ function parseGenericEmail(body: string, subject?: string): ParsedLead {
   }
 
   const telefon = extractField(text, [
-    /(?:telefon|tel\.?|handy|mobil|rufnummer|phone)\s*:?\s*([\d\s+\-/()]{6,20})/i,
+    /(?:telefon|tel\.?|festnetz|handy|mobil|rufnummer|phone)\s*:?\s*([\d\s+\-/()]{6,20})/i,
   ]);
 
   const emailMatch = text.match(/[\w.+-]+@[\w.-]+\.\w{2,}/);
