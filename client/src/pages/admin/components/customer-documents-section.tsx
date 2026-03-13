@@ -356,6 +356,29 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
             </div>
           </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>Dokument vom (optional)</Label>
+              <Input
+                type="date"
+                value={documentDate}
+                onChange={(e) => setDocumentDate(e.target.value)}
+                className="text-base"
+                data-testid="input-customer-document-date"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Notiz (optional)</Label>
+              <Input
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="z.B. Gültig bis 2026"
+                className="text-base"
+                data-testid="input-customer-document-notes"
+              />
+            </div>
+          </div>
+
           <div className="space-y-2">
             <Label>Dateien auswählen oder Foto aufnehmen *</Label>
             <div className="flex gap-2">
@@ -439,29 +462,6 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                 </div>
               </div>
             )}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Dokument vom (optional)</Label>
-              <Input
-                type="date"
-                value={documentDate}
-                onChange={(e) => setDocumentDate(e.target.value)}
-                className="text-base"
-                data-testid="input-customer-document-date"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Notiz (optional)</Label>
-              <Input
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="z.B. Gültig bis 2026"
-                className="text-base"
-                data-testid="input-customer-document-notes"
-              />
-            </div>
           </div>
 
           <div className="flex gap-2">
