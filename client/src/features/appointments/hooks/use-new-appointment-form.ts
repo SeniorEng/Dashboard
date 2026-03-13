@@ -115,22 +115,51 @@ export function useNewAppointmentForm() {
 
   useEffect(() => {
     if (!copyFromId || copyFromInitialized.current) return;
-    if (!copyFromAppointment || !copyFromServices) return;
+    if (!copyFromAppointment) return;
+
+    const isErstberatung = copyFromAppointment.appointmentType === "Erstberatung";
+
+    if (!isErstberatung && !copyFromServices) return;
 
     copyFromInitialized.current = true;
     defaultsInitialized.current = true;
 
-    setKtCustomerId(copyFromAppointment.customerId.toString());
-    if (copyFromAppointment.assignedEmployeeId) {
-      setKtAssignedEmployeeId(copyFromAppointment.assignedEmployeeId.toString());
-    }
-    setKtNotes(copyFromAppointment.notes || "");
-    const copiedServices = copyFromServices.map(s => ({
-      serviceId: s.serviceId,
-      durationMinutes: s.plannedDurationMinutes,
-    }));
-    if (copiedServices.length > 0) {
-      setKtServices(copiedServices);
+    if (isErstberatung) {
+      setActiveTab("erstberatung");
+      const customer = copyFromAppointment.customer;
+      if (customer) {
+        setEbVorname(customer.vorname || "");
+        setEbNachname(customer.nachname || "");
+        setEbTelefon(customer.telefon || "");
+        setEbEmail(customer.email || "");
+        setEbStrasse(customer.strasse || "");
+        setEbNr(customer.nr || "");
+        setEbPlz(customer.plz || "");
+        setEbStadt(customer.stadt || "");
+        if (customer.pflegegrad != null && customer.pflegegrad > 0) {
+          setEbPflegegrad(customer.pflegegrad.toString());
+        }
+      }
+      if (copyFromAppointment.durationPromised) {
+        setEbErstberatungDauer(copyFromAppointment.durationPromised);
+      }
+      if (copyFromAppointment.assignedEmployeeId) {
+        setEbAssignedEmployeeId(copyFromAppointment.assignedEmployeeId.toString());
+      }
+      setEbNotes(copyFromAppointment.notes || "");
+    } else {
+      setKtCustomerId(copyFromAppointment.customerId.toString());
+      if (copyFromAppointment.assignedEmployeeId) {
+        setKtAssignedEmployeeId(copyFromAppointment.assignedEmployeeId.toString());
+      }
+      setKtNotes(copyFromAppointment.notes || "");
+      const copiedServices = copyFromServices!.map(s => ({
+        serviceId: s.serviceId,
+        durationMinutes: s.plannedDurationMinutes,
+      }));
+      if (copiedServices.length > 0) {
+        setKtServices(copiedServices);
+      }
     }
 
     toast({ title: "Termin als Vorlage geladen" });
