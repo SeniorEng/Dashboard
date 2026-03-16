@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/patterns/status-badge";
+import { isChild } from "@shared/utils/datetime";
 import { AppointmentCard } from "@/features/appointments/components/appointment-card";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
@@ -552,6 +553,9 @@ export default function CustomerDetailPage() {
                     <StatusBadge type="pflegegrad" value={customer.pflegegrad!} data-testid="badge-pflegegrad" />
                   ) : (
                     <span className="text-xs text-muted-foreground/60">Kein Pflegegrad</span>
+                  )}
+                  {isChild(customer.geburtsdatum) && (
+                    <StatusBadge type="warning" value="Minderjährig" data-testid="badge-minor" />
                   )}
                 </div>
                 <Button variant="ghost" size="sm" className="min-h-[44px] min-w-[44px] p-0" onClick={() => startEditing("pflegegrad")} data-testid="button-edit-pflegegrad">

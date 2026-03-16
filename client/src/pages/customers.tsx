@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/patterns/status-badge";
+import { isChild } from "@shared/utils/datetime";
 import { 
   MapPin, Phone, PhoneCall, User, Search, 
   Loader2, Cake, Gift
@@ -337,6 +338,9 @@ const CustomerCard = memo(function CustomerCard({ customer }: { customer: Custom
                 )}
                 {customer.pflegegrad && customer.pflegegrad > 0 && (
                   <StatusBadge type="pflegegrad" value={customer.pflegegrad} size="sm" data-testid={`badge-customer-pflegegrad-${customer.id}`} />
+                )}
+                {isChild(customer.geburtsdatum) && (
+                  <StatusBadge type="warning" value="Minderjährig" size="sm" data-testid={`badge-minor-${customer.id}`} />
                 )}
               </div>
             </div>

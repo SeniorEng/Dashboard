@@ -22,6 +22,7 @@ import { EmptyState } from "@/components/patterns/empty-state";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { useCustomers, useEmployees, useInsuranceProviders } from "@/features/customers";
 import { iconSize, getPflegegradColors, componentStyles } from "@/design-system";
+import { isChild } from "@shared/utils/datetime";
 import {
   Plus,
   Loader2,
@@ -403,6 +404,9 @@ export default function AdminCustomers() {
                       )}
                       {customer.pflegegrad !== null && customer.pflegegrad > 0 && (
                         <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
+                      )}
+                      {isChild(customer.geburtsdatum) && (
+                        <StatusBadge type="warning" value="Minderjährig" data-testid={`badge-minor-${customer.id}`} />
                       )}
                     </div>
                   </div>

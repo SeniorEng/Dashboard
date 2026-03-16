@@ -9,7 +9,7 @@
 import { useState, useMemo, useCallback } from "react";
 import { useParams, useSearch, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { formatDateForDisplay } from "@shared/utils/datetime";
+import { formatDateForDisplay, isChild } from "@shared/utils/datetime";
 import { DEACTIVATION_REASON_SELECT_OPTIONS, DEACTIVATION_REASON_LABELS, type DeactivationReason } from "@shared/domain/customers";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -498,6 +498,9 @@ export default function AdminCustomerDetail() {
                       return null;
                     })()}
                   </>
+                )}
+                {isChild(customer.geburtsdatum) && (
+                  <StatusBadge type="warning" value="Minderjährig" data-testid="badge-minor" />
                 )}
               </>
             }
