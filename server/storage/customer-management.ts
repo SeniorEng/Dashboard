@@ -69,6 +69,7 @@ export interface CustomerListItem {
   nachname: string | null;
   email: string | null;
   telefon: string | null;
+  festnetz: string | null;
   pflegegrad: number | null;
   address: string;
   stadt: string | null;
@@ -226,6 +227,7 @@ export class CustomerManagementStorage {
         nachname: customers.nachname,
         email: customers.email,
         telefon: customers.telefon,
+        festnetz: customers.festnetz,
         pflegegrad: customers.pflegegrad,
         address: customers.address,
         stadt: customers.stadt,
@@ -290,6 +292,7 @@ export class CustomerManagementStorage {
       nachname: r.nachname,
       email: r.email,
       telefon: r.telefon,
+      festnetz: r.festnetz,
       pflegegrad: r.pflegegrad,
       address: r.address,
       stadt: r.stadt,

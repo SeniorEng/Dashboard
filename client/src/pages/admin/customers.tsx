@@ -379,10 +379,15 @@ export default function AdminCustomers() {
                             <span>{customer.address}</span>
                           </div>
                         )}
-                        {customer.telefon && (
+                        {(customer.telefon || customer.festnetz) && (
                           <div className="flex items-center gap-1 text-sm text-gray-600">
                             <Phone className={iconSize.xs} />
-                            <span>{formatPhoneForDisplay(customer.telefon)}</span>
+                            <span>
+                              {[
+                                customer.telefon ? formatPhoneForDisplay(customer.telefon) : null,
+                                customer.festnetz ? formatPhoneForDisplay(customer.festnetz) : null,
+                              ].filter(Boolean).join(" · ")}
+                            </span>
                           </div>
                         )}
                     </div>
