@@ -91,16 +91,20 @@ const BACKOFF_BASE_MS = 1000;
 
 async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
   const method = init.method || "GET";
+  const path = url.replace(BASE_URL, "");
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const response = await fetch(url, init);
-    if (response.status !== 429 || attempt === MAX_RETRIES) {
+    if (response.status !== 429) {
       return response;
     }
+    if (attempt === MAX_RETRIES) {
+      throw new Error(`Rate limit exceeded after ${MAX_RETRIES} retries for ${method} ${path}`);
+    }
     const delay = BACKOFF_BASE_MS * Math.pow(2, attempt);
-    console.warn(`[test-utils] 429 on ${method} ${url}, retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms`);
+    console.warn(`[test-utils] 429 on ${method} ${path}, retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms`);
     await new Promise((r) => setTimeout(r, delay));
   }
-  throw new Error(`Rate limit exceeded after ${MAX_RETRIES} retries for ${method} ${url}`);
+  throw new Error(`Rate limit exceeded after ${MAX_RETRIES} retries for ${method} ${path}`);
 }
 
 export async function apiGetAs<T = unknown>(auth: AuthCookie, path: string): Promise<{ status: number; data: T }> {
