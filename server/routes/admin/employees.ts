@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import { randomBytes } from "crypto";
 import { authService } from "../../services/auth";
 import { storage } from "../../storage";
-import { usersCache, birthdaysCache } from "../../services/cache";
+import { usersCache, birthdaysCache, customerIdsCache } from "../../services/cache";
 import { log } from "../../lib/log";
 import { sanitizeUser } from "../../utils/sanitize-user";
 import { 
@@ -17,6 +17,7 @@ import {
   passwordResetTokens,
   customers,
   employeeTimeEntries,
+  customerAssignmentHistory,
 } from "@shared/schema";
 import { validateGeburtsdatum, timeToMinutes, addDays as addDaysShared, minutesToTimeDisplay } from "@shared/utils/datetime";
 import { asyncHandler } from "../../lib/errors";
@@ -919,6 +920,273 @@ router.get("/employees/availability", asyncHandler("Verfügbarkeiten konnten nic
   });
 
   res.json(result);
+}));
+
+const handoverSchema = z.object({
+  targetEmployeeId: z.number().int().positive(),
+});
+
+router.get("/employees/:id/handover-preview", asyncHandler("Übergabe-Vorschau konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const sourceId = requireIntParam(req.params.id, res);
+  if (sourceId === null) return;
+  const targetId = parseInt(req.query.targetEmployeeId as string);
+  if (!targetId || isNaN(targetId)) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "targetEmployeeId ist erforderlich" });
+    return;
+  }
+
+  const sourceEmployee = await authService.getUser(sourceId);
+  if (!sourceEmployee) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Quell-Mitarbeiter nicht gefunden" });
+    return;
+  }
+  const targetEmployee = await authService.getUser(targetId);
+  if (!targetEmployee || !targetEmployee.isActive) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ziel-Mitarbeiter nicht gefunden oder nicht aktiv" });
+    return;
+  }
+
+  const today = new Date().toISOString().split("T")[0];
+
+  const [primaryCustomers, backupCustomers, backup2Customers, futureAppointments] = await Promise.all([
+    db.select({ id: customers.id, name: customers.name, vorname: customers.vorname, nachname: customers.nachname })
+      .from(customers)
+      .where(and(eq(customers.primaryEmployeeId, sourceId), isNull(customers.deletedAt), ne(customers.status, "erstberatung"))),
+    db.select({ id: customers.id, name: customers.name, vorname: customers.vorname, nachname: customers.nachname })
+      .from(customers)
+      .where(and(eq(customers.backupEmployeeId, sourceId), isNull(customers.deletedAt), ne(customers.status, "erstberatung"))),
+    db.select({ id: customers.id, name: customers.name, vorname: customers.vorname, nachname: customers.nachname })
+      .from(customers)
+      .where(and(eq(customers.backupEmployeeId2, sourceId), isNull(customers.deletedAt), ne(customers.status, "erstberatung"))),
+    db.execute(sql`
+      SELECT a.id, a.date, a.start_time AS "startTime", a.end_time AS "endTime",
+             c.name AS "customerName", c.vorname AS "customerVorname", c.nachname AS "customerNachname"
+      FROM appointments a
+      JOIN customers c ON c.id = a.customer_id
+      WHERE a.assigned_employee_id = ${sourceId}
+        AND a.deleted_at IS NULL
+        AND a.status IN ('scheduled', 'in_progress', 'documenting')
+        AND a.date >= ${today}
+      ORDER BY a.date, a.start_time
+    `),
+  ]);
+
+  res.json({
+    sourceEmployee: { id: sourceId, displayName: sourceEmployee.displayName },
+    targetEmployee: { id: targetId, displayName: targetEmployee.displayName },
+    primaryCustomers,
+    backupCustomers,
+    backup2Customers,
+    futureAppointments: futureAppointments.rows,
+    summary: {
+      primaryCount: primaryCustomers.length,
+      backupCount: backupCustomers.length,
+      backup2Count: backup2Customers.length,
+      appointmentCount: futureAppointments.rows.length,
+    },
+  });
+}));
+
+router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durchgeführt werden", async (req: Request, res: Response) => {
+  const sourceId = requireIntParam(req.params.id, res);
+  if (sourceId === null) return;
+
+  const result = handoverSchema.safeParse(req.body);
+  if (!result.success) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "targetEmployeeId ist erforderlich" });
+    return;
+  }
+  const { targetEmployeeId } = result.data;
+
+  if (sourceId === targetEmployeeId) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Quell- und Ziel-Mitarbeiter dürfen nicht identisch sein" });
+    return;
+  }
+
+  const sourceEmployee = await authService.getUser(sourceId);
+  if (!sourceEmployee) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Quell-Mitarbeiter nicht gefunden" });
+    return;
+  }
+  const targetEmployee = await authService.getUser(targetEmployeeId);
+  if (!targetEmployee || !targetEmployee.isActive) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ziel-Mitarbeiter nicht gefunden oder nicht aktiv" });
+    return;
+  }
+
+  const today = new Date().toISOString().split("T")[0];
+  const changedByUserId = req.user?.id ?? null;
+
+  const counts = await db.transaction(async (tx) => {
+    const affectedPrimary = await tx.select({ id: customers.id, primaryEmployeeId: customers.primaryEmployeeId, backupEmployeeId: customers.backupEmployeeId, backupEmployeeId2: customers.backupEmployeeId2 })
+      .from(customers)
+      .where(and(eq(customers.primaryEmployeeId, sourceId), isNull(customers.deletedAt), ne(customers.status, "erstberatung")));
+
+    for (const cust of affectedPrimary) {
+      await tx.update(customerAssignmentHistory)
+        .set({ validTo: today })
+        .where(and(
+          eq(customerAssignmentHistory.customerId, cust.id),
+          eq(customerAssignmentHistory.employeeId, sourceId),
+          eq(customerAssignmentHistory.role, "primary"),
+          isNull(customerAssignmentHistory.validTo)
+        ));
+      await tx.insert(customerAssignmentHistory).values({
+        customerId: cust.id,
+        employeeId: targetEmployeeId,
+        role: "primary",
+        validFrom: today,
+        changedByUserId,
+      });
+      const updateData: Record<string, number | null> = { primaryEmployeeId: targetEmployeeId };
+      if (cust.backupEmployeeId === targetEmployeeId) {
+        await tx.update(customerAssignmentHistory)
+          .set({ validTo: today })
+          .where(and(
+            eq(customerAssignmentHistory.customerId, cust.id),
+            eq(customerAssignmentHistory.employeeId, targetEmployeeId),
+            eq(customerAssignmentHistory.role, "backup"),
+            isNull(customerAssignmentHistory.validTo)
+          ));
+        updateData.backupEmployeeId = null;
+      }
+      if (cust.backupEmployeeId2 === targetEmployeeId) {
+        await tx.update(customerAssignmentHistory)
+          .set({ validTo: today })
+          .where(and(
+            eq(customerAssignmentHistory.customerId, cust.id),
+            eq(customerAssignmentHistory.employeeId, targetEmployeeId),
+            eq(customerAssignmentHistory.role, "backup2"),
+            isNull(customerAssignmentHistory.validTo)
+          ));
+        updateData.backupEmployeeId2 = null;
+      }
+      await tx.update(customers).set(updateData).where(eq(customers.id, cust.id));
+    }
+
+    const affectedBackup = await tx.select({ id: customers.id, primaryEmployeeId: customers.primaryEmployeeId, backupEmployeeId2: customers.backupEmployeeId2 })
+      .from(customers)
+      .where(and(eq(customers.backupEmployeeId, sourceId), isNull(customers.deletedAt), ne(customers.status, "erstberatung")));
+
+    for (const cust of affectedBackup) {
+      if (cust.primaryEmployeeId === targetEmployeeId) {
+        await tx.update(customerAssignmentHistory)
+          .set({ validTo: today })
+          .where(and(
+            eq(customerAssignmentHistory.customerId, cust.id),
+            eq(customerAssignmentHistory.employeeId, sourceId),
+            eq(customerAssignmentHistory.role, "backup"),
+            isNull(customerAssignmentHistory.validTo)
+          ));
+        await tx.update(customers).set({ backupEmployeeId: null }).where(eq(customers.id, cust.id));
+        continue;
+      }
+      await tx.update(customerAssignmentHistory)
+        .set({ validTo: today })
+        .where(and(
+          eq(customerAssignmentHistory.customerId, cust.id),
+          eq(customerAssignmentHistory.employeeId, sourceId),
+          eq(customerAssignmentHistory.role, "backup"),
+          isNull(customerAssignmentHistory.validTo)
+        ));
+      await tx.insert(customerAssignmentHistory).values({
+        customerId: cust.id,
+        employeeId: targetEmployeeId,
+        role: "backup",
+        validFrom: today,
+        changedByUserId,
+      });
+      const updateData: Record<string, number | null> = { backupEmployeeId: targetEmployeeId };
+      if (cust.backupEmployeeId2 === targetEmployeeId) {
+        await tx.update(customerAssignmentHistory)
+          .set({ validTo: today })
+          .where(and(
+            eq(customerAssignmentHistory.customerId, cust.id),
+            eq(customerAssignmentHistory.employeeId, targetEmployeeId),
+            eq(customerAssignmentHistory.role, "backup2"),
+            isNull(customerAssignmentHistory.validTo)
+          ));
+        updateData.backupEmployeeId2 = null;
+      }
+      await tx.update(customers).set(updateData).where(eq(customers.id, cust.id));
+    }
+
+    const affectedBackup2 = await tx.select({ id: customers.id, primaryEmployeeId: customers.primaryEmployeeId, backupEmployeeId: customers.backupEmployeeId })
+      .from(customers)
+      .where(and(eq(customers.backupEmployeeId2, sourceId), isNull(customers.deletedAt), ne(customers.status, "erstberatung")));
+
+    for (const cust of affectedBackup2) {
+      if (cust.primaryEmployeeId === targetEmployeeId || cust.backupEmployeeId === targetEmployeeId) {
+        await tx.update(customerAssignmentHistory)
+          .set({ validTo: today })
+          .where(and(
+            eq(customerAssignmentHistory.customerId, cust.id),
+            eq(customerAssignmentHistory.employeeId, sourceId),
+            eq(customerAssignmentHistory.role, "backup2"),
+            isNull(customerAssignmentHistory.validTo)
+          ));
+        await tx.update(customers).set({ backupEmployeeId2: null }).where(eq(customers.id, cust.id));
+        continue;
+      }
+      await tx.update(customerAssignmentHistory)
+        .set({ validTo: today })
+        .where(and(
+          eq(customerAssignmentHistory.customerId, cust.id),
+          eq(customerAssignmentHistory.employeeId, sourceId),
+          eq(customerAssignmentHistory.role, "backup2"),
+          isNull(customerAssignmentHistory.validTo)
+        ));
+      await tx.insert(customerAssignmentHistory).values({
+        customerId: cust.id,
+        employeeId: targetEmployeeId,
+        role: "backup2",
+        validFrom: today,
+        changedByUserId,
+      });
+      await tx.update(customers).set({ backupEmployeeId2: targetEmployeeId }).where(eq(customers.id, cust.id));
+    }
+
+    const appointmentResult = await tx.execute(sql`
+      UPDATE appointments
+      SET assigned_employee_id = ${targetEmployeeId}
+      WHERE assigned_employee_id = ${sourceId}
+        AND deleted_at IS NULL
+        AND status IN ('scheduled', 'in_progress', 'documenting')
+        AND date >= ${today}
+    `);
+
+    return {
+      primaryCount: affectedPrimary.length,
+      backupCount: affectedBackup.length,
+      backup2Count: affectedBackup2.length,
+      appointmentCount: Number(appointmentResult.rowCount || 0),
+    };
+  });
+
+  birthdaysCache.invalidateAll();
+  usersCache.invalidateAll();
+  customerIdsCache.invalidateAll();
+
+  await auditService.log({
+    action: "employee_handover",
+    entityType: "employee",
+    entityId: sourceId,
+    userId: changedByUserId ?? 0,
+    details: {
+      sourceEmployeeId: sourceId,
+      sourceEmployeeName: sourceEmployee.displayName,
+      targetEmployeeId,
+      targetEmployeeName: targetEmployee.displayName,
+      ...counts,
+    },
+  });
+
+  log(`Employee handover: ${sourceEmployee.displayName} → ${targetEmployee.displayName} (${counts.primaryCount} primary, ${counts.backupCount} backup, ${counts.backup2Count} backup2, ${counts.appointmentCount} appointments)`);
+
+  res.json({
+    message: "Übergabe erfolgreich durchgeführt",
+    ...counts,
+  });
 }));
 
 export default router;
