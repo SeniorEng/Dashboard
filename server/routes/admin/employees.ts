@@ -959,7 +959,7 @@ router.get("/employees/:id/handover-preview", asyncHandler("Übergabe-Vorschau k
       .from(customers)
       .where(and(eq(customers.backupEmployeeId2, sourceId), isNull(customers.deletedAt), ne(customers.status, "erstberatung"))),
     db.execute(sql`
-      SELECT a.id, a.date, a.start_time AS "startTime", a.end_time AS "endTime",
+      SELECT a.id, a.date, a.scheduled_start AS "startTime", a.scheduled_end AS "endTime",
              c.name AS "customerName", c.vorname AS "customerVorname", c.nachname AS "customerNachname"
       FROM appointments a
       JOIN customers c ON c.id = a.customer_id
@@ -967,7 +967,7 @@ router.get("/employees/:id/handover-preview", asyncHandler("Übergabe-Vorschau k
         AND a.deleted_at IS NULL
         AND a.status IN ('scheduled', 'in_progress', 'documenting')
         AND a.date >= ${today}
-      ORDER BY a.date, a.start_time
+      ORDER BY a.date, a.scheduled_start
     `),
   ]);
 
