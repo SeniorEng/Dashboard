@@ -325,6 +325,13 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
   if (overlapResult.hasOverlap) {
     return sendConflict(res, "Terminüberschneidung", ErrorMessages.timeOverlap);
   }
+
+  const customerOverlap = await appointmentService.checkCustomerOverlap(
+    validatedData.date, validatedData.scheduledStart, scheduledEnd, validatedData.customerId
+  );
+  if (customerOverlap) {
+    return sendConflict(res, "Kundenüberschneidung", "Dieser Kunde hat bereits einen Termin in diesem Zeitraum.");
+  }
   
   const appointment = await storage.createAppointment(appointmentData);
 
@@ -495,6 +502,13 @@ router.patch("/:id/erstberatung", asyncHandler("Erstberatung konnte nicht aktual
     return sendConflict(res, "Terminüberschneidung", ErrorMessages.timeOverlap);
   }
 
+  const customerOverlapEB = await appointmentService.checkCustomerOverlap(
+    validatedData.date, validatedData.scheduledStart, scheduledEnd, existingAppointment.customerId, id
+  );
+  if (customerOverlapEB) {
+    return sendConflict(res, "Kundenüberschneidung", "Dieser Kunde hat bereits einen Termin in diesem Zeitraum.");
+  }
+
   const customerUpdate: Record<string, unknown> = {
     vorname: validatedData.customer.vorname,
     nachname: validatedData.customer.nachname,
@@ -581,6 +595,32 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
   const validation = appointmentService.validateAllUpdateRules(existingAppointment, validatedData);
   if (!validation.valid) {
     return sendForbidden(res, validation.error!, validation.message!);
+  }
+
+  if (validatedData.date || validatedData.scheduledStart || validatedData.scheduledEnd || validatedData.durationPromised) {
+    const checkDate = validatedData.date || existingAppointment.date;
+    const checkStart = validatedData.scheduledStart || existingAppointment.scheduledStart;
+    const duration = validatedData.durationPromised ?? existingAppointment.durationPromised;
+    const checkEnd = validatedData.scheduledEnd
+      || (duration ? addMinutesToTimeHHMMSS(checkStart, duration) : null)
+      || existingAppointment.scheduledEnd;
+    const assignedEmpId = validatedData.assignedEmployeeId || existingAppointment.assignedEmployeeId;
+
+    if (checkDate && checkStart && checkEnd) {
+      if (assignedEmpId) {
+        const empOverlap = await appointmentService.checkOverlap(checkDate, checkStart, checkEnd, assignedEmpId, id);
+        if (empOverlap.hasOverlap) {
+          return sendConflict(res, "Terminüberschneidung", ErrorMessages.timeOverlap);
+        }
+      }
+
+      const customerOverlap = await appointmentService.checkCustomerOverlap(
+        checkDate, checkStart, checkEnd, existingAppointment.customerId, id
+      );
+      if (customerOverlap) {
+        return sendConflict(res, "Kundenüberschneidung", "Dieser Kunde hat bereits einen Termin in diesem Zeitraum.");
+      }
+    }
   }
   
   const updated = await storage.updateAppointment(id, validatedData);

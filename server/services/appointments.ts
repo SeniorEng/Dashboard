@@ -147,6 +147,42 @@ export class AppointmentService {
     return { hasOverlap: false, hasUnreliableData: false };
   }
 
+  async checkCustomerOverlap(
+    date: string,
+    startTime: string,
+    endTime: string,
+    customerId: number,
+    excludeId?: number
+  ): Promise<boolean> {
+    const existingAppointments = await this.storage.getAppointmentsByDate(date);
+
+    for (const apt of existingAppointments) {
+      if (excludeId && apt.id === excludeId) continue;
+      if (apt.customerId !== customerId) continue;
+      if (apt.status === "cancelled") continue;
+
+      if (apt.status === "completed") {
+        if (apt.actualEnd) {
+          const actualStart = apt.actualStart
+            ? this.formatTimeForDisplay(apt.actualStart)
+            : apt.scheduledStart;
+          const actualEnd = this.formatTimeForDisplay(apt.actualEnd);
+          if (doTimesOverlap(startTime, endTime, actualStart, actualEnd)) {
+            return true;
+          }
+        }
+        continue;
+      }
+
+      const aptEndTime = apt.scheduledEnd || (apt.durationPromised ? addMinutesToTime(apt.scheduledStart, apt.durationPromised) : null);
+      if (aptEndTime && doTimesOverlap(startTime, endTime, apt.scheduledStart, aptEndTime)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   validateStatusTransition(
     currentStatus: string,
     targetStatus: string | undefined,

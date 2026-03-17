@@ -109,7 +109,9 @@ export const insertErstberatungSchema = z.object({
   assignedEmployeeId: z.number().nullable().optional(), // Admin can assign employee
 });
 
-export const updateAppointmentSchema = baseAppointmentSchema.partial();
+export const updateAppointmentSchema = baseAppointmentSchema.omit({
+  customerId: true,
+}).partial();
 
 export const documentServiceEntrySchema = z.object({
   serviceId: z.number(),
