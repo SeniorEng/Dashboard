@@ -74,14 +74,14 @@ router.get("/growth", asyncHandler("Wachstums-Statistiken konnten nicht geladen 
     db.execute(sql`
       SELECT
         COUNT(*) FILTER (WHERE c.status = 'aktiv' AND c.deleted_at IS NULL)::int AS "activeNow",
-        COUNT(*) FILTER (WHERE c.deleted_at IS NULL AND EXTRACT(YEAR FROM c.created_at) = ${year})::int AS "gainedThisYear",
+        COUNT(*) FILTER (WHERE c.deleted_at IS NULL AND c.status != 'erstberatung' AND EXTRACT(YEAR FROM c.created_at) = ${year})::int AS "gainedThisYear",
         COUNT(*) FILTER (WHERE c.deleted_at IS NULL AND c.inaktiv_ab IS NOT NULL AND EXTRACT(YEAR FROM c.inaktiv_ab::date) = ${year})::int AS "lostThisYear"
       FROM customers c
     `),
 
     db.execute(sql`
       SELECT
-        COUNT(*) FILTER (WHERE c.deleted_at IS NULL AND EXTRACT(YEAR FROM c.created_at) = ${year - 1})::int AS "gainedPrevYear",
+        COUNT(*) FILTER (WHERE c.deleted_at IS NULL AND c.status != 'erstberatung' AND EXTRACT(YEAR FROM c.created_at) = ${year - 1})::int AS "gainedPrevYear",
         COUNT(*) FILTER (WHERE c.deleted_at IS NULL AND c.inaktiv_ab IS NOT NULL AND EXTRACT(YEAR FROM c.inaktiv_ab::date) = ${year - 1})::int AS "lostPrevYear"
       FROM customers c
     `),
