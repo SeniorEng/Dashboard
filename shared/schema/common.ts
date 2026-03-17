@@ -64,6 +64,21 @@ export const optionalGermanPhoneSchema = z.union([
   }
 });
 
+export const internationalPhoneTransformSchema = z.string().refine(
+  (value) => {
+    if (!value || value.trim() === "") return false;
+    try {
+      return isValidPhoneNumber(value, "DE");
+    } catch {
+      return false;
+    }
+  },
+  { message: "Ungültige Telefonnummer" }
+).transform((value) => {
+  const parsed = parsePhoneNumber(value, "DE");
+  return parsed?.format("E.164") ?? value;
+});
+
 // German validation patterns
 export const ikNummerSchema = z.string()
   .regex(/^\d{9}$/, "IK-Nummer muss genau 9 Ziffern haben");

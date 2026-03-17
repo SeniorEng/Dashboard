@@ -1,7 +1,7 @@
 import { pgTable, text, integer, serial, date, boolean, real, index, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
-import { timestamp, germanPhoneTransformSchema, optionalGermanPhoneSchema } from "./common";
+import { timestamp, germanPhoneTransformSchema, optionalGermanPhoneSchema, internationalPhoneTransformSchema } from "./common";
 import { users } from "./users";
 
 // ============================================
@@ -237,7 +237,7 @@ export const insertCustomerContactSchema = z.object({
   isPrimary: z.boolean().optional().default(false),
   vorname: z.string().min(1, "Vorname ist erforderlich"),
   nachname: z.string().min(1, "Nachname ist erforderlich"),
-  telefon: germanPhoneTransformSchema,
+  telefon: internationalPhoneTransformSchema,
   email: z.string().transform(v => v?.trim() || "").pipe(z.string().email("Ungültige E-Mail-Adresse").or(z.literal(""))).optional().nullable().transform(v => !v || v === "" ? null : v),
   notes: z.string().max(255, "Maximal 255 Zeichen").optional().nullable(),
   sortOrder: z.number().optional().default(0),
