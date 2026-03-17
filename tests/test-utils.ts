@@ -86,8 +86,25 @@ export async function loginAs(email: string, password: string): Promise<AuthCook
   };
 }
 
+const MAX_RETRIES = 3;
+const BACKOFF_BASE_MS = 1000;
+
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  const method = init.method || "GET";
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const response = await fetch(url, init);
+    if (response.status !== 429 || attempt === MAX_RETRIES) {
+      return response;
+    }
+    const delay = BACKOFF_BASE_MS * Math.pow(2, attempt);
+    console.warn(`[test-utils] 429 on ${method} ${url}, retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms`);
+    await new Promise((r) => setTimeout(r, delay));
+  }
+  throw new Error(`Rate limit exceeded after ${MAX_RETRIES} retries for ${method} ${url}`);
+}
+
 export async function apiGetAs<T = unknown>(auth: AuthCookie, path: string): Promise<{ status: number; data: T }> {
-  const response = await fetch(`${BASE_URL}${path}`, {
+  const response = await fetchWithRetry(`${BASE_URL}${path}`, {
     headers: { Cookie: auth.cookie },
   });
   const data = await response.json().catch(() => null);
@@ -96,7 +113,7 @@ export async function apiGetAs<T = unknown>(auth: AuthCookie, path: string): Pro
 
 export async function apiPostAs<T = unknown>(auth: AuthCookie, path: string, body: unknown): Promise<{ status: number; data: T }> {
   const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
-  const response = await fetch(`${BASE_URL}${path}`, {
+  const response = await fetchWithRetry(`${BASE_URL}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -128,7 +145,7 @@ export async function apiPatch<T = unknown>(
 ): Promise<{ status: number; data: T }> {
   const auth = await getAuthCookie();
   const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
-  const response = await fetch(`${BASE_URL}${path}`, {
+  const response = await fetchWithRetry(`${BASE_URL}${path}`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -147,7 +164,7 @@ export async function apiPut<T = unknown>(
 ): Promise<{ status: number; data: T }> {
   const auth = await getAuthCookie();
   const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
-  const response = await fetch(`${BASE_URL}${path}`, {
+  const response = await fetchWithRetry(`${BASE_URL}${path}`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
@@ -163,7 +180,7 @@ export async function apiPut<T = unknown>(
 export async function apiDelete(path: string): Promise<{ status: number; data: unknown }> {
   const auth = await getAuthCookie();
   const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
-  const response = await fetch(`${BASE_URL}${path}`, {
+  const response = await fetchWithRetry(`${BASE_URL}${path}`, {
     method: "DELETE",
     headers: {
       Cookie: cookieHeader,
