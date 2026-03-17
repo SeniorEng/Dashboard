@@ -60,6 +60,28 @@ router.get("/public/logo/:type", asyncHandler("Logo konnte nicht geladen werden"
   await objectStorageService.downloadObject(objectFile, res);
 }));
 
+router.get("/public/plz/:plz", asyncHandler("PLZ-Lookup fehlgeschlagen", async (req, res) => {
+  const plz = req.params.plz;
+  if (!/^\d{5}$/.test(plz)) {
+    return res.status(400).json({ error: "PLZ muss 5 Ziffern haben" });
+  }
+  try {
+    const response = await fetch(`https://openplzapi.org/de/Localities?postalCode=${plz}&page=1&pageSize=5`, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!response.ok) {
+      return res.json({ results: [] });
+    }
+    const data = await response.json() as Array<{ name: string; postalCode: string }>;
+    const cities = [...new Set(data.map((d) => d.name))];
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.json({ results: cities });
+  } catch {
+    res.json({ results: [] });
+  }
+}));
+
 router.use(authMiddleware);
 router.use(cacheHeaders);
 

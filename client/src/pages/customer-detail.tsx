@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useRoute, Link, useSearch, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invalidateRelated } from "@/lib/query-invalidation";
@@ -26,7 +26,7 @@ import { iconSize, componentStyles } from "@/design-system";
 import { ErrorState } from "@/components/patterns/error-state";
 import type { Customer, CustomerContact } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
-import { formatPhoneForDisplay } from "@shared/utils/phone";
+import { formatPhoneForDisplay, validateGermanPhone, formatPhoneAsYouType } from "@shared/utils/phone";
 import { formatDateForDisplay, todayISO } from "@shared/utils/datetime";
 import { UNDOCUMENTED_STATUSES } from "@shared/domain/appointments";
 import { CONTACT_TYPE_LABELS, CONTACT_TYPE_SELECT_OPTIONS } from "@shared/domain/customers";
@@ -176,6 +176,55 @@ export default function CustomerDetailPage() {
   const [emergencyContactForm, setEmergencyContactForm] = useState(emptyContactForm);
   const [showAddContact, setShowAddContact] = useState(false);
 
+  const [contactFormErrors, setContactFormErrors] = useState<Record<string, string>>({});
+  const [emergencyFormErrors, setEmergencyFormErrors] = useState<Record<string, string>>({});
+  const [plzLoading, setPlzLoading] = useState(false);
+  const plzTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+
+  const validatePhone = useCallback((value: string, field: string): string | null => {
+    if (!value || value.trim() === "") return null;
+    const result = validateGermanPhone(value);
+    return result.valid ? null : result.error;
+  }, []);
+
+  const validateEmail = useCallback((value: string): string | null => {
+    if (!value || value.trim() === "") return null;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(value.trim()) ? null : "Ungültige E-Mail-Adresse";
+  }, []);
+
+  const validatePlz = useCallback((value: string): string | null => {
+    if (!value || value.trim() === "") return null;
+    return /^\d{5}$/.test(value) ? null : "PLZ muss 5 Ziffern haben";
+  }, []);
+
+  const lastAutoFilledStadt = useRef<string>("");
+
+  useEffect(() => {
+    if (editingSection !== "contact") return;
+    const plz = contactForm.plz;
+    if (!plz || plz.length !== 5 || !/^\d{5}$/.test(plz)) return;
+    const currentStadt = contactForm.stadt?.trim() || "";
+    if (currentStadt !== "" && currentStadt !== lastAutoFilledStadt.current) return;
+
+    if (plzTimeoutRef.current) clearTimeout(plzTimeoutRef.current);
+    plzTimeoutRef.current = setTimeout(async () => {
+      setPlzLoading(true);
+      try {
+        const res = await fetch(`/api/public/plz/${plz}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.results?.length === 1) {
+            lastAutoFilledStadt.current = data.results[0];
+            setContactForm(f => ({ ...f, stadt: data.results[0] }));
+          }
+        }
+      } catch {}
+      setPlzLoading(false);
+    }, 400);
+    return () => { if (plzTimeoutRef.current) clearTimeout(plzTimeoutRef.current); };
+  }, [contactForm.plz, editingSection]);
+
   const startEditing = useCallback((section: EditSection) => {
     if (!customer) return;
     if (section === "contact") {
@@ -206,7 +255,7 @@ export default function CustomerDetailPage() {
     setEditingSection(section);
   }, [customer, details]);
 
-  const cancelEditing = useCallback(() => setEditingSection(null), []);
+  const cancelEditing = useCallback(() => { setEditingSection(null); setContactFormErrors({}); }, []);
 
   const updateCustomerMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
@@ -256,16 +305,30 @@ export default function CustomerDetailPage() {
   });
 
   const handleSaveContact = useCallback(() => {
+    const errors: Record<string, string> = {};
+    const telefonErr = validatePhone(contactForm.telefon, "telefon");
+    if (telefonErr) errors.telefon = telefonErr;
+    const festnetzErr = validatePhone(contactForm.festnetz, "festnetz");
+    if (festnetzErr) errors.festnetz = festnetzErr;
+    const emailErr = validateEmail(contactForm.email);
+    if (emailErr) errors.email = emailErr;
+    const plzErr = validatePlz(contactForm.plz);
+    if (plzErr) errors.plz = plzErr;
+    if (Object.keys(errors).length > 0) {
+      setContactFormErrors(errors);
+      return;
+    }
+    setContactFormErrors({});
     updateCustomerMutation.mutate({
       strasse: contactForm.strasse || undefined,
       nr: contactForm.nr || undefined,
       plz: contactForm.plz || undefined,
       stadt: contactForm.stadt || undefined,
-      telefon: contactForm.telefon || null,
-      festnetz: contactForm.festnetz || null,
-      email: contactForm.email || null,
+      telefon: contactForm.telefon?.trim() || null,
+      festnetz: contactForm.festnetz?.trim() || null,
+      email: contactForm.email?.trim() || null,
     });
-  }, [contactForm, updateCustomerMutation]);
+  }, [contactForm, updateCustomerMutation, validatePhone, validateEmail, validatePlz]);
 
   const handleSavePflegegrad = useCallback(() => {
     updateCareLevelMutation.mutate({
@@ -353,15 +416,32 @@ export default function CustomerDetailPage() {
     setEditingContactId(null);
     setShowAddContact(false);
     setEmergencyContactForm(emptyContactForm);
+    setEmergencyFormErrors({});
   }, []);
 
   const handleSaveEmergencyContact = useCallback(() => {
-    if (editingContactId) {
-      updateContactMutation.mutate({ contactId: editingContactId, data: emergencyContactForm });
-    } else {
-      addContactMutation.mutate(emergencyContactForm);
+    const errors: Record<string, string> = {};
+    const telefonErr = validatePhone(emergencyContactForm.telefon, "telefon");
+    if (telefonErr) errors.telefon = telefonErr;
+    const emailErr = validateEmail(emergencyContactForm.email);
+    if (emailErr) errors.email = emailErr;
+    if (Object.keys(errors).length > 0) {
+      setEmergencyFormErrors(errors);
+      return;
     }
-  }, [editingContactId, emergencyContactForm, updateContactMutation, addContactMutation]);
+    setEmergencyFormErrors({});
+    const payload = {
+      ...emergencyContactForm,
+      telefon: emergencyContactForm.telefon?.trim() || "",
+      email: emergencyContactForm.email?.trim() || null,
+      notes: emergencyContactForm.notes?.trim() || null,
+    };
+    if (editingContactId) {
+      updateContactMutation.mutate({ contactId: editingContactId, data: payload });
+    } else {
+      addContactMutation.mutate(payload);
+    }
+  }, [editingContactId, emergencyContactForm, updateContactMutation, addContactMutation, validatePhone, validateEmail]);
 
   const contactSaving = addContactMutation.isPending || updateContactMutation.isPending || deleteContactMutation.isPending;
 
@@ -587,24 +667,81 @@ export default function CustomerDetailPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div>
                     <Label>PLZ</Label>
-                    <Input value={contactForm.plz} onChange={(e) => setContactForm(f => ({ ...f, plz: e.target.value }))} maxLength={5} data-testid="input-plz" />
+                    <Input
+                      value={contactForm.plz}
+                      onChange={(e) => {
+                        const v = e.target.value.replace(/\D/g, "").slice(0, 5);
+                        setContactForm(f => ({ ...f, plz: v }));
+                        setContactFormErrors(prev => ({ ...prev, plz: "" }));
+                      }}
+                      maxLength={5}
+                      inputMode="numeric"
+                      className={contactFormErrors.plz ? "border-red-400" : ""}
+                      data-testid="input-plz"
+                    />
+                    {contactFormErrors.plz && <span className="text-xs text-red-500 mt-0.5">{contactFormErrors.plz}</span>}
                   </div>
                   <div className="col-span-2">
-                    <Label>Stadt</Label>
+                    <Label>{plzLoading ? "Stadt (wird gesucht...)" : "Stadt"}</Label>
                     <Input value={contactForm.stadt} onChange={(e) => setContactForm(f => ({ ...f, stadt: e.target.value }))} data-testid="input-stadt" />
                   </div>
                 </div>
                 <div>
                   <Label>Mobilnummer</Label>
-                  <Input value={contactForm.telefon} onChange={(e) => setContactForm(f => ({ ...f, telefon: e.target.value }))} placeholder="+49 151 ..." data-testid="input-telefon" />
+                  <Input
+                    value={contactForm.telefon}
+                    onChange={(e) => {
+                      setContactForm(f => ({ ...f, telefon: formatPhoneAsYouType(e.target.value) }));
+                      setContactFormErrors(prev => ({ ...prev, telefon: "" }));
+                    }}
+                    onBlur={() => {
+                      const err = validatePhone(contactForm.telefon, "telefon");
+                      if (err) setContactFormErrors(prev => ({ ...prev, telefon: err }));
+                    }}
+                    placeholder="0151 12345678"
+                    inputMode="tel"
+                    className={contactFormErrors.telefon ? "border-red-400" : ""}
+                    data-testid="input-telefon"
+                  />
+                  {contactFormErrors.telefon && <span className="text-xs text-red-500 mt-0.5">{contactFormErrors.telefon}</span>}
                 </div>
                 <div>
                   <Label>Festnetz</Label>
-                  <Input value={contactForm.festnetz} onChange={(e) => setContactForm(f => ({ ...f, festnetz: e.target.value }))} placeholder="+49 351 ..." data-testid="input-festnetz" />
+                  <Input
+                    value={contactForm.festnetz}
+                    onChange={(e) => {
+                      setContactForm(f => ({ ...f, festnetz: formatPhoneAsYouType(e.target.value) }));
+                      setContactFormErrors(prev => ({ ...prev, festnetz: "" }));
+                    }}
+                    onBlur={() => {
+                      const err = validatePhone(contactForm.festnetz, "festnetz");
+                      if (err) setContactFormErrors(prev => ({ ...prev, festnetz: err }));
+                    }}
+                    placeholder="0351 1234567"
+                    inputMode="tel"
+                    className={contactFormErrors.festnetz ? "border-red-400" : ""}
+                    data-testid="input-festnetz"
+                  />
+                  {contactFormErrors.festnetz && <span className="text-xs text-red-500 mt-0.5">{contactFormErrors.festnetz}</span>}
                 </div>
                 <div>
                   <Label>E-Mail</Label>
-                  <Input type="email" value={contactForm.email} onChange={(e) => setContactForm(f => ({ ...f, email: e.target.value }))} data-testid="input-email" />
+                  <Input
+                    type="email"
+                    value={contactForm.email}
+                    onChange={(e) => {
+                      setContactForm(f => ({ ...f, email: e.target.value }));
+                      setContactFormErrors(prev => ({ ...prev, email: "" }));
+                    }}
+                    onBlur={() => {
+                      const err = validateEmail(contactForm.email);
+                      if (err) setContactFormErrors(prev => ({ ...prev, email: err }));
+                    }}
+                    placeholder="name@beispiel.de"
+                    className={contactFormErrors.email ? "border-red-400" : ""}
+                    data-testid="input-email"
+                  />
+                  {contactFormErrors.email && <span className="text-xs text-red-500 mt-0.5">{contactFormErrors.email}</span>}
                 </div>
                 <div className="flex gap-2 pt-1">
                   <Button size="sm" onClick={handleSaveContact} disabled={isSaving} className="min-h-[36px]" data-testid="button-save-contact">
@@ -764,11 +901,40 @@ export default function CustomerDetailPage() {
                       </div>
                       <div>
                         <Label className="text-xs">Telefon</Label>
-                        <Input value={emergencyContactForm.telefon} onChange={(e) => setEmergencyContactForm(f => ({ ...f, telefon: e.target.value }))} className="h-9" data-testid="input-contact-telefon" />
+                        <Input
+                          value={emergencyContactForm.telefon}
+                          onChange={(e) => {
+                            setEmergencyContactForm(f => ({ ...f, telefon: formatPhoneAsYouType(e.target.value) }));
+                            setEmergencyFormErrors(prev => ({ ...prev, telefon: "" }));
+                          }}
+                          onBlur={() => {
+                            const err = validatePhone(emergencyContactForm.telefon, "telefon");
+                            if (err) setEmergencyFormErrors(prev => ({ ...prev, telefon: err }));
+                          }}
+                          placeholder="0151 12345678"
+                          inputMode="tel"
+                          className={`h-9 ${emergencyFormErrors.telefon ? "border-red-400" : ""}`}
+                          data-testid="input-contact-telefon"
+                        />
+                        {emergencyFormErrors.telefon && <span className="text-xs text-red-500 mt-0.5">{emergencyFormErrors.telefon}</span>}
                       </div>
                       <div>
                         <Label className="text-xs">E-Mail</Label>
-                        <Input value={emergencyContactForm.email} onChange={(e) => setEmergencyContactForm(f => ({ ...f, email: e.target.value }))} className="h-9" data-testid="input-contact-email" />
+                        <Input
+                          value={emergencyContactForm.email}
+                          onChange={(e) => {
+                            setEmergencyContactForm(f => ({ ...f, email: e.target.value }));
+                            setEmergencyFormErrors(prev => ({ ...prev, email: "" }));
+                          }}
+                          onBlur={() => {
+                            const err = validateEmail(emergencyContactForm.email);
+                            if (err) setEmergencyFormErrors(prev => ({ ...prev, email: err }));
+                          }}
+                          placeholder="name@beispiel.de"
+                          className={`h-9 ${emergencyFormErrors.email ? "border-red-400" : ""}`}
+                          data-testid="input-contact-email"
+                        />
+                        {emergencyFormErrors.email && <span className="text-xs text-red-500 mt-0.5">{emergencyFormErrors.email}</span>}
                       </div>
                       <div>
                         <Label className="text-xs">Beziehung</Label>
@@ -854,11 +1020,40 @@ export default function CustomerDetailPage() {
                 </div>
                 <div>
                   <Label className="text-xs">Telefon</Label>
-                  <Input value={emergencyContactForm.telefon} onChange={(e) => setEmergencyContactForm(f => ({ ...f, telefon: e.target.value }))} className="h-9" data-testid="input-new-contact-telefon" />
+                  <Input
+                    value={emergencyContactForm.telefon}
+                    onChange={(e) => {
+                      setEmergencyContactForm(f => ({ ...f, telefon: formatPhoneAsYouType(e.target.value) }));
+                      setEmergencyFormErrors(prev => ({ ...prev, telefon: "" }));
+                    }}
+                    onBlur={() => {
+                      const err = validatePhone(emergencyContactForm.telefon, "telefon");
+                      if (err) setEmergencyFormErrors(prev => ({ ...prev, telefon: err }));
+                    }}
+                    placeholder="0151 12345678"
+                    inputMode="tel"
+                    className={`h-9 ${emergencyFormErrors.telefon ? "border-red-400" : ""}`}
+                    data-testid="input-new-contact-telefon"
+                  />
+                  {emergencyFormErrors.telefon && <span className="text-xs text-red-500 mt-0.5">{emergencyFormErrors.telefon}</span>}
                 </div>
                 <div>
                   <Label className="text-xs">E-Mail</Label>
-                  <Input value={emergencyContactForm.email} onChange={(e) => setEmergencyContactForm(f => ({ ...f, email: e.target.value }))} className="h-9" placeholder="Optional" data-testid="input-new-contact-email" />
+                  <Input
+                    value={emergencyContactForm.email}
+                    onChange={(e) => {
+                      setEmergencyContactForm(f => ({ ...f, email: e.target.value }));
+                      setEmergencyFormErrors(prev => ({ ...prev, email: "" }));
+                    }}
+                    onBlur={() => {
+                      const err = validateEmail(emergencyContactForm.email);
+                      if (err) setEmergencyFormErrors(prev => ({ ...prev, email: err }));
+                    }}
+                    placeholder="name@beispiel.de (optional)"
+                    className={`h-9 ${emergencyFormErrors.email ? "border-red-400" : ""}`}
+                    data-testid="input-new-contact-email"
+                  />
+                  {emergencyFormErrors.email && <span className="text-xs text-red-500 mt-0.5">{emergencyFormErrors.email}</span>}
                 </div>
                 <div>
                   <Label className="text-xs">Beziehung</Label>

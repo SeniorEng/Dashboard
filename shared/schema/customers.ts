@@ -238,7 +238,7 @@ export const insertCustomerContactSchema = z.object({
   vorname: z.string().min(1, "Vorname ist erforderlich"),
   nachname: z.string().min(1, "Nachname ist erforderlich"),
   telefon: germanPhoneTransformSchema,
-  email: z.string().email("Ungültige E-Mail-Adresse").optional().nullable(),
+  email: z.string().transform(v => v?.trim() || "").pipe(z.string().email("Ungültige E-Mail-Adresse").or(z.literal(""))).optional().nullable().transform(v => !v || v === "" ? null : v),
   notes: z.string().max(255, "Maximal 255 Zeichen").optional().nullable(),
   sortOrder: z.number().optional().default(0),
 });

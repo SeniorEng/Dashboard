@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { storage } from "../storage";
 import { insertCustomerSchema, versichertennummerSchema } from "@shared/schema";
+import { optionalGermanPhoneSchema } from "@shared/schema/common";
 import { requireAuth, requireRoles } from "../middleware/auth";
 import { birthdaysCache, customerIdsCache } from "../services/cache";
 import { documentStorage } from "../storage/documents";
@@ -121,9 +122,9 @@ const employeeUpdateCustomerSchema = z.object({
   nr: z.string().min(1).max(20).optional(),
   plz: z.string().regex(/^\d{5}$/, "PLZ muss 5-stellig sein").optional(),
   stadt: z.string().min(1).max(100).optional(),
-  telefon: z.string().max(30).nullable().optional(),
-  festnetz: z.string().max(30).nullable().optional(),
-  email: z.string().email("Ungültige E-Mail-Adresse").nullable().optional(),
+  telefon: optionalGermanPhoneSchema.optional(),
+  festnetz: optionalGermanPhoneSchema.optional(),
+  email: z.string().transform(v => v?.trim() || "").pipe(z.string().email("Ungültige E-Mail-Adresse").or(z.literal(""))).nullable().optional().transform(v => !v || v === "" ? null : v),
   haustierVorhanden: z.boolean().optional(),
   haustierDetails: z.string().max(500).nullable().optional(),
   vorerkrankungen: z.string().max(2000).nullable().optional(),
