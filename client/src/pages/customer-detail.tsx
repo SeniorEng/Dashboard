@@ -227,16 +227,20 @@ export default function CustomerDetailPage() {
 
   const startEditing = useCallback((section: EditSection) => {
     if (!customer) return;
+    if (editingSection && editingSection !== section) {
+      if (!confirm("Du hast ungespeicherte Änderungen. Trotzdem wechseln?")) return;
+    }
     if (section === "contact") {
       setContactForm({
         strasse: customer.strasse || "",
         nr: customer.nr || "",
         plz: customer.plz || "",
         stadt: customer.stadt || "",
-        telefon: customer.telefon || "",
-        festnetz: customer.festnetz || "",
+        telefon: customer.telefon ? formatPhoneForDisplay(customer.telefon) : "",
+        festnetz: customer.festnetz ? formatPhoneForDisplay(customer.festnetz) : "",
         email: customer.email || "",
       });
+      setContactFormErrors({});
     } else if (section === "pflegegrad") {
       setPflegegradForm({
         pflegegrad: String(customer.pflegegrad || 1),
@@ -253,7 +257,7 @@ export default function CustomerDetailPage() {
       setServicesForm(details?.contract?.vereinbarteLeistungen || "");
     }
     setEditingSection(section);
-  }, [customer, details]);
+  }, [customer, details, editingSection]);
 
   const cancelEditing = useCallback(() => { setEditingSection(null); setContactFormErrors({}); }, []);
 
@@ -399,18 +403,24 @@ export default function CustomerDetailPage() {
   });
 
   const startEditContact = useCallback((contact: CustomerContact) => {
+    if (editingSection) {
+      if (!confirm("Du hast ungespeicherte Änderungen. Trotzdem wechseln?")) return;
+      setEditingSection(null);
+      setContactFormErrors({});
+    }
     setEditingContactId(contact.id);
     setEmergencyContactForm({
       vorname: contact.vorname,
       nachname: contact.nachname,
-      telefon: contact.telefon || "",
+      telefon: contact.telefon ? formatPhoneForDisplay(contact.telefon) : "",
       email: contact.email || "",
       contactType: contact.contactType,
       isPrimary: contact.isPrimary ?? false,
       notes: contact.notes || "",
     });
+    setEmergencyFormErrors({});
     setShowAddContact(false);
-  }, []);
+  }, [editingSection]);
 
   const cancelEditContact = useCallback(() => {
     setEditingContactId(null);
@@ -876,7 +886,16 @@ export default function CustomerDetailPage() {
                   variant="ghost"
                   size="sm"
                   className="h-7 px-2 text-xs gap-1"
-                  onClick={() => { setShowAddContact(true); setEmergencyContactForm(emptyContactForm); }}
+                  onClick={() => {
+                    if (editingSection) {
+                      if (!confirm("Du hast ungespeicherte Änderungen. Trotzdem wechseln?")) return;
+                      setEditingSection(null);
+                      setContactFormErrors({});
+                    }
+                    setShowAddContact(true);
+                    setEmergencyContactForm(emptyContactForm);
+                    setEmergencyFormErrors({});
+                  }}
                   data-testid="button-add-contact"
                 >
                   <Plus className="h-3.5 w-3.5" /> Hinzufügen
@@ -992,7 +1011,11 @@ export default function CustomerDetailPage() {
                         <Button variant="ghost" size="sm" className="min-h-[44px] min-w-[44px] p-0" onClick={() => startEditContact(contact)} data-testid={`button-edit-contact-${contact.id}`}>
                           <Pencil className="h-3 w-3 text-muted-foreground" />
                         </Button>
-                        <Button variant="ghost" size="sm" className="min-h-[44px] min-w-[44px] p-0" onClick={() => deleteContactMutation.mutate(contact.id)} disabled={contactSaving} data-testid={`button-delete-contact-${contact.id}`}>
+                        <Button variant="ghost" size="sm" className="min-h-[44px] min-w-[44px] p-0" onClick={() => {
+                          if (confirm(`Kontakt "${contact.vorname} ${contact.nachname}" wirklich löschen?`)) {
+                            deleteContactMutation.mutate(contact.id);
+                          }
+                        }} disabled={contactSaving} data-testid={`button-delete-contact-${contact.id}`}>
                           <Trash2 className="h-3 w-3 text-muted-foreground" />
                         </Button>
                       </div>
