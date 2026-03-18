@@ -594,6 +594,20 @@ export default function AppointmentDetail() {
         </div>
       )}
 
+      {isCompleted && user?.isAdmin && (
+        <div className="mt-6">
+          <Button
+            variant="outline"
+            className="w-full text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
+            onClick={() => setShowDeleteDialog(true)}
+            data-testid="button-admin-delete"
+          >
+            <Trash2 className={`${iconSize.sm} mr-2`} />
+            Termin löschen (Admin)
+          </Button>
+        </div>
+      )}
+
       <div className="mt-4">
         <Button 
           variant="outline"
@@ -615,8 +629,19 @@ export default function AppointmentDetail() {
               Termin löschen?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Möchten Sie den Termin bei {appointment.customer?.name} wirklich löschen? 
-              Diese Aktion kann nicht rückgängig gemacht werden.
+              {isCompleted && user?.isAdmin ? (
+                <>
+                  Möchten Sie den dokumentierten Termin bei <strong>{appointment.customer?.name}</strong> wirklich löschen?
+                  Das verbrauchte Budget wird automatisch zurückgebucht.
+                  {appointment.isLocked && " Der Termin ist Teil eines unterschriebenen Leistungsnachweises."}
+                  {" "}Diese Aktion kann nicht rückgängig gemacht werden.
+                </>
+              ) : (
+                <>
+                  Möchten Sie den Termin bei {appointment.customer?.name} wirklich löschen?
+                  Diese Aktion kann nicht rückgängig gemacht werden.
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

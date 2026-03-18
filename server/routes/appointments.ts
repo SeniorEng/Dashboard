@@ -946,29 +946,55 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   }
   
   if (!await checkCustomerAccess(req.user!, appointment.customerId, res)) return;
+
+  const isAdmin = req.user!.isAdmin;
+  const isCompleted = appointment.status === "completed";
   
   const isLocked = await storage.isAppointmentLocked(id);
-  if (isLocked) {
+  if (isLocked && !isAdmin) {
     return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht gelöscht werden.");
   }
   
-  const canDelete = appointmentService.canDeleteAppointment(appointment);
-  if (!canDelete.valid) {
-    return sendForbidden(res, canDelete.error!, canDelete.message!);
+  if (!isAdmin) {
+    const canDelete = appointmentService.canDeleteAppointment(appointment);
+    if (!canDelete.valid) {
+      return sendForbidden(res, canDelete.error!, canDelete.message!);
+    }
   }
   
   const ip = req.ip || req.socket.remoteAddress;
-  await auditService.appointmentDeleted(
-    req.user!.id,
+
+  let reversedTransactions = 0;
+  if (isAdmin && isCompleted) {
+    const transactions = await budgetLedgerStorage.getTransactionsByAppointmentId(id);
+    await db.transaction(async () => {
+      for (const tx of transactions) {
+        await budgetLedgerStorage.reverseBudgetTransaction(tx.id, req.user!.id);
+      }
+      await storage.deleteAppointment(id);
+    });
+    reversedTransactions = transactions.length;
+  } else {
+    const deleted = await storage.deleteAppointment(id);
+    if (!deleted) {
+      return sendServerError(res, ErrorMessages.deleteAppointmentFailed);
+    }
+  }
+
+  await auditService.log(
+    "appointment_deleted",
+    "appointment",
     id,
-    { customerId: appointment.customerId, date: appointment.date, status: appointment.status },
+    {
+      customerId: appointment.customerId,
+      date: appointment.date,
+      status: appointment.status,
+      adminForceDelete: isAdmin && isCompleted,
+      reversedTransactions,
+      wasLocked: isLocked,
+    },
     ip
   );
-
-  const deleted = await storage.deleteAppointment(id);
-  if (!deleted) {
-    return sendServerError(res, ErrorMessages.deleteAppointmentFailed);
-  }
 
   if (appointment.date) {
     const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
