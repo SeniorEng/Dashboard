@@ -976,7 +976,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         customerKilometers: Math.round(params.customerKilometers * 10),
         customerKilometersCents: costs.customerKilometersCents,
         userId: params.userId,
-      });
+      }, tx);
 
       if (cascadeResult.outstandingCents > 0) {
         if (acceptsPrivatePayment) {

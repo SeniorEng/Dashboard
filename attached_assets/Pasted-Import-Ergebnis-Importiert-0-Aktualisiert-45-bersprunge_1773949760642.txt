@@ -1,0 +1,98 @@
+Import-Ergebnis
+Importiert
+0
+Aktualisiert
+45
+Übersprungen
+2
+Fehler
+88
+Fehler-Details:
+Zeile 3: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 4: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 5: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 6: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 7: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 8: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 9: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 10: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 11: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 12: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 13: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 14: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 15: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 16: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 17: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 18: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 19: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 20: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 21: Budget reicht nicht aus. Fehlbetrag: 57.98 €. Kosten: 57.98 €. §45b verfügbar: 0.00 €, §39/42a verfügbar: 0.00 €, §45a verfügbar: 0.00 €. Kunde akzeptiert keine Privatzahlung.
+Zeile 22: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 23: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 24: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 25: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 26: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 33: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 39: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 49: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 59: Budget reicht nicht aus. Fehlbetrag: 67.66 €. Kosten: 67.66 €. §45b verfügbar: 0.00 €, §39/42a verfügbar: 0.00 €, §45a verfügbar: 0.00 €. Kunde akzeptiert keine Privatzahlung.
+Zeile 60: Budget reicht nicht aus. Fehlbetrag: 57.28 €. Kosten: 57.28 €. §45b verfügbar: 0.00 €, §39/42a verfügbar: 0.00 €, §45a verfügbar: 0.00 €. Kunde akzeptiert keine Privatzahlung.
+Zeile 61: Budget reicht nicht aus. Fehlbetrag: 84.28 €. Kosten: 84.28 €. §45b verfügbar: 0.00 €, §39/42a verfügbar: 0.00 €, §45a verfügbar: 0.00 €. Kunde akzeptiert keine Privatzahlung.
+Zeile 62: Budget reicht nicht aus. Fehlbetrag: 128.00 €. Kosten: 128.00 €. §45b verfügbar: 0.00 €, §39/42a verfügbar: 0.00 €, §45a verfügbar: 0.00 €. Kunde akzeptiert keine Privatzahlung.
+Zeile 63: Budget reicht nicht aus. Fehlbetrag: 38.00 €. Kosten: 38.00 €. §45b verfügbar: 0.00 €, §39/42a verfügbar: 0.00 €, §45a verfügbar: 0.00 €. Kunde akzeptiert keine Privatzahlung.
+Zeile 64: Budget reicht nicht aus. Fehlbetrag: 81.41 €. Kosten: 81.41 €. §45b verfügbar: 0.00 €, §39/42a verfügbar: 0.00 €, §45a verfügbar: 0.00 €. Kunde akzeptiert keine Privatzahlung.
+Zeile 66: Budget reicht nicht aus. Fehlbetrag: 63.72 €. Kunde akzeptiert keine Privatzahlung.
+Zeile 74: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 82: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 83: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 84: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 86: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 89: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 90: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 91: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 92: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 93: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 94: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 95: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 96: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 97: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 98: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 99: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 100: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 101: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 102: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 103: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 104: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 105: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 106: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 107: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 108: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 109: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 110: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 111: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 112: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 113: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 114: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 115: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 116: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 117: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 118: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 119: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 120: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 121: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 122: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 123: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 124: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 125: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 126: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 127: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 128: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 129: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 130: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 131: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 132: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 133: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 134: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 135: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 136: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk"
+Zeile 137: insert or update on table "budget_transactions" violates foreign key constraint "budget_transactions_appointment_id_appointments_id_fk
