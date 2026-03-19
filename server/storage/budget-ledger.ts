@@ -1440,11 +1440,14 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     customerKilometers: number;
     customerKilometersCents: number;
     userId?: number;
+    skipExistingCheck?: boolean;
   }, outerTx?: DbClient): Promise<CascadeResult> {
     const doWork = async (tx: DbClient) => {
-      const existingTransaction = await this.getTransactionByAppointmentId(params.appointmentId, tx);
-      if (existingTransaction) {
-        throw new Error(`Für diesen Termin wurde bereits eine Budget-Abbuchung erstellt (Transaktion #${existingTransaction.id})`);
+      if (!params.skipExistingCheck) {
+        const existingTransaction = await this.getTransactionByAppointmentId(params.appointmentId, tx);
+        if (existingTransaction) {
+          throw new Error(`Für diesen Termin wurde bereits eine Budget-Abbuchung erstellt (Transaktion #${existingTransaction.id})`);
+        }
       }
 
       const typeSettings = await this.getBudgetTypeSettings(params.customerId, tx);
@@ -1599,6 +1602,189 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       return await doWork(outerTx);
     }
     return await db.transaction(async (tx: DbClient) => doWork(tx));
+  }
+  async getRebookPreview(customerId: number): Promise<{
+    disabledTypes: string[];
+    affectedAppointments: number;
+    totalAmountCents: number;
+    transactions: Array<{ id: number; budgetType: string; amountCents: number; appointmentId: number | null; transactionDate: string }>;
+  }> {
+    const typeSettings = await this.getBudgetTypeSettings(customerId);
+    const disabledTypes = typeSettings.filter(s => !s.enabled).map(s => s.budgetType);
+
+    if (disabledTypes.length === 0) {
+      return { disabledTypes: [], affectedAppointments: 0, totalAmountCents: 0, transactions: [] };
+    }
+
+    const consumptions = await db.select()
+      .from(budgetTransactions)
+      .where(and(
+        eq(budgetTransactions.customerId, customerId),
+        eq(budgetTransactions.transactionType, "consumption"),
+        inArray(budgetTransactions.budgetType, disabledTypes),
+      ));
+
+    const reversals = await db.select()
+      .from(budgetTransactions)
+      .where(and(
+        eq(budgetTransactions.customerId, customerId),
+        eq(budgetTransactions.transactionType, "reversal"),
+        inArray(budgetTransactions.budgetType, disabledTypes),
+      ));
+
+    const reversedIds = new Set(
+      reversals
+        .map(r => r.notes?.match(/Storno von Transaktion #(\d+)/)?.[1])
+        .filter(Boolean)
+        .map(Number)
+    );
+
+    const unreversed = consumptions.filter(c => !reversedIds.has(c.id));
+
+    const appointmentIds = new Set(unreversed.filter(c => c.appointmentId).map(c => c.appointmentId!));
+    const totalAmountCents = unreversed.reduce((sum, c) => sum + Math.abs(c.amountCents), 0);
+
+    return {
+      disabledTypes,
+      affectedAppointments: appointmentIds.size,
+      totalAmountCents,
+      transactions: unreversed.map(c => ({
+        id: c.id,
+        budgetType: c.budgetType,
+        amountCents: c.amountCents,
+        appointmentId: c.appointmentId,
+        transactionDate: c.transactionDate,
+      })),
+    };
+  }
+
+  async rebookDisabledBudgetTransactions(customerId: number, userId: number): Promise<{
+    reversedCount: number;
+    rebookedCount: number;
+    totalOldAmountCents: number;
+    totalNewAmountCents: number;
+    errors: Array<{ appointmentId: number; error: string }>;
+  }> {
+    const preview = await this.getRebookPreview(customerId);
+    if (preview.transactions.length === 0) {
+      return { reversedCount: 0, rebookedCount: 0, totalOldAmountCents: 0, totalNewAmountCents: 0, errors: [] };
+    }
+
+    const byAppointment = new Map<number, typeof preview.transactions>();
+    for (const tx of preview.transactions) {
+      if (!tx.appointmentId) continue;
+      const existing = byAppointment.get(tx.appointmentId) || [];
+      existing.push(tx);
+      byAppointment.set(tx.appointmentId, existing);
+    }
+
+    let reversedCount = 0;
+    let rebookedCount = 0;
+    let totalOldAmountCents = 0;
+    let totalNewAmountCents = 0;
+    const errors: Array<{ appointmentId: number; error: string }> = [];
+
+    for (const [appointmentId, txs] of byAppointment) {
+      try {
+        const txResult = await db.transaction(async (tx) => {
+          await (tx as typeof db).execute(sql`SELECT pg_advisory_xact_lock(${sql.raw(String(customerId))})`);
+
+          let localReversedCount = 0;
+          let localOldAmountCents = 0;
+
+          for (const oldTx of txs) {
+            await tx.insert(budgetTransactions).values({
+              customerId,
+              budgetType: oldTx.budgetType,
+              transactionDate: todayISO(),
+              transactionType: "reversal",
+              amountCents: -oldTx.amountCents,
+              appointmentId: oldTx.appointmentId,
+              notes: `Storno von Transaktion #${oldTx.id} (Umbuchung)`,
+              createdByUserId: userId,
+            });
+            localReversedCount++;
+            localOldAmountCents += Math.abs(oldTx.amountCents);
+          }
+
+          const [appt] = await tx.select({
+            customerId: appointments.customerId,
+            date: appointments.date,
+            travelKilometers: appointments.travelKilometers,
+            customerKilometers: appointments.customerKilometers,
+          }).from(appointments).where(eq(appointments.id, appointmentId)).limit(1);
+
+          if (!appt) throw new Error(`Termin #${appointmentId} nicht gefunden`);
+
+          const apptServices = await tx.select({
+            serviceId: appointmentServices.serviceId,
+            actualDurationMinutes: appointmentServices.actualDurationMinutes,
+          }).from(appointmentServices).where(eq(appointmentServices.appointmentId, appointmentId));
+
+          const allServices = await tx.select({
+            id: services.id,
+            code: services.code,
+          }).from(services);
+
+          const serviceCodeMap = new Map(allServices.map(s => [s.id, s.code]));
+
+          let hwMinutes = 0;
+          let abMinutes = 0;
+          for (const as of apptServices) {
+            const code = serviceCodeMap.get(as.serviceId);
+            const mins = as.actualDurationMinutes ?? 0;
+            if (code === "hauswirtschaft") hwMinutes += mins;
+            else if (code === "alltagsbegleitung") abMinutes += mins;
+          }
+
+          const travelKm = appt.travelKilometers ?? 0;
+          const customerKm = appt.customerKilometers ?? 0;
+          const txDate = typeof appt.date === "string" ? appt.date : String(appt.date);
+
+          const costs = await this.calculateAppointmentCost({
+            customerId,
+            hauswirtschaftMinutes: hwMinutes,
+            alltagsbegleitungMinutes: abMinutes,
+            travelKilometers: travelKm,
+            customerKilometers: customerKm,
+            date: txDate,
+          });
+
+          let localNewAmountCents = 0;
+          if (costs.totalCents > 0) {
+            const cascadeResult = await this.createCascadeConsumption({
+              customerId,
+              appointmentId,
+              transactionDate: txDate,
+              totalAmountCents: costs.totalCents,
+              hauswirtschaftMinutes: hwMinutes,
+              hauswirtschaftCents: costs.hauswirtschaftCents,
+              alltagsbegleitungMinutes: abMinutes,
+              alltagsbegleitungCents: costs.alltagsbegleitungCents,
+              travelKilometers: Math.round(travelKm * 10),
+              travelCents: costs.travelCents,
+              customerKilometers: Math.round(customerKm * 10),
+              customerKilometersCents: costs.customerKilometersCents,
+              userId,
+              skipExistingCheck: true,
+            }, tx);
+            localNewAmountCents = cascadeResult.totalConsumedCents;
+          }
+
+          return { localReversedCount, localOldAmountCents, localNewAmountCents };
+        });
+
+        reversedCount += txResult.localReversedCount;
+        totalOldAmountCents += txResult.localOldAmountCents;
+        totalNewAmountCents += txResult.localNewAmountCents;
+        rebookedCount++;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push({ appointmentId, error: msg });
+      }
+    }
+
+    return { reversedCount, rebookedCount, totalOldAmountCents, totalNewAmountCents, errors };
   }
 }
 

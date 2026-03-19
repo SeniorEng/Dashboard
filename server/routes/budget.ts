@@ -685,4 +685,31 @@ router.post("/transactions/:transactionId/reverse", asyncHandler("Storno konnte 
   res.status(201).json(reversal);
 }));
 
+router.get("/:customerId/rebook-preview", requireAdmin, asyncHandler("Umbuchungs-Vorschau konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
+
+  const preview = await budgetLedgerStorage.getRebookPreview(customerId);
+  res.json(preview);
+}));
+
+router.post("/:customerId/rebook", requireAdmin, asyncHandler("Umbuchung konnte nicht durchgeführt werden", async (req: Request, res: Response) => {
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
+
+  const userId = req.user!.id;
+  const result = await budgetLedgerStorage.rebookDisabledBudgetTransactions(customerId, userId);
+
+  const ip = req.ip || req.socket?.remoteAddress || "unknown";
+  await auditService.log(userId, "budget_rebook", "budget", customerId, {
+    reversedCount: result.reversedCount,
+    rebookedCount: result.rebookedCount,
+    totalOldAmountCents: result.totalOldAmountCents,
+    totalNewAmountCents: result.totalNewAmountCents,
+    errors: result.errors,
+  }, ip);
+
+  res.json(result);
+}));
+
 export default router;

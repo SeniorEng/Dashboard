@@ -5,7 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { StatusBadge } from "@/components/patterns/status-badge";
-import { ArrowUp, ArrowDown, Save, Plus, History, ChevronDown, ChevronUp, ChevronRight, Trash2 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { ArrowUp, ArrowDown, Save, Plus, History, ChevronDown, ChevronUp, ChevronRight, Trash2, RefreshCw, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { BUDGET_TYPE_LABELS, type BudgetType, BUDGET_45B_MAX_MONTHLY_CENTS, BUDGET_39_42A_MAX_YEARLY_CENTS, BUDGET_45A_MAX_BY_PFLEGEGRAD } from "@shared/domain/budgets";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -335,7 +336,159 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
           {saveMutation.isPending ? "Wird gespeichert..." : "Einstellungen speichern"}
         </Button>
       )}
+
+      {!hasChanges && <RebookSection customerId={customerId} />}
     </div>
+  );
+}
+
+interface RebookPreview {
+  disabledTypes: string[];
+  affectedAppointments: number;
+  totalAmountCents: number;
+  transactions: Array<{ id: number; budgetType: string; amountCents: number; appointmentId: number | null; transactionDate: string }>;
+}
+
+interface RebookResult {
+  reversedCount: number;
+  rebookedCount: number;
+  totalOldAmountCents: number;
+  totalNewAmountCents: number;
+  errors: Array<{ appointmentId: number; error: string }>;
+}
+
+function RebookSection({ customerId }: { customerId: number }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [showDialog, setShowDialog] = useState(false);
+
+  const { data: preview, isLoading: previewLoading, isError: previewError, refetch } = useQuery<RebookPreview>({
+    queryKey: ["budget-rebook-preview", customerId],
+    queryFn: async () => unwrapResult(await api.get<RebookPreview>(`/budget/${customerId}/rebook-preview`)),
+    staleTime: 30000,
+    enabled: false,
+  });
+
+  const rebookMutation = useMutation({
+    mutationFn: async () => {
+      return unwrapResult(await api.post<RebookResult>(`/budget/${customerId}/rebook`, {}));
+    },
+    onSuccess: (result) => {
+      setShowDialog(false);
+      invalidateRelated(queryClient, "budget");
+      if (result.errors.length > 0) {
+        toast({
+          variant: "destructive",
+          title: `Umbuchung teilweise abgeschlossen`,
+          description: `${result.rebookedCount} Termine umgebucht, ${result.errors.length} Fehler`,
+        });
+      } else {
+        toast({
+          title: "Umbuchung erfolgreich",
+          description: `${result.rebookedCount} Termine umgebucht · ${formatCurrency(result.totalOldAmountCents)} → ${formatCurrency(result.totalNewAmountCents)}`,
+        });
+      }
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Fehler bei Umbuchung", description: error.message });
+    },
+  });
+
+  const handleOpenDialog = async () => {
+    setShowDialog(true);
+    refetch();
+  };
+
+  const hasRebookableTransactions = preview && preview.transactions.length > 0;
+
+  return (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={handleOpenDialog}
+        className="w-full text-xs"
+        data-testid="btn-open-rebook-dialog"
+      >
+        <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+        Buchungen auf aktive Töpfe umbuchen
+      </Button>
+
+      <Dialog open={showDialog} onOpenChange={setShowDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RefreshCw className="h-5 w-5" />
+              Budget-Umbuchung
+            </DialogTitle>
+          </DialogHeader>
+
+          {previewLoading ? (
+            <div className="py-6 text-center text-sm text-gray-500">Vorschau wird geladen...</div>
+          ) : previewError ? (
+            <div className="py-6 text-center space-y-2">
+              <p className="text-sm text-red-600">Vorschau konnte nicht geladen werden.</p>
+              <Button variant="outline" size="sm" onClick={() => refetch()} data-testid="btn-retry-rebook-preview">
+                Erneut versuchen
+              </Button>
+            </div>
+          ) : !hasRebookableTransactions ? (
+            <div className="py-6 text-center text-sm text-gray-500">
+              Keine Buchungen auf deaktivierten Töpfen gefunden. Es gibt nichts umzubuchen.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                <div className="text-sm text-amber-800">
+                  <p className="font-medium mb-1">Folgende Buchungen werden umgebucht:</p>
+                  <ul className="space-y-1 text-xs">
+                    {preview!.disabledTypes.map(t => (
+                      <li key={t}>
+                        {BUDGET_TYPE_LABELS[t as BudgetType] || t}: {preview!.transactions.filter(tx => tx.budgetType === t).length} Buchungen
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-500">Betroffene Termine</p>
+                  <p className="text-lg font-bold text-gray-900" data-testid="text-rebook-appointments">{preview!.affectedAppointments}</p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-500">Gesamtbetrag</p>
+                  <p className="text-lg font-bold text-gray-900" data-testid="text-rebook-amount">{formatCurrency(preview!.totalAmountCents)}</p>
+                </div>
+              </div>
+
+              <p className="text-xs text-gray-500">
+                Die Buchungen werden von deaktivierten Töpfen storniert und auf die aktiven Töpfe (nach Priorität) neu gebucht.
+              </p>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setShowDialog(false)}>
+              Abbrechen
+            </Button>
+            {hasRebookableTransactions && (
+              <Button
+                size="sm"
+                onClick={() => rebookMutation.mutate()}
+                disabled={rebookMutation.isPending}
+                data-testid="btn-confirm-rebook"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${rebookMutation.isPending ? "animate-spin" : ""}`} />
+                {rebookMutation.isPending ? "Wird umgebucht..." : "Jetzt umbuchen"}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
