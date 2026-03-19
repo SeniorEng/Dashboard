@@ -273,6 +273,15 @@ router.get("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
       return s || { ...d, customerId, id: null };
     });
     merged.sort((a, b) => a.priority - b.priority);
+    const seenPriorities = new Set<number>();
+    const needsRenumber = merged.some(m => {
+      if (seenPriorities.has(m.priority)) return true;
+      seenPriorities.add(m.priority);
+      return false;
+    });
+    if (needsRenumber) {
+      merged.forEach((m, i) => { m.priority = i + 1; });
+    }
     res.json(merged);
   }
 }));
