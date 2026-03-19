@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, Loader2, FileText, Wrench, Landmark } from "lucide-react";
+import { ArrowLeft, Loader2, FileText, Wrench, Landmark, Phone } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -137,6 +137,11 @@ export default function AdminSettings() {
         qontoLogin: companyData.qontoLogin ?? "",
         qontoSecretKey: companyData.qontoSecretKey ?? "",
         qontoIban: companyData.qontoIban ?? "",
+        twilioAccountSid: companyData.twilioAccountSid ?? "",
+        twilioAuthToken: companyData.twilioAuthToken ?? "",
+        twilioPhoneNumber: companyData.twilioPhoneNumber ?? "",
+        leadCallBridgePhone: companyData.leadCallBridgePhone ?? "",
+        leadCallBridgeEnabled: companyData.leadCallBridgeEnabled ?? false,
       });
     }
   }, [companyData]);
@@ -300,6 +305,109 @@ export default function AdminSettings() {
                 </CardContent>
               </Card>
               )}
+
+              <Card data-testid="card-lead-call-bridge">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Phone className="h-5 w-5 text-green-600" />
+                    Lead-Anruf-Brücke (Twilio)
+                  </CardTitle>
+                  <CardDescription>
+                    Automatischer Anruf bei neuem Lead: Das System ruft den Mitarbeiter an und verbindet ihn per Tastendruck mit dem Interessenten.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-col gap-4">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="lead-bridge-toggle" className="text-base font-medium">
+                        Anruf-Brücke aktiviert
+                      </Label>
+                      <Switch
+                        id="lead-bridge-toggle"
+                        data-testid="switch-lead-call-bridge"
+                        checked={companyForm.leadCallBridgeEnabled}
+                        onCheckedChange={(checked) => updateField("leadCallBridgeEnabled", checked)}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="twilioAccountSid">Twilio Account SID</Label>
+                        <Input
+                          id="twilioAccountSid"
+                          value={companyForm.twilioAccountSid}
+                          onChange={(e) => updateField("twilioAccountSid", e.target.value)}
+                          placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                          data-testid="input-twilio-account-sid"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="twilioAuthToken">Auth Token</Label>
+                        <Input
+                          id="twilioAuthToken"
+                          type="password"
+                          value={companyForm.twilioAuthToken}
+                          onChange={(e) => updateField("twilioAuthToken", e.target.value)}
+                          placeholder="Twilio Auth Token"
+                          data-testid="input-twilio-auth-token"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="twilioPhoneNumber">Twilio-Telefonnummer (Absender)</Label>
+                        <Input
+                          id="twilioPhoneNumber"
+                          value={companyForm.twilioPhoneNumber}
+                          onChange={(e) => updateField("twilioPhoneNumber", e.target.value)}
+                          placeholder="+49..."
+                          data-testid="input-twilio-phone-number"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="leadCallBridgePhone">Mitarbeiter-Rufnummer</Label>
+                        <Input
+                          id="leadCallBridgePhone"
+                          value={companyForm.leadCallBridgePhone}
+                          onChange={(e) => updateField("leadCallBridgePhone", e.target.value)}
+                          placeholder="+49..."
+                          data-testid="input-lead-call-bridge-phone"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!companyForm.twilioAccountSid || !companyForm.twilioAuthToken || !companyForm.twilioPhoneNumber || !companyForm.leadCallBridgePhone}
+                        data-testid="button-test-call"
+                        onClick={async () => {
+                          try {
+                            await companySaveMutation.mutateAsync(companyForm);
+                            const res = await api.post<{ success: boolean; message: string }>("/admin/twilio/test-call", {});
+                            const result = unwrapResult(res);
+                            toast({
+                              title: result.success ? "Testanruf gestartet" : "Testanruf fehlgeschlagen",
+                              description: result.message,
+                              variant: result.success ? "default" : "destructive",
+                            });
+                          } catch (err: unknown) {
+                            toast({ title: "Fehler", description: err instanceof Error ? err.message : "Unbekannter Fehler", variant: "destructive" });
+                          }
+                        }}
+                      >
+                        <Phone className="h-4 w-4 mr-2" />
+                        Testanruf
+                      </Button>
+                      <span className="text-xs text-muted-foreground">
+                        Speichert zuerst die Einstellungen und ruft dann die Mitarbeiter-Nummer an.
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Einstellungen werden beim Speichern der Firmendaten mit gespeichert. Bei aktivierter Brücke wird der Mitarbeiter automatisch angerufen, sobald ein neuer Lead mit Telefonnummer eingeht.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
 
               <Card data-testid="card-cover-letter-settings">
                 <CardHeader>

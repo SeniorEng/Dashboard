@@ -18,6 +18,7 @@ import prospectsRouter from "./admin/prospects";
 import qontoRouter from "./admin/qonto";
 import whatsappRouter from "./admin/whatsapp";
 import importAppointmentsRouter from "./admin/import-appointments";
+import { initiateTestCall } from "../services/twilio-call-bridge";
 
 const router = Router();
 
@@ -139,5 +140,10 @@ router.use("/", lexwareExportRouter);
 router.use("/", documentDeliveryRouter);
 router.use("/", prospectsRouter);
 router.use("/", importAppointmentsRouter);
+
+router.post("/twilio/test-call", requireSuperAdmin, asyncHandler("Testanruf fehlgeschlagen", async (_req: Request, res: Response) => {
+  const result = await initiateTestCall();
+  res.json(result);
+}));
 
 export default router;

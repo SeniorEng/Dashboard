@@ -52,6 +52,11 @@ export const emptyCompanyForm = {
   qontoLogin: "",
   qontoSecretKey: "",
   qontoIban: "",
+  twilioAccountSid: "",
+  twilioAuthToken: "",
+  twilioPhoneNumber: "",
+  leadCallBridgePhone: "",
+  leadCallBridgeEnabled: false,
 };
 
 export type CompanyFormData = typeof emptyCompanyForm;

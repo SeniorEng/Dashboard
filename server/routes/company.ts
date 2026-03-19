@@ -9,8 +9,23 @@ import { geocodeCompanySettings } from "../services/geocoding";
 const router = Router();
 router.use(requireAuth);
 
-router.get("/", asyncHandler("Firmendaten konnten nicht geladen werden", async (_req, res) => {
+const SENSITIVE_FIELDS = ["twilioAuthToken", "twilioAccountSid", "epostSecret", "qontoSecretKey"] as const;
+
+router.get("/", asyncHandler("Firmendaten konnten nicht geladen werden", async (req, res) => {
   const settings = await storage.getCompanySettings();
+  if (!settings) { res.json(settings); return; }
+
+  const user = req.user!;
+  if (!user.isAdmin && !user.isSuperAdmin) {
+    const masked = { ...settings };
+    for (const field of SENSITIVE_FIELDS) {
+      if (field in masked) {
+        (masked as Record<string, unknown>)[field] = "";
+      }
+    }
+    res.json(masked);
+    return;
+  }
   res.json(settings);
 }));
 

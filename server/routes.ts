@@ -3,6 +3,7 @@ import { type Server } from "http";
 import apiRouter from "./routes/index";
 import publicSigningRouter from "./routes/public-signing";
 import webhookRouter from "./routes/webhook";
+import twilioWebhookRouter from "./routes/webhook-twilio";
 import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
 import { db } from "./lib/db";
 import { sql } from "drizzle-orm";
@@ -24,6 +25,7 @@ export async function registerRoutes(
   app.use("/api/public", publicSigningRouter);
 
   app.use("/api/webhook", webhookRouter);
+  app.use("/api/webhook/twilio", twilioWebhookRouter);
 
   app.use("/api", apiRouter);
 

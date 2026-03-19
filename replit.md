@@ -157,9 +157,17 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Vitest config**: `fileParallelism: false` to prevent rate-limit collisions across test files sharing backend state.
 - **Login rate limit**: 100 attempts in dev (10 in production) to accommodate test suite runs.
 
+## Lead-Anruf-Brücke (Twilio)
+- **Funktion**: Bei neuem Lead mit Telefonnummer wird automatisch der konfigurierte Mitarbeiter angerufen (via Twilio). Ansage mit Lead-Details, bei Tastendruck "1" wird der Lead-Interessent direkt verbunden.
+- **Service**: `server/services/twilio-call-bridge.ts` — `initiateLeadCallBridge()` (fire-and-forget aus Webhook) + `initiateTestCall()` (Admin-Test).
+- **Webhook-Routen**: `server/routes/webhook-twilio.ts` — `/api/webhook/twilio/gather` (TwiML Gather→Dial) + `/api/webhook/twilio/status` (Anruf-Status-Notiz). Beide mit strenger Twilio-Signaturvalidierung.
+- **Admin-UI**: Karte "Lead-Anruf-Brücke" in Einstellungen mit Twilio-Feldern, Enable-Toggle und Testanruf-Button.
+- **DB-Felder**: `company_settings.twilio_account_sid`, `twilio_auth_token`, `twilio_phone_number`, `lead_call_bridge_phone`, `lead_call_bridge_enabled`.
+- **Sicherheit**: Twilio-Credentials nur für Admin/SuperAdmin sichtbar (non-admin GET maskiert). Webhook-Endpunkte validieren X-Twilio-Signature strikt.
+
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)
 - **Frontend Libraries**: React, TypeScript, Vite, Wouter, `shadcn/ui`, Radix UI, Tailwind CSS v4, TanStack Query, Zod.
 - **Backend Libraries**: Express.js, TypeScript, Zod, Drizzle ORM.
-- **Utilities**: `libphonenumber-js/min`, Puppeteer (for PDF generation).
+- **Utilities**: `libphonenumber-js/min`, Puppeteer (for PDF generation), Twilio (for Lead-Anruf-Brücke).
 - **Monitoring**: `GET /api/health` endpoint (unauthenticated) for load balancer health checks, returns DB connectivity status.
