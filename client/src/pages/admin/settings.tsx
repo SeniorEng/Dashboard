@@ -374,6 +374,7 @@ export default function AdminSettings() {
                         />
                       </div>
                     </div>
+                    {isSuperAdmin && (
                     <div className="flex items-center gap-3">
                       <Button
                         variant="outline"
@@ -402,6 +403,7 @@ export default function AdminSettings() {
                         Speichert zuerst die Einstellungen und ruft dann die Mitarbeiter-Nummer an.
                       </span>
                     </div>
+                    )}
                     <p className="text-xs text-muted-foreground">
                       Einstellungen werden beim Speichern der Firmendaten mit gespeichert. Bei aktivierter Brücke wird der Mitarbeiter automatisch angerufen, sobald ein neuer Lead mit Telefonnummer eingeht.
                     </p>
