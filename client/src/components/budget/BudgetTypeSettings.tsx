@@ -337,7 +337,11 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
         </Button>
       )}
 
-      {!hasChanges && <RebookSection customerId={customerId} />}
+      {hasChanges ? (
+        <p className="text-xs text-gray-400 text-center">Bitte erst Einstellungen speichern, um Umbuchungen vorzunehmen.</p>
+      ) : (
+        <RebookSection customerId={customerId} />
+      )}
     </div>
   );
 }
@@ -463,7 +467,7 @@ function RebookSection({ customerId }: { customerId: number }) {
               </div>
 
               <p className="text-xs text-gray-500">
-                Die Buchungen werden von deaktivierten Töpfen storniert und auf die aktiven Töpfe (nach Priorität) neu gebucht.
+                Alle Buchungen betroffener Termine werden komplett storniert und auf die aktiven Töpfe (nach Priorität) neu berechnet.
               </p>
             </div>
           )}
