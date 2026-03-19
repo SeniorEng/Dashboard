@@ -76,7 +76,7 @@ export async function initiateLeadCallBridge(params: CallBridgeParams): Promise<
       from: config.twilioPhone,
       twiml,
       statusCallback: `${baseUrl}/api/webhook/twilio/status?prospectId=${prospectId}`,
-      statusCallbackEvent: ["completed", "busy", "no-answer", "failed"],
+      statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
       statusCallbackMethod: "POST",
     });
 
