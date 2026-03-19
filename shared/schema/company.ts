@@ -3,6 +3,17 @@ import { z } from "zod";
 import { timestamp } from "./common";
 import { users } from "./users";
 import { customers } from "./customers";
+import { validateGermanPhone } from "../utils/phone";
+
+const optionalPhoneE164 = z.string().optional().nullable().transform((val, ctx) => {
+  if (!val || val.trim() === "") return val;
+  const result = validateGermanPhone(val);
+  if (!result.valid) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: result.error || "Ungültige Telefonnummer" });
+    return z.NEVER;
+  }
+  return result.e164;
+});
 import { generatedDocuments } from "./documents";
 
 export const companySettings = pgTable("company_settings", {
@@ -111,8 +122,8 @@ export const updateCompanySettingsSchema = z.object({
   whatsappEnabled: z.boolean().optional(),
   twilioAccountSid: z.string().optional().nullable(),
   twilioAuthToken: z.string().optional().nullable(),
-  twilioPhoneNumber: z.string().optional().nullable(),
-  leadCallBridgePhone: z.string().optional().nullable(),
+  twilioPhoneNumber: optionalPhoneE164,
+  leadCallBridgePhone: optionalPhoneE164,
   leadCallBridgeEnabled: z.boolean().optional(),
   deliveryEmailSubject: z.string().optional().nullable(),
   deliveryCoverLetterText: z.string().optional().nullable(),

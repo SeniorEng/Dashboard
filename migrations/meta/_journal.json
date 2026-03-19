@@ -15,6 +15,13 @@
       "when": 1773950400000,
       "tag": "0001_fix_budget_priority_duplicates",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1773956443279,
+      "tag": "0002_unknown_klaw",
+      "breakpoints": true
     }
   ]
 }
