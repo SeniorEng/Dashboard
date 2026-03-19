@@ -37,6 +37,28 @@ export async function getCustomerCurrentContract(customerId: number): Promise<(C
   return { ...contract, rates };
 }
 
+export async function getCustomerLatestContract(customerId: number): Promise<(CustomerContract & { rates: CustomerContractRate[] }) | undefined> {
+  const contractResult = await db
+    .select()
+    .from(customerContracts)
+    .where(eq(customerContracts.customerId, customerId))
+    .orderBy(customerContracts.id)
+    .limit(1);
+  
+  if (contractResult.length === 0) return undefined;
+  
+  const contract = contractResult[0];
+  const rates = await db
+    .select()
+    .from(customerContractRates)
+    .where(and(
+      eq(customerContractRates.contractId, contract.id),
+      isNull(customerContractRates.validTo)
+    ));
+  
+  return { ...contract, rates };
+}
+
 export async function createCustomerContract(data: InsertCustomerContract, userId?: number): Promise<CustomerContract> {
   const result = await db.insert(customerContracts).values({
     ...data,
@@ -73,8 +95,18 @@ export async function updateCustomerContract(contractId: number, data: Partial<{
   hoursPerPeriod: number;
   periodType: string;
 }>): Promise<CustomerContract | undefined> {
+  const updateData: Record<string, unknown> = { ...data };
+
+  if ("contractEnd" in data) {
+    if (data.contractEnd) {
+      updateData.status = "terminated";
+    } else {
+      updateData.status = "active";
+    }
+  }
+
   const result = await db.update(customerContracts)
-    .set(data)
+    .set(updateData)
     .where(eq(customerContracts.id, contractId))
     .returning();
   return result[0];

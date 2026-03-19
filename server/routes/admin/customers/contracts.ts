@@ -101,22 +101,20 @@ router.patch("/customers/:id/contract", asyncHandler("Vertrag konnte nicht aktua
     return;
   }
 
-  const [activeContract] = await db
+  const [latestContract] = await db
     .select()
     .from(customerContracts)
-    .where(and(
-      eq(customerContracts.customerId, id),
-      eq(customerContracts.status, "active")
-    ))
+    .where(eq(customerContracts.customerId, id))
+    .orderBy(customerContracts.id)
     .limit(1);
 
-  if (!activeContract) {
-    res.status(404).json({ error: "NOT_FOUND", message: "Kein aktiver Vertrag gefunden" });
+  if (!latestContract) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kein Vertrag gefunden" });
     return;
   }
 
   const validatedData = updateContractSchema.parse(req.body);
-  const result = await customerManagementStorage.updateCustomerContract(activeContract.id, validatedData);
+  const result = await customerManagementStorage.updateCustomerContract(latestContract.id, validatedData);
 
   if (!result) {
     res.status(404).json({ error: "NOT_FOUND", message: "Vertrag nicht gefunden" });

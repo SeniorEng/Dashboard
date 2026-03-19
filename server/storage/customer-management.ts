@@ -114,6 +114,7 @@ export class CustomerManagementStorage {
   addCustomerBudget = budgetsModule.addCustomerBudget;
 
   getCustomerCurrentContract = contractsModule.getCustomerCurrentContract;
+  getCustomerLatestContract = contractsModule.getCustomerLatestContract;
   createCustomerContract = contractsModule.createCustomerContract;
   addContractRate = contractsModule.addContractRate;
   getCurrentServiceRates = contractsModule.getCurrentServiceRates;
@@ -336,7 +337,7 @@ export class CustomerManagementStorage {
       this.getCustomerCareLevelHistory(customerId),
       this.getCustomerNeedsAssessment(customerId),
       this.getCustomerCurrentBudget(customerId),
-      this.getCustomerCurrentContract(customerId),
+      this.getCustomerLatestContract(customerId),
       customer.primaryEmployeeId 
         ? db.select({ id: users.id, displayName: users.displayName }).from(users).where(eq(users.id, customer.primaryEmployeeId)).then(r => r[0])
         : Promise.resolve(undefined),

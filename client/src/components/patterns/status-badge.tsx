@@ -79,12 +79,14 @@ const recordColors: Record<string, BadgeColor> = {
 const contractLabels: Record<string, string> = {
   active: "Aktiv",
   paused: "Pausiert",
+  terminated: "Beendet",
   ended: "Beendet",
 };
 
 const contractColors: Record<string, BadgeColor> = {
   active: "green",
   paused: "amber",
+  terminated: "gray",
   ended: "gray",
 };
 
