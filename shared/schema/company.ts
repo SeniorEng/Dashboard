@@ -12,7 +12,7 @@ const optionalPhoneE164 = z.string().optional().nullable().transform((val, ctx) 
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: result.error || "Ungültige Telefonnummer" });
     return z.NEVER;
   }
-  return result.e164;
+  return result.normalized;
 });
 import { generatedDocuments } from "./documents";
 
