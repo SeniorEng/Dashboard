@@ -94,19 +94,10 @@ export async function updateCustomerContract(contractId: number, data: Partial<{
   contractEnd: string | null;
   hoursPerPeriod: number;
   periodType: string;
+  status: string;
 }>): Promise<CustomerContract | undefined> {
-  const updateData: Record<string, unknown> = { ...data };
-
-  if ("contractEnd" in data) {
-    if (data.contractEnd) {
-      updateData.status = "terminated";
-    } else {
-      updateData.status = "active";
-    }
-  }
-
   const result = await db.update(customerContracts)
-    .set(updateData)
+    .set(data)
     .where(eq(customerContracts.id, contractId))
     .returning();
   return result[0];

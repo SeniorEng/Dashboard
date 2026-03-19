@@ -66,6 +66,17 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
 
   const contract = customer.currentContract;
 
+  const computedContractStatus = (() => {
+    if (!contract) return null;
+    if (contract.status === "terminated") return "terminated";
+    if (contract.status === "paused") return "paused";
+    if (contract.contractEnd) {
+      const today = new Date().toISOString().split("T")[0];
+      if (contract.contractEnd < today) return "auslaufend";
+    }
+    return "active";
+  })();
+
   const startEditing = (section: string) => {
     if (section === "vertragsdaten" && contract) {
       setContractStart(contract.contractStart || "");
@@ -146,6 +157,39 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
       setEditingSection(null);
     } catch (error: unknown) {
       toast({ variant: "destructive", title: "Fehler", description: error instanceof Error ? error.message : "Speichern fehlgeschlagen." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTerminateContract = async () => {
+    setSaving(true);
+    try {
+      const result = await api.patch(`/admin/customers/${customerId}/contract`, {
+        status: "terminated",
+      });
+      unwrapResult(result);
+      toast({ title: "Vertrag beendet" });
+      invalidateCustomer();
+    } catch (error: unknown) {
+      toast({ variant: "destructive", title: "Fehler", description: error instanceof Error ? error.message : "Vertrag konnte nicht beendet werden." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReactivateContract = async () => {
+    setSaving(true);
+    try {
+      const result = await api.patch(`/admin/customers/${customerId}/contract`, {
+        status: "active",
+        contractEnd: null,
+      });
+      unwrapResult(result);
+      toast({ title: "Vertrag reaktiviert" });
+      invalidateCustomer();
+    } catch (error: unknown) {
+      toast({ variant: "destructive", title: "Fehler", description: error instanceof Error ? error.message : "Vertrag konnte nicht reaktiviert werden." });
     } finally {
       setSaving(false);
     }
@@ -362,9 +406,39 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
               </div>
               <div>
                 <p className="text-sm text-gray-500">Status</p>
-                <StatusBadge type="contract" value={contract.status} />
+                <StatusBadge type="contract" value={computedContractStatus || contract.status} />
               </div>
             </div>
+            {contract.status !== "terminated" && computedContractStatus === "auslaufend" && (
+              <div className="pt-3 border-t">
+                <p className="text-sm text-amber-700 mb-2">
+                  Das Vertragsende wurde erreicht. Bitte prüfen Sie, ob alle Termine dokumentiert und Leistungsnachweise erstellt wurden, bevor Sie den Vertrag beenden.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive border-destructive/30 hover:bg-destructive/10"
+                  onClick={handleTerminateContract}
+                  disabled={saving}
+                  data-testid="button-terminate-contract"
+                >
+                  Vertrag beenden
+                </Button>
+              </div>
+            )}
+            {contract.status === "terminated" && (
+              <div className="pt-3 border-t">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleReactivateContract}
+                  disabled={saving}
+                  data-testid="button-reactivate-contract"
+                >
+                  Vertrag reaktivieren
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </SectionCard>

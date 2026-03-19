@@ -40,6 +40,7 @@ const updateContractSchema = z.object({
   contractEnd: z.string().nullable().optional(),
   hoursPerPeriod: z.number().int().min(0, "Muss mindestens 0 sein").optional(),
   periodType: z.enum(["week", "month", "year"]).optional(),
+  status: z.enum(["active", "paused", "terminated"]).optional(),
 });
 
 const createContractSchema = z.object({

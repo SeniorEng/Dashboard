@@ -264,6 +264,12 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     }
   }
 
+  const currentContract = await customerManagementStorage.getCustomerCurrentContract(validatedData.customerId);
+  if (currentContract?.contractEnd && validatedData.date > currentContract.contractEnd) {
+    const endFormatted = currentContract.contractEnd.split("-").reverse().join(".");
+    return sendBadRequest(res, `Der Vertrag endet am ${endFormatted}. Neue Termine können nicht nach dem Vertragsende erstellt werden.`);
+  }
+
   let assignedEmployeeId: number;
   if (user.isAdmin) {
     if (!validatedData.assignedEmployeeId) {
