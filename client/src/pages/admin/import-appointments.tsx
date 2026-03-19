@@ -509,12 +509,23 @@ export default function ImportAppointmentsPage() {
               {importResult.errors.length > 0 && (
                 <div className="mt-3">
                   <h3 className="font-medium text-sm text-red-700 mb-1">Fehler-Details:</h3>
-                  <div className="max-h-40 overflow-y-auto text-xs space-y-1">
-                    {importResult.errors.map((e, i) => (
-                      <div key={i} className="text-red-600 p-1 bg-red-50 rounded">
-                        Zeile {e.rowIndex}: {e.error}
-                      </div>
-                    ))}
+                  <div className="max-h-60 overflow-y-auto text-xs space-y-2">
+                    {importResult.errors.map((e, i) => {
+                      const row = preview?.rows.find(r => r.rowIndex === e.rowIndex);
+                      return (
+                        <div key={i} className="text-red-700 p-2 bg-red-50 rounded border border-red-200" data-testid={`error-detail-${i}`}>
+                          <div className="font-medium flex items-center gap-2 mb-1">
+                            <XCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                            {row ? (
+                              <span>{row.vorname} {row.nachname} — {row.date}, {row.startTime}–{row.endTime} ({row.serviceType})</span>
+                            ) : (
+                              <span>Zeile {e.rowIndex}</span>
+                            )}
+                          </div>
+                          <div className="text-red-600 pl-[22px]">{e.error}</div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
