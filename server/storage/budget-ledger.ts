@@ -1509,7 +1509,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           const lastDay = new Date(txYear, txMonth, 0).getDate();
           const currentMonthEnd = `${txYear}-${String(txMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
-          const monthTransactions = await tx.select({
+          const monthConsumptions = await tx.select({
             total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
           })
             .from(budgetTransactions)
@@ -1521,7 +1521,19 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
               lte(budgetTransactions.transactionDate, currentMonthEnd)
             ));
 
-          const alreadyUsedThisMonth = Number(monthTransactions[0]?.total ?? 0);
+          const monthReversals = await tx.select({
+            total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+          })
+            .from(budgetTransactions)
+            .where(and(
+              eq(budgetTransactions.customerId, params.customerId),
+              eq(budgetTransactions.budgetType, pot.budgetType),
+              eq(budgetTransactions.transactionType, "reversal"),
+              gte(budgetTransactions.transactionDate, currentMonthStart),
+              lte(budgetTransactions.transactionDate, currentMonthEnd)
+            ));
+
+          const alreadyUsedThisMonth = Math.max(0, Number(monthConsumptions[0]?.total ?? 0) - Number(monthReversals[0]?.total ?? 0));
 
           let effectiveMonthlyLimit = pot.monthlyLimitCents;
           if (pot.budgetType === "entlastungsbetrag_45b") {
@@ -1539,7 +1551,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           const yearStart = `${txYear}-01-01`;
           const yearEnd = `${txYear}-12-31`;
 
-          const yearTransactions = await tx.select({
+          const yearConsumptions = await tx.select({
             total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
           })
             .from(budgetTransactions)
@@ -1551,7 +1563,19 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
               lte(budgetTransactions.transactionDate, yearEnd)
             ));
 
-          const alreadyUsedThisYear = Number(yearTransactions[0]?.total ?? 0);
+          const yearReversals = await tx.select({
+            total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+          })
+            .from(budgetTransactions)
+            .where(and(
+              eq(budgetTransactions.customerId, params.customerId),
+              eq(budgetTransactions.budgetType, "ersatzpflege_39_42a"),
+              eq(budgetTransactions.transactionType, "reversal"),
+              gte(budgetTransactions.transactionDate, yearStart),
+              lte(budgetTransactions.transactionDate, yearEnd)
+            ));
+
+          const alreadyUsedThisYear = Math.max(0, Number(yearConsumptions[0]?.total ?? 0) - Number(yearReversals[0]?.total ?? 0));
           const yearlyRemaining = Math.max(0, pot.yearlyLimitCents - alreadyUsedThisYear);
           maxConsumable = Math.min(maxConsumable, yearlyRemaining);
         }
@@ -1721,7 +1745,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
             await tx.insert(budgetTransactions).values({
               customerId,
               budgetType: oldTx.budgetType,
-              transactionDate: todayISO(),
+              transactionDate: oldTx.transactionDate,
               transactionType: "reversal",
               amountCents: -oldTx.amountCents,
               appointmentId: oldTx.appointmentId,
@@ -1793,6 +1817,13 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
               userId,
               skipExistingCheck: true,
             }, tx);
+
+            if (cascadeResult.outstandingCents > 0) {
+              throw new Error(
+                `Ziel-Budget reicht nicht aus. ${(cascadeResult.outstandingCents / 100).toFixed(2)} € konnten nicht gebucht werden.`
+              );
+            }
+
             localNewAmountCents = cascadeResult.totalConsumedCents;
           }
 
