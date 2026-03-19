@@ -1684,15 +1684,40 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     let totalNewAmountCents = 0;
     const errors: Array<{ appointmentId: number; error: string }> = [];
 
-    for (const [appointmentId, txs] of byAppointment) {
+    for (const [appointmentId] of byAppointment) {
       try {
         const txResult = await db.transaction(async (tx) => {
           await (tx as typeof db).execute(sql`SELECT pg_advisory_xact_lock(${sql.raw(String(customerId))})`);
 
+          const allConsumptions = await tx.select()
+            .from(budgetTransactions)
+            .where(and(
+              eq(budgetTransactions.customerId, customerId),
+              eq(budgetTransactions.appointmentId, appointmentId),
+              eq(budgetTransactions.transactionType, "consumption"),
+            ));
+
+          const allReversals = await tx.select()
+            .from(budgetTransactions)
+            .where(and(
+              eq(budgetTransactions.customerId, customerId),
+              eq(budgetTransactions.appointmentId, appointmentId),
+              eq(budgetTransactions.transactionType, "reversal"),
+            ));
+
+          const alreadyReversedIds = new Set(
+            allReversals
+              .map(r => r.notes?.match(/Storno von Transaktion #(\d+)/)?.[1])
+              .filter(Boolean)
+              .map(Number)
+          );
+
+          const unreversedConsumptions = allConsumptions.filter(c => !alreadyReversedIds.has(c.id));
+
           let localReversedCount = 0;
           let localOldAmountCents = 0;
 
-          for (const oldTx of txs) {
+          for (const oldTx of unreversedConsumptions) {
             await tx.insert(budgetTransactions).values({
               customerId,
               budgetType: oldTx.budgetType,

@@ -366,7 +366,6 @@ function RebookSection({ customerId }: { customerId: number }) {
     queryKey: ["budget-rebook-preview", customerId],
     queryFn: async () => unwrapResult(await api.get<RebookPreview>(`/budget/${customerId}/rebook-preview`)),
     staleTime: 30000,
-    enabled: false,
   });
 
   const rebookMutation = useMutation({
@@ -394,12 +393,11 @@ function RebookSection({ customerId }: { customerId: number }) {
     },
   });
 
-  const handleOpenDialog = async () => {
-    setShowDialog(true);
-    refetch();
-  };
-
   const hasRebookableTransactions = preview && preview.transactions.length > 0;
+
+  if (previewLoading || !hasRebookableTransactions) {
+    return null;
+  }
 
   return (
     <>
@@ -407,12 +405,12 @@ function RebookSection({ customerId }: { customerId: number }) {
         type="button"
         variant="outline"
         size="sm"
-        onClick={handleOpenDialog}
+        onClick={() => { refetch(); setShowDialog(true); }}
         className="w-full text-xs"
         data-testid="btn-open-rebook-dialog"
       >
         <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-        Buchungen auf aktive Töpfe umbuchen
+        Buchungen auf aktive Töpfe umbuchen ({preview!.affectedAppointments} Termine)
       </Button>
 
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
