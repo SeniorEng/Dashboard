@@ -1,7 +1,7 @@
 import { pgTable, text, integer, serial, date, boolean, real, index, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
-import { timestamp, germanPhoneTransformSchema, optionalGermanPhoneSchema, internationalPhoneTransformSchema } from "./common";
+import { timestamp, germanPhoneTransformSchema, optionalGermanPhoneSchema, internationalPhoneTransformSchema, internationalEmailSchema } from "./common";
 import { users } from "./users";
 
 // ============================================
@@ -217,7 +217,7 @@ export const insertErstberatungCustomerSchema = z.object({
   vorname: z.string().min(1, "Vorname ist erforderlich"),
   nachname: z.string().min(1, "Nachname ist erforderlich"),
   telefon: germanPhoneTransformSchema,
-  email: z.string().email("Ungültige E-Mail-Adresse").optional().or(z.literal("")).nullable(),
+  email: internationalEmailSchema.optional().or(z.literal("")).nullable(),
   strasse: z.string().min(1, "Straße ist erforderlich"),
   nr: z.string().min(1, "Hausnummer ist erforderlich"),
   plz: z.string().regex(/^\d{5}$/, "PLZ muss 5 Ziffern haben"),
@@ -238,7 +238,7 @@ export const insertCustomerContactSchema = z.object({
   vorname: z.string().min(1, "Vorname ist erforderlich"),
   nachname: z.string().min(1, "Nachname ist erforderlich"),
   telefon: internationalPhoneTransformSchema,
-  email: z.string().transform(v => v?.trim() || "").pipe(z.string().email("Ungültige E-Mail-Adresse").or(z.literal(""))).optional().nullable().transform(v => !v || v === "" ? null : v),
+  email: z.string().transform(v => v?.trim() || "").pipe(internationalEmailSchema.or(z.literal(""))).optional().nullable().transform(v => !v || v === "" ? null : v),
   notes: z.string().max(255, "Maximal 255 Zeichen").optional().nullable(),
   sortOrder: z.number().optional().default(0),
 });

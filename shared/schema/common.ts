@@ -83,6 +83,15 @@ export const internationalPhoneTransformSchema = z.string().refine(
 export const ikNummerSchema = z.string()
   .regex(/^\d{9}$/, "IK-Nummer muss genau 9 Ziffern haben");
 
+export const internationalEmailSchema = z.string()
+  .refine(
+    (value) => {
+      if (!value || value.trim() === "") return true;
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+    },
+    { message: "Ungültige E-Mail-Adresse" }
+  );
+
 export const versichertennummerSchema = z.string()
   .regex(/^[A-Z]\d{9}$/, "Versichertennummer muss 1 Buchstabe + 9 Ziffern sein (z.B. A123456789)");
 

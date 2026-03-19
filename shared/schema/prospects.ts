@@ -1,7 +1,7 @@
 import { pgTable, text, integer, serial, date, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
-import { timestamp, optionalGermanPhoneSchema } from "./common";
+import { timestamp, optionalGermanPhoneSchema, internationalEmailSchema } from "./common";
 import { users } from "./users";
 import { customers } from "./customers";
 
@@ -91,7 +91,7 @@ export const insertProspectSchema = createInsertSchema(prospects).omit({
   vorname: z.string().min(1, "Vorname ist erforderlich").max(100, "Maximal 100 Zeichen"),
   nachname: z.string().min(1, "Nachname ist erforderlich").max(100, "Maximal 100 Zeichen"),
   telefon: optionalGermanPhoneSchema.nullable(),
-  email: z.string().email("Ungültige E-Mail-Adresse").optional().or(z.literal("")).nullable(),
+  email: internationalEmailSchema.optional().or(z.literal("")).nullable(),
   strasse: z.string().max(200, "Maximal 200 Zeichen").optional().nullable(),
   nr: z.string().max(20, "Maximal 20 Zeichen").optional().nullable(),
   plz: z.string().regex(/^\d{5}$/, "PLZ muss 5 Ziffern haben").optional().or(z.literal("")).nullable(),

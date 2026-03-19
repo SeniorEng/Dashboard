@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { storage } from "../storage";
 import { insertCustomerSchema, versichertennummerSchema } from "@shared/schema";
-import { optionalGermanPhoneSchema } from "@shared/schema/common";
+import { optionalGermanPhoneSchema, internationalEmailSchema } from "@shared/schema/common";
 import { requireAuth, requireRoles } from "../middleware/auth";
 import { birthdaysCache, customerIdsCache } from "../services/cache";
 import { documentStorage } from "../storage/documents";
@@ -124,7 +124,7 @@ const employeeUpdateCustomerSchema = z.object({
   stadt: z.string().min(1).max(100).optional(),
   telefon: optionalGermanPhoneSchema.optional(),
   festnetz: optionalGermanPhoneSchema.optional(),
-  email: z.string().transform(v => v?.trim() || "").pipe(z.string().email("Ungültige E-Mail-Adresse").or(z.literal(""))).nullable().optional().transform(v => !v || v === "" ? null : v),
+  email: z.string().transform(v => v?.trim() || "").pipe(internationalEmailSchema.or(z.literal(""))).nullable().optional().transform(v => !v || v === "" ? null : v),
   haustierVorhanden: z.boolean().optional(),
   haustierDetails: z.string().max(500).nullable().optional(),
   vorerkrankungen: z.string().max(2000).nullable().optional(),
@@ -348,7 +348,7 @@ const convertCustomerSchema = z.object({
   vorname: z.string().min(1),
   nachname: z.string().min(1),
   geburtsdatum: z.string().optional().nullable(),
-  email: z.string().email().optional().nullable(),
+  email: internationalEmailSchema.optional().nullable(),
   telefon: z.string().optional().nullable(),
   festnetz: z.string().optional().nullable(),
   strasse: z.string().min(1),

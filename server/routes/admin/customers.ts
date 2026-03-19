@@ -11,6 +11,7 @@ import {
   customers,
   type InsertCustomer,
 } from "@shared/schema";
+import { internationalEmailSchema } from "@shared/schema/common";
 import { asyncHandler } from "../../lib/errors";
 import { z } from "zod";
 import { db } from "../../lib/db";
@@ -156,7 +157,7 @@ const simpleCreateCustomerSchema = z.object({
   vorname: z.string().min(1, "Vorname ist erforderlich"),
   nachname: z.string().min(1, "Nachname ist erforderlich"),
   geburtsdatum: z.string().optional().nullable(),
-  email: z.string().email("Ungültige E-Mail-Adresse").optional().nullable(),
+  email: internationalEmailSchema.optional().nullable(),
   telefon: z.string().optional().nullable(),
   festnetz: z.string().optional().nullable(),
   strasse: z.string().min(1, "Straße ist erforderlich"),
@@ -389,7 +390,7 @@ const updateCustomerSchema = z.object({
   nachname: z.string().min(1, "Nachname ist erforderlich").optional(),
   billingType: z.enum(["pflegekasse_gesetzlich", "pflegekasse_privat", "selbstzahler"]).optional(),
   geburtsdatum: z.string().nullable().optional(),
-  email: z.string().email("Ungültige E-Mail-Adresse").nullable().optional(),
+  email: internationalEmailSchema.nullable().optional(),
   festnetz: z.string().nullable().optional(),
   telefon: z.string().nullable().optional(),
   strasse: z.string().min(1, "Straße ist erforderlich").optional(),

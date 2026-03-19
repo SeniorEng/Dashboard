@@ -1,6 +1,6 @@
 import { pgTable, text, integer, serial, date, boolean, index } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import { timestamp, ikNummerSchema, versichertennummerSchema, optionalGermanPhoneSchema } from "./common";
+import { timestamp, ikNummerSchema, versichertennummerSchema, optionalGermanPhoneSchema, internationalEmailSchema } from "./common";
 import { customers } from "./customers";
 import { users } from "./users";
 
@@ -81,7 +81,7 @@ export const insertInsuranceProviderSchema = z.object({
   stadt: z.string().optional().nullable(),
   telefon: optionalGermanPhoneSchema,
   fax: z.string().optional().nullable(),
-  email: z.string().email("Ungültige E-Mail-Adresse").optional().nullable(),
+  email: internationalEmailSchema.optional().nullable(),
   kimAdresse: z.string().optional().nullable(),
   ansprechpartner: z.string().optional().nullable(),
   datenannahmeIk: z.string().optional().nullable(),
