@@ -18,7 +18,7 @@ function escapeHtml(str: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function buildLeadAutoReplyHtml(options: {
+export function buildLeadAutoReplyHtml(options: {
   vorname: string;
   nachname: string;
   companyName: string;

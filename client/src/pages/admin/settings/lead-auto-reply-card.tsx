@@ -6,7 +6,8 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Mail, Upload, Trash2, Paperclip, Loader2 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Mail, Upload, Trash2, Paperclip, Loader2, Save, Eye } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import type { CompanySettings } from "@shared/schema";
@@ -24,6 +25,51 @@ export function LeadAutoReplyCard({ companyForm, companyData, updateField, compa
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState<string>("");
+  const [previewSubject, setPreviewSubject] = useState<string>("");
+  const [previewAttachment, setPreviewAttachment] = useState<string | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+
+  const hasChanges = companyData ? (
+    companyForm.leadAutoReplyEnabled !== (companyData.leadAutoReplyEnabled ?? false) ||
+    companyForm.leadAutoReplySubject !== (companyData.leadAutoReplySubject ?? "") ||
+    companyForm.leadAutoReplyBody !== (companyData.leadAutoReplyBody ?? "")
+  ) : false;
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await companySaveMutation.mutateAsync(companyForm);
+      toast({ title: "Auto-Antwort gespeichert" });
+    } catch (err) {
+      toast({ title: "Fehler beim Speichern", description: err instanceof Error ? err.message : "Unbekannter Fehler", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handlePreview = async () => {
+    setLoadingPreview(true);
+    try {
+      const params = new URLSearchParams();
+      if (companyForm.leadAutoReplySubject) params.set("subject", companyForm.leadAutoReplySubject);
+      if (companyForm.leadAutoReplyBody) params.set("body", companyForm.leadAutoReplyBody);
+      const result = await api.get<{ subject: string; html: string; attachmentName: string | null }>(
+        `/company-settings/lead-auto-reply-preview?${params.toString()}`
+      );
+      const data = unwrapResult(result);
+      setPreviewSubject(data.subject);
+      setPreviewHtml(data.html);
+      setPreviewAttachment(data.attachmentName);
+      setShowPreview(true);
+    } catch (err) {
+      toast({ title: "Vorschau konnte nicht geladen werden", description: err instanceof Error ? err.message : "Unbekannter Fehler", variant: "destructive" });
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
 
   const uploadMutation = useMutation({
     mutationFn: async (file: File) => {
@@ -101,123 +147,194 @@ export function LeadAutoReplyCard({ companyForm, companyData, updateField, compa
   const attachmentName = companyForm.leadAutoReplyAttachmentName || companyData?.leadAutoReplyAttachmentName;
 
   return (
-    <Card data-testid="card-lead-auto-reply">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Mail className="h-5 w-5 text-blue-600" />
-          Automatische Antwort bei Kundenanfrage
-        </CardTitle>
-        <CardDescription>
-          Sendet automatisch eine formatierte E-Mail mit optionalem PDF-Anhang (z.B. Infobroschüre) an den Interessenten, sobald eine neue Anfrage eingeht.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="auto-reply-toggle" className="text-base font-medium">
-              Automatische Antwort aktiviert
-            </Label>
-            <Switch
-              id="auto-reply-toggle"
-              data-testid="switch-lead-auto-reply"
-              checked={companyForm.leadAutoReplyEnabled}
-              onCheckedChange={(checked) => updateField("leadAutoReplyEnabled", checked)}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="leadAutoReplySubject">E-Mail-Betreff</Label>
-            <Input
-              id="leadAutoReplySubject"
-              value={companyForm.leadAutoReplySubject}
-              onChange={(e) => updateField("leadAutoReplySubject", e.target.value)}
-              placeholder="z.B. Vielen Dank für Ihre Anfrage bei SeniorenEngel"
-              data-testid="input-lead-auto-reply-subject"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="leadAutoReplyBody">E-Mail-Text</Label>
-            <Textarea
-              id="leadAutoReplyBody"
-              value={companyForm.leadAutoReplyBody}
-              onChange={(e) => updateField("leadAutoReplyBody", e.target.value)}
-              placeholder={"vielen Dank für Ihr Interesse an unseren Dienstleistungen.\n\nWir haben Ihre Anfrage erhalten und werden uns schnellstmöglich bei Ihnen melden.\n\nAnbei finden Sie unsere Informationsbroschüre mit einer Übersicht unserer Leistungen."}
-              rows={8}
-              data-testid="input-lead-auto-reply-body"
-            />
-            <p className="text-xs text-muted-foreground">
-              Anrede, Grußformel und Kontaktdaten werden automatisch ergänzt.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label>PDF-Anhang (optional)</Label>
-            <div className="flex items-center gap-3">
-              {attachmentName ? (
-                <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 flex-1 min-w-0">
-                  <Paperclip className="h-4 w-4 text-blue-600 shrink-0" />
-                  <span className="text-sm text-blue-800 truncate" data-testid="text-attachment-name">
-                    {attachmentName}
-                  </span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 bg-gray-50 border border-dashed border-gray-300 rounded-lg px-3 py-2 flex-1">
-                  <Paperclip className="h-4 w-4 text-gray-400" />
-                  <span className="text-sm text-gray-500">Kein Anhang hochgeladen</span>
-                </div>
-              )}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="application/pdf"
-                className="hidden"
-                onChange={handleFileSelect}
-                data-testid="input-auto-reply-attachment"
+    <>
+      <Card data-testid="card-lead-auto-reply">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Mail className="h-5 w-5 text-blue-600" />
+            Automatische Antwort bei Kundenanfrage
+          </CardTitle>
+          <CardDescription>
+            Sendet automatisch eine formatierte E-Mail mit optionalem PDF-Anhang (z.B. Infobroschüre) an den Interessenten, sobald eine neue Anfrage eingeht.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="auto-reply-toggle" className="text-base font-medium">
+                Automatische Antwort aktiviert
+              </Label>
+              <Switch
+                id="auto-reply-toggle"
+                data-testid="switch-lead-auto-reply"
+                checked={companyForm.leadAutoReplyEnabled}
+                onCheckedChange={(checked) => updateField("leadAutoReplyEnabled", checked)}
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="leadAutoReplySubject">E-Mail-Betreff</Label>
+              <Input
+                id="leadAutoReplySubject"
+                value={companyForm.leadAutoReplySubject}
+                onChange={(e) => updateField("leadAutoReplySubject", e.target.value)}
+                placeholder="z.B. Vielen Dank für Ihre Anfrage bei SeniorenEngel"
+                data-testid="input-lead-auto-reply-subject"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="leadAutoReplyBody">E-Mail-Text</Label>
+              <Textarea
+                id="leadAutoReplyBody"
+                value={companyForm.leadAutoReplyBody}
+                onChange={(e) => updateField("leadAutoReplyBody", e.target.value)}
+                placeholder={"vielen Dank für Ihr Interesse an unseren Dienstleistungen.\n\nWir haben Ihre Anfrage erhalten und werden uns schnellstmöglich bei Ihnen melden.\n\nAnbei finden Sie unsere Informationsbroschüre mit einer Übersicht unserer Leistungen."}
+                rows={8}
+                data-testid="input-lead-auto-reply-body"
+              />
+              <p className="text-xs text-muted-foreground">
+                Anrede, Grußformel und Kontaktdaten werden automatisch ergänzt.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>PDF-Anhang (optional)</Label>
+              <div className="flex items-center gap-3">
+                {attachmentName ? (
+                  <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 flex-1 min-w-0">
+                    <Paperclip className="h-4 w-4 text-blue-600 shrink-0" />
+                    <span className="text-sm text-blue-800 truncate" data-testid="text-attachment-name">
+                      {attachmentName}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 bg-gray-50 border border-dashed border-gray-300 rounded-lg px-3 py-2 flex-1">
+                    <Paperclip className="h-4 w-4 text-gray-400" />
+                    <span className="text-sm text-gray-500">Kein Anhang hochgeladen</span>
+                  </div>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="application/pdf"
+                  className="hidden"
+                  onChange={handleFileSelect}
+                  data-testid="input-auto-reply-attachment"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={uploading}
+                  onClick={() => fileInputRef.current?.click()}
+                  data-testid="button-upload-auto-reply-attachment"
+                >
+                  {uploading ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Upload className="mr-2 h-4 w-4" />
+                  )}
+                  {attachmentName ? "Ändern" : "PDF hochladen"}
+                </Button>
+                {attachmentName && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={deleteMutation.isPending}
+                    onClick={() => deleteMutation.mutate()}
+                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                    data-testid="button-delete-auto-reply-attachment"
+                  >
+                    {deleteMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                PDF-Datei, max. 10 MB. Z.B. eine Informationsbroschüre oder Leistungsübersicht.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={uploading}
-                onClick={() => fileInputRef.current?.click()}
-                data-testid="button-upload-auto-reply-attachment"
+                onClick={handlePreview}
+                disabled={loadingPreview || !companyForm.leadAutoReplyBody}
+                data-testid="button-preview-auto-reply"
               >
-                {uploading ? (
+                {loadingPreview ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
-                  <Upload className="mr-2 h-4 w-4" />
+                  <Eye className="mr-2 h-4 w-4" />
                 )}
-                {attachmentName ? "Ändern" : "PDF hochladen"}
+                Vorschau
               </Button>
-              {attachmentName && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={deleteMutation.isPending}
-                  onClick={() => deleteMutation.mutate()}
-                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                  data-testid="button-delete-auto-reply-attachment"
-                >
-                  {deleteMutation.isPending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-4 w-4" />
-                  )}
-                </Button>
-              )}
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleSave}
+                disabled={saving || !hasChanges}
+                data-testid="button-save-auto-reply"
+              >
+                {saving ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-2 h-4 w-4" />
+                )}
+                Speichern
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Dialog open={showPreview} onOpenChange={setShowPreview}>
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="h-5 w-5 text-blue-600" />
+              E-Mail-Vorschau
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 flex-1 overflow-hidden flex flex-col">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="font-medium text-gray-500 shrink-0">An:</span>
+              <span className="text-gray-700">maria.mustermann@beispiel.de</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="font-medium text-gray-500 shrink-0">Betreff:</span>
+              <span className="text-gray-900 font-medium">{previewSubject}</span>
+            </div>
+            {previewAttachment && (
+              <div className="flex items-center gap-2 text-sm">
+                <span className="font-medium text-gray-500 shrink-0">Anhang:</span>
+                <div className="flex items-center gap-1">
+                  <Paperclip className="h-3.5 w-3.5 text-blue-600" />
+                  <span className="text-blue-700">{previewAttachment}</span>
+                </div>
+              </div>
+            )}
+            <div className="border rounded-lg overflow-auto flex-1 bg-gray-50" data-testid="preview-auto-reply-email">
+              <iframe
+                srcDoc={previewHtml}
+                className="w-full h-full min-h-[400px] border-0"
+                title="E-Mail-Vorschau"
+                sandbox=""
+              />
             </div>
             <p className="text-xs text-muted-foreground">
-              PDF-Datei, max. 10 MB. Z.B. eine Informationsbroschüre oder Leistungsübersicht.
+              Vorschau mit Beispiel-Empfänger &quot;Maria Mustermann&quot;. Die tatsächliche E-Mail enthält den Namen des Interessenten.
             </p>
           </div>
-
-          <p className="text-xs text-muted-foreground">
-            Einstellungen werden beim Speichern der Firmendaten mit gespeichert. Die E-Mail wird im Firmendesign versendet (Logo, Farben, Footer) und enthält automatisch Ihre Kontaktdaten.
-          </p>
-        </div>
-      </CardContent>
-    </Card>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

@@ -5,6 +5,7 @@ import { updateCompanySettingsSchema } from "@shared/schema";
 import { fromError } from "zod-validation-error";
 import { storage } from "../storage";
 import { geocodeCompanySettings } from "../services/geocoding";
+import { buildLeadAutoReplyHtml } from "../services/lead-auto-reply";
 
 const router = Router();
 router.use(requireAuth);
@@ -42,6 +43,33 @@ router.patch("/", requireAdmin, asyncHandler("Firmendaten konnten nicht gespeich
   }
 
   res.json(updated);
+}));
+
+router.get("/lead-auto-reply-preview", requireAdmin, asyncHandler("Vorschau konnte nicht erstellt werden", async (req, res) => {
+  const settings = await storage.getCompanySettings();
+  if (!settings) {
+    throw badRequest("Keine Firmendaten vorhanden");
+  }
+
+  const subject = (req.query.subject as string) || settings.leadAutoReplySubject || "Betreff";
+  const body = (req.query.body as string) || settings.leadAutoReplyBody || "";
+
+  const html = buildLeadAutoReplyHtml({
+    vorname: "Maria",
+    nachname: "Mustermann",
+    companyName: settings.companyName || "SeniorenEngel",
+    logoUrl: settings.logoUrl,
+    bodyText: body,
+    telefon: settings.telefon,
+    email: settings.email,
+    website: settings.website,
+  });
+
+  res.json({
+    subject,
+    html,
+    attachmentName: settings.leadAutoReplyAttachmentName || null,
+  });
 }));
 
 export default router;
