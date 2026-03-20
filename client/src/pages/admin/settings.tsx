@@ -16,6 +16,7 @@ import { iconSize, componentStyles } from "@/design-system";
 import type { SystemSettings, CompanySettings } from "@shared/schema";
 import { emptyCompanyForm } from "./settings/types";
 import { LogoUploadCard } from "./settings/logo-upload";
+import { LeadAutoReplyCard } from "./settings/lead-auto-reply-card";
 import { CompanyDetailsForm } from "./settings/company-details-form";
 import { SmtpSettingsCard } from "./settings/smtp-settings";
 import { EPostSettingsCard } from "./settings/epost-settings";
@@ -142,6 +143,11 @@ export default function AdminSettings() {
         twilioPhoneNumber: companyData.twilioPhoneNumber ?? "",
         leadCallBridgePhone: companyData.leadCallBridgePhone ?? "",
         leadCallBridgeEnabled: companyData.leadCallBridgeEnabled ?? false,
+        leadAutoReplyEnabled: companyData.leadAutoReplyEnabled ?? false,
+        leadAutoReplySubject: companyData.leadAutoReplySubject ?? "",
+        leadAutoReplyBody: companyData.leadAutoReplyBody ?? "",
+        leadAutoReplyAttachmentPath: companyData.leadAutoReplyAttachmentPath ?? "",
+        leadAutoReplyAttachmentName: companyData.leadAutoReplyAttachmentName ?? "",
       });
     }
   }, [companyData]);
@@ -410,6 +416,13 @@ export default function AdminSettings() {
                   </div>
                 </CardContent>
               </Card>
+
+              <LeadAutoReplyCard
+                companyForm={companyForm}
+                companyData={companyData}
+                updateField={updateField}
+                companySaveMutation={companySaveMutation}
+              />
 
               <Card data-testid="card-cover-letter-settings">
                 <CardHeader>

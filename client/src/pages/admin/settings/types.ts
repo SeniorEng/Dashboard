@@ -57,6 +57,11 @@ export const emptyCompanyForm = {
   twilioPhoneNumber: "",
   leadCallBridgePhone: "",
   leadCallBridgeEnabled: false,
+  leadAutoReplyEnabled: false,
+  leadAutoReplySubject: "",
+  leadAutoReplyBody: "",
+  leadAutoReplyAttachmentPath: "",
+  leadAutoReplyAttachmentName: "",
 };
 
 export type CompanyFormData = typeof emptyCompanyForm;

@@ -65,7 +65,7 @@ export async function testSmtpConnection(settings: CompanySettings): Promise<{ s
   }
 }
 
-function buildEmailLayout(companyName: string, logoUrl: string | null | undefined, bodyContent: string): string {
+export function buildEmailLayout(companyName: string, logoUrl: string | null | undefined, bodyContent: string): string {
   return `<!DOCTYPE html>
 <html lang="de">
 <head>

@@ -68,6 +68,11 @@ export const companySettings = pgTable("company_settings", {
   leadCallBridgeEnabled: boolean("lead_call_bridge_enabled").notNull().default(false),
   deliveryEmailSubject: text("delivery_email_subject"),
   deliveryCoverLetterText: text("delivery_cover_letter_text"),
+  leadAutoReplyEnabled: boolean("lead_auto_reply_enabled").notNull().default(false),
+  leadAutoReplySubject: text("lead_auto_reply_subject"),
+  leadAutoReplyBody: text("lead_auto_reply_body"),
+  leadAutoReplyAttachmentPath: text("lead_auto_reply_attachment_path"),
+  leadAutoReplyAttachmentName: text("lead_auto_reply_attachment_name"),
   latitude: real("latitude"),
   longitude: real("longitude"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -127,6 +132,11 @@ export const updateCompanySettingsSchema = z.object({
   leadCallBridgeEnabled: z.boolean().optional(),
   deliveryEmailSubject: z.string().optional().nullable(),
   deliveryCoverLetterText: z.string().optional().nullable(),
+  leadAutoReplyEnabled: z.boolean().optional(),
+  leadAutoReplySubject: z.string().optional().nullable(),
+  leadAutoReplyBody: z.string().optional().nullable(),
+  leadAutoReplyAttachmentPath: z.string().optional().nullable(),
+  leadAutoReplyAttachmentName: z.string().optional().nullable(),
 });
 
 export type UpdateCompanySettings = z.infer<typeof updateCompanySettingsSchema>;

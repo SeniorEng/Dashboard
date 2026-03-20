@@ -157,6 +157,14 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Vitest config**: `fileParallelism: false` to prevent rate-limit collisions across test files sharing backend state.
 - **Login rate limit**: 100 attempts in dev (10 in production) to accommodate test suite runs.
 
+## Lead-Automatische-Antwort-E-Mail
+- **Funktion**: Bei neuem Lead mit E-Mail-Adresse wird automatisch eine formatierte E-Mail an den Interessenten gesendet, mit optionalem PDF-Anhang (z.B. Infobroschüre).
+- **Service**: `server/services/lead-auto-reply.ts` — `sendLeadAutoReply()` (fire-and-forget aus Webhook).
+- **E-Mail-Design**: Nutzt das bestehende `buildEmailLayout` (Logo, Teal-Header, Footer). Automatische Anrede mit Vor-/Nachname, Firmen-Kontaktdaten im Footer.
+- **Admin-UI**: Karte "Automatische Antwort bei Kundenanfrage" in Einstellungen (`client/src/pages/admin/settings/lead-auto-reply-card.tsx`) mit Betreff, Text (Textarea), PDF-Upload/Entfernen und Enable-Toggle.
+- **DB-Felder**: `company_settings.lead_auto_reply_enabled`, `lead_auto_reply_subject`, `lead_auto_reply_body`, `lead_auto_reply_attachment_path`, `lead_auto_reply_attachment_name`.
+- **PDF-Anhang**: Upload via Object Storage (presigned URL pattern), max. 10 MB. Server lädt PDF aus Object Storage beim Versand.
+
 ## Lead-Anruf-Brücke (Twilio)
 - **Funktion**: Bei neuem Lead mit Telefonnummer wird automatisch der konfigurierte Mitarbeiter angerufen (via Twilio). Ansage mit Lead-Details, bei Tastendruck "1" wird der Lead-Interessent direkt verbunden.
 - **Service**: `server/services/twilio-call-bridge.ts` — `initiateLeadCallBridge()` (fire-and-forget aus Webhook) + `initiateTestCall()` (Admin-Test).

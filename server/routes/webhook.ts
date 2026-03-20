@@ -5,6 +5,7 @@ import { prospectStorage } from "../storage/prospects";
 import { parseLeadEmail } from "../services/email-parser";
 import { asyncHandler } from "../lib/errors";
 import { initiateLeadCallBridge } from "../services/twilio-call-bridge";
+import { sendLeadAutoReply } from "../services/lead-auto-reply";
 
 const router = Router();
 
@@ -79,6 +80,17 @@ router.post("/email-lead", asyncHandler("Webhook-Verarbeitung fehlgeschlagen", a
       quelle: leadData.quelle || from || "unbekannt",
     }).catch(err => {
       console.error("[webhook] Lead call bridge error (non-blocking):", err);
+    });
+  }
+
+  if (leadData.email) {
+    sendLeadAutoReply({
+      prospectId: prospect.id,
+      leadEmail: leadData.email,
+      leadVorname: leadData.vorname,
+      leadNachname: leadData.nachname,
+    }).catch(err => {
+      console.error("[webhook] Lead auto-reply error (non-blocking):", err);
     });
   }
 

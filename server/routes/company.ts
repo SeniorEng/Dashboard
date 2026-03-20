@@ -9,7 +9,7 @@ import { geocodeCompanySettings } from "../services/geocoding";
 const router = Router();
 router.use(requireAuth);
 
-const SENSITIVE_FIELDS = ["twilioAuthToken", "twilioAccountSid", "epostSecret", "qontoSecretKey"] as const;
+const SENSITIVE_FIELDS = ["twilioAuthToken", "twilioAccountSid", "epostSecret", "qontoSecretKey", "smtpPass", "epostPassword", "whatsappAccessToken"] as const;
 
 router.get("/", asyncHandler("Firmendaten konnten nicht geladen werden", async (req, res) => {
   const settings = await storage.getCompanySettings();
