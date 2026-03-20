@@ -1,0 +1,623 @@
+# CareConnect — Refactoring Spec: Lead-to-Client-Flow
+
+**Projekt:** CareConnect (Seniorenengel Alltagsbegleitung UG)  
+**Zweck:** Vollständiges Refactoring des Lead-to-Client-Flows — von der aktuellen fehlerhaften Architektur zum korrekten Datenmodell  
+**Zielplattform:** Replit (Node.js/Express/TypeScript, Drizzle ORM, PostgreSQL/Neon, React/Vite)
+
+-----
+
+## 0. Kontext & Ausgangsproblem
+
+### Was aktuell falsch ist
+
+Das bestehende System erstellt einen `customers`-Datensatz sobald eine Erstberatung geplant wird — obwohl zu diesem Zeitpunkt noch kein Vertrag existiert. Dies führt zu:
+
+- Datenduplikation (Stammdaten in `prospects` UND `customers`)
+- Datentransfer über URL-Parameter (unsicher, fragil, DSGVO-relevant)
+- Proliferation von Workarounds (Filter, Ausblend-Logik in 4+ Modulen)
+- Race Condition: Prospect-Linking passiert clientseitig nach der Transaktion — Netzwerkfehler erzeugt verwaiste Datensätze
+- Semantisch falsches Datenmodell: `customer` = Vertragspartner, nicht Gesprächspartner
+
+### Das korrekte Prinzip
+
+> **Ein `customer`-Datensatz darf erst existieren, wenn ein Vertrag existiert.**
+
+Bis zur Vertragsunterzeichnung ist jede Person ausschließlich ein `prospect`.
+
+-----
+
+## 1. Stack
+
+```
+Backend:    Node.js + Express + TypeScript
+ORM:        Drizzle ORM (typsicher, SQL-nah)
+Datenbank:  PostgreSQL (Neon, serverless WebSocket)
+Validierung: Zod (aus Drizzle-Schemas abgeleitet via drizzle-zod)
+Frontend:   React + Vite + TanStack Query + Wouter + shadcn/ui + Tailwind
+Hosting:    Replit (Single-Process, kein Queue, kein Clustering)
+```
+
+**Wichtige Constraints:**
+
+- Kein Background-Job-Queue (kein Redis/Bull). Async-Tasks laufen als fire-and-forget Promise mit Timeout-Wrapper.
+- Neon WebSocket-Treiber: Bekannter Crash-Bug bei Timeouts — muss in jeder Transaktion abgefangen werden.
+- Single-Process: Keine Worker-Threads für die Implementierung einplanen.
+
+-----
+
+## 2. Schema-Änderungen
+
+### 2.1 Neue Tabelle: `prospect_offers`
+
+Speichert den vollständigen Wizard-Stand wenn ein Interessent Bedenkzeit braucht — verhindert Datenverlust und Doppeleingabe.
+
+```sql
+CREATE TABLE prospect_offers (
+  id              SERIAL PRIMARY KEY,
+  prospect_id     INTEGER NOT NULL REFERENCES prospects(id) ON DELETE CASCADE,
+  wizard_data     JSONB NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'offen',
+  -- Constraint: status IN ('offen', 'angenommen', 'abgelehnt')
+  created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+  created_by      INTEGER REFERENCES users(id),
+  expires_at      TIMESTAMP
+);
+```
+
+**Drizzle-Schema:**
+
+```typescript
+export const prospectOffers = pgTable('prospect_offers', {
+  id:          serial('id').primaryKey(),
+  prospectId:  integer('prospect_id').notNull().references(() => prospects.id, { onDelete: 'cascade' }),
+  wizardData:  jsonb('wizard_data').notNull(),
+  status:      text('status').notNull().default('offen'),
+  createdAt:   timestamp('created_at').notNull().defaultNow(),
+  createdBy:   integer('created_by').references(() => users.id),
+  expiresAt:   timestamp('expires_at'),
+});
+```
+
+### 2.2 Änderung: `appointments`-Tabelle
+
+Erstberatungs-Termine müssen direkt am Prospect hängen können — ohne Customer-Datensatz.
+
+```sql
+ALTER TABLE appointments
+ADD COLUMN prospect_id INTEGER REFERENCES prospects(id) ON DELETE SET NULL;
+
+-- Integrity-Constraint: Mindestens eines muss gesetzt sein
+ALTER TABLE appointments
+ADD CONSTRAINT appointment_must_have_owner
+CHECK (prospect_id IS NOT NULL OR customer_id IS NOT NULL);
+```
+
+**Drizzle-Schema (ergänzen):**
+
+```typescript
+// In der bestehenden appointments-Tabelle ergänzen:
+prospectId: integer('prospect_id').references(() => prospects.id, { onDelete: 'set null' }),
+```
+
+### 2.3 Änderung: `prospects`-Tabelle
+
+Qualifizierungs-Metadaten für den neuen Qualifizierungsschritt.
+
+```sql
+ALTER TABLE prospects
+ADD COLUMN geo_qualified          BOOLEAN,
+ADD COLUMN disqualification_reason TEXT;
+-- Mögliche Werte: 'außerhalb_einzugsgebiet' | 'keine_kapazität' | 'pflegegrad_ungeeignet' | 'sonstige'
+```
+
+### 2.4 Neuer Prospect-Status: `angebot_gemacht`
+
+In der Status-Enum-Definition (Drizzle/Zod) folgenden Status ergänzen:
+
+- `qualifiziert`
+- `disqualifiziert`
+- `erstberatung_durchgeführt` (umbenennen von `erstberatung`)
+- `angebot_gemacht`
+
+Die vollständige neue Enum-Reihenfolge:
+
+```typescript
+export const prospectStatusEnum = [
+  'neu',
+  'kontaktiert',
+  'wiedervorlage',
+  'qualifiziert',
+  'disqualifiziert',
+  'erstberatung_vereinbart',
+  'erstberatung_durchgeführt',
+  'angebot_gemacht',
+  'gewonnen',
+  'nicht_interessiert',
+  'absage',
+] as const;
+```
+
+-----
+
+## 3. Neue API-Endpunkte
+
+### 3.1 `GET /api/prospects/:id/appointment-data`
+
+Ersetzt den URL-Parameter-Transfer. Liefert alle Prospect-Daten für das Erstberatungs-Formular.
+
+```typescript
+// Response-Schema (Zod):
+const AppointmentDataSchema = z.object({
+  prospect: z.object({
+    id:         z.number(),
+    firstName:  z.string(),
+    lastName:   z.string(),
+    phone:      z.string().nullable(),
+    email:      z.string().nullable(),
+    street:     z.string().nullable(),
+    houseNumber:z.string().nullable(),
+    zip:        z.string().nullable(),
+    city:       z.string().nullable(),
+    careLevel:  z.number().nullable(),
+    source:     z.string().nullable(),
+  }),
+  existingAppointments: z.array(z.object({
+    id:    z.number(),
+    date:  z.string(),
+    type:  z.string(),
+    status:z.string(),
+  })),
+});
+```
+
+### 3.2 `POST /api/appointments` — Erweiterung
+
+Bestehenden Endpunkt erweitern: `prospectId` als optionalen Parameter akzeptieren (anstelle von `customerId` bei Erstberatungen).
+
+```typescript
+const CreateAppointmentSchema = z.object({
+  type:        z.enum(['erstberatung', 'hausbesuch', 'sonstiges']),
+  prospectId:  z.number().optional(),
+  customerId:  z.number().optional(),
+  employeeId:  z.number(),
+  date:        z.string().datetime(),
+  notes:       z.string().optional(),
+}).refine(
+  data => data.prospectId !== undefined || data.customerId !== undefined,
+  { message: 'Entweder prospectId oder customerId muss gesetzt sein' }
+);
+```
+
+Bei `type = 'erstberatung'` und `prospectId` gesetzt: Status des Prospects automatisch auf `erstberatung_vereinbart` setzen (in derselben Transaktion).
+
+### 3.3 `POST /api/prospects/:id/offers` — Angebot speichern
+
+Speichert den Wizard-Stand ohne einen Customer-Datensatz zu erstellen.
+
+```typescript
+const SaveOfferSchema = z.object({
+  wizardData: z.object({
+    billingType:   z.enum(['gesetzlich', 'privat', 'selbstzahler']),
+    personalData:  z.object({ /* Felder aus Wizard-Schritt 2 */ }).partial(),
+    insurance:     z.object({ /* Felder aus Wizard-Schritt 3 */ }).partial().optional(),
+    contract:      z.object({ /* Felder aus Wizard-Schritt 4 */ }).partial(),
+    budgets:       z.array(z.object({ /* Budget-Felder */ })).optional(),
+    contacts:      z.array(z.object({ /* Kontakt-Felder */ })).optional(),
+    employees:     z.array(z.object({ /* Mitarbeiter-Felder */ })).optional(),
+  }),
+  expiresAt: z.string().datetime().optional(),
+});
+```
+
+**Seiteneffekte:**
+
+- Prospect-Status → `angebot_gemacht`
+- Automatische `statuswechsel`-Notiz in `prospect_notes`
+
+### 3.4 `POST /api/prospects/:id/convert` — Haupttransaktion
+
+Der kritischste Endpunkt. Alle Operationen in einer atomaren DB-Transaktion.
+
+```typescript
+// Vollständige Transaktion — pseudocode-nah:
+async function convertProspectToCustomer(
+  prospectId: number,
+  wizardData: ConvertProspectInput,
+  userId: number,
+  offerId?: number  // optional: falls aus gespeichertem Angebot
+): Promise<Customer> {
+  
+  return await db.transaction(async (tx) => {
+    
+    // SCHRITT 1: Prospect laden & validieren
+    const prospect = await tx.query.prospects.findFirst({
+      where: eq(prospects.id, prospectId),
+    });
+    if (!prospect) throw new Error('Prospect nicht gefunden');
+    if (prospect.status === 'gewonnen') throw new Error('Bereits konvertiert');
+    if (prospect.deletedAt) throw new Error('Prospect gelöscht');
+
+    // SCHRITT 2: Customer erstellen (ERST JETZT)
+    const [customer] = await tx.insert(customers).values({
+      firstName:   prospect.firstName,
+      lastName:    prospect.lastName,
+      phone:       prospect.phone,
+      email:       prospect.email,
+      street:      prospect.street,
+      houseNumber: prospect.houseNumber,
+      zip:         prospect.zip,
+      city:        prospect.city,
+      careLevel:   prospect.careLevel,
+      billingType: wizardData.billingType,
+      dateOfBirth: wizardData.dateOfBirth,
+      status:      'aktiv',  // Direkt aktiv — kein Zwischenstatus mehr
+    }).returning();
+
+    // SCHRITT 3: Versicherung (nur Kassenpatienten)
+    if (wizardData.billingType !== 'selbstzahler' && wizardData.insurance) {
+      await tx.insert(customerInsurances).values({
+        customerId:     customer.id,
+        insurerId:      wizardData.insurance.insurerId,
+        insurantNumber: wizardData.insurance.insurantNumber,
+        validFrom:      wizardData.contractStart,
+      });
+    }
+
+    // SCHRITT 4: Vertrag
+    await tx.insert(contracts).values({
+      customerId:  customer.id,
+      startDate:   wizardData.contractStart,
+      services:    wizardData.services,
+      hourlyRates: wizardData.hourlyRates,
+    });
+
+    // SCHRITT 5: Budgets
+    if (wizardData.budgets?.length) {
+      await tx.insert(budgets).values(
+        wizardData.budgets.map(b => ({ customerId: customer.id, ...b }))
+      );
+    }
+
+    // SCHRITT 6: Notfallkontakte
+    if (wizardData.contacts?.length) {
+      await tx.insert(customerContacts).values(
+        wizardData.contacts.map(c => ({ customerId: customer.id, ...c }))
+      );
+    }
+
+    // SCHRITT 7: Mitarbeiter-Zuweisungen
+    if (wizardData.employees?.length) {
+      await tx.insert(customerEmployees).values(
+        wizardData.employees.map(e => ({ customerId: customer.id, ...e }))
+      );
+    }
+
+    // SCHRITT 8: Erstberatungs-Termin vom Prospect auf Customer umhängen
+    await tx.update(appointments)
+      .set({ customerId: customer.id, prospectId: null })
+      .where(eq(appointments.prospectId, prospectId));
+
+    // SCHRITT 9: Angebot als 'angenommen' markieren (falls vorhanden)
+    if (offerId) {
+      await tx.update(prospectOffers)
+        .set({ status: 'angenommen' })
+        .where(eq(prospectOffers.id, offerId));
+    }
+
+    // SCHRITT 10: Prospect abschließen — IN DERSELBEN TRANSAKTION
+    await tx.update(prospects)
+      .set({
+        status:              'gewonnen',
+        convertedCustomerId: customer.id,
+        updatedAt:           new Date(),
+      })
+      .where(eq(prospects.id, prospectId));
+
+    // SCHRITT 11: Audit-Notiz
+    await tx.insert(prospectNotes).values({
+      prospectId,
+      type:      'statuswechsel',
+      content:   `Zu Kunde #${customer.id} konvertiert`,
+      createdBy: userId,
+    });
+
+    return customer;
+  });
+}
+```
+
+**Error Handling:** Bei jedem Fehler innerhalb der Transaktion → vollständiger Rollback. Der Endpoint gibt einen strukturierten Error zurück, den das Frontend anzeigen kann.
+
+### 3.5 `GET /api/prospects/:id/offer` — Offenes Angebot laden
+
+Liefert das aktuell offene Angebot eines Prospects (falls vorhanden) für den Wizard-Wiederaufruf.
+
+```typescript
+// Response: prospect_offers-Datensatz mit status='offen' | null
+```
+
+### 3.6 `PATCH /api/prospects/:id/qualify` — Qualifizierung
+
+```typescript
+const QualifySchema = z.object({
+  action:                 z.enum(['qualify', 'disqualify']),
+  disqualificationReason: z.string().optional(),
+  // Pflichtfeld wenn action='disqualify'
+});
+```
+
+-----
+
+## 4. Unified Interaction History
+
+Kunden-Detailansicht zeigt eine chronologische Timeline aus beiden Quellen:
+
+```typescript
+// GET /api/customers/:id/timeline
+async function getCustomerTimeline(customerId: number) {
+  const customer = await db.query.customers.findFirst({
+    where: eq(customers.id, customerId),
+  });
+
+  // Kunden-Notizen
+  const customerNotesList = await db.query.customerNotes.findMany({
+    where: eq(customerNotes.customerId, customerId),
+    orderBy: asc(customerNotes.createdAt),
+  });
+
+  // Prospect-Vorgeschichte (falls Kunde aus Lead konvertiert)
+  let prospectNotesList: ProspectNote[] = [];
+  if (customer?.convertedFromProspectId) {
+    prospectNotesList = await db.query.prospectNotes.findMany({
+      where: eq(prospectNotes.prospectId, customer.convertedFromProspectId),
+      orderBy: asc(prospectNotes.createdAt),
+    });
+  }
+
+  return [
+    ...prospectNotesList.map(n => ({ ...n, phase: 'akquise' as const })),
+    ...customerNotesList.map(n => ({ ...n, phase: 'kunde' as const })),
+  ].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+}
+```
+
+**UI:** Eine Timeline mit einem visuellen Trennstrich und Label “Vertragsabschluss am [Datum]” zwischen den zwei Phasen.
+
+-----
+
+## 5. Frontend-Änderungen
+
+### 5.1 Erstberatung anlegen — URL-Parameter entfernen
+
+**Alt (ENTFERNEN):**
+
+```
+/new-appointment?type=erstberatung&vorname=Max&nachname=Mustermann&...
+```
+
+**Neu:**
+
+```
+/new-appointment?prospectId=123&type=erstberatung
+```
+
+Die Seite `/new-appointment` lädt Prospect-Daten via `GET /api/prospects/:id/appointment-data` und füllt das Formular serverseitig vor. Kein Regex-Parsing, kein String-Encoding.
+
+### 5.2 Konvertierungs-Wizard — rationalisiert auf 6 Schritte
+
+|Schritt|Inhalt                                                |Vorausgefüllt?       |
+|-------|------------------------------------------------------|---------------------|
+|1      |Abrechnungsart (Kasse / Privat / Selbstzahler)        |Nein                 |
+|2      |Persönliche Daten + Pflegegrad + ggf. Pflegekasse     |**Ja — aus Prospect**|
+|3      |Vertrag: Leistungen, Beginn, Stundensätze             |Nein                 |
+|4      |Budgets: §45b, §39, §36 (PG-abhängige Standardwerte)  |Teilweise            |
+|5      |Notfallkontakte + Unterschriften + Versand            |Nein                 |
+|6      |Mitarbeiter-Zuweisung (Primär + bis zu 2 Vertretungen)|Nein                 |
+
+**Wizard-Aufruf-Wege:**
+
+1. Direkt aus Erstberatung: `POST /api/prospects/:id/convert` → Customer aktiv
+1. Mit Bedenkzeit: `POST /api/prospects/:id/offers` → Angebot gespeichert, kein Customer
+1. Angebot annehmen: Wizard öffnet mit `GET /api/prospects/:id/offer` vorausgefüllt → `POST /api/prospects/:id/convert` mit `offerId`
+
+**Wizard-Footer (zwei Buttons):**
+
+```
+[ Als Angebot speichern ]    [ Jetzt Vertrag abschließen ]
+```
+
+### 5.3 Prospect-Detailansicht — neue UI-Elemente
+
+**Qualifizierungs-Panel** (erscheint bei Status `kontaktiert`):
+
+- ✅/❌ Einzugsgebiet (automatisch via Geo-Check)
+- ⚠️ Pflegegrad (manuell bestätigen)
+- ⚠️ Kapazität (manuell bestätigen)
+- Button: “Qualifizieren” → `PATCH /api/prospects/:id/qualify`
+- Button: “Disqualifizieren” → mit Pflicht-Dropdown für Grund
+
+**Angebot-Banner** (erscheint bei Status `angebot_gemacht`):
+
+```
+⏳ Offenes Angebot vom [Datum] — [Angebot annehmen] [Ablehnen]
+```
+
+**Erstberatung planen** (erscheint bei Status `qualifiziert`):
+
+- Button: “Erstberatung planen” → `/new-appointment?prospectId=:id&type=erstberatung`
+- Kein URL-Parameter-Transfer mehr
+
+### 5.4 Workarounds entfernen
+
+Nach erfolgreichem Deployment folgende Code-Stellen identifizieren und **ersatzlos löschen**:
+
+- [ ] Filter “Erstberatungs-Kunden ausblenden” in der Kundenliste
+- [ ] Filter in der globalen Suche (`status != 'erstberatung'`)
+- [ ] Separate Admin-Ansicht für Erstberatungs-Kunden
+- [ ] Speziallogik in Statistiken/Stundenübersicht
+- [ ] URL-Parameter-Encoding beim “Erstberatung anlegen”-Button
+- [ ] URL-Parameter-Decoding + Regex-Parsing auf `/new-appointment`
+- [ ] Clientseitiger PATCH-Request nach Erstberatungserstellung
+
+-----
+
+## 6. Migrationsskript (einmalig)
+
+Bestehende `customers` mit `status = 'erstberatung'` zurück in saubere Prospects migrieren.
+
+```typescript
+async function migrateErstberatungsKunden() {
+  console.log('Migration gestartet...');
+  
+  await db.transaction(async (tx) => {
+    // 1. Alle premature customers finden
+    const prematureCustomers = await tx.query.customers.findMany({
+      where: and(
+        eq(customers.status, 'erstberatung'),
+        isNull(customers.deletedAt)
+      ),
+    });
+    console.log(`Gefunden: ${prematureCustomers.length} Erstberatungs-Kunden`);
+
+    for (const customer of prematureCustomers) {
+      // 2. Verknüpften Prospect finden
+      const prospect = await tx.query.prospects.findFirst({
+        where: eq(prospects.convertedCustomerId, customer.id),
+      });
+
+      if (prospect) {
+        // 3. Prospect-Status zurücksetzen
+        await tx.update(prospects)
+          .set({
+            status:              'erstberatung_durchgeführt',
+            convertedCustomerId: null,
+            updatedAt:           new Date(),
+          })
+          .where(eq(prospects.id, prospect.id));
+
+        // 4. Erstberatungs-Termine umhängen: Customer → Prospect
+        await tx.update(appointments)
+          .set({ prospectId: prospect.id, customerId: null })
+          .where(and(
+            eq(appointments.customerId, customer.id),
+            eq(appointments.type, 'erstberatung')
+          ));
+
+        console.log(`Prospect #${prospect.id} zurückgesetzt, Termine umgehängt`);
+      } else {
+        console.warn(`⚠️ Kein Prospect für Customer #${customer.id} gefunden — manuell prüfen`);
+      }
+
+      // 5. Customer soft-delete
+      await tx.update(customers)
+        .set({ deletedAt: new Date() })
+        .where(eq(customers.id, customer.id));
+
+      console.log(`Customer #${customer.id} soft-deleted`);
+    }
+  });
+
+  console.log('Migration abgeschlossen.');
+}
+```
+
+**Vor dem Ausführen:**
+
+1. Datenbankbackup anlegen
+1. Skript in einer Staging-Umgebung testen
+1. Alle offenen Erstberatungs-Kunden manuell sichten (sind es tatsächlich nur ~20?)
+1. Ergebnis nach Migration in der Datenbank verifizieren
+
+-----
+
+## 7. Implementierungsreihenfolge
+
+```
+Phase 1 — Datenbankschema (blocking)
+  1.1  Migration: appointments.prospect_id hinzufügen + CHECK-Constraint
+  1.2  Migration: prospect_offers-Tabelle anlegen
+  1.3  Migration: prospects.geo_qualified + disqualification_reason hinzufügen
+  1.4  Drizzle-Schemas aktualisieren (alle 3 Tabellen)
+  1.5  Zod-Schemas aktualisieren (prospectStatusEnum erweitern)
+
+Phase 2 — Backend-Endpunkte
+  2.1  GET  /api/prospects/:id/appointment-data
+  2.2  POST /api/appointments erweitern (prospectId support)
+  2.3  POST /api/prospects/:id/convert (Haupttransaktion)
+  2.4  POST /api/prospects/:id/offers
+  2.5  GET  /api/prospects/:id/offer
+  2.6  PATCH /api/prospects/:id/qualify
+  2.7  GET  /api/customers/:id/timeline
+
+Phase 3 — Frontend
+  3.1  /new-appointment: URL-Parameter-Transfer entfernen, prospectId-basiertes Laden
+  3.2  Prospect-Detailansicht: Qualifizierungs-Panel + Angebot-Banner
+  3.3  Konvertierungs-Wizard: auf 6 Schritte vereinfachen, Vorausfüllung aus Prospect
+  3.4  Wizard: "Als Angebot speichern"-Button hinzufügen
+  3.5  Kunden-Timeline: Unified History View
+
+Phase 4 — Migration & Cleanup
+  4.1  Migrationsskript (Erstberatungs-Kunden) ausführen
+  4.2  Workarounds entfernen (Filter, Speziallogik, URL-Encoding-Code)
+  4.3  Smoke-Tests: Kompletter Durchlauf von Webhook-Eingang bis aktiver Kunde
+```
+
+-----
+
+## 8. Vollständige neue Status-Pipeline
+
+```
+Webhook / Manuelle Eingabe
+  ↓
+[prospects] status: neu
+  ↓ automatisch
+Twilio Call-Bridge + Auto-Reply-E-Mail (wie bisher)
+  ↓ manuell
+status: kontaktiert
+  ↓ Qualifizierungs-Panel (Geo ✓, PG ✓, Kapazität ✓)
+  ├→ status: disqualifiziert (mit Grund)
+  └→ status: qualifiziert
+       ↓ "Erstberatung planen" → /new-appointment?prospectId=:id
+       ↓ POST /api/appointments (prospectId, kein customer)
+status: erstberatung_vereinbart
+  ↓ Termin durchgeführt (manuell)
+status: erstberatung_durchgeführt
+  ↓ Wizard öffnen
+  ├→ "Jetzt abschließen" → POST /api/prospects/:id/convert
+  │     ↓ Atomare Transaktion
+  │   status: gewonnen → [customers] status: aktiv (NEU)
+  │
+  └→ "Als Angebot speichern" → POST /api/prospects/:id/offers
+       ↓
+     status: angebot_gemacht
+       ↓ Bedenkzeit
+       ├→ "Angebot annehmen" → POST /api/prospects/:id/convert (mit offerId)
+       │     ↓ Atomare Transaktion
+       │   status: gewonnen → [customers] status: aktiv
+       │
+       └→ "Ablehnen" → status: nicht_interessiert
+
+Quer-Mechanismus auf jeder Stufe:
+  wiedervorlage (Datum setzen → automatischer Statuswechsel, wie bisher)
+```
+
+-----
+
+## 9. Was nach dem Refactoring wegfällt
+
+Folgendes kann nach erfolgreichem Deployment ersatzlos gelöscht werden:
+
+|Komponente                                             |Grund                      |
+|-------------------------------------------------------|---------------------------|
+|Filter “Erstberatungs-Kunden” in Kundenliste           |Existiert nicht mehr       |
+|Filter in globaler Suche                               |Existiert nicht mehr       |
+|Separate Admin-Ansicht Erstberatungs-Kunden            |Existiert nicht mehr       |
+|Speziallogik in Statistiken/Stundenübersicht           |Existiert nicht mehr       |
+|URL-Parameter-Encoding (Erstberatung anlegen)          |Ersetzt durch prospectId   |
+|URL-Parameter-Decoding + Regex-Adress-Parsing          |Ersetzt durch Server-Lookup|
+|Clientseitiger PATCH nach Erstberatungserstellung      |In Transaktion integriert  |
+|`customers.status = 'erstberatung'` als gültiger Status|Obsolet                    |
+
+-----
+
+*Spec-Version: 1.0 | Stand: März 2026*

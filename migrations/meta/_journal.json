@@ -29,6 +29,13 @@
       "when": 1773991916062,
       "tag": "0003_rare_patch",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1774048416591,
+      "tag": "0004_bent_wolfsbane",
+      "breakpoints": true
     }
   ]
 }

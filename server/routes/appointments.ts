@@ -6,7 +6,11 @@ import {
   insertKundenterminSchema,
   insertErstberatungSchema,
   insertErstberatungCustomerSchema,
+  insertProspectErstberatungSchema,
+  appointments,
+  prospects,
 } from "@shared/schema";
+import { prospectStorage } from "../storage/prospects";
 import { appointmentService } from "../services/appointments";
 import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
@@ -436,6 +440,103 @@ router.post("/erstberatung", asyncHandler(ErrorMessages.createErstberatungFailed
   }
   
   res.status(201).json(_warningErstberatung ? { appointment, customer, _warning: _warningErstberatung } : { appointment, customer });
+}));
+
+router.post("/prospect-erstberatung", asyncHandler("Erstberatung konnte nicht erstellt werden", async (req, res) => {
+  const validatedData = insertProspectErstberatungSchema.parse(req.body);
+  const user = req.user!;
+
+  if (isWeekend(validatedData.date)) {
+    return sendBadRequest(res, "Termine können nicht an Samstagen oder Sonntagen erstellt werden.");
+  }
+
+  const farPastDate = isDateMoreThan3MonthsInPast(validatedData.date);
+  let _warning: string | undefined;
+  if (farPastDate) {
+    if (!user.isAdmin) {
+      return sendBadRequest(res, "Termine können nicht mehr als 3 Monate in der Vergangenheit erstellt werden.");
+    }
+    _warning = "Achtung: Dieser Termin liegt mehr als 3 Monate in der Vergangenheit.";
+  }
+
+  const prospect = await prospectStorage.getById(validatedData.prospectId);
+  if (!prospect) {
+    return sendNotFound(res, "Interessent nicht gefunden");
+  }
+
+  let assignedEmployeeId: number;
+  if (user.isAdmin) {
+    if (!validatedData.assignedEmployeeId) {
+      return sendBadRequest(res, "Bitte wählen Sie einen Mitarbeiter für diese Erstberatung aus.");
+    }
+    assignedEmployeeId = validatedData.assignedEmployeeId;
+  } else {
+    assignedEmployeeId = user.id;
+  }
+
+  const scheduledEnd = addMinutesToTimeHHMMSS(validatedData.scheduledStart, validatedData.erstberatungDauer);
+
+  const overlapResult = await appointmentService.checkOverlap(
+    validatedData.date,
+    validatedData.scheduledStart,
+    scheduledEnd,
+    assignedEmployeeId
+  );
+
+  if (overlapResult.hasUnreliableData) {
+    return sendConflict(
+      res,
+      "Datenprüfung erforderlich",
+      ErrorMessages.unreliableData(overlapResult.unreliableAppointmentId!)
+    );
+  }
+
+  if (overlapResult.hasOverlap) {
+    return sendConflict(res, "Terminüberschneidung", ErrorMessages.timeOverlap);
+  }
+
+  const result = await db.transaction(async (tx) => {
+    const [appointment] = await tx.insert(appointments).values({
+      prospectId: validatedData.prospectId,
+      appointmentType: "Erstberatung",
+      date: validatedData.date,
+      scheduledStart: validatedData.scheduledStart,
+      scheduledEnd,
+      durationPromised: validatedData.erstberatungDauer,
+      notes: validatedData.notes || null,
+      status: "scheduled",
+      createdByUserId: user.id,
+      assignedEmployeeId,
+    }).returning();
+
+    await tx.update(prospects)
+      .set({ status: "erstberatung_vereinbart", updatedAt: new Date() })
+      .where(eq(prospects.id, validatedData.prospectId));
+
+    return appointment;
+  });
+
+  const erstberatungService = await serviceCatalogStorage.getServiceByCode("erstberatung");
+  if (erstberatungService) {
+    await storage.createAppointmentServices(result.id, [{
+      serviceId: erstberatungService.id,
+      plannedDurationMinutes: validatedData.erstberatungDauer,
+    }]);
+  }
+
+  await prospectStorage.addNote({
+    prospectId: validatedData.prospectId,
+    userId: user.id,
+    noteText: `Erstberatung am ${validatedData.date} um ${validatedData.scheduledStart} vereinbart`,
+    noteType: "statuswechsel",
+  });
+
+  if (assignedEmployeeId !== user.id) {
+    const customerName = `${prospect.vorname} ${prospect.nachname}`;
+    notificationService.notifyAppointmentCreated(result.id, customerName, validatedData.date, assignedEmployeeId, user.id);
+  }
+
+  res.status(201).json(_warning ? { appointment: result, _warning } : { appointment: result });
 }));
 
 const updateErstberatungSchema = z.object({

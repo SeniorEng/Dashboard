@@ -49,6 +49,7 @@ export const customers = pgTable("customers", {
   deactivationReason: text("deactivation_reason"),
   deactivationNote: text("deactivation_note"),
   mergedIntoCustomerId: integer("merged_into_customer_id").references((): AnyPgColumn => customers.id),
+  convertedFromProspectId: integer("converted_from_prospect_id"),
   // Audit fields
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

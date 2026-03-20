@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, date, index } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, date, boolean, jsonb, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { timestamp, optionalGermanPhoneSchema, internationalEmailSchema } from "./common";
@@ -9,11 +9,14 @@ export const PROSPECT_STATUSES = [
   "neu",
   "kontaktiert",
   "wiedervorlage",
+  "qualifiziert",
+  "disqualifiziert",
   "erstberatung_vereinbart",
+  "erstberatung_durchgeführt",
+  "angebot_gemacht",
+  "gewonnen",
   "nicht_interessiert",
   "absage",
-  "erstberatung",
-  "gewonnen",
 ] as const;
 
 export type ProspectStatus = (typeof PROSPECT_STATUSES)[number];
@@ -22,11 +25,14 @@ export const PROSPECT_STATUS_LABELS: Record<ProspectStatus, string> = {
   neu: "Neu",
   kontaktiert: "Kontaktiert",
   wiedervorlage: "Wiedervorlage",
+  qualifiziert: "Qualifiziert",
+  disqualifiziert: "Disqualifiziert",
   erstberatung_vereinbart: "Erstberatung vereinbart",
+  erstberatung_durchgeführt: "Erstberatung durchgeführt",
+  angebot_gemacht: "Angebot gemacht",
+  gewonnen: "Erfolgreich gewonnen",
   nicht_interessiert: "Nicht interessiert",
   absage: "Absage",
-  erstberatung: "Erstberatung",
-  gewonnen: "Erfolgreich gewonnen",
 };
 
 export const PROSPECT_NOTE_TYPES = [
@@ -62,6 +68,8 @@ export const prospects = pgTable("prospects", {
   quelle: text("quelle"),
   quelleDetails: text("quelle_details"),
   rawEmailContent: text("raw_email_content"),
+  geoQualified: boolean("geo_qualified"),
+  disqualificationReason: text("disqualification_reason"),
   convertedCustomerId: integer("converted_customer_id").references(() => customers.id),
   assignedEmployeeId: integer("assigned_employee_id").references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -82,6 +90,38 @@ export const prospectNotes = pgTable("prospect_notes", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [
   index("prospect_notes_prospect_id_idx").on(table.prospectId),
+]);
+
+export const DISQUALIFICATION_REASONS = [
+  "ausserhalb_einzugsgebiet",
+  "keine_kapazitaet",
+  "pflegegrad_ungeeignet",
+  "sonstige",
+] as const;
+
+export type DisqualificationReason = (typeof DISQUALIFICATION_REASONS)[number];
+
+export const DISQUALIFICATION_REASON_LABELS: Record<DisqualificationReason, string> = {
+  ausserhalb_einzugsgebiet: "Außerhalb Einzugsgebiet",
+  keine_kapazitaet: "Keine Kapazität",
+  pflegegrad_ungeeignet: "Pflegegrad ungeeignet",
+  sonstige: "Sonstige",
+};
+
+export const PROSPECT_OFFER_STATUSES = ["offen", "angenommen", "abgelehnt"] as const;
+export type ProspectOfferStatus = (typeof PROSPECT_OFFER_STATUSES)[number];
+
+export const prospectOffers = pgTable("prospect_offers", {
+  id: serial("id").primaryKey(),
+  prospectId: integer("prospect_id").notNull().references(() => prospects.id, { onDelete: "cascade" }),
+  wizardData: jsonb("wizard_data").notNull(),
+  status: text("status").notNull().default("offen"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdBy: integer("created_by").references(() => users.id),
+  expiresAt: timestamp("expires_at"),
+}, (table) => [
+  index("prospect_offers_prospect_id_idx").on(table.prospectId),
+  index("prospect_offers_status_idx").on(table.prospectId, table.status),
 ]);
 
 export const insertProspectSchema = createInsertSchema(prospects).omit({
@@ -105,11 +145,26 @@ export const insertProspectSchema = createInsertSchema(prospects).omit({
   quelle: z.string().max(200, "Maximal 200 Zeichen").optional().nullable(),
   quelleDetails: z.string().max(500, "Maximal 500 Zeichen").optional().nullable(),
   rawEmailContent: z.string().optional().nullable(),
+  geoQualified: z.boolean().optional().nullable(),
+  disqualificationReason: z.string().optional().nullable(),
   convertedCustomerId: z.number().optional().nullable(),
   assignedEmployeeId: z.number().optional().nullable(),
 });
 
 export const updateProspectSchema = insertProspectSchema.partial();
+
+export const qualifyProspectSchema = z.object({
+  action: z.enum(["qualify", "disqualify"]),
+  disqualificationReason: z.enum(DISQUALIFICATION_REASONS).optional(),
+}).refine(
+  (data) => data.action === "qualify" || data.disqualificationReason !== undefined,
+  { message: "Disqualifizierungsgrund ist erforderlich", path: ["disqualificationReason"] }
+);
+
+export const insertProspectOfferSchema = z.object({
+  wizardData: z.record(z.unknown()),
+  expiresAt: z.string().optional().nullable(),
+});
 
 export const insertProspectNoteSchema = createInsertSchema(prospectNotes).omit({
   id: true,
@@ -124,3 +179,5 @@ export type InsertProspect = z.infer<typeof insertProspectSchema>;
 export type UpdateProspect = z.infer<typeof updateProspectSchema>;
 export type ProspectNote = typeof prospectNotes.$inferSelect;
 export type InsertProspectNote = z.infer<typeof insertProspectNoteSchema>;
+export type ProspectOffer = typeof prospectOffers.$inferSelect;
+export type InsertProspectOffer = z.infer<typeof insertProspectOfferSchema>;

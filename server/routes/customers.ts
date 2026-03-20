@@ -15,7 +15,8 @@ import { requireIntParam } from "../lib/params";
 import { authService } from "../services/auth";
 import { todayISO, validateGeburtsdatum } from "@shared/utils/datetime";
 import { db } from "../lib/db";
-import { customers } from "@shared/schema";
+import { customers, prospects, prospectNotes } from "@shared/schema";
+import { eq, and, isNull, desc } from "drizzle-orm";
 import { auditService } from "../services/audit";
 import contactsRouter from "./customers/contacts";
 import servicePricesRouter from "./customers/service-prices";
@@ -607,6 +608,68 @@ router.post("/:id/reject", requireRoles("erstberatung"), asyncHandler("Ablehnung
 
   const updated = await customerManagementStorage.updateCustomer(id, { status: "inaktiv" });
   res.json(updated);
+}));
+
+router.get("/:id/timeline", asyncHandler("Timeline konnte nicht geladen werden", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
+  if (!req.user!.isAdmin) {
+    const assignedCustomerIds = await storage.getAssignedCustomerIds(req.user!.id);
+    if (!assignedCustomerIds.includes(id)) {
+      res.status(403).json({ error: "FORBIDDEN", message: "Zugriff verweigert" });
+      return;
+    }
+  }
+
+  const customer = await storage.getCustomer(id);
+  if (!customer) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+    return;
+  }
+
+  type TimelineEntry = {
+    phase: "akquise" | "kunde";
+    type: string;
+    text: string;
+    createdAt: Date;
+    userId?: number | null;
+  };
+
+  const timeline: TimelineEntry[] = [];
+
+  if (customer.convertedFromProspectId) {
+    const pNotes = await db
+      .select()
+      .from(prospectNotes)
+      .where(eq(prospectNotes.prospectId, customer.convertedFromProspectId))
+      .orderBy(desc(prospectNotes.createdAt));
+
+    for (const note of pNotes) {
+      timeline.push({
+        phase: "akquise",
+        type: note.noteType,
+        text: note.noteText,
+        createdAt: note.createdAt,
+        userId: note.userId,
+      });
+    }
+
+    timeline.push({
+      phase: "kunde",
+      type: "conversion",
+      text: "Vertragsabschluss",
+      createdAt: customer.createdAt,
+      userId: customer.createdByUserId,
+    });
+  }
+
+  timeline.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+  res.json({
+    prospectId: customer.convertedFromProspectId,
+    entries: timeline,
+  });
 }));
 
 export default router;

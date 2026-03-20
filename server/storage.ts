@@ -28,6 +28,7 @@ const assignedEmployee = sqlBuilder`(SELECT display_name FROM users WHERE users.
 const appointmentWithCustomerSelectFields = {
   id: appointments.id,
   customerId: appointments.customerId,
+  prospectId: appointments.prospectId,
   createdByUserId: appointments.createdByUserId,
   assignedEmployeeId: appointments.assignedEmployeeId,
   appointmentType: appointments.appointmentType,
@@ -88,7 +89,8 @@ type AppointmentQueryRow = typeof appointmentWithCustomerSelectFields extends in
 function mapAppointmentRow(row: AppointmentQueryRow & Record<string, unknown>): AppointmentWithCustomer {
   return {
     id: row.id as number,
-    customerId: row.customerId as number,
+    customerId: row.customerId as number | null,
+    prospectId: row.prospectId as number | null,
     createdByUserId: row.createdByUserId as number | null,
     assignedEmployeeId: row.assignedEmployeeId as number | null,
     appointmentType: row.appointmentType as string,

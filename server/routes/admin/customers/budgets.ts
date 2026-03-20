@@ -107,12 +107,13 @@ router.get("/budget/backfill-preview", asyncHandler("Vorschau fehlgeschlagen", a
 
   const byCustomer: Record<number, { count: number; missingSignatures: number; dates: string[] }> = {};
   for (const appt of appointmentsWithoutBudget) {
-    if (!byCustomer[appt.customerId]) {
-      byCustomer[appt.customerId] = { count: 0, missingSignatures: 0, dates: [] };
+    const cid = appt.customerId!;
+    if (!byCustomer[cid]) {
+      byCustomer[cid] = { count: 0, missingSignatures: 0, dates: [] };
     }
-    byCustomer[appt.customerId].count++;
-    if (!appt.signatureData) byCustomer[appt.customerId].missingSignatures++;
-    byCustomer[appt.customerId].dates.push(String(appt.date));
+    byCustomer[cid].count++;
+    if (!appt.signatureData) byCustomer[cid].missingSignatures++;
+    byCustomer[cid].dates.push(String(appt.date));
   }
 
   res.json({
@@ -174,7 +175,7 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
     const durationMinutes = (endParts[0] * 60 + endParts[1]) - (startParts[0] * 60 + startParts[1]);
 
     if (durationMinutes <= 0) {
-      results.push({ appointmentId: appt.id, customerId: appt.customerId, date: String(appt.date), status: "skipped", error: "Ungültige Dauer" });
+      results.push({ appointmentId: appt.id, customerId: appt.customerId!, date: String(appt.date), status: "skipped", error: "Ungültige Dauer" });
       continue;
     }
 
@@ -184,13 +185,13 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
     const customerKm = appt.customerKilometers || 0;
 
     if (hwMinutes === 0 && abMinutes === 0 && travelKm === 0 && customerKm === 0) {
-      results.push({ appointmentId: appt.id, customerId: appt.customerId, date: String(appt.date), status: "skipped", error: "Keine abrechenbare Leistung" });
+      results.push({ appointmentId: appt.id, customerId: appt.customerId!, date: String(appt.date), status: "skipped", error: "Keine abrechenbare Leistung" });
       continue;
     }
 
     try {
       await budgetLedgerStorage.createConsumptionTransaction({
-        customerId: appt.customerId,
+        customerId: appt.customerId!,
         appointmentId: appt.id,
         transactionDate: String(appt.date),
         hauswirtschaftMinutes: hwMinutes,
@@ -214,13 +215,13 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
         "documentation_submitted",
         "appointment",
         appt.id,
-        { customerId: appt.customerId, systemBackfill: true, hasSignature: true, signatureType: "SYSTEMGENERIERT" },
+        { customerId: appt.customerId!, systemBackfill: true, hasSignature: true, signatureType: "SYSTEMGENERIERT" },
         req.ip || req.socket.remoteAddress
       );
 
-      results.push({ appointmentId: appt.id, customerId: appt.customerId, date: String(appt.date), status: "created" });
+      results.push({ appointmentId: appt.id, customerId: appt.customerId!, date: String(appt.date), status: "created" });
     } catch (err: unknown) {
-      results.push({ appointmentId: appt.id, customerId: appt.customerId, date: String(appt.date), status: "error", error: err instanceof Error ? err.message : "Unbekannter Fehler" });
+      results.push({ appointmentId: appt.id, customerId: appt.customerId!, date: String(appt.date), status: "error", error: err instanceof Error ? err.message : "Unbekannter Fehler" });
     }
   }
 

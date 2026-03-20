@@ -148,7 +148,7 @@ export function useNewAppointmentForm() {
       }
       setEbNotes(copyFromAppointment.notes || "");
     } else {
-      setKtCustomerId(copyFromAppointment.customerId.toString());
+      setKtCustomerId(copyFromAppointment.customerId?.toString() ?? "");
       if (copyFromAppointment.assignedEmployeeId) {
         setKtAssignedEmployeeId(copyFromAppointment.assignedEmployeeId.toString());
       }

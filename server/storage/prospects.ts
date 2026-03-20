@@ -4,8 +4,11 @@ import {
   type UpdateProspect,
   type ProspectNote,
   type InsertProspectNote,
+  type ProspectOffer,
   prospects,
   prospectNotes,
+  prospectOffers,
+  appointments,
 } from "@shared/schema";
 import { eq, and, or, ilike, isNull, desc, sql } from "drizzle-orm";
 import { db } from "../lib/db";
@@ -106,11 +109,86 @@ export const prospectStorage = {
     const [updated] = await db
       .update(prospects)
       .set({
-        status: "erstberatung",
+        status: "gewonnen",
         convertedCustomerId: customerId,
         updatedAt: new Date(),
       })
       .where(eq(prospects.id, id))
+      .returning();
+    return updated;
+  },
+
+  async getAppointmentData(prospectId: number) {
+    const prospect = await db
+      .select()
+      .from(prospects)
+      .where(and(eq(prospects.id, prospectId), isNull(prospects.deletedAt)))
+      .then(rows => rows[0]);
+
+    if (!prospect) return null;
+
+    const prospectAppointments = await db
+      .select()
+      .from(appointments)
+      .where(and(eq(appointments.prospectId, prospectId), isNull(appointments.deletedAt)));
+
+    return { prospect, appointments: prospectAppointments };
+  },
+
+  async createOffer(prospectId: number, wizardData: Record<string, unknown>, userId: number, expiresAt?: string | null): Promise<ProspectOffer> {
+    const [offer] = await db.insert(prospectOffers).values({
+      prospectId,
+      wizardData,
+      createdBy: userId,
+      expiresAt: expiresAt ? new Date(expiresAt) : null,
+    }).returning();
+    return offer;
+  },
+
+  async getOpenOffer(prospectId: number): Promise<ProspectOffer | undefined> {
+    const [offer] = await db
+      .select()
+      .from(prospectOffers)
+      .where(and(
+        eq(prospectOffers.prospectId, prospectId),
+        eq(prospectOffers.status, "offen"),
+      ))
+      .orderBy(desc(prospectOffers.createdAt))
+      .limit(1);
+    return offer;
+  },
+
+  async updateOfferStatus(offerId: number, status: "angenommen" | "abgelehnt"): Promise<ProspectOffer | undefined> {
+    const [updated] = await db
+      .update(prospectOffers)
+      .set({ status })
+      .where(eq(prospectOffers.id, offerId))
+      .returning();
+    return updated;
+  },
+
+  async qualify(id: number, geoQualified: boolean | null): Promise<Prospect | undefined> {
+    const [updated] = await db
+      .update(prospects)
+      .set({
+        status: "qualifiziert",
+        geoQualified: geoQualified ?? true,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(prospects.id, id), isNull(prospects.deletedAt)))
+      .returning();
+    return updated;
+  },
+
+  async disqualify(id: number, reason: string): Promise<Prospect | undefined> {
+    const [updated] = await db
+      .update(prospects)
+      .set({
+        status: "disqualifiziert",
+        disqualificationReason: reason,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(prospects.id, id), isNull(prospects.deletedAt)))
       .returning();
     return updated;
   },

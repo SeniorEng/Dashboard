@@ -4,6 +4,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { timestamp } from "./common";
 import { customers, insertErstberatungCustomerSchema } from "./customers";
+import { prospects } from "./prospects";
 import { users } from "./users";
 import { services } from "./services";
 
@@ -13,7 +14,8 @@ import { services } from "./services";
 
 export const appointments = pgTable("appointments", {
   id: serial("id").primaryKey(),
-  customerId: integer("customer_id").notNull().references(() => customers.id),
+  customerId: integer("customer_id").references(() => customers.id),
+  prospectId: integer("prospect_id").references(() => prospects.id, { onDelete: "set null" }),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
   assignedEmployeeId: integer("assigned_employee_id").references(() => users.id),
   performedByEmployeeId: integer("performed_by_employee_id").references(() => users.id),
@@ -54,6 +56,7 @@ export const appointments = pgTable("appointments", {
   index("appointments_active_date_idx").on(table.date).where(isNull(table.deletedAt)),
   index("appointments_active_customer_idx").on(table.customerId).where(isNull(table.deletedAt)),
   index("appointments_active_employee_date_idx").on(table.assignedEmployeeId, table.date).where(isNull(table.deletedAt)),
+  index("appointments_prospect_id_idx").on(table.prospectId),
 ]);
 
 // ============================================
@@ -99,14 +102,24 @@ export const insertKundenterminSchema = z.object({
   assignedEmployeeId: z.number().nullable().optional(),
 });
 
-// Schema for Erstberatung appointment
+// Schema for Erstberatung appointment (legacy: creates customer)
 export const insertErstberatungSchema = z.object({
   customer: insertErstberatungCustomerSchema,
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat (YYYY-MM-DD erwartet)"),
   scheduledStart: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Ungültiges Zeitformat (HH:MM erwartet)"),
   erstberatungDauer: z.number().min(15, "Mindestens 15 Minuten").multipleOf(15),
   notes: z.string().max(255, "Maximal 255 Zeichen").optional(),
-  assignedEmployeeId: z.number().nullable().optional(), // Admin can assign employee
+  assignedEmployeeId: z.number().nullable().optional(),
+});
+
+// Schema for Erstberatung appointment linked to prospect (no customer created)
+export const insertProspectErstberatungSchema = z.object({
+  prospectId: z.number(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat (YYYY-MM-DD erwartet)"),
+  scheduledStart: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Ungültiges Zeitformat (HH:MM erwartet)"),
+  erstberatungDauer: z.number().min(15, "Mindestens 15 Minuten").multipleOf(15),
+  notes: z.string().max(255, "Maximal 255 Zeichen").optional(),
+  assignedEmployeeId: z.number().nullable().optional(),
 });
 
 export const updateAppointmentSchema = baseAppointmentSchema.omit({
@@ -155,3 +168,4 @@ export type InsertAppointment = z.infer<typeof baseAppointmentSchema>;
 export type UpdateAppointment = z.infer<typeof updateAppointmentSchema>;
 export type InsertKundentermin = z.infer<typeof insertKundenterminSchema>;
 export type InsertErstberatung = z.infer<typeof insertErstberatungSchema>;
+export type InsertProspectErstberatung = z.infer<typeof insertProspectErstberatungSchema>;
