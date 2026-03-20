@@ -399,6 +399,9 @@ export default function AdminCustomers() {
                       {customer.status === "inaktiv" && (
                         <StatusBadge type="warning" value="Inaktiv" data-testid={`badge-status-${customer.id}`} />
                       )}
+                      {customer.status === "aktiv" && customer.inaktivAb && (
+                        <StatusBadge type="info" value="Auslaufend" data-testid={`badge-auslaufend-${customer.id}`} />
+                      )}
                       {customer.billingType && (
                         <StatusBadge type="billingType" value={customer.billingType} data-testid={`badge-billingtype-${customer.id}`} />
                       )}

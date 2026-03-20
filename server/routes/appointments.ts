@@ -257,13 +257,6 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     return sendNotFound(res, "Kunde nicht gefunden.");
   }
 
-  if ((customer as any).inaktivAb) {
-    const inaktivAb = (customer as any).inaktivAb as string;
-    if (validatedData.date >= inaktivAb) {
-      return sendBadRequest(res, `Für diesen Kunden können ab dem ${inaktivAb.split("-").reverse().join(".")} keine neuen Termine erstellt werden.`);
-    }
-  }
-
   const currentContract = await customerManagementStorage.getCustomerCurrentContract(validatedData.customerId);
   if (currentContract?.contractEnd && validatedData.date > currentContract.contractEnd) {
     const endFormatted = currentContract.contractEnd.split("-").reverse().join(".");

@@ -418,7 +418,7 @@ export default function AdminCustomerDetail() {
   });
 
   const updateStatus = useMutation({
-    mutationFn: async (payload: { status: string; deactivationReason?: string; deactivationNote?: string; inaktivAb?: string | null }) => {
+    mutationFn: async (payload: { status: string; deactivationReason?: string | null; deactivationNote?: string | null; inaktivAb?: string | null }) => {
       const result = await api.patch(`/admin/customers/${customerId}`, payload);
       return unwrapResult(result);
     },
@@ -488,6 +488,9 @@ export default function AdminCustomerDetail() {
                 )}
                 {customer.status === "inaktiv" && (
                   <StatusBadge type="warning" value="Inaktiv" />
+                )}
+                {customer.status === "aktiv" && customer.inaktivAb && (
+                  <StatusBadge type="info" value="Auslaufend" data-testid="badge-auslaufend" />
                 )}
                 {customer.billingType && (
                   <StatusBadge type="billingType" value={customer.billingType} data-testid="badge-billingtype" />
@@ -590,7 +593,7 @@ export default function AdminCustomerDetail() {
                 {customer.deactivationReason !== "zusammengefuehrt" && (
                   <Button
                     variant="outline"
-                    onClick={() => updateStatus.mutate({ status: "aktiv", deactivationReason: null as any, deactivationNote: null as any })}
+                    onClick={() => updateStatus.mutate({ status: "aktiv", deactivationReason: null, deactivationNote: null })}
                     disabled={updateStatus.isPending}
                     data-testid="button-reactivate-customer"
                   >
