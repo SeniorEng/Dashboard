@@ -168,8 +168,14 @@ export default function AppointmentDetail() {
   if (isLoading) {
     return (
       <Layout>
-        <div className="flex items-center justify-center py-12" data-testid="loading-appointment">
-          <Loader2 className={`${iconSize.lg} animate-spin text-primary`} />
+        <div className="py-6 px-4 space-y-4" data-testid="loading-appointment">
+          <div className="flex items-center gap-3">
+            <div className="animate-pulse h-8 w-8 rounded bg-muted" />
+            <div className="animate-pulse h-6 w-40 bg-muted rounded" />
+          </div>
+          <div className="animate-pulse h-40 w-full bg-muted rounded-xl" />
+          <div className="animate-pulse h-24 w-full bg-muted rounded-xl" />
+          <div className="animate-pulse h-32 w-full bg-muted rounded-xl" />
         </div>
       </Layout>
     );

@@ -479,8 +479,17 @@ export default function Dashboard() {
         )}
 
         {isLoading ? (
-          <div className="flex items-center justify-center min-h-[200px]" data-testid="loading-appointments">
-            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <div className="min-h-[200px] space-y-3 p-2" data-testid="loading-appointments">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="animate-pulse flex items-center gap-3 p-4 rounded-xl border border-border/40">
+                <div className="h-10 w-10 rounded-full bg-muted shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 w-3/4 bg-muted rounded" />
+                  <div className="h-3 w-1/2 bg-muted rounded" />
+                </div>
+                <div className="h-6 w-16 bg-muted rounded-full" />
+              </div>
+            ))}
           </div>
         ) : error ? (
           <div className="min-h-[200px]" data-testid="error-appointments">

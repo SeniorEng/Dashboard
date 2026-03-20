@@ -621,7 +621,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                         {filePreviews.map((item, idx) => (
                           <div key={idx} className="relative group rounded-lg border border-gray-200 overflow-hidden bg-gray-50">
                             {item.preview ? (
-                              <img src={item.preview} alt={item.file.name} className="w-full h-20 object-cover" />
+                              <img src={item.preview} alt={item.file.name} width={200} height={80} className="w-full h-20 object-cover" />
                             ) : (
                               <div className="w-full h-20 flex flex-col items-center justify-center gap-1">
                                 <FileText className="h-5 w-5 text-gray-500" />

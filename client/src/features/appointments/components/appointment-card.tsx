@@ -4,9 +4,11 @@ import { de } from "date-fns/locale";
 import { Card } from "@/components/ui/card";
 import { MapPin, CheckCircle2, Clock, FileText, Phone, Navigation, User } from "lucide-react";
 import { useLocation } from "wouter";
+import { useQueryClient } from "@tanstack/react-query";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { useAuth } from "@/hooks/use-auth";
 import { getCardServiceInfoFromAppointment } from "@shared/types";
+import { api, unwrapResult } from "@/lib/api";
 import { formatTimeSlot, getEndTime } from "../utils";
 
 interface AppointmentCardProps {
@@ -30,11 +32,23 @@ function getStatusIcon(status: string) {
 function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProps) {
   const [, navigate] = useLocation();
   const { user } = useAuth();
+  const queryClient = useQueryClient();
 
   const serviceInfo = useMemo(() => 
     getCardServiceInfoFromAppointment(appointment),
     [appointment.appointmentType, appointment.serviceType, appointment.durationPromised, appointment.status]
   );
+
+  const handlePrefetch = useCallback(() => {
+    queryClient.prefetchQuery({
+      queryKey: ["appointments", appointment.id],
+      queryFn: async () => {
+        const result = await api.get<AppointmentWithCustomer>(`/appointments/${appointment.id}`);
+        return unwrapResult(result);
+      },
+      staleTime: 30000,
+    });
+  }, [queryClient, appointment.id]);
 
   const handleCardClick = useCallback(() => {
     navigate(`/appointment/${appointment.id}`);
@@ -52,6 +66,8 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
       className={`rounded-xl transition-opacity duration-200 ${
         appointment.status === "completed" ? "opacity-60 hover:opacity-100" : ""
       }`}
+      onMouseEnter={handlePrefetch}
+      onFocus={handlePrefetch}
     >
       <Card 
         className="border-0 shadow-sm cursor-pointer hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"

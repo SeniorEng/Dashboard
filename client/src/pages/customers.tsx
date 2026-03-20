@@ -1,7 +1,7 @@
-import { useState, useMemo, memo } from "react";
+import { useState, useMemo, memo, useCallback } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/layout";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -311,6 +311,7 @@ function BirthdayCard({ birthday }: { birthday: BirthdayEntry }) {
 }
 
 const CustomerCard = memo(function CustomerCard({ customer }: { customer: CustomerWithAccess }) {
+  const queryClient = useQueryClient();
   const address = formatAddress(customer);
   const phone = customer.telefon ? formatPhoneForDisplay(customer.telefon) : null;
   const festnetz = customer.festnetz ? formatPhoneForDisplay(customer.festnetz) : null;
@@ -319,11 +320,23 @@ const CustomerCard = memo(function CustomerCard({ customer }: { customer: Custom
     ? formatDateForDisplay(customer.geburtsdatum, { day: "2-digit", month: "2-digit", year: "numeric" })
     : null;
 
+  const handlePrefetch = useCallback(() => {
+    queryClient.prefetchQuery({
+      queryKey: ["customer", customer.id],
+      queryFn: async () => {
+        const result = await api.get(`/customers/${customer.id}`);
+        return unwrapResult(result);
+      },
+      staleTime: 30000,
+    });
+  }, [queryClient, customer.id]);
+
   return (
     <Link href={`/customer/${customer.id}`}>
       <Card 
         data-testid={`card-customer-${customer.id}`}
         className={isLegacy ? "opacity-75 border-dashed" : ""}
+        onMouseEnter={handlePrefetch}
       >
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-3">

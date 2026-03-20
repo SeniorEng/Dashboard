@@ -440,6 +440,8 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                         <img
                           src={item.preview}
                           alt={item.file.name}
+                          width={200}
+                          height={80}
                           className="w-full h-20 object-cover"
                         />
                       ) : (

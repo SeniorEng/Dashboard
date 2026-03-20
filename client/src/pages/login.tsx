@@ -99,6 +99,8 @@ export default function LoginPage() {
           <img 
             src={displayLogo} 
             alt={branding?.companyName || "EngelDesk"} 
+            width={64}
+            height={64}
             className="h-16 mx-auto mb-2"
             data-testid="img-login-logo"
           />
@@ -246,6 +248,8 @@ function SetupPage() {
           <img 
             src={displayLogo} 
             alt={branding?.companyName || "EngelDesk"} 
+            width={64}
+            height={64}
             className="h-16 mx-auto mb-2"
             data-testid="img-setup-logo"
           />

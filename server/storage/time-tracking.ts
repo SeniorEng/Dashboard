@@ -922,28 +922,197 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
   }
 
   async getAdminMonthClosingReadiness(year: number, month: number) {
+    const monthStr = month.toString().padStart(2, '0');
+    const startDate = `${year}-${monthStr}-01`;
+    const lastDay = new Date(year, month, 0).getDate();
+    const endDate = `${year}-${monthStr}-${lastDay}`;
+
     const activeEmployees = await db
       .select({ id: users.id, displayName: users.displayName })
       .from(users)
       .where(and(eq(users.isActive, true), eq(users.isAdmin, false)));
 
-    const results = await Promise.all(
-      activeEmployees.map(async (emp) => {
-        const readiness = await this.getMonthClosingReadiness(emp.id, year, month);
-        const closing = await this.getMonthClosing(emp.id, year, month);
-        const isClosed = !!(closing && !closing.reopenedAt);
+    if (activeEmployees.length === 0) return [];
 
-        return {
-          userId: emp.id,
-          displayName: emp.displayName,
-          isClosed,
-          closingId: closing?.id ?? null,
-          ...readiness,
-        };
-      })
-    );
+    const employeeIds = activeEmployees.map(e => e.id);
 
-    return results;
+    const employeeAppointmentFilter = (userId: typeof appointments.assignedEmployeeId) =>
+      sqlBuilder`(
+        ${appointments.assignedEmployeeId} = ${userId}
+        OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId} OR ${customers.backupEmployeeId2} = ${userId}))
+      )`;
+
+    const [allOpenAppts, allUnsignedAppts, allTimeEntryCounts, allCompletedCounts, allClosings] = await Promise.all([
+      db
+        .select({
+          employeeId: sqlBuilder`COALESCE(${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`.as('employee_id'),
+          id: appointments.id,
+          date: appointments.date,
+          scheduledStart: appointments.scheduledStart,
+          status: appointments.status,
+          customerId: appointments.customerId,
+          customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as('customer_name'),
+        })
+        .from(appointments)
+        .innerJoin(customers, eq(appointments.customerId, customers.id))
+        .where(
+          and(
+            gte(appointments.date, startDate),
+            lte(appointments.date, endDate),
+            isNull(appointments.deletedAt),
+            notInArray(appointments.status, ["completed", "cancelled"]),
+            or(
+              inArray(appointments.assignedEmployeeId, employeeIds),
+              and(
+                isNull(appointments.assignedEmployeeId),
+                or(
+                  inArray(customers.primaryEmployeeId, employeeIds),
+                  inArray(customers.backupEmployeeId, employeeIds),
+                  inArray(customers.backupEmployeeId2, employeeIds)
+                )
+              )
+            )
+          )
+        )
+        .orderBy(asc(appointments.date), asc(appointments.scheduledStart)),
+
+      db
+        .select({
+          employeeId: sqlBuilder`COALESCE(${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`.as('employee_id'),
+          id: appointments.id,
+          date: appointments.date,
+          scheduledStart: appointments.scheduledStart,
+          status: appointments.status,
+          customerId: appointments.customerId,
+          customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as('customer_name'),
+        })
+        .from(appointments)
+        .innerJoin(customers, eq(appointments.customerId, customers.id))
+        .where(
+          and(
+            gte(appointments.date, startDate),
+            lte(appointments.date, endDate),
+            isNull(appointments.deletedAt),
+            eq(appointments.status, "completed"),
+            isNull(appointments.signatureData),
+            or(
+              inArray(appointments.assignedEmployeeId, employeeIds),
+              and(
+                isNull(appointments.assignedEmployeeId),
+                or(
+                  inArray(customers.primaryEmployeeId, employeeIds),
+                  inArray(customers.backupEmployeeId, employeeIds),
+                  inArray(customers.backupEmployeeId2, employeeIds)
+                )
+              )
+            )
+          )
+        )
+        .orderBy(asc(appointments.date), asc(appointments.scheduledStart)),
+
+      db
+        .select({
+          userId: employeeTimeEntries.userId,
+          count: count(),
+        })
+        .from(employeeTimeEntries)
+        .where(
+          and(
+            inArray(employeeTimeEntries.userId, employeeIds),
+            gte(employeeTimeEntries.entryDate, startDate),
+            lte(employeeTimeEntries.entryDate, endDate),
+            isNull(employeeTimeEntries.deletedAt)
+          )
+        )
+        .groupBy(employeeTimeEntries.userId),
+
+      db
+        .select({
+          employeeId: sqlBuilder`COALESCE(${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`.as('employee_id'),
+          count: count(),
+        })
+        .from(appointments)
+        .innerJoin(customers, eq(appointments.customerId, customers.id))
+        .where(
+          and(
+            gte(appointments.date, startDate),
+            lte(appointments.date, endDate),
+            isNull(appointments.deletedAt),
+            inArray(appointments.status, ["completed", "cancelled"]),
+            or(
+              inArray(appointments.assignedEmployeeId, employeeIds),
+              and(
+                isNull(appointments.assignedEmployeeId),
+                or(
+                  inArray(customers.primaryEmployeeId, employeeIds),
+                  inArray(customers.backupEmployeeId, employeeIds),
+                  inArray(customers.backupEmployeeId2, employeeIds)
+                )
+              )
+            )
+          )
+        )
+        .groupBy(sqlBuilder`COALESCE(${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`),
+
+      db
+        .select()
+        .from(employeeMonthClosings)
+        .where(
+          and(
+            eq(employeeMonthClosings.year, year),
+            eq(employeeMonthClosings.month, month),
+            inArray(employeeMonthClosings.userId, employeeIds)
+          )
+        ),
+    ]);
+
+    const mapAppointment = (a: { id: number; date: string; scheduledStart: string | null; status: string; customerName: unknown }) => ({
+      id: a.id,
+      date: a.date,
+      scheduledStart: a.scheduledStart,
+      status: a.status,
+      customerName: String(a.customerName ?? "Unbekannt"),
+    });
+
+    const openByEmployee = new Map<number, typeof allOpenAppts>();
+    for (const appt of allOpenAppts) {
+      const empId = Number(appt.employeeId);
+      if (!openByEmployee.has(empId)) openByEmployee.set(empId, []);
+      openByEmployee.get(empId)!.push(appt);
+    }
+
+    const unsignedByEmployee = new Map<number, typeof allUnsignedAppts>();
+    for (const appt of allUnsignedAppts) {
+      const empId = Number(appt.employeeId);
+      if (!unsignedByEmployee.has(empId)) unsignedByEmployee.set(empId, []);
+      unsignedByEmployee.get(empId)!.push(appt);
+    }
+
+    const timeEntryCountMap = new Map(allTimeEntryCounts.map(r => [r.userId, Number(r.count)]));
+    const completedCountMap = new Map(allCompletedCounts.map(r => [Number(r.employeeId), Number(r.count)]));
+    const closingMap = new Map(allClosings.map(c => [c.userId, c]));
+
+    return activeEmployees.map(emp => {
+      const openAppts = openByEmployee.get(emp.id) ?? [];
+      const unsignedAppts = unsignedByEmployee.get(emp.id) ?? [];
+      const timeEntries = timeEntryCountMap.get(emp.id) ?? 0;
+      const completedAppts = completedCountMap.get(emp.id) ?? 0;
+      const hasActivity = timeEntries > 0 || completedAppts > 0;
+      const closing = closingMap.get(emp.id);
+      const isClosed = !!(closing && !closing.reopenedAt);
+
+      return {
+        userId: emp.id,
+        displayName: emp.displayName,
+        isClosed,
+        closingId: closing?.id ?? null,
+        ready: openAppts.length === 0 && unsignedAppts.length === 0 && hasActivity,
+        openAppointments: openAppts.map(mapAppointment),
+        unsignedAppointments: unsignedAppts.map(mapAppointment),
+        hasTimeEntries: hasActivity,
+        timeEntryCount: timeEntries + completedAppts,
+      };
+    });
   }
 
   async getMonthClosing(userId: number, year: number, month: number) {

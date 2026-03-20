@@ -107,6 +107,8 @@ export function LogoUploadCard({ companyData }: LogoUploadCardProps) {
                   <img
                     src={companyData.logoUrl}
                     alt="App-Logo"
+                    width={64}
+                    height={64}
                     className="w-full h-full object-contain p-1"
                     data-testid="img-company-logo"
                   />
@@ -169,6 +171,8 @@ export function LogoUploadCard({ companyData }: LogoUploadCardProps) {
                   <img
                     src={companyData.pdfLogoUrl}
                     alt="Dokumenten-Logo"
+                    width={64}
+                    height={64}
                     className="w-full h-full object-contain p-1"
                     data-testid="img-pdf-logo"
                   />

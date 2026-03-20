@@ -482,8 +482,17 @@ export default function CustomerDetailPage() {
   if (customerLoading) {
     return (
       <Layout>
-        <div className="flex items-center justify-center min-h-[50vh]">
-          <Loader2 className={`${iconSize.xl} animate-spin text-primary`} />
+        <div className="min-h-[50vh] p-4 space-y-6">
+          <div className="flex items-center gap-3">
+            <div className="animate-pulse h-8 w-8 rounded-full bg-muted" />
+            <div className="animate-pulse h-6 w-48 bg-muted rounded" />
+          </div>
+          <div className="animate-pulse h-32 w-full bg-muted rounded-xl" />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="animate-pulse h-24 bg-muted rounded-xl" />
+            <div className="animate-pulse h-24 bg-muted rounded-xl" />
+          </div>
+          <div className="animate-pulse h-48 w-full bg-muted rounded-xl" />
         </div>
       </Layout>
     );
