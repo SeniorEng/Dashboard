@@ -388,18 +388,22 @@ describe("INT-6: Kaskadenverbrauch ueber Termin-Dokumentation", () => {
     });
     expect(docRes.status).toBe(200);
 
-    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?limit=50`);
+    const inlineTx = docRes.data.budgetTransaction;
+    expect(inlineTx).toBeDefined();
+    expect(inlineTx.appointmentId).toBe(appointmentId);
+    expect(inlineTx.transactionType).toBe("consumption");
+    expect(inlineTx.amountCents).toBeLessThan(0);
+
+    createdTransactionIds.push(inlineTx.id);
+
+    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?limit=200`);
     expect(txRes.status).toBe(200);
 
     const consumption = txRes.data.find(
       (t: any) => t.appointmentId === appointmentId && t.transactionType === "consumption"
     );
     expect(consumption).toBeDefined();
-    expect(consumption.amountCents).toBeLessThan(0);
-
-    if (consumption) {
-      createdTransactionIds.push(consumption.id);
-    }
+    expect(consumption!.amountCents).toBeLessThan(0);
   });
 
   it("INT-6.5 – Nach Dokumentation: Verbrauch in einem der Toepfe sichtbar", async () => {
