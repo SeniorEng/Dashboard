@@ -9,6 +9,7 @@ export const PROSPECT_STATUSES = [
   "neu",
   "kontaktiert",
   "wiedervorlage",
+  "erstberatung_vereinbart",
   "nicht_interessiert",
   "absage",
   "erstberatung",
@@ -21,9 +22,10 @@ export const PROSPECT_STATUS_LABELS: Record<ProspectStatus, string> = {
   neu: "Neu",
   kontaktiert: "Kontaktiert",
   wiedervorlage: "Wiedervorlage",
+  erstberatung_vereinbart: "Erstberatung vereinbart",
   nicht_interessiert: "Nicht interessiert",
   absage: "Absage",
-  erstberatung: "Erstberatung vereinbart",
+  erstberatung: "Erstberatung",
   gewonnen: "Erfolgreich gewonnen",
 };
 

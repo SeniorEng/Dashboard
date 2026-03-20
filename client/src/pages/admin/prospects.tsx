@@ -51,6 +51,7 @@ import {
   PhoneCall,
   Trash2,
   CalendarClock,
+  CalendarCheck,
   XCircle,
   ArrowRightCircle,
   Loader2,
@@ -67,6 +68,7 @@ const STATUS_COLORS: Record<ProspectStatus, string> = {
   neu: "bg-blue-100 text-blue-800",
   kontaktiert: "bg-amber-100 text-amber-800",
   wiedervorlage: "bg-purple-100 text-purple-800",
+  erstberatung_vereinbart: "bg-cyan-100 text-cyan-800",
   nicht_interessiert: "bg-gray-100 text-gray-800",
   absage: "bg-red-100 text-red-800",
   erstberatung: "bg-emerald-100 text-emerald-800",
@@ -89,7 +91,7 @@ function StatusBadge({ status }: { status: string }) {
 function PipelineStats({ stats }: { stats: Record<string, number> }) {
   const total = Object.values(stats).reduce((a, b) => a + b, 0);
   return (
-    <div className="grid grid-cols-3 md:grid-cols-7 gap-2 mb-4" data-testid="pipeline-stats">
+    <div className="grid grid-cols-4 md:grid-cols-8 gap-2 mb-4" data-testid="pipeline-stats">
       {PROSPECT_STATUSES.map((status) => (
         <div key={status} className="text-center p-2 rounded-lg bg-white/60 border">
           <div className="text-lg font-bold" data-testid={`stat-count-${status}`}>
@@ -433,6 +435,18 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                         <Button size="sm" variant="outline" onClick={() => setShowWiedervorlageDialog(true)} data-testid="button-status-wiedervorlage">
                           <CalendarClock className="h-3.5 w-3.5 mr-1" /> Wiedervorlage
                         </Button>
+                        {prospect.status !== "erstberatung_vereinbart" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-blue-600"
+                            onClick={() => updateMutation.mutate({ id: prospect.id, data: { status: "erstberatung_vereinbart" } })}
+                            disabled={updateMutation.isPending}
+                            data-testid="button-status-erstberatung-vereinbart"
+                          >
+                            <CalendarCheck className="h-3.5 w-3.5 mr-1" /> Erstberatung vereinbart
+                          </Button>
+                        )}
                         <Button size="sm" variant="outline" className="text-red-600" onClick={() => setShowNichtInteressiertDialog(true)} data-testid="button-status-nicht-interessiert">
                           <XCircle className="h-3.5 w-3.5 mr-1" /> Nicht interessiert
                         </Button>
@@ -443,7 +457,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                         data-testid="button-convert-erstberatung"
                       >
                         <ArrowRightCircle className="h-4 w-4 mr-2" />
-                        Erstberatung vereinbaren
+                        Erstberatung anlegen
                       </Button>
                     </CardContent>
                   </Card>
