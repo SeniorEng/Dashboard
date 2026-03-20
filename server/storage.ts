@@ -405,7 +405,7 @@ export class DatabaseStorage implements IStorage {
         name: customers.name,
         geburtsdatum: customers.geburtsdatum,
         strasse: customers.strasse,
-        hausnummer: customers.hausnummer,
+        hausnummer: customers.nr,
         plz: customers.plz,
         stadt: customers.stadt,
         primaryEmployeeId: customers.primaryEmployeeId,
@@ -554,8 +554,9 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async deleteAppointment(id: number): Promise<boolean> {
-    const result = await db.update(appointments)
+  async deleteAppointment(id: number, tx?: import("./lib/db").DbOrTx): Promise<boolean> {
+    const client = tx || db;
+    const result = await client.update(appointments)
       .set({ deletedAt: new Date() })
       .where(and(eq(appointments.id, id), isNull(appointments.deletedAt)))
       .returning();

@@ -893,9 +893,9 @@ router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins
 
   const transactions = await budgetLedgerStorage.getTransactionsByAppointmentId(id);
 
-  const updatedAppointment = await db.transaction(async () => {
+  const updatedAppointment = await db.transaction(async (txClient) => {
     for (const tx of transactions) {
-      await budgetLedgerStorage.reverseBudgetTransaction(tx.id, req.user!.id);
+      await budgetLedgerStorage.reverseBudgetTransaction(tx.id, req.user!.id, txClient);
     }
 
     const result = await storage.updateAppointment(id, {
@@ -904,7 +904,11 @@ router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins
       signatureHash: null,
       signedAt: null,
       signedByUserId: null,
-    });
+    }, txClient);
+
+    if (!result) {
+      throw new Error("Termin konnte nicht zurückgesetzt werden");
+    }
 
     return result;
   });
@@ -966,11 +970,14 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   let reversedTransactions = 0;
   if (isAdmin && isCompleted) {
     const transactions = await budgetLedgerStorage.getTransactionsByAppointmentId(id);
-    await db.transaction(async () => {
+    await db.transaction(async (txClient) => {
       for (const tx of transactions) {
-        await budgetLedgerStorage.reverseBudgetTransaction(tx.id, req.user!.id);
+        await budgetLedgerStorage.reverseBudgetTransaction(tx.id, req.user!.id, txClient);
       }
-      await storage.deleteAppointment(id);
+      const deleted = await storage.deleteAppointment(id, txClient);
+      if (!deleted) {
+        throw new Error("Termin konnte nicht gelöscht werden");
+      }
     });
     reversedTransactions = transactions.length;
   } else {
@@ -981,6 +988,7 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   }
 
   await auditService.log(
+    req.user!.id,
     "appointment_deleted",
     "appointment",
     id,

@@ -245,15 +245,16 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       ));
   }
 
-  async reverseBudgetTransaction(transactionId: number, userId?: number): Promise<BudgetTransaction | undefined> {
-    const original = await db.select()
+  async reverseBudgetTransaction(transactionId: number, userId?: number, txClient?: DbClient): Promise<BudgetTransaction | undefined> {
+    const d = txClient ?? db;
+    const original = await d.select()
       .from(budgetTransactions)
       .where(eq(budgetTransactions.id, transactionId))
       .limit(1);
     
     if (!original[0]) return undefined;
     
-    const reversal = await db.insert(budgetTransactions).values({
+    const reversal = await d.insert(budgetTransactions).values({
       customerId: original[0].customerId,
       budgetType: original[0].budgetType,
       transactionDate: todayISO(),
