@@ -10,14 +10,11 @@ import { useState, useMemo, useCallback } from "react";
 import { useParams, useSearch, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatDateForDisplay, isChild } from "@shared/utils/datetime";
-import { DEACTIVATION_REASON_SELECT_OPTIONS, DEACTIVATION_REASON_LABELS, type DeactivationReason } from "@shared/domain/customers";
+import { DEACTIVATION_REASON_LABELS, type DeactivationReason } from "@shared/domain/customers";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { DatePicker } from "@/components/ui/date-picker";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SectionCard } from "@/components/patterns/section-card";
@@ -359,10 +356,7 @@ export default function AdminCustomerDetail() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [showDeactivateDialog, setShowDeactivateDialog] = useState(false);
-  const [deactivationReason, setDeactivationReason] = useState<string>("");
   const [deactivationNote, setDeactivationNote] = useState<string>("");
-  const [deactivationMode, setDeactivationMode] = useState<"sofort" | "datum">("sofort");
-  const [inaktivAbDate, setInaktivAbDate] = useState<string>("");
   const [showMergeDialog, setShowMergeDialog] = useState(false);
   const [mergeTargetId, setMergeTargetId] = useState<string>("");
   const [mergeNote, setMergeNote] = useState<string>("");
@@ -387,6 +381,23 @@ export default function AdminCustomerDetail() {
       }))
       .sort((a, b) => a.label.localeCompare(b.label, "de"));
   }, [activeCustomersData, customerId]);
+
+  const declineErstberatung = useMutation({
+    mutationFn: async (payload: { note?: string }) => {
+      const result = await api.post(`/admin/customers/${customerId}/decline-erstberatung`, payload);
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      invalidateRelated(queryClient, "customers");
+      queryClient.invalidateQueries({ queryKey: ["conversion-readiness", customerId] });
+      toast({ title: "Erstberatung abgelehnt", description: "Der Kunde wurde als inaktiv markiert." });
+      setShowDeactivateDialog(false);
+      setDeactivationNote("");
+    },
+    onError: (err: Error) => {
+      toast({ title: "Fehler", description: err.message, variant: "destructive" });
+    },
+  });
 
   const mergeErstberatung = useMutation({
     mutationFn: async (payload: { targetCustomerId: number; note?: string }) => {
@@ -414,12 +425,10 @@ export default function AdminCustomerDetail() {
     onSuccess: () => {
       invalidateRelated(queryClient, "customers");
       queryClient.invalidateQueries({ queryKey: ["conversion-readiness", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["deactivation-readiness", customerId] });
       toast({ title: "Kundenstatus aktualisiert" });
       setShowDeactivateDialog(false);
-      setDeactivationReason("");
       setDeactivationNote("");
-      setDeactivationMode("sofort");
-      setInaktivAbDate("");
     },
     onError: (err: Error) => {
       toast({ title: "Fehler", description: err.message, variant: "destructive" });
@@ -504,24 +513,7 @@ export default function AdminCustomerDetail() {
                 )}
               </>
             }
-            actions={
-              customer.status === "aktiv" ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setDeactivationReason("");
-                    setDeactivationNote("");
-                    setShowDeactivateDialog(true);
-                  }}
-                  disabled={updateStatus.isPending}
-                  data-testid="button-deactivate-customer"
-                >
-                  <UserX className={`${iconSize.sm} mr-2`} />
-                  Deaktivieren
-                </Button>
-              ) : undefined
-            }
+            actions={undefined}
           />
 
           {customer.status === "erstberatung" && (
@@ -529,7 +521,6 @@ export default function AdminCustomerDetail() {
               customerId={customerId}
               onActivate={() => updateStatus.mutate({ status: "aktiv" })}
               onReject={() => {
-                setDeactivationReason("kein_interesse");
                 setDeactivationNote("");
                 setShowDeactivateDialog(true);
               }}
@@ -543,8 +534,8 @@ export default function AdminCustomerDetail() {
             <SectionCard className="mb-4 border-blue-200 bg-blue-50">
               <div className="flex items-center gap-2">
                 <p className="text-sm text-blue-800">
-                  <span className="font-medium">Inaktiv ab {formatDateForDisplay(customer.inaktivAb)}:</span>{" "}
-                  Ab diesem Datum können keine neuen Termine erstellt werden.
+                  <span className="font-medium">Vertragsende {formatDateForDisplay(customer.inaktivAb)}:</span>{" "}
+                  Vertrag läuft aus. Details und Deaktivierungsstatus im Vertrag-Tab.
                 </p>
               </div>
             </SectionCard>
@@ -751,70 +742,24 @@ export default function AdminCustomerDetail() {
           <Dialog open={showDeactivateDialog} onOpenChange={(open) => {
             if (!open) {
               setShowDeactivateDialog(false);
-              setDeactivationReason("");
               setDeactivationNote("");
-              setDeactivationMode("sofort");
-              setInaktivAbDate("");
             }
           }}>
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
-                <DialogTitle>Kunde deaktivieren</DialogTitle>
+                <DialogTitle>Erstberatung ablehnen</DialogTitle>
                 <DialogDescription>
-                  Bitte geben Sie einen Grund an, warum dieser Kunde deaktiviert wird. Dies dient der späteren Analyse.
+                  Bitte geben Sie einen Grund an, warum dieser Erstberatungskunde abgelehnt wird.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-2">
                 <div className="space-y-2">
-                  <Label htmlFor="deactivation-reason">Grund *</Label>
-                  <Select value={deactivationReason} onValueChange={setDeactivationReason}>
-                    <SelectTrigger id="deactivation-reason" data-testid="select-deactivation-reason">
-                      <SelectValue placeholder="Grund auswählen..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {DEACTIVATION_REASON_SELECT_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value} data-testid={`option-reason-${opt.value}`}>
-                          {opt.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-3">
-                  <Label>Zeitpunkt</Label>
-                  <RadioGroup value={deactivationMode} onValueChange={(v) => setDeactivationMode(v as "sofort" | "datum")} className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <RadioGroupItem value="sofort" id="mode-sofort" data-testid="radio-deactivation-sofort" />
-                      <Label htmlFor="mode-sofort" className="font-normal cursor-pointer">Sofort deaktivieren</Label>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <RadioGroupItem value="datum" id="mode-datum" data-testid="radio-deactivation-datum" />
-                      <Label htmlFor="mode-datum" className="font-normal cursor-pointer">Ab einem bestimmten Datum</Label>
-                    </div>
-                  </RadioGroup>
-                  {deactivationMode === "datum" && (
-                    <div className="pl-6 space-y-2">
-                      <Label htmlFor="inaktiv-ab-date">Inaktiv ab *</Label>
-                      <DatePicker
-                        value={inaktivAbDate || null}
-                        onChange={(val) => setInaktivAbDate(val || "")}
-                        data-testid="input-inaktiv-ab-date"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Der Kunde bleibt aktiv, aber ab diesem Datum können keine neuen Termine erstellt werden.
-                      </p>
-                    </div>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="deactivation-note">
-                    {deactivationReason === "sonstiges" ? "Beschreibung *" : "Anmerkung (optional)"}
-                  </Label>
+                  <Label htmlFor="deactivation-note">Anmerkung (optional)</Label>
                   <Textarea
                     id="deactivation-note"
                     value={deactivationNote}
                     onChange={(e) => setDeactivationNote(e.target.value)}
-                    placeholder={deactivationReason === "sonstiges" ? "Bitte beschreiben Sie den Grund..." : "Optionale Anmerkung..."}
+                    placeholder="Optionale Anmerkung..."
                     maxLength={1000}
                     rows={3}
                     data-testid="textarea-deactivation-note"
@@ -826,10 +771,7 @@ export default function AdminCustomerDetail() {
                   variant="outline"
                   onClick={() => {
                     setShowDeactivateDialog(false);
-                    setDeactivationReason("");
                     setDeactivationNote("");
-                    setDeactivationMode("sofort");
-                    setInaktivAbDate("");
                   }}
                   data-testid="button-cancel-deactivation"
                 >
@@ -838,35 +780,19 @@ export default function AdminCustomerDetail() {
                 <Button
                   variant="destructive"
                   onClick={() => {
-                    if (deactivationMode === "datum") {
-                      updateStatus.mutate({
-                        status: "aktiv",
-                        inaktivAb: inaktivAbDate,
-                        deactivationReason: deactivationReason || undefined,
-                        deactivationNote: deactivationNote.trim() || undefined,
-                      });
-                    } else {
-                      updateStatus.mutate({
-                        status: "inaktiv",
-                        deactivationReason: deactivationReason || undefined,
-                        deactivationNote: deactivationNote.trim() || undefined,
-                      });
-                    }
+                    declineErstberatung.mutate({
+                      note: deactivationNote.trim() || undefined,
+                    });
                   }}
-                  disabled={
-                    !deactivationReason ||
-                    (deactivationReason === "sonstiges" && !deactivationNote.trim()) ||
-                    (deactivationMode === "datum" && !inaktivAbDate) ||
-                    updateStatus.isPending
-                  }
+                  disabled={declineErstberatung.isPending}
                   data-testid="button-confirm-deactivation"
                 >
-                  {updateStatus.isPending ? (
+                  {declineErstberatung.isPending ? (
                     <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
                   ) : (
                     <UserX className={`${iconSize.sm} mr-2`} />
                   )}
-                  {deactivationMode === "datum" ? "Datum setzen" : "Deaktivieren"}
+                  Ablehnen
                 </Button>
               </DialogFooter>
             </DialogContent>

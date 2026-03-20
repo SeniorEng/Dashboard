@@ -71,7 +71,6 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
     haustierVorhanden: false,
     haustierDetails: "",
     personenbefoerderungGewuenscht: false,
-    inaktivAb: "",
   });
 
   const [documentDeliveryMethod, setDocumentDeliveryMethod] = useState<"email" | "post">("email");
@@ -125,7 +124,6 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
       haustierVorhanden: customer.haustierVorhanden ?? false,
       haustierDetails: customer.haustierDetails || "",
       personenbefoerderungGewuenscht: customer.personenbefoerderungGewuenscht ?? false,
-      inaktivAb: customer.inaktivAb || "",
     });
   };
 
@@ -270,7 +268,6 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
         haustierVorhanden: besonderheiten.haustierVorhanden,
         haustierDetails: besonderheiten.haustierVorhanden ? (besonderheiten.haustierDetails?.trim() || null) : null,
         personenbefoerderungGewuenscht: besonderheiten.personenbefoerderungGewuenscht,
-        inaktivAb: besonderheiten.inaktivAb?.trim() || null,
       });
       unwrapResult(result);
       toast({ title: "Besonderheiten gespeichert" });
@@ -761,14 +758,6 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
                 data-testid="switch-personenbefoerderung"
               />
             </div>
-            <div className="space-y-2">
-              <Label>Inaktiv ab</Label>
-              <DatePicker
-                value={besonderheiten.inaktivAb || null}
-                onChange={(val) => setBesonderheiten((prev) => ({ ...prev, inaktivAb: val || "" }))}
-                data-testid="input-inaktiv-ab"
-              />
-            </div>
             {saveCancel(handleSaveBesonderheiten, "besonderheiten")}
           </div>
         ) : (
@@ -783,10 +772,6 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
             <div className="flex items-center gap-2 text-gray-700" data-testid="text-personenbefoerderung">
               <Car className={`${iconSize.sm} text-gray-500`} />
               Personenbeförderung: {customer.personenbefoerderungGewuenscht ? "Ja" : "Nein"}
-            </div>
-            <div className="flex items-center gap-2 text-gray-700" data-testid="text-inaktiv-ab">
-              <Calendar className={`${iconSize.sm} text-gray-500`} />
-              Inaktiv ab: {customer.inaktivAb ? formatDateForDisplay(customer.inaktivAb) : "Nicht festgelegt"}
             </div>
           </div>
         )}

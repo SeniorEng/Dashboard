@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDateForDisplay } from "@shared/utils/datetime";
+import { DEACTIVATION_REASON_SELECT_OPTIONS } from "@shared/domain/customers";
 import { SectionCard } from "@/components/patterns/section-card";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,11 @@ import {
   Save,
   X,
   Loader2,
+  AlertTriangle,
+  CheckCircle2,
+  XCircle,
+  UserX,
+  Calendar,
 } from "lucide-react";
 import type { CustomerDetail } from "@/lib/api/types";
 
@@ -38,6 +44,23 @@ function formatPeriodType(type: string): string {
     case "year": return "Jahr";
     default: return type;
   }
+}
+
+interface DeactivationCheck {
+  key: string;
+  label: string;
+  met: boolean;
+  detail: string;
+}
+
+interface DeactivationReadiness {
+  ready: boolean;
+  hasContractEnd: boolean;
+  contractEnd: string | null;
+  checks: DeactivationCheck[];
+  futureAppointmentsCount: number;
+  futureAppointments: Array<{ id: number; date: string; status: string }>;
+  message?: string;
 }
 
 interface CustomerContractTabProps {
@@ -64,6 +87,9 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
   const [creatingContract, setCreatingContract] = useState(false);
   const [newContractStart, setNewContractStart] = useState("");
 
+  const [deactivationReason, setDeactivationReason] = useState("");
+  const [deactivationNote, setDeactivationNote] = useState("");
+
   const contract = customer.currentContract;
 
   const computedContractStatus = (() => {
@@ -76,6 +102,18 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
     }
     return "active";
   })();
+
+  const hasContractEnd = !!contract?.contractEnd;
+
+  const { data: deactivationReadiness, isLoading: readinessLoading } = useQuery<DeactivationReadiness>({
+    queryKey: ["deactivation-readiness", customerId],
+    queryFn: async () => {
+      const result = await api.get<DeactivationReadiness>(`/admin/customers/${customerId}/deactivation-readiness`);
+      return unwrapResult(result);
+    },
+    enabled: hasContractEnd && customer.status === "aktiv",
+    staleTime: 15000,
+  });
 
   const startEditing = (section: string) => {
     if (section === "vertragsdaten" && contract) {
@@ -98,6 +136,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
 
   const invalidateCustomer = () => {
     invalidateRelated(queryClient, "customers");
+    queryClient.invalidateQueries({ queryKey: ["deactivation-readiness", customerId] });
   };
 
   const handleCreateContract = async () => {
@@ -162,22 +201,6 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
     }
   };
 
-  const handleTerminateContract = async () => {
-    setSaving(true);
-    try {
-      const result = await api.patch(`/admin/customers/${customerId}/contract`, {
-        status: "terminated",
-      });
-      unwrapResult(result);
-      toast({ title: "Vertrag beendet" });
-      invalidateCustomer();
-    } catch (error: unknown) {
-      toast({ variant: "destructive", title: "Fehler", description: error instanceof Error ? error.message : "Vertrag konnte nicht beendet werden." });
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const handleReactivateContract = async () => {
     setSaving(true);
     try {
@@ -194,6 +217,25 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
       setSaving(false);
     }
   };
+
+  const completeDeactivation = useMutation({
+    mutationFn: async () => {
+      const result = await api.post(`/admin/customers/${customerId}/complete-deactivation`, {
+        deactivationReason,
+        deactivationNote: deactivationNote.trim() || undefined,
+      });
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      invalidateCustomer();
+      toast({ title: "Vertrag beendet & Kunde deaktiviert", description: "Der Kunde wurde erfolgreich deaktiviert." });
+      setDeactivationReason("");
+      setDeactivationNote("");
+    },
+    onError: (err: Error) => {
+      toast({ title: "Fehler", description: err.message, variant: "destructive" });
+    },
+  });
 
   const togglePrivatePayment = useMutation({
     mutationFn: async (accepts: boolean) => {
@@ -343,6 +385,9 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
                   onChange={(e) => setContractEnd(e.target.value)}
                   data-testid="input-contract-end"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Das Vertragsende steuert den gesamten Deaktivierungsprozess.
+                </p>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="hoursPerPeriod">Stundenumfang</Label>
@@ -393,7 +438,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
                 <p className="font-medium" data-testid="text-contract-end">
                   {contract.contractEnd
                     ? formatDateForDisplay(contract.contractEnd)
-                    : "Kein Ende festgelegt"}
+                    : "Kein Ende festgelegt (unbefristet)"}
                 </p>
               </div>
               <div>
@@ -409,23 +454,6 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
                 <StatusBadge type="contract" value={computedContractStatus || contract.status} />
               </div>
             </div>
-            {contract.status !== "terminated" && computedContractStatus === "auslaufend" && (
-              <div className="pt-3 border-t">
-                <p className="text-sm text-amber-700 mb-2">
-                  Das Vertragsende wurde erreicht. Bitte prüfen Sie, ob alle Termine dokumentiert und Leistungsnachweise erstellt wurden, bevor Sie den Vertrag beenden.
-                </p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-destructive border-destructive/30 hover:bg-destructive/10"
-                  onClick={handleTerminateContract}
-                  disabled={saving}
-                  data-testid="button-terminate-contract"
-                >
-                  Vertrag beenden
-                </Button>
-              </div>
-            )}
             {contract.status === "terminated" && (
               <div className="pt-3 border-t">
                 <Button
@@ -442,6 +470,119 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
           </div>
         )}
       </SectionCard>
+
+      {contract && hasContractEnd && customer.status === "aktiv" && (
+        <SectionCard
+          title="Vertragsende & Deaktivierung"
+          icon={<Calendar className={iconSize.sm} />}
+        >
+          <div className="space-y-4">
+            {deactivationReadiness?.futureAppointmentsCount && deactivationReadiness.futureAppointmentsCount > 0 ? (
+              <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className={`${iconSize.sm} text-amber-600 mt-0.5 shrink-0`} />
+                  <div>
+                    <p className="text-sm font-medium text-amber-900">
+                      {deactivationReadiness.futureAppointmentsCount} Termin(e) nach Vertragsende
+                    </p>
+                    <p className="text-xs text-amber-700 mt-0.5">
+                      Es gibt Termine nach dem {formatDateForDisplay(contract.contractEnd!)}. Diese sollten storniert oder verschoben werden.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {readinessLoading ? (
+              <div className="flex items-center gap-2 text-sm text-gray-500">
+                <Loader2 className={`${iconSize.sm} animate-spin`} />
+                <span>Deaktivierungsstatus wird geprüft...</span>
+              </div>
+            ) : deactivationReadiness?.checks && deactivationReadiness.checks.length > 0 ? (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-gray-700">Checkliste vor Deaktivierung:</p>
+                {deactivationReadiness.checks.map((check) => (
+                  <div
+                    key={check.key}
+                    className={`flex items-start gap-2 text-sm ${check.met ? "text-green-700" : "text-gray-600"}`}
+                    data-testid={`check-${check.key}`}
+                  >
+                    {check.met ? (
+                      <CheckCircle2 className={`${iconSize.sm} text-green-600 shrink-0 mt-0.5`} />
+                    ) : (
+                      <XCircle className={`${iconSize.sm} text-gray-400 shrink-0 mt-0.5`} />
+                    )}
+                    <div>
+                      <span className="font-medium">{check.label}</span>
+                      <p className="text-xs text-gray-500">{check.detail}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {deactivationReadiness?.ready ? (
+              <div className="pt-3 border-t space-y-3">
+                <p className="text-sm text-green-700 font-medium">
+                  Alle Bedingungen erfüllt — der Kunde kann deaktiviert werden.
+                </p>
+                <div className="space-y-2">
+                  <Label htmlFor="deact-reason">Deaktivierungsgrund *</Label>
+                  <Select value={deactivationReason} onValueChange={setDeactivationReason}>
+                    <SelectTrigger id="deact-reason" data-testid="select-deactivation-reason">
+                      <SelectValue placeholder="Grund auswählen..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DEACTIVATION_REASON_SELECT_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value} data-testid={`option-reason-${opt.value}`}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="deact-note">
+                    {deactivationReason === "sonstiges" ? "Beschreibung *" : "Anmerkung (optional)"}
+                  </Label>
+                  <Textarea
+                    id="deact-note"
+                    value={deactivationNote}
+                    onChange={(e) => setDeactivationNote(e.target.value)}
+                    placeholder={deactivationReason === "sonstiges" ? "Bitte beschreiben Sie den Grund..." : "Optionale Anmerkung..."}
+                    maxLength={1000}
+                    rows={2}
+                    data-testid="textarea-deactivation-note"
+                  />
+                </div>
+                <Button
+                  variant="destructive"
+                  onClick={() => completeDeactivation.mutate()}
+                  disabled={
+                    !deactivationReason ||
+                    (deactivationReason === "sonstiges" && !deactivationNote.trim()) ||
+                    completeDeactivation.isPending
+                  }
+                  data-testid="button-complete-deactivation"
+                >
+                  {completeDeactivation.isPending ? (
+                    <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                  ) : (
+                    <UserX className={`${iconSize.sm} mr-2`} />
+                  )}
+                  Vertrag beenden & Kunden deaktivieren
+                </Button>
+              </div>
+            ) : deactivationReadiness && !deactivationReadiness.ready ? (
+              <div className="pt-3 border-t">
+                <p className="text-sm text-gray-500">
+                  Bitte schließen Sie alle offenen Punkte ab, bevor der Kunde deaktiviert werden kann.
+                </p>
+              </div>
+            ) : null}
+          </div>
+        </SectionCard>
+      )}
 
       <SectionCard
         title="Vereinbarte Leistungen"
