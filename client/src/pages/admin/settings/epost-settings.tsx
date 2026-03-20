@@ -5,18 +5,28 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Loader2, Truck, CheckCircle2, XCircle, Eye, EyeOff, Smartphone, KeyRound } from "lucide-react";
+import { Loader2, Truck, CheckCircle2, XCircle, Eye, EyeOff, Smartphone, KeyRound, Save } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
+import type { CompanySettings } from "@shared/schema";
 import type { CompanyFormData } from "./types";
 
 interface EPostSettingsCardProps {
   companyForm: CompanyFormData;
   updateField: (field: keyof CompanyFormData, value: string | boolean) => void;
-  onSaveFirst: () => Promise<void>;
 }
 
-export function EPostSettingsCard({ companyForm, updateField, onSaveFirst }: EPostSettingsCardProps) {
+function pickEpostFields(form: CompanyFormData) {
+  return {
+    epostVendorId: form.epostVendorId,
+    epostEkp: form.epostEkp,
+    epostPassword: form.epostPassword,
+    epostSecret: form.epostSecret,
+    epostTestMode: form.epostTestMode,
+  };
+}
+
+export function EPostSettingsCard({ companyForm, updateField }: EPostSettingsCardProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [showEpostPass, setShowEpostPass] = useState(false);
@@ -26,9 +36,23 @@ export function EPostSettingsCard({ companyForm, updateField, onSaveFirst }: EPo
   const [epostNewPassword, setEpostNewPassword] = useState("");
   const [showEpostNewPass, setShowEpostNewPass] = useState(false);
 
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const result = await api.patch<CompanySettings>("/company-settings", pickEpostFields(companyForm));
+      return unwrapResult(result);
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(["company-settings"], data);
+      toast({ title: "E-POST-Einstellungen gespeichert" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler beim Speichern", description: error.message, variant: "destructive" });
+    },
+  });
+
   const epostTestMutation = useMutation({
     mutationFn: async () => {
-      await onSaveFirst();
+      await saveMutation.mutateAsync();
       const result = await api.post<{ success: boolean; error?: string }>("/admin/document-delivery/test-epost", {});
       return unwrapResult(result);
     },
@@ -305,9 +329,22 @@ export function EPostSettingsCard({ companyForm, updateField, onSaveFirst }: EPo
             </div>
           )}
 
-          <p className="text-xs text-muted-foreground">
-            Einstellungen werden beim Speichern der Firmendaten mit gespeichert.
-          </p>
+          <div className="flex justify-end pt-2 border-t">
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending}
+              data-testid="button-save-epost"
+            >
+              {saveMutation.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="mr-2 h-4 w-4" />
+              )}
+              Speichern
+            </Button>
+          </div>
         </div>
       </CardContent>
     </Card>

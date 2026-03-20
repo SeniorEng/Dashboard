@@ -17,10 +17,9 @@ interface LeadAutoReplyCardProps {
   companyForm: CompanyFormData;
   companyData: CompanySettings | undefined;
   updateField: (field: keyof CompanyFormData, value: string | boolean) => void;
-  companySaveMutation: { mutateAsync: (data: CompanyFormData) => Promise<unknown> };
 }
 
-export function LeadAutoReplyCard({ companyForm, companyData, updateField, companySaveMutation }: LeadAutoReplyCardProps) {
+export function LeadAutoReplyCard({ companyForm, companyData, updateField }: LeadAutoReplyCardProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -41,7 +40,13 @@ export function LeadAutoReplyCard({ companyForm, companyData, updateField, compa
   const handleSave = async () => {
     setSaving(true);
     try {
-      await companySaveMutation.mutateAsync(companyForm);
+      const result = await api.patch<CompanySettings>("/company-settings", {
+        leadAutoReplyEnabled: companyForm.leadAutoReplyEnabled,
+        leadAutoReplySubject: companyForm.leadAutoReplySubject,
+        leadAutoReplyBody: companyForm.leadAutoReplyBody,
+      });
+      const data = unwrapResult(result);
+      queryClient.setQueryData(["company-settings"], data);
       toast({ title: "Auto-Antwort gespeichert" });
     } catch (err) {
       toast({ title: "Fehler beim Speichern", description: err instanceof Error ? err.message : "Unbekannter Fehler", variant: "destructive" });

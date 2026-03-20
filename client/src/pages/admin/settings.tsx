@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, Loader2, FileText, Wrench, Landmark, Phone } from "lucide-react";
+import { ArrowLeft, Loader2, FileText, Wrench, Landmark, Phone, Save } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -156,8 +156,28 @@ export default function AdminSettings() {
     setCompanyForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  const companyOnlyFields = {
+    companyName: companyForm.companyName,
+    geschaeftsfuehrer: companyForm.geschaeftsfuehrer,
+    strasse: companyForm.strasse,
+    hausnummer: companyForm.hausnummer,
+    plz: companyForm.plz,
+    stadt: companyForm.stadt,
+    telefon: companyForm.telefon,
+    email: companyForm.email,
+    website: companyForm.website,
+    steuernummer: companyForm.steuernummer,
+    ustId: companyForm.ustId,
+    iban: companyForm.iban,
+    bic: companyForm.bic,
+    bankName: companyForm.bankName,
+    ikNummer: companyForm.ikNummer,
+    anerkennungsnummer45a: companyForm.anerkennungsnummer45a,
+    anerkennungsBundesland: companyForm.anerkennungsBundesland,
+  };
+
   const companySaveMutation = useMutation({
-    mutationFn: async (data: typeof companyForm) => {
+    mutationFn: async (data: typeof companyOnlyFields) => {
       const result = await api.patch<CompanySettings>("/company-settings", data);
       return unwrapResult(result);
     },
@@ -170,9 +190,60 @@ export default function AdminSettings() {
     },
   });
 
-  const saveFirst = async () => {
-    await companySaveMutation.mutateAsync(companyForm);
-  };
+  const qontoSaveMutation = useMutation({
+    mutationFn: async () => {
+      const result = await api.patch<CompanySettings>("/company-settings", {
+        qontoLogin: companyForm.qontoLogin,
+        qontoSecretKey: companyForm.qontoSecretKey,
+        qontoIban: companyForm.qontoIban,
+      });
+      return unwrapResult(result);
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(["company-settings"], data);
+      toast({ title: "Qonto-Einstellungen gespeichert" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const twilioSaveMutation = useMutation({
+    mutationFn: async () => {
+      const result = await api.patch<CompanySettings>("/company-settings", {
+        twilioAccountSid: companyForm.twilioAccountSid,
+        twilioAuthToken: companyForm.twilioAuthToken,
+        twilioPhoneNumber: companyForm.twilioPhoneNumber,
+        leadCallBridgePhone: companyForm.leadCallBridgePhone,
+        leadCallBridgeEnabled: companyForm.leadCallBridgeEnabled,
+      });
+      return unwrapResult(result);
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(["company-settings"], data);
+      toast({ title: "Twilio-Einstellungen gespeichert" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const coverLetterSaveMutation = useMutation({
+    mutationFn: async () => {
+      const result = await api.patch<CompanySettings>("/company-settings", {
+        deliveryEmailSubject: companyForm.deliveryEmailSubject,
+        deliveryCoverLetterText: companyForm.deliveryCoverLetterText,
+      });
+      return unwrapResult(result);
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(["company-settings"], data);
+      toast({ title: "Anschreiben-Einstellungen gespeichert" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
 
   const toggleMutation = useMutation({
     mutationFn: async (autoBreaksEnabled: boolean) => {
@@ -242,20 +313,18 @@ export default function AdminSettings() {
               <CompanyDetailsForm
                 companyForm={companyForm}
                 updateField={updateField}
-                onSubmit={() => companySaveMutation.mutate(companyForm)}
+                onSubmit={() => companySaveMutation.mutate(companyOnlyFields)}
                 isSaving={companySaveMutation.isPending}
               />
 
               <SmtpSettingsCard
                 companyForm={companyForm}
                 updateField={updateField}
-                onSaveFirst={saveFirst}
               />
 
               <EPostSettingsCard
                 companyForm={companyForm}
                 updateField={updateField}
-                onSaveFirst={saveFirst}
               />
 
               {isSuperAdmin && (
@@ -304,9 +373,22 @@ export default function AdminSettings() {
                         data-testid="input-qonto-iban"
                       />
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Einstellungen werden beim Speichern der Firmendaten mit gespeichert. Zahlungsabgleich unter Zahlungen & Qonto.
-                    </p>
+                    <div className="flex justify-end pt-2 border-t">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => qontoSaveMutation.mutate()}
+                        disabled={qontoSaveMutation.isPending}
+                        data-testid="button-save-qonto"
+                      >
+                        {qontoSaveMutation.isPending ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Save className="mr-2 h-4 w-4" />
+                        )}
+                        Speichern
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -389,7 +471,7 @@ export default function AdminSettings() {
                         data-testid="button-test-call"
                         onClick={async () => {
                           try {
-                            await companySaveMutation.mutateAsync(companyForm);
+                            await twilioSaveMutation.mutateAsync();
                             const res = await api.post<{ success: boolean; message: string }>("/admin/twilio/test-call", {});
                             const result = unwrapResult(res);
                             toast({
@@ -410,9 +492,22 @@ export default function AdminSettings() {
                       </span>
                     </div>
                     )}
-                    <p className="text-xs text-muted-foreground">
-                      Einstellungen werden beim Speichern der Firmendaten mit gespeichert. Bei aktivierter Brücke wird der Mitarbeiter automatisch angerufen, sobald ein neuer Lead mit Telefonnummer eingeht.
-                    </p>
+                    <div className="flex justify-end pt-2 border-t">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => twilioSaveMutation.mutate()}
+                        disabled={twilioSaveMutation.isPending}
+                        data-testid="button-save-twilio"
+                      >
+                        {twilioSaveMutation.isPending ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Save className="mr-2 h-4 w-4" />
+                        )}
+                        Speichern
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -421,7 +516,6 @@ export default function AdminSettings() {
                 companyForm={companyForm}
                 companyData={companyData}
                 updateField={updateField}
-                companySaveMutation={companySaveMutation}
               />
 
               <Card data-testid="card-cover-letter-settings">
@@ -470,9 +564,22 @@ export default function AdminSettings() {
                         <div><code className="bg-white px-1 rounded">{"{{dokumentenliste}}"}</code> — Liste der Dokumente</div>
                       </div>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Leer lassen für den Standardtext. Speichern über den Button "Speichern" bei den Firmendaten oben.
-                    </p>
+                    <div className="flex justify-end pt-2 border-t">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => coverLetterSaveMutation.mutate()}
+                        disabled={coverLetterSaveMutation.isPending}
+                        data-testid="button-save-cover-letter"
+                      >
+                        {coverLetterSaveMutation.isPending ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Save className="mr-2 h-4 w-4" />
+                        )}
+                        Speichern
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
