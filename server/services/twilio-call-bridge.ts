@@ -2,6 +2,7 @@ import twilio from "twilio";
 import { storage } from "../storage";
 import { prospectStorage } from "../storage/prospects";
 import { validateGermanPhone } from "@shared/utils/phone";
+import { withTimeout } from "../lib/with-timeout";
 
 interface CallBridgeParams {
   prospectId: number;
@@ -11,7 +12,11 @@ interface CallBridgeParams {
 }
 
 async function getTwilioConfig() {
-  const settings = await storage.getCompanySettings();
+  const settings = await withTimeout(
+    () => storage.getCompanySettings(),
+    10000,
+    "getTwilioConfig DB lookup"
+  );
   if (
     !settings?.leadCallBridgeEnabled ||
     !settings?.twilioAccountSid ||
@@ -50,11 +55,7 @@ export async function initiateLeadCallBridge(params: CallBridgeParams): Promise<
   const phoneResult = validateGermanPhone(leadPhone);
   if (!phoneResult.valid) {
     console.log(`[twilio-bridge] Invalid lead phone for prospect ${prospectId}: ${phoneResult.error}`);
-    await prospectStorage.addNote({
-      prospectId,
-      noteText: `Automatischer Anruf nicht möglich: Telefonnummer ungültig (${leadPhone})`,
-      noteType: "notiz",
-    });
+    await safeAddNote(prospectId, `Automatischer Anruf nicht möglich: Telefonnummer ungültig (${leadPhone})`, "notiz");
     return;
   }
 
@@ -82,20 +83,24 @@ export async function initiateLeadCallBridge(params: CallBridgeParams): Promise<
 
     console.log(`[twilio-bridge] Call initiated for prospect ${prospectId}: SID=${call.sid}`);
 
-    await prospectStorage.addNote({
-      prospectId,
-      noteText: `Automatischer Anruf gestartet (${leadName}, Tel: ${phoneResult.formatted})`,
-      noteType: "anruf",
-    });
+    await safeAddNote(prospectId, `Automatischer Anruf gestartet (${leadName}, Tel: ${phoneResult.formatted})`, "anruf");
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[twilio-bridge] Failed to initiate call for prospect ${prospectId}: ${msg}`);
 
-    await prospectStorage.addNote({
-      prospectId,
-      noteText: `Automatischer Anruf fehlgeschlagen: ${msg}`,
-      noteType: "notiz",
-    });
+    await safeAddNote(prospectId, `Automatischer Anruf fehlgeschlagen: ${msg}`, "notiz");
+  }
+}
+
+async function safeAddNote(prospectId: number, noteText: string, noteType: string): Promise<void> {
+  try {
+    await withTimeout(
+      () => prospectStorage.addNote({ prospectId, noteText, noteType }),
+      10000,
+      `twilioBridge addNote (prospect ${prospectId})`
+    );
+  } catch (err) {
+    console.error(`[twilio-bridge] Failed to save note for prospect ${prospectId}:`, err instanceof Error ? err.message : err);
   }
 }
 

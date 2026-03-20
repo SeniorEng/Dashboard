@@ -91,14 +91,34 @@ app.use((req, res, next) => {
 });
 
 process.on("unhandledRejection", (reason, promise) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  if (isNeonDriverBug(msg)) {
+    console.warn("[neon-driver] Non-fatal WebSocket error suppressed:", msg);
+    return;
+  }
   console.error("[FATAL] Unhandled Promise Rejection:", reason);
   gracefulShutdown("unhandledRejection");
 });
 
 process.on("uncaughtException", (error) => {
+  const msg = error instanceof Error ? error.message : String(error);
+  if (isNeonDriverBug(msg)) {
+    console.warn("[neon-driver] Non-fatal WebSocket error suppressed:", msg);
+    return;
+  }
   console.error("[FATAL] Uncaught Exception:", error);
   gracefulShutdown("uncaughtException");
 });
+
+function isNeonDriverBug(message: string): boolean {
+  return (
+    message.includes("Cannot set property message of") &&
+    message.includes("which has only a getter")
+  ) || (
+    message.includes("ErrorEvent") &&
+    message.includes("only a getter")
+  );
+}
 
 (async () => {
   const { serviceCatalogStorage } = await import("./storage/service-catalog");

@@ -2,6 +2,7 @@ import { storage } from "../storage";
 import { prospectStorage } from "../storage/prospects";
 import { sendEmail, buildEmailLayout } from "./email-service";
 import { ObjectStorageService } from "../replit_integrations/object_storage/objectStorage";
+import { withTimeout } from "../lib/with-timeout";
 
 interface LeadAutoReplyParams {
   prospectId: number;
@@ -83,7 +84,11 @@ async function downloadAttachment(objectPath: string): Promise<Buffer | null> {
 export async function sendLeadAutoReply(params: LeadAutoReplyParams): Promise<void> {
   const { prospectId, leadEmail, leadVorname, leadNachname } = params;
 
-  const settings = await storage.getCompanySettings();
+  const settings = await withTimeout(
+    () => storage.getCompanySettings(),
+    10000,
+    "leadAutoReply DB lookup"
+  );
   if (!settings) {
     console.log("[lead-auto-reply] No company settings found, skipping");
     return;
@@ -101,11 +106,7 @@ export async function sendLeadAutoReply(params: LeadAutoReplyParams): Promise<vo
 
   if (!settings.smtpHost || !settings.smtpUser) {
     console.log("[lead-auto-reply] SMTP not configured, skipping auto-reply");
-    await prospectStorage.addNote({
-      prospectId,
-      noteText: "Automatische Antwort-E-Mail konnte nicht gesendet werden: SMTP nicht konfiguriert",
-      noteType: "notiz",
-    });
+    await safeAddNote(prospectId, "Automatische Antwort-E-Mail konnte nicht gesendet werden: SMTP nicht konfiguriert");
     return;
   }
 
@@ -149,19 +150,23 @@ export async function sendLeadAutoReply(params: LeadAutoReplyParams): Promise<vo
       ? ` (mit Anhang: ${settings.leadAutoReplyAttachmentName || "Information.pdf"})`
       : "";
 
-    await prospectStorage.addNote({
-      prospectId,
-      noteText: `Automatische Antwort-E-Mail gesendet an ${leadEmail}${attachmentNote}`,
-      noteType: "email",
-    });
+    await safeAddNote(prospectId, `Automatische Antwort-E-Mail gesendet an ${leadEmail}${attachmentNote}`, "email");
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : "Unbekannter Fehler";
     console.error(`[lead-auto-reply] Failed to send auto-reply to ${leadEmail}:`, err);
 
-    await prospectStorage.addNote({
-      prospectId,
-      noteText: `Automatische Antwort-E-Mail an ${leadEmail} fehlgeschlagen: ${errorMsg}`,
-      noteType: "notiz",
-    });
+    await safeAddNote(prospectId, `Automatische Antwort-E-Mail an ${leadEmail} fehlgeschlagen: ${errorMsg}`);
+  }
+}
+
+async function safeAddNote(prospectId: number, noteText: string, noteType: string = "notiz"): Promise<void> {
+  try {
+    await withTimeout(
+      () => prospectStorage.addNote({ prospectId, noteText, noteType }),
+      10000,
+      `leadAutoReply addNote (prospect ${prospectId})`
+    );
+  } catch (err) {
+    console.error(`[lead-auto-reply] Failed to save note for prospect ${prospectId}:`, err instanceof Error ? err.message : err);
   }
 }
