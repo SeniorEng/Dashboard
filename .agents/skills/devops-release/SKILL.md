@@ -357,6 +357,61 @@ This agent validates that the application is production-ready, properly configur
 
 ---
 
+## Category 7: External Integration Health
+
+**Goal**: Verify that all external service integrations are properly configured and will function after deployment.
+
+### Steps:
+1. **Twilio integration**:
+   ```bash
+   # Check Twilio credentials are configured
+   grep -rn "TWILIO_ACCOUNT_SID\|TWILIO_AUTH_TOKEN\|TWILIO_PHONE" server/ --include="*.ts"
+   
+   # Check Twilio call bridge is resilient
+   grep -rn "withTimeout\|safeAddNote" server/services/twilio-call-bridge.ts
+   ```
+   - Verify: Twilio credentials are set as environment secrets (not hardcoded)
+   - Verify: Twilio call failures don't crash the server or block lead processing
+   - Verify: Background DB calls in call bridge use `withTimeout()` pattern
+
+2. **Email webhook endpoint**:
+   ```bash
+   # Check webhook route exists and is protected
+   grep -rn "webhook\|EMAIL_WEBHOOK_SECRET" server/routes/ --include="*.ts"
+   
+   # Check lead auto-reply resilience
+   grep -rn "withTimeout\|safeAddNote" server/services/lead-auto-reply.ts
+   ```
+   - Verify: Webhook endpoint validates `EMAIL_WEBHOOK_SECRET`
+   - Verify: Webhook processing is resilient to DB timeouts
+   - Verify: Lead auto-reply doesn't crash on external service failures
+
+3. **Geocoding service (Nominatim)**:
+   ```bash
+   grep -rn "nominatim\|geocod\|openstreetmap" server/ --include="*.ts"
+   ```
+   - Verify: Geocoding has a timeout configured
+   - Verify: Geocoding failure is non-blocking (appointment still saved)
+
+4. **Neon database driver resilience**:
+   ```bash
+   # CRITICAL: Check crash suppression is in place
+   grep -rn "isNeonDriverBug\|uncaughtException\|unhandledRejection" server/index.ts
+   ```
+   - Verify: `isNeonDriverBug()` suppression handles `TypeError: Cannot set property message of #<ErrorEvent>`
+   - Verify: `uncaughtException` and `unhandledRejection` handlers are registered in `server/index.ts`
+   - If either handler is missing → FAIL (DB timeouts will crash the server)
+
+### Red Flags:
+- External service credentials hardcoded → FAIL
+- Webhook endpoint without secret validation → FAIL
+- Missing `isNeonDriverBug()` crash suppression → FAIL
+- Background task without `withTimeout()` → WARN
+- External service call without timeout → WARN
+- Missing Twilio credentials in environment → WARN (calls will silently fail)
+
+---
+
 ## Output Format
 
 ```
@@ -370,6 +425,7 @@ This agent validates that the application is production-ready, properly configur
 | 4. Logging & Monitoring | PASS/WARN/FAIL | Details |
 | 5. Database Operations | PASS/WARN/FAIL | Details |
 | 6. Pre-Deploy Checklist | PASS/WARN/FAIL | Details |
+| 7. External Integration Health | PASS/WARN/FAIL | Details |
 
 ### Deployment Readiness: READY / READY WITH WARNINGS / NOT READY
 
@@ -377,6 +433,13 @@ This agent validates that the application is production-ready, properly configur
 - Endpoint: /api/health (exists / MISSING)
 - DB connectivity check: Yes / No
 - SIGTERM handling: Yes / No
+- Neon crash suppression: Yes / No
+
+### External Integration Status
+- Twilio: configured / MISSING credentials
+- Email webhook: endpoint exists / MISSING
+- Geocoding: configured with timeout / MISSING timeout
+- Neon driver bug handler: in place / MISSING
 
 ### Rollback Plan
 - Previous version: [commit/checkpoint]

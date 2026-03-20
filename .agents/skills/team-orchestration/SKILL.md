@@ -74,6 +74,59 @@ Not all code changes carry equal risk. Allocate testing effort proportionally:
 | Multi-file refactor (3+ files) | Code Quality + Regression Guard + Architect |
 | Pre-deployment | Full team audit (all 9 agents) |
 
+### Small Fix Shortcut
+
+For changes < 5 lines touching a single file, run Code Quality **Categories 2 + 7 only** (convention compliance + documentation alignment). Skip duplicate detection, dead code scan, and Knip. This keeps overhead proportional to risk.
+
+### Quick Agent Selection Flowchart
+
+Use this to quickly decide which agents to run:
+
+```
+Start: What did you change?
+│
+├── Auth, sessions, permissions?     → Security + Regression Guard
+├── Database schema or queries?      → Database + Regression Guard
+├── API routes or endpoints?         → Security + Error Handling + Business Logic + Regression Guard
+├── Business workflows or status?    → Business Logic + QA + Regression Guard
+├── Frontend components or pages?    → UI/UX + Performance
+├── Forms or user input?             → Security + UI/UX + QA
+├── Frontend mutations?              → Error Handling
+├── Dependencies (package.json)?     → DevOps + Security (supply chain)
+├── Build config or env vars?        → DevOps
+├── Shared modules?                  → Regression Guard + ALL affected specialists
+│
+└── Always add: Code Quality + Architect
+```
+
+---
+
+## Time Budgets Per Agent
+
+Not every audit needs to be exhaustive. Use time budgets to keep audits proportional to risk:
+
+| Agent | Quick Check | Standard Audit | Full Audit |
+|---|---|---|---|
+| Code Quality | 3 min (Cat 2, 7 only) | 10 min (all categories) | 15 min (+ Knip) |
+| Business Logic | 5 min (Cat 1, 3 only) | 15 min (Cat 1-6, 9) | 25 min (all 11 categories) |
+| Database | 5 min (Cat 1, 3, 6) | 15 min (Cat 1-10) | 25 min (all 13 categories) |
+| Error Handling | 3 min (Cat 1, 2) | 10 min (Cat 1-5) | 15 min (all 7 categories) |
+| Performance | 5 min (Cat 1, 4) | 10 min (Cat 1-5) | 15 min (all 6 categories) |
+| Regression Guard | 5 min (Cat 1, 3) | 10 min (Cat 1-3) | 15 min (all 5 categories) |
+| Security | 5 min (Cat 1, 2, 4) | 15 min (Cat 1-6) | 20 min (all 8 categories) |
+| UI/UX | 3 min (Cat 1, 6) | 10 min (Cat 1-5) | 15 min (all 8 categories) |
+| QA | 5 min (Cat 1 only) | 15 min (Cat 1-5) | 20 min (all 9 categories) |
+| DevOps | 3 min (Cat 3, 4) | 10 min (Cat 1-5) | 15 min (all 7 categories) |
+
+### Audit Profiles
+
+| Profile | When to Use | Time Budget | Agents |
+|---|---|---|---|
+| **Quick** | Small fix (< 10 lines, 1 file) | < 5 min | Code Quality (Cat 2, 7) + Architect |
+| **Standard** | Medium feature (10-100 lines) | ~15 min | Code Quality + 1-2 specialists (standard depth) + Architect |
+| **Thorough** | Large feature (100+ lines) | ~45 min | Code Quality + Regression Guard + all relevant specialists (standard depth) + Architect |
+| **Pre-deploy** | Before publishing to production | ~60 min | All 9 agents (full depth) + DevOps Category 6 checklist |
+
 ---
 
 ## Conflict Resolution Hierarchy

@@ -107,6 +107,8 @@ Work through all 13 categories. For each, report: PASS, WARN (non-critical), or 
 
 **Goal**: Queries are fast, indexes exist where needed, no unused indexes waste space.
 
+**Dev environment note**: In development, pg_stat counters are unreliable (small datasets, frequent restarts). On **quick/standard audits in dev**, skip this category unless performance is noticeably degraded. Always run on **full audits** and **pre-deploy audits**.
+
 ### Steps:
 1. Run: `reference/audit-queries.sql` → "Sequential scan analysis" (note: pg_stat counters reset on DB restart — in dev, high seq_scan% is normal for small datasets)
 2. Run: `reference/audit-queries.sql` → "Unused indexes" (monitor over a full business cycle before removing — dev stats are unreliable)
@@ -333,6 +335,8 @@ someNewField        → ✓            → ✗ MISSING      → ✗ MISSING   �
 ## Category 12: Query Optimization & Caching Opportunities
 
 **Goal**: Identify queries that are unnecessarily complex, frequently repeated, or candidates for caching.
+
+**Dev environment note**: Like Category 4, query optimization stats are less meaningful in dev. On **quick/standard audits in dev**, focus only on Step 1 (redundant subqueries) and Step 6 (cache invalidation). Run all steps on **full audits** and **pre-deploy audits**.
 
 ### Steps:
 1. **Redundant subqueries**:

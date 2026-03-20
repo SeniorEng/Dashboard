@@ -510,6 +510,27 @@ After completing all checks, produce a summary:
 
 ---
 
+## Automated Test Suite Reference
+
+The project has an integration test suite that can be run to verify critical paths programmatically:
+
+```bash
+# Run all tests (103 tests covering budget, auth, workflows, API contracts)
+TEST_USER_PASSWORD="$TEST_USER_PASSWORD_INTERNAL" TEST_USER_EMAIL="e2e-test@seniorenengel.test" npx vitest run --reporter=verbose
+```
+
+**Key test file**: `tests/budget-integration.test.ts` — covers the HOCH-risk budget system end-to-end.
+
+**CSRF pattern for test requests**: All authenticated test requests must include:
+```
+Cookie: ${auth.cookie}; careconnect_csrf=${auth.csrfToken}
+x-csrf-token: ${auth.csrfToken}
+```
+
+When recommending test scenarios (Category 9), cross-reference against existing test coverage to avoid duplicating what's already automated and to identify gaps.
+
+---
+
 ## Cross-References to Other Audit Skills
 
 This audit covers **functional correctness and stability**. For complete coverage, also run:

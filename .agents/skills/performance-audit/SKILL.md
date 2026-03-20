@@ -259,7 +259,11 @@ This agent checks for performance issues that degrade user experience, especiall
    ```
    - Consider: Are critical next-page routes prefetched on hover/focus?
    - Consider: Are frequently accessed queries prefetched during idle time?
-   - Example: When user views appointment list, prefetch first appointment detail
+   
+   **Existing prefetch patterns (target patterns for new pages)**:
+   - `CustomerCard`: prefetches customer detail (`["customer", customerId]`) on hover/touch — see `client/src/pages/customers.tsx`
+   - Appointment detail: prefetches `["appointments", id]` on card interaction
+   - New list pages should follow the same pattern: prefetch detail query on card hover/touch start
 
 ### Red Flags:
 - List endpoint returning 100+ items without pagination → FAIL

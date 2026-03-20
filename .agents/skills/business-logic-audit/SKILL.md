@@ -236,18 +236,28 @@ Insurance Providers → Customer Creation (Pflegekasse assignment)
 
 **Goal**: All billing-relevant, medical, and audit-critical data meets German regulatory requirements for record-keeping and traceability.
 
+### Key Implementation Files:
+- **Audit trail**: `server/services/audit-service.ts` — `auditService.log(userId, action, entityType, entityId, metadata?, ip?)` (positional args, NOT object style)
+- **Budget ledger**: `server/storage/budget-ledger.ts` — all budget transactions, cascade logic (§45b → §39/42a → §45a → Private)
+- **Signature locking**: Check `SIGNATURE_LOCKED` status handling in appointment routes
+- **Soft-delete pattern**: `deletedAt` / `isActive` fields on employee/customer tables
+
 ### Steps:
 1. **Unveränderbarkeit (Immutability)**: Billing-relevant records must not be silently changed:
    ```bash
    # Check for audit trail on critical tables
    grep -rn "auditService\|audit_log\|AuditService" server/ --include="*.ts"
    
-   # Check which operations are audited
-   grep -rn "auditService\." server/ --include="*.ts" | sed 's/.*auditService\.\([a-zA-Z]*\).*/\1/' | sort -u
+   # Check which operations are audited — signature must be auditService.log()
+   grep -rn "auditService\.log" server/ --include="*.ts"
+   
+   # Verify audit service uses positional args (userId, action, entityType, entityId, metadata?, ip?)
+   grep -rn "auditService\.log(" server/ --include="*.ts" | head -5
    ```
-   - Verify: All signature actions are logged to immutable audit_log
-   - Verify: Documentation changes are tracked
-   - Verify: Budget/billing changes are traceable
+   - Verify: All signature actions are logged via `auditService.log()` in `server/services/audit-service.ts`
+   - Verify: Documentation changes (status transitions) are tracked
+   - Verify: Budget/billing changes in `server/storage/budget-ledger.ts` are traceable
+   - Verify: Budget cascade order (§45b → §39/42a → §45a → Private) is implemented in one place only (`budget-ledger.ts`)
 
 2. **Nachvollziehbarkeit (Traceability)**: Every change must be attributable to a person:
    ```bash
@@ -256,6 +266,7 @@ Insurance Providers → Customer Creation (Pflegekasse assignment)
    ```
    - Verify: Every write operation records WHO made the change
    - Verify: Timestamps are recorded for all state changes
+   - Verify: `signedByUserId` is set on all signature operations
 
 3. **Aufbewahrungspflicht (Retention)**: Records must be retained for legally required periods:
    - Abrechnungsrelevante Daten: 10 Jahre

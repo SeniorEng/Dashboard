@@ -333,12 +333,23 @@ This agent acts as a skeptical Senior Engineer who questions every change before
    - Files > 500 lines → WARN (consider splitting)
    - Files > 800 lines → FAIL (must split)
    - Exception: Schema definition files, auto-generated code
+   - **Known exception**: `server/storage/budget-ledger.ts` (~1840 lines) — must NOT be split (tightly coupled budget cascade logic, splitting would increase bug surface)
+
+5. **Hot file monitor** (stability risk detection):
+   ```bash
+   # Find files changed most frequently in recent commits (high churn = instability risk)
+   git log --oneline --name-only -50 2>/dev/null | grep -E "\.(ts|tsx)$" | sort | uniq -c | sort -rn | head -10
+   ```
+   - Files changed 5+ times in last 50 commits → WARN (instability risk — consider stabilizing with better tests or refactoring)
+   - Hot files in HOCH-risk modules (budget, auth, documentation) → elevated risk — flag for extra scrutiny
+   - Hot files suggest either: incomplete initial implementation, frequent requirement changes, or a design that doesn't absorb changes well
 
 ### Red Flags:
 - Debt item unaddressed for > 30 days → WARN (escalate priority)
 - File > 500 lines → WARN (split into focused modules)
-- File > 800 lines → FAIL (must be split)
+- File > 800 lines → FAIL (must be split, exception: `budget-ledger.ts`)
 - More than 10 open debt items → WARN (schedule cleanup sprint)
+- File changed 5+ times in last 50 commits → WARN (stability risk)
 
 ---
 

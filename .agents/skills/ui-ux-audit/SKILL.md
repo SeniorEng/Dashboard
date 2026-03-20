@@ -83,12 +83,17 @@ This agent validates that the user interface is usable, accessible, and appropri
    ```bash
    # Check for skeleton patterns
    grep -rn "Skeleton\|skeleton\|animate-pulse\|shimmer" client/src/ --include="*.tsx" | head -10
+   
+   # Check which pages still use spinners vs skeletons
+   grep -rn "Loader2\|spinner\|Spinner" client/src/pages/ --include="*.tsx" -l
+   grep -rn "Skeleton\|skeleton" client/src/pages/ --include="*.tsx" -l
    ```
    - Prefer: Skeleton loading (gray shapes matching content layout) over simple spinners
    - Skeleton preserves layout during loading → no Cumulative Layout Shift (CLS)
    - Use spinners only for short actions (<500ms) or overlay actions (form submission)
    - Pattern: `isLoading ? <SkeletonCard /> : <ActualCard />`
    - Skeleton should match the approximate size and shape of the real content
+   - **Track progress**: Run the grep commands above to identify which pages still need skeleton migration. Pages using `Loader2` spinner for initial load should be upgraded to skeletons.
 
 2. **Success/Error feedback**:
    ```bash

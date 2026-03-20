@@ -80,12 +80,24 @@ This agent performs deep security analysis following OWASP guidelines, OWASP API
    - Verify: API endpoints with expensive operations have rate limiting
    - Recommended limits: Login: 5 attempts per 15 minutes per IP, Password reset: 3 per hour per email
 
+5. **Process-level crash resilience**:
+   ```bash
+   # Check that uncaughtException/unhandledRejection handlers are in place
+   grep -rn "uncaughtException\|unhandledRejection\|isNeonDriverBug" server/index.ts
+   ```
+   - Verify: `process.on('uncaughtException')` and `process.on('unhandledRejection')` handlers exist in `server/index.ts`
+   - Verify: `isNeonDriverBug()` function filters known Neon WebSocket driver errors (`TypeError: Cannot set property message of #<ErrorEvent>`)
+   - Verify: Non-Neon uncaught exceptions still log and exit (don't silently swallow real crashes)
+   - **Known attack surface**: If these handlers are removed, any DB connection timeout via the Neon WebSocket driver will crash the server, creating a denial-of-service vector
+
 ### Red Flags:
 - Plaintext password in any variable, log, or response → FAIL
 - Missing httpOnly/secure on session cookies → FAIL
 - Route without auth middleware that accesses user data → FAIL
 - Token generated with Math.random → FAIL
 - Password reset token without expiry → FAIL
+- Missing `uncaughtException`/`unhandledRejection` handlers → FAIL (server crash on DB timeout)
+- `isNeonDriverBug()` suppression removed → FAIL (DB timeouts crash server)
 - Session without expiry → WARN
 - No rate limiting on login endpoint → WARN
 - No rate limiting on password reset → WARN

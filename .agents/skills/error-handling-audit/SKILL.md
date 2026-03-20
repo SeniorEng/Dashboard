@@ -97,30 +97,48 @@ For every Zod schema in `shared/schema/`:
 
 For each external dependency, verify fallback behavior:
 
-1. **Database connection failure**:
+1. **Database connection failure (Neon driver crash pattern)**:
    ```bash
    # Check for connection error handling
    grep -rn "connect\|pool\|neon\|DATABASE_URL" server/ --include="*.ts" | grep -i "error\|catch\|retry\|fail"
+   
+   # CRITICAL: Check Neon driver crash suppression is still in place
+   grep -rn "isNeonDriverBug\|uncaughtException\|unhandledRejection" server/index.ts
    ```
    - Verify: DB connection failures show "Datenbankverbindung fehlgeschlagen. Bitte versuchen Sie es in wenigen Minuten erneut."
    - Verify: App doesn't crash on DB timeout — returns 503 with retry-after header
+   - **Known pattern**: Neon WebSocket driver throws `TypeError: Cannot set property message of #<ErrorEvent>` on connection timeout — this MUST be caught by `isNeonDriverBug()` in `server/index.ts` uncaughtException/unhandledRejection handlers. If this suppression is removed, DB timeouts will crash the entire server.
 
-2. **Geocoding service failure**:
+2. **Background task resilience (withTimeout pattern)**:
+   ```bash
+   # Check that fire-and-forget DB calls in webhook handlers use withTimeout
+   grep -rn "withTimeout\|safeAddNote" server/services/twilio-call-bridge.ts server/services/lead-auto-reply.ts
+   
+   # Check the utility exists
+   grep -rn "withTimeout" server/lib/with-timeout.ts
+   ```
+   - Verify: All fire-and-forget DB calls in webhook background tasks are wrapped with `withTimeout()` (10s recommended)
+   - Verify: `safeAddNote()` helper is used for non-critical note additions that should never crash the request
+   - Verify: Background tasks (Twilio calls, lead auto-replies) cannot hang or crash due to DB hiccups
+   - **Known pattern**: Webhook handlers (e.g., new lead from email) trigger background DB operations. Without `withTimeout`, a DB timeout can hang the webhook response indefinitely or crash via unhandled rejection.
+
+3. **Geocoding service failure**:
    ```bash
    grep -rn "geocod\|nominatim\|coordinates\|latitude\|longitude" server/ --include="*.ts" | grep -i "error\|catch\|fail"
    ```
    - Verify: Geocoding failure doesn't block appointment creation
    - Verify: Missing coordinates show "Adresse konnte nicht geocodiert werden" (non-blocking warning)
 
-3. **External API failures** (if any):
+4. **External API failures** (Twilio, email, etc.):
    ```bash
-   grep -rn "fetch\|axios\|https\.\|http\." server/ --include="*.ts" | grep -v "node_modules"
+   grep -rn "fetch\|axios\|https\.\|http\.\|twilio\|Twilio" server/ --include="*.ts" | grep -v "node_modules"
    ```
    - Verify: Each external call has a timeout
    - Verify: Failures are caught and produce user-friendly messages
    - Verify: Critical operations don't depend on non-critical external services
+   - Verify: Twilio call failures don't block lead processing
 
-4. **Error recovery UX**:
+5. **Error recovery UX**:
    ```bash
    # Check if forms preserve user input on error
    grep -rn "reset()\|resetForm\|form\.reset" client/src/ --include="*.tsx" --include="*.ts"
@@ -143,6 +161,8 @@ For each external dependency, verify fallback behavior:
 
 ### Red Flags (Graceful Degradation):
 - External service failure crashes the app → FAIL
+- `isNeonDriverBug()` suppression removed from `server/index.ts` → FAIL (will crash on DB timeout)
+- Fire-and-forget DB call in webhook handler without `withTimeout()` → FAIL (can hang or crash)
 - Form data lost after submission error → FAIL
 - No timeout on external API calls → WARN
 - Error logged without request context → WARN
