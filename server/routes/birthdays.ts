@@ -13,8 +13,10 @@ router.use(requireAuth);
 const MAX_HORIZON_DAYS = 365;
 const DEFAULT_HORIZON_DAYS = 30;
 
-function buildAddress(strasse: string | null, plz: string | null, stadt: string | null): string | undefined {
-  const parts = [strasse, [plz, stadt].filter(Boolean).join(" ")].filter(Boolean);
+function buildAddress(strasse: string | null, hausnummer: string | null, plz: string | null, stadt: string | null): string | undefined {
+  const streetPart = [strasse, hausnummer].filter(Boolean).join(" ");
+  const cityPart = [plz, stadt].filter(Boolean).join(" ");
+  const parts = [streetPart, cityPart].filter(Boolean);
   return parts.length > 0 ? parts.join(", ") : undefined;
 }
 
@@ -111,7 +113,7 @@ router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (
             geburtsdatum: emp.geburtsdatum,
             daysUntil,
             age: calculateUpcomingAge(emp.geburtsdatum, daysUntil),
-            address: buildAddress(emp.strasse, emp.plz, emp.stadt),
+            address: buildAddress(emp.strasse, emp.hausnummer, emp.plz, emp.stadt),
           });
         }
       }
@@ -128,7 +130,7 @@ router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (
             geburtsdatum: cust.geburtsdatum,
             daysUntil,
             age: calculateUpcomingAge(cust.geburtsdatum, daysUntil),
-            address: buildAddress(cust.strasse, cust.plz, cust.stadt),
+            address: buildAddress(cust.strasse, cust.hausnummer, cust.plz, cust.stadt),
           });
         }
       }
@@ -165,7 +167,7 @@ router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (
               geburtsdatum: cust.geburtsdatum,
               daysUntil,
               age: calculateUpcomingAge(cust.geburtsdatum, daysUntil),
-              address: buildAddress(cust.strasse, cust.plz, cust.stadt),
+              address: buildAddress(cust.strasse, cust.hausnummer, cust.plz, cust.stadt),
             });
           }
         }

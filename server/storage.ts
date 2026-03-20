@@ -160,8 +160,8 @@ export interface IStorage {
   getCurrentlyAssignedCustomerIds(employeeId: number): Promise<number[]>;
 
   // Birthday queries
-  getActiveEmployeesWithBirthday(): Promise<{ id: number; displayName: string; geburtsdatum: string | null; strasse: string | null; plz: string | null; stadt: string | null }[]>;
-  getActiveCustomersWithBirthday(): Promise<{ id: number; name: string; geburtsdatum: string | null; strasse: string | null; plz: string | null; stadt: string | null; primaryEmployeeId: number | null; backupEmployeeId: number | null; backupEmployeeId2: number | null }[]>;
+  getActiveEmployeesWithBirthday(): Promise<{ id: number; displayName: string; geburtsdatum: string | null; strasse: string | null; hausnummer: string | null; plz: string | null; stadt: string | null }[]>;
+  getActiveCustomersWithBirthday(): Promise<{ id: number; name: string; geburtsdatum: string | null; strasse: string | null; hausnummer: string | null; plz: string | null; stadt: string | null; primaryEmployeeId: number | null; backupEmployeeId: number | null; backupEmployeeId2: number | null }[]>;
   getAdminUserIds(): Promise<number[]>;
   
   // Optimized search
@@ -380,13 +380,14 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(customers).where(inArray(customers.id, ids));
   }
 
-  async getActiveEmployeesWithBirthday(): Promise<{ id: number; displayName: string; geburtsdatum: string | null; strasse: string | null; plz: string | null; stadt: string | null }[]> {
+  async getActiveEmployeesWithBirthday(): Promise<{ id: number; displayName: string; geburtsdatum: string | null; strasse: string | null; hausnummer: string | null; plz: string | null; stadt: string | null }[]> {
     return await db
       .select({
         id: users.id,
         displayName: users.displayName,
         geburtsdatum: users.geburtsdatum,
         strasse: users.strasse,
+        hausnummer: users.hausnummer,
         plz: users.plz,
         stadt: users.stadt,
       })
@@ -397,13 +398,14 @@ export class DatabaseStorage implements IStorage {
       ));
   }
 
-  async getActiveCustomersWithBirthday(): Promise<{ id: number; name: string; geburtsdatum: string | null; strasse: string | null; plz: string | null; stadt: string | null; primaryEmployeeId: number | null; backupEmployeeId: number | null; backupEmployeeId2: number | null }[]> {
+  async getActiveCustomersWithBirthday(): Promise<{ id: number; name: string; geburtsdatum: string | null; strasse: string | null; hausnummer: string | null; plz: string | null; stadt: string | null; primaryEmployeeId: number | null; backupEmployeeId: number | null; backupEmployeeId2: number | null }[]> {
     return await db
       .select({
         id: customers.id,
         name: customers.name,
         geburtsdatum: customers.geburtsdatum,
         strasse: customers.strasse,
+        hausnummer: customers.hausnummer,
         plz: customers.plz,
         stadt: customers.stadt,
         primaryEmployeeId: customers.primaryEmployeeId,
