@@ -213,23 +213,8 @@ export const insertCustomerSchema = baseCustomerSchema.extend({
   telefon: optionalGermanPhoneSchema,
 });
 
-// Schema for creating new customer during Erstberatung
-export const insertErstberatungCustomerSchema = z.object({
-  vorname: z.string().min(1, "Vorname ist erforderlich"),
-  nachname: z.string().min(1, "Nachname ist erforderlich"),
-  telefon: germanPhoneTransformSchema,
-  email: internationalEmailSchema.optional().or(z.literal("")).nullable(),
-  strasse: z.string().min(1, "Straße ist erforderlich"),
-  nr: z.string().min(1, "Hausnummer ist erforderlich"),
-  plz: z.string().regex(/^\d{5}$/, "PLZ muss 5 Ziffern haben"),
-  stadt: z.string().min(1, "Stadt ist erforderlich"),
-  pflegegrad: z.number().min(1, "Pflegegrad muss zwischen 1 und 5 liegen").max(5, "Pflegegrad muss zwischen 1 und 5 liegen").optional().nullable(),
-  billingType: z.enum(["pflegekasse_gesetzlich", "pflegekasse_privat", "selbstzahler"]).default("pflegekasse_gesetzlich"),
-});
-
 export type Customer = typeof customers.$inferSelect;
 export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
-export type InsertErstberatungCustomer = z.infer<typeof insertErstberatungCustomerSchema>;
 
 // Customer Contact schemas
 export const insertCustomerContactSchema = z.object({

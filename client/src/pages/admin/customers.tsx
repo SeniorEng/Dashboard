@@ -172,7 +172,6 @@ export default function AdminCustomers() {
           <div className="flex gap-1 mb-4 bg-white rounded-lg p-1 border" data-testid="status-filter">
             {[
               { value: "aktiv", label: "Aktiv" },
-              { value: "erstberatung", label: "Erstberatung" },
               { value: "inaktiv", label: "Inaktiv" },
               { value: "all", label: "Alle" },
             ].map((opt) => (
@@ -393,9 +392,6 @@ export default function AdminCustomers() {
                         )}
                     </div>
                     <div className="flex flex-col items-end gap-2">
-                      {customer.status === "erstberatung" && (
-                        <StatusBadge type="status" value="Erstberatung" data-testid={`badge-status-${customer.id}`} />
-                      )}
                       {customer.status === "inaktiv" && (
                         <StatusBadge type="warning" value="Inaktiv" data-testid={`badge-status-${customer.id}`} />
                       )}
@@ -418,7 +414,7 @@ export default function AdminCustomers() {
                       Betreut von: {customer.primaryEmployee.displayName}
                     </div>
                   )}
-                  {!customer.primaryEmployee && !customer.hasBackupEmployee && customer.status !== "erstberatung" && (
+                  {!customer.primaryEmployee && !customer.hasBackupEmployee && (
                     <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5" data-testid={`banner-no-betreuer-${customer.id}`}>
                       <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
                       <span>Kein Betreuer / Vertreter hinterlegt</span>

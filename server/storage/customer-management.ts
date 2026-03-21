@@ -31,7 +31,7 @@ import {
   users,
   customerAssignmentHistory,
 } from "@shared/schema";
-import { eq, ne, and, isNull, isNotNull, desc, asc, count, or, ilike, sql as sqlBuilder } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, desc, asc, count, or, ilike, sql as sqlBuilder } from "drizzle-orm";
 import { customerIdsCache } from "../services/cache";
 import { todayISO } from "@shared/utils/datetime";
 import { db } from "../lib/db";
@@ -154,8 +154,6 @@ export class CustomerManagementStorage {
 
     if (filters?.status) {
       baseConditions.push(eq(customers.status, filters.status));
-    } else {
-      baseConditions.push(ne(customers.status, 'erstberatung'));
     }
 
     if (filters?.billingType) {

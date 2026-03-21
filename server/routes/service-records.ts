@@ -126,7 +126,6 @@ router.get("/check-period", requireAuth, asyncHandler("Periodendaten konnten nic
     storage.getCoveredByMonthlyCount(customerId, effectiveUserId, year, month),
   ]);
 
-  const isErstberatung = customerData?.status === "erstberatung";
   const coveredCount = coveredBySingleCount + coveredByMonthlyCount;
   const uncoveredDocumentedCount = Math.max(0, counts.documentedCount - coveredCount);
   
@@ -137,8 +136,7 @@ router.get("/check-period", requireAuth, asyncHandler("Periodendaten konnten nic
     coveredBySingleCount,
     coveredByMonthlyCount,
     uncoveredDocumentedCount,
-    canCreateRecord: !isErstberatung && counts.undocumentedCount === 0 && counts.documentedCount > 0 && uncoveredDocumentedCount > 0,
-    isErstberatung,
+    canCreateRecord: counts.undocumentedCount === 0 && counts.documentedCount > 0 && uncoveredDocumentedCount > 0,
   });
 }));
 
@@ -240,13 +238,6 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
     });
   }
   
-  const customer = await storage.getCustomer(customerId);
-  if (customer?.status === "erstberatung") {
-    return res.status(400).json({
-      message: "Für Erstberatungskunden können keine Leistungsnachweise erstellt werden. Erst nach Vertragsabschluss ist eine Abrechnung möglich."
-    });
-  }
-
   const undocumentedAppointments = await storage.getUndocumentedAppointmentsForPeriod(customerId, userId, year, month);
   if (undocumentedAppointments.length > 0) {
     return res.status(400).json({ 
@@ -320,13 +311,6 @@ router.post("/single", requireAuth, asyncHandler("Einzeltermin-Leistungsnachweis
     });
   }
   
-  const customer = await storage.getCustomer(customerId);
-  if (customer?.status === "erstberatung") {
-    return res.status(400).json({
-      message: "Für Erstberatungskunden können keine Leistungsnachweise erstellt werden."
-    });
-  }
-
   const [appointment] = await db.select()
     .from(appointments)
     .where(and(

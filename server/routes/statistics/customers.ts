@@ -57,7 +57,6 @@ router.get("/growth", asyncHandler("Wachstums-Statistiken konnten nicht geladen 
         FROM customer_contracts cc
         JOIN customers c ON c.id = cc.customer_id
         WHERE c.deleted_at IS NULL
-          AND c.status != 'erstberatung'
           AND EXTRACT(YEAR FROM cc.contract_start::date) = ${year}
         GROUP BY EXTRACT(MONTH FROM cc.contract_start::date)
       ) gained ON gained.m = m.month
@@ -75,7 +74,7 @@ router.get("/growth", asyncHandler("Wachstums-Statistiken konnten nicht geladen 
     db.execute(sql`
       SELECT
         COUNT(*) FILTER (WHERE c.status = 'aktiv' AND c.deleted_at IS NULL)::int AS "activeNow",
-        COUNT(DISTINCT cc.customer_id) FILTER (WHERE c.deleted_at IS NULL AND c.status != 'erstberatung' AND EXTRACT(YEAR FROM cc.contract_start::date) = ${year})::int AS "gainedThisYear",
+        COUNT(DISTINCT cc.customer_id) FILTER (WHERE c.deleted_at IS NULL AND EXTRACT(YEAR FROM cc.contract_start::date) = ${year})::int AS "gainedThisYear",
         COUNT(*) FILTER (WHERE c.deleted_at IS NULL AND c.inaktiv_ab IS NOT NULL AND EXTRACT(YEAR FROM c.inaktiv_ab::date) = ${year})::int AS "lostThisYear"
       FROM customers c
       LEFT JOIN customer_contracts cc ON cc.customer_id = c.id
@@ -83,7 +82,7 @@ router.get("/growth", asyncHandler("Wachstums-Statistiken konnten nicht geladen 
 
     db.execute(sql`
       SELECT
-        COUNT(DISTINCT cc.customer_id) FILTER (WHERE c.deleted_at IS NULL AND c.status != 'erstberatung' AND EXTRACT(YEAR FROM cc.contract_start::date) = ${year - 1})::int AS "gainedPrevYear",
+        COUNT(DISTINCT cc.customer_id) FILTER (WHERE c.deleted_at IS NULL AND EXTRACT(YEAR FROM cc.contract_start::date) = ${year - 1})::int AS "gainedPrevYear",
         COUNT(*) FILTER (WHERE c.deleted_at IS NULL AND c.inaktiv_ab IS NOT NULL AND EXTRACT(YEAR FROM c.inaktiv_ab::date) = ${year - 1})::int AS "lostPrevYear"
       FROM customers c
       LEFT JOIN customer_contracts cc ON cc.customer_id = c.id

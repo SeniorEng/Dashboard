@@ -7,7 +7,6 @@ import { api, unwrapResult } from "@/lib/api/client";
 import { useCustomerList } from "./use-customer-list";
 import { useAdminEmployees } from "./use-active-employees";
 import { useCreateKundentermin, useCreateErstberatung } from "./use-appointment-mutations";
-import { validateGermanPhone, normalizePhone, formatPhoneAsYouType } from "@shared/utils/phone";
 import { timeToMinutes, minutesToTimeDisplay, formatDurationDisplay, todayISO } from "@shared/utils/datetime";
 import type { Service } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
@@ -83,19 +82,31 @@ export function useNewAppointmentForm() {
   const [ktAssignedEmployeeId, setKtAssignedEmployeeId] = useState<string>("");
   const fromProspectId = urlParams.get("fromProspect");
 
-  const [ebVorname, setEbVorname] = useState<string>(urlParams.get("vorname") || "");
-  const [ebNachname, setEbNachname] = useState<string>(urlParams.get("nachname") || "");
-  const [ebTelefon, setEbTelefon] = useState<string>(urlParams.get("telefon") || "");
-  const [ebEmail, setEbEmail] = useState<string>(urlParams.get("email") || "");
-  const [ebStrasse, setEbStrasse] = useState<string>(urlParams.get("strasse") || "");
-  const [ebNr, setEbNr] = useState<string>(urlParams.get("nr") || "");
-  const [ebPlz, setEbPlz] = useState<string>(urlParams.get("plz") || "");
-  const [ebStadt, setEbStadt] = useState<string>(urlParams.get("stadt") || "");
-  const [ebPflegegrad, setEbPflegegrad] = useState<string>(urlParams.get("pflegegrad") || "1");
+  const { data: prospectData } = useQuery<{
+    id: number;
+    vorname: string;
+    nachname: string;
+    telefon: string | null;
+    email: string | null;
+    strasse: string | null;
+    nr: string | null;
+    plz: string | null;
+    stadt: string | null;
+    pflegegrad: number | null;
+  }>({
+    queryKey: [`/api/admin/prospects/${fromProspectId}`],
+    queryFn: async () => {
+      const result = await api.get<any>(`/admin/prospects/${fromProspectId}`);
+      return unwrapResult(result);
+    },
+    enabled: !!fromProspectId,
+    staleTime: 60_000,
+  });
+
   const [ebDate, setEbDate] = useState<string>(initialDate);
   const [ebStartTime, setEbStartTime] = useState<string>(urlParams.get("time") || "09:00");
   const [ebErstberatungDauer, setEbErstberatungDauer] = useState<number>(60);
-  const [ebNotes, setEbNotes] = useState<string>(urlParams.get("notes") || "");
+  const [ebNotes, setEbNotes] = useState<string>("");
   const [ebAssignedEmployeeId, setEbAssignedEmployeeId] = useState<string>(urlParams.get("employeeId") || "");
 
   const defaultsInitialized = useRef(false);
@@ -117,49 +128,22 @@ export function useNewAppointmentForm() {
     if (!copyFromId || copyFromInitialized.current) return;
     if (!copyFromAppointment) return;
 
-    const isErstberatung = copyFromAppointment.appointmentType === "Erstberatung";
-
-    if (!isErstberatung && !copyFromServices) return;
+    if (!copyFromServices) return;
 
     copyFromInitialized.current = true;
     defaultsInitialized.current = true;
 
-    if (isErstberatung) {
-      setActiveTab("erstberatung");
-      const customer = copyFromAppointment.customer;
-      if (customer) {
-        setEbVorname(customer.vorname || "");
-        setEbNachname(customer.nachname || "");
-        setEbTelefon(customer.telefon || "");
-        setEbEmail(customer.email || "");
-        setEbStrasse(customer.strasse || "");
-        setEbNr(customer.nr || "");
-        setEbPlz(customer.plz || "");
-        setEbStadt(customer.stadt || "");
-        if (customer.pflegegrad != null && customer.pflegegrad > 0) {
-          setEbPflegegrad(customer.pflegegrad.toString());
-        }
-      }
-      if (copyFromAppointment.durationPromised) {
-        setEbErstberatungDauer(copyFromAppointment.durationPromised);
-      }
-      if (copyFromAppointment.assignedEmployeeId) {
-        setEbAssignedEmployeeId(copyFromAppointment.assignedEmployeeId.toString());
-      }
-      setEbNotes(copyFromAppointment.notes || "");
-    } else {
-      setKtCustomerId(copyFromAppointment.customerId?.toString() ?? "");
-      if (copyFromAppointment.assignedEmployeeId) {
-        setKtAssignedEmployeeId(copyFromAppointment.assignedEmployeeId.toString());
-      }
-      setKtNotes(copyFromAppointment.notes || "");
-      const copiedServices = copyFromServices!.map(s => ({
-        serviceId: s.serviceId,
-        durationMinutes: s.plannedDurationMinutes,
-      }));
-      if (copiedServices.length > 0) {
-        setKtServices(copiedServices);
-      }
+    setKtCustomerId(copyFromAppointment.customerId?.toString() ?? "");
+    if (copyFromAppointment.assignedEmployeeId) {
+      setKtAssignedEmployeeId(copyFromAppointment.assignedEmployeeId.toString());
+    }
+    setKtNotes(copyFromAppointment.notes || "");
+    const copiedServices = copyFromServices.map(s => ({
+      serviceId: s.serviceId,
+      durationMinutes: s.plannedDurationMinutes,
+    }));
+    if (copiedServices.length > 0) {
+      setKtServices(copiedServices);
     }
 
     toast({ title: "Termin als Vorlage geladen" });
@@ -242,14 +226,7 @@ export function useNewAppointmentForm() {
 
   const validateErstberatung = (): boolean => {
     const newErrors: Record<string, string> = {};
-    if (!ebVorname.trim()) newErrors.ebVorname = "Vorname ist erforderlich";
-    if (!ebNachname.trim()) newErrors.ebNachname = "Nachname ist erforderlich";
-    const phoneValidation = validateGermanPhone(ebTelefon);
-    if (!phoneValidation.valid) newErrors.ebTelefon = phoneValidation.error;
-    if (!ebStrasse.trim()) newErrors.ebStrasse = "Straße ist erforderlich";
-    if (!ebNr.trim()) newErrors.ebNr = "Hausnummer ist erforderlich";
-    if (!/^\d{5}$/.test(ebPlz)) newErrors.ebPlz = "PLZ muss 5 Ziffern haben";
-    if (!ebStadt.trim()) newErrors.ebStadt = "Stadt ist erforderlich";
+    if (!fromProspectId) newErrors.ebProspect = "Bitte wählen Sie einen Interessenten";
     if (isAdmin && !ebAssignedEmployeeId) newErrors.ebAssignedEmployeeId = "Bitte wählen Sie einen Mitarbeiter";
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -284,44 +261,16 @@ export function useNewAppointmentForm() {
   const handleErstberatungSubmit = () => {
     if (!validateErstberatung()) return;
 
-    const normalizedPhone = normalizePhone(ebTelefon);
-    if (!normalizedPhone) {
-      setErrors({ ebTelefon: "Ungültige Telefonnummer" });
-      return;
-    }
-
     createErstberatungMutation.mutate({
-      customer: {
-        vorname: ebVorname,
-        nachname: ebNachname,
-        telefon: normalizedPhone,
-        email: ebEmail || undefined,
-        strasse: ebStrasse,
-        nr: ebNr,
-        plz: ebPlz,
-        stadt: ebStadt,
-        pflegegrad: parseInt(ebPflegegrad),
-      },
+      prospectId: parseInt(fromProspectId!),
       date: ebDate,
       scheduledStart: ebStartTime,
       erstberatungDauer: ebErstberatungDauer,
       notes: ebNotes || undefined,
       assignedEmployeeId: isAdmin && ebAssignedEmployeeId ? parseInt(ebAssignedEmployeeId) : undefined,
     }, {
-      onSuccess: async (data: any) => {
-        if (fromProspectId) {
-          try {
-            await api.patch(`/admin/prospects/${fromProspectId}`, {
-              status: "erstberatung",
-              convertedCustomerId: data?.customerId || null,
-              statusNotiz: "Automatisch in Erstberatung umgewandelt",
-            });
-          } catch (e) {
-            console.warn("Prospect update failed:", e);
-            toast({ variant: "destructive", title: "Hinweis", description: "Erstberatung wurde erstellt, aber der Interessent konnte nicht automatisch aktualisiert werden." });
-          }
-        }
-        toast({ title: "Erstberatung erstellt", description: "Die Erstberatung und der neue Kunde wurden erfolgreich angelegt." });
+      onSuccess: () => {
+        toast({ title: "Erstberatung erstellt", description: "Die Erstberatung wurde erfolgreich angelegt." });
         setLocation(ebDate ? `/?date=${ebDate}` : "/");
       },
       onError: (error: Error) => {
@@ -431,24 +380,7 @@ export function useNewAppointmentForm() {
     ktAssignedEmployeeId,
     setKtAssignedEmployeeId,
 
-    ebVorname,
-    setEbVorname,
-    ebNachname,
-    setEbNachname,
-    ebTelefon,
-    setEbTelefon,
-    ebEmail,
-    setEbEmail,
-    ebStrasse,
-    setEbStrasse,
-    ebNr,
-    setEbNr,
-    ebPlz,
-    setEbPlz,
-    ebStadt,
-    setEbStadt,
-    ebPflegegrad,
-    setEbPflegegrad,
+    prospectData: prospectData ?? null,
     ebDate,
     setEbDate,
     ebStartTime,
@@ -474,6 +406,5 @@ export function useNewAppointmentForm() {
 
     handleKundenterminSubmit,
     handleErstberatungSubmit,
-    formatPhoneAsYouType,
   };
 }

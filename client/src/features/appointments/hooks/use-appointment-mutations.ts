@@ -41,11 +41,12 @@ export function useCreateErstberatung() {
   const { toast } = useToast();
   return useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
-      const result = await api.post("/appointments/erstberatung", data);
+      const result = await api.post("/appointments/prospect-erstberatung", data);
       return unwrapResult(result);
     },
     onSuccess: () => {
       invalidateRelated(queryClient, "appointments");
+      invalidateRelated(queryClient, "prospects");
       toast({ title: "Erfolg", description: "Erstberatung wurde erstellt" });
     },
     onError: (error: Error) => {

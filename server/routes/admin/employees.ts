@@ -951,13 +951,13 @@ router.get("/employees/:id/handover-preview", asyncHandler("Übergabe-Vorschau k
   const [primaryCustomers, backupCustomers, backup2Customers, futureAppointments] = await Promise.all([
     db.select({ id: customers.id, name: customers.name, vorname: customers.vorname, nachname: customers.nachname })
       .from(customers)
-      .where(and(eq(customers.primaryEmployeeId, sourceId), isNull(customers.deletedAt), ne(customers.status, "erstberatung"))),
+      .where(and(eq(customers.primaryEmployeeId, sourceId), isNull(customers.deletedAt))),
     db.select({ id: customers.id, name: customers.name, vorname: customers.vorname, nachname: customers.nachname })
       .from(customers)
-      .where(and(eq(customers.backupEmployeeId, sourceId), isNull(customers.deletedAt), ne(customers.status, "erstberatung"))),
+      .where(and(eq(customers.backupEmployeeId, sourceId), isNull(customers.deletedAt))),
     db.select({ id: customers.id, name: customers.name, vorname: customers.vorname, nachname: customers.nachname })
       .from(customers)
-      .where(and(eq(customers.backupEmployeeId2, sourceId), isNull(customers.deletedAt), ne(customers.status, "erstberatung"))),
+      .where(and(eq(customers.backupEmployeeId2, sourceId), isNull(customers.deletedAt))),
     db.execute(sql`
       SELECT a.id, a.date, a.scheduled_start AS "startTime", a.scheduled_end AS "endTime",
              c.name AS "customerName", c.vorname AS "customerVorname", c.nachname AS "customerNachname"
@@ -1020,7 +1020,7 @@ router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durc
   const counts = await db.transaction(async (tx) => {
     const affectedPrimary = await tx.select({ id: customers.id, primaryEmployeeId: customers.primaryEmployeeId, backupEmployeeId: customers.backupEmployeeId, backupEmployeeId2: customers.backupEmployeeId2 })
       .from(customers)
-      .where(and(eq(customers.primaryEmployeeId, sourceId), isNull(customers.deletedAt), ne(customers.status, "erstberatung")));
+      .where(and(eq(customers.primaryEmployeeId, sourceId), isNull(customers.deletedAt)));
 
     for (const cust of affectedPrimary) {
       await tx.update(customerAssignmentHistory)
@@ -1066,7 +1066,7 @@ router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durc
 
     const affectedBackup = await tx.select({ id: customers.id, primaryEmployeeId: customers.primaryEmployeeId, backupEmployeeId2: customers.backupEmployeeId2 })
       .from(customers)
-      .where(and(eq(customers.backupEmployeeId, sourceId), isNull(customers.deletedAt), ne(customers.status, "erstberatung")));
+      .where(and(eq(customers.backupEmployeeId, sourceId), isNull(customers.deletedAt)));
 
     for (const cust of affectedBackup) {
       if (cust.primaryEmployeeId === targetEmployeeId) {
@@ -1113,7 +1113,7 @@ router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durc
 
     const affectedBackup2 = await tx.select({ id: customers.id, primaryEmployeeId: customers.primaryEmployeeId, backupEmployeeId: customers.backupEmployeeId })
       .from(customers)
-      .where(and(eq(customers.backupEmployeeId2, sourceId), isNull(customers.deletedAt), ne(customers.status, "erstberatung")));
+      .where(and(eq(customers.backupEmployeeId2, sourceId), isNull(customers.deletedAt)));
 
     for (const cust of affectedBackup2) {
       if (cust.primaryEmployeeId === targetEmployeeId || cust.backupEmployeeId === targetEmployeeId) {

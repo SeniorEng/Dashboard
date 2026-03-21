@@ -222,10 +222,6 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
   const customer = await storage.getCustomer(customerId);
   if (!customer) throw notFound("Kunde nicht gefunden");
 
-  if (customer.status === "erstberatung") {
-    throw badRequest("Kunden in Erstberatung können nicht abgerechnet werden.");
-  }
-
   const serviceRecords = await getServiceRecordsForPeriod(customerId, billingYear, billingMonth);
   if (serviceRecords.length === 0) {
     throw badRequest("Kein Leistungsnachweis für diesen Zeitraum vorhanden. Bitte erstellen Sie zuerst einen Leistungsnachweis im Bereich 'Nachweise'.");
@@ -401,11 +397,6 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
 
       if (!customer) {
         results.skipped.push({ customerName: custName, reason: "Kunde nicht gefunden" });
-        continue;
-      }
-
-      if (customer.status === "erstberatung") {
-        results.skipped.push({ customerName: custName, reason: "Erstberatung (nicht abrechenbar)" });
         continue;
       }
 

@@ -383,7 +383,7 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
   res.status(201).json({ ...customer, warnings: warnings.length > 0 ? warnings : undefined });
 }));
 
-const VALID_CUSTOMER_STATUSES = ["erstberatung", "aktiv", "inaktiv"] as const;
+const VALID_CUSTOMER_STATUSES = ["aktiv", "inaktiv"] as const;
 
 const updateCustomerSchema = z.object({
   vorname: z.string().min(1, "Vorname ist erforderlich").optional(),

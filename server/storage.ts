@@ -152,7 +152,7 @@ export interface SearchOptions {
 
 export interface IStorage {
   // Customers
-  getCustomers(includeErstberatung?: boolean): Promise<Customer[]>;
+  getCustomers(): Promise<Customer[]>;
   getCustomersByIds(ids: number[]): Promise<Customer[]>;
   getCustomersForEmployee(employeeId: number): Promise<(Customer & { isCurrentlyAssigned: boolean })[]>;
   getCustomer(id: number): Promise<Customer | undefined>;
@@ -190,12 +190,6 @@ export interface IStorage {
   ): Promise<PaginatedResult<AppointmentWithCustomer>>;
   getAppointmentWithCustomer(id: number): Promise<AppointmentWithCustomer | undefined>;
   getUndocumentedAppointments(beforeDate: string, customerIds?: number[], employeeId?: number): Promise<AppointmentWithCustomer[]>;
-  
-  // Atomic operations (with application-level rollback)
-  createErstberatungWithCustomer(
-    customer: InsertCustomer,
-    appointment: Omit<InsertAppointment, 'customerId'>
-  ): Promise<{ customer: Customer; appointment: Appointment }>;
   
   // Get appointments for a specific employee on a specific day
   getAppointmentsForDay(employeeId: number, date: string): Promise<AppointmentWithCustomer[]>;
@@ -270,12 +264,8 @@ export interface ServiceRecordOverviewItem {
 
 export class DatabaseStorage implements IStorage {
   // Customers
-  async getCustomers(includeErstberatung = false): Promise<Customer[]> {
-    const conditions = [isNull(customers.deletedAt)];
-    if (!includeErstberatung) {
-      conditions.push(ne(customers.status, 'erstberatung'));
-    }
-    return await db.select().from(customers).where(and(...conditions));
+  async getCustomers(): Promise<Customer[]> {
+    return await db.select().from(customers).where(isNull(customers.deletedAt));
   }
 
   async getCustomer(id: number): Promise<Customer | undefined> {
@@ -361,7 +351,7 @@ export class DatabaseStorage implements IStorage {
     const customerRows = await db
       .select()
       .from(customers)
-      .where(and(inArray(customers.id, assignedIds), isNull(customers.deletedAt), ne(customers.status, 'erstberatung')))
+      .where(and(inArray(customers.id, assignedIds), isNull(customers.deletedAt)))
       .orderBy(customers.nachname, customers.vorname);
 
     return customerRows.map(c => ({
@@ -415,7 +405,7 @@ export class DatabaseStorage implements IStorage {
         backupEmployeeId2: customers.backupEmployeeId2,
       })
       .from(customers)
-      .where(and(isNotNull(customers.geburtsdatum), ne(customers.status, 'erstberatung'), isNull(customers.deletedAt)));
+      .where(and(isNotNull(customers.geburtsdatum), isNull(customers.deletedAt)));
   }
 
   async getAdminUserIds(): Promise<number[]> {
@@ -439,7 +429,6 @@ export class DatabaseStorage implements IStorage {
         ilike(customers.vorname, searchTerm),
         ilike(customers.nachname, searchTerm)
       ),
-      ne(customers.status, 'erstberatung')
     ];
     
     if (assignedCustomerIds) {
@@ -670,24 +659,6 @@ export class DatabaseStorage implements IStorage {
     return results.map(mapAppointmentRow);
   }
 
-  async createErstberatungWithCustomer(
-    customerData: InsertCustomer,
-    appointmentData: Omit<InsertAppointment, 'customerId'>
-  ): Promise<{ customer: Customer; appointment: Appointment }> {
-    return await db.transaction(async (tx) => {
-      const customerResult = await tx.insert(customers).values(customerData).returning();
-      const customer = customerResult[0];
-      customerIdsCache.invalidateAll();
-
-      const appointmentResult = await tx.insert(appointments).values({
-        ...appointmentData,
-        customerId: customer.id,
-      }).returning();
-      const appointment = appointmentResult[0];
-
-      return { customer, appointment };
-    });
-  }
 
   async getAppointmentsForDay(employeeId: number, date: string): Promise<AppointmentWithCustomer[]> {
     // Get appointments where the employee is assigned OR created the appointment OR appointment is unassigned
@@ -991,8 +962,7 @@ export class DatabaseStorage implements IStorage {
         isNull(appointments.deletedAt)
       ))
       .where(and(
-        inArray(customers.id, assignedCustomerIds),
-        ne(customers.status, 'erstberatung')
+        inArray(customers.id, assignedCustomerIds)
       ))
       .groupBy(customers.id, customers.vorname, customers.nachname);
 

@@ -173,7 +173,6 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
         COUNT(*) FILTER (WHERE c.status = 'aktiv' AND c.deleted_at IS NULL)::int AS "activeCustomers",
         COUNT(*) FILTER (WHERE c.status = 'inaktiv' AND c.deleted_at IS NULL)::int AS "inactiveCustomers",
         COUNT(*) FILTER (WHERE c.status = 'interessent' AND c.deleted_at IS NULL)::int AS "prospects",
-        COUNT(*) FILTER (WHERE c.status = 'erstberatung' AND c.deleted_at IS NULL)::int AS "consultation",
         COUNT(*) FILTER (WHERE c.status = 'gekuendigt' AND c.deleted_at IS NULL)::int AS "terminated",
         (SELECT COALESCE(AVG(apt_count), 0)
          FROM (

@@ -37,8 +37,7 @@ router.get("/", asyncHandler("Kunden konnten nicht geladen werden", async (req, 
   const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : undefined;
   
   if (user.isAdmin && !viewAsEmployeeId) {
-    const includeErstberatung = statusFilter === 'erstberatung';
-    let allCustomers = await storage.getCustomers(includeErstberatung);
+    let allCustomers = await storage.getCustomers();
     if (statusFilter) {
       allCustomers = allCustomers.filter(c => c.status === statusFilter);
     }
@@ -72,10 +71,6 @@ router.get("/:id", asyncHandler("Kunde konnte nicht geladen werden", async (req,
     res.status(404).json({ error: "Kunde nicht gefunden" });
     return;
   }
-  if (!user.isAdmin && customer.status === 'erstberatung') {
-    res.status(403).json({ error: "Zugriff verweigert" });
-    return;
-  }
   res.json(customer);
 }));
 
@@ -87,11 +82,6 @@ router.get("/:id/details", asyncHandler("Kundendetails konnten nicht geladen wer
   if (!user.isAdmin) {
     const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
     if (!assignedCustomerIds.includes(id)) {
-      res.status(403).json({ error: "Zugriff verweigert" });
-      return;
-    }
-    const customer = await storage.getCustomer(id);
-    if (customer?.status === 'erstberatung') {
       res.status(403).json({ error: "Zugriff verweigert" });
       return;
     }
@@ -398,217 +388,6 @@ const convertCustomerSchema = z.object({
   backupEmployeeId: z.number().nullable().optional(),
   backupEmployeeId2: z.number().nullable().optional(),
 });
-
-router.post("/:id/convert", requireRoles("erstberatung"), asyncHandler("Konvertierung fehlgeschlagen", async (req, res) => {
-  const id = requireIntParam(req.params.id, res);
-  if (id === null) return;
-
-  if (!req.user!.isAdmin) {
-    const assignedCustomerIds = await storage.getAssignedCustomerIds(req.user!.id);
-    if (!assignedCustomerIds.includes(id)) {
-      res.status(403).json({ error: "FORBIDDEN", message: "Zugriff verweigert" });
-      return;
-    }
-  }
-
-  const customer = await storage.getCustomer(id);
-  if (!customer) {
-    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
-    return;
-  }
-
-  if (customer.status !== "erstberatung") {
-    res.status(400).json({ error: "INVALID_STATUS", message: "Nur Erstberatungskunden können konvertiert werden" });
-    return;
-  }
-
-  const data = convertCustomerSchema.parse(req.body);
-
-  const geburtsdatumError = validateGeburtsdatum(data.geburtsdatum);
-  if (geburtsdatumError) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: geburtsdatumError });
-    return;
-  }
-
-  const userId = req.user!.id;
-  const today = todayISO();
-  const warnings: string[] = [];
-
-  const updateData: Record<string, unknown> = {
-    name: `${data.nachname}, ${data.vorname}`,
-    vorname: data.vorname,
-    nachname: data.nachname,
-    email: data.email || null,
-    telefon: data.telefon || null,
-    festnetz: data.festnetz || null,
-    address: `${data.strasse} ${data.nr}, ${data.plz} ${data.stadt}`,
-    strasse: data.strasse,
-    nr: data.nr,
-    plz: data.plz,
-    stadt: data.stadt,
-    pflegegrad: data.pflegegrad || null,
-    geburtsdatum: data.geburtsdatum || null,
-    vorerkrankungen: data.vorerkrankungen || null,
-    haustierVorhanden: data.haustierVorhanden || false,
-    haustierDetails: data.haustierVorhanden ? (data.haustierDetails || null) : null,
-    personenbefoerderungGewuenscht: data.personenbefoerderungGewuenscht || false,
-    acceptsPrivatePayment: data.acceptsPrivatePayment ?? false,
-    documentDeliveryMethod: data.documentDeliveryMethod || "email",
-    billingType: data.billingType,
-    status: "aktiv",
-  };
-
-  const updated = await customerManagementStorage.updateCustomer(id, updateData);
-  if (!updated) {
-    res.status(422).json({ code: "UPDATE_FAILED", message: "Kunde konnte nicht aktualisiert werden — bitte laden Sie die Seite neu und versuchen es erneut" });
-    return;
-  }
-
-  if (data.pflegegrad && data.pflegegradSeit) {
-    try {
-      await customerManagementStorage.addCareLevelHistory({
-        customerId: id,
-        pflegegrad: data.pflegegrad,
-        validFrom: data.pflegegradSeit,
-      }, userId);
-    } catch (err) {
-      console.error(`[POST /:id/convert] Pflegegrad-Historie fehlgeschlagen:`, err);
-      warnings.push("Pflegegrad-Historie konnte nicht gespeichert werden");
-    }
-  }
-
-  if (data.insurance && isPflegekasseCustomer(data.billingType)) {
-    try {
-      await customerManagementStorage.addCustomerInsurance({
-        customerId: id,
-        insuranceProviderId: data.insurance.providerId,
-        versichertennummer: data.insurance.versichertennummer,
-        validFrom: data.insurance.validFrom,
-      }, userId);
-    } catch (err) {
-      console.error(`[POST /:id/convert] Versicherung fehlgeschlagen:`, err);
-      warnings.push("Versicherung konnte nicht gespeichert werden");
-    }
-  }
-
-  if (data.contacts) {
-    for (let i = 0; i < data.contacts.length; i++) {
-      const c = data.contacts[i];
-      try {
-        await customerManagementStorage.addCustomerContact({
-          customerId: id,
-          contactType: c.contactType as "familie" | "angehoerige" | "nachbar" | "hausarzt" | "betreuer" | "sonstige",
-          isPrimary: c.isPrimary,
-          vorname: c.vorname,
-          nachname: c.nachname,
-          telefon: c.telefon,
-          email: c.email || null,
-          sortOrder: i,
-        });
-      } catch (err) {
-        console.error(`[POST /:id/convert] Kontakt ${i} fehlgeschlagen:`, err);
-        warnings.push(`Kontakt "${c.vorname} ${c.nachname}" konnte nicht gespeichert werden`);
-      }
-    }
-  }
-
-  if (data.budgets && isPflegekasseCustomer(data.billingType)) {
-    try {
-      await customerManagementStorage.addCustomerBudget({
-        customerId: id,
-        entlastungsbetrag45b: data.budgets.entlastungsbetrag45b,
-        verhinderungspflege39: data.budgets.verhinderungspflege39,
-        pflegesachleistungen36: data.budgets.pflegesachleistungen36,
-        validFrom: data.budgets.validFrom,
-      }, userId);
-    } catch (err) {
-      console.error(`[POST /:id/convert] Budgets fehlgeschlagen:`, err);
-      warnings.push("Budgets konnten nicht gespeichert werden");
-    }
-  }
-
-  if (data.contract) {
-    try {
-      const hauswirtschaftRate = data.contract.rates?.find(r => r.serviceCategory === "hauswirtschaft");
-      const alltagsbegleitungRate = data.contract.rates?.find(r => r.serviceCategory === "alltagsbegleitung");
-      const kilometerRate = data.contract.rates?.find(r => r.serviceCategory === "kilometer");
-      await customerManagementStorage.createCustomerContract({
-        customerId: id,
-        contractStart: data.contract.contractStart,
-        contractDate: data.contract.contractDate || null,
-        vereinbarteLeistungen: data.contract.vereinbarteLeistungen || null,
-        hoursPerPeriod: data.contract.hoursPerPeriod,
-        periodType: data.contract.periodType as "week" | "month" | "year",
-        hauswirtschaftRateCents: hauswirtschaftRate?.hourlyRateCents || 0,
-        alltagsbegleitungRateCents: alltagsbegleitungRate?.hourlyRateCents || 0,
-        kilometerRateCents: kilometerRate?.hourlyRateCents || 0,
-        status: "active",
-      }, userId);
-    } catch (err) {
-      console.error(`[POST /:id/convert] Vertrag fehlgeschlagen:`, err);
-      warnings.push("Vertrag konnte nicht erstellt werden");
-    }
-  }
-
-  if (data.primaryEmployeeId !== undefined || data.backupEmployeeId !== undefined || data.backupEmployeeId2 !== undefined) {
-    try {
-      const empIds = [data.primaryEmployeeId, data.backupEmployeeId, data.backupEmployeeId2].filter((id): id is number => id != null);
-      const uniqueEmpIds = new Set(empIds);
-      if (empIds.length !== uniqueEmpIds.size) {
-        warnings.push("Mitarbeiter-Zuordnung übersprungen: Alle zugewiesenen Mitarbeiter müssen unterschiedlich sein");
-      } else {
-        for (const empId of empIds) {
-          const emp = await authService.getUser(empId);
-          if (!emp || !emp.isActive) {
-            warnings.push(`Mitarbeiter-Zuordnung übersprungen: Mitarbeiter ${empId} nicht gefunden oder nicht aktiv`);
-            break;
-          }
-        }
-        if (!warnings.some(w => w.startsWith("Mitarbeiter-Zuordnung übersprungen"))) {
-          const assignmentUpdate: Record<string, unknown> = {};
-          if (data.primaryEmployeeId !== undefined) assignmentUpdate.primaryEmployeeId = data.primaryEmployeeId ?? null;
-          if (data.backupEmployeeId !== undefined) assignmentUpdate.backupEmployeeId = data.backupEmployeeId ?? null;
-          if (data.backupEmployeeId2 !== undefined) assignmentUpdate.backupEmployeeId2 = data.backupEmployeeId2 ?? null;
-          await customerManagementStorage.updateCustomer(id, assignmentUpdate as any);
-        }
-      }
-    } catch (err) {
-      console.error(`[POST /:id/convert] Mitarbeiter-Zuordnung fehlgeschlagen:`, err);
-      warnings.push("Mitarbeiter-Zuordnung konnte nicht gespeichert werden");
-    }
-  }
-
-  birthdaysCache.invalidateAll();
-
-  res.json({ ...updated, status: "aktiv", warnings: warnings.length > 0 ? warnings : undefined });
-}));
-
-router.post("/:id/reject", requireRoles("erstberatung"), asyncHandler("Ablehnung fehlgeschlagen", async (req, res) => {
-  const id = requireIntParam(req.params.id, res);
-  if (id === null) return;
-
-  if (!req.user!.isAdmin) {
-    const assignedCustomerIds = await storage.getAssignedCustomerIds(req.user!.id);
-    if (!assignedCustomerIds.includes(id)) {
-      res.status(403).json({ error: "FORBIDDEN", message: "Zugriff verweigert" });
-      return;
-    }
-  }
-
-  const customer = await storage.getCustomer(id);
-  if (!customer) {
-    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
-    return;
-  }
-
-  if (customer.status !== "erstberatung") {
-    res.status(400).json({ error: "INVALID_STATUS", message: "Nur Erstberatungskunden können abgelehnt werden" });
-    return;
-  }
-
-  const updated = await customerManagementStorage.updateCustomer(id, { status: "inaktiv" });
-  res.json(updated);
-}));
 
 router.get("/:id/timeline", asyncHandler("Timeline konnte nicht geladen werden", async (req, res) => {
   const id = requireIntParam(req.params.id, res);

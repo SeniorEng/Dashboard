@@ -292,55 +292,19 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
 
   const handleConvertToErstberatung = () => {
     if (!prospect) return;
+    navigate(`/new-appointment?type=erstberatung&fromProspect=${prospect.id}`);
+  };
 
-    let pStrasse = prospect.strasse || "";
-    let pNr = prospect.nr || "";
-    let pPlz = prospect.plz || "";
-    let pStadt = prospect.stadt || "";
+  const handleQualifizieren = () => {
+    if (!prospectId) return;
+    updateMutation.mutate({ id: prospectId, data: { status: "qualifiziert" } });
+  };
 
-    if (!pStrasse && pStadt) {
-      const full = pStadt.trim();
-      const plzStadtMatch = full.match(/(\d{5})\s+(.+)/);
-      if (plzStadtMatch) {
-        const beforePlz = full.substring(0, plzStadtMatch.index).replace(/,\s*$/, "").trim();
-        const strasseNrMatch = beforePlz.match(/^(.+?)\s+(\d+\s*[a-zA-Z]?)$/);
-        if (strasseNrMatch) {
-          pStrasse = strasseNrMatch[1].trim();
-          pNr = strasseNrMatch[2].trim();
-        } else if (beforePlz) {
-          pStrasse = beforePlz;
-        }
-        pPlz = plzStadtMatch[1];
-        pStadt = plzStadtMatch[2].trim();
-      }
-    }
-
-    let prospectNotes = "";
-    if (prospect.notes && prospect.notes.length > 0) {
-      const relevantNotes = prospect.notes.filter((n: any) => n.noteType !== "statuswechsel");
-      if (relevantNotes.length > 0) {
-        prospectNotes = relevantNotes.map((n: any) => {
-          const date = formatDateForDisplay(n.createdAt.split("T")[0]);
-          const typeLabel = PROSPECT_NOTE_TYPE_LABELS[n.noteType as ProspectNoteType] || n.noteType;
-          return `[${date} – ${typeLabel}] ${n.noteText}`;
-        }).join("\n");
-      }
-    }
-
-    const params = new URLSearchParams({
-      fromProspect: String(prospect.id),
-      vorname: prospect.vorname,
-      nachname: prospect.nachname,
-      ...(prospect.telefon && { telefon: prospect.telefon }),
-      ...(prospect.email && { email: prospect.email }),
-      ...(pStrasse && { strasse: pStrasse }),
-      ...(pNr && { nr: pNr }),
-      ...(pPlz && { plz: pPlz }),
-      ...(pStadt && { stadt: pStadt }),
-      ...(prospect.pflegegrad && { pflegegrad: String(prospect.pflegegrad) }),
-      ...(prospectNotes && { notes: prospectNotes }),
+  const handleDisqualifizieren = () => {
+    if (!prospectId) return;
+    updateMutation.mutate({ id: prospectId, data: { status: "disqualifiziert", statusNotiz: dialogKommentar.trim() || undefined } }, {
+      onSuccess: () => setDialogKommentar(""),
     });
-    navigate(`/new-appointment?type=erstberatung&${params}`);
   };
 
   return (
@@ -423,7 +387,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                   </CardContent>
                 </Card>
 
-                {prospect.status !== "erstberatung" && prospect.status !== "absage" && prospect.status !== "nicht_interessiert" && (
+                {prospect.status !== "gewonnen" && prospect.status !== "absage" && prospect.status !== "nicht_interessiert" && prospect.status !== "disqualifiziert" && (
                   <Card>
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm">Status ändern</CardTitle>
@@ -438,6 +402,11 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                         <Button size="sm" variant="outline" onClick={() => setShowWiedervorlageDialog(true)} data-testid="button-status-wiedervorlage">
                           <CalendarClock className="h-3.5 w-3.5 mr-1" /> Wiedervorlage
                         </Button>
+                        {!["qualifiziert", "erstberatung_vereinbart", "erstberatung_durchgeführt", "angebot_gemacht"].includes(prospect.status) && (
+                          <Button size="sm" variant="outline" className="text-teal-600" onClick={handleQualifizieren} disabled={updateMutation.isPending} data-testid="button-status-qualifiziert">
+                            <UserPlus className="h-3.5 w-3.5 mr-1" /> Qualifizieren
+                          </Button>
+                        )}
                         {prospect.status !== "erstberatung_vereinbart" && (
                           <Button
                             size="sm"
@@ -450,17 +419,30 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                             <CalendarCheck className="h-3.5 w-3.5 mr-1" /> Erstberatung vereinbart
                           </Button>
                         )}
+                        {!["disqualifiziert", "nicht_interessiert"].includes(prospect.status) && (
+                          <Button size="sm" variant="outline" className="text-orange-600" onClick={handleDisqualifizieren} disabled={updateMutation.isPending} data-testid="button-status-disqualifiziert">
+                            <XCircle className="h-3.5 w-3.5 mr-1" /> Disqualifizieren
+                          </Button>
+                        )}
                         <Button size="sm" variant="outline" className="text-red-600" onClick={() => setShowNichtInteressiertDialog(true)} data-testid="button-status-nicht-interessiert">
                           <XCircle className="h-3.5 w-3.5 mr-1" /> Nicht interessiert
                         </Button>
                       </div>
+
+                      {prospect.status === "angebot_gemacht" && (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800" data-testid="banner-angebot">
+                          <p className="font-medium">Angebot wurde gemacht</p>
+                          <p className="text-xs mt-1">Warten auf Rückmeldung des Interessenten.</p>
+                        </div>
+                      )}
+
                       <Button
                         className="w-full"
                         onClick={handleConvertToErstberatung}
                         data-testid="button-convert-erstberatung"
                       >
                         <ArrowRightCircle className="h-4 w-4 mr-2" />
-                        Erstberatung anlegen
+                        Erstberatung planen
                       </Button>
                     </CardContent>
                   </Card>

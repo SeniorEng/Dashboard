@@ -1,5 +1,5 @@
 import { storage, type IStorage } from "../storage";
-import type { Appointment, InsertAppointment, UpdateAppointment, InsertErstberatungCustomer } from "@shared/schema";
+import type { Appointment, InsertAppointment, UpdateAppointment } from "@shared/schema";
 import { timeToMinutes, addMinutesToTime, addMinutesToTimeHHMMSS, formatTimeHHMMSS } from "@shared/utils/datetime";
 import { validateServiceDocumentationFromServices } from "@shared/domain/appointments";
 import { 
@@ -65,15 +65,6 @@ export interface KundenterminInput {
   date: string;
   scheduledStart: string;
   services: Array<{ serviceId: number; durationMinutes: number; serviceCode?: string | null }>;
-  notes?: string;
-  assignedEmployeeId?: number | null;
-}
-
-export interface ErstberatungInput {
-  customer: InsertErstberatungCustomer;
-  date: string;
-  scheduledStart: string;
-  erstberatungDauer: number;
   notes?: string;
   assignedEmployeeId?: number | null;
 }
@@ -344,58 +335,6 @@ export class AppointmentService {
     }));
     
     return { appointmentData, scheduledEnd, totalDuration, serviceEntries };
-  }
-
-  prepareErstberatungData(input: ErstberatungInput): {
-    customerData: {
-      name: string;
-      vorname: string;
-      nachname: string;
-      telefon: string;
-      email?: string | null;
-      status: string;
-      address: string;
-      strasse: string;
-      nr: string;
-      plz: string;
-      stadt: string;
-      pflegegrad: number;
-    };
-    appointmentData: Omit<InsertAppointment, 'customerId'>;
-    scheduledEnd: string;
-  } {
-    const fullName = `${input.customer.vorname} ${input.customer.nachname}`;
-    const fullAddress = `${input.customer.strasse} ${input.customer.nr}, ${input.customer.plz} ${input.customer.stadt}`;
-    
-    const scheduledEnd = addMinutesToTimeHHMMSS(input.scheduledStart, input.erstberatungDauer);
-    
-    const customerData = {
-      name: fullName,
-      vorname: input.customer.vorname,
-      nachname: input.customer.nachname,
-      telefon: input.customer.telefon,
-      email: input.customer.email || null,
-      status: "erstberatung" as const,
-      address: fullAddress,
-      strasse: input.customer.strasse,
-      nr: input.customer.nr,
-      plz: input.customer.plz,
-      stadt: input.customer.stadt,
-      pflegegrad: input.customer.pflegegrad ?? 0,
-    };
-    
-    const appointmentData: Omit<InsertAppointment, 'customerId'> = {
-      appointmentType: "Erstberatung",
-      date: input.date,
-      scheduledStart: input.scheduledStart,
-      scheduledEnd,
-      durationPromised: input.erstberatungDauer,
-      notes: input.notes || null,
-      status: "scheduled",
-      assignedEmployeeId: input.assignedEmployeeId ?? null,
-    };
-    
-    return { customerData, appointmentData, scheduledEnd };
   }
 
   validateDocumentationInput(

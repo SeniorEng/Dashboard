@@ -4,16 +4,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DatePicker } from "@/components/ui/date-picker";
-import { ChevronLeft, Loader2, Calendar, Clock, User, Home, Plus, Users, AlertTriangle, XCircle, Copy } from "lucide-react";
+import { ChevronLeft, Loader2, Calendar, Clock, User, Plus, Users, AlertTriangle, XCircle, Copy, UserCheck } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { useNewAppointmentForm, ServiceSelector, AppointmentSummary } from "@/features/appointments";
 import { EmployeeAvailability } from "@/features/appointments/components/employee-availability";
-import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS, formatDuration } from "@shared/types";
+import { DURATION_OPTIONS, formatDuration } from "@shared/types";
 import { useLocation } from "wouter";
 
 export default function NewAppointment() {
@@ -202,274 +201,169 @@ export default function NewAppointment() {
         <TabsContent value="erstberatung">
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">Erstberatung für neuen Kunden</CardTitle>
+              <CardTitle className="text-lg">Erstberatung für Interessenten</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
-              {/* Personal Info */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="eb-vorname">Vorname *</Label>
-                  <Input
-                    id="eb-vorname"
-                    value={form.ebVorname}
-                    onChange={(e) => form.setEbVorname(e.target.value)}
-                    placeholder="Max"
-                    data-testid="input-eb-vorname"
-                  />
-                  {form.errors.ebVorname && <p className="text-destructive text-sm">{form.errors.ebVorname}</p>}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="eb-nachname">Nachname *</Label>
-                  <Input
-                    id="eb-nachname"
-                    value={form.ebNachname}
-                    onChange={(e) => form.setEbNachname(e.target.value)}
-                    placeholder="Mustermann"
-                    data-testid="input-eb-nachname"
-                  />
-                  {form.errors.ebNachname && <p className="text-destructive text-sm">{form.errors.ebNachname}</p>}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="eb-telefon">Telefon *</Label>
-                <Input
-                  id="eb-telefon"
-                  type="tel"
-                  value={form.ebTelefon}
-                  onChange={(e) => form.setEbTelefon(form.formatPhoneAsYouType(e.target.value))}
-                  placeholder="0171 1234567"
-                  data-testid="input-eb-telefon"
-                />
-                <p className="text-xs text-muted-foreground">Mobil (0171...) oder Festnetz (030...)</p>
-                {form.errors.ebTelefon && <p className="text-destructive text-sm">{form.errors.ebTelefon}</p>}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="eb-email">E-Mail</Label>
-                <Input
-                  id="eb-email"
-                  type="email"
-                  value={form.ebEmail}
-                  onChange={(e) => form.setEbEmail(e.target.value)}
-                  placeholder="beispiel@email.de"
-                  data-testid="input-eb-email"
-                />
-              </div>
-
-              {/* Address */}
-              <div className="space-y-4">
-                <Label className="flex items-center gap-2">
-                  <Home className={iconSize.sm} /> Adresse
-                </Label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="col-span-2 space-y-2">
-                    <Label htmlFor="eb-strasse">Straße *</Label>
-                    <AddressAutocomplete
-                      id="eb-strasse"
-                      value={form.ebStrasse}
-                      onChange={(val) => form.setEbStrasse(val)}
-                      onAddressSelect={(addr) => {
-                        form.setEbStrasse(addr.strasse);
-                        form.setEbNr(addr.hausnummer);
-                        form.setEbPlz(addr.plz);
-                        form.setEbStadt(addr.stadt);
-                      }}
-                      placeholder="Musterstraße"
-                      data-testid="input-eb-strasse"
-                    />
-                    {form.errors.ebStrasse && <p className="text-destructive text-sm">{form.errors.ebStrasse}</p>}
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="eb-nr">Nr. *</Label>
-                    <Input
-                      id="eb-nr"
-                      value={form.ebNr}
-                      onChange={(e) => form.setEbNr(e.target.value)}
-                      placeholder="42"
-                      data-testid="input-eb-nr"
-                    />
-                    {form.errors.ebNr && <p className="text-destructive text-sm">{form.errors.ebNr}</p>}
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="eb-plz">PLZ *</Label>
-                    <Input
-                      id="eb-plz"
-                      value={form.ebPlz}
-                      onChange={(e) => form.setEbPlz(e.target.value)}
-                      placeholder="10969"
-                      maxLength={5}
-                      data-testid="input-eb-plz"
-                    />
-                    {form.errors.ebPlz && <p className="text-destructive text-sm">{form.errors.ebPlz}</p>}
-                  </div>
-                  <div className="col-span-2 space-y-2">
-                    <Label htmlFor="eb-stadt">Stadt *</Label>
-                    <Input
-                      id="eb-stadt"
-                      value={form.ebStadt}
-                      onChange={(e) => form.setEbStadt(e.target.value)}
-                      placeholder="Berlin"
-                      data-testid="input-eb-stadt"
-                    />
-                    {form.errors.ebStadt && <p className="text-destructive text-sm">{form.errors.ebStadt}</p>}
-                  </div>
-                </div>
-              </div>
-
-              {/* Pflegegrad */}
-              <div className="space-y-2">
-                <Label>Pflegegrad *</Label>
-                <Select value={form.ebPflegegrad} onValueChange={form.setEbPflegegrad}>
-                  <SelectTrigger data-testid="select-pflegegrad">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PFLEGEGRAD_OPTIONS.map((p) => (
-                      <SelectItem key={p} value={p.toString()}>
-                        Pflegegrad {p}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Employee Assignment (Admin only - required) */}
-              {form.isAdmin && (
-                <div className="space-y-2">
-                  <Label>
-                    <Users className={`${iconSize.sm} inline mr-1`} /> Mitarbeiter zuweisen *
-                  </Label>
-                  <SearchableSelect
-                    options={form.ebEmployeeOptions}
-                    value={form.ebAssignedEmployeeId}
-                    onValueChange={form.setEbAssignedEmployeeId}
-                    placeholder="Mitarbeiter auswählen..."
-                    searchPlaceholder="Mitarbeiter suchen..."
-                    emptyText="Kein Mitarbeiter mit Erstberatungs-Berechtigung gefunden."
-                    className={form.errors.ebAssignedEmployeeId ? "border-destructive" : ""}
-                    data-testid="select-eb-employee"
-                  />
-                  {form.errors.ebAssignedEmployeeId && <p className="text-destructive text-sm">{form.errors.ebAssignedEmployeeId}</p>}
-                  <p className="text-xs text-muted-foreground">
-                    Der ausgewählte Mitarbeiter wird automatisch Hauptmitarbeiter für diesen neuen Kunden
-                  </p>
-                </div>
-              )}
-
-              {/* Date & Time */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>
-                    <Calendar className={`${iconSize.sm} inline mr-1`} /> Datum *
-                  </Label>
-                  <DatePicker
-                    value={form.ebDate || null}
-                    onChange={(val) => form.setEbDate(val || "")}
-                    disableWeekends
-                    data-testid="input-eb-date"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="eb-start">
-                    <Clock className={`${iconSize.sm} inline mr-1`} /> Startzeit *
-                  </Label>
-                  <Input
-                    id="eb-start"
-                    type="time"
-                    value={form.ebStartTime}
-                    onChange={(e) => form.setEbStartTime(e.target.value)}
-                    className="text-base"
-                    data-testid="input-eb-start"
-                  />
-                </div>
-              </div>
-
-              {form.isAdmin && form.ebDate && (
-                <EmployeeAvailability
-                  date={form.ebDate}
-                  selectedEmployeeId={form.ebAssignedEmployeeId}
-                  onSelectEmployee={form.setEbAssignedEmployeeId}
-                />
-              )}
-
-              {/* Service (Erstberatung) */}
-              <div className="space-y-4">
-                <Label>Service</Label>
-                <div className="flex items-center justify-between p-4 rounded-lg border bg-purple-50 border-purple-200">
-                  <div className="flex-1">
-                    <span className="font-medium text-purple-800">Erstberatung</span>
-                  </div>
-                  <Select
-                    value={form.ebErstberatungDauer.toString()}
-                    onValueChange={(v) => form.setEbErstberatungDauer(parseInt(v))}
+              {!form.fromProspectId ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800" data-testid="banner-no-prospect">
+                  <p className="font-medium">Kein Interessent ausgewählt</p>
+                  <p className="mt-1">Erstberatungen werden über die Interessenten-Verwaltung erstellt. Bitte wählen Sie dort einen Interessenten aus und klicken Sie auf "Erstberatung planen".</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    onClick={() => setLocation("/admin/prospects")}
+                    data-testid="button-go-prospects"
                   >
-                    <SelectTrigger className="w-auto min-w-[120px]" data-testid="select-erstberatung-dauer">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {DURATION_OPTIONS.map((d) => (
-                        <SelectItem key={d} value={d.toString()}>
-                          {formatDuration(d)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    Zur Interessenten-Verwaltung
+                  </Button>
                 </div>
-              </div>
+              ) : (
+                <>
+                  {form.prospectData && (
+                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-4" data-testid="panel-prospect-info">
+                      <div className="flex items-center gap-2 text-blue-800 font-medium mb-2">
+                        <UserCheck className={iconSize.sm} />
+                        <span>Interessent</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-sm text-blue-700">
+                        <div><span className="text-blue-500">Name:</span> {form.prospectData.vorname} {form.prospectData.nachname}</div>
+                        {form.prospectData.telefon && <div><span className="text-blue-500">Telefon:</span> {form.prospectData.telefon}</div>}
+                        {form.prospectData.email && <div><span className="text-blue-500">E-Mail:</span> {form.prospectData.email}</div>}
+                        {form.prospectData.strasse && (
+                          <div className="col-span-2"><span className="text-blue-500">Adresse:</span> {form.prospectData.strasse} {form.prospectData.nr}, {form.prospectData.plz} {form.prospectData.stadt}</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {form.errors.ebProspect && <p className="text-destructive text-sm">{form.errors.ebProspect}</p>}
 
-              {/* Summary */}
-              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 space-y-3" data-testid="eb-summary-panel">
-                <div className="flex items-center gap-2 text-purple-700 font-semibold">
-                  <Clock className={iconSize.sm} />
-                  <span>Terminübersicht</span>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span className="text-purple-600">Von</span>
-                    <p className="font-medium text-lg text-purple-800">{form.ebSummary.startTime} Uhr</p>
+                  {form.isAdmin && (
+                    <div className="space-y-2">
+                      <Label>
+                        <Users className={`${iconSize.sm} inline mr-1`} /> Mitarbeiter zuweisen *
+                      </Label>
+                      <SearchableSelect
+                        options={form.ebEmployeeOptions}
+                        value={form.ebAssignedEmployeeId}
+                        onValueChange={form.setEbAssignedEmployeeId}
+                        placeholder="Mitarbeiter auswählen..."
+                        searchPlaceholder="Mitarbeiter suchen..."
+                        emptyText="Kein Mitarbeiter mit Erstberatungs-Berechtigung gefunden."
+                        className={form.errors.ebAssignedEmployeeId ? "border-destructive" : ""}
+                        data-testid="select-eb-employee"
+                      />
+                      {form.errors.ebAssignedEmployeeId && <p className="text-destructive text-sm">{form.errors.ebAssignedEmployeeId}</p>}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>
+                        <Calendar className={`${iconSize.sm} inline mr-1`} /> Datum *
+                      </Label>
+                      <DatePicker
+                        value={form.ebDate || null}
+                        onChange={(val) => form.setEbDate(val || "")}
+                        disableWeekends
+                        data-testid="input-eb-date"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="eb-start">
+                        <Clock className={`${iconSize.sm} inline mr-1`} /> Startzeit *
+                      </Label>
+                      <Input
+                        id="eb-start"
+                        type="time"
+                        value={form.ebStartTime}
+                        onChange={(e) => form.setEbStartTime(e.target.value)}
+                        className="text-base"
+                        data-testid="input-eb-start"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <span className="text-purple-600">Bis</span>
-                    <p className="font-medium text-lg text-purple-800">{form.ebSummary.endTime} Uhr</p>
+
+                  {form.isAdmin && form.ebDate && (
+                    <EmployeeAvailability
+                      date={form.ebDate}
+                      selectedEmployeeId={form.ebAssignedEmployeeId}
+                      onSelectEmployee={form.setEbAssignedEmployeeId}
+                    />
+                  )}
+
+                  <div className="space-y-4">
+                    <Label>Service</Label>
+                    <div className="flex items-center justify-between p-4 rounded-lg border bg-purple-50 border-purple-200">
+                      <div className="flex-1">
+                        <span className="font-medium text-purple-800">Erstberatung</span>
+                      </div>
+                      <Select
+                        value={form.ebErstberatungDauer.toString()}
+                        onValueChange={(v) => form.setEbErstberatungDauer(parseInt(v))}
+                      >
+                        <SelectTrigger className="w-auto min-w-[120px]" data-testid="select-erstberatung-dauer">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {DURATION_OPTIONS.map((d) => (
+                            <SelectItem key={d} value={d.toString()}>
+                              {formatDuration(d)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                </div>
 
-                <div className="border-t border-purple-200 pt-3">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-purple-700">Erstberatung</span>
-                    <span className="font-medium text-purple-800">{form.ebSummary.totalFormatted}</span>
+                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 space-y-3" data-testid="eb-summary-panel">
+                    <div className="flex items-center gap-2 text-purple-700 font-semibold">
+                      <Clock className={iconSize.sm} />
+                      <span>Terminübersicht</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-purple-600">Von</span>
+                        <p className="font-medium text-lg text-purple-800">{form.ebSummary.startTime} Uhr</p>
+                      </div>
+                      <div>
+                        <span className="text-purple-600">Bis</span>
+                        <p className="font-medium text-lg text-purple-800">{form.ebSummary.endTime} Uhr</p>
+                      </div>
+                    </div>
+                    <div className="border-t border-purple-200 pt-3">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-purple-700">Erstberatung</span>
+                        <span className="font-medium text-purple-800">{form.ebSummary.totalFormatted}</span>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
 
-              {/* Notes */}
-              <div className="space-y-2">
-                <Label htmlFor="eb-notes">Notizen (optional, max. 255 Zeichen)</Label>
-                <Textarea
-                  id="eb-notes"
-                  placeholder="Besondere Hinweise zur Erstberatung..."
-                  value={form.ebNotes}
-                  onChange={(e) => form.setEbNotes(e.target.value.slice(0, 255))}
-                  maxLength={255}
-                  data-testid="textarea-eb-notes"
-                />
-                <p className="text-xs text-muted-foreground">{form.ebNotes.length}/255</p>
-              </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="eb-notes">Notizen (optional, max. 255 Zeichen)</Label>
+                    <Textarea
+                      id="eb-notes"
+                      placeholder="Besondere Hinweise zur Erstberatung..."
+                      value={form.ebNotes}
+                      onChange={(e) => form.setEbNotes(e.target.value.slice(0, 255))}
+                      maxLength={255}
+                      data-testid="textarea-eb-notes"
+                    />
+                    <p className="text-xs text-muted-foreground">{form.ebNotes.length}/255</p>
+                  </div>
 
-              <Button
-                className={`w-full ${componentStyles.btnPrimary}`}
-                size="lg"
-                onClick={form.handleErstberatungSubmit}
-                disabled={form.isPending}
-                data-testid="button-create-erstberatung"
-              >
-                {form.isPending ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : null}
-                Erstberatung erstellen
-              </Button>
+                  <Button
+                    className={`w-full ${componentStyles.btnPrimary}`}
+                    size="lg"
+                    onClick={form.handleErstberatungSubmit}
+                    disabled={form.isPending}
+                    data-testid="button-create-erstberatung"
+                  >
+                    {form.isPending ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : null}
+                    Erstberatung erstellen
+                  </Button>
+                </>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

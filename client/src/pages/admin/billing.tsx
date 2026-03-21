@@ -550,7 +550,7 @@ export default function AdminBilling() {
                       <SelectItem value="alle" className="font-medium border-b">
                         Alle Kunden (Sammelabrechnung)
                       </SelectItem>
-                      {customers?.filter(c => c.status !== "erstberatung").map((c) => (
+                      {customers?.map((c) => (
                         <SelectItem key={c.id} value={c.id.toString()}>
                           {getCustomerName(c)}{c.status === "inaktiv" ? " (inaktiv)" : ""}
                         </SelectItem>
