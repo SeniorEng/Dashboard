@@ -1,3 +1,5 @@
+import { normalizePhone } from "@shared/utils/phone";
+
 export interface ParsedLead {
   vorname: string;
   nachname: string;
@@ -233,7 +235,7 @@ function parsePflegehilfeEmail(body: string, subject?: string): ParsedLead {
   const result = {
     vorname: vorname || "Unbekannt",
     nachname: nachname || "Interessent",
-    telefon: rawTelefon?.replace(/\s+/g, "") || undefined,
+    telefon: (rawTelefon ? normalizePhone(rawTelefon) : null) ?? undefined,
     email,
     ...addressParts,
     pflegegrad,
@@ -422,7 +424,7 @@ function parsePflegeDeEmail(body: string, subject?: string): ParsedLead {
   return {
     vorname: vorname || "Unbekannt",
     nachname: nachname || "Interessent",
-    telefon: rawTelefon?.replace(/\s+/g, "") || undefined,
+    telefon: (rawTelefon ? normalizePhone(rawTelefon) : null) ?? undefined,
     email,
     strasse: addressFromStrasse.strasse,
     nr: addressFromStrasse.nr,
@@ -540,7 +542,7 @@ function parseGenericEmail(body: string, subject?: string): ParsedLead {
   return {
     vorname,
     nachname,
-    telefon: telefon?.replace(/\s+/g, ""),
+    telefon: (telefon ? normalizePhone(telefon) : null) ?? undefined,
     email,
     ...addressParts,
     pflegegrad,

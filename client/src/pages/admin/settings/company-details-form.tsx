@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
+import { formatPhoneAsYouType } from "@shared/utils/phone";
 import type { CompanyFormData } from "./types";
 import { BUNDESLAENDER } from "./types";
 
@@ -115,7 +116,7 @@ export function CompanyDetailsForm({ companyForm, updateField, onSubmit, isSavin
                   id="telefon"
                   data-testid="input-company-telefon"
                   value={companyForm.telefon}
-                  onChange={(e) => updateField("telefon", e.target.value)}
+                  onChange={(e) => updateField("telefon", formatPhoneAsYouType(e.target.value))}
                 />
               </div>
               <div>

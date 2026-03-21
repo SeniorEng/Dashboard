@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { asyncHandler, badRequest, notFound } from "../lib/errors";
+import { formatPhoneForDisplay } from "@shared/utils/phone";
 import {
   createInvoiceSchema,
   updateInvoiceStatusSchema,
@@ -604,7 +605,7 @@ function buildPdfData(invoice: Invoice, lineItems: InvoiceLineItem[], companySet
       [companySettings.strasse, companySettings.hausnummer].filter(Boolean).join(" "),
       [companySettings.plz, companySettings.stadt].filter(Boolean).join(" "),
     ].filter(Boolean).join(", "),
-    companyPhone: companySettings.telefon || "",
+    companyPhone: formatPhoneForDisplay(companySettings.telefon || ""),
     companyEmail: companySettings.email || "",
     companyWebsite: companySettings.website ?? null,
     steuernummer: companySettings.steuernummer ?? null,

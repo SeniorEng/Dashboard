@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
 import type { SystemSettings, CompanySettings } from "@shared/schema";
+import { formatPhoneAsYouType } from "@shared/utils/phone";
 import { emptyCompanyForm } from "./settings/types";
 import { LogoUploadCard } from "./settings/logo-upload";
 import { LeadAutoReplyCard } from "./settings/lead-auto-reply-card";
@@ -446,7 +447,7 @@ export default function AdminSettings() {
                         <Input
                           id="twilioPhoneNumber"
                           value={companyForm.twilioPhoneNumber}
-                          onChange={(e) => updateField("twilioPhoneNumber", e.target.value)}
+                          onChange={(e) => updateField("twilioPhoneNumber", formatPhoneAsYouType(e.target.value))}
                           placeholder="+49..."
                           data-testid="input-twilio-phone-number"
                         />
@@ -456,7 +457,7 @@ export default function AdminSettings() {
                         <Input
                           id="leadCallBridgePhone"
                           value={companyForm.leadCallBridgePhone}
-                          onChange={(e) => updateField("leadCallBridgePhone", e.target.value)}
+                          onChange={(e) => updateField("leadCallBridgePhone", formatPhoneAsYouType(e.target.value))}
                           placeholder="+49..."
                           data-testid="input-lead-call-bridge-phone"
                         />

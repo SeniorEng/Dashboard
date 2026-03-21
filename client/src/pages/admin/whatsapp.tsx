@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { formatPhoneAsYouType } from "@shared/utils/phone";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
@@ -259,7 +260,7 @@ function ConfigTab() {
           <div className="flex flex-col sm:flex-row gap-3">
             <Input
               value={testPhone}
-              onChange={(e) => setTestPhone(e.target.value)}
+              onChange={(e) => setTestPhone(formatPhoneAsYouType(e.target.value))}
               placeholder="+49 170 1234567"
               className="flex-1"
               data-testid="input-test-phone"

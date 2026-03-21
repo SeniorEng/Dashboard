@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
 import { Switch } from "@/components/ui/switch";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
@@ -154,7 +155,7 @@ export default function AdminInsuranceProviders() {
       hausnummer: form.hausnummer?.trim() || null,
       plz: plzValue || null,
       stadt: form.stadt?.trim() || null,
-      telefon: form.telefon?.trim() || null,
+      telefon: (form.telefon ? normalizePhone(form.telefon) : null) || form.telefon?.trim() || null,
       fax: form.fax?.trim() || null,
       email: form.email?.trim() || null,
       kimAdresse: form.kimAdresse?.trim() || null,
@@ -462,7 +463,7 @@ export default function AdminInsuranceProviders() {
                   <Input
                     id="telefon"
                     value={form.telefon || ""}
-                    onChange={(e) => handleChange("telefon", e.target.value)}
+                    onChange={(e) => handleChange("telefon", formatPhoneAsYouType(e.target.value))}
                     placeholder="+49 89 1234567"
                     data-testid="input-provider-telefon"
                   />
