@@ -99,9 +99,9 @@ export default function LoginPage() {
           <img 
             src={displayLogo} 
             alt={branding?.companyName || "EngelDesk"} 
-            width={64}
-            height={64}
-            className="h-16 mx-auto mb-2"
+            width={200}
+            height={48}
+            className="h-12 w-auto mx-auto mb-2"
             data-testid="img-login-logo"
           />
         </CardHeader>
@@ -248,9 +248,9 @@ function SetupPage() {
           <img 
             src={displayLogo} 
             alt={branding?.companyName || "EngelDesk"} 
-            width={64}
-            height={64}
-            className="h-16 mx-auto mb-2"
+            width={200}
+            height={48}
+            className="h-12 w-auto mx-auto mb-2"
             data-testid="img-setup-logo"
           />
           <CardTitle className="text-xl font-bold text-gray-900">Ersteinrichtung</CardTitle>
