@@ -320,6 +320,8 @@ describe("INT-5: Kostenschaetzung", () => {
 describe("INT-6: Kaskadenverbrauch ueber Termin-Dokumentation", () => {
   let appointmentId: number | null = null;
   let serviceId: number | null = null;
+  let appointmentMonth: string | null = null;
+  let initialBalanceId: number | null = null;
 
   it("INT-6.1 – Hauswirtschaft-Service ermitteln", async () => {
     const servicesRes = await apiGet<any[]>("/api/services");
@@ -366,23 +368,26 @@ describe("INT-6: Kaskadenverbrauch ueber Termin-Dokumentation", () => {
     expect(createRes?.status).toBe(201);
     appointmentId = createRes.data.id;
     createdAppointmentIds.push(appointmentId!);
+
+    const apptDate = createRes.data.date;
+    if (apptDate) {
+      appointmentMonth = apptDate.substring(0, 7);
+    }
   });
 
   it("INT-6.3 – Budget-Overview ist abrufbar vor Dokumentation", async () => {
-    if (!appointmentId) return;
+    if (!appointmentId || !appointmentMonth) return;
 
-    await apiPatch(`/api/admin/customers/${testCustomerId}`, {
-      acceptsPrivatePayment: true,
+    const ibRes = await apiPost<any>(`/api/budget/${testCustomerId}/initial-balance/entlastungsbetrag_45b`, {
+      amountCents: 50000,
+      validFrom: appointmentMonth,
     });
+    expect([200, 201]).toContain(ibRes.status);
 
-    const adjRes = await apiPost<any>(`/api/budget/${testCustomerId}/manual-adjustment`, {
-      budgetType: "entlastungsbetrag_45b",
-      amountCents: 10000,
-      notes: "INT-6 Aufladung fuer Dokumentationstest",
-    });
-    expect(adjRes.status).toBe(201);
-    if (adjRes.data.type === "transaction" && adjRes.data.data?.id) {
-      createdTransactionIds.push(adjRes.data.data.id);
+    const ibList = await apiGet<any[]>(`/api/budget/${testCustomerId}/initial-balances/entlastungsbetrag_45b`);
+    if (ibList.status === 200 && Array.isArray(ibList.data)) {
+      const ib = ibList.data.find((a: any) => a.source === "initial_balance" && a.amountCents === 50000);
+      if (ib) initialBalanceId = ib.id;
     }
 
     const res = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
@@ -429,6 +434,14 @@ describe("INT-6: Kaskadenverbrauch ueber Termin-Dokumentation", () => {
       (res.data.umwandlung45a?.currentMonthUsedCents || 0) +
       (res.data.ersatzpflege39_42a?.currentYearUsedCents || 0);
     expect(totalUsed).toBeGreaterThan(0);
+  });
+
+  afterAll(async () => {
+    if (initialBalanceId) {
+      try {
+        await apiDeleteRaw(`/api/budget/${testCustomerId}/initial-balance/${initialBalanceId}`);
+      } catch {}
+    }
   });
 });
 
