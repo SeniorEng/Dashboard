@@ -49,6 +49,7 @@ import { PricingSection } from "./components/customer-pricing-section";
 import { CustomerDocumentsSection } from "./components/customer-documents-section";
 import { CustomerContactsTab } from "./components/customer-contacts-tab";
 import { CustomerContractTab } from "./components/customer-contract-tab";
+import { CustomerTimeline } from "@/features/customers/components/customer-timeline";
 
 const MISSING_LABELS: Record<string, string> = {
   pflegegrad: "Pflegegrad",
@@ -330,7 +331,7 @@ function BudgetsTabContent({
   );
 }
 
-const VALID_TABS = ["overview", "vertrag", "documents", "contacts", "budgets", "insurance"] as const;
+const VALID_TABS = ["overview", "vertrag", "documents", "contacts", "budgets", "insurance", "timeline"] as const;
 
 export default function AdminCustomerDetail() {
   const { id } = useParams<{ id: string }>();
@@ -583,6 +584,7 @@ export default function AdminCustomerDetail() {
               { value: "contacts", label: "Kontakte", testId: "tab-contacts" },
               { value: "budgets", label: "Budgets", testId: "tab-budgets" },
               { value: "insurance", label: "Versicherung", testId: "tab-insurance" },
+              { value: "timeline", label: "Verlauf", testId: "tab-timeline" },
             ]}
             value={activeTab}
             onValueChange={handleTabChange}
@@ -631,6 +633,10 @@ export default function AdminCustomerDetail() {
                 customerId={customerId}
                 currentInsurance={customer.currentInsurance}
               />
+            </TabsContent>
+
+            <TabsContent value="timeline" className="space-y-4">
+              <CustomerTimeline customerId={customerId} />
             </TabsContent>
           </ResponsiveTabs>
 

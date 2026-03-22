@@ -436,14 +436,16 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                         </div>
                       )}
 
-                      <Button
-                        className="w-full"
-                        onClick={handleConvertToErstberatung}
-                        data-testid="button-convert-erstberatung"
-                      >
-                        <ArrowRightCircle className="h-4 w-4 mr-2" />
-                        Erstberatung planen
-                      </Button>
+                      {["qualifiziert", "erstberatung_durchgeführt", "angebot_gemacht"].includes(prospect.status) && (
+                        <Button
+                          className="w-full"
+                          onClick={handleConvertToErstberatung}
+                          data-testid="button-convert-erstberatung"
+                        >
+                          <ArrowRightCircle className="h-4 w-4 mr-2" />
+                          Erstberatung planen
+                        </Button>
+                      )}
                     </CardContent>
                   </Card>
                 )}

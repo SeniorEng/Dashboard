@@ -15,7 +15,8 @@ import { internationalEmailSchema } from "@shared/schema/common";
 import { asyncHandler } from "../../lib/errors";
 import { z } from "zod";
 import { db } from "../../lib/db";
-import { eq, and, sql, isNull } from "drizzle-orm";
+import { eq, and, sql, isNull, desc } from "drizzle-orm";
+import { auditLog, users } from "@shared/schema";
 
 import assignmentsRouter from "./customers/assignments";
 import budgetsRouter from "./customers/budgets";
@@ -466,6 +467,61 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
   birthdaysCache.invalidateAll();
   
   res.json(customer);
+}));
+
+router.get("/customers/:id/timeline", asyncHandler("Timeline konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
+    return;
+  }
+
+  const customer = await storage.getCustomer(id);
+  if (!customer) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+    return;
+  }
+
+  const { entries: directEntries } = await auditService.getEntries({
+    entityType: "customer",
+    entityId: id,
+    limit: 50,
+    offset: 0,
+  });
+
+  const relatedEntries = await db
+    .select({
+      id: auditLog.id,
+      action: auditLog.action,
+      userName: users.displayName,
+      metadata: auditLog.metadata,
+      createdAt: auditLog.createdAt,
+    })
+    .from(auditLog)
+    .innerJoin(users, eq(auditLog.userId, users.id))
+    .where(
+      and(
+        sql`${auditLog.metadata}->>'customerId' = ${String(id)}`,
+        sql`${auditLog.entityType} != 'customer'`
+      )
+    )
+    .orderBy(desc(auditLog.createdAt))
+    .limit(50);
+
+  const directIds = new Set(directEntries.map(e => e.id));
+  const merged = [
+    ...directEntries.map(entry => ({
+      id: entry.id,
+      action: entry.action,
+      userName: entry.userName,
+      metadata: entry.metadata,
+      createdAt: entry.createdAt,
+    })),
+    ...relatedEntries.filter(e => !directIds.has(e.id)),
+  ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+   .slice(0, 50);
+
+  res.json(merged);
 }));
 
 export default router;

@@ -414,7 +414,7 @@ describe("Junction-Tabelle (appointment_services)", () => {
 
     const { status, data } = await apiPost<any>("/api/appointments/kundentermin", {
       customerId: testCustomerId,
-      date: getFutureDate(162),
+      date: getFutureDate(190),
       scheduledStart: "09:00",
       services: [
         { serviceId: hwServiceId, durationMinutes: 30 },
@@ -455,43 +455,49 @@ describe("Junction-Tabelle (appointment_services)", () => {
   });
 });
 
-describe("Erstberatung (Initial Consultation)", () => {
+describe("Erstberatung via Prospect (prospect-erstberatung)", () => {
   let createdAppointmentId: number;
-  let createdCustomerId: number;
+  let createdProspectId: number;
 
   afterAll(async () => {
     if (createdAppointmentId) {
       await apiDelete(`/api/appointments/${createdAppointmentId}`);
     }
+    if (createdProspectId) {
+      await apiDelete(`/api/admin/prospects/${createdProspectId}`);
+    }
   });
 
-  it("sollte eine Erstberatung mit neuem Kunden erstellen", async () => {
+  it("sollte eine Erstberatung für einen Interessenten erstellen", async () => {
     const auth = await getAuthCookie();
-    const { status, data } = await apiPost<{ appointment: Appointment; customer: { id: number; name: string } }>(
-      "/api/appointments/erstberatung",
+
+    const prospectRes = await apiPost<{ id: number }>("/api/admin/prospects", {
+      vorname: "Test",
+      nachname: `EB_Prospect_${Date.now()}`,
+      telefon: "+491234567890",
+      status: "qualifiziert",
+    });
+    expect(prospectRes.status).toBe(201);
+    createdProspectId = prospectRes.data.id;
+
+    const uniqueDayOffset = 300 + Math.floor(Math.random() * 50);
+    const { status, data } = await apiPost<any>(
+      "/api/appointments/prospect-erstberatung",
       {
-        customer: {
-          vorname: "Test",
-          nachname: `Erstberatung_${Date.now()}`,
-          strasse: "Teststraße",
-          nr: "1",
-          plz: "12345",
-          stadt: "Teststadt",
-          telefon: "+491234567890",
-          pflegegrad: 2,
-        },
-        date: getFutureDate(21),
-        scheduledStart: "11:00",
+        prospectId: createdProspectId,
+        date: getFutureDate(uniqueDayOffset),
+        scheduledStart: "16:00",
         erstberatungDauer: 60,
         assignedEmployeeId: auth.user.id,
       }
     );
 
     expect(status).toBe(201);
-    expect(data.appointment).toHaveProperty("id");
-    expect(data.customer).toHaveProperty("id");
+    const appointment = data.appointment ?? data;
+    expect(appointment).toHaveProperty("id");
+    expect(appointment.appointmentType).toBe("Erstberatung");
+    expect(appointment.prospectId).toBe(createdProspectId);
 
-    createdAppointmentId = data.appointment.id;
-    createdCustomerId = data.customer.id;
+    createdAppointmentId = appointment.id;
   });
 });

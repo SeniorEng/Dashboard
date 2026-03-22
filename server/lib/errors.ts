@@ -33,7 +33,6 @@ export const ErrorMessages = {
   endVisitRestriction: "Der Besuch kann nur bei einem laufenden Termin beendet werden.",
   documentationRestriction: "Kilometer, erledigte Services und Unterschrift können erst nach dem Besuch dokumentiert werden.",
   createAppointmentFailed: "Der Termin konnte nicht erstellt werden. Bitte versuchen Sie es erneut.",
-  createErstberatungFailed: "Die Erstberatung konnte nicht erstellt werden. Bitte versuchen Sie es erneut.",
   deleteAppointmentFailed: "Termin konnte nicht gelöscht werden",
   fetchAppointmentsFailed: "Fehler beim Laden der Termine",
   fetchAppointmentFailed: "Fehler beim Laden des Termins",
