@@ -1,0 +1,106 @@
+import {
+  type Appointment,
+  customers,
+  appointments,
+  users,
+} from "@shared/schema";
+import type { AppointmentWithCustomer } from "@shared/types";
+import { sql as sqlBuilder } from "drizzle-orm";
+
+export const assignedEmployee = sqlBuilder`(SELECT display_name FROM users WHERE users.id = ${appointments.assignedEmployeeId})`.as("assigned_employee_name");
+
+export const appointmentWithCustomerSelectFields = {
+  id: appointments.id,
+  customerId: appointments.customerId,
+  prospectId: appointments.prospectId,
+  createdByUserId: appointments.createdByUserId,
+  assignedEmployeeId: appointments.assignedEmployeeId,
+  appointmentType: appointments.appointmentType,
+  serviceType: appointments.serviceType,
+  date: appointments.date,
+  scheduledStart: appointments.scheduledStart,
+  scheduledEnd: appointments.scheduledEnd,
+  durationPromised: appointments.durationPromised,
+  status: appointments.status,
+  actualStart: appointments.actualStart,
+  actualEnd: appointments.actualEnd,
+  travelOriginType: appointments.travelOriginType,
+  travelFromAppointmentId: appointments.travelFromAppointmentId,
+  travelKilometers: appointments.travelKilometers,
+  travelMinutes: appointments.travelMinutes,
+  customerKilometers: appointments.customerKilometers,
+  notes: appointments.notes,
+  servicesDone: appointments.servicesDone,
+  signatureData: appointments.signatureData,
+  signatureHash: appointments.signatureHash,
+  signedAt: appointments.signedAt,
+  signedByUserId: appointments.signedByUserId,
+  deletedAt: appointments.deletedAt,
+  createdAt: appointments.createdAt,
+  performedByEmployeeId: appointments.performedByEmployeeId,
+  assignedEmployeeName: assignedEmployee,
+  customer: {
+    id: customers.id,
+    name: customers.name,
+    vorname: customers.vorname,
+    nachname: customers.nachname,
+    email: customers.email,
+    festnetz: customers.festnetz,
+    telefon: customers.telefon,
+    geburtsdatum: customers.geburtsdatum,
+    address: customers.address,
+    strasse: customers.strasse,
+    nr: customers.nr,
+    plz: customers.plz,
+    stadt: customers.stadt,
+    pflegegrad: customers.pflegegrad,
+    primaryEmployeeId: customers.primaryEmployeeId,
+    backupEmployeeId: customers.backupEmployeeId,
+    backupEmployeeId2: customers.backupEmployeeId2,
+    createdAt: customers.createdAt,
+    updatedAt: customers.updatedAt,
+    createdByUserId: customers.createdByUserId,
+    status: customers.status,
+    latitude: customers.latitude,
+    longitude: customers.longitude,
+  }
+};
+
+export type AppointmentQueryRow = typeof appointmentWithCustomerSelectFields extends infer T
+  ? { [K in keyof T]: T[K] extends { $inferSelect: infer S } ? S : unknown }
+  : never;
+
+export function mapAppointmentRow(row: AppointmentQueryRow & Record<string, unknown>): AppointmentWithCustomer {
+  return {
+    id: row.id as number,
+    customerId: row.customerId as number | null,
+    prospectId: row.prospectId as number | null,
+    createdByUserId: row.createdByUserId as number | null,
+    assignedEmployeeId: row.assignedEmployeeId as number | null,
+    appointmentType: row.appointmentType as string,
+    serviceType: row.serviceType as string | null,
+    date: row.date as string,
+    scheduledStart: row.scheduledStart as string,
+    scheduledEnd: row.scheduledEnd as string | null,
+    durationPromised: row.durationPromised as number,
+    status: row.status as string,
+    actualStart: row.actualStart as string | null,
+    actualEnd: row.actualEnd as string | null,
+    travelOriginType: row.travelOriginType as string | null,
+    travelFromAppointmentId: row.travelFromAppointmentId as number | null,
+    travelKilometers: row.travelKilometers as number | null,
+    travelMinutes: row.travelMinutes as number | null,
+    customerKilometers: row.customerKilometers as number | null,
+    notes: row.notes as string | null,
+    servicesDone: row.servicesDone as string[] | null,
+    signatureData: (row.signatureData as string | null) ?? null,
+    signatureHash: (row.signatureHash as string | null) ?? null,
+    signedAt: (row.signedAt as Date | null) ?? null,
+    signedByUserId: (row.signedByUserId as number | null) ?? null,
+    deletedAt: (row.deletedAt as Date | null) ?? null,
+    createdAt: row.createdAt as Date,
+    performedByEmployeeId: row.performedByEmployeeId as number | null,
+    assignedEmployeeName: (row.assignedEmployeeName as string | null) ?? null,
+    customer: (row.customer as { id?: number })?.id ? row.customer as AppointmentWithCustomer["customer"] : null,
+  };
+}

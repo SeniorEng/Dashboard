@@ -371,6 +371,20 @@ describe("INT-6: Kaskadenverbrauch ueber Termin-Dokumentation", () => {
   it("INT-6.3 – Budget-Overview ist abrufbar vor Dokumentation", async () => {
     if (!appointmentId) return;
 
+    await apiPatch(`/api/admin/customers/${testCustomerId}`, {
+      acceptsPrivatePayment: true,
+    });
+
+    const adjRes = await apiPost<any>(`/api/budget/${testCustomerId}/manual-adjustment`, {
+      budgetType: "entlastungsbetrag_45b",
+      amountCents: 10000,
+      notes: "INT-6 Aufladung fuer Dokumentationstest",
+    });
+    expect(adjRes.status).toBe(201);
+    if (adjRes.data.type === "transaction" && adjRes.data.data?.id) {
+      createdTransactionIds.push(adjRes.data.data.id);
+    }
+
     const res = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
     expect(res.status).toBe(200);
     expect(res.data).toHaveProperty("entlastungsbetrag45b");
