@@ -97,7 +97,7 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
     if (hasUsage && appointment.appointmentType !== "Erstberatung") {
       try {
         budgetTransaction = await budgetLedgerStorage.createConsumptionTransaction({
-          customerId: appointment.customerId,
+          customerId: appointment.customerId!,
           appointmentId: id,
           transactionDate: appointment.date,
           hauswirtschaftMinutes,
@@ -108,7 +108,7 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
         }, tx);
 
         try {
-          const summary = await budgetLedgerStorage.getBudgetSummary(appointment.customerId);
+          const summary = await budgetLedgerStorage.getBudgetSummary(appointment.customerId!);
           if (summary.monthlyLimitCents !== null && summary.currentMonthUsedCents > summary.monthlyLimitCents) {
             const limitEuro = (summary.monthlyLimitCents / 100).toFixed(2);
             const usedEuro = (summary.currentMonthUsedCents / 100).toFixed(2);
@@ -143,7 +143,7 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
   await auditService.documentationSubmitted(
     req.user!.id,
     id,
-    { customerId: appointment.customerId, hasSignature, performedByEmployeeId: (updateData as Record<string, unknown>).performedByEmployeeId as number | null },
+    { customerId: appointment.customerId!, hasSignature, performedByEmployeeId: (updateData as Record<string, unknown>).performedByEmployeeId as number | null },
     ip
   );
   if (hasSignature) {
@@ -151,7 +151,7 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
     await auditService.signatureAdded(
       req.user!.id,
       id,
-      { customerId: appointment.customerId, signatureHash: sigHash },
+      { customerId: appointment.customerId!, signatureHash: sigHash },
       ip
     );
   }

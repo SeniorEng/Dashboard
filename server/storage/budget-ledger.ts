@@ -1712,7 +1712,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     for (const [appointmentId] of byAppointment) {
       try {
         const txResult = await db.transaction(async (tx) => {
-          await (tx as typeof db).execute(sql`SELECT pg_advisory_xact_lock(${sql.raw(String(customerId))})`);
+          await (tx as unknown as typeof db).execute(sql`SELECT pg_advisory_xact_lock(${sql.raw(String(customerId))})`);
 
           const allConsumptions = await tx.select()
             .from(budgetTransactions)

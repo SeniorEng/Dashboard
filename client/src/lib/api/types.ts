@@ -78,10 +78,13 @@ export interface CustomerListItem {
   billingType: string | null;
   email: string | null;
   telefon: string | null;
+  festnetz: string | null;
   address: string | null;
   stadt: string | null;
   pflegegrad: number | null;
+  geburtsdatum: string | null;
   status: string;
+  inaktivAb: string | null;
   primaryEmployee: { displayName: string } | null;
   hasBackupEmployee: boolean;
   hasBackupEmployee2: boolean;

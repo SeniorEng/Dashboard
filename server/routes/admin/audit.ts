@@ -158,7 +158,7 @@ router.post("/revoke-signature/:entityType/:entityId", asyncHandler("Stornierung
     await auditService.appointmentRevoked(
       userId,
       entityId,
-      { customerId: appointment.customerId, reason, previousStatus: appointment.status },
+      { customerId: appointment.customerId!, reason, previousStatus: appointment.status },
       ip
     );
 

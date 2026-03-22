@@ -216,7 +216,7 @@ router.get("/:id", asyncHandler(ErrorMessages.fetchAppointmentFailed, async (req
   
   if (!user.isAdmin) {
     const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-    if (!assignedCustomerIds.includes(appointment.customerId)) {
+    if (!assignedCustomerIds.includes(appointment.customerId!)) {
       return sendForbidden(res, "Zugriff verweigert", "Sie haben keinen Zugriff auf diesen Termin.");
     }
   }
@@ -519,7 +519,7 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
       }
 
       const customerOverlap = await appointmentService.checkCustomerOverlap(
-        checkDate, checkStart, checkEnd, existingAppointment.customerId, id
+        checkDate, checkStart, checkEnd, existingAppointment.customerId!, id
       );
       if (customerOverlap) {
         return sendConflict(res, "Kundenüberschneidung", "Dieser Kunde hat bereits einen Termin in diesem Zeitraum.");
@@ -549,7 +549,7 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
     await auditService.appointmentUpdated(
       req.user!.id,
       id,
-      { customerId: existingAppointment.customerId, changedFields },
+      { customerId: existingAppointment.customerId!, changedFields },
       ip
     );
   }

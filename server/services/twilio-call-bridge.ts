@@ -92,7 +92,7 @@ export async function initiateLeadCallBridge(params: CallBridgeParams): Promise<
   }
 }
 
-async function safeAddNote(prospectId: number, noteText: string, noteType: string): Promise<void> {
+async function safeAddNote(prospectId: number, noteText: string, noteType: "email" | "notiz" | "anruf" | "statuswechsel"): Promise<void> {
   try {
     await withTimeout(
       () => prospectStorage.addNote({ prospectId, noteText, noteType }),

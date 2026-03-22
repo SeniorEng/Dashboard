@@ -349,9 +349,9 @@ export async function getServiceRecordsOverview(employeeId: number, year: number
 
     for (const row of coveredRows) {
       if (row.recordType === "single") {
-        coveredBySingleByCustomer.set(row.customerId, row.count);
+        coveredBySingleByCustomer.set(row.customerId!, row.count);
       } else {
-        coveredByMonthlyByCustomer.set(row.customerId, row.count);
+        coveredByMonthlyByCustomer.set(row.customerId!, row.count);
       }
     }
   }

@@ -379,7 +379,7 @@ router.get("/for-appointment/:appointmentId", requireAuth, asyncHandler("Leistun
   const hasAccess = await canAccessCustomer(
     req.user!.id,
     req.user!.isAdmin,
-    appointment.customerId,
+    appointment.customerId!,
     (employeeId) => storage.getAssignedCustomerIds(employeeId)
   );
   if (!hasAccess) {

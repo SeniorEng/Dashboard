@@ -159,7 +159,7 @@ export async function sendLeadAutoReply(params: LeadAutoReplyParams): Promise<vo
   }
 }
 
-async function safeAddNote(prospectId: number, noteText: string, noteType: string = "notiz"): Promise<void> {
+async function safeAddNote(prospectId: number, noteText: string, noteType: "email" | "notiz" | "anruf" | "statuswechsel" = "notiz"): Promise<void> {
   try {
     await withTimeout(
       () => prospectStorage.addNote({ prospectId, noteText, noteType }),

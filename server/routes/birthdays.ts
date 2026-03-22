@@ -167,7 +167,7 @@ router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (
               geburtsdatum: cust.geburtsdatum,
               daysUntil,
               age: calculateUpcomingAge(cust.geburtsdatum, daysUntil),
-              address: buildAddress(cust.strasse, cust.hausnummer, cust.plz, cust.stadt),
+              address: buildAddress(cust.strasse, cust.nr, cust.plz, cust.stadt),
             });
           }
         }

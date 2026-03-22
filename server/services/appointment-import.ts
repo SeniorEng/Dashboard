@@ -467,8 +467,8 @@ export async function createServiceRecordsForImported(userId: number): Promise<{
 
     if (!grouping.has(key)) {
       grouping.set(key, {
-        customerId: a.customerId,
-        employeeId: a.performedByEmployeeId,
+        customerId: a.customerId!,
+        employeeId: a.performedByEmployeeId!,
         year,
         month,
         appointmentIds: [],
