@@ -103,7 +103,7 @@ describe("Zeiterfassung (Time Entries) CRUD", () => {
     });
 
     it("sollte Mehrtages-Urlaub erstellen können", async () => {
-      const startDate = getFutureDate(200);
+      const startDate = getFutureDate(400);
       const endDateObj = new Date(startDate + "T00:00:00");
       endDateObj.setDate(endDateObj.getDate() + 2);
       if (endDateObj.getDay() === 0) endDateObj.setDate(endDateObj.getDate() + 1);
