@@ -210,21 +210,6 @@ export default function EditAppointment() {
     },
   });
 
-  const updateErstberatungMutation = useMutation({
-    mutationFn: async (data: Record<string, unknown>) => {
-      const result = await api.patch(`/appointments/${id}/erstberatung`, data);
-      return unwrapResult(result);
-    },
-    onSuccess: () => {
-      invalidateRelated(queryClient, "appointments", "customers");
-      queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}/services`] });
-      toast({ title: "Erstberatung aktualisiert", description: "Alle Änderungen wurden gespeichert." });
-      setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");
-    },
-    onError: (error: Error) => {
-      toast({ variant: "destructive", title: "Fehler", description: error.message });
-    },
-  });
 
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
@@ -237,17 +222,6 @@ export default function EditAppointment() {
         newErrors.ktAssignedEmployeeId = "Bitte wählen Sie einen Mitarbeiter";
       }
     } else if (appointment?.appointmentType === "Erstberatung") {
-      if (!ebVorname.trim()) newErrors.ebVorname = "Vorname ist erforderlich";
-      if (!ebNachname.trim()) newErrors.ebNachname = "Nachname ist erforderlich";
-      if (!ebTelefon.trim()) {
-        newErrors.ebTelefon = "Telefon ist erforderlich";
-      } else if (!validateGermanPhone(ebTelefon)) {
-        newErrors.ebTelefon = "Ungültige Telefonnummer";
-      }
-      if (!ebStrasse.trim()) newErrors.ebStrasse = "Straße ist erforderlich";
-      if (!ebNr.trim()) newErrors.ebNr = "Hausnummer ist erforderlich";
-      if (!ebPlz.trim() || !/^\d{5}$/.test(ebPlz)) newErrors.ebPlz = "PLZ muss 5 Ziffern haben";
-      if (!ebStadt.trim()) newErrors.ebStadt = "Stadt ist erforderlich";
       if (isAdmin && !ebAssignedEmployeeId) newErrors.ebAssignedEmployeeId = "Bitte einen Mitarbeiter auswählen";
       if (!duration || duration <= 0) newErrors.time = "Bitte wählen Sie eine Dauer";
     } else {
@@ -280,23 +254,14 @@ export default function EditAppointment() {
         })),
       });
     } else if (appointment.appointmentType === "Erstberatung") {
-      updateErstberatungMutation.mutate({
-        customer: {
-          vorname: ebVorname.trim(),
-          nachname: ebNachname.trim(),
-          telefon: ebTelefon.trim(),
-          email: ebEmail.trim() || undefined,
-          strasse: ebStrasse.trim(),
-          nr: ebNr.trim(),
-          plz: ebPlz.trim(),
-          stadt: ebStadt.trim(),
-          pflegegrad: parseInt(ebPflegegrad),
-        },
+      const calculatedEnd = addMinutesToTime(time, duration);
+      updateMutation.mutate({
         date,
         scheduledStart: time,
-        erstberatungDauer: duration,
+        scheduledEnd: calculatedEnd,
+        durationPromised: duration,
         notes: notes || null,
-        assignedEmployeeId: ebAssignedEmployeeId ? parseInt(ebAssignedEmployeeId) : null,
+        assignedEmployeeId: ebAssignedEmployeeId ? parseInt(ebAssignedEmployeeId) : undefined,
       });
     } else {
       const calculatedEnd = addMinutesToTime(time, duration);
@@ -311,7 +276,7 @@ export default function EditAppointment() {
     }
   };
 
-  const isPending = updateMutation.isPending || updateErstberatungMutation.isPending;
+  const isPending = updateMutation.isPending;
 
   if (appointmentLoading) {
     return (

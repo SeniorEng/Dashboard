@@ -1167,19 +1167,20 @@ router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durc
   usersCache.invalidateAll();
   customerIdsCache.invalidateAll();
 
-  await auditService.log({
-    action: "employee_handover",
-    entityType: "employee",
-    entityId: sourceId,
-    userId: changedByUserId ?? 0,
-    details: {
+  await auditService.log(
+    changedByUserId ?? 0,
+    "employee_handover",
+    "employee",
+    sourceId,
+    {
       sourceEmployeeId: sourceId,
       sourceEmployeeName: sourceEmployee.displayName,
       targetEmployeeId,
       targetEmployeeName: targetEmployee.displayName,
       ...counts,
     },
-  });
+    req.ip
+  );
 
   log(`Employee handover: ${sourceEmployee.displayName} → ${targetEmployee.displayName} (${counts.primaryCount} primary, ${counts.backupCount} backup, ${counts.backup2Count} backup2, ${counts.appointmentCount} appointments)`);
 

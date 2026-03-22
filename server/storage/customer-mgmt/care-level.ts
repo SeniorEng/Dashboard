@@ -48,7 +48,10 @@ export async function addCareLevelHistory(data: InsertCareLevelHistory, userId?:
   for (const entry of currentEntries) {
     const entryFrom = parseLocalDate(entry.validFrom);
     if (entryFrom >= validFromDate) {
-      await db.delete(customerCareLevelHistory).where(eq(customerCareLevelHistory.id, entry.id));
+      await db
+        .update(customerCareLevelHistory)
+        .set({ validTo: data.validFrom })
+        .where(eq(customerCareLevelHistory.id, entry.id));
     } else {
       await db
         .update(customerCareLevelHistory)

@@ -43,6 +43,7 @@ export const AUDIT_ACTIONS = [
   "initial_balance_deleted",
   "service_record_deleted",
   "prospect_converted",
+  "employee_handover",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];
@@ -57,6 +58,7 @@ export const AUDIT_ENTITY_TYPES = [
   "month_closing",
   "budget",
   "prospect",
+  "employee",
 ] as const;
 
 export type AuditEntityType = typeof AUDIT_ENTITY_TYPES[number];

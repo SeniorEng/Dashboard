@@ -50,8 +50,12 @@ function isDateMoreThan3MonthsInPast(dateStr: string): boolean {
   return date < threeMonthsAgo;
 }
 
-export async function checkCustomerAccess(user: { id: number; isAdmin: boolean }, customerId: number, res: Response): Promise<boolean> {
+export async function checkCustomerAccess(user: { id: number; isAdmin: boolean }, customerId: number | null, res: Response): Promise<boolean> {
   if (user.isAdmin) return true;
+  if (customerId === null) {
+    sendForbidden(res, "ACCESS_DENIED", "Sie haben keinen Zugriff auf diesen Termin.");
+    return false;
+  }
   const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
   if (!assignedCustomerIds.includes(customerId)) {
     sendForbidden(res, "ACCESS_DENIED", "Sie haben keinen Zugriff auf diesen Termin.");

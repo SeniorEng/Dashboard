@@ -382,40 +382,6 @@ export default function AdminCustomerDetail() {
       .sort((a, b) => a.label.localeCompare(b.label, "de"));
   }, [activeCustomersData, customerId]);
 
-  const declineErstberatung = useMutation({
-    mutationFn: async (payload: { note?: string }) => {
-      const result = await api.post(`/admin/customers/${customerId}/decline-erstberatung`, payload);
-      return unwrapResult(result);
-    },
-    onSuccess: () => {
-      invalidateRelated(queryClient, "customers");
-      queryClient.invalidateQueries({ queryKey: ["conversion-readiness", customerId] });
-      toast({ title: "Erstberatung abgelehnt", description: "Der Kunde wurde als inaktiv markiert." });
-      setShowDeactivateDialog(false);
-      setDeactivationNote("");
-    },
-    onError: (err: Error) => {
-      toast({ title: "Fehler", description: err.message, variant: "destructive" });
-    },
-  });
-
-  const mergeErstberatung = useMutation({
-    mutationFn: async (payload: { targetCustomerId: number; note?: string }) => {
-      const result = await api.post(`/admin/customers/${customerId}/merge-erstberatung`, payload);
-      return unwrapResult(result);
-    },
-    onSuccess: () => {
-      invalidateRelated(queryClient, "customers");
-      queryClient.invalidateQueries({ queryKey: ["conversion-readiness", customerId] });
-      toast({ title: "Erfolgreich zusammengeführt", description: "Der Erstberatungskunde wurde mit dem bestehenden Kunden zusammengeführt." });
-      setShowMergeDialog(false);
-      setMergeTargetId("");
-      setMergeNote("");
-    },
-    onError: (err: Error) => {
-      toast({ title: "Fehler", description: err.message, variant: "destructive" });
-    },
-  });
 
   const updateStatus = useMutation({
     mutationFn: async (payload: { status: string; deactivationReason?: string | null; deactivationNote?: string | null; inaktivAb?: string | null }) => {
@@ -529,7 +495,7 @@ export default function AdminCustomerDetail() {
               }}
               onMerge={() => setShowMergeDialog(true)}
               isUpdating={updateStatus.isPending}
-              isMerging={mergeErstberatung.isPending}
+              isMerging={false}
             />
           )}
 
@@ -722,16 +688,22 @@ export default function AdminCustomerDetail() {
                 </Button>
                 <Button
                   onClick={() => {
-                    mergeErstberatung.mutate({
-                      targetCustomerId: parseInt(mergeTargetId),
-                      note: mergeNote.trim() || undefined,
-                    });
+                    updateStatus.mutate(
+                      { status: "inaktiv", deactivationReason: "zusammengefuehrt" as DeactivationReason, deactivationNote: mergeNote.trim() || null },
+                      {
+                        onSuccess: () => {
+                          setShowMergeDialog(false);
+                          setMergeTargetId("");
+                          setMergeNote("");
+                        },
+                      }
+                    );
                   }}
-                  disabled={!mergeTargetId || mergeErstberatung.isPending}
+                  disabled={!mergeTargetId || updateStatus.isPending}
                   className={componentStyles.btnPrimary}
                   data-testid="button-confirm-merge"
                 >
-                  {mergeErstberatung.isPending ? (
+                  {updateStatus.isPending ? (
                     <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
                   ) : (
                     <Merge className={`${iconSize.sm} mr-2`} />
@@ -783,14 +755,20 @@ export default function AdminCustomerDetail() {
                 <Button
                   variant="destructive"
                   onClick={() => {
-                    declineErstberatung.mutate({
-                      note: deactivationNote.trim() || undefined,
-                    });
+                    updateStatus.mutate(
+                      { status: "inaktiv", deactivationReason: "kein_interesse" as DeactivationReason, deactivationNote: deactivationNote.trim() || null },
+                      {
+                        onSuccess: () => {
+                          setShowDeactivateDialog(false);
+                          setDeactivationNote("");
+                        },
+                      }
+                    );
                   }}
-                  disabled={declineErstberatung.isPending}
+                  disabled={updateStatus.isPending}
                   data-testid="button-confirm-deactivation"
                 >
-                  {declineErstberatung.isPending ? (
+                  {updateStatus.isPending ? (
                     <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
                   ) : (
                     <UserX className={`${iconSize.sm} mr-2`} />
