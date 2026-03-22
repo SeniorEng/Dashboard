@@ -239,3 +239,33 @@ class SessionCacheService {
 }
 
 export const sessionCache = new SessionCacheService();
+
+const COMPANY_SETTINGS_TTL = 60 * 1000;
+
+class CompanySettingsCacheService {
+  private cache = new SimpleCache<unknown>(COMPANY_SETTINGS_TTL);
+  private static KEY = "company_settings";
+
+  get<T>(): T | undefined {
+    return this.cache.get(CompanySettingsCacheService.KEY) as T | undefined;
+  }
+
+  set<T>(settings: T): void {
+    this.cache.set(CompanySettingsCacheService.KEY, settings);
+  }
+
+  invalidate(): void {
+    this.cache.delete(CompanySettingsCacheService.KEY);
+  }
+}
+
+export const companySettingsCache = new CompanySettingsCacheService();
+
+export async function getCachedCompanySettings(): Promise<any> {
+  const cached = companySettingsCache.get();
+  if (cached !== undefined) return cached;
+  const { storage } = await import("../storage");
+  const settings = await storage.getCompanySettings();
+  companySettingsCache.set(settings);
+  return settings;
+}

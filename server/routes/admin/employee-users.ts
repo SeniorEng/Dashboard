@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import { randomBytes } from "crypto";
 import { authService } from "../../services/auth";
 import { storage } from "../../storage";
-import { usersCache, birthdaysCache } from "../../services/cache";
+import { usersCache, birthdaysCache, getCachedCompanySettings } from "../../services/cache";
 import { log } from "../../lib/log";
 import { sanitizeUser } from "../../utils/sanitize-user";
 import { 
@@ -128,7 +128,7 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
   birthdaysCache.invalidateAll();
 
   try {
-    const companySettings = await storage.getCompanySettings();
+    const companySettings = await getCachedCompanySettings();
     if (companySettings.smtpHost && companySettings.smtpUser) {
       log(`Sende Willkommens-E-Mail an ${result.data.email}...`, "email");
       const welcomeToken = await authService.createWelcomeToken(user.id);
@@ -335,7 +335,7 @@ router.post("/users/:id/resend-welcome", asyncHandler("Willkommens-E-Mail konnte
     return;
   }
 
-  const companySettings = await storage.getCompanySettings();
+  const companySettings = await getCachedCompanySettings();
   if (!companySettings.smtpHost || !companySettings.smtpUser) {
     res.status(400).json({ error: "SMTP_NOT_CONFIGURED", message: "E-Mail-Versand ist nicht konfiguriert" });
     return;

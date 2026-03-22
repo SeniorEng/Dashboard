@@ -38,6 +38,25 @@ export async function upsertWhatsAppNotificationRule(
   return result[0];
 }
 
+export async function batchUpsertWhatsAppNotificationRules(
+  rules: InsertWhatsAppNotificationRule[]
+): Promise<WhatsAppNotificationRule[]> {
+  if (rules.length === 0) return [];
+  return db
+    .insert(whatsappNotificationRules)
+    .values(rules)
+    .onConflictDoUpdate({
+      target: whatsappNotificationRules.eventType,
+      set: {
+        enabled: sqlBuilder`excluded.enabled`,
+        templateName: sqlBuilder`excluded.template_name`,
+        description: sqlBuilder`excluded.description`,
+        updatedAt: new Date(),
+      },
+    })
+    .returning();
+}
+
 async function deleteWhatsAppNotificationRule(id: number): Promise<void> {
   await db
     .delete(whatsappNotificationRules)

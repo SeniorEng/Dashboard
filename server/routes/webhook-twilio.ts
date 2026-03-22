@@ -2,11 +2,12 @@ import { Router, Request, Response } from "express";
 import twilio from "twilio";
 import { prospectStorage } from "../storage/prospects";
 import { storage } from "../storage";
+import { getCachedCompanySettings } from "../services/cache";
 
 const router = Router();
 
 async function validateTwilioSignature(req: Request, res: Response): Promise<boolean> {
-  const settings = await storage.getCompanySettings();
+  const settings = await getCachedCompanySettings();
   if (!settings?.twilioAuthToken) {
     console.error("[twilio-webhook] No Twilio auth token configured");
     res.status(403).send("Forbidden");

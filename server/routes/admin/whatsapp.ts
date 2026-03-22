@@ -2,6 +2,7 @@ import { Router } from "express";
 import { asyncHandler, badRequest } from "../../lib/errors";
 import { z } from "zod";
 import { storage } from "../../storage";
+import { getCachedCompanySettings, companySettingsCache } from "../../services/cache";
 import { whatsAppService } from "../../services/whatsapp-service";
 import {
   updateWhatsAppConfigSchema,
@@ -9,14 +10,14 @@ import {
 } from "@shared/schema";
 import {
   getWhatsAppNotificationRules,
-  upsertWhatsAppNotificationRule,
+  batchUpsertWhatsAppNotificationRules,
   getMessageLog,
 } from "../../storage/whatsapp";
 
 const router = Router();
 
 router.get("/config", asyncHandler("WhatsApp-Konfiguration konnte nicht geladen werden", async (_req, res) => {
-  const settings = await storage.getCompanySettings();
+  const settings = await getCachedCompanySettings();
   res.json({
     whatsappEnabled: settings?.whatsappEnabled ?? false,
     whatsappPhoneNumberId: settings?.whatsappPhoneNumberId ?? null,
@@ -30,7 +31,9 @@ router.get("/config", asyncHandler("WhatsApp-Konfiguration konnte nicht geladen 
 
 router.put("/config", asyncHandler("WhatsApp-Konfiguration konnte nicht gespeichert werden", async (req, res) => {
   const data = updateWhatsAppConfigSchema.parse(req.body);
+  companySettingsCache.invalidate();
   const updated = await storage.updateCompanySettings(data as any, req.user!.id);
+  companySettingsCache.invalidate();
   res.json({
     whatsappEnabled: updated.whatsappEnabled,
     whatsappPhoneNumberId: updated.whatsappPhoneNumberId ?? null,
@@ -83,20 +86,19 @@ router.put("/rules", asyncHandler("Benachrichtigungsregeln konnten nicht gespeic
   const existingRules = await getWhatsAppNotificationRules();
   const existingMap = new Map(existingRules.map(r => [r.id, r]));
 
-  const updated = [];
-  for (const rule of rules) {
-    const existing = existingMap.get(rule.id);
-    if (!existing) continue;
-
-    const result = await upsertWhatsAppNotificationRule({
-      eventType: existing.eventType,
-      enabled: rule.enabled,
-      templateName: rule.templateName,
-      description: existing.description,
+  const rulesToUpsert = rules
+    .filter(rule => existingMap.has(rule.id))
+    .map(rule => {
+      const existing = existingMap.get(rule.id)!;
+      return {
+        eventType: existing.eventType,
+        enabled: rule.enabled,
+        templateName: rule.templateName,
+        description: existing.description,
+      };
     });
-    updated.push(result);
-  }
 
+  const updated = await batchUpsertWhatsAppNotificationRules(rulesToUpsert);
   res.json(updated);
 }));
 

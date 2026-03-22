@@ -25,7 +25,7 @@ import { storage } from "../storage";
 import { sendEmail, buildPasswordResetEmailHtml } from "../services/email-service";
 import { resolveLogoToDataUrl } from "../services/logo-resolver";
 import { timeTrackingStorage } from "../storage/time-tracking";
-import { birthdaysCache } from "../services/cache";
+import { birthdaysCache, getCachedCompanySettings } from "../services/cache";
 import { todayISO } from "@shared/utils/datetime";
 import { calculateDaysUntilBirthday } from "./birthdays";
 
@@ -183,7 +183,7 @@ router.post(
     if (token) {
       try {
         const user = await authService.getUserByEmail(result.data.email);
-        const companySettings = await storage.getCompanySettings();
+        const companySettings = await getCachedCompanySettings();
         if (user && companySettings.smtpHost && companySettings.smtpUser) {
           const baseUrl = `${req.protocol}://${req.get("host")}`;
           const resetUrl = `${baseUrl}/reset-password?token=${token}`;

@@ -6,6 +6,7 @@ import { fromError } from "zod-validation-error";
 import { storage } from "../storage";
 import { geocodeCompanySettings } from "../services/geocoding";
 import { buildLeadAutoReplyHtml } from "../services/lead-auto-reply";
+import { getCachedCompanySettings, companySettingsCache } from "../services/cache";
 
 const router = Router();
 router.use(requireAuth);
@@ -13,7 +14,7 @@ router.use(requireAuth);
 const SENSITIVE_FIELDS = ["twilioAuthToken", "twilioAccountSid", "epostSecret", "qontoSecretKey", "smtpPass", "epostPassword", "whatsappAccessToken"] as const;
 
 router.get("/", asyncHandler("Firmendaten konnten nicht geladen werden", async (req, res) => {
-  const settings = await storage.getCompanySettings();
+  const settings = await getCachedCompanySettings();
   if (!settings) { res.json(settings); return; }
 
   const user = req.user!;
@@ -35,7 +36,9 @@ router.patch("/", requireAdmin, asyncHandler("Firmendaten konnten nicht gespeich
   if (!parsed.success) {
     throw badRequest(fromError(parsed.error).toString());
   }
+  companySettingsCache.invalidate();
   const updated = await storage.updateCompanySettings(parsed.data, req.user!.id);
+  companySettingsCache.invalidate();
 
   const addressFields = ["strasse", "hausnummer", "plz", "stadt"];
   if (addressFields.some(f => f in parsed.data)) {
@@ -46,7 +49,7 @@ router.patch("/", requireAdmin, asyncHandler("Firmendaten konnten nicht gespeich
 }));
 
 router.get("/lead-auto-reply-preview", requireAdmin, asyncHandler("Vorschau konnte nicht erstellt werden", async (req, res) => {
-  const settings = await storage.getCompanySettings();
+  const settings = await getCachedCompanySettings();
   if (!settings) {
     throw badRequest("Keine Firmendaten vorhanden");
   }

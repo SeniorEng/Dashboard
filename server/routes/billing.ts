@@ -26,6 +26,7 @@ import { storage } from "../storage";
 import { db } from "../lib/db";
 import { auditService } from "../services/audit";
 import type { InvoicePdfData } from "../lib/pdf-generator";
+import { getCachedCompanySettings } from "../services/cache";
 
 interface BuildLineItem extends Record<string, unknown> {
   appointmentId: number;
@@ -384,6 +385,75 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
   const allCustomers = await storage.getCustomersByIds(uniqueCustomerIds);
   const customerMap = new Map(allCustomers.map(c => [c.id, c]));
 
+  const signedRecordsByCustomer = new Map<number, typeof allServiceRecords>();
+  for (const sr of allServiceRecords) {
+    if (sr.status === "completed" || sr.status === "employee_signed") {
+      const list = signedRecordsByCustomer.get(sr.customerId) || [];
+      list.push(sr);
+      signedRecordsByCustomer.set(sr.customerId, list);
+    }
+  }
+
+  const allSignedRecordIds = Array.from(signedRecordsByCustomer.values()).flat().map(sr => sr.id);
+  let allSrApptRows: { serviceRecordId: number; appointmentId: number }[] = [];
+  if (allSignedRecordIds.length > 0) {
+    allSrApptRows = await db.select({
+      serviceRecordId: serviceRecordAppointments.serviceRecordId,
+      appointmentId: serviceRecordAppointments.appointmentId,
+    })
+    .from(serviceRecordAppointments)
+    .where(inArray(serviceRecordAppointments.serviceRecordId, allSignedRecordIds));
+  }
+  const srApptMap = new Map<number, number[]>();
+  for (const row of allSrApptRows) {
+    const list = srApptMap.get(row.serviceRecordId) || [];
+    list.push(row.appointmentId);
+    srApptMap.set(row.serviceRecordId, list);
+  }
+
+  const allInvoicedRows = await db.select({
+    customerId: invoicesTable.customerId,
+    appointmentId: invoiceLineItems.appointmentId,
+  })
+  .from(invoiceLineItems)
+  .innerJoin(invoicesTable, eq(invoiceLineItems.invoiceId, invoicesTable.id))
+  .where(and(
+    inArray(invoicesTable.customerId, uniqueCustomerIds),
+    eq(invoicesTable.billingYear, billingYear),
+    eq(invoicesTable.billingMonth, billingMonth),
+    ne(invoicesTable.status, "storniert"),
+    ne(invoicesTable.invoiceType, "stornorechnung")
+  ));
+  const invoicedByCustomer = new Map<number, Set<number>>();
+  for (const row of allInvoicedRows) {
+    if (row.appointmentId == null) continue;
+    if (!invoicedByCustomer.has(row.customerId)) invoicedByCustomer.set(row.customerId, new Set());
+    invoicedByCustomer.get(row.customerId)!.add(row.appointmentId);
+  }
+
+  const allInsuranceData = await db.select({
+    customerId: customerInsuranceHistory.customerId,
+    providerName: insuranceProviders.name,
+    ikNummer: insuranceProviders.ikNummer,
+    versichertennummer: customerInsuranceHistory.versichertennummer,
+  })
+  .from(customerInsuranceHistory)
+  .innerJoin(insuranceProviders, eq(customerInsuranceHistory.insuranceProviderId, insuranceProviders.id))
+  .where(and(
+    inArray(customerInsuranceHistory.customerId, uniqueCustomerIds),
+    isNull(customerInsuranceHistory.validTo)
+  ));
+  const insuranceByCustomer = new Map<number, { providerName: string; ikNummer: string; versichertennummer: string }>();
+  for (const row of allInsuranceData) {
+    if (!insuranceByCustomer.has(row.customerId)) {
+      insuranceByCustomer.set(row.customerId, {
+        providerName: row.providerName,
+        ikNummer: row.ikNummer,
+        versichertennummer: row.versichertennummer,
+      });
+    }
+  }
+
   const results: { created: number; skipped: { customerName: string; reason: string }[]; errors: { customerId: number; customerName: string; reason: string }[] } = {
     created: 0,
     skipped: [],
@@ -400,33 +470,32 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
         continue;
       }
 
-      const customerRecords = allServiceRecords.filter(sr => sr.customerId === customerId);
-      const signedRecords = customerRecords.filter(sr =>
-        sr.status === "completed" || sr.status === "employee_signed"
-      );
-
-      if (signedRecords.length === 0) {
+      const signedRecords = signedRecordsByCustomer.get(customerId);
+      if (!signedRecords || signedRecords.length === 0) {
         results.skipped.push({ customerName: custName, reason: "Leistungsnachweis nicht unterschrieben" });
         continue;
       }
 
-      const serviceRecordIds = signedRecords.map(sr => sr.id);
-      const allApptIds = await getAppointmentIdsFromServiceRecords(serviceRecordIds);
+      const allApptIds: number[] = [];
+      for (const sr of signedRecords) {
+        const ids = srApptMap.get(sr.id);
+        if (ids) allApptIds.push(...ids);
+      }
 
       if (allApptIds.length === 0) {
         results.skipped.push({ customerName: custName, reason: "Leistungsnachweis ohne Termine" });
         continue;
       }
 
-      const alreadyInvoicedIds = await getAlreadyInvoicedAppointmentIds(customerId, billingYear, billingMonth);
-      const isNachberechnung = alreadyInvoicedIds.length > 0;
+      const alreadyInvoicedSet = invoicedByCustomer.get(customerId);
+      const isNachberechnung = alreadyInvoicedSet != null && alreadyInvoicedSet.size > 0;
 
-      const apptIds = alreadyInvoicedIds.length > 0
-        ? allApptIds.filter(id => !alreadyInvoicedIds.includes(id))
+      const apptIds = alreadyInvoicedSet
+        ? allApptIds.filter(id => !alreadyInvoicedSet.has(id))
         : allApptIds;
 
       if (apptIds.length === 0) {
-        results.skipped.push({ customerName: custName, reason: alreadyInvoicedIds.length > 0 ? "Alle Termine bereits abgerechnet" : "Keine Termine" });
+        results.skipped.push({ customerName: custName, reason: isNachberechnung ? "Alle Termine bereits abgerechnet" : "Keine Termine" });
         continue;
       }
 
@@ -446,25 +515,13 @@ router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstell
       let versichertennummer = "";
 
       if (billingType === "pflegekasse_gesetzlich" || billingType === "pflegekasse_privat") {
-        const insuranceData = await db.select({
-          providerName: insuranceProviders.name,
-          ikNummer: insuranceProviders.ikNummer,
-          versichertennummer: customerInsuranceHistory.versichertennummer,
-        })
-        .from(customerInsuranceHistory)
-        .innerJoin(insuranceProviders, eq(customerInsuranceHistory.insuranceProviderId, insuranceProviders.id))
-        .where(and(
-          eq(customerInsuranceHistory.customerId, customerId),
-          isNull(customerInsuranceHistory.validTo)
-        ))
-        .limit(1);
-
-        if (insuranceData.length > 0) {
-          insuranceProviderName = insuranceData[0].providerName;
-          insuranceIkNummer = insuranceData[0].ikNummer;
-          versichertennummer = insuranceData[0].versichertennummer;
+        const insData = insuranceByCustomer.get(customerId);
+        if (insData) {
+          insuranceProviderName = insData.providerName;
+          insuranceIkNummer = insData.ikNummer;
+          versichertennummer = insData.versichertennummer;
           if (billingType === "pflegekasse_gesetzlich") {
-            recipientName = insuranceData[0].providerName;
+            recipientName = insData.providerName;
             recipientAddress = "";
           }
         }
@@ -650,7 +707,7 @@ router.get("/:id/pdf", asyncHandler("PDF konnte nicht generiert werden", async (
   if (!invoice) throw notFound("Rechnung nicht gefunden");
   
   const lineItems = await storage.getInvoiceLineItems(id);
-  const companySettings = await storage.getCompanySettings();
+  const companySettings = await getCachedCompanySettings();
   const { generateInvoiceHtml, generatePdf } = await import("../lib/pdf-generator");
   
   const pdfData = buildPdfData(invoice, lineItems, companySettings);
@@ -668,7 +725,7 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
   if (!invoice) throw notFound("Rechnung nicht gefunden");
   
   const lineItems = await storage.getInvoiceLineItems(id);
-  const companySettings = await storage.getCompanySettings();
+  const companySettings = await getCachedCompanySettings();
   const { generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
   
   const pdfData = buildPdfData(invoice, lineItems, companySettings);

@@ -13,6 +13,7 @@ import { appointmentService } from "../services/appointments";
 import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
 import { serviceCatalogStorage } from "../storage/service-catalog";
+import { getCachedCompanySettings } from "../services/cache";
 import { suggestTravelOrigin } from "@shared/domain/appointments";
 import { calculateRoute } from "../services/routing";
 import { geocodeCustomer } from "../services/geocoding";
@@ -691,7 +692,7 @@ router.get("/:id/travel-suggestion", asyncHandler("Fehler beim Laden der Fahrvor
   const destCustomer = appointment.customer;
   if (destCustomer?.latitude && destCustomer?.longitude) {
     if (suggestion.suggestedOrigin === "home") {
-      const company = await storage.getCompanySettings();
+      const company = await getCachedCompanySettings();
       if (company?.latitude && company?.longitude) {
         const route = await calculateRoute(company.latitude, company.longitude, destCustomer.latitude, destCustomer.longitude);
         if (route) {
@@ -746,7 +747,7 @@ router.get("/:id/route-calculation", asyncHandler("Fehler bei der Routenberechnu
   let suggestedMinutes: number | null = null;
 
   if (originType === "home") {
-    const company = await storage.getCompanySettings();
+    const company = await getCachedCompanySettings();
     if (company?.latitude && company?.longitude) {
       const route = await calculateRoute(company.latitude, company.longitude, destCustomer.latitude, destCustomer.longitude);
       if (route) {

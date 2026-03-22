@@ -25,6 +25,7 @@ import { authMiddleware, requireAuth } from "../middleware/auth";
 import { cacheHeaders } from "../middleware/cache-headers";
 import { customerManagementStorage } from "../storage/customer-management";
 import { asyncHandler } from "../lib/errors";
+import { getCachedCompanySettings } from "../services/cache";
 
 const router = Router();
 
@@ -37,8 +38,7 @@ router.get("/health", asyncHandler("Health check fehlgeschlagen", async (_req, r
 }));
 
 router.get("/public/branding", asyncHandler("Branding konnte nicht geladen werden", async (_req, res) => {
-  const { storage } = await import("../storage");
-  const settings = await storage.getCompanySettings();
+  const settings = await getCachedCompanySettings();
   res.json({
     logoUrl: settings?.logoUrl ? "/api/public/logo/main" : null,
     pdfLogoUrl: settings?.pdfLogoUrl ? "/api/public/logo/pdf" : null,
@@ -47,8 +47,7 @@ router.get("/public/branding", asyncHandler("Branding konnte nicht geladen werde
 }));
 
 router.get("/public/logo/:type", asyncHandler("Logo konnte nicht geladen werden", async (req, res) => {
-  const { storage } = await import("../storage");
-  const settings = await storage.getCompanySettings();
+  const settings = await getCachedCompanySettings();
   const logoPath = req.params.type === "pdf" ? settings?.pdfLogoUrl : settings?.logoUrl;
   if (!logoPath) {
     return res.status(404).json({ error: "Logo not found" });

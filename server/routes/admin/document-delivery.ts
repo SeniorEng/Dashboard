@@ -6,6 +6,7 @@ import { testSmtpConnection } from "../../services/email-service";
 import { testEpostConnection, requestSmsCode, setEpostPassword, checkEpostHealthCheck } from "../../services/epost-service";
 import { deliveryStorage } from "../../storage/deliveries";
 import { storage } from "../../storage";
+import { getCachedCompanySettings, companySettingsCache } from "../../services/cache";
 
 const router = Router();
 
@@ -112,7 +113,7 @@ router.post("/document-delivery/send-for-customer/:customerId", asyncHandler("Ve
 }));
 
 router.post("/document-delivery/test-smtp", asyncHandler("SMTP-Test fehlgeschlagen", async (_req: Request, res: Response) => {
-  const settings = await storage.getCompanySettings();
+  const settings = await getCachedCompanySettings();
   if (!settings) {
     res.status(400).json({ error: "CONFIG_ERROR", message: "Firmendaten nicht konfiguriert" });
     return;
@@ -123,7 +124,7 @@ router.post("/document-delivery/test-smtp", asyncHandler("SMTP-Test fehlgeschlag
 }));
 
 router.post("/document-delivery/test-epost", asyncHandler("E-POST-Test fehlgeschlagen", async (_req: Request, res: Response) => {
-  const settings = await storage.getCompanySettings();
+  const settings = await getCachedCompanySettings();
   if (!settings) {
     res.status(400).json({ error: "CONFIG_ERROR", message: "Firmendaten nicht konfiguriert" });
     return;
@@ -174,12 +175,14 @@ router.post("/document-delivery/epost-set-password", asyncHandler("Passwort setz
   );
 
   if (result.success && result.secret) {
+    companySettingsCache.invalidate();
     await storage.updateCompanySettings({
       epostVendorId: parsed.data.vendorId,
       epostEkp: parsed.data.ekp,
       epostPassword: parsed.data.newPassword,
       epostSecret: result.secret,
     }, req.user!.id);
+    companySettingsCache.invalidate();
   }
 
   res.json(result);

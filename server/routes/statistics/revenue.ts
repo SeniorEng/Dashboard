@@ -66,23 +66,35 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
         AND EXTRACT(YEAR FROM a.date::date) = ${year}
         ${monthFilter}
     ),
+    km_defaults AS (
+      SELECT
+        code,
+        default_price_cents,
+        employee_rate_cents
+      FROM services
+      WHERE code IN ('travel_km', 'customer_km')
+    ),
     service_line_calc AS (
       SELECT
         fa.id AS appointment_id,
         fa.employee_id,
         fa.customer_id,
         COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) AS duration_minutes,
-        COALESCE(
-          (SELECT csp.price_cents FROM customer_service_prices csp
-           WHERE csp.customer_id = fa.customer_id AND csp.service_id = s.id
-             AND csp.valid_from::date <= fa.appt_date AND (csp.valid_to IS NULL OR csp.valid_to::date >= fa.appt_date)
-           ORDER BY csp.valid_from DESC LIMIT 1),
-          s.default_price_cents
-        ) AS hourly_price,
+        COALESCE(csp_svc.price_cents, s.default_price_cents) AS hourly_price,
         s.employee_rate_cents AS hourly_cost
       FROM filtered_appointments fa
       JOIN appointment_services asvc ON asvc.appointment_id = fa.id
       JOIN services s ON s.id = asvc.service_id
+      LEFT JOIN LATERAL (
+        SELECT csp.price_cents
+        FROM customer_service_prices csp
+        WHERE csp.customer_id = fa.customer_id
+          AND csp.service_id = s.id
+          AND csp.valid_from::date <= fa.appt_date
+          AND (csp.valid_to IS NULL OR csp.valid_to::date >= fa.appt_date)
+        ORDER BY csp.valid_from DESC
+        LIMIT 1
+      ) csp_svc ON true
       WHERE s.unit_type = 'hours'
     ),
     service_totals AS (
@@ -107,26 +119,34 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
         COALESCE(st.total_service_minutes, fa.duration_promised) AS service_minutes,
         COALESCE(st.revenue_service_cents, 0) AS revenue_service_cents,
         COALESCE(st.cost_service_cents, 0) AS cost_service_cents,
-        ROUND(fa.travel_km * COALESCE(
-          (SELECT csp.price_cents FROM customer_service_prices csp
-           JOIN services sp ON sp.id = csp.service_id AND sp.code = 'travel_km'
-           WHERE csp.customer_id = fa.customer_id
-             AND csp.valid_from::date <= fa.appt_date AND (csp.valid_to IS NULL OR csp.valid_to::date >= fa.appt_date)
-           ORDER BY csp.valid_from DESC LIMIT 1),
-          (SELECT default_price_cents FROM services WHERE code = 'travel_km')
-        )) AS revenue_km_cents,
-        ROUND(fa.travel_km * (SELECT employee_rate_cents FROM services WHERE code = 'travel_km')) AS cost_km_cents,
-        ROUND(fa.customer_km * COALESCE(
-          (SELECT csp.price_cents FROM customer_service_prices csp
-           JOIN services sp ON sp.id = csp.service_id AND sp.code = 'customer_km'
-           WHERE csp.customer_id = fa.customer_id
-             AND csp.valid_from::date <= fa.appt_date AND (csp.valid_to IS NULL OR csp.valid_to::date >= fa.appt_date)
-           ORDER BY csp.valid_from DESC LIMIT 1),
-          (SELECT default_price_cents FROM services WHERE code = 'customer_km')
-        )) AS revenue_ckm_cents,
-        ROUND(fa.customer_km * (SELECT employee_rate_cents FROM services WHERE code = 'customer_km')) AS cost_ckm_cents
+        ROUND(fa.travel_km * COALESCE(csp_tkm.price_cents, tkm.default_price_cents)) AS revenue_km_cents,
+        ROUND(fa.travel_km * tkm.employee_rate_cents) AS cost_km_cents,
+        ROUND(fa.customer_km * COALESCE(csp_ckm.price_cents, ckm.default_price_cents)) AS revenue_ckm_cents,
+        ROUND(fa.customer_km * ckm.employee_rate_cents) AS cost_ckm_cents
       FROM filtered_appointments fa
       LEFT JOIN service_totals st ON st.appointment_id = fa.id
+      LEFT JOIN km_defaults tkm ON tkm.code = 'travel_km'
+      LEFT JOIN km_defaults ckm ON ckm.code = 'customer_km'
+      LEFT JOIN LATERAL (
+        SELECT csp.price_cents
+        FROM customer_service_prices csp
+        JOIN services sp ON sp.id = csp.service_id AND sp.code = 'travel_km'
+        WHERE csp.customer_id = fa.customer_id
+          AND csp.valid_from::date <= fa.appt_date
+          AND (csp.valid_to IS NULL OR csp.valid_to::date >= fa.appt_date)
+        ORDER BY csp.valid_from DESC
+        LIMIT 1
+      ) csp_tkm ON true
+      LEFT JOIN LATERAL (
+        SELECT csp.price_cents
+        FROM customer_service_prices csp
+        JOIN services sp ON sp.id = csp.service_id AND sp.code = 'customer_km'
+        WHERE csp.customer_id = fa.customer_id
+          AND csp.valid_from::date <= fa.appt_date
+          AND (csp.valid_to IS NULL OR csp.valid_to::date >= fa.appt_date)
+        ORDER BY csp.valid_from DESC
+        LIMIT 1
+      ) csp_ckm ON true
     )
     SELECT
       u.id AS "employeeId",
