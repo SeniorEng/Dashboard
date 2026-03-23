@@ -36,6 +36,13 @@
       "when": 1774048416591,
       "tag": "0004_bent_wolfsbane",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1774262839744,
+      "tag": "0005_flowery_kree",
+      "breakpoints": true
     }
   ]
 }

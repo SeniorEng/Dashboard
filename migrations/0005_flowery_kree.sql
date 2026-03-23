@@ -1,0 +1,1 @@
+CREATE INDEX "audit_log_metadata_idx" ON "audit_log" USING gin ("metadata");

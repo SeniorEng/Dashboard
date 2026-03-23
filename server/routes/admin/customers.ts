@@ -501,7 +501,7 @@ router.get("/customers/:id/timeline", asyncHandler("Timeline konnte nicht gelade
     .innerJoin(users, eq(auditLog.userId, users.id))
     .where(
       and(
-        sql`${auditLog.metadata}->>'customerId' = ${String(id)}`,
+        sql`${auditLog.metadata} @> ${JSON.stringify({ customerId: id })}::jsonb`,
         sql`${auditLog.entityType} != 'customer'`
       )
     )

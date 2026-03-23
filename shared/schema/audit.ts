@@ -78,6 +78,7 @@ export const auditLog = pgTable("audit_log", {
   index("audit_log_user_idx").on(table.userId),
   index("audit_log_action_idx").on(table.action),
   index("audit_log_created_at_idx").on(table.createdAt),
+  index("audit_log_metadata_idx").using("gin", table.metadata),
 ]);
 
 export type AuditLogEntry = typeof auditLog.$inferSelect;
