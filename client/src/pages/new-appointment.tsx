@@ -9,11 +9,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DatePicker } from "@/components/ui/date-picker";
-import { ChevronLeft, Loader2, Calendar, Clock, User, Plus, Users, AlertTriangle, XCircle, Copy, UserCheck, Phone, UserPlus, Pencil, Check, X } from "lucide-react";
+import { ChevronLeft, Loader2, Calendar, Clock, User, Plus, Users, AlertTriangle, XCircle, Copy, UserCheck, Phone, UserPlus, Pencil, Check, X, Home, Mail } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { useNewAppointmentForm, ServiceSelector, AppointmentSummary } from "@/features/appointments";
 import { EmployeeAvailability } from "@/features/appointments/components/employee-availability";
-import { DURATION_OPTIONS, formatDuration } from "@shared/types";
+import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS, formatDuration } from "@shared/types";
 import { useLocation } from "wouter";
 import { useUpdateProspect } from "@/features/prospects";
 
@@ -278,17 +278,89 @@ export default function NewAppointment() {
                             {form.errors.inlineNachname && <p className="text-destructive text-xs">{form.errors.inlineNachname}</p>}
                           </div>
                         </div>
-                        <div className="mt-3 space-y-1">
-                          <Label htmlFor="inline-telefon">
-                            <Phone className={`${iconSize.sm} inline mr-1`} /> Telefon (optional)
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                          <div className="space-y-1">
+                            <Label htmlFor="inline-telefon">
+                              <Phone className={`${iconSize.sm} inline mr-1`} /> Telefon
+                            </Label>
+                            <Input
+                              id="inline-telefon"
+                              placeholder="z.B. 0151 12345678"
+                              value={form.inlineProspectTelefon}
+                              onChange={(e) => form.setInlineProspectTelefon(e.target.value)}
+                              data-testid="input-inline-telefon"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor="inline-email">
+                              <Mail className={`${iconSize.sm} inline mr-1`} /> E-Mail
+                            </Label>
+                            <Input
+                              id="inline-email"
+                              type="email"
+                              placeholder="beispiel@email.de"
+                              value={form.inlineProspectEmail}
+                              onChange={(e) => form.setInlineProspectEmail(e.target.value)}
+                              data-testid="input-inline-email"
+                            />
+                          </div>
+                        </div>
+                        <div className="mt-3">
+                          <Label className="flex items-center gap-1 mb-2">
+                            <Home className={iconSize.sm} /> Adresse
                           </Label>
-                          <Input
-                            id="inline-telefon"
-                            placeholder="z.B. 0151 12345678"
-                            value={form.inlineProspectTelefon}
-                            onChange={(e) => form.setInlineProspectTelefon(e.target.value)}
-                            data-testid="input-inline-telefon"
-                          />
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <div className="col-span-2 space-y-1">
+                              <Input
+                                placeholder="Straße"
+                                value={form.inlineProspectStrasse}
+                                onChange={(e) => form.setInlineProspectStrasse(e.target.value)}
+                                data-testid="input-inline-strasse"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Input
+                                placeholder="Nr."
+                                value={form.inlineProspectNr}
+                                onChange={(e) => form.setInlineProspectNr(e.target.value)}
+                                data-testid="input-inline-nr"
+                              />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
+                            <div className="space-y-1">
+                              <Input
+                                placeholder="PLZ"
+                                maxLength={5}
+                                value={form.inlineProspectPlz}
+                                onChange={(e) => form.setInlineProspectPlz(e.target.value)}
+                                data-testid="input-inline-plz"
+                              />
+                            </div>
+                            <div className="col-span-2 space-y-1">
+                              <Input
+                                placeholder="Stadt"
+                                value={form.inlineProspectStadt}
+                                onChange={(e) => form.setInlineProspectStadt(e.target.value)}
+                                data-testid="input-inline-stadt"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-3 space-y-1">
+                          <Label>Pflegegrad</Label>
+                          <Select value={form.inlineProspectPflegegrad} onValueChange={form.setInlineProspectPflegegrad}>
+                            <SelectTrigger data-testid="select-inline-pflegegrad">
+                              <SelectValue placeholder="Pflegegrad wählen..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {PFLEGEGRAD_OPTIONS.map((p) => (
+                                <SelectItem key={p} value={p.toString()}>
+                                  Pflegegrad {p}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
                         <Button
                           className="mt-4 w-full"

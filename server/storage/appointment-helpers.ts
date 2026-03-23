@@ -3,6 +3,7 @@ import {
   customers,
   appointments,
   users,
+  prospects,
 } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { sql as sqlBuilder } from "drizzle-orm";
@@ -63,6 +64,18 @@ export const appointmentWithCustomerSelectFields = {
     status: customers.status,
     latitude: customers.latitude,
     longitude: customers.longitude,
+  },
+  prospect: {
+    id: prospects.id,
+    vorname: prospects.vorname,
+    nachname: prospects.nachname,
+    telefon: prospects.telefon,
+    email: prospects.email,
+    strasse: prospects.strasse,
+    nr: prospects.nr,
+    plz: prospects.plz,
+    stadt: prospects.stadt,
+    pflegegrad: prospects.pflegegrad,
   }
 };
 
@@ -101,6 +114,75 @@ export function mapAppointmentRow(row: AppointmentQueryRow & Record<string, unkn
     createdAt: row.createdAt as Date,
     performedByEmployeeId: row.performedByEmployeeId as number | null,
     assignedEmployeeName: (row.assignedEmployeeName as string | null) ?? null,
-    customer: (row.customer as { id?: number })?.id ? row.customer as AppointmentWithCustomer["customer"] : null,
+    customer: (row.customer as { id?: number })?.id
+      ? row.customer as AppointmentWithCustomer["customer"]
+      : (row.prospect as { id?: number })?.id
+        ? mapProspectAsCustomer(row.prospect as ProspectRow)
+        : null,
+  };
+}
+
+interface ProspectRow {
+  id: number;
+  vorname: string;
+  nachname: string;
+  telefon: string | null;
+  email: string | null;
+  strasse: string | null;
+  nr: string | null;
+  plz: string | null;
+  stadt: string | null;
+  pflegegrad: number | null;
+}
+
+/**
+ * Maps prospect data into a Customer-shaped object for Erstberatung appointments.
+ * Contact fields (name, telefon, email, address) come from the prospect.
+ * Non-contact fields (billing, status, pets, etc.) use synthetic defaults
+ * and should NOT be treated as real customer attributes.
+ */
+function mapProspectAsCustomer(p: ProspectRow): AppointmentWithCustomer["customer"] {
+  const addressParts = [p.strasse, p.nr].filter(Boolean).join(" ");
+  const cityParts = [p.plz, p.stadt].filter(Boolean).join(" ");
+  const fullAddress = [addressParts, cityParts].filter(Boolean).join(", ");
+  return {
+    id: p.id,
+    name: `${p.vorname} ${p.nachname}`,
+    vorname: p.vorname,
+    nachname: p.nachname,
+    email: p.email,
+    festnetz: null,
+    telefon: p.telefon,
+    geburtsdatum: null,
+    address: fullAddress || "",
+    strasse: p.strasse,
+    nr: p.nr,
+    plz: p.plz,
+    stadt: p.stadt,
+    pflegegrad: p.pflegegrad,
+    primaryEmployeeId: null,
+    backupEmployeeId: null,
+    backupEmployeeId2: null,
+    vorerkrankungen: null,
+    haustierVorhanden: false,
+    haustierDetails: null,
+    status: "erstberatung",
+    inaktivAb: null,
+    personenbefoerderungGewuenscht: false,
+    billingType: "pflegekasse_gesetzlich",
+    acceptsPrivatePayment: false,
+    documentDeliveryMethod: "email",
+    deactivationReason: null,
+    deactivationNote: null,
+    mergedIntoCustomerId: null,
+    convertedFromProspectId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    createdByUserId: null,
+    deletedAt: null,
+    isAnonymized: false,
+    anonymizedAt: null,
+    latitude: null,
+    longitude: null,
   };
 }

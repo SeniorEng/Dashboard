@@ -4,6 +4,7 @@ import {
   type UpdateAppointment,
   customers,
   appointments,
+  prospects,
 } from "@shared/schema";
 import type { AppointmentWithCustomer, PaginatedResult } from "@shared/types";
 import { eq, count, sql as sqlBuilder, lt, ne, and, or, inArray, isNull } from "drizzle-orm";
@@ -115,7 +116,8 @@ export async function getAppointmentsWithCustomers(date?: string, customerIds?: 
   const query = db
     .select(appointmentWithCustomerSelectFields)
     .from(appointments)
-    .leftJoin(customers, eq(appointments.customerId, customers.id));
+    .leftJoin(customers, eq(appointments.customerId, customers.id))
+    .leftJoin(prospects, eq(appointments.prospectId, prospects.id));
 
   const results = conditions.length > 0
     ? await query.where(and(...conditions))
@@ -141,6 +143,7 @@ export async function getAppointmentsWithCustomersPaginated(
     .select(appointmentWithCustomerSelectFields)
     .from(appointments)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
+    .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .limit(limit)
     .offset(offset);
 
@@ -158,6 +161,7 @@ export async function getAppointmentWithCustomer(id: number): Promise<Appointmen
     .select(appointmentWithCustomerSelectFields)
     .from(appointments)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
+    .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(and(eq(appointments.id, id), isNull(appointments.deletedAt)));
 
   if (results.length === 0) return undefined;
@@ -191,6 +195,7 @@ export async function getUndocumentedAppointments(beforeDate: string, customerId
     .select(appointmentWithCustomerSelectFields)
     .from(appointments)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
+    .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(and(...conditions));
 
   return results.map(mapAppointmentRow);
@@ -200,6 +205,7 @@ export async function getAppointmentsForDay(employeeId: number, date: string): P
   const rows = await db.select(appointmentWithCustomerSelectFields)
     .from(appointments)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
+    .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(and(
       eq(appointments.date, date),
       or(

@@ -115,10 +115,26 @@ export function useNewAppointmentForm() {
   const [inlineProspectVorname, setInlineProspectVorname] = useState<string>("");
   const [inlineProspectNachname, setInlineProspectNachname] = useState<string>("");
   const [inlineProspectTelefon, setInlineProspectTelefon] = useState<string>("");
+  const [inlineProspectEmail, setInlineProspectEmail] = useState<string>("");
+  const [inlineProspectStrasse, setInlineProspectStrasse] = useState<string>("");
+  const [inlineProspectNr, setInlineProspectNr] = useState<string>("");
+  const [inlineProspectPlz, setInlineProspectPlz] = useState<string>("");
+  const [inlineProspectStadt, setInlineProspectStadt] = useState<string>("");
+  const [inlineProspectPflegegrad, setInlineProspectPflegegrad] = useState<string>("");
   const [inlineProspectCreatedId, setInlineProspectCreatedId] = useState<number | null>(null);
 
   const createInlineProspectMutation = useMutation({
-    mutationFn: async (data: { vorname: string; nachname: string; telefon?: string }) => {
+    mutationFn: async (data: {
+      vorname: string;
+      nachname: string;
+      telefon?: string;
+      email?: string;
+      strasse?: string;
+      nr?: string;
+      plz?: string;
+      stadt?: string;
+      pflegegrad?: number;
+    }) => {
       const result = await api.post<{ id: number; vorname: string; nachname: string; telefon: string | null }>("/admin/prospects", {
         ...data,
         status: "erstberatung_vereinbart",
@@ -310,6 +326,12 @@ export function useNewAppointmentForm() {
       vorname: inlineProspectVorname.trim(),
       nachname: inlineProspectNachname.trim(),
       telefon: inlineProspectTelefon.trim() || undefined,
+      email: inlineProspectEmail.trim() || undefined,
+      strasse: inlineProspectStrasse.trim() || undefined,
+      nr: inlineProspectNr.trim() || undefined,
+      plz: inlineProspectPlz.trim() || undefined,
+      stadt: inlineProspectStadt.trim() || undefined,
+      pflegegrad: inlineProspectPflegegrad ? parseInt(inlineProspectPflegegrad) : undefined,
     });
   };
 
@@ -465,6 +487,18 @@ export function useNewAppointmentForm() {
     setInlineProspectNachname,
     inlineProspectTelefon,
     setInlineProspectTelefon,
+    inlineProspectEmail,
+    setInlineProspectEmail,
+    inlineProspectStrasse,
+    setInlineProspectStrasse,
+    inlineProspectNr,
+    setInlineProspectNr,
+    inlineProspectPlz,
+    setInlineProspectPlz,
+    inlineProspectStadt,
+    setInlineProspectStadt,
+    inlineProspectPflegegrad,
+    setInlineProspectPflegegrad,
     inlineProspectCreatedId,
     isCreatingProspect: createInlineProspectMutation.isPending,
     handleInlineProspectCreate,
