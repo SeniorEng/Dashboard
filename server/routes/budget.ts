@@ -196,7 +196,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     }
 
     const monthlyRemaining45b = Math.max(0, summary45b.monthlyLimitCents - appointmentMonthUsedCents);
-    const effectiveAvailable = summary45a.currentMonthAvailableCents + monthlyRemaining45b;
+    const effectiveAvailable = summary45a.currentMonthAvailableCents + monthlyRemaining45b + summary39_42a.currentYearAvailableCents;
     if (totalCostCents > effectiveAvailable) {
       const limitEuro = (summary45b.monthlyLimitCents / 100).toFixed(2);
       const usedEuro = (appointmentMonthUsedCents / 100).toFixed(2);
