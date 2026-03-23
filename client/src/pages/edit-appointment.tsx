@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import { ChevronLeft, Loader2, Calendar, Clock, AlertTriangle, Home, Users } from "lucide-react";
+import { ChevronLeft, Loader2, Calendar, Clock, AlertTriangle, Home, Users, UserCheck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
@@ -210,6 +210,17 @@ export default function EditAppointment() {
     },
   });
 
+  const updateProspectMutation = useMutation({
+    mutationFn: async ({ prospectId, data }: { prospectId: number; data: Record<string, unknown> }) => {
+      const result = await api.patch(`/admin/prospects/${prospectId}`, data);
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["prospects"] });
+      queryClient.invalidateQueries({ queryKey: ["prospect-appointment-data"] });
+    },
+  });
+
 
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
@@ -255,6 +266,22 @@ export default function EditAppointment() {
       });
     } else if (appointment.appointmentType === "Erstberatung") {
       const calculatedEnd = addMinutesToTime(time, duration);
+      if (appointment.prospectId) {
+        updateProspectMutation.mutate({
+          prospectId: appointment.prospectId,
+          data: {
+            vorname: ebVorname.trim(),
+            nachname: ebNachname.trim(),
+            telefon: ebTelefon.trim() || null,
+            email: ebEmail.trim() || null,
+            strasse: ebStrasse.trim() || null,
+            nr: ebNr.trim() || null,
+            plz: ebPlz.trim() || null,
+            stadt: ebStadt.trim() || null,
+            pflegegrad: ebPflegegrad && ebPflegegrad !== "none" ? parseInt(ebPflegegrad) : null,
+          },
+        });
+      }
       updateMutation.mutate({
         date,
         scheduledStart: time,
@@ -276,7 +303,7 @@ export default function EditAppointment() {
     }
   };
 
-  const isPending = updateMutation.isPending;
+  const isPending = updateMutation.isPending || updateProspectMutation.isPending;
 
   if (appointmentLoading) {
     return (
@@ -368,6 +395,10 @@ export default function EditAppointment() {
 
           {isErstberatung && (
             <>
+              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground mb-1">
+                <UserCheck className="h-4 w-4" />
+                <span>Kontaktdaten des Interessenten</span>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="eb-vorname">Vorname *</Label>
