@@ -517,6 +517,7 @@ function buildPdfData(invoice: Invoice, lineItems: InvoiceLineItem[], companySet
     pflegegrad: invoice.pflegegrad ?? null,
     customerName: invoice.customerName || invoice.recipientName,
     customerAddress: invoice.recipientAddress || "",
+    customerGeburtsdatum: null,
     lineItems: lineItems.map((item: InvoiceLineItem) => ({
       appointmentId: item.appointmentId ?? null,
       appointmentDate: item.appointmentDate,
@@ -567,6 +568,14 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
   const { generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
   
   const pdfData = buildPdfData(invoice, lineItems, companySettings);
+
+  const customerForLN = await db.select({ geburtsdatum: customersTable.geburtsdatum })
+    .from(customersTable)
+    .where(eq(customersTable.id, invoice.customerId))
+    .limit(1);
+  if (customerForLN.length > 0 && customerForLN[0].geburtsdatum) {
+    pdfData.customerGeburtsdatum = customerForLN[0].geburtsdatum;
+  }
 
   const serviceRecords = await db.select({
     id: monthlyServiceRecords.id,

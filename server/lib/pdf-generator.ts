@@ -39,6 +39,7 @@ export interface InvoicePdfData {
   // Customer info (always needed for reference)
   customerName: string;
   customerAddress: string | null;
+  customerGeburtsdatum: string | null;
   
   // Line items
   lineItems: {
@@ -122,6 +123,32 @@ function getBillingTypeNote(billingType: string, insuranceProviderName: string |
       return `Abrechnung gemäß Abtretungserklärung über den Entlastungsbetrag nach § 45b SGB XI.`;
     case "pflegekasse_privat":
       return `Zur Erstattung bei Ihrer privaten Pflegekasse${insuranceProviderName ? ` (${insuranceProviderName})` : ""} einzureichen. Abrechnung des Entlastungsbetrags nach § 45b SGB XI.`;
+    case "selbstzahler":
+      return "";
+    default:
+      return "";
+  }
+}
+
+function getBudgettopfLabel(billingType: string): string {
+  switch (billingType) {
+    case "pflegekasse_gesetzlich":
+      return "§ 45b SGB XI – Entlastungsbetrag";
+    case "pflegekasse_privat":
+      return "§ 45b SGB XI – Entlastungsbetrag (privat)";
+    case "selbstzahler":
+      return "Selbstzahler";
+    default:
+      return billingType;
+  }
+}
+
+function getConfirmTextForBillingType(billingType: string): string {
+  switch (billingType) {
+    case "pflegekasse_gesetzlich":
+      return "und zur Abrechnung des Entlastungsbetrags nach § 45b SGB XI bei der zuständigen Pflegekasse eingereicht werden dürfen";
+    case "pflegekasse_privat":
+      return "und zur Erstattung des Entlastungsbetrags nach § 45b SGB XI bei der zuständigen privaten Pflegekasse eingereicht werden dürfen";
     case "selbstzahler":
       return "";
     default:
@@ -344,21 +371,6 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(svc.totalCents)}</td>
         </tr>`);
       }
-      if (group.kmItems.length > 0) {
-        const totalKm = group.kmItems.reduce((sum, k) => sum + k.durationMinutes, 0);
-        const totalKmCents = group.kmItems.reduce((sum, k) => sum + k.totalCents, 0);
-        const kmPrice = group.kmItems[0].unitPriceCents;
-        const showDateCol = group.services.length === 0;
-        rows.push(`
-        <tr>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${showDateCol ? group.date : ""}</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${showDateCol ? group.time : ""}</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">Kilometer</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${totalKm} km</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(kmPrice)}/km</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(totalKmCents)}</td>
-        </tr>`);
-      }
       if (group.notes) {
         rows.push(`
         <tr>
@@ -369,6 +381,61 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       }
       return rows.join("");
     }).join("");
+  }
+
+  function renderCumulatedKmBlock(items: LineItem[]): string {
+    const allKmItems = items.filter(i => isKmItem(i));
+    if (allKmItems.length === 0) return "";
+
+    const travelKm = allKmItems.filter(i => i.serviceCode === "travel_km");
+    const customerKm = allKmItems.filter(i => i.serviceCode === "customer_km");
+
+    const rows: string[] = [];
+
+    function renderKmTypeRows(kmItems: LineItem[], label: string): void {
+      const byRate = new Map<number, { km: number; cents: number }>();
+      for (const k of kmItems) {
+        const entry = byRate.get(k.unitPriceCents) || { km: 0, cents: 0 };
+        entry.km += k.durationMinutes;
+        entry.cents += k.totalCents;
+        byRate.set(k.unitPriceCents, entry);
+      }
+      for (const [rate, { km, cents }] of byRate) {
+        rows.push(`
+        <tr>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;" colspan="2"></td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(label)}</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${km} km</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(rate)}/km</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(cents)}</td>
+        </tr>`);
+      }
+    }
+
+    if (travelKm.length > 0) {
+      renderKmTypeRows(travelKm, "Anfahrtskilometer");
+    }
+
+    if (customerKm.length > 0) {
+      renderKmTypeRows(customerKm, "Begleitfahrten");
+    }
+
+    if (rows.length === 0) return "";
+
+    return `
+    <tr>
+      <td colspan="6" style="padding: 8px; font-weight: 600; font-size: 9pt; color: #0d9488; border-bottom: 1px solid #e5e7eb;">Kilometer (kumuliert)</td>
+    </tr>
+    ${rows.join("")}`;
+  }
+
+  function renderAbtretungserklaerung(): string {
+    if (data.billingType === "selbstzahler") return "";
+    return `
+    <div style="margin-top: 20px; padding: 10px; background: #fefce8; border: 1px solid #fde68a; border-radius: 4px; font-size: 8.5pt; color: #92400e;">
+      <div style="font-weight: 600; margin-bottom: 4px;">Abtretungserklärung (§ 398 BGB)</div>
+      Der/Die Leistungsempfänger/in tritt hiermit seinen/ihren Anspruch auf Kostenerstattung gegenüber der Pflegekasse in Höhe des abgerechneten Betrages an ${escapeHtml(data.companyName || "")} ab.${data.ikNummer ? ` IK-Nr.: ${escapeHtml(data.ikNummer)}.` : ""} Die Unterschrift unter dem Leistungsnachweis gilt gleichzeitig als Abtretungserklärung.
+    </div>`;
   }
 
   function renderSignature(sig: NonNullable<InvoicePdfData["signatures"]>[0], fallbackEmployeeLabel: string): string {
@@ -417,8 +484,8 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
 
   if (hasMultipleLNs && data.signatures) {
     const sections: string[] = [];
-    const confirmText = `Ich bestätige hiermit, dass die aufgeführten Leistungen wie oben beschrieben erbracht wurden
-      ${data.billingType !== "selbstzahler" ? "und zur Abrechnung des Entlastungsbetrags nach § 45b SGB XI bei meiner Pflegekasse eingereicht werden dürfen" : ""}.`;
+    const confirmSuffix = getConfirmTextForBillingType(data.billingType);
+    const confirmText = `Ich bestätige hiermit, dass die aufgeführten Leistungen wie oben beschrieben erbracht wurden${confirmSuffix ? " " + confirmSuffix : ""}.`;
 
     for (let idx = 0; idx < data.signatures.length; idx++) {
       const sig = data.signatures[idx];
@@ -429,6 +496,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
 
       const groups = groupByAppointment(sectionItems);
       const tableRowsHtml = renderTableRows(groups);
+      const kmBlockHtml = renderCumulatedKmBlock(sectionItems);
       const sectionServiceMinutes = sectionItems.filter(i => !isKmItem(i)).reduce((sum, item) => sum + item.durationMinutes, 0);
       const sectionKm = sectionItems.filter(i => isKmItem(i)).reduce((sum, item) => sum + item.durationMinutes, 0);
       const sectionCents = sectionItems.reduce((sum, item) => sum + item.totalCents, 0);
@@ -457,6 +525,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
         </thead>
         <tbody>
           ${tableRowsHtml}
+          ${kmBlockHtml}
           <tr class="total-row">
             <td colspan="3">Zwischensumme</td>
             <td style="text-align: right;">${formatMinutes(sectionServiceMinutes)}${sectionKm > 0 ? ` + ${sectionKm} km` : ""}</td>
@@ -468,6 +537,8 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
 
       <div class="confirm-text">${confirmText}</div>
 
+      ${renderAbtretungserklaerung()}
+
       ${renderSignature(sig, sectionEmployeeLabel)}
       `);
     }
@@ -476,11 +547,13 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   } else {
     const groups = groupByAppointment(allSorted);
     const tableRowsHtml = renderTableRows(groups);
+    const kmBlockHtml = renderCumulatedKmBlock(allSorted);
     const totalServiceMinutes = allSorted.filter(i => !isKmItem(i)).reduce((sum, item) => sum + item.durationMinutes, 0);
     const totalKmAll = allSorted.filter(i => isKmItem(i)).reduce((sum, item) => sum + item.durationMinutes, 0);
     const totalCentsAll = allSorted.reduce((sum, item) => sum + item.totalCents, 0);
 
     const sig = data.signatures && data.signatures.length > 0 ? data.signatures[0] : null;
+    const confirmSuffix = getConfirmTextForBillingType(data.billingType);
 
     sectionsHtml = `
     <table class="items">
@@ -496,6 +569,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       </thead>
       <tbody>
         ${tableRowsHtml}
+        ${kmBlockHtml}
         <tr class="total-row">
           <td colspan="3">Gesamt</td>
           <td style="text-align: right;">${formatMinutes(totalServiceMinutes)}${totalKmAll > 0 ? ` + ${totalKmAll} km` : ""}</td>
@@ -512,9 +586,10 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     </div>
 
     <div class="confirm-text">
-      Ich bestätige hiermit, dass die aufgeführten Leistungen wie oben beschrieben erbracht wurden
-      ${data.billingType !== "selbstzahler" ? "und zur Abrechnung des Entlastungsbetrags nach § 45b SGB XI bei meiner Pflegekasse eingereicht werden dürfen" : ""}.
+      Ich bestätige hiermit, dass die aufgeführten Leistungen wie oben beschrieben erbracht wurden${confirmSuffix ? " " + confirmSuffix : ""}.
     </div>
+
+    ${renderAbtretungserklaerung()}
 
     ${data.signatures && data.signatures.length > 0 ? data.signatures.map(s => renderSignature(s, employeeLabel)).join("") : `
     <div class="signature-area">
@@ -570,6 +645,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       <div class="info-label">Leistungsempfänger/in</div>
       <div class="info-value">${escapeHtml(data.customerName)}</div>
       ${data.customerAddress ? `<div style="font-size: 9pt;">${escapeHtml(data.customerAddress).replace(/\n/g, "<br>")}</div>` : ""}
+      ${data.customerGeburtsdatum ? `<div style="font-size: 9pt;">Geb.: ${formatDate(data.customerGeburtsdatum)}</div>` : ""}
     </div>
     <div class="info-box">
       <div class="info-label">Leistungserbringer/in</div>
@@ -588,6 +664,12 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       <div class="info-label">Zeitraum</div>
       <div class="info-value">${escapeHtml(periodLabel)}</div>
       <div style="font-size: 9pt;">Rechnungsnr.: ${escapeHtml(data.invoiceNumber)}</div>
+    </div>
+  </div>
+  <div class="info-grid">
+    <div class="info-box" style="flex: 1;">
+      <div class="info-label">Abrechnungsgrundlage</div>
+      <div class="info-value" style="font-size: 9pt;">${escapeHtml(getBudgettopfLabel(data.billingType))}</div>
     </div>
   </div>
 
