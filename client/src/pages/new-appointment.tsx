@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,16 +9,54 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DatePicker } from "@/components/ui/date-picker";
-import { ChevronLeft, Loader2, Calendar, Clock, User, Plus, Users, AlertTriangle, XCircle, Copy, UserCheck, Phone, UserPlus } from "lucide-react";
+import { ChevronLeft, Loader2, Calendar, Clock, User, Plus, Users, AlertTriangle, XCircle, Copy, UserCheck, Phone, UserPlus, Pencil, Check, X } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { useNewAppointmentForm, ServiceSelector, AppointmentSummary } from "@/features/appointments";
 import { EmployeeAvailability } from "@/features/appointments/components/employee-availability";
 import { DURATION_OPTIONS, formatDuration } from "@shared/types";
 import { useLocation } from "wouter";
+import { useUpdateProspect } from "@/features/prospects";
 
 export default function NewAppointment() {
   const [, setLocation] = useLocation();
   const form = useNewAppointmentForm();
+  const updateProspectMutation = useUpdateProspect();
+
+  const [editingEbContact, setEditingEbContact] = useState(false);
+  const [ebEditTelefon, setEbEditTelefon] = useState("");
+  const [ebEditEmail, setEbEditEmail] = useState("");
+  const [ebEditStrasse, setEbEditStrasse] = useState("");
+  const [ebEditNr, setEbEditNr] = useState("");
+  const [ebEditPlz, setEbEditPlz] = useState("");
+  const [ebEditStadt, setEbEditStadt] = useState("");
+
+  const startEditingEbContact = () => {
+    if (!form.prospectData) return;
+    setEbEditTelefon(form.prospectData.telefon || "");
+    setEbEditEmail(form.prospectData.email || "");
+    setEbEditStrasse(form.prospectData.strasse || "");
+    setEbEditNr(form.prospectData.nr || "");
+    setEbEditPlz(form.prospectData.plz || "");
+    setEbEditStadt(form.prospectData.stadt || "");
+    setEditingEbContact(true);
+  };
+
+  const handleSaveEbContact = () => {
+    if (!form.prospectData) return;
+    updateProspectMutation.mutate({
+      id: form.prospectData.id,
+      data: {
+        telefon: ebEditTelefon.trim() || null,
+        email: ebEditEmail.trim() || null,
+        strasse: ebEditStrasse.trim() || null,
+        nr: ebEditNr.trim() || null,
+        plz: ebEditPlz.trim() || null,
+        stadt: ebEditStadt.trim() || null,
+      },
+    }, {
+      onSuccess: () => setEditingEbContact(false),
+    });
+  };
 
   return (
     <Layout>
@@ -286,18 +325,71 @@ export default function NewAppointment() {
                 <>
                   {form.prospectData && (
                     <div className="rounded-lg border border-blue-200 bg-blue-50 p-4" data-testid="panel-prospect-info">
-                      <div className="flex items-center gap-2 text-blue-800 font-medium mb-2">
-                        <UserCheck className={iconSize.sm} />
-                        <span>Interessent</span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 text-sm text-blue-700">
-                        <div><span className="text-blue-500">Name:</span> {form.prospectData.vorname} {form.prospectData.nachname}</div>
-                        {form.prospectData.telefon && <div><span className="text-blue-500">Telefon:</span> {form.prospectData.telefon}</div>}
-                        {form.prospectData.email && <div><span className="text-blue-500">E-Mail:</span> {form.prospectData.email}</div>}
-                        {form.prospectData.strasse && (
-                          <div className="col-span-2"><span className="text-blue-500">Adresse:</span> {form.prospectData.strasse} {form.prospectData.nr}, {form.prospectData.plz} {form.prospectData.stadt}</div>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2 text-blue-800 font-medium">
+                          <UserCheck className={iconSize.sm} />
+                          <span>Interessent</span>
+                        </div>
+                        {!editingEbContact && (
+                          <Button variant="ghost" size="sm" className="h-6 text-xs gap-1 text-blue-700 hover:text-blue-900" onClick={startEditingEbContact} data-testid="button-edit-eb-contact">
+                            <Pencil className="h-3 w-3" /> Bearbeiten
+                          </Button>
                         )}
                       </div>
+                      {editingEbContact ? (
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium text-blue-800 mb-1">{form.prospectData.vorname} {form.prospectData.nachname}</div>
+                          <div className="space-y-1">
+                            <Label className="text-xs text-blue-600">Telefon</Label>
+                            <Input value={ebEditTelefon} onChange={(e) => setEbEditTelefon(e.target.value)} placeholder="z.B. 0151 12345678" className="bg-white" data-testid="input-eb-edit-telefon" />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs text-blue-600">E-Mail</Label>
+                            <Input value={ebEditEmail} onChange={(e) => setEbEditEmail(e.target.value)} placeholder="E-Mail-Adresse" type="email" className="bg-white" data-testid="input-eb-edit-email" />
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="col-span-2 space-y-1">
+                              <Label className="text-xs text-blue-600">Straße</Label>
+                              <Input value={ebEditStrasse} onChange={(e) => setEbEditStrasse(e.target.value)} placeholder="Straße" className="bg-white" data-testid="input-eb-edit-strasse" />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-blue-600">Nr.</Label>
+                              <Input value={ebEditNr} onChange={(e) => setEbEditNr(e.target.value)} placeholder="Nr." className="bg-white" data-testid="input-eb-edit-nr" />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="space-y-1">
+                              <Label className="text-xs text-blue-600">PLZ</Label>
+                              <Input value={ebEditPlz} onChange={(e) => setEbEditPlz(e.target.value)} placeholder="PLZ" maxLength={5} className="bg-white" data-testid="input-eb-edit-plz" />
+                            </div>
+                            <div className="col-span-2 space-y-1">
+                              <Label className="text-xs text-blue-600">Stadt</Label>
+                              <Input value={ebEditStadt} onChange={(e) => setEbEditStadt(e.target.value)} placeholder="Stadt" className="bg-white" data-testid="input-eb-edit-stadt" />
+                            </div>
+                          </div>
+                          <div className="flex gap-2 pt-1">
+                            <Button size="sm" className="flex-1" onClick={handleSaveEbContact} disabled={updateProspectMutation.isPending} data-testid="button-save-eb-contact">
+                              {updateProspectMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Check className="h-3.5 w-3.5 mr-1" />}
+                              Speichern
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => setEditingEbContact(false)} data-testid="button-cancel-eb-contact">
+                              <X className="h-3.5 w-3.5 mr-1" /> Abbrechen
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-2 text-sm text-blue-700">
+                          <div><span className="text-blue-500">Name:</span> {form.prospectData.vorname} {form.prospectData.nachname}</div>
+                          {form.prospectData.telefon && <div><span className="text-blue-500">Telefon:</span> {form.prospectData.telefon}</div>}
+                          {form.prospectData.email && <div><span className="text-blue-500">E-Mail:</span> {form.prospectData.email}</div>}
+                          {form.prospectData.strasse && (
+                            <div className="col-span-2"><span className="text-blue-500">Adresse:</span> {form.prospectData.strasse} {form.prospectData.nr}, {form.prospectData.plz} {form.prospectData.stadt}</div>
+                          )}
+                          {!form.prospectData.telefon && !form.prospectData.email && !form.prospectData.strasse && (
+                            <div className="col-span-2 text-blue-400 italic">Keine Kontaktdaten — <button className="underline" onClick={startEditingEbContact}>jetzt ergänzen</button></div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                   {form.errors.ebProspect && <p className="text-destructive text-sm">{form.errors.ebProspect}</p>}

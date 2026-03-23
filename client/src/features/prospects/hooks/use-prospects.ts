@@ -70,9 +70,11 @@ export function useUpdateProspect() {
       const result = await api.patch<Prospect>(`/admin/prospects/${id}`, data);
       return unwrapResult(result);
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["prospects"] });
+      queryClient.invalidateQueries({ queryKey: ["prospect", variables.id] });
       queryClient.invalidateQueries({ queryKey: ["prospect-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["prospect-appointment-data"] });
       toast({ title: "Gespeichert", description: "Die Änderungen wurden gespeichert." });
     },
     onError: (error: Error) => {

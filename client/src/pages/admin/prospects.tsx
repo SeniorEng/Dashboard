@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Link, useLocation, useSearch } from "wouter";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -60,6 +60,9 @@ import {
   ShieldCheck,
   FileText,
   Ban,
+  Pencil,
+  Check,
+  X,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { useProspects, useProspectStats, useProspect, useCreateProspect, useUpdateProspect, useAddProspectNote, useReparseProspect, useDeleteProspect, useQualifyProspect, useProspectOffer, useDeclineProspectOffer } from "@/features/prospects";
@@ -239,6 +242,59 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
   const [dialogKommentar, setDialogKommentar] = useState("");
   const [disqualifyReason, setDisqualifyReason] = useState<string>("");
 
+  const [editingContact, setEditingContact] = useState(false);
+  const [editVorname, setEditVorname] = useState("");
+  const [editNachname, setEditNachname] = useState("");
+  const [editTelefon, setEditTelefon] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editStrasse, setEditStrasse] = useState("");
+  const [editNr, setEditNr] = useState("");
+  const [editPlz, setEditPlz] = useState("");
+  const [editStadt, setEditStadt] = useState("");
+  const [editPflegegrad, setEditPflegegrad] = useState("");
+
+  const prevProspectId = useRef(prospectId);
+  useEffect(() => {
+    if (prospectId !== prevProspectId.current || !open) {
+      setEditingContact(false);
+      prevProspectId.current = prospectId;
+    }
+  }, [prospectId, open]);
+
+  const startEditingContact = () => {
+    if (!prospect) return;
+    setEditVorname(prospect.vorname || "");
+    setEditNachname(prospect.nachname || "");
+    setEditTelefon(prospect.telefon || "");
+    setEditEmail(prospect.email || "");
+    setEditStrasse(prospect.strasse || "");
+    setEditNr(prospect.nr || "");
+    setEditPlz(prospect.plz || "");
+    setEditStadt(prospect.stadt || "");
+    setEditPflegegrad(prospect.pflegegrad?.toString() || "");
+    setEditingContact(true);
+  };
+
+  const handleSaveContact = () => {
+    if (!prospectId || !editVorname.trim() || !editNachname.trim()) return;
+    updateMutation.mutate({
+      id: prospectId,
+      data: {
+        vorname: editVorname.trim(),
+        nachname: editNachname.trim(),
+        telefon: editTelefon.trim() || null,
+        email: editEmail.trim() || null,
+        strasse: editStrasse.trim() || null,
+        nr: editNr.trim() || null,
+        plz: editPlz.trim() || null,
+        stadt: editStadt.trim() || null,
+        pflegegrad: editPflegegrad && editPflegegrad !== "none" ? parseInt(editPflegegrad) : null,
+      },
+    }, {
+      onSuccess: () => setEditingContact(false),
+    });
+  };
+
   const handleKontaktiert = () => {
     if (!prospectId) return;
     updateMutation.mutate({ id: prospectId, data: { status: "kontaktiert" } });
@@ -346,60 +402,138 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                   <CardHeader className="pb-2">
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-sm">Kontaktdaten</CardTitle>
-                      {prospect.rawEmailContent && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs gap-1"
-                          onClick={() => prospectId && reparseMutation.mutate(prospectId)}
-                          disabled={reparseMutation.isPending}
-                          data-testid="button-reparse-prospect"
-                        >
-                          <RefreshCw className={`h-3 w-3 ${reparseMutation.isPending ? "animate-spin" : ""}`} />
-                          Neu parsen
-                        </Button>
-                      )}
+                      <div className="flex gap-1">
+                        {prospect.rawEmailContent && !editingContact && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs gap-1"
+                            onClick={() => prospectId && reparseMutation.mutate(prospectId)}
+                            disabled={reparseMutation.isPending}
+                            data-testid="button-reparse-prospect"
+                          >
+                            <RefreshCw className={`h-3 w-3 ${reparseMutation.isPending ? "animate-spin" : ""}`} />
+                            Neu parsen
+                          </Button>
+                        )}
+                        {!editingContact && (
+                          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={startEditingContact} data-testid="button-edit-contact">
+                            <Pencil className="h-3 w-3" /> Bearbeiten
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-2 text-sm">
-                    {prospect.telefon && (
-                      <a href={`tel:${prospect.telefon}`} className="flex items-center gap-2 text-primary" data-testid="link-prospect-phone">
-                        <Phone className="h-3.5 w-3.5" /> {formatPhoneForDisplay(prospect.telefon)}
-                      </a>
-                    )}
-                    {prospect.email && (
-                      <a href={`mailto:${prospect.email}`} className="flex items-center gap-2 text-primary" data-testid="link-prospect-email">
-                        <Mail className="h-3.5 w-3.5" /> {prospect.email}
-                      </a>
-                    )}
-                    {(prospect.strasse || prospect.stadt) && (
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <MapPin className="h-3.5 w-3.5" />
-                        {formatAddress(prospect)}
-                      </div>
-                    )}
-                    {prospect.pflegegrad && (
-                      <Badge variant="outline" className="mt-1">Pflegegrad {prospect.pflegegrad}</Badge>
-                    )}
-                    {prospect.quelle && (
-                      <div className="text-xs text-muted-foreground">Quelle: {prospect.quelle}</div>
-                    )}
-                    <div className="text-xs text-muted-foreground">
-                      Erstellt: {formatDateForDisplay(String(prospect.createdAt).substring(0, 10))}
-                    </div>
-                    {prospect.wiedervorlageDate && (
-                      (() => {
-                        const dateStr = String(prospect.wiedervorlageDate).substring(0, 10);
-                        const today = todayISO();
-                        const isOverdue = dateStr < today;
-                        return (
-                          <div className={`flex items-center gap-1.5 mt-2 text-sm font-medium ${isOverdue ? "text-red-600" : "text-purple-700"}`} data-testid="text-wiedervorlage-date">
-                            <CalendarClock className="h-3.5 w-3.5" />
-                            Wiedervorlage am {formatDateForDisplay(dateStr)}
-                            {isOverdue && <Badge variant="outline" className="text-red-600 border-red-300 text-xs ml-1">Überfällig</Badge>}
+                    {editingContact ? (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Vorname *</Label>
+                            <Input value={editVorname} onChange={(e) => setEditVorname(e.target.value)} placeholder="Vorname" data-testid="input-edit-vorname" />
                           </div>
-                        );
-                      })()
+                          <div className="space-y-1">
+                            <Label className="text-xs">Nachname *</Label>
+                            <Input value={editNachname} onChange={(e) => setEditNachname(e.target.value)} placeholder="Nachname" data-testid="input-edit-nachname" />
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Telefon</Label>
+                          <Input value={editTelefon} onChange={(e) => setEditTelefon(e.target.value)} placeholder="z.B. 0151 12345678" data-testid="input-edit-telefon" />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">E-Mail</Label>
+                          <Input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} placeholder="E-Mail-Adresse" type="email" data-testid="input-edit-email" />
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="col-span-2 space-y-1">
+                            <Label className="text-xs">Straße</Label>
+                            <Input value={editStrasse} onChange={(e) => setEditStrasse(e.target.value)} placeholder="Straße" data-testid="input-edit-strasse" />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Nr.</Label>
+                            <Input value={editNr} onChange={(e) => setEditNr(e.target.value)} placeholder="Nr." data-testid="input-edit-nr" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="space-y-1">
+                            <Label className="text-xs">PLZ</Label>
+                            <Input value={editPlz} onChange={(e) => setEditPlz(e.target.value)} placeholder="PLZ" maxLength={5} data-testid="input-edit-plz" />
+                          </div>
+                          <div className="col-span-2 space-y-1">
+                            <Label className="text-xs">Stadt</Label>
+                            <Input value={editStadt} onChange={(e) => setEditStadt(e.target.value)} placeholder="Stadt" data-testid="input-edit-stadt" />
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Pflegegrad</Label>
+                          <Select value={editPflegegrad} onValueChange={setEditPflegegrad}>
+                            <SelectTrigger data-testid="select-edit-pflegegrad">
+                              <SelectValue placeholder="Nicht bekannt" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Nicht bekannt</SelectItem>
+                              {[1, 2, 3, 4, 5].map(g => (
+                                <SelectItem key={g} value={g.toString()}>Pflegegrad {g}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex gap-2 pt-1">
+                          <Button size="sm" className="flex-1" onClick={handleSaveContact} disabled={updateMutation.isPending || !editVorname.trim() || !editNachname.trim()} data-testid="button-save-contact">
+                            {updateMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Check className="h-3.5 w-3.5 mr-1" />}
+                            Speichern
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => setEditingContact(false)} data-testid="button-cancel-edit-contact">
+                            <X className="h-3.5 w-3.5 mr-1" /> Abbrechen
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {prospect.telefon && (
+                          <a href={`tel:${prospect.telefon}`} className="flex items-center gap-2 text-primary" data-testid="link-prospect-phone">
+                            <Phone className="h-3.5 w-3.5" /> {formatPhoneForDisplay(prospect.telefon)}
+                          </a>
+                        )}
+                        {prospect.email && (
+                          <a href={`mailto:${prospect.email}`} className="flex items-center gap-2 text-primary" data-testid="link-prospect-email">
+                            <Mail className="h-3.5 w-3.5" /> {prospect.email}
+                          </a>
+                        )}
+                        {(prospect.strasse || prospect.stadt) && (
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <MapPin className="h-3.5 w-3.5" />
+                            {formatAddress(prospect)}
+                          </div>
+                        )}
+                        {prospect.pflegegrad && (
+                          <Badge variant="outline" className="mt-1">Pflegegrad {prospect.pflegegrad}</Badge>
+                        )}
+                        {!prospect.telefon && !prospect.email && !prospect.strasse && !prospect.stadt && (
+                          <p className="text-muted-foreground italic">Keine Kontaktdaten hinterlegt — <button className="text-primary underline" onClick={startEditingContact}>jetzt ergänzen</button></p>
+                        )}
+                        {prospect.quelle && (
+                          <div className="text-xs text-muted-foreground">Quelle: {prospect.quelle}</div>
+                        )}
+                        <div className="text-xs text-muted-foreground">
+                          Erstellt: {formatDateForDisplay(String(prospect.createdAt).substring(0, 10))}
+                        </div>
+                        {prospect.wiedervorlageDate && (
+                          (() => {
+                            const dateStr = String(prospect.wiedervorlageDate).substring(0, 10);
+                            const today = todayISO();
+                            const isOverdue = dateStr < today;
+                            return (
+                              <div className={`flex items-center gap-1.5 mt-2 text-sm font-medium ${isOverdue ? "text-red-600" : "text-purple-700"}`} data-testid="text-wiedervorlage-date">
+                                <CalendarClock className="h-3.5 w-3.5" />
+                                Wiedervorlage am {formatDateForDisplay(dateStr)}
+                                {isOverdue && <Badge variant="outline" className="text-red-600 border-red-300 text-xs ml-1">Überfällig</Badge>}
+                              </div>
+                            );
+                          })()
+                        )}
+                      </>
                     )}
                   </CardContent>
                 </Card>
