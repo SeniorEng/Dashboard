@@ -1,0 +1,83 @@
+Leistungsnachweise für Dunkelverarbeitung der Pflegekassen
+Das ist ein spannendes Thema — hier gibt es mehrere Ebenen zu unterscheiden, die oft vermischt werden.
+
+Zwei Verarbeitungsebenen verstehen
+Leistungsnachweis (PDF/digital)   →  Archivdokument / Prüfgrundlage
+        ↓
+Abrechnungsdatei (EDIFACT/TA5)    →  eigentliche Dunkelverarbeitung
+Die Dunkelverarbeitung läuft primär über die elektronische Abrechnungsdatei, nicht über das PDF. Der Leistungsnachweis ist das Nachweisdokument, das bei Prüfung vorgelegt wird. Beide müssen aber konsistent sein.
+
+Pflichtfelder — budgettopfunabhängiger Kern
+Diese Felder müssen auf jedem Leistungsnachweis vorhanden sein, unabhängig von § 45b, § 36, § 38 etc.:
+FeldgruppePflichtfelderLeistungsempfängerName, Vorname, Geburtsdatum, Versichertennummer (10-stellig), PflegegradPflegekasseIK-Nummer der Kasse, Name der KasseLeistungserbringerIK-Nummer (deine: 461438852), Name der UG, AnschriftLeistungspositionLeistungsschlüssel (Positionsnummer nach Rahmenvertrag), LeistungsbeschreibungZeiterfassungDatum, Beginn (HH:MM), Ende (HH:MM), Gesamtdauer in MinutenAbrechnungEinzelpreis, Menge/Einheit, Gesamtbetrag, Budgettopf-KennzeichenUnterschriftenLeistungsempfänger (oder Bevollmächtigte/r mit Vermerk), Mitarbeiter, Datum
+
+Budgettopf-Kennzeichen — das entscheidende Feld
+Statt separate Formulare: ein Feld das den Topf kodiert:
+Abrechnungsgrundlage:
+  [ ] § 45b SGB XI – Entlastungsbetrag
+  [ ] § 36 SGB XI – Pflegesachleistung
+  [ ] § 38 SGB XI – Kombinationsleistung
+  [ ] § 39 SGB XI – Verhinderungspflege
+  [ ] Privat / Selbstzahler
+Das erlaubt dir, eine Vorlage zu verwenden und die Abrechnungsdatei entsprechend zu befüllen.
+
+Abtretungserklärung — direkt einbetten
+Für Direktabrechnung mit der Pflegekasse muss die Abtretung nachweisbar sein. Optimal: fester Textblock auf jedem Leistungsnachweis, nicht als separates Dokument:
+ABTRETUNGSERKLÄRUNG (§ 398 BGB)
+Der/Die Leistungsempfänger/in tritt hiermit seinen/ihren Anspruch auf 
+Kostenerstattung gegenüber der Pflegekasse in Höhe des abgerechneten 
+Betrages an Senioren Engel Alltagsbegleitung UG ab.
+IK-Nr. des Leistungserbringers: 461438852
+
+□ Ich erteile die Abtretung  □ Abrechnung erfolgt privat
+→ Die Unterschrift unter dem Leistungsnachweis gilt gleichzeitig als Abtretungserklärung — das spart ein separates Formular.
+
+Technische Anforderungen für Dunkelverarbeitung
+Elektronische Abrechnungsdatei (§ 105 SGB XI / § 302 SGB V)
+Die eigentliche Dunkelverarbeitung läuft über EDIFACT TA5 (SGB XI) oder SLLA-Format. Dein Tool muss entweder:
+
+Abrechnungszentrum nutzen (empfohlen): z.B. Medifox, snap, oder spezialisierte Clearinghäuser — die übernehmen die EDIFACT-Konvertierung und GKV-Kommunikationsserver-Anbindung
+Direkt über GKV-Kommunikationsserver — erfordert Zulassung und technische Zertifikate
+
+Maschinenlesbarkeit des PDF-Leistungsnachweises
+Für OCR-gestützte Nachprüfung durch die Kassen:
+
+Kein Scan-PDF — immer text-layer-fähiges PDF (aus HTML gerendert ✓)
+Konsistentes Layout — gleiche Feldpositionen auf jeder Seite
+Klare Feldbezeichnungen direkt neben den Werten
+Barcode oder QR-Code mit Vorgangsnummer für Zuordnung empfohlen
+Keine handschriftlichen Freitexte in Pflichtfeldern
+
+Digitale Unterschrift — Akzeptanz der Kassen
+Die meisten Pflegekassen akzeptieren digitale Unterschriften, wenn:
+
+Zeitstempel vorhanden (ISO 8601)
+Identität des Unterzeichnenden dokumentiert (Name + Datum im Datensatz)
+Das Verfahren in der Leistungserbringervereinbarung vereinbart ist — das solltest du mit den Kassen, bei denen du hauptsächlich abrechnest, schriftlich klären
+
+
+Strukturempfehlung für dein Tool
+Leistungsnachweis-Datensatz (intern)
+├── Stammdaten (einmalig pro Klient)
+│   ├── Versichertennummer
+│   ├── Pflegegrad
+│   └── IK Pflegekasse
+├── Leistungspositionen (pro Einsatz)
+│   ├── Datum + Beginn/Ende
+│   ├── Leistungsschlüssel
+│   ├── Mitarbeiter-ID
+│   └── Budgettopf-Kennzeichen
+├── Unterschriften
+│   ├── Empfänger (digital, mit Timestamp)
+│   └── Mitarbeiter (digital, mit Timestamp)
+└── Rechnungsreferenz (generiert)
+→ Aus diesem einen Datensatz erzeugst du: PDF-Leistungsnachweis + EDIFACT-Abrechnungsdatei (direkt oder via Abrechnungszentrum)
+
+Wichtigste Handlungsempfehlung
+Da Rahmenverträge bundeslandspezifisch sind (Sachsen: Rahmenvertrag nach § 75 SGB XI mit dem sächsischen Rahmenvertragsausschuss), solltest du:
+
+Den aktuellen Rahmenvertrag Sachsen § 75 SGB XI und seine Anlage 2 (Leistungsnachweis-Anforderungen) als Basis nehmen
+Mit einer Pflegekasse (z.B. AOK Plus als größte in Sachsen) einen Pilotdurchlauf zur Dunkelverarbeitungskompatibilität abstimmen
+Ein Abrechnungszentrum als technischen Mittler einbinden — das löst 80% der Dunkelverarbeitungsproblematik sofort
+
+Soll ich die konkreten Pflichtfelder als HTML-Template-Erweiterung für deine bestehenden Dokumente ausarbeiten, oder eher die Datenbankstruktur für den Leistungsnachweis-Datensatz?
