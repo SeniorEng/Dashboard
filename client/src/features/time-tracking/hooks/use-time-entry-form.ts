@@ -35,6 +35,7 @@ export interface TimeEntryFormState {
   isFullDay: boolean;
   kilometers?: number | null;
   notes?: string | null;
+  targetUserId?: number | null;
 }
 
 const FULL_DAY_TYPES = FULL_DAY_ENTRY_TYPES as readonly string[];
@@ -134,6 +135,7 @@ export function useTimeEntryForm(initialState?: Partial<TimeEntryFormState>) {
     isFullDay: formState.isFullDay,
     kilometers: formState.isFullDay ? undefined : (formState.kilometers ?? undefined),
     notes: formState.notes || undefined,
+    targetUserId: formState.targetUserId ?? undefined,
   }), [formState]);
 
   const toUpdateRequest = useCallback(() => ({

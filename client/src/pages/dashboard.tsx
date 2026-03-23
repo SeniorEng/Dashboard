@@ -27,6 +27,8 @@ import { useTimeEntryConflict } from "@/features/time-tracking/hooks/use-time-en
 import { TimeEntryDialog } from "@/features/time-tracking/components/time-entry-dialog";
 import { TIME_ENTRY_TYPE_CONFIG } from "@/features/time-tracking/constants";
 import { useMonthClosingStatus } from "@/features/time-tracking/hooks/use-month-closing";
+import { useAdminEmployees } from "@/features/appointments/hooks/use-active-employees";
+import { useAuth } from "@/hooks/use-auth";
 import { ErrorState } from "@/components/patterns/error-state";
 import type { TimeEntry, TimeEntryType } from "@/lib/api/types";
 import type { AppointmentWithCustomer } from "@shared/types";
@@ -174,6 +176,8 @@ function TimeEntryCard({
 }
 
 export default function Dashboard() {
+  const { user } = useAuth();
+  const isAdmin = user?.isAdmin ?? false;
   const searchString = useSearch();
   const [selectedDate, setSelectedDate] = useState(() => {
     const params = new URLSearchParams(searchString);
@@ -188,6 +192,14 @@ export default function Dashboard() {
 
   const { data: appointments, isLoading, error, refetch } = useAppointments(dateString);
   const { data: dayTimeEntries } = useDayTimeEntries(dateString);
+  const { data: adminEmployees = [] } = useAdminEmployees({ enabled: isAdmin });
+  const employeeOptions = useMemo(() =>
+    adminEmployees.filter(e => e.isActive).map(e => ({
+      value: e.id.toString(),
+      label: e.displayName,
+    })).sort((a, b) => a.label.localeCompare(b.label, "de")),
+    [adminEmployees]
+  );
 
   const selectedYear = selectedDate.getFullYear();
   const selectedMonth = selectedDate.getMonth() + 1;
@@ -555,6 +567,8 @@ export default function Dashboard() {
         supportsDateRange={createForm.supportsDateRange}
         submitLabel="Erstellen"
         testIdPrefix="dashboard-create"
+        isAdmin={isAdmin}
+        employeeOptions={employeeOptions}
       />
 
       <TimeEntryDialog

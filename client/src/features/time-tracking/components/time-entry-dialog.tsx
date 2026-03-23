@@ -6,7 +6,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { DatePicker } from "@/components/ui/date-picker";
-import { Loader2, AlertCircle } from "lucide-react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
+import { Loader2, AlertCircle, Users } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { TimeEntryType } from "@/lib/api/types";
@@ -14,6 +15,11 @@ import type { TimeEntryFormState } from "../hooks/use-time-entry-form";
 import type { UseTimeEntryConflictResult } from "../hooks/use-time-entry-conflict";
 import { TIME_ENTRY_TYPE_CONFIG } from "../constants";
 import { parseLocalDate } from "@shared/utils/datetime";
+
+export interface EmployeeOption {
+  value: string;
+  label: string;
+}
 
 export interface TimeEntryDialogProps {
   open: boolean;
@@ -28,6 +34,8 @@ export interface TimeEntryDialogProps {
   supportsDateRange: boolean;
   submitLabel?: string;
   testIdPrefix?: string;
+  isAdmin?: boolean;
+  employeeOptions?: EmployeeOption[];
 }
 
 function TimeEntryFormContent({
@@ -41,11 +49,30 @@ function TimeEntryFormContent({
   supportsDateRange,
   submitLabel = "Speichern",
   testIdPrefix = "",
+  isAdmin = false,
+  employeeOptions = [],
 }: Omit<TimeEntryDialogProps, "open" | "title">) {
   const prefix = testIdPrefix ? `${testIdPrefix}-` : "";
 
   return (
     <div className="space-y-4 pt-4">
+      {isAdmin && employeeOptions.length > 0 && (
+        <div className="space-y-2">
+          <Label className="flex items-center gap-1.5">
+            <Users className={iconSize.sm} />
+            Mitarbeiter
+          </Label>
+          <SearchableSelect
+            options={employeeOptions}
+            value={formState.targetUserId?.toString() || ""}
+            onValueChange={(val) => onFieldChange("targetUserId", val ? parseInt(val) : null)}
+            placeholder="Für mich selbst (Standard)"
+            searchPlaceholder="Mitarbeiter suchen..."
+            data-testid={`${prefix}select-target-employee`}
+          />
+        </div>
+      )}
+
       <div className="space-y-2">
         <Label>Art</Label>
         <Select

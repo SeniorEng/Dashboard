@@ -23,6 +23,7 @@ import {
   MONTH_NAMES,
   type DayTimeEntry,
 } from "@/features/time-tracking";
+import { useAdminEmployees } from "@/features/appointments/hooks/use-active-employees";
 import type { TimeEntryType } from "@/lib/api/types";
 import { todayISO } from "@shared/utils/datetime";
 import { iconSize, componentStyles } from "@/design-system";
@@ -30,10 +31,19 @@ import { iconSize, componentStyles } from "@/design-system";
 export default function MyTimes() {
   const { toast } = useToast();
   const { user } = useAuth();
+  const isAdmin = user?.isAdmin ?? false;
   const searchString = useSearch();
   const todayStr = useMemo(() => todayISO(), []);
   const dayDetailRef = useRef<HTMLDivElement>(null);
   const missingBreaksRef = useRef<HTMLDivElement>(null);
+  const { data: adminEmployees = [] } = useAdminEmployees({ enabled: isAdmin });
+  const employeeOptions = useMemo(() =>
+    adminEmployees.filter(e => e.isActive).map(e => ({
+      value: e.id.toString(),
+      label: e.displayName,
+    })).sort((a, b) => a.label.localeCompare(b.label, "de")),
+    [adminEmployees]
+  );
 
   const [selectedYear, setSelectedYear] = useState(() => {
     const params = new URLSearchParams(searchString);
@@ -77,6 +87,7 @@ export default function MyTimes() {
       startTime: createForm.formState.startTime,
       endTime: createForm.formState.endTime,
       isFullDay: createForm.formState.isFullDay,
+      targetUserId: createForm.formState.targetUserId ?? undefined,
     } : null,
     showCreateDialog
   );
@@ -289,6 +300,8 @@ export default function MyTimes() {
             isFullDayType={createForm.isFullDayType}
             supportsDateRange={createForm.supportsDateRange}
             testIdPrefix=""
+            isAdmin={isAdmin}
+            employeeOptions={employeeOptions}
           />
 
           <TimeEntryDialog
