@@ -6,21 +6,15 @@ import {
   type UpdateAppointment,
   type MonthlyServiceRecord,
   type InsertServiceRecord,
-  type ServiceRecordStatus,
   type Invoice,
   type InvoiceLineItem,
   type SystemSettings,
   type CompanySettings,
-  customers, 
-  appointments,
   monthlyServiceRecords,
-  serviceRecordAppointments,
   users,
 } from "@shared/schema";
-import { computeDataHash } from "./services/signature-integrity";
 import type { AppointmentWithCustomer } from "@shared/types";
-import { eq, count, sql as sqlBuilder, lt, ne, and, or, ilike, inArray, isNull, isNotNull } from "drizzle-orm";
-import { customerIdsCache } from "./services/cache";
+import { eq } from "drizzle-orm";
 import { db } from "./lib/db";
 
 import * as customersStorage from "./storage/customers-storage";
@@ -108,7 +102,7 @@ export interface IStorage {
   getServiceRecordByPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<MonthlyServiceRecord | undefined>;
   createServiceRecord(record: InsertServiceRecord): Promise<MonthlyServiceRecord>;
   signServiceRecord(id: number, signatureData: string, signerType: 'employee' | 'customer', userId?: number, signingIp?: string | null, signingLocation?: string | null): Promise<MonthlyServiceRecord | undefined>;
-  updateServiceRecord(id: number, data: Record<string, unknown>): Promise<MonthlyServiceRecord | undefined>;
+  updateServiceRecord(id: number, data: Partial<typeof monthlyServiceRecords.$inferInsert>): Promise<MonthlyServiceRecord | undefined>;
   getAppointmentsForServiceRecord(serviceRecordId: number): Promise<AppointmentWithCustomer[]>;
   addAppointmentsToServiceRecord(serviceRecordId: number, appointmentIds: number[]): Promise<void>;
   getDocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<AppointmentWithCustomer[]>;

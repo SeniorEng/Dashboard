@@ -119,9 +119,9 @@ export async function signServiceRecord(id: number, signatureData: string, signe
   return result[0];
 }
 
-export async function updateServiceRecord(id: number, data: Record<string, unknown>): Promise<MonthlyServiceRecord | undefined> {
+export async function updateServiceRecord(id: number, data: Partial<typeof monthlyServiceRecords.$inferInsert>): Promise<MonthlyServiceRecord | undefined> {
   const result = await db.update(monthlyServiceRecords)
-    .set(data as any)
+    .set(data)
     .where(eq(monthlyServiceRecords.id, id))
     .returning();
   return result[0];
