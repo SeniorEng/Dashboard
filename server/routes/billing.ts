@@ -9,6 +9,7 @@ import {
   appointmentServices as appointmentServicesTable,
   services as servicesTable,
   users,
+  customers as customersTable,
   customerInsuranceHistory,
   insuranceProviders,
   invoices as invoicesTable,
@@ -18,7 +19,7 @@ import {
   customerServicePrices,
 } from "@shared/schema";
 import type { Invoice, InvoiceLineItem, CompanySettings } from "@shared/schema";
-import { eq, and, gte, lte, isNull, inArray, ne, notInArray } from "drizzle-orm";
+import { eq, and, gte, lte, isNull, inArray, ne, notInArray, or } from "drizzle-orm";
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
 import { formatDateForDisplay, formatDateISO, todayISO } from "@shared/utils/datetime";
@@ -204,6 +205,47 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
   res.json(invoices);
 }));
 
+router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht geladen werden", async (req, res) => {
+  const month = Number(req.query.month);
+  const year = Number(req.query.year);
+  if (!month || !year || month < 1 || month > 12) {
+    throw badRequest("Monat und Jahr sind erforderlich.");
+  }
+
+  const signedRecords = await db.select({
+    customerId: monthlyServiceRecords.customerId,
+  })
+    .from(monthlyServiceRecords)
+    .where(and(
+      eq(monthlyServiceRecords.year, year),
+      eq(monthlyServiceRecords.month, month),
+      or(
+        eq(monthlyServiceRecords.status, "completed"),
+        eq(monthlyServiceRecords.status, "employee_signed")
+      ),
+      isNull(monthlyServiceRecords.deletedAt)
+    ));
+
+  const uniqueCustomerIds = Array.from(new Set(signedRecords.map(r => r.customerId)));
+
+  if (uniqueCustomerIds.length === 0) {
+    return res.json([]);
+  }
+
+  const eligibleCustomers = await db.select({
+    id: customersTable.id,
+    name: customersTable.name,
+    vorname: customersTable.vorname,
+    nachname: customersTable.nachname,
+    billingType: customersTable.billingType,
+    status: customersTable.status,
+  })
+    .from(customersTable)
+    .where(inArray(customersTable.id, uniqueCustomerIds));
+
+  res.json(eligibleCustomers);
+}));
+
 router.get("/:id", asyncHandler("Rechnung konnte nicht geladen werden", async (req, res) => {
   const id = Number(req.params.id);
   const invoice = await storage.getInvoice(id);
@@ -356,210 +398,6 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
   res.json(invoice);
 }));
 
-router.post("/generate-batch", asyncHandler("Sammelrechnung konnte nicht erstellt werden", async (req, res) => {
-  const schema = z.object({
-    billingMonth: z.number().int().min(1).max(12),
-    billingYear: z.number().int().min(2020).max(2100),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    throw badRequest(fromError(parsed.error).toString());
-  }
-
-  const { billingMonth, billingYear } = parsed.data;
-
-  const allServiceRecords = await db.select()
-    .from(monthlyServiceRecords)
-    .where(and(
-      eq(monthlyServiceRecords.year, billingYear),
-      eq(monthlyServiceRecords.month, billingMonth),
-      isNull(monthlyServiceRecords.deletedAt)
-    ));
-
-  const uniqueCustomerIds = Array.from(new Set(allServiceRecords.map(sr => sr.customerId)));
-
-  if (uniqueCustomerIds.length === 0) {
-    return res.json({ created: 0, skipped: 0, errors: [], message: "Keine Leistungsnachweise für diesen Zeitraum vorhanden." });
-  }
-
-  const allCustomers = await storage.getCustomersByIds(uniqueCustomerIds);
-  const customerMap = new Map(allCustomers.map(c => [c.id, c]));
-
-  const signedRecordsByCustomer = new Map<number, typeof allServiceRecords>();
-  for (const sr of allServiceRecords) {
-    if (sr.status === "completed" || sr.status === "employee_signed") {
-      const list = signedRecordsByCustomer.get(sr.customerId) || [];
-      list.push(sr);
-      signedRecordsByCustomer.set(sr.customerId, list);
-    }
-  }
-
-  const allSignedRecordIds = Array.from(signedRecordsByCustomer.values()).flat().map(sr => sr.id);
-  let allSrApptRows: { serviceRecordId: number; appointmentId: number }[] = [];
-  if (allSignedRecordIds.length > 0) {
-    allSrApptRows = await db.select({
-      serviceRecordId: serviceRecordAppointments.serviceRecordId,
-      appointmentId: serviceRecordAppointments.appointmentId,
-    })
-    .from(serviceRecordAppointments)
-    .where(inArray(serviceRecordAppointments.serviceRecordId, allSignedRecordIds));
-  }
-  const srApptMap = new Map<number, number[]>();
-  for (const row of allSrApptRows) {
-    const list = srApptMap.get(row.serviceRecordId) || [];
-    list.push(row.appointmentId);
-    srApptMap.set(row.serviceRecordId, list);
-  }
-
-  const allInvoicedRows = await db.select({
-    customerId: invoicesTable.customerId,
-    appointmentId: invoiceLineItems.appointmentId,
-  })
-  .from(invoiceLineItems)
-  .innerJoin(invoicesTable, eq(invoiceLineItems.invoiceId, invoicesTable.id))
-  .where(and(
-    inArray(invoicesTable.customerId, uniqueCustomerIds),
-    eq(invoicesTable.billingYear, billingYear),
-    eq(invoicesTable.billingMonth, billingMonth),
-    ne(invoicesTable.status, "storniert"),
-    ne(invoicesTable.invoiceType, "stornorechnung")
-  ));
-  const invoicedByCustomer = new Map<number, Set<number>>();
-  for (const row of allInvoicedRows) {
-    if (row.appointmentId == null) continue;
-    if (!invoicedByCustomer.has(row.customerId)) invoicedByCustomer.set(row.customerId, new Set());
-    invoicedByCustomer.get(row.customerId)!.add(row.appointmentId);
-  }
-
-  const allInsuranceData = await db.select({
-    customerId: customerInsuranceHistory.customerId,
-    providerName: insuranceProviders.name,
-    ikNummer: insuranceProviders.ikNummer,
-    versichertennummer: customerInsuranceHistory.versichertennummer,
-  })
-  .from(customerInsuranceHistory)
-  .innerJoin(insuranceProviders, eq(customerInsuranceHistory.insuranceProviderId, insuranceProviders.id))
-  .where(and(
-    inArray(customerInsuranceHistory.customerId, uniqueCustomerIds),
-    isNull(customerInsuranceHistory.validTo)
-  ));
-  const insuranceByCustomer = new Map<number, { providerName: string; ikNummer: string; versichertennummer: string }>();
-  for (const row of allInsuranceData) {
-    if (!insuranceByCustomer.has(row.customerId)) {
-      insuranceByCustomer.set(row.customerId, {
-        providerName: row.providerName,
-        ikNummer: row.ikNummer,
-        versichertennummer: row.versichertennummer,
-      });
-    }
-  }
-
-  const results: { created: number; skipped: { customerName: string; reason: string }[]; errors: { customerId: number; customerName: string; reason: string }[] } = {
-    created: 0,
-    skipped: [],
-    errors: [],
-  };
-
-  for (const customerId of uniqueCustomerIds) {
-    try {
-      const customer = customerMap.get(customerId);
-      const custName = customer ? (customer.vorname && customer.nachname ? `${customer.vorname} ${customer.nachname}` : customer.name) : `Kunde #${customerId}`;
-
-      if (!customer) {
-        results.skipped.push({ customerName: custName, reason: "Kunde nicht gefunden" });
-        continue;
-      }
-
-      const signedRecords = signedRecordsByCustomer.get(customerId);
-      if (!signedRecords || signedRecords.length === 0) {
-        results.skipped.push({ customerName: custName, reason: "Leistungsnachweis nicht unterschrieben" });
-        continue;
-      }
-
-      const allApptIds: number[] = [];
-      for (const sr of signedRecords) {
-        const ids = srApptMap.get(sr.id);
-        if (ids) allApptIds.push(...ids);
-      }
-
-      if (allApptIds.length === 0) {
-        results.skipped.push({ customerName: custName, reason: "Leistungsnachweis ohne Termine" });
-        continue;
-      }
-
-      const alreadyInvoicedSet = invoicedByCustomer.get(customerId);
-      const isNachberechnung = alreadyInvoicedSet != null && alreadyInvoicedSet.size > 0;
-
-      const apptIds = alreadyInvoicedSet
-        ? allApptIds.filter(id => !alreadyInvoicedSet.has(id))
-        : allApptIds;
-
-      if (apptIds.length === 0) {
-        results.skipped.push({ customerName: custName, reason: isNachberechnung ? "Alle Termine bereits abgerechnet" : "Keine Termine" });
-        continue;
-      }
-
-      const { lineItems, totalNetCents, totalVatCents } = await buildLineItemsFromAppointments(apptIds, customerId);
-
-      const billingType = customer.billingType || "selbstzahler";
-      const customerName = customer.vorname && customer.nachname
-        ? `${customer.vorname} ${customer.nachname}`
-        : customer.name || "Unbekannt";
-      const customerAddress = [customer.strasse, customer.nr].filter(Boolean).join(" ") +
-        (customer.plz || customer.stadt ? `\n${customer.plz || ""} ${customer.stadt || ""}` : "");
-
-      let recipientName = customerName;
-      let recipientAddress = customerAddress;
-      let insuranceProviderName = "";
-      let insuranceIkNummer = "";
-      let versichertennummer = "";
-
-      if (billingType === "pflegekasse_gesetzlich" || billingType === "pflegekasse_privat") {
-        const insData = insuranceByCustomer.get(customerId);
-        if (insData) {
-          insuranceProviderName = insData.providerName;
-          insuranceIkNummer = insData.ikNummer;
-          versichertennummer = insData.versichertennummer;
-          if (billingType === "pflegekasse_gesetzlich") {
-            recipientName = insData.providerName;
-            recipientAddress = "";
-          }
-        }
-      }
-
-      const invoiceNumber = await storage.getNextInvoiceNumber(billingYear);
-      const invoiceData = {
-        invoiceNumber,
-        customerId,
-        billingType,
-        invoiceType: isNachberechnung ? "nachberechnung" : "rechnung",
-        billingMonth,
-        billingYear,
-        recipientName,
-        recipientAddress,
-        customerName,
-        insuranceProviderName: insuranceProviderName || null,
-        insuranceIkNummer: insuranceIkNummer || null,
-        versichertennummer: versichertennummer || null,
-        pflegegrad: customer.pflegegrad || null,
-        netAmountCents: totalNetCents,
-        vatAmountCents: totalVatCents,
-        grossAmountCents: totalNetCents + totalVatCents,
-        vatRate: 0,
-        status: "entwurf",
-      };
-
-      await storage.createInvoice(invoiceData, lineItems as Record<string, unknown>[], req.user!.id);
-      results.created++;
-    } catch (err: unknown) {
-      const customer = customerMap.get(customerId);
-      const name = customer ? (customer.vorname && customer.nachname ? `${customer.vorname} ${customer.nachname}` : customer.name) : `ID ${customerId}`;
-      results.errors.push({ customerId, customerName: name || `ID ${customerId}`, reason: err instanceof Error ? err.message : "Unbekannter Fehler" });
-    }
-  }
-
-  res.json(results);
-}));
 
 router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werden", async (req, res) => {
   const id = Number(req.params.id);

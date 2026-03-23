@@ -132,7 +132,6 @@ export default function AdminBilling() {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<number | null>(null);
   const [stornoTarget, setStornoTarget] = useState<InvoiceItem | null>(null);
-  const [batchResult, setBatchResult] = useState<{ created: number; skipped: { customerName: string; reason: string }[]; errors: { customerName: string; reason: string }[]; message?: string } | null>(null);
 
   const currentYear = today.getFullYear();
   const years = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
@@ -150,9 +149,12 @@ export default function AdminBilling() {
   });
 
   const { data: customers } = useQuery({
-    queryKey: ["billing-customers"],
+    queryKey: ["billing-eligible-customers", selectedYear, selectedMonth],
     queryFn: async ({ signal }) => {
-      const result = await api.get<CustomerListItem[]>("/customers", signal);
+      const params = new URLSearchParams();
+      params.set("month", selectedMonth.toString());
+      params.set("year", selectedYear.toString());
+      const result = await api.get<CustomerListItem[]>(`/billing/eligible-customers?${params.toString()}`, signal);
       return unwrapResult(result);
     },
   });
@@ -188,20 +190,6 @@ export default function AdminBilling() {
     },
   });
 
-  const batchMutation = useMutation({
-    mutationFn: async (data: { billingMonth: number; billingYear: number }) => {
-      const result = await api.post<{ created: number; skipped: { customerName: string; reason: string }[]; errors: { customerName: string; reason: string }[]; message?: string }>("/billing/generate-batch", data);
-      return unwrapResult(result);
-    },
-    onSuccess: (data) => {
-      setBatchResult(data);
-      queryClient.invalidateQueries({ queryKey: ["billing-invoices"] });
-    },
-    onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message, variant: "destructive" });
-    },
-  });
-
   const statusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: number; status: string }) => {
       const result = await api.patch(`/billing/${id}/status`, { status });
@@ -219,13 +207,6 @@ export default function AdminBilling() {
   });
 
   const handleGenerate = () => {
-    if (selectedCustomerId === "alle") {
-      batchMutation.mutate({
-        billingMonth: selectedMonth,
-        billingYear: selectedYear,
-      });
-      return;
-    }
     if (!selectedCustomerId) {
       toast({ title: "Bitte Kunden auswählen", variant: "destructive" });
       return;
@@ -489,7 +470,7 @@ export default function AdminBilling() {
             </Card>
           )}
 
-      <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) { setBatchResult(null); setSelectedCustomerId(""); } }}>
+      <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) { setSelectedCustomerId(""); } }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Neue Rechnung erstellen</DialogTitle>
@@ -498,114 +479,68 @@ export default function AdminBilling() {
             </DialogDescription>
           </DialogHeader>
 
-          {batchResult ? (
-            <div className="space-y-4 pt-2">
-              <div className="rounded-lg border p-4 space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2 text-green-700">
-                    <Check className={iconSize.sm} />
-                    <span className="font-medium">{batchResult.created} Rechnung(en) erstellt</span>
-                  </div>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Kunde</label>
+              {customers && customers.length === 0 ? (
+                <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3" data-testid="text-no-eligible-customers">
+                  Keine Kunden mit unterschriebenen Leistungsnachweisen für {MONTH_NAMES[selectedMonth - 1]} {selectedYear} vorhanden.
                 </div>
-                {batchResult.skipped.length > 0 && (
-                  <div className="space-y-1">
-                    <span className="text-sm text-gray-500 font-medium">{batchResult.skipped.length} übersprungen:</span>
-                    {batchResult.skipped.map((s, i) => (
-                      <div key={i} className="text-sm text-gray-500 pl-2">
-                        {s.customerName} – {s.reason}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {batchResult.created === 0 && batchResult.skipped.length === 0 && batchResult.message && (
-                  <div className="text-sm text-amber-600">{batchResult.message}</div>
-                )}
-                {batchResult.errors.length > 0 && (
-                  <div className="space-y-1">
-                    <span className="text-sm font-medium text-red-600">Fehler:</span>
-                    {batchResult.errors.map((err, i) => (
-                      <div key={i} className="text-sm text-red-600 pl-2">
-                        {err.customerName}: {err.reason}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <DialogFooter>
-                <Button onClick={() => { setDialogOpen(false); setBatchResult(null); setSelectedCustomerId(""); }}>
-                  Schließen
-                </Button>
-              </DialogFooter>
-            </div>
-          ) : (
-            <>
-              <div className="space-y-4 pt-2">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700">Kunde</label>
-                  <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId}>
-                    <SelectTrigger data-testid="select-invoice-customer">
-                      <SelectValue placeholder="Kunden auswählen..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="alle" className="font-medium border-b">
-                        Alle Kunden (Sammelabrechnung)
+              ) : (
+                <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId}>
+                  <SelectTrigger data-testid="select-invoice-customer">
+                    <SelectValue placeholder="Kunden auswählen..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {customers?.map((c) => (
+                      <SelectItem key={c.id} value={c.id.toString()}>
+                        {getCustomerName(c)}{c.status === "inaktiv" ? " (inaktiv)" : ""}
                       </SelectItem>
-                      {customers?.map((c) => (
-                        <SelectItem key={c.id} value={c.id.toString()}>
-                          {getCustomerName(c)}{c.status === "inaktiv" ? " (inaktiv)" : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
 
-                <div className="flex gap-4">
-                  <div className="flex-1 space-y-2">
-                    <label className="text-sm font-medium text-gray-700">Monat</label>
-                    <div className="text-sm text-gray-900 p-2 bg-gray-50 rounded-md">
-                      {MONTH_NAMES[selectedMonth - 1]}
-                    </div>
-                  </div>
-                  <div className="flex-1 space-y-2">
-                    <label className="text-sm font-medium text-gray-700">Jahr</label>
-                    <div className="text-sm text-gray-900 p-2 bg-gray-50 rounded-md">
-                      {selectedYear}
-                    </div>
-                  </div>
+            <div className="flex gap-4">
+              <div className="flex-1 space-y-2">
+                <label className="text-sm font-medium text-gray-700">Monat</label>
+                <div className="text-sm text-gray-900 p-2 bg-gray-50 rounded-md">
+                  {MONTH_NAMES[selectedMonth - 1]}
                 </div>
-
-                {selectedCustomerId === "alle" && (
-                  <div className="text-sm text-teal-700 bg-teal-50 border border-teal-200 rounded-md p-3">
-                    Es werden automatisch Rechnungen für alle Kunden mit abgeschlossenen Terminen im gewählten Monat erstellt. Bereits abgerechnete Termine werden übersprungen. Bei Nacherfassungen wird eine Ergänzungsrechnung erstellt.
-                  </div>
-                )}
               </div>
+              <div className="flex-1 space-y-2">
+                <label className="text-sm font-medium text-gray-700">Jahr</label>
+                <div className="text-sm text-gray-900 p-2 bg-gray-50 rounded-md">
+                  {selectedYear}
+                </div>
+              </div>
+            </div>
+          </div>
 
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setDialogOpen(false)}>
-                  Abbrechen
-                </Button>
-                <Button
-                  onClick={handleGenerate}
-                  disabled={generateMutation.isPending || batchMutation.isPending || !selectedCustomerId}
-                  className="bg-teal-600 hover:bg-teal-700 text-white"
-                  data-testid="button-generate-invoice"
-                >
-                  {(generateMutation.isPending || batchMutation.isPending) ? (
-                    <>
-                      <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
-                      {selectedCustomerId === "alle" ? "Wird erstellt..." : "Wird erstellt..."}
-                    </>
-                  ) : (
-                    <>
-                      <FileText className={`${iconSize.sm} mr-1`} />
-                      {selectedCustomerId === "alle" ? "Alle Rechnungen erstellen" : "Rechnung erstellen"}
-                    </>
-                  )}
-                </Button>
-              </DialogFooter>
-            </>
-          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+              Abbrechen
+            </Button>
+            <Button
+              onClick={handleGenerate}
+              disabled={generateMutation.isPending || !selectedCustomerId}
+              className="bg-teal-600 hover:bg-teal-700 text-white"
+              data-testid="button-generate-invoice"
+            >
+              {generateMutation.isPending ? (
+                <>
+                  <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                  Wird erstellt...
+                </>
+              ) : (
+                <>
+                  <FileText className={`${iconSize.sm} mr-1`} />
+                  Rechnung erstellen
+                </>
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
