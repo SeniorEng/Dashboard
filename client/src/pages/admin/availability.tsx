@@ -16,6 +16,7 @@ import {
   Thermometer,
   Plus,
   Loader2,
+  Ban,
 } from "lucide-react";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
@@ -35,10 +36,16 @@ interface DayAppointment {
   status: string;
 }
 
+interface BlockerSlot {
+  startTime: string;
+  endTime: string;
+}
+
 interface DayData {
   availability: { startTime: string | null; endTime: string | null }[];
   appointments: DayAppointment[];
   absence: "urlaub" | "krankheit" | null;
+  blockers: "fullday" | BlockerSlot[] | null;
   freeSlots: FreeSlot[];
 }
 
@@ -306,6 +313,10 @@ export default function AvailabilityPage() {
           Gebucht
         </div>
         <div className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded bg-orange-100 border border-orange-300" />
+          Blockiert
+        </div>
+        <div className="flex items-center gap-1.5">
           <span className="w-3 h-3 rounded bg-red-100 border border-red-300" />
           Abwesend
         </div>
@@ -351,8 +362,22 @@ function DayCell({
     );
   }
 
+  if (dayData.blockers === "fullday") {
+    return (
+      <div
+        className="rounded-md px-2 py-1.5 text-center text-xs font-medium bg-orange-50 text-orange-700 border border-orange-200"
+        data-testid={`blocker-${employeeId}-${dateStr}`}
+      >
+        <div className="flex items-center justify-center gap-1">
+          <Ban className="h-3 w-3" />
+          Blockiert
+        </div>
+      </div>
+    );
+  }
+
   const hasContent =
-    dayData.freeSlots.length > 0 || dayData.appointments.length > 0 || dayData.availability.length > 0;
+    dayData.freeSlots.length > 0 || dayData.appointments.length > 0 || dayData.availability.length > 0 || (Array.isArray(dayData.blockers) && dayData.blockers.length > 0);
 
   if (!hasContent) {
     return (
@@ -391,6 +416,18 @@ function DayCell({
             </span>
           </div>
           <div className="truncate ml-4 text-gray-500">{appt.customerName}</div>
+        </div>
+      ))}
+      {Array.isArray(dayData.blockers) && dayData.blockers.map((blocker, i) => (
+        <div
+          key={`blocker-${i}`}
+          className="px-2 py-1 rounded text-xs bg-orange-50 border border-orange-200 text-orange-700"
+          data-testid={`slot-blocker-${employeeId}-${dateStr}-${i}`}
+        >
+          <div className="flex items-center gap-1">
+            <Ban className="h-3 w-3 shrink-0" />
+            <span className="font-medium">{blocker.startTime} – {blocker.endTime}</span>
+          </div>
         </div>
       ))}
     </div>

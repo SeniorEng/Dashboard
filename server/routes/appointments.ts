@@ -17,7 +17,8 @@ import { getCachedCompanySettings } from "../services/cache";
 import { suggestTravelOrigin } from "@shared/domain/appointments";
 import { calculateRoute } from "../services/routing";
 import { geocodeCustomer } from "../services/geocoding";
-import { isWeekend, currentTimeHHMMSS, todayISO, parseLocalDate } from "@shared/utils/datetime";
+import { isWeekend, currentTimeHHMMSS, todayISO, parseLocalDate, timeToMinutes } from "@shared/utils/datetime";
+import { timeRangesOverlap } from "@shared/domain/time-entries";
 import { 
   ErrorMessages, 
   asyncHandler,
@@ -42,6 +43,32 @@ import { serviceRecordAppointments, monthlyServiceRecords } from "@shared/schema
 import { eq } from "drizzle-orm";
 
 const router = Router();
+
+async function checkEmployeeBlocker(
+  employeeId: number,
+  date: string,
+  startTime: string,
+  endTime: string
+): Promise<string | null> {
+  const blockerEntries = await timeTrackingStorage.getTimeEntriesForDate(employeeId, date);
+  const blockers = blockerEntries.filter(e => e.entryType === "blocker" && !e.deletedAt);
+
+  for (const blocker of blockers) {
+    if (blocker.isFullDay) {
+      return "Der Mitarbeiter hat an diesem Tag einen Blocker eingetragen und steht nicht zur Verfügung.";
+    }
+    if (blocker.startTime && blocker.endTime) {
+      const blockerStart = timeToMinutes(blocker.startTime);
+      const blockerEnd = timeToMinutes(blocker.endTime);
+      const apptStart = timeToMinutes(startTime);
+      const apptEnd = timeToMinutes(endTime);
+      if (timeRangesOverlap(apptStart, apptEnd, blockerStart, blockerEnd)) {
+        return `Der Mitarbeiter hat einen Blocker von ${blocker.startTime.slice(0, 5)} bis ${blocker.endTime.slice(0, 5)} Uhr eingetragen.`;
+      }
+    }
+  }
+  return null;
+}
 
 function isDateMoreThan3MonthsInPast(dateStr: string): boolean {
   const date = parseLocalDate(dateStr);
@@ -332,6 +359,13 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     return sendConflict(res, "Terminüberschneidung", ErrorMessages.timeOverlap);
   }
 
+  const blockerConflict = await checkEmployeeBlocker(
+    assignedEmployeeId, validatedData.date, validatedData.scheduledStart, scheduledEnd
+  );
+  if (blockerConflict) {
+    return sendConflict(res, "Mitarbeiter blockiert", blockerConflict);
+  }
+
   const customerOverlap = await appointmentService.checkCustomerOverlap(
     validatedData.date, validatedData.scheduledStart, scheduledEnd, validatedData.customerId
   );
@@ -413,6 +447,13 @@ router.post("/prospect-erstberatung", asyncHandler("Erstberatung konnte nicht er
 
   if (overlapResult.hasOverlap) {
     return sendConflict(res, "Terminüberschneidung", ErrorMessages.timeOverlap);
+  }
+
+  const erstberatungBlockerConflict = await checkEmployeeBlocker(
+    assignedEmployeeId, validatedData.date, validatedData.scheduledStart, scheduledEnd
+  );
+  if (erstberatungBlockerConflict) {
+    return sendConflict(res, "Mitarbeiter blockiert", erstberatungBlockerConflict);
   }
 
   const result = await db.transaction(async (tx) => {
@@ -502,7 +543,7 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
     return sendForbidden(res, validation.error!, validation.message!);
   }
 
-  if (validatedData.date || validatedData.scheduledStart || validatedData.scheduledEnd || validatedData.durationPromised) {
+  if (validatedData.date || validatedData.scheduledStart || validatedData.scheduledEnd || validatedData.durationPromised || validatedData.assignedEmployeeId) {
     const checkDate = validatedData.date || existingAppointment.date;
     const checkStart = validatedData.scheduledStart || existingAppointment.scheduledStart;
     const duration = validatedData.durationPromised ?? existingAppointment.durationPromised;
@@ -516,6 +557,11 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
         const empOverlap = await appointmentService.checkOverlap(checkDate, checkStart, checkEnd, assignedEmpId, id);
         if (empOverlap.hasOverlap) {
           return sendConflict(res, "Terminüberschneidung", ErrorMessages.timeOverlap);
+        }
+
+        const updateBlockerConflict = await checkEmployeeBlocker(assignedEmpId, checkDate, checkStart, checkEnd);
+        if (updateBlockerConflict) {
+          return sendConflict(res, "Mitarbeiter blockiert", updateBlockerConflict);
         }
       }
 

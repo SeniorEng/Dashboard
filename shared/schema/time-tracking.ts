@@ -20,6 +20,7 @@ export const TIME_ENTRY_TYPES = [
   "besprechung",   // Meeting
   "sonstiges",     // Other
   "verfuegbar",    // Available (organizational only, not counted as work time)
+  "blocker",       // Blocked time (no appointments allowed, not counted as work time)
 ] as const;
 
 export type TimeEntryType = typeof TIME_ENTRY_TYPES[number];

@@ -25,7 +25,7 @@ async function checkTimeConflicts(
   excludeEntryId?: number,
   entryType?: string
 ): Promise<string | null> {
-  if (entryType === "verfuegbar") {
+  if (entryType === "verfuegbar" || entryType === "blocker") {
     return null;
   }
 
@@ -38,10 +38,10 @@ async function checkTimeConflicts(
   // Get time entries for this date
   const timeEntries = await timeTrackingStorage.getTimeEntriesForDate(userId, date);
   
-  // Filter out the entry we're updating (if any) and verfuegbar entries (organizational only)
+  // Filter out the entry we're updating (if any) and verfuegbar/blocker entries (organizational only)
   const otherEntries = timeEntries
     .filter(e => e.id !== excludeEntryId)
-    .filter(e => e.entryType !== "verfuegbar");
+    .filter(e => e.entryType !== "verfuegbar" && e.entryType !== "blocker");
   
   // For full-day entries, check if there are any other active appointments or entries
   if (isFullDay) {
