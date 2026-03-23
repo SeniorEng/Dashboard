@@ -159,13 +159,18 @@ router.get("/vacation-summary/:year", asyncHandler("Urlaubsübersicht konnte nic
  */
 router.get("/by-date/:date", asyncHandler("Zeiteinträge konnten nicht geladen werden", async (req: Request, res: Response) => {
   const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : undefined;
-  const userId = (req.user!.isAdmin && viewAsEmployeeId) ? viewAsEmployeeId : req.user!.id;
   const date = req.params.date;
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return res.status(400).json({ error: "Ungültiges Datum" });
   }
 
+  if (req.user!.isAdmin && !viewAsEmployeeId) {
+    const entries = await timeTrackingStorage.getAllTimeEntriesForDate(date);
+    return res.json(entries);
+  }
+
+  const userId = (req.user!.isAdmin && viewAsEmployeeId) ? viewAsEmployeeId : req.user!.id;
   const entries = await timeTrackingStorage.getTimeEntriesForDate(userId, date);
   res.json(entries);
 }));
