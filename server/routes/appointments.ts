@@ -114,15 +114,9 @@ router.get("/", asyncHandler(ErrorMessages.fetchAppointmentsFailed, async (req, 
   
   if (user.isAdmin && viewAsEmployeeId) {
     customerIds = await storage.getAssignedCustomerIds(viewAsEmployeeId);
-    if (customerIds.length === 0) {
-      return res.json([]);
-    }
     employeeId = viewAsEmployeeId;
   } else if (!user.isAdmin) {
     customerIds = await storage.getAssignedCustomerIds(user.id);
-    if (customerIds.length === 0) {
-      return res.json([]);
-    }
     employeeId = user.id;
   }
   
@@ -159,15 +153,9 @@ router.get("/counts", asyncHandler("Fehler beim Laden der Terminzähler", async 
 
   if (user.isAdmin && viewAsEmployeeId) {
     customerIds = await storage.getAssignedCustomerIds(viewAsEmployeeId);
-    if (customerIds.length === 0) {
-      return res.json({});
-    }
     employeeId = viewAsEmployeeId;
   } else if (!user.isAdmin) {
     customerIds = await storage.getAssignedCustomerIds(user.id);
-    if (customerIds.length === 0) {
-      return res.json({});
-    }
     employeeId = user.id;
   }
 
@@ -185,15 +173,9 @@ router.get("/undocumented", asyncHandler("Fehler beim Laden der offenen Dokument
 
   if (user.isAdmin && viewAsEmployeeId) {
     customerIds = await storage.getAssignedCustomerIds(viewAsEmployeeId);
-    if (customerIds.length === 0) {
-      return res.json([]);
-    }
     employeeId = viewAsEmployeeId;
   } else if (!user.isAdmin) {
     customerIds = await storage.getAssignedCustomerIds(user.id);
-    if (customerIds.length === 0) {
-      return res.json([]);
-    }
     employeeId = user.id;
   }
 
