@@ -147,6 +147,13 @@ function isNeonDriverBug(message: string): boolean {
     console.error("[startup] WhatsApp-Regeln-Seed fehlgeschlagen:", err);
   }
 
+  const { migrateErstberatungCustomers } = await import("./startup/migrate-erstberatung-customers");
+  try {
+    await migrateErstberatungCustomers();
+  } catch (err) {
+    console.error("[startup] Erstberatung-Kunden-Migration fehlgeschlagen:", err);
+  }
+
   const { geocodeAllMissing } = await import("./services/geocoding");
   geocodeAllMissing().catch(err => console.error("[geocoding] Batch geocoding error:", err));
 
