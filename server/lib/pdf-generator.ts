@@ -378,10 +378,10 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     <div class="signature-area">
       <div class="signature-box">
         ${custSigValid ? `
-          <div style="margin-bottom: 4px;">
-            <img src="${sig.customerSignatureData}" style="max-width: 200px; max-height: 60px;" />
+          <div class="signature-img-wrapper">
+            <img src="${sig.customerSignatureData}" class="signature-img" />
           </div>
-          <div class="signature-line">
+          <div class="signature-line signature-line-signed">
             ${escapeHtml(sig.customerSignedAt || "")}, ${escapeHtml(sig.customerName || data.customerName)}<br>
             <span style="color: #9ca3af;">(Leistungsempfänger/in)</span>
           </div>
@@ -391,10 +391,10 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       </div>
       <div class="signature-box">
         ${empSigValid ? `
-          <div style="margin-bottom: 4px;">
-            <img src="${sig.employeeSignatureData}" style="max-width: 200px; max-height: 60px;" />
+          <div class="signature-img-wrapper">
+            <img src="${sig.employeeSignatureData}" class="signature-img" />
           </div>
-          <div class="signature-line">
+          <div class="signature-line signature-line-signed">
             ${escapeHtml(sig.employeeSignedAt || "")}, ${escapeHtml(sig.employeeName || "")}<br>
             <span style="color: #9ca3af;">(Leistungserbringer/in)</span>
           </div>
@@ -547,8 +547,11 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     table.items th:nth-child(4), table.items th:nth-child(5), table.items th:nth-child(6) { text-align: right; }
     .total-row td { font-weight: bold; border-top: 2px solid #0d9488; padding: 8px; }
     .signature-area { margin-top: 40px; display: flex; justify-content: space-between; }
-    .signature-box { width: 45%; }
+    .signature-box { width: 45%; position: relative; }
+    .signature-img-wrapper { position: relative; margin-bottom: -18px; z-index: 1; }
+    .signature-img { max-width: 260px; max-height: 150px; filter: brightness(0) saturate(100%) invert(18%) sepia(60%) saturate(600%) hue-rotate(190deg); }
     .signature-line { border-top: 1px solid #1f2937; margin-top: 40px; padding-top: 5px; font-size: 9pt; color: #6b7280; }
+    .signature-line-signed { margin-top: 0; }
     .footer { margin-top: 30px; font-size: 8pt; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 10px; }
     .confirm-text { margin-top: 20px; font-size: 9pt; font-style: italic; color: #4b5563; padding: 10px; background: #f0fdfa; border-left: 3px solid #0d9488; }
   </style>

@@ -291,12 +291,14 @@ export function SignatureDisplay({
       {label && (
         <p className="text-xs font-medium text-muted-foreground">{label}</p>
       )}
-      <div className="border rounded-lg bg-white p-2">
+      <div className="border rounded-lg p-2 bg-transparent relative">
         <img
           src={signatureData}
           alt="Unterschrift"
-          className="max-h-20 w-auto mx-auto"
+          className="max-h-36 w-auto mx-auto relative -mb-1"
+          style={{ filter: "brightness(0) saturate(100%) invert(18%) sepia(60%) saturate(600%) hue-rotate(190deg)" }}
         />
+        <div className="border-t border-gray-800 mx-2" />
       </div>
       {formattedDate && (
         <p className="text-xs text-muted-foreground text-center">
