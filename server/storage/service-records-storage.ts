@@ -3,6 +3,7 @@ import {
   type InsertServiceRecord,
   type ServiceRecordStatus,
   customers,
+  prospects,
   appointments,
   monthlyServiceRecords,
   serviceRecordAppointments,
@@ -139,6 +140,7 @@ export async function getAppointmentsForServiceRecord(serviceRecordId: number): 
   const rows = await db.select(appointmentWithCustomerSelectFields)
     .from(appointments)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
+    .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(and(inArray(appointments.id, appointmentIds), isNull(appointments.deletedAt)))
     .orderBy(appointments.date, appointments.scheduledStart);
 
@@ -167,6 +169,7 @@ export async function getDocumentedAppointmentsForPeriod(customerId: number, emp
   const rows = await db.select(appointmentWithCustomerSelectFields)
     .from(appointments)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
+    .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(and(
       eq(appointments.customerId, customerId),
       or(
@@ -192,6 +195,7 @@ export async function getUndocumentedAppointmentsForPeriod(customerId: number, e
   const rows = await db.select(appointmentWithCustomerSelectFields)
     .from(appointments)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
+    .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(and(
       eq(appointments.customerId, customerId),
       or(

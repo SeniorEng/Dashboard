@@ -2,6 +2,7 @@ import {
   type Customer,
   type InsertCustomer,
   customers,
+  prospects,
   appointments,
   users,
 } from "@shared/schema";
@@ -215,6 +216,7 @@ export async function searchAppointmentsWithCustomers(options: SearchOptions): P
     .select(appointmentWithCustomerSelectFields)
     .from(appointments)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
+    .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(and(...conditions))
     .limit(limit);
 
