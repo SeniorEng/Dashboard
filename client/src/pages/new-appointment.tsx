@@ -281,15 +281,17 @@ export default function NewAppointment() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                           <div className="space-y-1">
                             <Label htmlFor="inline-telefon">
-                              <Phone className={`${iconSize.sm} inline mr-1`} /> Telefon
+                              <Phone className={`${iconSize.sm} inline mr-1`} /> Telefon *
                             </Label>
                             <Input
                               id="inline-telefon"
                               placeholder="z.B. 0151 12345678"
                               value={form.inlineProspectTelefon}
                               onChange={(e) => form.setInlineProspectTelefon(e.target.value)}
+                              className={form.errors.inlineTelefon ? "border-destructive" : ""}
                               data-testid="input-inline-telefon"
                             />
+                            {form.errors.inlineTelefon && <p className="text-destructive text-xs">{form.errors.inlineTelefon}</p>}
                           </div>
                           <div className="space-y-1">
                             <Label htmlFor="inline-email">

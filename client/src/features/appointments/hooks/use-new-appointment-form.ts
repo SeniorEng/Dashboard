@@ -319,6 +319,7 @@ export function useNewAppointmentForm() {
     const newErrors: Record<string, string> = {};
     if (!inlineProspectVorname.trim()) newErrors.inlineVorname = "Vorname ist erforderlich";
     if (!inlineProspectNachname.trim()) newErrors.inlineNachname = "Nachname ist erforderlich";
+    if (!inlineProspectTelefon.trim()) newErrors.inlineTelefon = "Telefonnummer ist erforderlich";
     setErrors(newErrors);
     if (Object.keys(newErrors).length > 0) return;
 
