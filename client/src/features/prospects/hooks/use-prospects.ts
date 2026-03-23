@@ -46,7 +46,7 @@ export function useCreateProspect() {
   const { toast } = useToast();
 
   return useMutation({
-    mutationFn: async (data: InsertProspect) => {
+    mutationFn: async (data: InsertProspect & { _initialNote?: string }) => {
       const result = await api.post<Prospect>("/admin/prospects", data);
       return unwrapResult(result);
     },
@@ -133,6 +133,69 @@ export function useDeleteProspect() {
       queryClient.invalidateQueries({ queryKey: ["prospects"] });
       queryClient.invalidateQueries({ queryKey: ["prospect-stats"] });
       toast({ title: "Gelöscht", description: "Der Interessent wurde entfernt." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+}
+
+export function useQualifyProspect() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({ id, action, disqualificationReason }: { id: number; action: "qualify" | "disqualify"; disqualificationReason?: string }) => {
+      const result = await api.patch<Prospect>(`/admin/prospects/${id}/qualify`, { action, disqualificationReason });
+      return unwrapResult(result);
+    },
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: ["prospect", vars.id] });
+      queryClient.invalidateQueries({ queryKey: ["prospects"] });
+      queryClient.invalidateQueries({ queryKey: ["prospect-stats"] });
+      toast({ title: vars.action === "qualify" ? "Qualifiziert" : "Disqualifiziert" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+}
+
+interface ProspectOfferData {
+  id: number;
+  wizardData: Record<string, unknown>;
+  status: string;
+  createdAt: string;
+  expiresAt: string | null;
+}
+
+export function useProspectOffer(prospectId: number | null) {
+  return useQuery<ProspectOfferData | null>({
+    queryKey: ["prospect-offer", prospectId],
+    queryFn: async () => {
+      const result = await api.get<ProspectOfferData>(`/admin/prospects/${prospectId}/offer`);
+      return unwrapResult(result);
+    },
+    enabled: !!prospectId,
+    staleTime: 30_000,
+  });
+}
+
+export function useDeclineProspectOffer() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({ prospectId }: { prospectId: number }) => {
+      const result = await api.patch<Prospect>(`/admin/prospects/${prospectId}`, { status: "absage" });
+      return unwrapResult(result);
+    },
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: ["prospect", vars.prospectId] });
+      queryClient.invalidateQueries({ queryKey: ["prospects"] });
+      queryClient.invalidateQueries({ queryKey: ["prospect-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["prospect-offer", vars.prospectId] });
+      toast({ title: "Angebot abgelehnt" });
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });

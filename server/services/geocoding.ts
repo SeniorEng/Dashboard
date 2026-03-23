@@ -123,7 +123,7 @@ export async function geocodeAllMissing(): Promise<void> {
       isNotNull(customers.strasse),
       isNotNull(customers.plz),
       isNotNull(customers.stadt),
-      or(eq(customers.status, "aktiv"), eq(customers.status, "erstberatung"))
+      eq(customers.status, "aktiv")
     )
   );
 

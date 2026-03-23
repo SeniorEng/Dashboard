@@ -51,140 +51,12 @@ import { CustomerContactsTab } from "./components/customer-contacts-tab";
 import { CustomerContractTab } from "./components/customer-contract-tab";
 import { CustomerTimeline } from "@/features/customers/components/customer-timeline";
 
-const MISSING_LABELS: Record<string, string> = {
-  pflegegrad: "Pflegegrad",
-  billingType: "Abrechnungsart",
-  primaryEmployee: "Zuständiger Mitarbeiter",
-  insurance: "Versicherung / Pflegekasse",
-  contract: "Aktiver Vertrag",
-};
 
 interface CustomerListItem {
   id: number;
   name: string;
   status: string;
   address: string;
-}
-
-function ErstberatungConversionSection({
-  customerId,
-  onActivate,
-  onReject,
-  onMerge,
-  isUpdating,
-  isMerging,
-}: {
-  customerId: number;
-  onActivate: () => void;
-  onReject: () => void;
-  onMerge: () => void;
-  isUpdating: boolean;
-  isMerging: boolean;
-}) {
-  const { data: readiness, isLoading } = useQuery<{
-    ready: boolean;
-    missing: string[];
-    customerStatus: string;
-  }>({
-    queryKey: ["conversion-readiness", customerId],
-    queryFn: async () => {
-      const result = await api.get<{ ready: boolean; missing: string[]; customerStatus: string }>(`/admin/customers/${customerId}/conversion-readiness`);
-      return unwrapResult(result);
-    },
-    staleTime: 10000,
-  });
-
-  return (
-    <SectionCard className="mb-4 border-teal-200 bg-teal-50">
-      <div className="space-y-3">
-        <div>
-          <p className="font-medium text-teal-900">Erstberatungskunde</p>
-          <p className="text-sm text-teal-700 mt-0.5">
-            Prüfen Sie die Vollständigkeit und aktivieren Sie den Kunden für reguläre Termine.
-          </p>
-        </div>
-
-        {isLoading ? (
-          <div className="flex items-center gap-2 text-sm text-teal-600">
-            <Loader2 className={`${iconSize.sm} animate-spin`} />
-            <span>Daten werden geprüft...</span>
-          </div>
-        ) : readiness ? (
-          <>
-            <div className="space-y-1.5">
-              {Object.entries(MISSING_LABELS).map(([key, label]) => {
-                const isMissing = readiness.missing.includes(key);
-                return (
-                  <div
-                    key={key}
-                    className={`flex items-center gap-2 text-sm ${isMissing ? "text-red-700" : "text-teal-700"}`}
-                    data-testid={`readiness-${key}`}
-                  >
-                    {isMissing ? (
-                      <XCircle className={`${iconSize.sm} text-red-500 shrink-0`} />
-                    ) : (
-                      <CheckCircle2 className={`${iconSize.sm} text-green-600 shrink-0`} />
-                    )}
-                    <span>{label}</span>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              <Button
-                onClick={onActivate}
-                disabled={isUpdating || isMerging || !readiness.ready}
-                className={componentStyles.btnPrimary}
-                data-testid="button-activate-customer"
-              >
-                {isUpdating ? (
-                  <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
-                ) : (
-                  <UserCheck className={`${iconSize.sm} mr-2`} />
-                )}
-                Kunde aktivieren
-              </Button>
-              <Button
-                variant="outline"
-                onClick={onMerge}
-                disabled={isUpdating || isMerging}
-                className="text-teal-700 border-teal-200 hover:bg-teal-100"
-                data-testid="button-merge-customer"
-              >
-                {isMerging ? (
-                  <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
-                ) : (
-                  <Merge className={`${iconSize.sm} mr-2`} />
-                )}
-                Zusammenführen
-              </Button>
-              <Button
-                variant="outline"
-                onClick={onReject}
-                disabled={isUpdating || isMerging}
-                className="text-red-700 border-red-200 hover:bg-red-50"
-                data-testid="button-reject-customer"
-              >
-                {isUpdating ? (
-                  <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
-                ) : (
-                  <Ban className={`${iconSize.sm} mr-2`} />
-                )}
-                Kein Interesse
-              </Button>
-            </div>
-
-            {!readiness.ready && (
-              <p className="text-xs text-teal-600 mt-1">
-                Bitte ergänzen Sie die fehlenden Daten über "Bearbeiten", bevor Sie den Kunden aktivieren.
-              </p>
-            )}
-          </>
-        ) : null}
-      </div>
-    </SectionCard>
-  );
 }
 
 function BackfillSection({ customerId, onRefresh }: { customerId: number; onRefresh: () => void }) {
@@ -450,9 +322,6 @@ export default function AdminCustomerDetail() {
             backHref="/admin/customers"
             badge={
               <>
-                {customer.status === "erstberatung" && (
-                  <StatusBadge type="status" value="Erstberatung" />
-                )}
                 {customer.status === "inaktiv" && (
                   <StatusBadge type="warning" value="Inaktiv" />
                 )}
@@ -486,20 +355,6 @@ export default function AdminCustomerDetail() {
             actions={undefined}
           />
 
-          {customer.status === "erstberatung" && (
-            <ErstberatungConversionSection
-              customerId={customerId}
-              onActivate={() => updateStatus.mutate({ status: "aktiv" })}
-              onReject={() => {
-                setDeactivationNote("");
-                setShowDeactivateDialog(true);
-              }}
-              onMerge={() => setShowMergeDialog(true)}
-              isUpdating={updateStatus.isPending}
-              isMerging={false}
-            />
-          )}
-
           {customer.status === "aktiv" && customer.inaktivAb && (
             <SectionCard className="mb-4 border-blue-200 bg-blue-50">
               <div className="flex items-center gap-2">
@@ -520,7 +375,7 @@ export default function AdminCustomerDetail() {
                   </p>
                   <p className={`text-sm mt-0.5 ${customer.deactivationReason === "zusammengefuehrt" ? "text-green-700" : "text-amber-700"}`}>
                     {customer.deactivationReason === "zusammengefuehrt"
-                      ? "Dieser Erstberatungskunde wurde mit einem bestehenden Kunden zusammengeführt."
+                      ? "Dieser Kunde wurde mit einem bestehenden Kunden zusammengeführt."
                       : customer.inaktivAb
                         ? `Inaktiv ab ${formatDateForDisplay(customer.inaktivAb)}. Keine neuen Termine ab diesem Datum.`
                         : "Dieser Kunde ist deaktiviert und kann keine neuen Termine erhalten."}
@@ -651,7 +506,7 @@ export default function AdminCustomerDetail() {
               <DialogHeader>
                 <DialogTitle>Mit bestehendem Kunden zusammenführen</DialogTitle>
                 <DialogDescription>
-                  Wählen Sie den aktiven Kunden aus, mit dem dieser Erstberatungskunde zusammengeführt werden soll. Der Erstberatungskunde wird als erfolgreich übernommen markiert.
+                  Wählen Sie den aktiven Kunden aus, mit dem dieser Kunde zusammengeführt werden soll. Der Kunde wird als erfolgreich übernommen markiert.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-2">
@@ -728,9 +583,9 @@ export default function AdminCustomerDetail() {
           }}>
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
-                <DialogTitle>Erstberatung ablehnen</DialogTitle>
+                <DialogTitle>Kunden deaktivieren</DialogTitle>
                 <DialogDescription>
-                  Bitte geben Sie einen Grund an, warum dieser Erstberatungskunde abgelehnt wird.
+                  Bitte geben Sie einen Grund an, warum dieser Kunde deaktiviert wird.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-2">

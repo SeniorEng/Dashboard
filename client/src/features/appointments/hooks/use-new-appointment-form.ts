@@ -80,9 +80,9 @@ export function useNewAppointmentForm() {
   const [ktServices, setKtServices] = useState<Array<{ serviceId: number; durationMinutes: number }>>([]);
   const [ktNotes, setKtNotes] = useState<string>("");
   const [ktAssignedEmployeeId, setKtAssignedEmployeeId] = useState<string>("");
-  const fromProspectId = urlParams.get("fromProspect");
+  const fromProspectId = urlParams.get("prospectId");
 
-  const { data: prospectData } = useQuery<{
+  interface ProspectAppointmentData {
     id: number;
     vorname: string;
     nachname: string;
@@ -93,10 +93,12 @@ export function useNewAppointmentForm() {
     plz: string | null;
     stadt: string | null;
     pflegegrad: number | null;
-  }>({
-    queryKey: [`/api/admin/prospects/${fromProspectId}`],
+  }
+
+  const { data: prospectData } = useQuery<ProspectAppointmentData>({
+    queryKey: ["prospect-appointment-data", fromProspectId],
     queryFn: async () => {
-      const result = await api.get<any>(`/admin/prospects/${fromProspectId}`);
+      const result = await api.get<ProspectAppointmentData>(`/admin/prospects/${fromProspectId}/appointment-data`);
       return unwrapResult(result);
     },
     enabled: !!fromProspectId,

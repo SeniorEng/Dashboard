@@ -42,6 +42,7 @@ const AdminStatistics = lazy(() => import("@/pages/admin/statistics"));
 const AdminBilling = lazy(() => import("@/pages/admin/billing"));
 const AdminHoursOverview = lazy(() => import("@/pages/admin/lexware-export"));
 const AdminProspects = lazy(() => import("@/pages/admin/prospects"));
+const ProspectConvert = lazy(() => import("@/pages/prospect-convert"));
 const AdminProofReview = lazy(() => import("@/pages/admin/proof-review"));
 const AdminQonto = lazy(() => import("@/pages/admin/qonto"));
 const AdminWhatsApp = lazy(() => import("@/pages/admin/whatsapp"));
@@ -226,6 +227,9 @@ function Router() {
       </Route>
       <Route path="/admin/whatsapp">
         <AdminRoute component={AdminWhatsApp} />
+      </Route>
+      <Route path="/admin/prospects/:id/convert">
+        <AdminRoute component={ProspectConvert} />
       </Route>
       <Route path="/admin/prospects">
         <AdminRoute component={AdminProspects} />

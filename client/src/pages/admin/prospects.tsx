@@ -56,10 +56,14 @@ import {
   ArrowRightCircle,
   Loader2,
   RefreshCw,
+  CheckCircle2,
+  ShieldCheck,
+  FileText,
+  Ban,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
-import { useProspects, useProspectStats, useProspect, useCreateProspect, useUpdateProspect, useAddProspectNote, useReparseProspect, useDeleteProspect } from "@/features/prospects";
-import { PROSPECT_STATUS_LABELS, PROSPECT_STATUSES, PROSPECT_NOTE_TYPE_LABELS, type ProspectStatus, type ProspectNoteType } from "@shared/schema";
+import { useProspects, useProspectStats, useProspect, useCreateProspect, useUpdateProspect, useAddProspectNote, useReparseProspect, useDeleteProspect, useQualifyProspect, useProspectOffer, useDeclineProspectOffer } from "@/features/prospects";
+import { PROSPECT_STATUS_LABELS, PROSPECT_STATUSES, PROSPECT_NOTE_TYPE_LABELS, DISQUALIFICATION_REASON_LABELS, DISQUALIFICATION_REASONS, type ProspectStatus, type ProspectNoteType, type DisqualificationReason } from "@shared/schema";
 import { formatDateForDisplay, todayISO } from "@shared/utils/datetime";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { formatAddress } from "@shared/utils/format";
@@ -137,7 +141,7 @@ function CreateProspectSheet({ open, onClose }: { open: boolean; onClose: () => 
       status: wiedervorlageDate ? "wiedervorlage" : "neu",
       wiedervorlageDate: wiedervorlageDate || null,
       _initialNote: notiz || undefined,
-    } as any, {
+    }, {
       onSuccess: () => {
         setVorname(""); setNachname(""); setTelefon(""); setEmail("");
         setStrasse(""); setNr(""); setPlz(""); setStadt("");
@@ -218,17 +222,22 @@ function CreateProspectSheet({ open, onClose }: { open: boolean; onClose: () => 
 function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number | null; open: boolean; onClose: () => void }) {
   const { data: prospect, isLoading } = useProspect(prospectId);
   const updateMutation = useUpdateProspect();
+  const qualifyMutation = useQualifyProspect();
   const addNoteMutation = useAddProspectNote();
   const deleteMutation = useDeleteProspect();
   const reparseMutation = useReparseProspect();
+  const declineOfferMutation = useDeclineProspectOffer();
+  const { data: openOffer } = useProspectOffer(prospect?.status === "angebot_gemacht" ? prospectId : null);
   const [, navigate] = useLocation();
   const [noteText, setNoteText] = useState("");
   const [noteType, setNoteType] = useState<ProspectNoteType>("notiz");
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showWiedervorlageDialog, setShowWiedervorlageDialog] = useState(false);
   const [showNichtInteressiertDialog, setShowNichtInteressiertDialog] = useState(false);
+  const [showDisqualifyDialog, setShowDisqualifyDialog] = useState(false);
   const [dialogWiedervorlageDate, setDialogWiedervorlageDate] = useState("");
   const [dialogKommentar, setDialogKommentar] = useState("");
+  const [disqualifyReason, setDisqualifyReason] = useState<string>("");
 
   const handleKontaktiert = () => {
     if (!prospectId) return;
@@ -292,18 +301,26 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
 
   const handleConvertToErstberatung = () => {
     if (!prospect) return;
-    navigate(`/new-appointment?type=erstberatung&fromProspect=${prospect.id}`);
+    navigate(`/new-appointment?type=erstberatung&prospectId=${prospect.id}`);
+  };
+
+  const handleNavigateToConvert = () => {
+    if (!prospect) return;
+    navigate(`/admin/prospects/${prospect.id}/convert`);
   };
 
   const handleQualifizieren = () => {
     if (!prospectId) return;
-    updateMutation.mutate({ id: prospectId, data: { status: "qualifiziert" } });
+    qualifyMutation.mutate({ id: prospectId, action: "qualify" });
   };
 
-  const handleDisqualifizieren = () => {
-    if (!prospectId) return;
-    updateMutation.mutate({ id: prospectId, data: { status: "disqualifiziert", statusNotiz: dialogKommentar.trim() || undefined } }, {
-      onSuccess: () => setDialogKommentar(""),
+  const handleDisqualifizierenConfirm = () => {
+    if (!prospectId || !disqualifyReason) return;
+    qualifyMutation.mutate({ id: prospectId, action: "disqualify", disqualificationReason: disqualifyReason }, {
+      onSuccess: () => {
+        setShowDisqualifyDialog(false);
+        setDisqualifyReason("");
+      },
     });
   };
 
@@ -387,10 +404,80 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                   </CardContent>
                 </Card>
 
+                {prospect.status === "kontaktiert" && (
+                  <Card data-testid="panel-qualification">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <ShieldCheck className="h-4 w-4" /> Qualifizierung
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="space-y-2 text-sm">
+                        <div className="flex items-center gap-2">
+                          {prospect.geoQualified === true ? (
+                            <CheckCircle2 className="h-4 w-4 text-green-600" />
+                          ) : prospect.geoQualified === false ? (
+                            <XCircle className="h-4 w-4 text-red-500" />
+                          ) : (
+                            <Clock className="h-4 w-4 text-gray-400" />
+                          )}
+                          <span>Geo-Check {prospect.geoQualified === true ? "bestanden" : prospect.geoQualified === false ? "nicht bestanden" : "ausstehend"}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {prospect.pflegegrad ? (
+                            <CheckCircle2 className="h-4 w-4 text-green-600" />
+                          ) : (
+                            <Clock className="h-4 w-4 text-gray-400" />
+                          )}
+                          <span>Pflegegrad {prospect.pflegegrad ? `${prospect.pflegegrad} bestätigt` : "nicht bestätigt"}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="h-4 w-4 text-green-600" />
+                          <span>Kapazität verfügbar</span>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 pt-1">
+                        <Button size="sm" className="flex-1" onClick={handleQualifizieren} disabled={qualifyMutation.isPending} data-testid="button-qualify">
+                          <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Qualifizieren
+                        </Button>
+                        <Button size="sm" variant="outline" className="flex-1 text-red-600" onClick={() => setShowDisqualifyDialog(true)} data-testid="button-disqualify">
+                          <Ban className="h-3.5 w-3.5 mr-1" /> Disqualifizieren
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {prospect.status === "angebot_gemacht" && (
+                  <Card data-testid="panel-offer">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <FileText className="h-4 w-4" /> Offenes Angebot
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800" data-testid="banner-angebot">
+                        <p className="font-medium">Angebot wurde erstellt</p>
+                        {openOffer && (
+                          <p className="text-xs mt-1">Erstellt am {formatDateForDisplay(String(openOffer.createdAt).substring(0, 10))}</p>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <Button size="sm" className="flex-1" onClick={() => prospectId && navigate(`/admin/prospects/${prospectId}/convert`)} data-testid="button-accept-offer">
+                          <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Vertrag abschließen
+                        </Button>
+                        <Button size="sm" variant="outline" className="flex-1 text-red-600" onClick={() => prospectId && declineOfferMutation.mutate({ prospectId })} disabled={declineOfferMutation.isPending} data-testid="button-decline-offer">
+                          <XCircle className="h-3.5 w-3.5 mr-1" /> Ablehnen
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
                 {prospect.status !== "gewonnen" && prospect.status !== "absage" && prospect.status !== "nicht_interessiert" && prospect.status !== "disqualifiziert" && (
                   <Card>
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Status ändern</CardTitle>
+                      <CardTitle className="text-sm">Aktionen</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-3">
                       <div className="flex flex-wrap gap-2">
@@ -402,26 +489,9 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                         <Button size="sm" variant="outline" onClick={() => setShowWiedervorlageDialog(true)} data-testid="button-status-wiedervorlage">
                           <CalendarClock className="h-3.5 w-3.5 mr-1" /> Wiedervorlage
                         </Button>
-                        {!["qualifiziert", "erstberatung_vereinbart", "erstberatung_durchgeführt", "angebot_gemacht"].includes(prospect.status) && (
-                          <Button size="sm" variant="outline" className="text-teal-600" onClick={handleQualifizieren} disabled={updateMutation.isPending} data-testid="button-status-qualifiziert">
+                        {prospect.status !== "erstberatung_vereinbart" && prospect.status !== "kontaktiert" && !["qualifiziert", "erstberatung_durchgeführt", "angebot_gemacht"].includes(prospect.status) && (
+                          <Button size="sm" variant="outline" className="text-teal-600" onClick={handleQualifizieren} disabled={qualifyMutation.isPending} data-testid="button-status-qualifiziert">
                             <UserPlus className="h-3.5 w-3.5 mr-1" /> Qualifizieren
-                          </Button>
-                        )}
-                        {prospect.status !== "erstberatung_vereinbart" && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="text-blue-600"
-                            onClick={() => updateMutation.mutate({ id: prospect.id, data: { status: "erstberatung_vereinbart" } })}
-                            disabled={updateMutation.isPending}
-                            data-testid="button-status-erstberatung-vereinbart"
-                          >
-                            <CalendarCheck className="h-3.5 w-3.5 mr-1" /> Erstberatung vereinbart
-                          </Button>
-                        )}
-                        {!["disqualifiziert", "nicht_interessiert"].includes(prospect.status) && (
-                          <Button size="sm" variant="outline" className="text-orange-600" onClick={handleDisqualifizieren} disabled={updateMutation.isPending} data-testid="button-status-disqualifiziert">
-                            <XCircle className="h-3.5 w-3.5 mr-1" /> Disqualifizieren
                           </Button>
                         )}
                         <Button size="sm" variant="outline" className="text-red-600" onClick={() => setShowNichtInteressiertDialog(true)} data-testid="button-status-nicht-interessiert">
@@ -429,14 +499,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                         </Button>
                       </div>
 
-                      {prospect.status === "angebot_gemacht" && (
-                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800" data-testid="banner-angebot">
-                          <p className="font-medium">Angebot wurde gemacht</p>
-                          <p className="text-xs mt-1">Warten auf Rückmeldung des Interessenten.</p>
-                        </div>
-                      )}
-
-                      {["qualifiziert", "erstberatung_durchgeführt", "angebot_gemacht"].includes(prospect.status) && (
+                      {prospect.status === "qualifiziert" && (
                         <Button
                           className="w-full"
                           onClick={handleConvertToErstberatung}
@@ -444,6 +507,18 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                         >
                           <ArrowRightCircle className="h-4 w-4 mr-2" />
                           Erstberatung planen
+                        </Button>
+                      )}
+
+                      {["qualifiziert", "erstberatung_durchgeführt", "angebot_gemacht"].includes(prospect.status) && (
+                        <Button
+                          className="w-full"
+                          variant="outline"
+                          onClick={handleNavigateToConvert}
+                          data-testid="button-start-conversion"
+                        >
+                          <ArrowRightCircle className="h-4 w-4 mr-2" />
+                          Vertrag / Angebot erstellen
                         </Button>
                       )}
                     </CardContent>
@@ -612,6 +687,45 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
           </div>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={showDisqualifyDialog} onOpenChange={(v) => { if (!v) { setShowDisqualifyDialog(false); setDisqualifyReason(""); } }}>
+        <DialogContent className="fixed inset-0 flex items-center justify-center">
+          <div className="bg-background rounded-lg p-6 max-w-md w-full mx-4 shadow-lg border">
+            <DialogHeader>
+              <DialogTitle>Interessent disqualifizieren</DialogTitle>
+              <DialogDescription>
+                Bitte wählen Sie einen Grund für die Disqualifizierung.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 mt-4">
+              <div>
+                <Label>Grund *</Label>
+                <Select value={disqualifyReason} onValueChange={setDisqualifyReason}>
+                  <SelectTrigger data-testid="select-disqualify-reason">
+                    <SelectValue placeholder="Grund auswählen..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DISQUALIFICATION_REASONS.map((reason) => (
+                      <SelectItem key={reason} value={reason}>
+                        {DISQUALIFICATION_REASON_LABELS[reason]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter className="mt-4">
+              <Button variant="outline" onClick={() => { setShowDisqualifyDialog(false); setDisqualifyReason(""); }} data-testid="button-cancel-disqualify">
+                Abbrechen
+              </Button>
+              <Button onClick={handleDisqualifizierenConfirm} disabled={!disqualifyReason || qualifyMutation.isPending} className="bg-red-600 hover:bg-red-700 text-white" data-testid="button-confirm-disqualify">
+                {qualifyMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Disqualifizieren
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
