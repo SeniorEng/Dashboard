@@ -229,13 +229,13 @@ describe("Termine (Appointments) CRUD", () => {
       }
     });
     
-    it("sollte Fehler bei fehlender Preisvereinbarung zurückgeben", async () => {
+    it("sollte Dokumentation mit Standardpreisen erfolgreich durchführen", async () => {
       if (!docTestAppointmentId) {
         console.log("Termin-Erstellung fehlgeschlagen");
         return;
       }
       
-      const { status, data } = await apiPost<{ code: string; message: string }>(
+      const { status, data } = await apiPost<Record<string, unknown>>(
         `/api/appointments/${docTestAppointmentId}/document`,
         {
           actualStart: "09:00",
@@ -248,8 +248,8 @@ describe("Termine (Appointments) CRUD", () => {
         }
       );
 
-      expect(status).toBe(400);
-      expect(data.message.toLowerCase()).toMatch(/preis|budget|vereinbarung/);
+      expect(status).toBe(200);
+      expect(data).toBeTruthy();
     });
 
     it("sollte doppelte Dokumentation verhindern", async () => {

@@ -80,8 +80,9 @@ export default function ProspectConvert() {
   const { data: prospect, isLoading: prospectLoading } = useQuery<ProspectData>({
     queryKey: ["prospect-appointment-data", prospectId],
     queryFn: async () => {
-      const result = await api.get<ProspectData>(`/admin/prospects/${prospectId}/appointment-data`);
-      return unwrapResult(result);
+      const result = await api.get<{ prospect: ProspectData; appointments: unknown[] }>(`/admin/prospects/${prospectId}/appointment-data`);
+      const data = unwrapResult(result);
+      return data.prospect;
     },
     enabled: prospectId > 0,
   });
