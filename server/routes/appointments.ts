@@ -955,6 +955,18 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
     ip
   );
 
+  if (appointment.appointmentType === "Erstberatung" && appointment.prospectId) {
+    const prospectData = await prospectStorage.getAppointmentData(appointment.prospectId);
+    if (prospectData && prospectData.prospect.status === "erstberatung_vereinbart") {
+      const hasOtherActiveAppointments = prospectData.appointments.length > 0;
+      if (!hasOtherActiveAppointments) {
+        await db.update(prospects)
+          .set({ status: "qualifiziert", updatedAt: new Date() })
+          .where(eq(prospects.id, appointment.prospectId));
+      }
+    }
+  }
+
   if (appointment.date) {
     const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
     if (employeeId) {
