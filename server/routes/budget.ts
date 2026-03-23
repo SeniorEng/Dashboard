@@ -172,11 +172,36 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
   let vatCents = 0;
 
   if (summary45b.monthlyLimitCents !== null) {
-    const monthlyRemaining45b = Math.max(0, summary45b.monthlyLimitCents - summary45b.currentMonthUsedCents);
+    const appointmentDate = parseLocalDate(date);
+    const today = parseLocalDate(todayISO());
+    const isSameMonth = appointmentDate.getFullYear() === today.getFullYear() && appointmentDate.getMonth() === today.getMonth();
+
+    let appointmentMonthUsedCents = summary45b.currentMonthUsedCents;
+    if (!isSameMonth) {
+      const { sql: sqlTag } = await import("drizzle-orm");
+      const { db: dbInstance } = await import("../lib/db");
+      const appointmentMonthStart = `${appointmentDate.getFullYear()}-${String(appointmentDate.getMonth() + 1).padStart(2, '0')}-01`;
+      const appointmentMonthEndDate = new Date(appointmentDate.getFullYear(), appointmentDate.getMonth() + 1, 0);
+      const appointmentMonthEnd = `${appointmentMonthEndDate.getFullYear()}-${String(appointmentMonthEndDate.getMonth() + 1).padStart(2, '0')}-${String(appointmentMonthEndDate.getDate()).padStart(2, '0')}`;
+      const monthResult = await dbInstance.execute(sqlTag`
+        SELECT COALESCE(SUM(ABS(amount_cents)), 0) as total
+        FROM budget_transactions
+        WHERE customer_id = ${customerId}
+          AND budget_type = 'entlastungsbetrag_45b'
+          AND transaction_type = 'consumption'
+          AND transaction_date >= ${appointmentMonthStart}
+          AND transaction_date <= ${appointmentMonthEnd}
+      `);
+      appointmentMonthUsedCents = Number((monthResult.rows[0] as any)?.total ?? 0);
+    }
+
+    const monthlyRemaining45b = Math.max(0, summary45b.monthlyLimitCents - appointmentMonthUsedCents);
     const effectiveAvailable = summary45a.currentMonthAvailableCents + monthlyRemaining45b;
     if (totalCostCents > effectiveAvailable) {
       const limitEuro = (summary45b.monthlyLimitCents / 100).toFixed(2);
-      warning = `Unter Berücksichtigung des §45b-Monatslimits (${limitEuro} €) reicht das Budget nicht vollständig.`;
+      const usedEuro = (appointmentMonthUsedCents / 100).toFixed(2);
+      const remainingEuro = (monthlyRemaining45b / 100).toFixed(2);
+      warning = `§45b-Monatslimit (${limitEuro} €): bereits ${usedEuro} € verbraucht, noch ${remainingEuro} € verfügbar.`;
     }
   }
 

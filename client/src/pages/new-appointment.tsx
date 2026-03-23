@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DatePicker } from "@/components/ui/date-picker";
-import { ChevronLeft, Loader2, Calendar, Clock, User, Plus, Users, AlertTriangle, XCircle, Copy, UserCheck } from "lucide-react";
+import { ChevronLeft, Loader2, Calendar, Clock, User, Plus, Users, AlertTriangle, XCircle, Copy, UserCheck, Phone, UserPlus } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { useNewAppointmentForm, ServiceSelector, AppointmentSummary } from "@/features/appointments";
 import { EmployeeAvailability } from "@/features/appointments/components/employee-availability";
@@ -154,7 +154,7 @@ export default function NewAppointment() {
                   <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
                   <div>
                     <p className="text-red-800 font-semibold">Termin kann nicht erstellt werden</p>
-                    <p className="text-red-700 mt-1">Das Budget ist aufgebraucht und der Kunde akzeptiert keine private Zuzahlung.</p>
+                    <p className="text-red-700 mt-1">{form.costEstimate.warning || "Das Budget ist aufgebraucht und der Kunde akzeptiert keine private Zuzahlung."}</p>
                   </div>
                 </div>
               )}
@@ -164,7 +164,7 @@ export default function NewAppointment() {
                   <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
                   <div>
                     <p className="text-amber-800 font-semibold">Budget-Hinweis</p>
-                    <p className="text-amber-700 mt-1">Das Budget reicht nicht vollständig aus. Der Restbetrag wird dem Kunden privat berechnet.</p>
+                    <p className="text-amber-700 mt-1">{form.costEstimate.warning}</p>
                   </div>
                 </div>
               )}
@@ -205,18 +205,82 @@ export default function NewAppointment() {
             </CardHeader>
             <CardContent className="space-y-6">
               {!form.fromProspectId ? (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800" data-testid="banner-no-prospect">
-                  <p className="font-medium">Kein Interessent ausgewählt</p>
-                  <p className="mt-1">Erstberatungen werden über die Interessenten-Verwaltung erstellt. Bitte wählen Sie dort einen Interessenten aus und klicken Sie auf "Erstberatung planen".</p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="mt-3"
-                    onClick={() => setLocation("/admin/prospects")}
-                    data-testid="button-go-prospects"
-                  >
-                    Zur Interessenten-Verwaltung
-                  </Button>
+                <div className="space-y-4">
+                  {form.isAdmin ? (
+                    <>
+                      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4" data-testid="panel-inline-prospect">
+                        <div className="flex items-center gap-2 text-blue-800 font-medium mb-3">
+                          <UserPlus className={iconSize.sm} />
+                          <span>Neuen Interessenten anlegen</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <Label htmlFor="inline-vorname">Vorname *</Label>
+                            <Input
+                              id="inline-vorname"
+                              placeholder="Vorname"
+                              value={form.inlineProspectVorname}
+                              onChange={(e) => form.setInlineProspectVorname(e.target.value)}
+                              className={form.errors.inlineVorname ? "border-destructive" : ""}
+                              data-testid="input-inline-vorname"
+                            />
+                            {form.errors.inlineVorname && <p className="text-destructive text-xs">{form.errors.inlineVorname}</p>}
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor="inline-nachname">Nachname *</Label>
+                            <Input
+                              id="inline-nachname"
+                              placeholder="Nachname"
+                              value={form.inlineProspectNachname}
+                              onChange={(e) => form.setInlineProspectNachname(e.target.value)}
+                              className={form.errors.inlineNachname ? "border-destructive" : ""}
+                              data-testid="input-inline-nachname"
+                            />
+                            {form.errors.inlineNachname && <p className="text-destructive text-xs">{form.errors.inlineNachname}</p>}
+                          </div>
+                        </div>
+                        <div className="mt-3 space-y-1">
+                          <Label htmlFor="inline-telefon">
+                            <Phone className={`${iconSize.sm} inline mr-1`} /> Telefon (optional)
+                          </Label>
+                          <Input
+                            id="inline-telefon"
+                            placeholder="z.B. 0151 12345678"
+                            value={form.inlineProspectTelefon}
+                            onChange={(e) => form.setInlineProspectTelefon(e.target.value)}
+                            data-testid="input-inline-telefon"
+                          />
+                        </div>
+                        <Button
+                          className="mt-4 w-full"
+                          onClick={form.handleInlineProspectCreate}
+                          disabled={form.isCreatingProspect}
+                          data-testid="button-create-inline-prospect"
+                        >
+                          {form.isCreatingProspect ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : <UserPlus className={`${iconSize.sm} mr-2`} />}
+                          Interessent anlegen & weiter
+                        </Button>
+                      </div>
+                      <div className="relative flex items-center justify-center">
+                        <div className="absolute inset-0 flex items-center"><div className="w-full border-t" /></div>
+                        <span className="relative bg-card px-3 text-xs text-muted-foreground">oder</span>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full"
+                        onClick={() => setLocation("/admin/prospects")}
+                        data-testid="button-go-prospects"
+                      >
+                        Bestehenden Interessenten in der Verwaltung auswählen
+                      </Button>
+                    </>
+                  ) : (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800" data-testid="banner-no-prospect">
+                      <p className="font-medium">Kein Interessent ausgewählt</p>
+                      <p className="mt-1">Erstberatungen werden über die Interessenten-Verwaltung erstellt. Bitte wenden Sie sich an einen Administrator.</p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <>

@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -111,6 +111,44 @@ export function useNewAppointmentForm() {
   const [ebErstberatungDauer, setEbErstberatungDauer] = useState<number>(60);
   const [ebNotes, setEbNotes] = useState<string>("");
   const [ebAssignedEmployeeId, setEbAssignedEmployeeId] = useState<string>(urlParams.get("employeeId") || "");
+
+  const [inlineProspectVorname, setInlineProspectVorname] = useState<string>("");
+  const [inlineProspectNachname, setInlineProspectNachname] = useState<string>("");
+  const [inlineProspectTelefon, setInlineProspectTelefon] = useState<string>("");
+  const [inlineProspectCreatedId, setInlineProspectCreatedId] = useState<number | null>(null);
+
+  const createInlineProspectMutation = useMutation({
+    mutationFn: async (data: { vorname: string; nachname: string; telefon?: string }) => {
+      const result = await api.post<{ id: number; vorname: string; nachname: string; telefon: string | null }>("/admin/prospects", {
+        ...data,
+        status: "erstberatung_vereinbart",
+        quelle: "direktkontakt",
+        quelleDetails: "Telefonischer Erstkontakt — Erstberatung direkt vereinbart",
+      });
+      return unwrapResult(result);
+    },
+    onSuccess: (prospect) => {
+      setInlineProspectCreatedId(prospect.id);
+      toast({ title: "Interessent angelegt", description: `${prospect.vorname} ${prospect.nachname} wurde als Interessent erstellt.` });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+    },
+  });
+
+  const effectiveProspectId = fromProspectId || (inlineProspectCreatedId ? String(inlineProspectCreatedId) : null);
+
+  const { data: inlineProspectData } = useQuery<ProspectAppointmentData>({
+    queryKey: ["prospect-appointment-data", inlineProspectCreatedId],
+    queryFn: async () => {
+      const result = await api.get<{ prospect: ProspectAppointmentData; appointments: unknown[] }>(`/admin/prospects/${inlineProspectCreatedId}/appointment-data`);
+      return unwrapResult(result).prospect;
+    },
+    enabled: !!inlineProspectCreatedId && !fromProspectId,
+    staleTime: 60_000,
+  });
+
+  const effectiveProspectData = fromProspectId ? (prospectData ?? null) : (inlineProspectData ?? null);
 
   const defaultsInitialized = useRef(false);
   const copyFromInitialized = useRef(false);
@@ -229,7 +267,7 @@ export function useNewAppointmentForm() {
 
   const validateErstberatung = (): boolean => {
     const newErrors: Record<string, string> = {};
-    if (!fromProspectId) newErrors.ebProspect = "Bitte wählen Sie einen Interessenten";
+    if (!effectiveProspectId) newErrors.ebProspect = "Bitte legen Sie zuerst einen Interessenten an";
     if (isAdmin && !ebAssignedEmployeeId) newErrors.ebAssignedEmployeeId = "Bitte wählen Sie einen Mitarbeiter";
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -261,11 +299,25 @@ export function useNewAppointmentForm() {
     });
   };
 
+  const handleInlineProspectCreate = () => {
+    const newErrors: Record<string, string> = {};
+    if (!inlineProspectVorname.trim()) newErrors.inlineVorname = "Vorname ist erforderlich";
+    if (!inlineProspectNachname.trim()) newErrors.inlineNachname = "Nachname ist erforderlich";
+    setErrors(newErrors);
+    if (Object.keys(newErrors).length > 0) return;
+
+    createInlineProspectMutation.mutate({
+      vorname: inlineProspectVorname.trim(),
+      nachname: inlineProspectNachname.trim(),
+      telefon: inlineProspectTelefon.trim() || undefined,
+    });
+  };
+
   const handleErstberatungSubmit = () => {
     if (!validateErstberatung()) return;
 
     createErstberatungMutation.mutate({
-      prospectId: parseInt(fromProspectId!),
+      prospectId: parseInt(effectiveProspectId!),
       date: ebDate,
       scheduledStart: ebStartTime,
       erstberatungDauer: ebErstberatungDauer,
@@ -383,7 +435,7 @@ export function useNewAppointmentForm() {
     ktAssignedEmployeeId,
     setKtAssignedEmployeeId,
 
-    prospectData: prospectData ?? null,
+    prospectData: effectiveProspectData,
     ebDate,
     setEbDate,
     ebStartTime,
@@ -397,7 +449,7 @@ export function useNewAppointmentForm() {
 
     copyFromId,
     copyFromCustomerName: copyFromAppointment?.customer?.name ?? null,
-    fromProspectId,
+    fromProspectId: effectiveProspectId,
     errors,
     costEstimate,
     ktSummary,
@@ -406,6 +458,16 @@ export function useNewAppointmentForm() {
     employeeOptions,
     ebEmployeeOptions,
     isPending,
+
+    inlineProspectVorname,
+    setInlineProspectVorname,
+    inlineProspectNachname,
+    setInlineProspectNachname,
+    inlineProspectTelefon,
+    setInlineProspectTelefon,
+    inlineProspectCreatedId,
+    isCreatingProspect: createInlineProspectMutation.isPending,
+    handleInlineProspectCreate,
 
     handleKundenterminSubmit,
     handleErstberatungSubmit,
