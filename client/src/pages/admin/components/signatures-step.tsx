@@ -37,7 +37,7 @@ export interface WizardUploadedDoc {
 }
 
 interface SignaturesStepProps {
-  billingType: BillingType;
+  billingType: BillingType | "";
   customerSignatures: Record<string, string>;
   onSignatureChange: (slug: string, signatureData: string, location?: string | null) => void;
   uploadedDocuments: WizardUploadedDoc[];

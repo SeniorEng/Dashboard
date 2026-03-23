@@ -37,7 +37,7 @@ function clearDraft() {
 
 function createInitialFormData(): CustomerFormData {
   return {
-    billingType: "" as any,
+    billingType: "",
     vorname: "",
     nachname: "",
     geburtsdatum: "",

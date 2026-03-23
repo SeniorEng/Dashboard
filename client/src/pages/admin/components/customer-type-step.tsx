@@ -3,7 +3,7 @@ import { Building2, Shield, User } from "lucide-react";
 import { iconSize } from "@/design-system";
 
 interface CustomerTypeStepProps {
-  selectedType: BillingType;
+  selectedType: BillingType | "";
   onChange: (type: BillingType) => void;
 }
 

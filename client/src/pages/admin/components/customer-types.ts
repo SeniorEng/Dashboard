@@ -20,7 +20,7 @@ export interface BudgetTypeSettingForm {
 }
 
 export interface CustomerFormData {
-  billingType: BillingType;
+  billingType: BillingType | "";
   vorname: string;
   nachname: string;
   geburtsdatum: string;
@@ -82,7 +82,7 @@ const ALL_STEPS: StepConfig[] = [
   { id: "matching", title: "Mitarbeiter", icon: UserCheck },
 ];
 
-export function getStepsForBillingType(billingType: BillingType): StepConfig[] {
+export function getStepsForBillingType(billingType: BillingType | ""): StepConfig[] {
   if (isPflegekasseCustomer(billingType)) {
     return ALL_STEPS;
   }

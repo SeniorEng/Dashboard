@@ -28,20 +28,20 @@ export const BILLING_TYPE_DESCRIPTIONS: Record<BillingType, string> = {
   selbstzahler: "Direktabrechnung ohne Pflegekasse, optional mit SEPA-Mandat",
 };
 
-export function isPflegekasseCustomer(billingType: BillingType): boolean {
+export function isPflegekasseCustomer(billingType: BillingType | ""): boolean {
   return billingType === "pflegekasse_gesetzlich" || billingType === "pflegekasse_privat";
 }
 
 
-export function needsBudgetData(billingType: BillingType): boolean {
+export function needsBudgetData(billingType: BillingType | ""): boolean {
   return isPflegekasseCustomer(billingType);
 }
 
-function needsPflegegradData(billingType: BillingType): boolean {
+function needsPflegegradData(billingType: BillingType | ""): boolean {
   return isPflegekasseCustomer(billingType);
 }
 
-export function needsVorerkrankungenData(billingType: BillingType): boolean {
+export function needsVorerkrankungenData(billingType: BillingType | ""): boolean {
   return isPflegekasseCustomer(billingType);
 }
 
