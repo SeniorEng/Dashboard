@@ -6,7 +6,11 @@ import {
   PhoneNumber,
 } from "libphonenumber-js/min";
 
-const DACH_COUNTRIES: CountryCode[] = ["DE", "AT", "CH"];
+export const DACH_COUNTRIES: CountryCode[] = ["DE", "AT", "CH"];
+
+export function isDACHCountry(country: string | undefined): boolean {
+  return DACH_COUNTRIES.includes(country as CountryCode);
+}
 
 export type PhoneValidationResult =
   | { valid: true; normalized: string; formatted: string; type: "mobile" | "landline" | "unknown" }
@@ -37,8 +41,8 @@ export function validateDachPhone(input: string): PhoneValidationResult {
       return { valid: false, error: "Ungültige Telefonnummer (DE/AT/CH)" };
     }
 
-    if (phoneNumber.country && !DACH_COUNTRIES.includes(phoneNumber.country as CountryCode)) {
-      return { valid: false, error: "Nur Telefonnummern aus DE, AT oder CH erlaubt" };
+    if (!isDACHCountry(phoneNumber.country)) {
+      return { valid: false, error: "Ungültige Telefonnummer (DE/AT/CH)" };
     }
 
     const phoneType = phoneNumber.getType();
