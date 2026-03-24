@@ -65,7 +65,17 @@ export async function testSmtpConnection(settings: CompanySettings): Promise<{ s
   }
 }
 
+function toAbsoluteUrl(relativeUrl: string | null | undefined): string | null {
+  if (!relativeUrl) return null;
+  if (relativeUrl.startsWith("http://") || relativeUrl.startsWith("https://")) return relativeUrl;
+  const domain = process.env.REPLIT_DEV_DOMAIN || process.env.REPLIT_DOMAINS?.split(",")[0];
+  if (!domain) return null;
+  const base = `https://${domain}`;
+  return `${base}${relativeUrl.startsWith("/") ? "" : "/"}${relativeUrl}`;
+}
+
 export function buildEmailLayout(companyName: string, logoUrl: string | null | undefined, bodyContent: string): string {
+  const absoluteLogoUrl = toAbsoluteUrl(logoUrl);
   return `<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -79,7 +89,7 @@ export function buildEmailLayout(companyName: string, logoUrl: string | null | u
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
           <tr>
             <td style="background-color: #0d9488; padding: 24px 32px; text-align: center;">
-              ${logoUrl ? `<img src="${logoUrl}" alt="${companyName}" style="max-height: 48px; margin-bottom: 8px;" />` : ""}
+              ${absoluteLogoUrl ? `<img src="${absoluteLogoUrl}" alt="${companyName}" style="max-height: 48px; margin-bottom: 8px;" />` : ""}
               <h1 style="color: #ffffff; margin: 0; font-size: 20px; font-weight: 600;">${companyName}</h1>
             </td>
           </tr>
