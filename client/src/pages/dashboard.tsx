@@ -37,7 +37,7 @@ const WEEKDAY_NAMES_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 
 const FULL_DAY_TYPES: string[] = ["urlaub", "krankheit"];
 const AVAILABILITY_TYPES: string[] = ["verfuegbar"];
-const BLOCKER_TYPES: string[] = ["blocker"];
+const BLOCKER_TYPES: string[] = [];
 
 interface DayButtonProps {
   dayStr: string;
