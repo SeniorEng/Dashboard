@@ -304,6 +304,7 @@ export function useCustomerWizard() {
         nachname: c.nachname.trim(),
         telefon: c.telefon.trim() ? (normalizePhone(c.telefon) || c.telefon.trim()) : "",
         email: c.email.trim() || undefined,
+        notes: c.notes.trim() || undefined,
       }));
 
     const is45bEnabled = formData.budgetTypeSettings.find(s => s.budgetType === "entlastungsbetrag_45b")?.enabled ?? false;

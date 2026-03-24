@@ -9,6 +9,7 @@ export interface ContactFormData {
   contactType: string;
   telefon: string;
   email: string;
+  notes: string;
   isPrimary: boolean;
 }
 
@@ -112,6 +113,7 @@ export const EMPTY_CONTACT: ContactFormData = {
   contactType: "familie",
   telefon: "",
   email: "",
+  notes: "",
   isPrimary: true,
 };
 

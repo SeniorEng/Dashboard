@@ -116,6 +116,17 @@ export function ContactsStep({ contacts, phoneErrors, onContactChange, onAddCont
             />
           </div>
 
+          <div className="space-y-2">
+            <Label htmlFor={`contactNotes-${index}`}>Notiz (optional)</Label>
+            <Input
+              id={`contactNotes-${index}`}
+              value={contact.notes}
+              onChange={(e) => onContactChange(index, "notes", e.target.value)}
+              placeholder="z.B. Erreichbarkeit, besondere Hinweise"
+              data-testid={`input-contact-notes-${index}`}
+            />
+          </div>
+
           <div className="flex items-center space-x-2">
             <Checkbox
               id={`contactIsPrimary-${index}`}
