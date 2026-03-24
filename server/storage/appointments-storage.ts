@@ -180,19 +180,15 @@ export async function getUndocumentedAppointments(beforeDate: string, customerId
     isNull(appointments.deletedAt)
   ];
 
-  const employeeCondition = employeeId
-    ? or(
+  if (employeeId) {
+    conditions.push(
+      or(
         eq(appointments.assignedEmployeeId, employeeId),
         eq(appointments.performedByEmployeeId, employeeId)
       )!
-    : undefined;
-
-  if (customerIds && customerIds.length > 0 && employeeCondition) {
-    conditions.push(or(inArray(appointments.customerId, customerIds), employeeCondition)!);
+    );
   } else if (customerIds && customerIds.length > 0) {
     conditions.push(inArray(appointments.customerId, customerIds));
-  } else if (employeeCondition) {
-    conditions.push(employeeCondition);
   }
 
   const results = await db
