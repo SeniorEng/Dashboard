@@ -5,7 +5,7 @@ import type { CustomerFormData } from "./customer-types";
 
 interface DeliveryStepProps {
   formData: CustomerFormData;
-  onChange: (field: keyof CustomerFormData, value: any) => void;
+  onChange: (field: keyof CustomerFormData, value: string | boolean) => void;
 }
 
 const OPTIONS = [

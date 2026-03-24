@@ -13,6 +13,22 @@ import { iconSize } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 import { MONTH_NAMES } from "@/features/time-tracking/constants";
 import { cents, pct, hours, SERVICE_TYPE_LABELS, SERVICE_TYPE_COLORS } from "./helpers";
+import type {
+  OverviewResponse,
+  GrowthResponse,
+  BudgetPotentialResponse,
+  MonthlyTrend,
+  PflegegradEntry,
+  CustomerLifecycleMonth,
+  BudgetPotentialCustomer,
+  HoursByType,
+} from "./helpers";
+
+interface DonutSegment {
+  label: string;
+  value: number;
+  color: string;
+}
 
 interface KundenTabProps {
   selectedYear: number;
@@ -22,40 +38,40 @@ interface KundenTabProps {
 export function KundenTab({ selectedYear, selectedMonth }: KundenTabProps) {
   const monthParam = selectedMonth !== "all" ? `&month=${selectedMonth}` : "";
 
-  const { data: statsData } = useQuery<any>({
+  const { data: statsData } = useQuery<OverviewResponse>({
     queryKey: ["statistics", selectedYear, selectedMonth],
     queryFn: async () => {
-      const result = await api.get(`/statistics/overview?year=${selectedYear}${monthParam}`);
+      const result = await api.get<OverviewResponse>(`/statistics/overview?year=${selectedYear}${monthParam}`);
       return unwrapResult(result);
     },
     staleTime: 60000,
   });
 
-  const { data: growth } = useQuery<any>({
+  const { data: growth } = useQuery<GrowthResponse>({
     queryKey: ["statistics-growth", selectedYear],
     queryFn: async () => {
-      const result = await api.get(`/statistics/growth?year=${selectedYear}`);
+      const result = await api.get<GrowthResponse>(`/statistics/growth?year=${selectedYear}`);
       return unwrapResult(result);
     },
     staleTime: 60000,
   });
 
-  const { data: budgetPotential } = useQuery<any>({
+  const { data: budgetPotential } = useQuery<BudgetPotentialResponse>({
     queryKey: ["statistics-budget-potential", selectedYear],
     queryFn: async () => {
-      const result = await api.get(`/statistics/budget-potential?year=${selectedYear}`);
+      const result = await api.get<BudgetPotentialResponse>(`/statistics/budget-potential?year=${selectedYear}`);
       return unwrapResult(result);
     },
     staleTime: 60000,
   });
 
-  const customerStats = statsData?.customers ?? {};
+  const customerStats = statsData?.customers ?? {} as OverviewResponse["customers"];
   const pflegegrad = statsData?.pflegegradDistribution ?? [];
-  const budget = statsData?.budgetUtilization ?? {};
+  const budget = statsData?.budgetUtilization ?? {} as OverviewResponse["budgetUtilization"];
   const trends = statsData?.monthlyTrends ?? [];
 
   const maxTrendMinutes = useMemo(() => {
-    return Math.max(...trends.map((t: any) => {
+    return Math.max(...trends.map((t: MonthlyTrend) => {
       const hw = Number(t.hwMinutes || 0);
       const ab = Number(t.abMinutes || 0);
       const eb = Number(t.ebMinutes || 0);
@@ -71,18 +87,18 @@ export function KundenTab({ selectedYear, selectedMonth }: KundenTabProps) {
     }), 1);
   }, [trends]);
 
-  const summary = growth?.summary || {};
+  const summary = growth?.summary || {} as GrowthResponse["summary"];
   const lifecycle = growth?.customerLifecycle || [];
-  const maxLifecycle = Math.max(...lifecycle.map((m: any) => Math.max(m.customersGained, m.customersLost)), 1);
+  const maxLifecycle = Math.max(...lifecycle.map((m: CustomerLifecycleMonth) => Math.max(m.customersGained, m.customersLost)), 1);
   const yoyGrowthPct = summary.gainedPrevYear > 0
     ? Math.round(((summary.gainedThisYear - summary.gainedPrevYear) / summary.gainedPrevYear) * 100)
     : null;
-  const serviceSegments = (growth?.hoursByServiceType || [])
-    .filter((s: any) => s.service_type)
-    .map((s: any) => ({
-      label: SERVICE_TYPE_LABELS[s.service_type] || s.service_type,
+  const serviceSegments: DonutSegment[] = (growth?.hoursByServiceType || [])
+    .filter((s: HoursByType) => s.service_type)
+    .map((s: HoursByType) => ({
+      label: SERVICE_TYPE_LABELS[s.service_type!] || s.service_type!,
       value: Number(s.total_minutes || 0),
-      color: SERVICE_TYPE_COLORS[s.service_type] || "#a3a3a3",
+      color: SERVICE_TYPE_COLORS[s.service_type!] || "#a3a3a3",
     }));
 
   return (
@@ -109,8 +125,8 @@ export function KundenTab({ selectedYear, selectedMonth }: KundenTabProps) {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
-            {pflegegrad.map((pg: any) => {
-              const total = pflegegrad.reduce((s: number, p: any) => s + p.count, 0);
+            {pflegegrad.map((pg: PflegegradEntry) => {
+              const total = pflegegrad.reduce((s: number, p: PflegegradEntry) => s + p.count, 0);
               return (
                 <div key={pg.pflegegrad} className="text-center p-3 bg-gray-50 rounded-lg">
                   <div className="text-xl font-bold text-teal-700">{pg.count}</div>
@@ -147,7 +163,7 @@ export function KundenTab({ selectedYear, selectedMonth }: KundenTabProps) {
         </CardContent>
       </Card>
 
-      {budgetPotential?.customers?.length > 0 && (
+      {(budgetPotential?.customers?.length ?? 0) > 0 && budgetPotential && (
         <Card className="mb-4">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
@@ -158,7 +174,7 @@ export function KundenTab({ selectedYear, selectedMonth }: KundenTabProps) {
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {budgetPotential.customers.map((c: any) => {
+              {budgetPotential!.customers.map((c: BudgetPotentialCustomer) => {
                 const colorClass = c.percent < 30 ? "text-red-600" : c.percent < 50 ? "text-amber-600" : "text-emerald-600";
                 const barColor = c.percent < 30 ? "bg-red-400" : c.percent < 50 ? "bg-amber-400" : "bg-emerald-500";
                 const bgColor = c.percent < 30 ? "border-red-200 bg-red-50/30" : c.percent < 50 ? "border-amber-200 bg-amber-50/30" : "";
@@ -194,10 +210,10 @@ export function KundenTab({ selectedYear, selectedMonth }: KundenTabProps) {
           const entryTypes = growth?.hoursByEntryType || [];
           const paidUnproductiveTypes = ['bueroarbeit', 'besprechung', 'vertrieb', 'sonstiges', 'weiterbildung'];
 
-          const productiveMin = serviceSegments.reduce((sum: number, s: any) => sum + s.value, 0);
+          const productiveMin = serviceSegments.reduce((sum: number, s: DonutSegment) => sum + s.value, 0);
           const paidUnproductiveMin = entryTypes
-            .filter((e: any) => paidUnproductiveTypes.includes(e.entry_type))
-            .reduce((sum: number, e: any) => sum + Number(e.total_minutes || 0), 0);
+            .filter((e: HoursByType) => paidUnproductiveTypes.includes(e.entry_type || ""))
+            .reduce((sum: number, e: HoursByType) => sum + Number(e.total_minutes || 0), 0);
 
           const segments = [
             ...serviceSegments,
@@ -251,7 +267,7 @@ export function KundenTab({ selectedYear, selectedMonth }: KundenTabProps) {
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {lifecycle.map((m: any) => (
+                {lifecycle.map((m: CustomerLifecycleMonth) => (
                   <div key={m.month} className="flex items-center gap-3">
                     <span className="text-xs text-muted-foreground w-8 text-right">{(MONTH_NAMES[m.month - 1] || "?").slice(0, 3)}</span>
                     <div className="flex-1 flex gap-1">

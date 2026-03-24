@@ -53,3 +53,260 @@ export const ENTRY_TYPE_COLORS: Record<string, string> = {
   sonstiges: "#a3a3a3",
   weiterbildung: "#ec4899",
 };
+
+export interface MarginData {
+  revenueCents: number;
+  costCents: number;
+  marginCents: number;
+  marginPercent: number;
+  appointments: number;
+  totalMinutes: number;
+}
+
+export interface UtilizationData {
+  productiveMinutes: number;
+  overheadMinutes: number;
+  percent: number;
+  appointments: number;
+}
+
+export interface BudgetData {
+  allocatedCents: number;
+  usedCents: number;
+  percent: number;
+  customerCount: number;
+}
+
+export interface BudgetPrevData {
+  allocatedCents: number;
+  usedCents: number;
+  percent: number;
+}
+
+export interface CockpitData {
+  month: number | null;
+  year: number;
+  hasPreviousMonth: boolean;
+  margin: MarginData;
+  marginPrev: MarginData | null;
+  utilization: UtilizationData;
+  utilizationPrev: UtilizationData | null;
+  budget: BudgetData;
+  budgetPrev: BudgetPrevData | null;
+}
+
+export interface MonthlyTrend {
+  month: number;
+  revenueCents: number;
+  invoiceCount: number;
+  appointmentCount: number;
+  completedCount: number;
+  completedHauswirtschaft: number;
+  completedAlltagsbegleitung: number;
+  completedErstberatungen: number;
+  cancelledCount: number;
+  activeCustomers: number;
+  hwMinutes: number;
+  abMinutes: number;
+  ebMinutes: number;
+  pauseMinutes: number;
+  urlaubMinutes: number;
+  krankMinutes: number;
+  bueroarbeitMinutes: number;
+  besprechungMinutes: number;
+  vertriebMinutes: number;
+  sonstigesMinutes: number;
+  weiterbildungMinutes: number;
+}
+
+export interface EmployeeOverview {
+  id: number;
+  name: string;
+  appointments: number;
+  customers: number;
+  workMinutes: number;
+  travelKm: number;
+  travelMinutes: number;
+  customerKm: number;
+  sickDays: number;
+  vacationDays: number;
+  officeMinutes: number;
+  revenueCents: number;
+}
+
+export interface CustomerStats {
+  activeCustomers: number;
+  inactiveCustomers: number;
+  prospects: number;
+  terminated: number;
+  avgAppointmentsPerCustomer: number;
+  plannedConsultations: number;
+  consultation?: number;
+}
+
+export interface PflegegradEntry {
+  pflegegrad: number;
+  count: number;
+}
+
+export interface BudgetUtilization {
+  totalAllocatedCents: number;
+  totalUsedCents: number;
+  customerCount: number;
+}
+
+export interface OverviewResponse {
+  year: number;
+  month: number | null;
+  employees: EmployeeOverview[];
+  revenue: Record<string, number>;
+  customers: CustomerStats;
+  efficiency: Record<string, number>;
+  monthlyTrends: MonthlyTrend[];
+  pflegegradDistribution: PflegegradEntry[];
+  budgetUtilization: BudgetUtilization;
+  cockpit: CockpitData;
+}
+
+export interface AlertItem {
+  severity: "rot" | "gelb" | "gruen";
+  title: string;
+  description: string;
+  count: number;
+  link?: string;
+}
+
+export interface ServicePrice {
+  code: string;
+  priceCents: number;
+  rateCents: number;
+}
+
+export interface ProfitabilityEmployee {
+  employeeId: number;
+  employeeName: string;
+  appointments: number;
+  customers: number;
+  totalMinutes: number;
+  totalTravelKm: number;
+  totalCustomerKm: number;
+  revenueCents: number;
+  costCents: number;
+  marginCents: number;
+  revenueServiceCents: number;
+  revenueKmCents: number;
+  costServiceCents: number;
+  costKmCents: number;
+}
+
+export interface ProfitabilityTotals {
+  appointments: number;
+  customers: number;
+  totalMinutes: number;
+  revenueCents: number;
+  costCents: number;
+  marginCents: number;
+  revenueServiceCents: number;
+  revenueKmCents: number;
+  costServiceCents: number;
+  costKmCents: number;
+}
+
+export interface ProfitabilityResponse {
+  employees: ProfitabilityEmployee[];
+  totals: ProfitabilityTotals;
+  servicePrices: ServicePrice[];
+  marginPercent: number;
+}
+
+export interface HoursByType {
+  service_type?: string;
+  entry_type?: string;
+  total_minutes: number;
+}
+
+export interface CustomerLifecycleMonth {
+  month: number;
+  customersGained: number;
+  customersLost: number;
+}
+
+export interface GrowthSummary {
+  activeCustomers: number;
+  gainedThisYear: number;
+  lostThisYear: number;
+  netGrowth: number;
+  gainedPrevYear: number;
+  lostPrevYear: number;
+}
+
+export interface GrowthResponse {
+  year: number;
+  hoursByServiceType: HoursByType[];
+  hoursByEntryType: HoursByType[];
+  customerLifecycle: CustomerLifecycleMonth[];
+  summary: GrowthSummary;
+}
+
+export interface BudgetPotentialCustomer {
+  id: number;
+  name: string;
+  pflegegrad: number;
+  unusedCents: number;
+  percent: number;
+}
+
+export interface BudgetPotentialResponse {
+  customers: BudgetPotentialCustomer[];
+}
+
+export interface PlanningEmployee {
+  employeeId: number;
+  employeeName: string;
+  appointments: number;
+  scheduledCount: number;
+  completedCount: number;
+  documentedCount: number;
+  customers: number;
+  totalMinutes: number;
+  revenueCents: number;
+  costCents: number;
+  marginCents: number;
+  revenueServiceCents: number;
+  revenueKmCents: number;
+  costServiceCents: number;
+  costKmCents: number;
+}
+
+export interface PlanningTotals {
+  appointments: number;
+  scheduledCount: number;
+  completedCount: number;
+  documentedCount: number;
+  customers: number;
+  totalMinutes: number;
+  revenueCents: number;
+  costCents: number;
+  marginCents: number;
+  revenueServiceCents: number;
+  revenueKmCents: number;
+  costServiceCents: number;
+  costKmCents: number;
+}
+
+export interface CustomerWithoutAppointment {
+  id: number;
+  name: string;
+  vorname: string;
+  nachname: string;
+  pflegegrad: number | null;
+  primaryEmployeeName: string | null;
+}
+
+export interface PlanningResponse {
+  employees: PlanningEmployee[];
+  totals: PlanningTotals;
+  servicePrices: ServicePrice[];
+  marginPercent: number;
+  customersWithoutAppointments: CustomerWithoutAppointment[];
+}

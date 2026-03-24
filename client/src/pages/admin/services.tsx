@@ -222,7 +222,7 @@ export default function AdminServices() {
       name: form.name.trim(),
       code: form.code.trim() || undefined,
       description: form.description.trim() || null,
-      unitType: form.unitType as any,
+      unitType: form.unitType as "hours" | "kilometers" | "flat",
       defaultPriceCents: priceCents,
       vatRate: vatValue,
       minDurationMinutes: form.unitType === "hours" && minDuration && minDuration > 0 ? minDuration : null,

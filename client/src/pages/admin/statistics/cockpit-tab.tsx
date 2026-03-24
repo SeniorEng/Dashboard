@@ -12,6 +12,7 @@ import { iconSize } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 import { MONTH_NAMES } from "@/features/time-tracking/constants";
 import { cents, hours } from "./helpers";
+import type { OverviewResponse, AlertItem, MonthlyTrend } from "./helpers";
 
 interface CockpitTabProps {
   selectedYear: number;
@@ -21,19 +22,19 @@ interface CockpitTabProps {
 export function CockpitTab({ selectedYear, selectedMonth }: CockpitTabProps) {
   const monthParam = selectedMonth !== "all" ? `&month=${selectedMonth}` : "";
 
-  const { data, isLoading } = useQuery<any>({
+  const { data, isLoading } = useQuery<OverviewResponse>({
     queryKey: ["statistics", selectedYear, selectedMonth],
     queryFn: async () => {
-      const result = await api.get(`/statistics/overview?year=${selectedYear}${monthParam}`);
+      const result = await api.get<OverviewResponse>(`/statistics/overview?year=${selectedYear}${monthParam}`);
       return unwrapResult(result);
     },
     staleTime: 60000,
   });
 
-  const { data: alerts } = useQuery<any[]>({
+  const { data: alerts } = useQuery<AlertItem[]>({
     queryKey: ["statistics-alerts"],
     queryFn: async () => {
-      const result = await api.get<any[]>(`/statistics/alerts`);
+      const result = await api.get<AlertItem[]>(`/statistics/alerts`);
       return unwrapResult(result);
     },
     staleTime: 120000,
@@ -46,7 +47,7 @@ export function CockpitTab({ selectedYear, selectedMonth }: CockpitTabProps) {
   const trends = data?.monthlyTrends ?? [];
 
   const maxTrendMinutes = useMemo(() => {
-    return Math.max(...trends.map((t: any) => {
+    return Math.max(...trends.map((t: MonthlyTrend) => {
       const hw = Number(t.hwMinutes || 0);
       const ab = Number(t.abMinutes || 0);
       const eb = Number(t.ebMinutes || 0);
@@ -143,7 +144,7 @@ export function CockpitTab({ selectedYear, selectedMonth }: CockpitTabProps) {
         </CardHeader>
         <CardContent>
           <div className="space-y-2">
-            {trends.map((t: any) => {
+            {trends.map((t: MonthlyTrend) => {
               const hw = Number(t.hwMinutes || 0);
               const ab = Number(t.abMinutes || 0);
               const eb = Number(t.ebMinutes || 0);
@@ -185,7 +186,7 @@ export function CockpitTab({ selectedYear, selectedMonth }: CockpitTabProps) {
   );
 }
 
-function AlertsSection({ alerts }: { alerts: any[] }) {
+function AlertsSection({ alerts }: { alerts: AlertItem[] }) {
   const activeAlerts = alerts.filter(a => a.count > 0);
 
   if (activeAlerts.length === 0) {
@@ -212,7 +213,7 @@ function AlertsSection({ alerts }: { alerts: any[] }) {
     <div className="space-y-2 mb-6" data-testid="alerts-section">
       <h3 className="text-sm font-semibold text-muted-foreground mb-2">Handlungsbedarf</h3>
       {sorted.map((alert, i) => {
-        const cfg = severityConfig[alert.severity as keyof typeof severityConfig] || severityConfig.gelb;
+        const cfg = severityConfig[alert.severity] || severityConfig.gelb;
         return (
           <Card key={i} className={`border-l-4 ${cfg.border} ${cfg.bg}`} data-testid={`alert-${i}`}>
             <CardContent className="p-4 flex items-start gap-3">

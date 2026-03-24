@@ -9,6 +9,14 @@ import { iconSize } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 import { formatKm } from "@/lib/utils";
 import { cents, hours, ENTRY_TYPE_LABELS, ENTRY_TYPE_COLORS } from "./helpers";
+import type {
+  OverviewResponse,
+  ProfitabilityResponse,
+  ProfitabilityEmployee,
+  EmployeeOverview,
+  GrowthResponse,
+  HoursByType,
+} from "./helpers";
 
 interface TeamTabProps {
   selectedYear: number;
@@ -18,28 +26,28 @@ interface TeamTabProps {
 export function TeamTab({ selectedYear, selectedMonth }: TeamTabProps) {
   const monthParam = selectedMonth !== "all" ? `&month=${selectedMonth}` : "";
 
-  const { data: statsData } = useQuery<any>({
+  const { data: statsData } = useQuery<OverviewResponse>({
     queryKey: ["statistics", selectedYear, selectedMonth],
     queryFn: async () => {
-      const result = await api.get(`/statistics/overview?year=${selectedYear}${monthParam}`);
+      const result = await api.get<OverviewResponse>(`/statistics/overview?year=${selectedYear}${monthParam}`);
       return unwrapResult(result);
     },
     staleTime: 60000,
   });
 
-  const { data: profitability } = useQuery<any>({
+  const { data: profitability } = useQuery<ProfitabilityResponse>({
     queryKey: ["statistics-profitability", selectedYear, selectedMonth],
     queryFn: async () => {
-      const result = await api.get(`/statistics/profitability?year=${selectedYear}${monthParam}`);
+      const result = await api.get<ProfitabilityResponse>(`/statistics/profitability?year=${selectedYear}${monthParam}`);
       return unwrapResult(result);
     },
     staleTime: 60000,
   });
 
-  const { data: growth } = useQuery<any>({
+  const { data: growth } = useQuery<GrowthResponse>({
     queryKey: ["statistics-growth", selectedYear],
     queryFn: async () => {
-      const result = await api.get(`/statistics/growth?year=${selectedYear}`);
+      const result = await api.get<GrowthResponse>(`/statistics/growth?year=${selectedYear}`);
       return unwrapResult(result);
     },
     staleTime: 60000,
@@ -57,17 +65,17 @@ export function TeamTab({ selectedYear, selectedMonth }: TeamTabProps) {
 
   const t = profitability.totals || {};
   const empList = profitability.employees || [];
-  const maxEmpMargin = Math.max(...empList.map((e: any) => Number(e.marginCents || 0)), 1);
+  const maxEmpMargin = Math.max(...empList.map((e: ProfitabilityEmployee) => Number(e.marginCents || 0)), 1);
   const prices = profitability.servicePrices || [];
-  const hwPrice = prices.find((p: any) => p.code === 'hauswirtschaft');
-  const abPrice = prices.find((p: any) => p.code === 'alltagsbegleitung');
+  const hwPrice = prices.find((p) => p.code === 'hauswirtschaft');
+  const abPrice = prices.find((p) => p.code === 'alltagsbegleitung');
 
   const entrySegments = (growth?.hoursByEntryType || [])
-    .filter((s: any) => s.entry_type)
-    .map((s: any) => ({
-      label: ENTRY_TYPE_LABELS[s.entry_type] || s.entry_type,
+    .filter((s: HoursByType) => s.entry_type)
+    .map((s: HoursByType) => ({
+      label: ENTRY_TYPE_LABELS[s.entry_type!] || s.entry_type!,
       value: Number(s.total_minutes || 0),
-      color: ENTRY_TYPE_COLORS[s.entry_type] || "#a3a3a3",
+      color: ENTRY_TYPE_COLORS[s.entry_type!] || "#a3a3a3",
     }));
 
   return (
@@ -127,9 +135,9 @@ export function TeamTab({ selectedYear, selectedMonth }: TeamTabProps) {
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            {empList.map((emp: any, i: number) => {
+            {empList.map((emp: ProfitabilityEmployee, i: number) => {
               const empMarginPct = Number(emp.revenueCents) > 0 ? Math.round((Number(emp.marginCents) / Number(emp.revenueCents)) * 100) : 0;
-              const empOverview = employees.find((e: any) => e.id === emp.employeeId);
+              const empOverview = employees.find((e: EmployeeOverview) => e.id === emp.employeeId);
               return (
                 <div key={emp.employeeId} className="border rounded-lg p-3" data-testid={`team-employee-${emp.employeeId}`}>
                   <div className="flex items-center justify-between mb-2">

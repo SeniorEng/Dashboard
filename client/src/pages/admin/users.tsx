@@ -212,14 +212,21 @@ function HandoverDialog({ user, allUsers, onClose }: { user: UserData; allUsers:
     enabled: !!targetEmployeeId,
   });
 
+  interface HandoverResult {
+    primaryCount?: number;
+    backupCount?: number;
+    backup2Count?: number;
+    appointmentCount?: number;
+  }
+
   const handoverMutation = useMutation({
-    mutationFn: async () => {
-      const result = await api.post(`/admin/employees/${user.id}/handover`, {
+    mutationFn: async (): Promise<HandoverResult> => {
+      const result = await api.post<HandoverResult>(`/admin/employees/${user.id}/handover`, {
         targetEmployeeId: parseInt(targetEmployeeId),
       });
       return unwrapResult(result);
     },
-    onSuccess: (data: any) => {
+    onSuccess: (data: HandoverResult) => {
       queryClient.invalidateQueries({ queryKey: ["admin"] });
       queryClient.invalidateQueries({ queryKey: ["customers"] });
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
@@ -336,7 +343,7 @@ function HandoverDialog({ user, allUsers, onClose }: { user: UserData; allUsers:
                       Zukünftige Termine ({preview.summary.appointmentCount})
                     </h3>
                     <div className="max-h-40 overflow-y-auto space-y-1">
-                      {preview.futureAppointments.map((apt: any) => (
+                      {preview.futureAppointments.map((apt) => (
                         <div key={apt.id} className="text-xs text-gray-600 flex justify-between" data-testid={`text-handover-appointment-${apt.id}`}>
                           <span>{apt.customerVorname} {apt.customerNachname}</span>
                           <span className="text-gray-400">

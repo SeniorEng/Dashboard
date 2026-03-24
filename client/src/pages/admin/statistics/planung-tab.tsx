@@ -12,6 +12,13 @@ import { iconSize } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 import { MONTH_NAMES } from "@/features/time-tracking/constants";
 import { cents, hours } from "./helpers";
+import type {
+  OverviewResponse,
+  PlanningResponse,
+  PlanningEmployee,
+  MonthlyTrend,
+  CustomerWithoutAppointment,
+} from "./helpers";
 
 interface PlanungTabProps {
   selectedYear: number;
@@ -22,19 +29,19 @@ interface PlanungTabProps {
 export function PlanungTab({ selectedYear, selectedMonth, periodLabel }: PlanungTabProps) {
   const monthParam = selectedMonth !== "all" ? `&month=${selectedMonth}` : "";
 
-  const { data: statsData } = useQuery<any>({
+  const { data: statsData } = useQuery<OverviewResponse>({
     queryKey: ["statistics", selectedYear, selectedMonth],
     queryFn: async () => {
-      const result = await api.get(`/statistics/overview?year=${selectedYear}${monthParam}`);
+      const result = await api.get<OverviewResponse>(`/statistics/overview?year=${selectedYear}${monthParam}`);
       return unwrapResult(result);
     },
     staleTime: 60000,
   });
 
-  const { data: planning } = useQuery<any>({
+  const { data: planning } = useQuery<PlanningResponse>({
     queryKey: ["statistics-planning", selectedYear, selectedMonth],
     queryFn: async () => {
-      const result = await api.get(`/statistics/planning?year=${selectedYear}${monthParam}`);
+      const result = await api.get<PlanningResponse>(`/statistics/planning?year=${selectedYear}${monthParam}`);
       return unwrapResult(result);
     },
     staleTime: 60000,
@@ -43,7 +50,7 @@ export function PlanungTab({ selectedYear, selectedMonth, periodLabel }: Planung
   const trends = statsData?.monthlyTrends ?? [];
 
   const maxTrendMinutes = useMemo(() => {
-    return Math.max(...trends.map((t: any) => {
+    return Math.max(...trends.map((t: MonthlyTrend) => {
       const hw = Number(t.hwMinutes || 0);
       const ab = Number(t.abMinutes || 0);
       const eb = Number(t.ebMinutes || 0);
@@ -69,7 +76,7 @@ export function PlanungTab({ selectedYear, selectedMonth, periodLabel }: Planung
 
   const t = planning.totals || {};
   const planEmpList = planning.employees || [];
-  const maxPlanMargin = Math.max(...planEmpList.map((e: any) => Math.abs(Number(e.marginCents || 0))), 1);
+  const maxPlanMargin = Math.max(...planEmpList.map((e: PlanningEmployee) => Math.abs(Number(e.marginCents || 0))), 1);
   const noApptCustomers = planning.customersWithoutAppointments || [];
 
   return (
@@ -132,7 +139,7 @@ export function PlanungTab({ selectedYear, selectedMonth, periodLabel }: Planung
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            {planEmpList.map((emp: any, i: number) => {
+            {planEmpList.map((emp: PlanningEmployee, i: number) => {
               const empMarginPct = Number(emp.revenueCents) > 0
                 ? Math.round((Number(emp.marginCents) / Number(emp.revenueCents)) * 100)
                 : 0;
@@ -198,7 +205,7 @@ export function PlanungTab({ selectedYear, selectedMonth, periodLabel }: Planung
         <CardContent>
           {noApptCustomers.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {noApptCustomers.map((c: any) => (
+              {noApptCustomers.map((c: CustomerWithoutAppointment) => (
                 <Link
                   key={c.id}
                   href={`/admin/customers/${c.id}`}
@@ -243,7 +250,7 @@ export function PlanungTab({ selectedYear, selectedMonth, periodLabel }: Planung
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {trends.map((t: any) => {
+                {trends.map((t: MonthlyTrend) => {
                   const hw = Number(t.hwMinutes || 0);
                   const ab = Number(t.abMinutes || 0);
                   const eb = Number(t.ebMinutes || 0);
@@ -291,8 +298,8 @@ export function PlanungTab({ selectedYear, selectedMonth, periodLabel }: Planung
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {trends.map((t: any) => {
-                  const maxCust = Math.max(...trends.map((tr: any) => Number(tr.activeCustomers || 0)), 1);
+                {trends.map((t: MonthlyTrend) => {
+                  const maxCust = Math.max(...trends.map((tr: MonthlyTrend) => Number(tr.activeCustomers || 0)), 1);
                   return (
                     <div key={t.month} className="flex items-center gap-3">
                       <span className="text-xs text-muted-foreground w-8 text-right">{(MONTH_NAMES[t.month - 1] || "?").slice(0, 3)}</span>

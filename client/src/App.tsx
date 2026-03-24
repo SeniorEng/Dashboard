@@ -12,7 +12,7 @@ import { Loader2 } from "lucide-react";
 import { lazy, Suspense, useState, useEffect, useCallback } from "react";
 
 import NotFound from "@/pages/not-found";
-import Dashboard from "@/pages/dashboard";
+const Dashboard = lazy(() => import("@/pages/dashboard"));
 import LoginPage from "@/pages/login";
 
 const AppointmentDetail = lazy(() => import("@/pages/appointment-detail"));

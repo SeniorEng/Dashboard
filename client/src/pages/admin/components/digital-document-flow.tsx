@@ -125,7 +125,7 @@ export function DigitalDocumentFlow({
     if (!selectedTemplate) return;
     setIsRendering(true);
     try {
-      const renderData: Record<string, any> = {
+      const renderData: Record<string, unknown> = {
         templateSlug: selectedTemplate.slug,
         customerId: customerId || 0,
       };

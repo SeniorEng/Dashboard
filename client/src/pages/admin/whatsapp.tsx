@@ -503,7 +503,7 @@ function LogTab() {
                       </div>
                       <p className="text-xs text-gray-600 mt-1">
                         An: {entry.phoneNumber}
-                        {(entry as any).userName && <> — {(entry as any).userName}</>}
+                        {entry.userName && <> — {entry.userName}</>}
                       </p>
                       <p className="text-xs text-gray-500 mt-0.5">
                         Template: {entry.templateName}
