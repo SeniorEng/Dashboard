@@ -6,11 +6,13 @@ import {
   PhoneNumber,
 } from "libphonenumber-js/min";
 
+const DACH_COUNTRIES: CountryCode[] = ["DE", "AT", "CH"];
+
 export type PhoneValidationResult =
   | { valid: true; normalized: string; formatted: string; type: "mobile" | "landline" | "unknown" }
   | { valid: false; error: string };
 
-export function validateGermanPhone(input: string): PhoneValidationResult {
+export function validateDachPhone(input: string): PhoneValidationResult {
   if (!input || input.trim() === "") {
     return { valid: false, error: "Telefonnummer ist erforderlich" };
   }
@@ -20,14 +22,23 @@ export function validateGermanPhone(input: string): PhoneValidationResult {
   try {
     let phoneNumber: PhoneNumber | undefined;
 
-    if (isValidPhoneNumber(cleaned, "DE")) {
-      phoneNumber = parsePhoneNumber(cleaned, "DE");
-    } else if (isValidPhoneNumber(cleaned)) {
+    for (const country of DACH_COUNTRIES) {
+      if (isValidPhoneNumber(cleaned, country)) {
+        phoneNumber = parsePhoneNumber(cleaned, country);
+        break;
+      }
+    }
+
+    if (!phoneNumber && isValidPhoneNumber(cleaned)) {
       phoneNumber = parsePhoneNumber(cleaned);
     }
 
     if (!phoneNumber || !phoneNumber.isValid()) {
-      return { valid: false, error: "Ungültige Telefonnummer" };
+      return { valid: false, error: "Ungültige Telefonnummer (DE/AT/CH)" };
+    }
+
+    if (phoneNumber.country && !DACH_COUNTRIES.includes(phoneNumber.country as CountryCode)) {
+      return { valid: false, error: "Nur Telefonnummern aus DE, AT oder CH erlaubt" };
     }
 
     const phoneType = phoneNumber.getType();
@@ -46,12 +57,15 @@ export function validateGermanPhone(input: string): PhoneValidationResult {
       type,
     };
   } catch {
-    return { valid: false, error: "Ungültige Telefonnummer" };
+    return { valid: false, error: "Ungültige Telefonnummer (DE/AT/CH)" };
   }
 }
 
+/** @deprecated Use validateDachPhone instead */
+export const validateGermanPhone = validateDachPhone;
+
 export function normalizePhone(input: string): string | null {
-  const result = validateGermanPhone(input);
+  const result = validateDachPhone(input);
   if (result.valid) {
     return result.normalized;
   }
@@ -67,7 +81,6 @@ export function formatPhoneForDisplay(e164OrInput: string): string {
       return phoneNumber.country === "DE" ? phoneNumber.formatNational() : phoneNumber.formatInternational();
     }
   } catch {
-    // Fall through to return original
   }
 
   return e164OrInput;
@@ -81,4 +94,3 @@ export function formatPhoneAsYouType(input: string): string {
   }
   return formatIncompletePhoneNumber(input, "DE");
 }
-

@@ -1,32 +1,55 @@
 import { timestamp as pgTimestamp } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import { isValidPhoneNumber, parsePhoneNumber } from "libphonenumber-js/min";
+import { isValidPhoneNumber, parsePhoneNumber, CountryCode } from "libphonenumber-js/min";
 
 export const timestamp = (name: string) => pgTimestamp(name, { withTimezone: true });
 
-// German phone validation using libphonenumber-js
+const DACH_COUNTRIES: CountryCode[] = ["DE", "AT", "CH"];
+const PHONE_ERROR = "Ungültige Telefonnummer (DE/AT/CH)";
+
+function isDachPhone(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  try {
+    for (const country of DACH_COUNTRIES) {
+      if (isValidPhoneNumber(trimmed, country)) {
+        const parsed = parsePhoneNumber(trimmed, country);
+        if (parsed?.country && DACH_COUNTRIES.includes(parsed.country as CountryCode)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function parseDachPhone(value: string): string {
+  const trimmed = value.trim();
+  for (const country of DACH_COUNTRIES) {
+    if (isValidPhoneNumber(trimmed, country)) {
+      const parsed = parsePhoneNumber(trimmed, country);
+      if (parsed?.country && DACH_COUNTRIES.includes(parsed.country as CountryCode)) {
+        return parsed.format("E.164");
+      }
+    }
+  }
+  return value;
+}
+
 export const germanPhoneSchema = z.string().refine(
   (value) => {
     if (!value || value.trim() === "") return false;
-    try {
-      if (!isValidPhoneNumber(value, "DE")) return false;
-      const parsed = parsePhoneNumber(value, "DE");
-      return parsed?.country === "DE";
-    } catch {
-      return false;
-    }
+    return isDachPhone(value);
   },
-  { message: "Ungültige deutsche Telefonnummer" }
+  { message: PHONE_ERROR }
 );
 
-// Transform phone to E.164 format for storage
 export const germanPhoneTransformSchema = germanPhoneSchema.transform((value) => {
-  const parsed = parsePhoneNumber(value, "DE");
-  return parsed?.format("E.164") ?? value;
+  return parseDachPhone(value);
 });
 
-// Optional phone validation - validates and transforms to E.164 if provided
-// Handles: null, undefined, empty string, E.164 format, user input formats
 export const optionalGermanPhoneSchema = z.union([
   z.null(),
   z.undefined(),
@@ -38,48 +61,26 @@ export const optionalGermanPhoneSchema = z.union([
   const trimmed = value.trim();
   if (trimmed === "") return null;
   
-  try {
-    if (!isValidPhoneNumber(trimmed, "DE")) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Ungültige deutsche Telefonnummer",
-      });
-      return z.NEVER;
-    }
-    const parsed = parsePhoneNumber(trimmed, "DE");
-    if (parsed?.country !== "DE") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Ungültige deutsche Telefonnummer",
-      });
-      return z.NEVER;
-    }
-    return parsed.format("E.164");
-  } catch {
+  if (!isDachPhone(trimmed)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "Ungültige deutsche Telefonnummer",
+      message: PHONE_ERROR,
     });
     return z.NEVER;
   }
+  return parseDachPhone(trimmed);
 });
 
 export const internationalPhoneTransformSchema = z.string().refine(
   (value) => {
     if (!value || value.trim() === "") return false;
-    try {
-      return isValidPhoneNumber(value, "DE");
-    } catch {
-      return false;
-    }
+    return isDachPhone(value);
   },
-  { message: "Ungültige Telefonnummer" }
+  { message: PHONE_ERROR }
 ).transform((value) => {
-  const parsed = parsePhoneNumber(value, "DE");
-  return parsed?.format("E.164") ?? value;
+  return parseDachPhone(value);
 });
 
-// German validation patterns
 export const ikNummerSchema = z.string()
   .regex(/^\d{9}$/, "IK-Nummer muss genau 9 Ziffern haben");
 
