@@ -42,6 +42,7 @@ interface ContactFormState {
   contactType: string;
   telefon: string;
   email: string;
+  notes: string;
   isPrimary: boolean;
 }
 
@@ -51,6 +52,7 @@ const EMPTY_FORM: ContactFormState = {
   contactType: "familie",
   telefon: "",
   email: "",
+  notes: "",
   isPrimary: false,
 };
 
@@ -61,6 +63,7 @@ function contactToForm(c: CustomerContactItem): ContactFormState {
     contactType: c.contactType,
     telefon: formatPhoneForDisplay(c.telefon),
     email: c.email ?? "",
+    notes: c.notes ?? "",
     isPrimary: c.isPrimary,
   };
 }
@@ -116,6 +119,7 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
         nachname: data.nachname,
         telefon: normalizedPhone,
         email: data.email || null,
+        notes: data.notes.trim() || null,
       });
       return unwrapResult(result);
     },
@@ -141,6 +145,7 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
         nachname: data.nachname,
         telefon: normalizedPhone,
         email: data.email || null,
+        notes: data.notes.trim() || null,
       });
       return unwrapResult(result);
     },
@@ -279,6 +284,17 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
         />
       </div>
 
+      <div className="space-y-1">
+        <Label className="text-xs">Notiz (optional)</Label>
+        <Input
+          value={form.notes}
+          onChange={(e) => updateField("notes", e.target.value)}
+          placeholder="z.B. Erreichbarkeit, besondere Hinweise"
+          className="text-base"
+          data-testid="input-contact-edit-notes"
+        />
+      </div>
+
       <div className="flex items-center space-x-2">
         <Checkbox
           id="contact-edit-primary"
@@ -373,6 +389,11 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
                         <Mail className="h-3 w-3" />
                         {contact.email}
                       </a>
+                    )}
+                    {contact.notes && (
+                      <p className="text-xs text-gray-400 mt-1 italic" data-testid={`contact-notes-${contact.id}`}>
+                        {contact.notes}
+                      </p>
                     )}
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
