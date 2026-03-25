@@ -108,6 +108,54 @@ router.get("/growth", asyncHandler("Wachstums-Statistiken konnten nicht geladen 
   });
 }));
 
+router.get("/lifecycle-details", asyncHandler("Lifecycle-Details konnten nicht geladen werden", async (req, res) => {
+  if (!req.user!.isAdmin) throw forbidden("FORBIDDEN", "Nur für Administratoren");
+
+  const year = parseInt(req.query.year as string) || new Date().getFullYear();
+  const month = parseInt(req.query.month as string);
+  if (!month || month < 1 || month > 12) {
+    res.status(400).json({ error: "Ungültiger Monat" });
+    return;
+  }
+
+  const [gained, lost] = await Promise.all([
+    db.execute(sql`
+      SELECT DISTINCT c.id, c.name, c.vorname, c.nachname, cc.contract_start
+      FROM customer_contracts cc
+      JOIN customers c ON c.id = cc.customer_id
+      WHERE c.deleted_at IS NULL
+        AND EXTRACT(YEAR FROM cc.contract_start::date) = ${year}
+        AND EXTRACT(MONTH FROM cc.contract_start::date) = ${month}
+      ORDER BY cc.contract_start
+    `),
+    db.execute(sql`
+      SELECT c.id, c.name, c.vorname, c.nachname, c.inaktiv_ab, c.deactivation_reason
+      FROM customers c
+      WHERE c.deleted_at IS NULL
+        AND c.inaktiv_ab IS NOT NULL
+        AND EXTRACT(YEAR FROM c.inaktiv_ab::date) = ${year}
+        AND EXTRACT(MONTH FROM c.inaktiv_ab::date) = ${month}
+      ORDER BY c.inaktiv_ab
+    `),
+  ]);
+
+  const mapName = (r: any) => r.name || [r.vorname, r.nachname].filter(Boolean).join(" ") || "Unbekannt";
+
+  res.json({
+    gained: gained.rows.map((r: any) => ({
+      id: r.id,
+      name: mapName(r),
+      date: r.contract_start,
+    })),
+    lost: lost.rows.map((r: any) => ({
+      id: r.id,
+      name: mapName(r),
+      date: r.inaktiv_ab,
+      reason: r.deactivation_reason || null,
+    })),
+  });
+}));
+
 router.get("/budget-potential", asyncHandler("Budget-Potenzial konnte nicht geladen werden", async (req, res) => {
   if (!req.user!.isAdmin) throw forbidden("FORBIDDEN", "Nur für Administratoren");
 

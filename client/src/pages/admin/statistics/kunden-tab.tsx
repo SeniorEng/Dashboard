@@ -1,8 +1,9 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StatCard, BarSimple, BarStacked, DonutChart } from "@/components/charts";
 import {
   Loader2, Users, TrendingUp,
@@ -11,6 +12,7 @@ import {
 } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
+import { formatDateForDisplay } from "@shared/utils/datetime";
 import { MONTH_NAMES } from "@/features/time-tracking/constants";
 import { cents, pct, hours, SERVICE_TYPE_LABELS, SERVICE_TYPE_COLORS } from "./helpers";
 import type {
@@ -30,12 +32,25 @@ interface DonutSegment {
   color: string;
 }
 
+interface LifecycleCustomer {
+  id: number;
+  name: string;
+  date: string;
+  reason?: string | null;
+}
+
+interface LifecycleDetailsResponse {
+  gained: LifecycleCustomer[];
+  lost: LifecycleCustomer[];
+}
+
 interface KundenTabProps {
   selectedYear: number;
   selectedMonth: string;
 }
 
 export function KundenTab({ selectedYear, selectedMonth }: KundenTabProps) {
+  const [lifecycleMonth, setLifecycleMonth] = useState<number | null>(null);
   const monthParam = selectedMonth !== "all" ? `&month=${selectedMonth}` : "";
 
   const { data: statsData } = useQuery<OverviewResponse>({
@@ -62,6 +77,16 @@ export function KundenTab({ selectedYear, selectedMonth }: KundenTabProps) {
       const result = await api.get<BudgetPotentialResponse>(`/statistics/budget-potential?year=${selectedYear}`);
       return unwrapResult(result);
     },
+    staleTime: 60000,
+  });
+
+  const { data: lifecycleDetails, isLoading: lifecycleLoading } = useQuery<LifecycleDetailsResponse>({
+    queryKey: ["statistics-lifecycle-details", selectedYear, lifecycleMonth],
+    queryFn: async () => {
+      const result = await api.get<LifecycleDetailsResponse>(`/statistics/lifecycle-details?year=${selectedYear}&month=${lifecycleMonth}`);
+      return unwrapResult(result);
+    },
+    enabled: lifecycleMonth !== null,
     staleTime: 60000,
   });
 
@@ -267,25 +292,100 @@ export function KundenTab({ selectedYear, selectedMonth }: KundenTabProps) {
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {lifecycle.map((m: CustomerLifecycleMonth) => (
-                  <div key={m.month} className="flex items-center gap-3">
-                    <span className="text-xs text-muted-foreground w-8 text-right">{(MONTH_NAMES[m.month - 1] || "?").slice(0, 3)}</span>
-                    <div className="flex-1 flex gap-1">
-                      <div className="flex-1"><BarStacked segments={[{ value: m.customersGained, color: "bg-green-500" }]} max={maxLifecycle} /></div>
-                      <div className="flex-1"><BarStacked segments={[{ value: m.customersLost, color: "bg-red-400" }]} max={maxLifecycle} /></div>
-                    </div>
-                    <div className="text-xs w-20 text-right">
-                      <span className="font-medium text-green-600">+{m.customersGained}</span>
-                      <span className="text-muted-foreground"> / </span>
-                      <span className="font-medium text-red-500">-{m.customersLost}</span>
-                    </div>
-                  </div>
-                ))}
+                {lifecycle.map((m: CustomerLifecycleMonth) => {
+                  const hasData = m.customersGained > 0 || m.customersLost > 0;
+                  return (
+                    <button
+                      key={m.month}
+                      type="button"
+                      className={`flex items-center gap-3 w-full text-left rounded-lg px-2 py-1.5 transition-colors ${hasData ? "hover:bg-gray-50 cursor-pointer" : "cursor-default"}`}
+                      onClick={() => hasData && setLifecycleMonth(m.month)}
+                      disabled={!hasData}
+                      data-testid={`lifecycle-month-${m.month}`}
+                    >
+                      <span className="text-xs text-muted-foreground w-8 text-right">{(MONTH_NAMES[m.month - 1] || "?").slice(0, 3)}</span>
+                      <div className="flex-1 flex gap-1">
+                        <div className="flex-1"><BarStacked segments={[{ value: m.customersGained, color: "bg-green-500" }]} max={maxLifecycle} /></div>
+                        <div className="flex-1"><BarStacked segments={[{ value: m.customersLost, color: "bg-red-400" }]} max={maxLifecycle} /></div>
+                      </div>
+                      <div className="text-xs w-20 text-right">
+                        <span className="font-medium text-green-600">+{m.customersGained}</span>
+                        <span className="text-muted-foreground"> / </span>
+                        <span className="font-medium text-red-500">-{m.customersLost}</span>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </CardContent>
           </Card>
         )}
       </div>
+
+      <Dialog open={lifecycleMonth !== null} onOpenChange={(open) => { if (!open) setLifecycleMonth(null); }}>
+        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              Kunden-Lifecycle — {lifecycleMonth ? MONTH_NAMES[lifecycleMonth - 1] : ""} {selectedYear}
+            </DialogTitle>
+          </DialogHeader>
+          {lifecycleLoading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className={`${iconSize.lg} animate-spin text-primary`} />
+            </div>
+          ) : lifecycleDetails ? (
+            <div className="space-y-4">
+              {lifecycleDetails.gained.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-semibold text-green-700 flex items-center gap-2 mb-2">
+                    <UserCheck className={iconSize.sm} />
+                    Gewonnen ({lifecycleDetails.gained.length})
+                  </h3>
+                  <div className="space-y-1.5">
+                    {lifecycleDetails.gained.map((c) => (
+                      <Link
+                        key={c.id}
+                        href={`/admin/customers/${c.id}`}
+                        className="flex items-center justify-between p-2 rounded-lg hover:bg-green-50 transition-colors group"
+                        data-testid={`lifecycle-gained-${c.id}`}
+                      >
+                        <span className="text-sm font-medium group-hover:underline">{c.name}</span>
+                        <span className="text-xs text-muted-foreground">{formatDateForDisplay(c.date)}</span>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {lifecycleDetails.lost.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-semibold text-red-600 flex items-center gap-2 mb-2">
+                    <UserX className={iconSize.sm} />
+                    Verloren ({lifecycleDetails.lost.length})
+                  </h3>
+                  <div className="space-y-1.5">
+                    {lifecycleDetails.lost.map((c) => (
+                      <Link
+                        key={c.id}
+                        href={`/admin/customers/${c.id}`}
+                        className="flex items-center justify-between p-2 rounded-lg hover:bg-red-50 transition-colors group"
+                        data-testid={`lifecycle-lost-${c.id}`}
+                      >
+                        <div>
+                          <span className="text-sm font-medium group-hover:underline">{c.name}</span>
+                          {c.reason && (
+                            <span className="text-xs text-muted-foreground ml-2">({c.reason})</span>
+                          )}
+                        </div>
+                        <span className="text-xs text-muted-foreground shrink-0">{formatDateForDisplay(c.date)}</span>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
