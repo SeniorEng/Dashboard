@@ -606,6 +606,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     const currentYear = todayDate.getFullYear();
     const currentMonth = todayDate.getMonth() + 1;
     const currentMonthStart = `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`;
+    const lastDayOfMonth = new Date(currentYear, currentMonth, 0).getDate();
+    const currentMonthEnd = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(lastDayOfMonth).padStart(2, '0')}`;
 
     const allocValidWhere = and(
       eq(budgetAllocations.customerId, customerId),
@@ -622,7 +624,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       isNull(budgetAllocations.deletedAt)
     );
 
-    const [allocResult, txResult, currentYearResult, carryoverResult, currentMonthResult] = await Promise.all([
+    const [allocResult, txResult, currentYearResult, carryoverResult, currentMonthResult, currentMonthReversalResult] = await Promise.all([
       db.select({
         total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
       }).from(budgetAllocations).where(allocAllWhere),
@@ -659,7 +661,18 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         eq(budgetTransactions.customerId, customerId),
         eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
         eq(budgetTransactions.transactionType, "consumption"),
-        gte(budgetTransactions.transactionDate, currentMonthStart)
+        gte(budgetTransactions.transactionDate, currentMonthStart),
+        lte(budgetTransactions.transactionDate, currentMonthEnd)
+      )),
+
+      db.select({
+        total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+      }).from(budgetTransactions).where(and(
+        eq(budgetTransactions.customerId, customerId),
+        eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
+        eq(budgetTransactions.transactionType, "reversal"),
+        gte(budgetTransactions.transactionDate, currentMonthStart),
+        lte(budgetTransactions.transactionDate, currentMonthEnd)
       )),
     ]);
 
@@ -678,7 +691,9 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     const currentYearAllocatedCents = Number(currentYearResult[0]?.total ?? 0);
     const carryoverCents = Number(carryoverResult[0]?.total ?? 0);
     const carryoverExpiresAt = carryoverCents > 0 ? (carryoverResult[0]?.expiresAt ?? null) : null;
-    const currentMonthUsedCents = Number(currentMonthResult[0]?.total ?? 0);
+    const currentMonthConsumption = Number(currentMonthResult[0]?.total ?? 0);
+    const currentMonthReversals = Number(currentMonthReversalResult[0]?.total ?? 0);
+    const currentMonthUsedCents = Math.max(0, currentMonthConsumption - currentMonthReversals);
 
     const availableCents = totalAllocatedCents - netUsedCents;
     const plannedCents = await this.getPlannedCostCents(customerId);

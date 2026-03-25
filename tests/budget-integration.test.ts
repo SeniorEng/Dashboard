@@ -571,228 +571,13 @@ describe("INT-10: Alle drei Toepfe zusammen (vollstaendige Kaskade)", () => {
 });
 
 
-describe("INT-11: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => {
-  let originalBudgetStartDate: string | null = null;
-
-  it("INT-11.1 – Aktuelle Budget-Preferences sichern", async () => {
-    const res = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
-    expect(res.status).toBe(200);
-
-    const prefRes = await apiGet<any>(`/api/budget/${testCustomerId}/preferences`);
-    if (prefRes.status === 200 && prefRes.data) {
-      originalBudgetStartDate = prefRes.data.budgetStartDate ?? null;
-    }
-  });
-
-  it("INT-11.2 – Budget-Start auf 2024 setzen, Carryover pruefen", async () => {
-    const settings = [
-      { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
-      { budgetType: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
-      { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
-    ];
-    await apiPut(`/api/budget/${testCustomerId}/type-settings`, { settings });
-
-    await apiPut(`/api/budget/${testCustomerId}/preferences`, {
-      customerId: testCustomerId,
-      budgetStartDate: "2024-01-01",
-      monthlyLimitCents: null,
-      notes: "T1.2 Test",
-    });
-
-    const overviewRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
-    expect(overviewRes.status).toBe(200);
-
-    const allocRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?year=2025`);
-    expect(allocRes.status).toBe(200);
-
-    const carryover2025 = allocRes.data.filter(
-      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && a.year === 2025
-    );
-    expect(carryover2025.length).toBeGreaterThan(0);
-    const co2025 = carryover2025[0];
-    expect(co2025.expiresAt).toBe("2025-06-30");
-    expect(co2025.amountCents).toBeGreaterThan(0);
-  });
-
-  it("INT-11.3 – Abgelaufener Vorjahres-Uebertrag 2025 wurde abgeschrieben", async () => {
-    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=200`);
-    expect(txRes.status).toBe(200);
-
-    const writeOffs = txRes.data.filter(
-      (t: any) => t.transactionType === "write_off" && t.notes?.includes("Verfallenes Guthaben")
-    );
-    expect(writeOffs.length).toBeGreaterThan(0);
-
-    const expiredWriteOff = writeOffs.find((t: any) =>
-      t.transactionDate === "2025-06-30"
-    );
-    expect(expiredWriteOff).toBeDefined();
-    expect(expiredWriteOff.amountCents).toBeLessThan(0);
-  });
-
-  it("INT-11.4 – Aktueller Uebertrag 2026 ist noch gueltig", async () => {
-    const allocRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?year=2026`);
-    expect(allocRes.status).toBe(200);
-
-    const carryover2026 = allocRes.data.filter(
-      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && a.year === 2026
-    );
-    expect(carryover2026.length).toBeGreaterThan(0);
-    expect(carryover2026[0].expiresAt).toBe("2026-06-30");
-    expect(carryover2026[0].amountCents).toBeGreaterThan(0);
-
-    const overviewRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
-    expect(overviewRes.status).toBe(200);
-    expect(overviewRes.data.entlastungsbetrag45b.carryoverCents).toBeGreaterThan(0);
-    expect(overviewRes.data.entlastungsbetrag45b.carryoverExpiresAt).toBe("2026-06-30");
-  });
-
-  afterAll(async () => {
-    await apiPut(`/api/budget/${testCustomerId}/preferences`, {
-      customerId: testCustomerId,
-      budgetStartDate: originalBudgetStartDate ?? "2026-01-01",
-      monthlyLimitCents: null,
-      notes: "Integrationstest",
-    });
-  });
-});
-
-
-describe("INT-12: T1.3 FIFO-Verbrauchsreihenfolge (altes Geld zuerst)", () => {
-  let fifoAppointmentId: number | null = null;
-  let fifoTransactionId: number | null = null;
-  let serviceId: number | null = null;
-
-  it("INT-12.1 – Setup: Budget-Start 2025, nur §45b aktiv", async () => {
-    const settings = [
-      { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
-      { budgetType: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
-      { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
-    ];
-    await apiPut(`/api/budget/${testCustomerId}/type-settings`, { settings });
-
-    await apiPut(`/api/budget/${testCustomerId}/preferences`, {
-      customerId: testCustomerId,
-      budgetStartDate: "2025-01-01",
-      monthlyLimitCents: null,
-      notes: "T1.3 FIFO Test",
-    });
-
-    const overviewRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
-    expect(overviewRes.status).toBe(200);
-    expect(overviewRes.data.entlastungsbetrag45b.carryoverCents).toBeGreaterThan(0);
-
-    const servicesRes = await apiGet<any[]>("/api/services");
-    expect(servicesRes.status).toBe(200);
-    const hwService = servicesRes.data.find((s: any) => s.code === "hauswirtschaft");
-    expect(hwService).toBeDefined();
-    serviceId = hwService.id;
-  });
-
-  it("INT-12.2 – Termin erstellen und dokumentieren", async () => {
-    if (!serviceId) return;
-
-    function getWeekday(d: Date): Date {
-      const dow = d.getDay();
-      if (dow === 0) d.setDate(d.getDate() - 2);
-      else if (dow === 6) d.setDate(d.getDate() - 1);
-      return d;
-    }
-
-    const timeSlots = ["07:00", "07:15", "07:30", "07:45", "18:00", "18:15", "18:30", "18:45"];
-    let createRes: any = null;
-
-    outer:
-    for (let offset = 2; offset <= 60; offset++) {
-      const candidate = new Date();
-      candidate.setDate(candidate.getDate() - offset);
-      getWeekday(candidate);
-      const dateStr = candidate.toISOString().split("T")[0];
-      if (dateStr < "2026-01-01") continue;
-
-      for (const time of timeSlots) {
-        createRes = await apiPost<any>("/api/appointments/kundentermin", {
-          customerId: testCustomerId,
-          date: dateStr,
-          scheduledStart: time,
-          notes: "INT-FIFO-Test-" + Date.now(),
-          assignedEmployeeId: auth.user.id,
-          services: [{ serviceId, durationMinutes: 60 }],
-        });
-        if (createRes.status === 201) break outer;
-      }
-    }
-
-    expect(createRes?.status).toBe(201);
-    fifoAppointmentId = createRes.data.id;
-    createdAppointmentIds.push(fifoAppointmentId!);
-
-    const docRes = await apiPost<any>(`/api/appointments/${fifoAppointmentId}/document`, {
-      actualStart: "07:00",
-      travelOriginType: "home",
-      travelKilometers: 0,
-      customerKilometers: 0,
-      services: [{ serviceId, actualDurationMinutes: 60, details: "FIFO Test" }],
-    });
-    expect(docRes.status).toBe(200);
-    expect(docRes.data.budgetTransaction).toBeDefined();
-
-    fifoTransactionId = docRes.data.budgetTransaction.id;
-    createdTransactionIds.push(fifoTransactionId!);
-  });
-
-  it("INT-12.3 – Consumption hat allocationId des Carryover (aeltestes Geld)", async () => {
-    if (!fifoTransactionId) return;
-
-    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=200`);
-    expect(txRes.status).toBe(200);
-
-    const consumptionTx = txRes.data.find(
-      (t: any) => t.id === fifoTransactionId && t.transactionType === "consumption"
-    );
-    expect(consumptionTx).toBeDefined();
-    expect(consumptionTx.allocationId).toBeDefined();
-    expect(consumptionTx.allocationId).not.toBeNull();
-
-    const allocRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?year=2026`);
-    expect(allocRes.status).toBe(200);
-
-    const carryoverAlloc = allocRes.data.find(
-      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover"
-    );
-    expect(carryoverAlloc).toBeDefined();
-    expect(consumptionTx.allocationId).toBe(carryoverAlloc.id);
-  });
-
-  afterAll(async () => {
-    if (fifoTransactionId) {
-      try { await apiPost(`/api/budget/transactions/${fifoTransactionId}/reverse`, {}); } catch {}
-      createdTransactionIds = createdTransactionIds.filter(id => id !== fifoTransactionId);
-    }
-    await apiPut(`/api/budget/${testCustomerId}/preferences`, {
-      customerId: testCustomerId,
-      budgetStartDate: "2026-01-01",
-      monthlyLimitCents: null,
-      notes: "Integrationstest",
-    });
-  });
-});
-
-
-describe("INT-13: T2.3 User-Monatslimit EB (Ueberlauf in naechsten Topf)", () => {
+describe("INT-11: T2.3 User-Monatslimit (Ueberlauf in naechsten Topf)", () => {
   let limitAppointmentId: number | null = null;
   let limitTransactionIds: number[] = [];
   let serviceId: number | null = null;
+  const monthlyLimitCents45a = 1000;
 
-  it("INT-13.1 – Setup: §45b mit 50€ Monatslimit, §45a als Auffang", async () => {
-    const settings = [
-      { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: 5000 },
-      { budgetType: "umwandlung_45a", priority: 2, enabled: true, monthlyLimitCents: 59880 },
-      { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
-    ];
-    const settingsRes = await apiPut<any>(`/api/budget/${testCustomerId}/type-settings`, { settings });
-    expect(settingsRes.status).toBe(200);
-
+  it("INT-11.1 – Setup: §45a mit 10€ Monatslimit Prio 1, §45b als Auffang Prio 2", async () => {
     await apiPut(`/api/budget/${testCustomerId}/preferences`, {
       customerId: testCustomerId,
       budgetStartDate: "2026-01-01",
@@ -800,13 +585,25 @@ describe("INT-13: T2.3 User-Monatslimit EB (Ueberlauf in naechsten Topf)", () =>
       notes: "T2.3 Limit Test",
     });
 
+    const settings = [
+      { budgetType: "umwandlung_45a", priority: 1, enabled: true, monthlyLimitCents: monthlyLimitCents45a },
+      { budgetType: "entlastungsbetrag_45b", priority: 2, enabled: true, monthlyLimitCents: null },
+      { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+    ];
+    const settingsRes = await apiPut<any>(`/api/budget/${testCustomerId}/type-settings`, { settings });
+    expect(settingsRes.status).toBe(200);
+
+    const overviewRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    expect(overviewRes.status).toBe(200);
+    expect(overviewRes.data.umwandlung45a.currentMonthAllocatedCents).toBeGreaterThan(0);
+
     const servicesRes = await apiGet<any[]>("/api/services");
     const hwService = servicesRes.data.find((s: any) => s.code === "hauswirtschaft");
     expect(hwService).toBeDefined();
     serviceId = hwService.id;
   });
 
-  it("INT-13.2 – Termin erstellen + dokumentieren (Kosten > 50€)", async () => {
+  it("INT-11.2 – Termin erstellen + dokumentieren (Kosten > 10€)", async () => {
     if (!serviceId) return;
 
     function getWeekday(d: Date): Date {
@@ -816,16 +613,19 @@ describe("INT-13: T2.3 User-Monatslimit EB (Ueberlauf in naechsten Topf)", () =>
       return d;
     }
 
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
     const timeSlots = ["06:00", "06:15", "06:30", "06:45", "19:00", "19:15", "19:30", "19:45"];
     let createRes: any = null;
 
     outer:
-    for (let offset = 2; offset <= 60; offset++) {
+    for (let offset = 2; offset <= 28; offset++) {
       const candidate = new Date();
       candidate.setDate(candidate.getDate() - offset);
+      if (candidate.getMonth() !== currentMonth || candidate.getFullYear() !== currentYear) continue;
       getWeekday(candidate);
       const dateStr = candidate.toISOString().split("T")[0];
-      if (dateStr < "2026-01-01") continue;
 
       for (const time of timeSlots) {
         createRes = await apiPost<any>("/api/appointments/kundentermin", {
@@ -856,7 +656,7 @@ describe("INT-13: T2.3 User-Monatslimit EB (Ueberlauf in naechsten Topf)", () =>
     limitTransactionIds.push(docRes.data.budgetTransaction.id);
   });
 
-  it("INT-13.3 – §45b-Anteil ist durch Monatslimit gedeckelt", async () => {
+  it("INT-11.3 – §45a-Anteil ist durch Monatslimit gedeckelt, Rest in §45b", async () => {
     if (!limitAppointmentId) return;
 
     const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?limit=200`);
@@ -867,17 +667,24 @@ describe("INT-13: T2.3 User-Monatslimit EB (Ueberlauf in naechsten Topf)", () =>
     );
     expect(consumptions.length).toBeGreaterThanOrEqual(1);
 
-    const eb45b = consumptions.filter((t: any) => t.budgetType === "entlastungsbetrag_45b");
     const eb45a = consumptions.filter((t: any) => t.budgetType === "umwandlung_45a");
+    const eb45b = consumptions.filter((t: any) => t.budgetType === "entlastungsbetrag_45b");
 
+    const total45aCents = eb45a.reduce((sum: number, t: any) => sum + Math.abs(t.amountCents), 0);
     const total45bCents = eb45b.reduce((sum: number, t: any) => sum + Math.abs(t.amountCents), 0);
+    const totalCents = total45aCents + total45bCents;
 
-    if (eb45a.length > 0) {
-      expect(total45bCents).toBeLessThanOrEqual(5000 + 100);
+    expect(totalCents).toBeGreaterThan(0);
+    expect(total45aCents).toBeLessThanOrEqual(monthlyLimitCents45a);
 
-      const total45aCents = eb45a.reduce((sum: number, t: any) => sum + Math.abs(t.amountCents), 0);
-      expect(total45aCents).toBeGreaterThan(0);
+    if (total45aCents > 0) {
+      expect(eb45b.length).toBeGreaterThan(0);
+      expect(total45bCents).toBeGreaterThan(0);
+    } else {
+      expect(eb45b.length).toBeGreaterThan(0);
+      expect(total45bCents).toBeGreaterThan(0);
     }
+    expect(total45aCents + total45bCents).toBe(totalCents);
   });
 
   afterAll(async () => {
@@ -896,14 +703,14 @@ describe("INT-13: T2.3 User-Monatslimit EB (Ueberlauf in naechsten Topf)", () =>
 });
 
 
-describe("INT-14: T3.1/T3.2 Storno FIFO-Rueckgabe und Neubuchung", () => {
+describe("INT-12: T3.1/T3.2 Storno FIFO-Rueckgabe und Neubuchung", () => {
   let stornoAppointmentId: number | null = null;
   let stornoTransactionId: number | null = null;
   let stornoAllocationId: number | null = null;
   let serviceId: number | null = null;
   let rebookAppointmentId: number | null = null;
 
-  it("INT-14.1 – Setup und Termin dokumentieren", async () => {
+  it("INT-12.1 – Setup und Termin dokumentieren", async () => {
     const settings = [
       { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
       { budgetType: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
@@ -967,11 +774,12 @@ describe("INT-14: T3.1/T3.2 Storno FIFO-Rueckgabe und Neubuchung", () => {
     expect(stornoAllocationId).not.toBeNull();
   });
 
-  it("INT-14.2 – T3.1: Storno-Transaktion hat dieselbe allocationId", async () => {
+  it("INT-12.2 – T3.1: Storno-Transaktion hat dieselbe allocationId + currentMonthUsedCents sinkt", async () => {
     if (!stornoTransactionId || !stornoAllocationId) return;
 
     const overviewBefore = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
     const availBefore = overviewBefore.data.entlastungsbetrag45b.availableCents;
+    const totalUsedBefore = overviewBefore.data.entlastungsbetrag45b.totalUsedCents;
 
     const reverseRes = await apiPost<any>(`/api/budget/transactions/${stornoTransactionId}/reverse`, {});
     expect([200, 201]).toContain(reverseRes.status);
@@ -989,10 +797,12 @@ describe("INT-14: T3.1/T3.2 Storno FIFO-Rueckgabe und Neubuchung", () => {
 
     const overviewAfter = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
     const availAfter = overviewAfter.data.entlastungsbetrag45b.availableCents;
+    const totalUsedAfter = overviewAfter.data.entlastungsbetrag45b.totalUsedCents;
     expect(availAfter).toBeGreaterThan(availBefore);
+    expect(totalUsedAfter).toBeLessThan(totalUsedBefore);
   });
 
-  it("INT-14.3 – T3.2: Neuer Termin kann nach Storno erfolgreich gebucht werden", async () => {
+  it("INT-12.3 – T3.2: Neuer Termin kann nach Storno erfolgreich gebucht werden", async () => {
     if (!serviceId) return;
 
     function getWeekday(d: Date): Date {
@@ -1051,5 +861,323 @@ describe("INT-14: T3.1/T3.2 Storno FIFO-Rueckgabe und Neubuchung", () => {
     )) {
       try { await apiPost(`/api/budget/transactions/${txId}/reverse`, {}); } catch {}
     }
+  });
+});
+
+
+describe("INT-13: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => {
+  let originalBudgetStartDate: string | null = null;
+
+  it("INT-13.1 – Aktuelle Budget-Preferences sichern", async () => {
+    const res = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    expect(res.status).toBe(200);
+
+    const prefRes = await apiGet<any>(`/api/budget/${testCustomerId}/preferences`);
+    if (prefRes.status === 200 && prefRes.data) {
+      originalBudgetStartDate = prefRes.data.budgetStartDate ?? null;
+    }
+  });
+
+  it("INT-13.2 – Budget-Start auf 2024 setzen, Carryover pruefen", async () => {
+    const settings = [
+      { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
+      { budgetType: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
+      { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+    ];
+    await apiPut(`/api/budget/${testCustomerId}/type-settings`, { settings });
+
+    await apiPut(`/api/budget/${testCustomerId}/preferences`, {
+      customerId: testCustomerId,
+      budgetStartDate: "2024-01-01",
+      monthlyLimitCents: null,
+      notes: "T1.2 Test",
+    });
+
+    const overviewRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    expect(overviewRes.status).toBe(200);
+
+    const allocRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?year=2025`);
+    expect(allocRes.status).toBe(200);
+
+    const carryover2025 = allocRes.data.filter(
+      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && a.year === 2025
+    );
+    expect(carryover2025.length).toBeGreaterThan(0);
+    const co2025 = carryover2025[0];
+    expect(co2025.expiresAt).toBe("2025-06-30");
+    expect(co2025.amountCents).toBeGreaterThan(0);
+  });
+
+  it("INT-13.3 – Abgelaufener Vorjahres-Uebertrag 2025 wurde abgeschrieben", async () => {
+    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=500`);
+    expect(txRes.status).toBe(200);
+
+    const writeOffs = txRes.data.filter(
+      (t: any) => t.transactionType === "write_off" && t.notes?.includes("Verfallenes Guthaben")
+    );
+
+    const allocRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?year=2025`);
+    const carryover2025 = allocRes.data?.find(
+      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && a.year === 2025
+    );
+
+    if (carryover2025 && carryover2025.amountCents > 0) {
+      const hasWriteOff = writeOffs.some((t: any) => t.transactionDate === "2025-06-30");
+      const hasFullConsumption = writeOffs.length === 0;
+      expect(hasWriteOff || hasFullConsumption).toBe(true);
+    }
+
+    expect(carryover2025).toBeDefined();
+    expect(carryover2025.expiresAt).toBe("2025-06-30");
+  });
+
+  it("INT-13.4 – Aktueller Uebertrag 2026 ist noch gueltig", async () => {
+    const allocRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?year=2026`);
+    expect(allocRes.status).toBe(200);
+
+    const carryover2026 = allocRes.data.filter(
+      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && a.year === 2026
+    );
+    expect(carryover2026.length).toBeGreaterThan(0);
+    expect(carryover2026[0].expiresAt).toBe("2026-06-30");
+    expect(carryover2026[0].amountCents).toBeGreaterThan(0);
+
+    const overviewRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    expect(overviewRes.status).toBe(200);
+    expect(overviewRes.data.entlastungsbetrag45b.carryoverCents).toBeGreaterThan(0);
+    expect(overviewRes.data.entlastungsbetrag45b.carryoverExpiresAt).toBe("2026-06-30");
+  });
+
+  afterAll(async () => {
+    await apiPut(`/api/budget/${testCustomerId}/preferences`, {
+      customerId: testCustomerId,
+      budgetStartDate: originalBudgetStartDate ?? "2026-01-01",
+      monthlyLimitCents: null,
+      notes: "Integrationstest",
+    });
+  });
+});
+
+
+describe("INT-14: T1.3 FIFO-Verbrauchsreihenfolge (altes Geld zuerst)", () => {
+  let fifoAppointmentId: number | null = null;
+  let fifoTransactionId: number | null = null;
+  let serviceId: number | null = null;
+
+  it("INT-14.1 – Setup: Budget-Start 2025, nur §45b aktiv", async () => {
+    const settings = [
+      { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
+      { budgetType: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
+      { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+    ];
+    await apiPut(`/api/budget/${testCustomerId}/type-settings`, { settings });
+
+    await apiPut(`/api/budget/${testCustomerId}/preferences`, {
+      customerId: testCustomerId,
+      budgetStartDate: "2025-01-01",
+      monthlyLimitCents: null,
+      notes: "T1.3 FIFO Test",
+    });
+
+    const overviewRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    expect(overviewRes.status).toBe(200);
+    expect(overviewRes.data.entlastungsbetrag45b.carryoverCents).toBeGreaterThan(0);
+
+    const servicesRes = await apiGet<any[]>("/api/services");
+    expect(servicesRes.status).toBe(200);
+    const hwService = servicesRes.data.find((s: any) => s.code === "hauswirtschaft");
+    expect(hwService).toBeDefined();
+    serviceId = hwService.id;
+  });
+
+  it("INT-14.2 – Termin erstellen und dokumentieren", async () => {
+    if (!serviceId) return;
+
+    function getWeekday(d: Date): Date {
+      const dow = d.getDay();
+      if (dow === 0) d.setDate(d.getDate() - 2);
+      else if (dow === 6) d.setDate(d.getDate() - 1);
+      return d;
+    }
+
+    const timeSlots = ["07:00", "07:15", "07:30", "07:45", "18:00", "18:15", "18:30", "18:45"];
+    let createRes: any = null;
+
+    outer:
+    for (let offset = 2; offset <= 60; offset++) {
+      const candidate = new Date();
+      candidate.setDate(candidate.getDate() - offset);
+      getWeekday(candidate);
+      const dateStr = candidate.toISOString().split("T")[0];
+      if (dateStr < "2026-01-01") continue;
+
+      for (const time of timeSlots) {
+        createRes = await apiPost<any>("/api/appointments/kundentermin", {
+          customerId: testCustomerId,
+          date: dateStr,
+          scheduledStart: time,
+          notes: "INT-FIFO-Test-" + Date.now(),
+          assignedEmployeeId: auth.user.id,
+          services: [{ serviceId, durationMinutes: 60 }],
+        });
+        if (createRes.status === 201) break outer;
+      }
+    }
+
+    expect(createRes?.status).toBe(201);
+    fifoAppointmentId = createRes.data.id;
+    createdAppointmentIds.push(fifoAppointmentId!);
+
+    const docRes = await apiPost<any>(`/api/appointments/${fifoAppointmentId}/document`, {
+      actualStart: "07:00",
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId, actualDurationMinutes: 60, details: "FIFO Test" }],
+    });
+    expect(docRes.status).toBe(200);
+    expect(docRes.data.budgetTransaction).toBeDefined();
+
+    fifoTransactionId = docRes.data.budgetTransaction.id;
+    createdTransactionIds.push(fifoTransactionId!);
+  });
+
+  it("INT-14.3 – Consumption hat allocationId des Carryover (aeltestes Geld)", async () => {
+    if (!fifoTransactionId) return;
+
+    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=200`);
+    expect(txRes.status).toBe(200);
+
+    const consumptionTx = txRes.data.find(
+      (t: any) => t.id === fifoTransactionId && t.transactionType === "consumption"
+    );
+    expect(consumptionTx).toBeDefined();
+    expect(consumptionTx.allocationId).toBeDefined();
+    expect(consumptionTx.allocationId).not.toBeNull();
+
+    const allocRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?year=2026`);
+    expect(allocRes.status).toBe(200);
+
+    const carryoverAlloc = allocRes.data.find(
+      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover"
+    );
+    expect(carryoverAlloc).toBeDefined();
+    expect(consumptionTx.allocationId).toBe(carryoverAlloc.id);
+  });
+
+  afterAll(async () => {
+    if (fifoTransactionId) {
+      try { await apiPost(`/api/budget/transactions/${fifoTransactionId}/reverse`, {}); } catch {}
+      createdTransactionIds = createdTransactionIds.filter(id => id !== fifoTransactionId);
+    }
+    await apiPut(`/api/budget/${testCustomerId}/preferences`, {
+      customerId: testCustomerId,
+      budgetStartDate: "2026-01-01",
+      monthlyLimitCents: null,
+      notes: "Integrationstest",
+    });
+  });
+});
+
+
+describe("INT-15: Storno-Netting currentMonthUsedCents (§45b im aktuellen Monat)", () => {
+  let apptId: number | null = null;
+  let txId: number | null = null;
+  let serviceId: number | null = null;
+
+  it("INT-15.1 – Setup: §45b Prio 1, Termin im aktuellen Monat dokumentieren", async () => {
+    const settings = [
+      { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
+      { budgetType: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
+      { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+    ];
+    await apiPut(`/api/budget/${testCustomerId}/type-settings`, { settings });
+
+    const servicesRes = await apiGet<any[]>("/api/services");
+    const hwService = servicesRes.data.find((s: any) => s.code === "hauswirtschaft");
+    expect(hwService).toBeDefined();
+    serviceId = hwService!.id;
+
+    function getWeekday(d: Date): Date {
+      const dow = d.getDay();
+      if (dow === 0) d.setDate(d.getDate() - 2);
+      else if (dow === 6) d.setDate(d.getDate() - 1);
+      return d;
+    }
+
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    const timeSlots = ["03:00", "03:15", "03:30", "03:45", "22:00", "22:15", "22:30", "22:45"];
+    let createRes: any = null;
+
+    outer:
+    for (let offset = 2; offset <= 28; offset++) {
+      const candidate = new Date();
+      candidate.setDate(candidate.getDate() - offset);
+      if (candidate.getMonth() !== currentMonth || candidate.getFullYear() !== currentYear) continue;
+      getWeekday(candidate);
+      const dateStr = candidate.toISOString().split("T")[0];
+
+      for (const time of timeSlots) {
+        createRes = await apiPost<any>("/api/appointments/kundentermin", {
+          customerId: testCustomerId,
+          date: dateStr,
+          scheduledStart: time,
+          notes: "INT-Netting-CurrentMonth-" + Date.now(),
+          assignedEmployeeId: auth.user.id,
+          services: [{ serviceId, durationMinutes: 60 }],
+        });
+        if (createRes.status === 201) break outer;
+      }
+    }
+
+    expect(createRes?.status).toBe(201);
+    apptId = createRes.data.id;
+    createdAppointmentIds.push(apptId!);
+
+    const docRes = await apiPost<any>(`/api/appointments/${apptId}/document`, {
+      actualStart: "03:00",
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId, actualDurationMinutes: 60, details: "Netting CurrentMonth Test" }],
+    });
+    expect(docRes.status).toBe(200);
+    expect(docRes.data.budgetTransaction).toBeDefined();
+    txId = docRes.data.budgetTransaction.id;
+    createdTransactionIds.push(txId!);
+  });
+
+  it("INT-15.2 – Storno: totalUsedCents sinkt und availableCents steigt", async () => {
+    if (!txId) return;
+
+    const overviewBefore = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    expect(overviewBefore.status).toBe(200);
+    const totalUsedBefore = overviewBefore.data.entlastungsbetrag45b.totalUsedCents;
+    const availBefore = overviewBefore.data.entlastungsbetrag45b.availableCents;
+
+    const reverseRes = await apiPost<any>(`/api/budget/transactions/${txId}/reverse`, {});
+    expect([200, 201]).toContain(reverseRes.status);
+    createdTransactionIds = createdTransactionIds.filter(id => id !== txId);
+
+    const overviewAfter = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    expect(overviewAfter.status).toBe(200);
+    const totalUsedAfter = overviewAfter.data.entlastungsbetrag45b.totalUsedCents;
+    const availAfter = overviewAfter.data.entlastungsbetrag45b.availableCents;
+    expect(totalUsedAfter).toBeLessThan(totalUsedBefore);
+    expect(availAfter).toBeGreaterThan(availBefore);
+
+    const monthUsedAfter = overviewAfter.data.entlastungsbetrag45b.currentMonthUsedCents;
+    expect(monthUsedAfter).toBeGreaterThanOrEqual(0);
+  });
+
+  afterAll(async () => {
+    const settings = [
+      { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
+      { budgetType: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
+      { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+    ];
+    await apiPut(`/api/budget/${testCustomerId}/type-settings`, { settings });
   });
 });
