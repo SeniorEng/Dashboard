@@ -8,7 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api";
 import { iconSize } from "@/design-system";
 import { EditButton, SaveCancelButtons } from "./section-helpers";
-import { Stethoscope, PawPrint, Car, Send, Mail, Truck } from "lucide-react";
+import { Stethoscope, PawPrint, Send, Mail, Truck } from "lucide-react";
 import type { SectionProps } from "./types";
 
 export function MedicalSection({ customer, customerId, editingSection, setEditingSection, saving, setSaving, invalidateCustomer }: SectionProps) {
@@ -72,14 +72,12 @@ export function SpecialFeaturesSection({ customer, customerId, editingSection, s
   const [besonderheiten, setBesonderheiten] = useState({
     haustierVorhanden: false,
     haustierDetails: "",
-    personenbefoerderungGewuenscht: false,
   });
 
   const initBesonderheiten = () => {
     setBesonderheiten({
       haustierVorhanden: customer.haustierVorhanden ?? false,
       haustierDetails: customer.haustierDetails || "",
-      personenbefoerderungGewuenscht: customer.personenbefoerderungGewuenscht ?? false,
     });
   };
 
@@ -89,7 +87,6 @@ export function SpecialFeaturesSection({ customer, customerId, editingSection, s
       const result = await api.patch(`/admin/customers/${customerId}`, {
         haustierVorhanden: besonderheiten.haustierVorhanden,
         haustierDetails: besonderheiten.haustierVorhanden ? (besonderheiten.haustierDetails?.trim() || null) : null,
-        personenbefoerderungGewuenscht: besonderheiten.personenbefoerderungGewuenscht,
       });
       unwrapResult(result);
       toast({ title: "Besonderheiten gespeichert" });
@@ -136,15 +133,6 @@ export function SpecialFeaturesSection({ customer, customerId, editingSection, s
               />
             </div>
           )}
-          <div className="flex items-center justify-between">
-            <Label htmlFor="personenbefoerderung" className="cursor-pointer">Personenbeförderung gewünscht</Label>
-            <Switch
-              id="personenbefoerderung"
-              checked={besonderheiten.personenbefoerderungGewuenscht}
-              onCheckedChange={(checked) => setBesonderheiten((prev) => ({ ...prev, personenbefoerderungGewuenscht: checked }))}
-              data-testid="switch-personenbefoerderung"
-            />
-          </div>
           <SaveCancelButtons onSave={handleSaveBesonderheiten} testIdPrefix="besonderheiten" saving={saving} onCancel={() => setEditingSection(null)} />
         </div>
       ) : (
@@ -155,10 +143,6 @@ export function SpecialFeaturesSection({ customer, customerId, editingSection, s
             {customer.haustierVorhanden && customer.haustierDetails && (
               <span className="text-gray-500">({customer.haustierDetails})</span>
             )}
-          </div>
-          <div className="flex items-center gap-2 text-gray-700" data-testid="text-personenbefoerderung">
-            <Car className={`${iconSize.sm} text-gray-500`} />
-            Personenbeförderung: {customer.personenbefoerderungGewuenscht ? "Ja" : "Nein"}
           </div>
         </div>
       )}

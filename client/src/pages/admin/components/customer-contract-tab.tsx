@@ -25,6 +25,7 @@ import {
   FileText,
   ClipboardList,
   CreditCard,
+  Car,
   Pencil,
   Save,
   X,
@@ -82,6 +83,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
   const [periodType, setPeriodType] = useState("week");
 
   const [vereinbarteLeistungen, setVereinbarteLeistungen] = useState("");
+  const [personenbefoerderungGewuenscht, setPersonenbefoerderungGewuenscht] = useState(false);
   const [acceptsPrivatePayment, setAcceptsPrivatePayment] = useState(false);
 
   const [creatingContract, setCreatingContract] = useState(false);
@@ -124,6 +126,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
       setPeriodType(contract.periodType || "week");
     } else if (section === "leistungen") {
       setVereinbarteLeistungen(contract?.vereinbarteLeistungen || "");
+      setPersonenbefoerderungGewuenscht(customer.personenbefoerderungGewuenscht ?? false);
     } else if (section === "abrechnung") {
       setAcceptsPrivatePayment(customer.acceptsPrivatePayment ?? false);
     }
@@ -191,6 +194,10 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
         });
         unwrapResult(contractPatch);
       }
+      const customerPatch = await api.patch(`/admin/customers/${customerId}`, {
+        personenbefoerderungGewuenscht,
+      });
+      unwrapResult(customerPatch);
       toast({ title: "Vereinbarte Leistungen gespeichert" });
       invalidateCustomer();
       setEditingSection(null);
@@ -604,12 +611,30 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
               disabled={!contract}
               data-testid="input-vereinbarte-leistungen"
             />
-            {saveCancel(handleSaveLeistungen, saving, "leistungen", !contract)}
+            <div className="flex items-center justify-between">
+              <Label htmlFor="personenbefoerderung" className="cursor-pointer flex items-center gap-2">
+                <Car className={`${iconSize.sm} text-gray-500`} />
+                Personenbeförderung gewünscht
+              </Label>
+              <Switch
+                id="personenbefoerderung"
+                checked={personenbefoerderungGewuenscht}
+                onCheckedChange={(checked) => setPersonenbefoerderungGewuenscht(checked)}
+                data-testid="switch-personenbefoerderung"
+              />
+            </div>
+            {saveCancel(handleSaveLeistungen, saving, "leistungen")}
           </div>
         ) : (
-          <p className="text-gray-700 whitespace-pre-wrap" data-testid="text-vereinbarte-leistungen">
-            {contract?.vereinbarteLeistungen || "Keine Angabe"}
-          </p>
+          <div className="space-y-3">
+            <p className="text-gray-700 whitespace-pre-wrap" data-testid="text-vereinbarte-leistungen">
+              {contract?.vereinbarteLeistungen || "Keine Angabe"}
+            </p>
+            <div className="flex items-center gap-2 text-gray-700" data-testid="text-personenbefoerderung">
+              <Car className={`${iconSize.sm} text-gray-500`} />
+              Personenbeförderung: {customer.personenbefoerderungGewuenscht ? "Ja" : "Nein"}
+            </div>
+          </div>
         )}
       </SectionCard>
 
