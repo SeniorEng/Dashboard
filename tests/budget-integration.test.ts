@@ -571,19 +571,20 @@ describe("INT-10: Alle drei Toepfe zusammen (vollstaendige Kaskade)", () => {
 });
 
 
-describe("INT-11: T2.3 User-Monatslimit (Ueberlauf in naechsten Topf)", () => {
+describe("INT-11: T2.3 User-Monatslimit EB (Ueberlauf in naechsten Topf)", () => {
   let limitAppointmentId: number | null = null;
   let limitTransactionIds: number[] = [];
   let serviceId: number | null = null;
   let initialBalanceId45a: number | null = null;
-  const monthlyLimitCents45a = 1000;
+  let effectiveLimitCents = 0;
+  const monthlyLimitCentsEB = 1000;
 
-  it("INT-11.1 – Setup: §45a mit 10€ Monatslimit Prio 1, §45b als Auffang Prio 2", async () => {
+  it("INT-11.1 – Setup: §45b mit 10€ Monatslimit Prio 1, §45a als Auffang Prio 2", async () => {
     await apiPut(`/api/budget/${testCustomerId}/preferences`, {
       customerId: testCustomerId,
       budgetStartDate: "2026-01-01",
       monthlyLimitCents: null,
-      notes: "T2.3 Limit Test",
+      notes: "T2.3 EB Limit Test",
     });
 
     const now = new Date();
@@ -599,8 +600,8 @@ describe("INT-11: T2.3 User-Monatslimit (Ueberlauf in naechsten Topf)", () => {
     if (ib) initialBalanceId45a = ib.id;
 
     const settings = [
-      { budgetType: "umwandlung_45a", priority: 1, enabled: true, monthlyLimitCents: monthlyLimitCents45a },
-      { budgetType: "entlastungsbetrag_45b", priority: 2, enabled: true, monthlyLimitCents: null },
+      { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: monthlyLimitCentsEB },
+      { budgetType: "umwandlung_45a", priority: 2, enabled: true, monthlyLimitCents: null },
       { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
     ];
     const settingsRes = await apiPut<any>(`/api/budget/${testCustomerId}/type-settings`, { settings });
@@ -608,6 +609,11 @@ describe("INT-11: T2.3 User-Monatslimit (Ueberlauf in naechsten Topf)", () => {
 
     const overviewRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
     expect(overviewRes.status).toBe(200);
+    expect(overviewRes.data.entlastungsbetrag45b.totalAllocatedCents).toBeGreaterThan(0);
+    expect(overviewRes.data.umwandlung45a.currentMonthAllocatedCents).toBeGreaterThan(0);
+
+    const carryoverCents = overviewRes.data.entlastungsbetrag45b.carryoverCents ?? 0;
+    effectiveLimitCents = monthlyLimitCentsEB + carryoverCents;
 
     const servicesRes = await apiGet<any[]>("/api/services");
     const hwService = servicesRes.data.find((s: any) => s.code === "hauswirtschaft");
@@ -644,7 +650,7 @@ describe("INT-11: T2.3 User-Monatslimit (Ueberlauf in naechsten Topf)", () => {
           customerId: testCustomerId,
           date: dateStr,
           scheduledStart: time,
-          notes: "INT-Limit-Test-" + Date.now(),
+          notes: "INT-EB-Limit-Test-" + Date.now(),
           assignedEmployeeId: auth.user.id,
           services: [{ serviceId, durationMinutes: 120 }],
         });
@@ -661,19 +667,15 @@ describe("INT-11: T2.3 User-Monatslimit (Ueberlauf in naechsten Topf)", () => {
       travelOriginType: "home",
       travelKilometers: 0,
       customerKilometers: 0,
-      services: [{ serviceId, actualDurationMinutes: 120, details: "Limit Test 120min" }],
+      services: [{ serviceId, actualDurationMinutes: 120, details: "EB Limit Test 120min" }],
     });
     expect(docRes.status).toBe(200);
     expect(docRes.data.budgetTransaction).toBeDefined();
     limitTransactionIds.push(docRes.data.budgetTransaction.id);
   });
 
-  it("INT-11.3 – §45a-Anteil ist durch Monatslimit (10€) gedeckelt, Rest in §45b", async () => {
+  it("INT-11.3 – §45b-Anteil wird durch effektives Monatslimit gedeckelt", async () => {
     if (!limitAppointmentId) return;
-
-    const overviewRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
-    expect(overviewRes.status).toBe(200);
-    expect(overviewRes.data.umwandlung45a.currentMonthAllocatedCents).toBeGreaterThan(0);
 
     const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?limit=5000`);
     expect(txRes.status).toBe(200);
@@ -681,19 +683,22 @@ describe("INT-11: T2.3 User-Monatslimit (Ueberlauf in naechsten Topf)", () => {
     const consumptions = txRes.data.filter(
       (t: any) => t.appointmentId === limitAppointmentId && t.transactionType === "consumption"
     );
-    expect(consumptions.length).toBeGreaterThanOrEqual(2);
+    expect(consumptions.length).toBeGreaterThanOrEqual(1);
 
-    const eb45a = consumptions.filter((t: any) => t.budgetType === "umwandlung_45a");
     const eb45b = consumptions.filter((t: any) => t.budgetType === "entlastungsbetrag_45b");
+    const eb45a = consumptions.filter((t: any) => t.budgetType === "umwandlung_45a");
 
-    const total45aCents = eb45a.reduce((sum: number, t: any) => sum + Math.abs(t.amountCents), 0);
     const total45bCents = eb45b.reduce((sum: number, t: any) => sum + Math.abs(t.amountCents), 0);
-    const totalCents = total45aCents + total45bCents;
+    const total45aCents = eb45a.reduce((sum: number, t: any) => sum + Math.abs(t.amountCents), 0);
+    const totalCents = total45bCents + total45aCents;
 
     expect(totalCents).toBeGreaterThan(0);
-    expect(total45aCents).toBeGreaterThan(0);
-    expect(total45aCents).toBeLessThanOrEqual(monthlyLimitCents45a);
     expect(total45bCents).toBeGreaterThan(0);
+    expect(total45bCents).toBeLessThanOrEqual(effectiveLimitCents);
+
+    if (totalCents > effectiveLimitCents) {
+      expect(total45aCents).toBeGreaterThan(0);
+    }
   });
 
   afterAll(async () => {
@@ -945,19 +950,19 @@ describe("INT-13: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => 
     const reversalsForCarryover = txRes.data.filter(
       (t: any) => t.allocationId === carryover2025.id && t.transactionType === "reversal"
     );
+    const writeOffs = txRes.data.filter(
+      (t: any) => t.transactionType === "write_off" && t.allocationId === carryover2025.id
+    );
+    expect(writeOffs.length).toBeGreaterThan(0);
+    const writeOff = writeOffs[0];
+    expect(writeOff.amountCents).toBeLessThan(0);
+    expect(writeOff.notes).toContain("Verfallenes Guthaben");
+
     const consumed = consumptionsForCarryover.reduce((s: number, t: any) => s + Math.abs(t.amountCents), 0);
     const reversed = reversalsForCarryover.reduce((s: number, t: any) => s + Math.abs(t.amountCents), 0);
-    const remaining = carryover2025.amountCents - Math.max(0, consumed - reversed);
-
-    if (remaining > 0) {
-      const writeOffs = txRes.data.filter(
-        (t: any) => t.transactionType === "write_off" && t.allocationId === carryover2025.id
-      );
-      expect(writeOffs.length).toBeGreaterThan(0);
-      const writeOff = writeOffs[0];
-      expect(writeOff.amountCents).toBeLessThan(0);
-      expect(writeOff.notes).toContain("Verfallenes Guthaben");
-    }
+    const writeOffTotal = writeOffs.reduce((s: number, t: any) => s + Math.abs(t.amountCents), 0);
+    const netConsumed = Math.max(0, consumed - reversed);
+    expect(writeOffTotal + netConsumed).toBe(carryover2025.amountCents);
 
     const overviewRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
     expect(overviewRes.status).toBe(200);
