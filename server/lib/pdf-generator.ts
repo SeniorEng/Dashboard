@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { getBrowser } from "../services/pdf-generator";
+import { formatPhoneForDisplay } from "@shared/utils/phone";
 
 export interface InvoicePdfData {
   // Company data
@@ -211,7 +212,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
       <div class="company-name">${data.companyName || "Firma"}</div>
       <div class="company-info">
         ${data.companyAddress || ""}<br>
-        ${data.companyPhone ? `Tel.: ${data.companyPhone}` : ""}${data.companyEmail ? ` | ${data.companyEmail}` : ""}
+        ${data.companyPhone ? `Tel.: ${formatPhoneForDisplay(data.companyPhone)}` : ""}${data.companyEmail ? ` | ${data.companyEmail}` : ""}
         ${data.companyWebsite ? `<br>${data.companyWebsite}` : ""}
       </div>
     </div>
@@ -297,7 +298,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
         ${data.geschaeftsfuehrer ? `Geschäftsführer: ${data.geschaeftsfuehrer}` : ""}
       </div>
       <div class="footer-col" style="text-align: center;">
-        ${data.companyPhone ? `Tel.: ${data.companyPhone}` : ""}<br>
+        ${data.companyPhone ? `Tel.: ${formatPhoneForDisplay(data.companyPhone)}` : ""}<br>
         ${data.companyEmail || ""}
       </div>
       <div class="footer-col" style="text-align: right;">
@@ -684,7 +685,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   ` : ''}
 
   <div class="footer">
-    ${data.companyName || ""} | ${data.companyAddress || ""} | ${data.companyPhone ? `Tel.: ${data.companyPhone}` : ""} | ${data.companyEmail || ""}
+    ${data.companyName || ""} | ${data.companyAddress || ""} | ${data.companyPhone ? `Tel.: ${formatPhoneForDisplay(data.companyPhone)}` : ""} | ${data.companyEmail || ""}
   </div>
 </body>
 </html>`;

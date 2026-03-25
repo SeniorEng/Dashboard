@@ -1,11 +1,11 @@
 import { useState, useMemo } from "react";
 import { Link } from "wouter";
+import { formatPhoneAsYouType, validateGermanPhone } from "@shared/utils/phone";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
 import { Switch } from "@/components/ui/switch";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
@@ -146,6 +146,16 @@ export default function AdminInsuranceProviders() {
       toast({ title: "PLZ muss genau 5 Ziffern haben", variant: "destructive" });
       return null;
     }
+    let normalizedTelefon: string | null = null;
+    const rawTelefon = form.telefon?.trim();
+    if (rawTelefon) {
+      const phoneResult = validateGermanPhone(rawTelefon);
+      if (!phoneResult.valid) {
+        toast({ title: "Ungültige Telefonnummer", description: phoneResult.error, variant: "destructive" });
+        return null;
+      }
+      normalizedTelefon = phoneResult.normalized!;
+    }
 
     return {
       ...form,
@@ -155,7 +165,7 @@ export default function AdminInsuranceProviders() {
       hausnummer: form.hausnummer?.trim() || null,
       plz: plzValue || null,
       stadt: form.stadt?.trim() || null,
-      telefon: (form.telefon ? normalizePhone(form.telefon) : null) || form.telefon?.trim() || null,
+      telefon: normalizedTelefon,
       fax: form.fax?.trim() || null,
       email: form.email?.trim() || null,
       kimAdresse: form.kimAdresse?.trim() || null,

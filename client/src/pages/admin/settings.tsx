@@ -14,7 +14,8 @@ import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
 import type { SystemSettings, CompanySettings } from "@shared/schema";
-import { formatPhoneAsYouType } from "@shared/utils/phone";
+import { formatPhoneAsYouType, validateGermanPhone } from "@shared/utils/phone";
+import { isValidPhoneNumber } from "libphonenumber-js/min";
 import { emptyCompanyForm } from "./settings/types";
 import { LogoUploadCard } from "./settings/logo-upload";
 import { LeadAutoReplyCard } from "./settings/lead-auto-reply-card";
@@ -177,6 +178,35 @@ export default function AdminSettings() {
     anerkennungsBundesland: companyForm.anerkennungsBundesland,
   };
 
+  const validateCompanyPhone = () => {
+    if (companyForm.telefon && companyForm.telefon.trim()) {
+      const result = validateGermanPhone(companyForm.telefon);
+      if (!result.valid) {
+        toast({ title: "Ungültige Telefonnummer", description: result.error, variant: "destructive" });
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const validateTwilioPhones = () => {
+    if (companyForm.twilioPhoneNumber && companyForm.twilioPhoneNumber.trim()) {
+      const val = companyForm.twilioPhoneNumber.trim();
+      if (!isValidPhoneNumber(val, "DE") && !isValidPhoneNumber(val)) {
+        toast({ title: "Ungültige Twilio-Telefonnummer", variant: "destructive" });
+        return false;
+      }
+    }
+    if (companyForm.leadCallBridgePhone && companyForm.leadCallBridgePhone.trim()) {
+      const val = companyForm.leadCallBridgePhone.trim();
+      if (!isValidPhoneNumber(val, "DE") && !isValidPhoneNumber(val)) {
+        toast({ title: "Ungültige Mitarbeiter-Rufnummer", variant: "destructive" });
+        return false;
+      }
+    }
+    return true;
+  };
+
   const companySaveMutation = useMutation({
     mutationFn: async (data: typeof companyOnlyFields) => {
       const result = await api.patch<CompanySettings>("/company-settings", data);
@@ -314,7 +344,7 @@ export default function AdminSettings() {
               <CompanyDetailsForm
                 companyForm={companyForm}
                 updateField={updateField}
-                onSubmit={() => companySaveMutation.mutate(companyOnlyFields)}
+                onSubmit={() => { if (validateCompanyPhone()) companySaveMutation.mutate(companyOnlyFields); }}
                 isSaving={companySaveMutation.isPending}
               />
 
@@ -471,6 +501,7 @@ export default function AdminSettings() {
                         disabled={!companyForm.twilioAccountSid || !companyForm.twilioAuthToken || !companyForm.twilioPhoneNumber || !companyForm.leadCallBridgePhone}
                         data-testid="button-test-call"
                         onClick={async () => {
+                          if (!validateTwilioPhones()) return;
                           try {
                             await twilioSaveMutation.mutateAsync();
                             const res = await api.post<{ success: boolean; message: string }>("/admin/twilio/test-call", {});
@@ -497,7 +528,7 @@ export default function AdminSettings() {
                       <Button
                         type="button"
                         size="sm"
-                        onClick={() => twilioSaveMutation.mutate()}
+                        onClick={() => { if (validateTwilioPhones()) twilioSaveMutation.mutate(); }}
                         disabled={twilioSaveMutation.isPending}
                         data-testid="button-save-twilio"
                       >

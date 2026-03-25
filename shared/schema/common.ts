@@ -81,6 +81,39 @@ export const internationalPhoneTransformSchema = z.string().refine(
   return parseDachPhone(value);
 });
 
+export const optionalInternationalPhoneSchema = z.string().optional().nullable().transform((val, ctx) => {
+  if (val === undefined) return undefined;
+  if (val === null || val.trim() === "") return val;
+  
+  const trimmed = val.trim();
+  
+  try {
+    for (const country of DACH_COUNTRIES) {
+      if (isValidPhoneNumber(trimmed, country)) {
+        const parsed = parsePhoneNumber(trimmed, country);
+        if (parsed?.isValid()) {
+          return parsed.format("E.164");
+        }
+      }
+    }
+    if (isValidPhoneNumber(trimmed)) {
+      const parsed = parsePhoneNumber(trimmed);
+      return parsed?.format("E.164") ?? trimmed;
+    }
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Ungültige Telefonnummer",
+    });
+    return z.NEVER;
+  } catch {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Ungültige Telefonnummer",
+    });
+    return z.NEVER;
+  }
+});
+
 export const ikNummerSchema = z.string()
   .regex(/^\d{9}$/, "IK-Nummer muss genau 9 Ziffern haben");
 

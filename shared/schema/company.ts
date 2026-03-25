@@ -1,6 +1,6 @@
 import { pgTable, text, integer, serial, boolean, real } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import { timestamp, optionalGermanPhoneSchema } from "./common";
+import { timestamp, optionalGermanPhoneSchema, optionalInternationalPhoneSchema } from "./common";
 import { users } from "./users";
 import { customers } from "./customers";
 import { generatedDocuments } from "./documents";
@@ -77,7 +77,7 @@ export const updateCompanySettingsSchema = z.object({
   hausnummer: z.string().optional(),
   plz: z.string().optional(),
   stadt: z.string().optional(),
-  telefon: z.string().optional(),
+  telefon: optionalGermanPhoneSchema,
   email: z.string().optional(),
   website: z.string().optional().nullable(),
   steuernummer: z.string().optional(),
@@ -116,8 +116,8 @@ export const updateCompanySettingsSchema = z.object({
   whatsappEnabled: z.boolean().optional(),
   twilioAccountSid: z.string().optional().nullable(),
   twilioAuthToken: z.string().optional().nullable(),
-  twilioPhoneNumber: optionalGermanPhoneSchema,
-  leadCallBridgePhone: optionalGermanPhoneSchema,
+  twilioPhoneNumber: optionalInternationalPhoneSchema,
+  leadCallBridgePhone: optionalInternationalPhoneSchema,
   leadCallBridgeEnabled: z.boolean().optional(),
   deliveryEmailSubject: z.string().optional().nullable(),
   deliveryCoverLetterText: z.string().optional().nullable(),

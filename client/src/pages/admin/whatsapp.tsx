@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "wouter";
+import { formatPhoneAsYouType, validateGermanPhone } from "@shared/utils/phone";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -132,7 +133,11 @@ function ConfigTab() {
 
   const testMutation = useMutation({
     mutationFn: async () => {
-      return unwrapResult(await api.post<{ success: boolean; error?: string }>("/admin/whatsapp/test", { phoneNumber: testPhone }));
+      const phoneResult = validateGermanPhone(testPhone);
+      if (!phoneResult.valid) {
+        throw new Error(phoneResult.error);
+      }
+      return unwrapResult(await api.post<{ success: boolean; error?: string }>("/admin/whatsapp/test", { phoneNumber: phoneResult.normalized }));
     },
     onSuccess: (data) => {
       if (data.success) {
