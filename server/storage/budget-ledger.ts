@@ -607,7 +607,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     const currentMonth = todayDate.getMonth() + 1;
     const currentMonthStart = `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`;
 
-    const allocBaseWhere = and(
+    const allocValidWhere = and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
       lte(budgetAllocations.validFrom, today),
@@ -615,10 +615,17 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       or(isNull(budgetAllocations.expiresAt), gte(budgetAllocations.expiresAt, today))
     );
 
+    const allocAllWhere = and(
+      eq(budgetAllocations.customerId, customerId),
+      eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
+      lte(budgetAllocations.validFrom, today),
+      isNull(budgetAllocations.deletedAt)
+    );
+
     const [allocResult, txResult, currentYearResult, carryoverResult, currentMonthResult] = await Promise.all([
       db.select({
         total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
-      }).from(budgetAllocations).where(allocBaseWhere),
+      }).from(budgetAllocations).where(allocAllWhere),
 
       db.select({
         transactionType: budgetTransactions.transactionType,
@@ -632,7 +639,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       db.select({
         total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
       }).from(budgetAllocations).where(and(
-        allocBaseWhere,
+        allocValidWhere,
         eq(budgetAllocations.year, currentYear),
         sql`${budgetAllocations.source} != 'carryover'`
       )),
@@ -641,7 +648,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
         expiresAt: sql<string | null>`MIN(${budgetAllocations.expiresAt})`,
       }).from(budgetAllocations).where(and(
-        allocBaseWhere,
+        allocValidWhere,
         eq(budgetAllocations.source, "carryover"),
         sql`${budgetAllocations.expiresAt} IS NOT NULL`
       )),
@@ -1169,7 +1176,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
     const amounts = _amounts ?? await this.getCustomerBudgetAmounts(customerId);
 
-    const [allocResult, txResult] = await Promise.all([
+    const [allocResult, txConsumptionResult, txReversalResult] = await Promise.all([
       db.select({
         total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
       }).from(budgetAllocations).where(and(
@@ -1191,10 +1198,20 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         gte(budgetTransactions.transactionDate, currentMonthStart),
         lte(budgetTransactions.transactionDate, currentMonthLastDay)
       )),
+
+      db.select({
+        total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+      }).from(budgetTransactions).where(and(
+        eq(budgetTransactions.customerId, customerId),
+        eq(budgetTransactions.budgetType, "umwandlung_45a"),
+        eq(budgetTransactions.transactionType, "reversal"),
+        gte(budgetTransactions.transactionDate, currentMonthStart),
+        lte(budgetTransactions.transactionDate, currentMonthLastDay)
+      )),
     ]);
 
     const currentMonthAllocatedCents = Number(allocResult[0]?.total ?? 0);
-    const currentMonthUsedCents = Number(txResult[0]?.total ?? 0);
+    const currentMonthUsedCents = Math.max(0, Number(txConsumptionResult[0]?.total ?? 0) - Number(txReversalResult[0]?.total ?? 0));
 
     return {
       customerId,
@@ -1214,7 +1231,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
     const amounts = _amounts ?? await this.getCustomerBudgetAmounts(customerId);
 
-    const [allocResult, txResult] = await Promise.all([
+    const [allocResult, txConsumptionResult, txReversalResult] = await Promise.all([
       db.select({
         total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
       }).from(budgetAllocations).where(and(
@@ -1235,10 +1252,20 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         gte(budgetTransactions.transactionDate, yearStart),
         lte(budgetTransactions.transactionDate, yearEnd)
       )),
+
+      db.select({
+        total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+      }).from(budgetTransactions).where(and(
+        eq(budgetTransactions.customerId, customerId),
+        eq(budgetTransactions.budgetType, "ersatzpflege_39_42a"),
+        eq(budgetTransactions.transactionType, "reversal"),
+        gte(budgetTransactions.transactionDate, yearStart),
+        lte(budgetTransactions.transactionDate, yearEnd)
+      )),
     ]);
 
     const currentYearAllocatedCents = Number(allocResult[0]?.total ?? 0);
-    const currentYearUsedCents = Number(txResult[0]?.total ?? 0);
+    const currentYearUsedCents = Math.max(0, Number(txConsumptionResult[0]?.total ?? 0) - Number(txReversalResult[0]?.total ?? 0));
 
     return {
       customerId,
@@ -1451,7 +1478,11 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           gte(budgetAllocations.expiresAt, today)
         )
       ))
-      .orderBy(asc(budgetAllocations.validFrom), asc(budgetAllocations.id));
+      .orderBy(
+        sql`CASE WHEN ${budgetAllocations.source} = 'carryover' THEN 0 ELSE 1 END`,
+        asc(budgetAllocations.validFrom),
+        asc(budgetAllocations.id)
+      );
 
     if (allocations.length === 0) {
       return { consumedCents: 0, transactions: [], remainingCents: amountCents };
