@@ -577,9 +577,9 @@ describe("INT-11: T2.3 User-Monatslimit EB (Ueberlauf in naechsten Topf)", () =>
   let serviceId: number | null = null;
   let initialBalanceId45a: number | null = null;
   let effectiveLimitCents = 0;
-  const monthlyLimitCentsEB = 1000;
+  const monthlyLimitCentsEB = 5000;
 
-  it("INT-11.1 – Setup: §45b mit 10€ Monatslimit Prio 1, §45a als Auffang Prio 2", async () => {
+  it("INT-11.1 – Setup: §45b mit 50€ Monatslimit Prio 1, §45a als Auffang Prio 2", async () => {
     await apiPut(`/api/budget/${testCustomerId}/preferences`, {
       customerId: testCustomerId,
       budgetStartDate: "2026-01-01",
@@ -968,6 +968,25 @@ describe("INT-13: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => 
     expect(overviewRes.status).toBe(200);
     const overview = overviewRes.data.entlastungsbetrag45b;
     expect(overview).toBeDefined();
+
+    const alloc2025 = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?year=2025`);
+    const activeCarryover2025 = alloc2025.data?.filter(
+      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && a.year === 2025 && !a.deletedAt
+    ) ?? [];
+    for (const co of activeCarryover2025) {
+      const coWriteOffs = txRes.data.filter(
+        (t: any) => t.transactionType === "write_off" && t.allocationId === co.id
+      );
+      const coConsumed = txRes.data.filter(
+        (t: any) => t.allocationId === co.id && t.transactionType === "consumption"
+      ).reduce((s: number, t: any) => s + Math.abs(t.amountCents), 0);
+      const coReversed = txRes.data.filter(
+        (t: any) => t.allocationId === co.id && t.transactionType === "reversal"
+      ).reduce((s: number, t: any) => s + Math.abs(t.amountCents), 0);
+      const coWriteOffTotal = coWriteOffs.reduce((s: number, t: any) => s + Math.abs(t.amountCents), 0);
+      const coNet = Math.max(0, coConsumed - coReversed);
+      expect(coWriteOffTotal + coNet).toBe(co.amountCents);
+    }
   });
 
   it("INT-13.4 – Aktueller Uebertrag 2026 ist noch gueltig", async () => {
