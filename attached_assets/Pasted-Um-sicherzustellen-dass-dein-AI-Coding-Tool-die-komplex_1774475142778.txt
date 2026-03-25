@@ -1,0 +1,16 @@
+Um sicherzustellen, dass dein AI-Coding-Tool die komplexen Abhängigkeiten der Pflegebudgets (Stand 2026) fehlerfrei abbildet, habe ich ein dreistufiges Testregime entwickelt.Dieses Regime ist so aufgebaut, dass es die Zeitachse (Monatssilos vs. Jahrestöpfe), die Priorisierung (welcher Topf zuerst?) und die Benutzer-Einschränkungen (Capping) stresstestet.Phase 1: Die "Stichtag- & Verfalls-Logik" (Zeitachse)Hier prüfen wir, ob das Tool versteht, dass Geld unterschiedliche "Haltbarkeitsdaten" hat.Test-IDSzenarioInput / AktionErwartetes Ergebnis (Soll)T1.1EB AnsparungJan & Feb: 0 € Verbrauch.Kontostand am 01.03.: 262 € (131 € * 2).T1.2EB Juni-Deadline500 € Übertrag aus Vorjahr.Am 01.07. muss der Vorjahres-Übertrag 0 € sein. Aktueller Jahreswert bleibt erhalten.T1.3FIFO-VerbrauchVorjahr: 100 €. Jan: 131 €. Rechnung 150 € im Februar.Vorjahrestopf ist 0 €, Jan-Topf ist 81 €. (Altes Geld zuerst!)T1.4VHP Jahresreset31.12. Rest: 400 €.01.01. Rest: 1.612 € (Reset auf vollen Jahrestopf).Phase 2: "Umwandlung & Capping" (Dynamische Grenzen)Dieser Test prüft die Kopplung zwischen Sachleistung und Entlastung sowie die nutzerdefinierten Limits.Test-IDSzenarioInput / AktionErwartetes Ergebnis (Soll)T2.1UA-BerechnungPG 3 (1.432 € Sachleistung). Genutzt: 432 €.Max. Umwandlung: 400 € (Da 40% von 1.432 € = 572,80 €, aber Rest nur 1.000 € -> 40% Deckel greift).T2.2UA VerfallJan: 200 € UA nicht genutzt.Feb: UA-Startwert wieder bei 0 € bzw. Neu-Berechnung (kein Übertrag!).T2.3User-Limit (EB)Guthaben EB: 500 €. User-Limit: 50 €/Monat. Rechnung: 120 €.Tool bucht 50 € EB, Rest 70 € geht in "offene Posten/Privat".T2.4User-Limit (VHP)Topf: 1.612 €. User-Limit: 600 € total.Tool verweigert Buchung ab dem 601. Euro, obwohl gesetzlich Geld da wäre.Phase 3: "Integrität & Wiederfreigabe" (Data Safety)Hier testen wir, ob das Tool beim "Rückwärtsrechnen" (Storno) Fehler macht.Test-IDSzenarioInput / AktionErwartetes Ergebnis (Soll)T3.1Storno FIFORechnung (150 €) wurde aus Vorjahres-EB (100 €) und Jan-EB (50 €) gezahlt. Rechnung löschen.Vorjahres-Topf muss wieder 100 € haben, Jan-Topf wieder 131 €.T3.2Storno UARechnung im März wurde über UA (60 €) gezahlt. Löschung im April.Das Geld darf nicht im April erscheinen. Es verfällt, da der Monat März abgeschlossen ist.T3.3Budget-HoppingRechnung 500 €. 131 € (EB) -> 100 € (UA) -> Rest VHP.Korrekte Verteilung auf 3 Töpfe in einer Transaktion.4. Validierungs-Skript (Pseudo-Code für die AI)Du kannst der AI diesen Logik-Check als "Definition of Done" geben:Pythondef validate_budget_logic(transaction):
+    # 1. Gesetzliche Deckelung prüfen
+    assert transaction.eb_amount <= (eb_accumulated + 131), "EB übersteigt Guthaben!"
+    assert transaction.ua_amount <= (sachleistung_max * 0.4), "UA übersteigt 40% Deckel!"
+    
+    # 2. User-Constraint Prüfung
+    if user.limit_eb_monthly:
+        assert transaction.eb_amount <= user.limit_eb_monthly, "User-Monatslimit EB verletzt!"
+    
+    # 3. Zeit-Validierung
+    if current_date > June_30 and transaction.source == "CarryOver_PreviousYear":
+        return Error("Guthaben abgelaufen")
+
+    # 4. Wiederfreigabe-Logik (Transaction Journal)
+    if transaction.status == "deleted":
+        revert_to_specific_bucket(transaction.bucket_id, transaction.amount)
