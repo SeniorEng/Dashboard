@@ -261,6 +261,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       transactionType: "reversal",
       amountCents: -original[0].amountCents,
       appointmentId: original[0].appointmentId,
+      allocationId: original[0].allocationId,
       notes: `Storno von Transaktion #${transactionId}`,
       createdByUserId: userId,
     }).returning();
@@ -494,7 +495,104 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       this.ensureAllocations45a(customerId, _tx, preferences, amounts),
       this.ensureAllocations39_42a(customerId, _tx, preferences, amounts),
     ]);
+    await this.ensureYearlyCarryover45b(customerId, _tx);
     await this.processExpiredCarryover(customerId, _tx);
+  }
+
+  async ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Promise<BudgetAllocation[]> {
+    const d = _tx ?? db;
+    const { year: curYear } = currentYearAndMonth();
+
+    const allAllocations = await d.select()
+      .from(budgetAllocations)
+      .where(and(
+        eq(budgetAllocations.customerId, customerId),
+        eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
+        isNull(budgetAllocations.deletedAt)
+      ));
+
+    if (allAllocations.length === 0) return [];
+
+    const existingCarryoverYears = new Set(
+      allAllocations
+        .filter(a => a.source === "carryover")
+        .map(a => a.year)
+    );
+
+    const yearSet = new Set(allAllocations.map(a => a.year));
+    const years = Array.from(yearSet).sort((a, b) => a - b);
+
+    const created: BudgetAllocation[] = [];
+
+    for (const year of years) {
+      if (year >= curYear) continue;
+      const targetYear = year + 1;
+      if (existingCarryoverYears.has(targetYear)) continue;
+
+      const yearAllocations = allAllocations.filter(a =>
+        a.year === year &&
+        a.source !== "carryover"
+      );
+      if (yearAllocations.length === 0) continue;
+
+      const totalAllocated = yearAllocations.reduce((sum, a) => sum + a.amountCents, 0);
+
+      const yearAllocIds = yearAllocations.map(a => a.id);
+
+      const carryoverIntoThisYear = allAllocations.filter(a =>
+        a.year === year && a.source === "carryover"
+      );
+      const totalCarryoverIn = carryoverIntoThisYear.reduce((sum, a) => sum + a.amountCents, 0);
+      const allAllocIds = [...yearAllocIds, ...carryoverIntoThisYear.map(a => a.id)];
+
+      if (allAllocIds.length === 0) continue;
+
+      const consumptionResult = await d.select({
+        total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+      })
+        .from(budgetTransactions)
+        .where(and(
+          eq(budgetTransactions.customerId, customerId),
+          eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
+          inArray(budgetTransactions.allocationId, allAllocIds),
+          sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`
+        ));
+
+      const reversalResult = await d.select({
+        total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+      })
+        .from(budgetTransactions)
+        .where(and(
+          eq(budgetTransactions.customerId, customerId),
+          eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
+          inArray(budgetTransactions.allocationId, allAllocIds),
+          eq(budgetTransactions.transactionType, "reversal")
+        ));
+
+      const totalConsumed = Number(consumptionResult[0]?.total ?? 0);
+      const totalReversed = Number(reversalResult[0]?.total ?? 0);
+      const netConsumed = Math.max(0, totalConsumed - totalReversed);
+      const totalPool = totalAllocated + totalCarryoverIn;
+      const unused = Math.max(0, totalPool - netConsumed);
+
+      if (unused <= 0) continue;
+
+      const result = await d.insert(budgetAllocations).values({
+        customerId,
+        budgetType: "entlastungsbetrag_45b",
+        year: targetYear,
+        month: null,
+        amountCents: unused,
+        source: "carryover",
+        validFrom: `${targetYear}-01-01`,
+        expiresAt: `${targetYear}-06-30`,
+        notes: `Übertrag aus ${year}: ${(unused / 100).toFixed(2)} € (verfällt 30.06.${targetYear})`,
+      }).onConflictDoNothing().returning();
+
+      if (result[0]) created.push(result[0]);
+    }
+
+    return created;
   }
 
   async getBudgetSummary(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<BudgetSummary> {
@@ -908,55 +1006,30 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         const summaries = await this.getAllBudgetSummaries(params.customerId);
         const typeSettings = await this.getBudgetTypeSettings(params.customerId);
 
-        let effective45b = summaries.entlastungsbetrag45b.availableCents;
-        let effective45a = summaries.umwandlung45a.currentMonthAvailableCents;
-        let effective39_42a = summaries.ersatzpflege39_42a.currentYearAvailableCents;
+        let total45b = summaries.entlastungsbetrag45b.availableCents;
+        let total45a = summaries.umwandlung45a.currentMonthAvailableCents;
+        let total39_42a = summaries.ersatzpflege39_42a.currentYearAvailableCents;
 
         if (typeSettings.length > 0) {
           const settingsMap = new Map(typeSettings.map(s => [s.budgetType, s]));
-
           const s45b = settingsMap.get("entlastungsbetrag_45b");
-          if (s45b && !s45b.enabled) effective45b = 0;
-          if (s45b?.monthlyLimitCents !== null && s45b?.monthlyLimitCents !== undefined) {
-            const totalCarryover = await this.getTotalCarryoverCents(params.customerId, params.transactionDate);
-            const effectiveLimit = s45b.monthlyLimitCents + totalCarryover;
-            const monthlyRemaining45b = Math.max(0, effectiveLimit - summaries.entlastungsbetrag45b.currentMonthUsedCents);
-            effective45b = Math.min(effective45b, monthlyRemaining45b);
-          }
-
+          if (s45b && !s45b.enabled) total45b = 0;
           const s45a = settingsMap.get("umwandlung_45a");
-          if (s45a && !s45a.enabled) effective45a = 0;
-          if (s45a?.monthlyLimitCents !== null && s45a?.monthlyLimitCents !== undefined) {
-            const monthlyRemaining45a = Math.max(0, s45a.monthlyLimitCents - summaries.umwandlung45a.currentMonthUsedCents);
-            effective45a = Math.min(effective45a, monthlyRemaining45a);
-          }
-
+          if (s45a && !s45a.enabled) total45a = 0;
           const s39 = settingsMap.get("ersatzpflege_39_42a");
-          if (s39 && !s39.enabled) effective39_42a = 0;
-          if (s39?.yearlyLimitCents !== null && s39?.yearlyLimitCents !== undefined) {
-            const yearlyRemaining = Math.max(0, s39.yearlyLimitCents - summaries.ersatzpflege39_42a.currentYearUsedCents);
-            effective39_42a = Math.min(effective39_42a, yearlyRemaining);
-          }
-        } else {
-          const effectiveMonthlyLimit = await this.getEffectiveMonthlyLimitCents(params.customerId);
-          if (effectiveMonthlyLimit !== null) {
-            const totalCarryover = await this.getTotalCarryoverCents(params.customerId, params.transactionDate);
-            const effectiveLimit = effectiveMonthlyLimit + totalCarryover;
-            const monthlyRemaining45b = Math.max(0, effectiveLimit - summaries.entlastungsbetrag45b.currentMonthUsedCents);
-            effective45b = Math.min(effective45b, monthlyRemaining45b);
-          }
+          if (s39 && !s39.enabled) total39_42a = 0;
         }
 
-        const totalAvailable = effective45a + effective45b + effective39_42a;
+        const totalAvailable = total45a + total45b + total39_42a;
 
         if (costs.totalCents > totalAvailable) {
           const shortfall = costs.totalCents - totalAvailable;
           const parts = [
             `Budget reicht nicht aus. Fehlbetrag: ${(shortfall / 100).toFixed(2)} €.`,
             `Kosten: ${(costs.totalCents / 100).toFixed(2)} €.`,
-            `§45b verfügbar: ${(effective45b / 100).toFixed(2)} €,`,
-            `§39/42a verfügbar: ${(effective39_42a / 100).toFixed(2)} €,`,
-            `§45a verfügbar: ${(effective45a / 100).toFixed(2)} €.`,
+            `§45b verfügbar: ${(total45b / 100).toFixed(2)} €,`,
+            `§39/42a verfügbar: ${(total39_42a / 100).toFixed(2)} €,`,
+            `§45a verfügbar: ${(total45a / 100).toFixed(2)} €.`,
             `Kunde akzeptiert keine Privatzahlung.`,
           ];
           throw new Error(parts.join(" "));
@@ -1244,12 +1317,25 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       ))
       .groupBy(budgetTransactions.allocationId);
 
+    const reversed = await d.select({
+      allocationId: budgetTransactions.allocationId,
+      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+    })
+      .from(budgetTransactions)
+      .where(and(
+        inArray(budgetTransactions.allocationId, allocationIds),
+        eq(budgetTransactions.transactionType, "reversal")
+      ))
+      .groupBy(budgetTransactions.allocationId);
+
     const consumedMap = new Map(consumed.map(c => [c.allocationId, Number(c.total)]));
+    const reversalMap = new Map(reversed.map(r => [r.allocationId, Number(r.total)]));
 
     let totalAvailable = 0;
     for (const alloc of carryoverAllocations) {
       const used = consumedMap.get(alloc.id) ?? 0;
-      totalAvailable += Math.max(0, alloc.amountCents - used);
+      const rev = reversalMap.get(alloc.id) ?? 0;
+      totalAvailable += Math.max(0, alloc.amountCents - Math.max(0, used - rev));
     }
 
     return totalAvailable;
@@ -1296,11 +1382,21 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         .from(budgetTransactions)
         .where(and(
           eq(budgetTransactions.allocationId, allocation.id),
-          eq(budgetTransactions.transactionType, "consumption")
+          sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`
+        ));
+
+      const reversedFromAllocation = await d.select({
+        total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+      })
+        .from(budgetTransactions)
+        .where(and(
+          eq(budgetTransactions.allocationId, allocation.id),
+          eq(budgetTransactions.transactionType, "reversal")
         ));
 
       const consumed = Number(consumedFromAllocation[0]?.total ?? 0);
-      const remaining = allocation.amountCents - consumed;
+      const reversed = Number(reversedFromAllocation[0]?.total ?? 0);
+      const remaining = allocation.amountCents - Math.max(0, consumed - reversed);
 
       if (remaining <= 0) continue;
 
@@ -1375,11 +1471,27 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           .groupBy(budgetTransactions.allocationId)
       : [];
 
+    const reversalByAllocation = allocationIds.length > 0
+      ? await d.select({
+          allocationId: budgetTransactions.allocationId,
+          total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+        })
+          .from(budgetTransactions)
+          .where(and(
+            inArray(budgetTransactions.allocationId, allocationIds),
+            eq(budgetTransactions.transactionType, "reversal")
+          ))
+          .groupBy(budgetTransactions.allocationId)
+      : [];
+
     const consumedMap = new Map(consumptionByAllocation.map(c => [c.allocationId, Number(c.total)]));
+    const reversalMap = new Map(reversalByAllocation.map(r => [r.allocationId, Number(r.total)]));
 
     const allocationConsumption = allocations.map(a => {
       const consumed = consumedMap.get(a.id) ?? 0;
-      return { allocation: a, consumed, available: Math.max(0, a.amountCents - consumed) };
+      const reversed = reversalMap.get(a.id) ?? 0;
+      const netConsumed = Math.max(0, consumed - reversed);
+      return { allocation: a, consumed: netConsumed, available: Math.max(0, a.amountCents - netConsumed) };
     });
 
     let remaining = amountCents;
@@ -1750,6 +1862,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
               transactionType: "reversal",
               amountCents: -oldTx.amountCents,
               appointmentId: oldTx.appointmentId,
+              allocationId: oldTx.allocationId,
               notes: `Storno von Transaktion #${oldTx.id} (Umbuchung)`,
               createdByUserId: userId,
             });
