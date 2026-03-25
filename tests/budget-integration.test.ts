@@ -415,7 +415,7 @@ describe("INT-6: Kaskadenverbrauch ueber Termin-Dokumentation", () => {
 
     createdTransactionIds.push(inlineTx.id);
 
-    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?limit=200`);
+    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?limit=5000`);
     expect(txRes.status).toBe(200);
 
     const consumption = txRes.data.find(
@@ -428,7 +428,7 @@ describe("INT-6: Kaskadenverbrauch ueber Termin-Dokumentation", () => {
   it("INT-6.5 – Nach Dokumentation: Verbrauch in einem der Toepfe sichtbar", async () => {
     if (!appointmentId) return;
 
-    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?limit=200`);
+    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?limit=5000`);
     expect(txRes.status).toBe(200);
 
     const consumption = txRes.data.find(
@@ -575,6 +575,7 @@ describe("INT-11: T2.3 User-Monatslimit (Ueberlauf in naechsten Topf)", () => {
   let limitAppointmentId: number | null = null;
   let limitTransactionIds: number[] = [];
   let serviceId: number | null = null;
+  let initialBalanceId45a: number | null = null;
   const monthlyLimitCents45a = 1000;
 
   it("INT-11.1 – Setup: §45a mit 10€ Monatslimit Prio 1, §45b als Auffang Prio 2", async () => {
@@ -584,6 +585,18 @@ describe("INT-11: T2.3 User-Monatslimit (Ueberlauf in naechsten Topf)", () => {
       monthlyLimitCents: null,
       notes: "T2.3 Limit Test",
     });
+
+    const now = new Date();
+    const validFromMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const ibRes = await apiPost<any>(`/api/budget/${testCustomerId}/initial-balance/umwandlung_45a`, {
+      amountCents: 50000,
+      validFrom: validFromMonth,
+    });
+    expect([200, 201]).toContain(ibRes.status);
+
+    const ibList = await apiGet<any[]>(`/api/budget/${testCustomerId}/initial-balances/umwandlung_45a`);
+    const ib = ibList.data?.find((a: any) => a.amountCents === 50000 && a.source === "initial_balance");
+    if (ib) initialBalanceId45a = ib.id;
 
     const settings = [
       { budgetType: "umwandlung_45a", priority: 1, enabled: true, monthlyLimitCents: monthlyLimitCents45a },
@@ -595,7 +608,6 @@ describe("INT-11: T2.3 User-Monatslimit (Ueberlauf in naechsten Topf)", () => {
 
     const overviewRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
     expect(overviewRes.status).toBe(200);
-    expect(overviewRes.data.umwandlung45a.currentMonthAllocatedCents).toBeGreaterThan(0);
 
     const servicesRes = await apiGet<any[]>("/api/services");
     const hwService = servicesRes.data.find((s: any) => s.code === "hauswirtschaft");
@@ -656,16 +668,20 @@ describe("INT-11: T2.3 User-Monatslimit (Ueberlauf in naechsten Topf)", () => {
     limitTransactionIds.push(docRes.data.budgetTransaction.id);
   });
 
-  it("INT-11.3 – §45a-Anteil ist durch Monatslimit gedeckelt, Rest in §45b", async () => {
+  it("INT-11.3 – §45a-Anteil ist durch Monatslimit (10€) gedeckelt, Rest in §45b", async () => {
     if (!limitAppointmentId) return;
 
-    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?limit=200`);
+    const overviewRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    expect(overviewRes.status).toBe(200);
+    expect(overviewRes.data.umwandlung45a.currentMonthAllocatedCents).toBeGreaterThan(0);
+
+    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?limit=5000`);
     expect(txRes.status).toBe(200);
 
     const consumptions = txRes.data.filter(
       (t: any) => t.appointmentId === limitAppointmentId && t.transactionType === "consumption"
     );
-    expect(consumptions.length).toBeGreaterThanOrEqual(1);
+    expect(consumptions.length).toBeGreaterThanOrEqual(2);
 
     const eb45a = consumptions.filter((t: any) => t.budgetType === "umwandlung_45a");
     const eb45b = consumptions.filter((t: any) => t.budgetType === "entlastungsbetrag_45b");
@@ -675,16 +691,9 @@ describe("INT-11: T2.3 User-Monatslimit (Ueberlauf in naechsten Topf)", () => {
     const totalCents = total45aCents + total45bCents;
 
     expect(totalCents).toBeGreaterThan(0);
+    expect(total45aCents).toBeGreaterThan(0);
     expect(total45aCents).toBeLessThanOrEqual(monthlyLimitCents45a);
-
-    if (total45aCents > 0) {
-      expect(eb45b.length).toBeGreaterThan(0);
-      expect(total45bCents).toBeGreaterThan(0);
-    } else {
-      expect(eb45b.length).toBeGreaterThan(0);
-      expect(total45bCents).toBeGreaterThan(0);
-    }
-    expect(total45aCents + total45bCents).toBe(totalCents);
+    expect(total45bCents).toBeGreaterThan(0);
   });
 
   afterAll(async () => {
@@ -693,12 +702,23 @@ describe("INT-11: T2.3 User-Monatslimit (Ueberlauf in naechsten Topf)", () => {
     }
     createdTransactionIds = createdTransactionIds.filter(id => !limitTransactionIds.includes(id));
 
+    if (initialBalanceId45a) {
+      try { await apiDelete(`/api/budget/${testCustomerId}/initial-balance/${initialBalanceId45a}`); } catch {}
+    }
+
     const settings = [
       { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
       { budgetType: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
       { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
     ];
     await apiPut(`/api/budget/${testCustomerId}/type-settings`, { settings });
+
+    await apiPut(`/api/budget/${testCustomerId}/preferences`, {
+      customerId: testCustomerId,
+      budgetStartDate: "2026-01-01",
+      monthlyLimitCents: null,
+      notes: "",
+    });
   });
 });
 
@@ -785,7 +805,7 @@ describe("INT-12: T3.1/T3.2 Storno FIFO-Rueckgabe und Neubuchung", () => {
     expect([200, 201]).toContain(reverseRes.status);
     createdTransactionIds = createdTransactionIds.filter(id => id !== stornoTransactionId);
 
-    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=200`);
+    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=5000`);
     expect(txRes.status).toBe(200);
 
     const reversalTx = txRes.data.find(
@@ -909,26 +929,40 @@ describe("INT-13: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => 
   });
 
   it("INT-13.3 – Abgelaufener Vorjahres-Uebertrag 2025 wurde abgeschrieben", async () => {
-    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=500`);
-    expect(txRes.status).toBe(200);
-
-    const writeOffs = txRes.data.filter(
-      (t: any) => t.transactionType === "write_off" && t.notes?.includes("Verfallenes Guthaben")
-    );
-
     const allocRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?year=2025`);
     const carryover2025 = allocRes.data?.find(
       (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && a.year === 2025
     );
-
-    if (carryover2025 && carryover2025.amountCents > 0) {
-      const hasWriteOff = writeOffs.some((t: any) => t.transactionDate === "2025-06-30");
-      const hasFullConsumption = writeOffs.length === 0;
-      expect(hasWriteOff || hasFullConsumption).toBe(true);
-    }
-
     expect(carryover2025).toBeDefined();
     expect(carryover2025.expiresAt).toBe("2025-06-30");
+
+    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=5000`);
+    expect(txRes.status).toBe(200);
+
+    const consumptionsForCarryover = txRes.data.filter(
+      (t: any) => t.allocationId === carryover2025.id && t.transactionType === "consumption"
+    );
+    const reversalsForCarryover = txRes.data.filter(
+      (t: any) => t.allocationId === carryover2025.id && t.transactionType === "reversal"
+    );
+    const consumed = consumptionsForCarryover.reduce((s: number, t: any) => s + Math.abs(t.amountCents), 0);
+    const reversed = reversalsForCarryover.reduce((s: number, t: any) => s + Math.abs(t.amountCents), 0);
+    const remaining = carryover2025.amountCents - Math.max(0, consumed - reversed);
+
+    if (remaining > 0) {
+      const writeOffs = txRes.data.filter(
+        (t: any) => t.transactionType === "write_off" && t.allocationId === carryover2025.id
+      );
+      expect(writeOffs.length).toBeGreaterThan(0);
+      const writeOff = writeOffs[0];
+      expect(writeOff.amountCents).toBeLessThan(0);
+      expect(writeOff.notes).toContain("Verfallenes Guthaben");
+    }
+
+    const overviewRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    expect(overviewRes.status).toBe(200);
+    const overview = overviewRes.data.entlastungsbetrag45b;
+    expect(overview).toBeDefined();
   });
 
   it("INT-13.4 – Aktueller Uebertrag 2026 ist noch gueltig", async () => {
@@ -1045,7 +1079,7 @@ describe("INT-14: T1.3 FIFO-Verbrauchsreihenfolge (altes Geld zuerst)", () => {
   it("INT-14.3 – Consumption hat allocationId des Carryover (aeltestes Geld)", async () => {
     if (!fifoTransactionId) return;
 
-    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=200`);
+    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=5000`);
     expect(txRes.status).toBe(200);
 
     const consumptionTx = txRes.data.find(

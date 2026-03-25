@@ -1300,10 +1300,17 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     ]);
     const amounts = await this.getCustomerBudgetAmounts(customerId, undefined, typeSettings);
 
+    const is45aEnabled = typeSettings.some(s => s.budgetType === "umwandlung_45a" && s.enabled);
+    const is39Enabled = typeSettings.some(s => s.budgetType === "ersatzpflege_39_42a" && s.enabled);
+
     const [entlastungsbetrag45b, umwandlung45a, ersatzpflege39_42a] = await Promise.all([
       this.getBudgetSummary(customerId, preferences, typeSettings),
-      this.getBudgetSummary45a(customerId, preferences, amounts),
-      this.getBudgetSummary39_42a(customerId, preferences, amounts),
+      is45aEnabled
+        ? this.getBudgetSummary45a(customerId, preferences, amounts)
+        : { customerId, monthlyBudgetCents: 0, currentMonthAllocatedCents: 0, currentMonthUsedCents: 0, currentMonthAvailableCents: 0 } as Budget45aSummary,
+      is39Enabled
+        ? this.getBudgetSummary39_42a(customerId, preferences, amounts)
+        : { customerId, yearlyBudgetCents: 0, currentYearAllocatedCents: 0, currentYearUsedCents: 0, currentYearAvailableCents: 0 } as Budget39_42aSummary,
     ]);
     return { entlastungsbetrag45b, umwandlung45a, ersatzpflege39_42a };
   }
