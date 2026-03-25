@@ -154,6 +154,14 @@ function isNeonDriverBug(message: string): boolean {
     console.error("[startup] Erstberatung-Kunden-Migration fehlgeschlagen:", err);
   }
 
+  const { syncAllBudgetAllocations } = await import("./startup/sync-budget-allocations");
+  try {
+    const synced = await syncAllBudgetAllocations();
+    if (synced > 0) log(`Budget-Zuweisungen synchronisiert für ${synced} Kunden`, "startup");
+  } catch (err) {
+    console.error("[startup] Budget-Sync fehlgeschlagen:", err);
+  }
+
   const { geocodeAllMissing } = await import("./services/geocoding");
   geocodeAllMissing().catch(err => console.error("[geocoding] Batch geocoding error:", err));
 

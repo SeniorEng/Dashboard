@@ -311,6 +311,14 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
         }
       }
 
+      if (typeSettings.length > 0) {
+        try {
+          await budgetLedgerStorage.syncBudgetAllocations(customer.id);
+        } catch (err) {
+          console.error(`[POST /customers] Budget-Sync fehlgeschlagen für Kunde ${customer.id}:`, err);
+        }
+      }
+
       if (data.budgets.carryoverAmountCents && data.budgets.carryoverAmountCents > 0) {
         try {
           const validFrom = data.budgets.validFrom || todayISO();
