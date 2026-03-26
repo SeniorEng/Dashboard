@@ -71,8 +71,9 @@ export function useNewAppointmentForm() {
     staleTime: 60_000,
   });
 
-  const [ktCustomerId, setKtCustomerId] = useState<string>("");
   const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const initialCustomerId = urlParams.get("customerId") ?? "";
+  const [ktCustomerId, setKtCustomerId] = useState<string>(initialCustomerId);
   const initialDate = urlParams.get("date") && /^\d{4}-\d{2}-\d{2}$/.test(urlParams.get("date")!) ? urlParams.get("date")! : todayISO();
 
   const [ktDate, setKtDate] = useState<string>(initialDate);
