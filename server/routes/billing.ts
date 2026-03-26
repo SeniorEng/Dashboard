@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { asyncHandler, badRequest, notFound } from "../lib/errors";
+import { requireIntParam } from "../lib/params";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import {
   createInvoiceSchema,
@@ -247,7 +248,8 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
 }));
 
 router.get("/:id", asyncHandler("Rechnung konnte nicht geladen werden", async (req, res) => {
-  const id = Number(req.params.id);
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   const invoice = await storage.getInvoice(id);
   if (!invoice) throw notFound("Rechnung nicht gefunden");
   const lineItems = await storage.getInvoiceLineItems(id);
@@ -400,7 +402,8 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
 
 
 router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werden", async (req, res) => {
-  const id = Number(req.params.id);
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   const parsed = updateInvoiceStatusSchema.safeParse(req.body);
   if (!parsed.success) {
     throw badRequest(fromError(parsed.error).toString());
@@ -541,7 +544,8 @@ function buildPdfData(invoice: Invoice, lineItems: InvoiceLineItem[], companySet
 }
 
 router.get("/:id/pdf", asyncHandler("PDF konnte nicht generiert werden", async (req, res) => {
-  const id = Number(req.params.id);
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   const invoice = await storage.getInvoice(id);
   if (!invoice) throw notFound("Rechnung nicht gefunden");
   
@@ -559,7 +563,8 @@ router.get("/:id/pdf", asyncHandler("PDF konnte nicht generiert werden", async (
 }));
 
 router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nicht generiert werden", async (req, res) => {
-  const id = Number(req.params.id);
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
   const invoice = await storage.getInvoice(id);
   if (!invoice) throw notFound("Rechnung nicht gefunden");
   

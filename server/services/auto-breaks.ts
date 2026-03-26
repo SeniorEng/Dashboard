@@ -5,6 +5,7 @@ import {
   appointments,
 } from "@shared/schema";
 import { db, type DbOrTx } from "../lib/db";
+import { getEntryDuration } from "@shared/domain/time-entries";
 
 export interface AutoBreakResult {
   date: string;
@@ -24,21 +25,6 @@ async function isAutoBreaksEnabled(): Promise<boolean> {
   const rows = await db.select().from(systemSettings).limit(1);
   if (rows.length === 0) return true;
   return rows[0].autoBreaksEnabled;
-}
-
-function getEntryDuration(entry: {
-  durationMinutes: number | null;
-  startTime: string | null;
-  endTime: string | null;
-}): number {
-  if (entry.durationMinutes && entry.durationMinutes > 0)
-    return entry.durationMinutes;
-  if (entry.startTime && entry.endTime) {
-    const [startH, startM] = entry.startTime.split(":").map(Number);
-    const [endH, endM] = entry.endTime.split(":").map(Number);
-    return Math.max(0, endH * 60 + endM - (startH * 60 + startM));
-  }
-  return 0;
 }
 
 export async function generateAutoBreaksForMonth(

@@ -55,3 +55,17 @@ export function getAppointmentEndMinutes(appt: {
 
 export const FULL_DAY_ENTRY_TYPES = ["urlaub", "krankheit"] as const;
 
+export function getEntryDuration(entry: { durationMinutes: number | null; startTime: string | null; endTime: string | null }): number {
+  if (entry.durationMinutes && entry.durationMinutes > 0) {
+    return entry.durationMinutes;
+  }
+  if (entry.startTime && entry.endTime) {
+    const [startH, startM] = entry.startTime.split(':').map(Number);
+    const [endH, endM] = entry.endTime.split(':').map(Number);
+    const startMinutes = startH * 60 + startM;
+    const endMinutes = endH * 60 + endM;
+    return Math.max(0, endMinutes - startMinutes);
+  }
+  return 0;
+}
+

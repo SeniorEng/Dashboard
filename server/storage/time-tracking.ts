@@ -13,6 +13,7 @@ import {
   type InsertVacationAllowance,
   type Appointment,
 } from "@shared/schema";
+import { getEntryDuration } from "@shared/domain/time-entries";
 import { getVacationEntitlement, calculateCarryOverDays } from "@shared/domain/vacation";
 import { appointmentServices as appointmentServicesTable } from "@shared/schema/appointments";
 import { services as servicesTable } from "@shared/schema/services";
@@ -619,21 +620,6 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       sonstigesMinutes: 0,
     };
     
-    // Helper to calculate duration from startTime/endTime if durationMinutes is not set
-    const getEntryDuration = (entry: { durationMinutes: number | null; startTime: string | null; endTime: string | null }): number => {
-      if (entry.durationMinutes && entry.durationMinutes > 0) {
-        return entry.durationMinutes;
-      }
-      if (entry.startTime && entry.endTime) {
-        const [startH, startM] = entry.startTime.split(':').map(Number);
-        const [endH, endM] = entry.endTime.split(':').map(Number);
-        const startMinutes = startH * 60 + startM;
-        const endMinutes = endH * 60 + endM;
-        return Math.max(0, endMinutes - startMinutes);
-      }
-      return 0;
-    };
-    
     for (const entry of timeEntries) {
       const duration = getEntryDuration(entry);
       travel.timeEntryKilometers += entry.kilometers || 0;
@@ -749,18 +735,6 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       }
       workByDate[date].workMinutes += appt.durationPromised || 0;
     }
-
-    const getEntryDuration = (entry: { durationMinutes: number | null; startTime: string | null; endTime: string | null }): number => {
-      if (entry.durationMinutes && entry.durationMinutes > 0) {
-        return entry.durationMinutes;
-      }
-      if (entry.startTime && entry.endTime) {
-        const [startH, startM] = entry.startTime.split(':').map(Number);
-        const [endH, endM] = entry.endTime.split(':').map(Number);
-        return Math.max(0, (endH * 60 + endM) - (startH * 60 + startM));
-      }
-      return 0;
-    };
 
     for (const entry of timeEntries) {
       const date = entry.entryDate;

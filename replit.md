@@ -176,6 +176,14 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **DB-Felder**: `company_settings.twilio_account_sid`, `twilio_auth_token`, `twilio_phone_number`, `lead_call_bridge_phone`, `lead_call_bridge_enabled`.
 - **Sicherheit**: Twilio-Credentials nur für Admin/SuperAdmin sichtbar (non-admin GET maskiert). Webhook-Endpunkte validieren X-Twilio-Signature strikt.
 
+## Code Quality Audit (Task #35 — 2026-03-26)
+- **Overall**: PASS (no FAIL items). 3-phase deep analysis across 9 domain clusters.
+- **Methodology**: `.agents/skills/deep-analysis/SKILL.md` (Gestaffelte Tiefenanalyse).
+- **Full report**: `.local/audit-reports/task-35-full-app-tiefenanalyse.md`
+- **Fixes applied**: W1 (deduplicated `getEntryDuration` → `shared/domain/time-entries.ts`), W3 (billing routes now use `requireIntParam`).
+- **Remaining WARNs**: W2 (`any` type in budget-ledger consumeFifo), W4 (Puppeteer singleton memory), W5 (rounding in split budget txs), W6 (date parsing in isMonthClosed).
+- **Key shared utility**: `getEntryDuration()` exported from `@shared/domain/time-entries` — used by `time-tracking.ts`, `auto-breaks.ts`. Calculates duration from durationMinutes or startTime/endTime.
+
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)
 - **Frontend Libraries**: React, TypeScript, Vite, Wouter, `shadcn/ui`, Radix UI, Tailwind CSS v4, TanStack Query, Zod.
