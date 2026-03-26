@@ -456,6 +456,7 @@ export default function AdminUsers() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "vacation-summaries"] });
       setEditingUserId(null);
       toast({ title: "Benutzer aktualisiert" });
     },
