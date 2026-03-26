@@ -737,22 +737,22 @@ router.get("/employees/workload", asyncHandler("Auslastungsdaten konnten nicht g
     )
     SELECT
       cc.employee_id AS "employeeId",
-      cc.hv_count AS "hvCount",
-      cc.v1_count AS "v1Count",
-      cc.v2_count AS "v2Count",
+      cc.hv_count AS "primaryCount",
+      cc.v1_count AS "backupCount",
+      cc.v2_count AS "backup2Count",
       am.avg_hw_minutes AS "avgMonthlyHwMinutes",
       am.avg_all_minutes AS "avgMonthlyAllMinutes"
     FROM customer_counts cc
     JOIN avg_minutes am ON am.employee_id = cc.employee_id
   `);
 
-  const workloadMap: Record<number, { hvCount: number; v1Count: number; v2Count: number; avgMonthlyHwMinutes: number; avgMonthlyAllMinutes: number }> = {};
+  const workloadMap: Record<number, { primaryCount: number; backupCount: number; backup2Count: number; avgMonthlyHwMinutes: number; avgMonthlyAllMinutes: number }> = {};
   for (const row of result.rows) {
     const r = row as Record<string, unknown>;
     workloadMap[Number(r.employeeId)] = {
-      hvCount: Number(r.hvCount),
-      v1Count: Number(r.v1Count),
-      v2Count: Number(r.v2Count),
+      primaryCount: Number(r.primaryCount),
+      backupCount: Number(r.backupCount),
+      backup2Count: Number(r.backup2Count),
       avgMonthlyHwMinutes: Number(r.avgMonthlyHwMinutes),
       avgMonthlyAllMinutes: Number(r.avgMonthlyAllMinutes),
     };

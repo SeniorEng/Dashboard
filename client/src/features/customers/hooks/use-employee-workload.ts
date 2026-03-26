@@ -2,9 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
 
 export interface EmployeeWorkload {
-  hvCount: number;
-  v1Count: number;
-  v2Count: number;
+  primaryCount: number;
+  backupCount: number;
+  backup2Count: number;
   avgMonthlyHwMinutes: number;
   avgMonthlyAllMinutes: number;
 }

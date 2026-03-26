@@ -691,30 +691,29 @@ export default function AdminUsers() {
                             )}
                             {workloadData && workloadData[user.id] && (() => {
                               const wl = workloadData[user.id];
-                              const hwHours = (wl.avgMonthlyHwMinutes / 60).toFixed(1);
-                              const allHours = (wl.avgMonthlyAllMinutes / 60).toFixed(1);
+                              const totalCustomers = wl.primaryCount + wl.backupCount + wl.backup2Count;
+                              const hwHours = Math.round(wl.avgMonthlyHwMinutes / 60 * 10) / 10;
+                              const allHours = Math.round(wl.avgMonthlyAllMinutes / 60 * 10) / 10;
                               return (
-                                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" data-testid={`workload-stats-${user.id}`}>
-                                  <span
-                                    className="inline-flex items-center gap-1 text-gray-600 cursor-default"
-                                    title={`${wl.hvCount} Hauptverantwortung · ${wl.v1Count} Vertretung 1 · ${wl.v2Count} Vertretung 2`}
-                                  >
+                                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600" data-testid={`workload-stats-${user.id}`}>
+                                  <span className="inline-flex items-center gap-1 cursor-default">
                                     <Users className="h-3 w-3" />
-                                    <span className="font-medium text-teal-700" data-testid={`workload-hv-${user.id}`}>{wl.hvCount}</span>
-                                    <span className="text-gray-400">/</span>
-                                    <span className="font-medium text-blue-600" data-testid={`workload-v1-${user.id}`}>{wl.v1Count}</span>
-                                    <span className="text-gray-400">/</span>
-                                    <span className="font-medium text-purple-600" data-testid={`workload-v2-${user.id}`}>{wl.v2Count}</span>
+                                    <span className="font-medium" data-testid={`workload-total-${user.id}`}>{totalCustomers} Kunden</span>
+                                    <span className="text-gray-400">
+                                      (<span className="text-teal-700" data-testid={`workload-hv-${user.id}`}>{wl.primaryCount} HV</span>
+                                      {" · "}
+                                      <span className="text-blue-600" data-testid={`workload-v1-${user.id}`}>{wl.backupCount} V1</span>
+                                      {" · "}
+                                      <span className="text-purple-600" data-testid={`workload-v2-${user.id}`}>{wl.backup2Count} V2</span>)
+                                    </span>
                                   </span>
                                   <span className="text-gray-300">|</span>
-                                  <span
-                                    className="inline-flex items-center gap-1 text-gray-600 cursor-default"
-                                    title={`Ø letzte 3 Monate: ${hwHours}h Hauswirtschaft · ${allHours}h Alltagsbegleitung`}
-                                  >
+                                  <span className="inline-flex items-center gap-1 cursor-default">
                                     <Calendar className="h-3 w-3" />
                                     <span>Ø</span>
                                     <span className="font-medium" data-testid={`workload-hw-hours-${user.id}`}>{hwHours}h</span>
                                     <span className="text-gray-400">HW</span>
+                                    <span className="text-gray-400">·</span>
                                     <span className="font-medium" data-testid={`workload-all-hours-${user.id}`}>{allHours}h</span>
                                     <span className="text-gray-400">ALL</span>
                                   </span>
