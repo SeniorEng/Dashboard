@@ -40,7 +40,8 @@ import { customerManagementStorage } from "../storage/customer-management";
 import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
 import { addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
 import { customers } from "@shared/schema";
-import { eq, and, or, inArray, gte, lte, ne, isNull } from "drizzle-orm";
+import { customerContracts } from "@shared/schema/contracts";
+import { eq, and, or, inArray, gte, lte, ne, isNull, lt, sql } from "drizzle-orm";
 
 const router = Router();
 
@@ -153,6 +154,26 @@ router.get("/coverage-check", asyncHandler("Fehler beim Laden der Terminabdeckun
   const nextMonthStart = `${nextMonthYear}-${String(nextMonth).padStart(2, "0")}-01`;
   const nextMonthEnd = `${nextMonthYear}-${String(nextMonth).padStart(2, "0")}-${new Date(nextMonthYear, nextMonth, 0).getDate()}`;
 
+  const contractEndRows = await db.select({
+    customerId: customerContracts.customerId,
+    maxEnd: sql<string | null>`MAX(${customerContracts.contractEnd})`.as("max_end"),
+    hasOpenEnded: sql<boolean>`bool_or(${customerContracts.contractEnd} IS NULL AND ${customerContracts.status} = 'active')`.as("has_open_ended"),
+    hasAnyContract: sql<boolean>`bool_or(true)`.as("has_any_contract"),
+  })
+  .from(customerContracts)
+  .where(inArray(customerContracts.customerId, customerIds))
+  .groupBy(customerContracts.customerId);
+
+  const contractInfo = new Map(contractEndRows.map(r => [r.customerId, r]));
+
+  function hasActiveContractForMonth(customerId: number, monthStart: string): boolean {
+    const info = contractInfo.get(customerId);
+    if (!info) return true;
+    if (info.hasOpenEnded) return true;
+    if (!info.maxEnd) return true;
+    return info.maxEnd >= monthStart;
+  }
+
   const [currentMonthAppts, nextMonthAppts] = await Promise.all([
     db.select({ customerId: appointments.customerId })
       .from(appointments)
@@ -188,11 +209,11 @@ router.get("/coverage-check", asyncHandler("Fehler beim Laden der Terminabdeckun
   }
 
   const currentUncovered = assignedCustomers
-    .filter(c => !currentCoveredIds.has(c.id))
+    .filter(c => !currentCoveredIds.has(c.id) && hasActiveContractForMonth(c.id, currentMonthStart))
     .map(c => ({ id: c.id, name: c.name, role: getRole(c) }));
 
   const nextUncovered = assignedCustomers
-    .filter(c => !nextCoveredIds.has(c.id))
+    .filter(c => !nextCoveredIds.has(c.id) && hasActiveContractForMonth(c.id, nextMonthStart))
     .map(c => ({ id: c.id, name: c.name, role: getRole(c) }));
 
   res.json({
