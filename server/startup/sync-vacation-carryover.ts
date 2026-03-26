@@ -91,21 +91,19 @@ export async function syncVacationCarryover(): Promise<number> {
 
     const totalDays = getVacationEntitlement(vacDays, eintritt, currentYear);
 
-    if (carryOverDays > 0 || totalDays !== vacDays) {
-      try {
-        await db.insert(employeeVacationAllowance).values({
-          userId: emp.id,
-          year: currentYear,
-          totalDays,
-          carryOverDays,
-          notes: carryOverDays > 0
-            ? `Automatischer Übertrag: ${carryOverDays} Tage aus ${currentYear - 1}`
-            : null,
-        }).onConflictDoNothing();
-        synced++;
-      } catch (err) {
-        console.error(`[vacation-sync] Fehler bei Mitarbeiter ${emp.id}:`, err);
-      }
+    try {
+      const result = await db.insert(employeeVacationAllowance).values({
+        userId: emp.id,
+        year: currentYear,
+        totalDays,
+        carryOverDays,
+        notes: carryOverDays > 0
+          ? `Automatischer Übertrag: ${carryOverDays} Tage aus ${currentYear - 1}`
+          : null,
+      }).onConflictDoNothing().returning();
+      if (result.length > 0) synced++;
+    } catch (err) {
+      console.error(`[vacation-sync] Fehler bei Mitarbeiter ${emp.id}:`, err);
     }
   }
 

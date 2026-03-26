@@ -594,7 +594,7 @@ router.get("/vacation-summaries/:year", asyncHandler("Urlaubsübersichten konnte
     .from(users)
     .where(eq(users.isAnonymized, false));
 
-  const summaries: Record<number, any> = {};
+  const summaries: Record<number, Awaited<ReturnType<typeof timeTrackingStorage.getVacationSummary>>> = {};
   await Promise.all(
     allEmployees.map(async (emp) => {
       summaries[emp.id] = await timeTrackingStorage.getVacationSummary(emp.id, year);
