@@ -403,7 +403,7 @@ export default function AdminUsers() {
   const { user: currentUser } = useAuth();
   const isSuperAdmin = currentUser?.isSuperAdmin ?? false;
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState<UserData | null>(null);
+  const [editingUserId, setEditingUserId] = useState<number | null>(null);
   const [resetPasswordUser, setResetPasswordUser] = useState<UserData | null>(null);
   const [anonymizingUser, setAnonymizingUser] = useState<UserData | null>(null);
   const [handoverUser, setHandoverUser] = useState<UserData | null>(null);
@@ -418,6 +418,15 @@ export default function AdminUsers() {
       const result = await api.get<UserData[]>("/admin/users");
       return unwrapResult(result);
     },
+  });
+
+  const { data: editingUser, isLoading: isLoadingEditUser } = useQuery<UserData>({
+    queryKey: ["admin", "users", editingUserId],
+    queryFn: async () => {
+      const result = await api.get<UserData>(`/admin/users/${editingUserId}`);
+      return unwrapResult(result);
+    },
+    enabled: !!editingUserId,
   });
 
   const { data: workloadData } = useEmployeeWorkload();
@@ -444,7 +453,7 @@ export default function AdminUsers() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
-      setEditingUser(null);
+      setEditingUserId(null);
       toast({ title: "Benutzer aktualisiert" });
     },
     onError: (error: Error) => {
@@ -544,8 +553,8 @@ export default function AdminUsers() {
   };
 
   const handleEditSubmit = (data: UserFormData) => {
-    if (!editingUser) return;
-    updateMutation.mutate({ id: editingUser.id, ...data });
+    if (!editingUserId) return;
+    updateMutation.mutate({ id: editingUserId, ...data });
   };
 
   return (
@@ -730,7 +739,7 @@ export default function AdminUsers() {
                             variant="ghost"
                             size="sm"
                             className="h-8 w-8 p-0"
-                            onClick={() => setEditingUser(user)}
+                            onClick={() => setEditingUserId(user.id)}
                             data-testid={`button-edit-user-${user.id}`}
                           >
                             <Pencil className={`${iconSize.sm} text-gray-600`} />
@@ -805,9 +814,9 @@ export default function AdminUsers() {
             </div>
           )}
 
-      <Dialog open={!!editingUser} onOpenChange={() => setEditingUser(null)}>
+      <Dialog open={!!editingUserId} onOpenChange={() => setEditingUserId(null)}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
-          {editingUser && (
+          {editingUserId && editingUser && !isLoadingEditUser && (
             <>
               <UserForm
                 mode="edit"
