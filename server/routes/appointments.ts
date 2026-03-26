@@ -41,7 +41,7 @@ import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
 import { addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
 import { customers } from "@shared/schema";
 import { customerContracts } from "@shared/schema/contracts";
-import { eq, and, or, inArray, gte, lte, ne, isNull, lt, sql } from "drizzle-orm";
+import { eq, and, or, inArray, gte, lte, ne, isNull, sql } from "drizzle-orm";
 
 const router = Router();
 
@@ -158,7 +158,6 @@ router.get("/coverage-check", asyncHandler("Fehler beim Laden der Terminabdeckun
     customerId: customerContracts.customerId,
     maxEnd: sql<string | null>`MAX(${customerContracts.contractEnd})`.as("max_end"),
     hasOpenEnded: sql<boolean>`bool_or(${customerContracts.contractEnd} IS NULL AND ${customerContracts.status} = 'active')`.as("has_open_ended"),
-    hasAnyContract: sql<boolean>`bool_or(true)`.as("has_any_contract"),
   })
   .from(customerContracts)
   .where(inArray(customerContracts.customerId, customerIds))
