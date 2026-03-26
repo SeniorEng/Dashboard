@@ -687,9 +687,10 @@ router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durc
 
 router.get("/employees/workload", asyncHandler("Auslastungsdaten konnten nicht geladen werden", async (_req: Request, res: Response) => {
   const now = new Date();
-  const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-  const threeMonthsAgoStr = `${threeMonthsAgo.getFullYear()}-${String(threeMonthsAgo.getMonth() + 1).padStart(2, "0")}-01`;
-  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const windowEnd = new Date(now.getFullYear(), now.getMonth(), 1);
+  const windowStart = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+  const windowStartStr = `${windowStart.getFullYear()}-${String(windowStart.getMonth() + 1).padStart(2, "0")}-01`;
+  const windowEndStr = `${windowEnd.getFullYear()}-${String(windowEnd.getMonth() + 1).padStart(2, "0")}-01`;
 
   const result = await db.execute(sql`
     WITH active_employees AS (
@@ -709,7 +710,7 @@ router.get("/employees/workload", asyncHandler("Auslastungsdaten konnten nicht g
       )
       GROUP BY ae.id
     ),
-    monthly_hours AS (
+    period_hours AS (
       SELECT
         COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
         s.lohnart_kategorie,
@@ -719,19 +720,19 @@ router.get("/employees/workload", asyncHandler("Auslastungsdaten konnten nicht g
       JOIN services s ON s.id = asvc.service_id
       WHERE a.deleted_at IS NULL
         AND a.status IN ('completed', 'documented')
-        AND a.date::date >= ${threeMonthsAgoStr}::date
-        AND a.date::date < ${todayStr}::date
+        AND a.date::date >= ${windowStartStr}::date
+        AND a.date::date < ${windowEndStr}::date
         AND s.unit_type = 'hours'
         AND COALESCE(a.performed_by_employee_id, a.assigned_employee_id) IN (SELECT id FROM active_employees)
       GROUP BY COALESCE(a.performed_by_employee_id, a.assigned_employee_id), s.lohnart_kategorie
     ),
-    avg_hours AS (
+    avg_minutes AS (
       SELECT
         ae.id AS employee_id,
-        ROUND(COALESCE(SUM(CASE WHEN mh.lohnart_kategorie = 'hauswirtschaft' THEN mh.total_minutes END) / 3.0 / 60.0, 0), 1) AS avg_hw_hours,
-        ROUND(COALESCE(SUM(CASE WHEN mh.lohnart_kategorie = 'alltagsbegleitung' THEN mh.total_minutes END) / 3.0 / 60.0, 0), 1) AS avg_all_hours
+        ROUND(COALESCE(SUM(CASE WHEN ph.lohnart_kategorie = 'hauswirtschaft' THEN ph.total_minutes END) / 3.0, 0))::int AS avg_hw_minutes,
+        ROUND(COALESCE(SUM(CASE WHEN ph.lohnart_kategorie = 'alltagsbegleitung' THEN ph.total_minutes END) / 3.0, 0))::int AS avg_all_minutes
       FROM active_employees ae
-      LEFT JOIN monthly_hours mh ON mh.employee_id = ae.id
+      LEFT JOIN period_hours ph ON ph.employee_id = ae.id
       GROUP BY ae.id
     )
     SELECT
@@ -739,21 +740,21 @@ router.get("/employees/workload", asyncHandler("Auslastungsdaten konnten nicht g
       cc.hv_count AS "hvCount",
       cc.v1_count AS "v1Count",
       cc.v2_count AS "v2Count",
-      ah.avg_hw_hours AS "avgHwHours",
-      ah.avg_all_hours AS "avgAllHours"
+      am.avg_hw_minutes AS "avgMonthlyHwMinutes",
+      am.avg_all_minutes AS "avgMonthlyAllMinutes"
     FROM customer_counts cc
-    JOIN avg_hours ah ON ah.employee_id = cc.employee_id
+    JOIN avg_minutes am ON am.employee_id = cc.employee_id
   `);
 
-  const workloadMap: Record<number, { hvCount: number; v1Count: number; v2Count: number; avgHwHours: number; avgAllHours: number }> = {};
+  const workloadMap: Record<number, { hvCount: number; v1Count: number; v2Count: number; avgMonthlyHwMinutes: number; avgMonthlyAllMinutes: number }> = {};
   for (const row of result.rows) {
     const r = row as Record<string, unknown>;
     workloadMap[Number(r.employeeId)] = {
       hvCount: Number(r.hvCount),
       v1Count: Number(r.v1Count),
       v2Count: Number(r.v2Count),
-      avgHwHours: Number(r.avgHwHours),
-      avgAllHours: Number(r.avgAllHours),
+      avgMonthlyHwMinutes: Number(r.avgMonthlyHwMinutes),
+      avgMonthlyAllMinutes: Number(r.avgMonthlyAllMinutes),
     };
   }
 

@@ -53,14 +53,7 @@ import {
   AVAILABLE_ROLES,
   formatPhoneForDisplay,
 } from "./components/user-types";
-
-interface EmployeeWorkload {
-  hvCount: number;
-  v1Count: number;
-  v2Count: number;
-  avgHwHours: number;
-  avgAllHours: number;
-}
+import { useEmployeeWorkload } from "@/features/customers/hooks/use-employee-workload";
 import { UserForm } from "./components/user-form";
 import { EmployeeDocumentsSection } from "./components/employee-documents-section";
 import { EmployeeServiceRates } from "./components/employee-service-rates";
@@ -427,14 +420,7 @@ export default function AdminUsers() {
     },
   });
 
-  const { data: workloadData } = useQuery<Record<number, EmployeeWorkload>>({
-    queryKey: ["admin", "employees", "workload"],
-    queryFn: async () => {
-      const result = await api.get<Record<number, EmployeeWorkload>>("/admin/employees/workload");
-      return unwrapResult(result);
-    },
-    staleTime: 120000,
-  });
+  const { data: workloadData } = useEmployeeWorkload();
 
   const createMutation = useMutation({
     mutationFn: async (data: UserFormData & { password?: string }) => {
@@ -703,33 +689,38 @@ export default function AdminUsers() {
                                 LBNR: {user.lbnr}
                               </div>
                             )}
-                            {workloadData && workloadData[user.id] && (
-                              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" data-testid={`workload-stats-${user.id}`}>
-                                <span
-                                  className="inline-flex items-center gap-1 text-gray-600 cursor-default"
-                                  title={`${workloadData[user.id].hvCount} Hauptverantwortung · ${workloadData[user.id].v1Count} Vertretung 1 · ${workloadData[user.id].v2Count} Vertretung 2`}
-                                >
-                                  <Users className="h-3 w-3" />
-                                  <span className="font-medium text-teal-700">{workloadData[user.id].hvCount}</span>
-                                  <span className="text-gray-400">/</span>
-                                  <span className="font-medium text-blue-600">{workloadData[user.id].v1Count}</span>
-                                  <span className="text-gray-400">/</span>
-                                  <span className="font-medium text-purple-600">{workloadData[user.id].v2Count}</span>
-                                </span>
-                                <span className="text-gray-300">|</span>
-                                <span
-                                  className="inline-flex items-center gap-1 text-gray-600 cursor-default"
-                                  title={`Ø letzte 3 Monate: ${workloadData[user.id].avgHwHours}h Hauswirtschaft · ${workloadData[user.id].avgAllHours}h Alltagsbegleitung`}
-                                >
-                                  <Calendar className="h-3 w-3" />
-                                  <span>Ø</span>
-                                  <span className="font-medium">{workloadData[user.id].avgHwHours}h</span>
-                                  <span className="text-gray-400">HW</span>
-                                  <span className="font-medium">{workloadData[user.id].avgAllHours}h</span>
-                                  <span className="text-gray-400">ALL</span>
-                                </span>
-                              </div>
-                            )}
+                            {workloadData && workloadData[user.id] && (() => {
+                              const wl = workloadData[user.id];
+                              const hwHours = (wl.avgMonthlyHwMinutes / 60).toFixed(1);
+                              const allHours = (wl.avgMonthlyAllMinutes / 60).toFixed(1);
+                              return (
+                                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" data-testid={`workload-stats-${user.id}`}>
+                                  <span
+                                    className="inline-flex items-center gap-1 text-gray-600 cursor-default"
+                                    title={`${wl.hvCount} Hauptverantwortung · ${wl.v1Count} Vertretung 1 · ${wl.v2Count} Vertretung 2`}
+                                  >
+                                    <Users className="h-3 w-3" />
+                                    <span className="font-medium text-teal-700" data-testid={`workload-hv-${user.id}`}>{wl.hvCount}</span>
+                                    <span className="text-gray-400">/</span>
+                                    <span className="font-medium text-blue-600" data-testid={`workload-v1-${user.id}`}>{wl.v1Count}</span>
+                                    <span className="text-gray-400">/</span>
+                                    <span className="font-medium text-purple-600" data-testid={`workload-v2-${user.id}`}>{wl.v2Count}</span>
+                                  </span>
+                                  <span className="text-gray-300">|</span>
+                                  <span
+                                    className="inline-flex items-center gap-1 text-gray-600 cursor-default"
+                                    title={`Ø letzte 3 Monate: ${hwHours}h Hauswirtschaft · ${allHours}h Alltagsbegleitung`}
+                                  >
+                                    <Calendar className="h-3 w-3" />
+                                    <span>Ø</span>
+                                    <span className="font-medium" data-testid={`workload-hw-hours-${user.id}`}>{hwHours}h</span>
+                                    <span className="text-gray-400">HW</span>
+                                    <span className="font-medium" data-testid={`workload-all-hours-${user.id}`}>{allHours}h</span>
+                                    <span className="text-gray-400">ALL</span>
+                                  </span>
+                                </div>
+                              );
+                            })()}
                           </div>
                         )}
                       </div>

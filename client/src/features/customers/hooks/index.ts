@@ -8,6 +8,13 @@ export {
 
 export { useEmployees, employeeKeys } from './use-employees';
 
+export {
+  useEmployeeWorkload,
+  employeeWorkloadKeys,
+  type EmployeeWorkload,
+  type EmployeeWorkloadMap,
+} from './use-employee-workload';
+
 export { 
   useInsuranceProviders, 
   useCreateInsuranceProvider,
