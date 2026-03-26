@@ -331,9 +331,10 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       : getVacationEntitlement(vacationDaysPerYear, eintrittsdatum, year - 1);
 
     const unusedFromPrevYear = Math.max(0, prevEntitlement - prevYearUsed);
-    const carryOverDays = allowanceResult
+    const rawCarryOver = allowanceResult
       ? allowanceResult.carryOverDays
       : calculateCarryOverDays(unusedFromPrevYear, year, today);
+    const carryOverDays = calculateCarryOverDays(rawCarryOver, year, today);
 
     let usedDays = 0;
     let plannedDays = 0;
