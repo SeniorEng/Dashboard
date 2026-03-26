@@ -685,4 +685,79 @@ router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durc
   });
 }));
 
+router.get("/employees/workload", asyncHandler("Auslastungsdaten konnten nicht geladen werden", async (_req: Request, res: Response) => {
+  const now = new Date();
+  const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+  const threeMonthsAgoStr = `${threeMonthsAgo.getFullYear()}-${String(threeMonthsAgo.getMonth() + 1).padStart(2, "0")}-01`;
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+  const result = await db.execute(sql`
+    WITH active_employees AS (
+      SELECT id FROM users WHERE is_active = true AND is_anonymized = false
+    ),
+    customer_counts AS (
+      SELECT
+        ae.id AS employee_id,
+        COUNT(DISTINCT CASE WHEN c.primary_employee_id = ae.id THEN c.id END)::int AS hv_count,
+        COUNT(DISTINCT CASE WHEN c.backup_employee_id = ae.id THEN c.id END)::int AS v1_count,
+        COUNT(DISTINCT CASE WHEN c.backup_employee_id_2 = ae.id THEN c.id END)::int AS v2_count
+      FROM active_employees ae
+      LEFT JOIN customers c ON (
+        c.deleted_at IS NULL
+        AND c.status = 'aktiv'
+        AND (c.primary_employee_id = ae.id OR c.backup_employee_id = ae.id OR c.backup_employee_id_2 = ae.id)
+      )
+      GROUP BY ae.id
+    ),
+    monthly_hours AS (
+      SELECT
+        COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
+        s.lohnart_kategorie,
+        SUM(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes))::numeric AS total_minutes
+      FROM appointments a
+      JOIN appointment_services asvc ON asvc.appointment_id = a.id
+      JOIN services s ON s.id = asvc.service_id
+      WHERE a.deleted_at IS NULL
+        AND a.status IN ('completed', 'documented')
+        AND a.date::date >= ${threeMonthsAgoStr}::date
+        AND a.date::date < ${todayStr}::date
+        AND s.unit_type = 'hours'
+        AND COALESCE(a.performed_by_employee_id, a.assigned_employee_id) IN (SELECT id FROM active_employees)
+      GROUP BY COALESCE(a.performed_by_employee_id, a.assigned_employee_id), s.lohnart_kategorie
+    ),
+    avg_hours AS (
+      SELECT
+        ae.id AS employee_id,
+        ROUND(COALESCE(SUM(CASE WHEN mh.lohnart_kategorie = 'hauswirtschaft' THEN mh.total_minutes END) / 3.0 / 60.0, 0), 1) AS avg_hw_hours,
+        ROUND(COALESCE(SUM(CASE WHEN mh.lohnart_kategorie = 'alltagsbegleitung' THEN mh.total_minutes END) / 3.0 / 60.0, 0), 1) AS avg_all_hours
+      FROM active_employees ae
+      LEFT JOIN monthly_hours mh ON mh.employee_id = ae.id
+      GROUP BY ae.id
+    )
+    SELECT
+      cc.employee_id AS "employeeId",
+      cc.hv_count AS "hvCount",
+      cc.v1_count AS "v1Count",
+      cc.v2_count AS "v2Count",
+      ah.avg_hw_hours AS "avgHwHours",
+      ah.avg_all_hours AS "avgAllHours"
+    FROM customer_counts cc
+    JOIN avg_hours ah ON ah.employee_id = cc.employee_id
+  `);
+
+  const workloadMap: Record<number, { hvCount: number; v1Count: number; v2Count: number; avgHwHours: number; avgAllHours: number }> = {};
+  for (const row of result.rows) {
+    const r = row as Record<string, unknown>;
+    workloadMap[Number(r.employeeId)] = {
+      hvCount: Number(r.hvCount),
+      v1Count: Number(r.v1Count),
+      v2Count: Number(r.v2Count),
+      avgHwHours: Number(r.avgHwHours),
+      avgAllHours: Number(r.avgAllHours),
+    };
+  }
+
+  res.json(workloadMap);
+}));
+
 export default router;

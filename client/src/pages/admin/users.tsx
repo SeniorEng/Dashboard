@@ -53,6 +53,14 @@ import {
   AVAILABLE_ROLES,
   formatPhoneForDisplay,
 } from "./components/user-types";
+
+interface EmployeeWorkload {
+  hvCount: number;
+  v1Count: number;
+  v2Count: number;
+  avgHwHours: number;
+  avgAllHours: number;
+}
 import { UserForm } from "./components/user-form";
 import { EmployeeDocumentsSection } from "./components/employee-documents-section";
 import { EmployeeServiceRates } from "./components/employee-service-rates";
@@ -419,6 +427,15 @@ export default function AdminUsers() {
     },
   });
 
+  const { data: workloadData } = useQuery<Record<number, EmployeeWorkload>>({
+    queryKey: ["admin", "employees", "workload"],
+    queryFn: async () => {
+      const result = await api.get<Record<number, EmployeeWorkload>>("/admin/employees/workload");
+      return unwrapResult(result);
+    },
+    staleTime: 120000,
+  });
+
   const createMutation = useMutation({
     mutationFn: async (data: UserFormData & { password?: string }) => {
       const result = await api.post("/admin/users", data);
@@ -684,6 +701,33 @@ export default function AdminUsers() {
                             {user.lbnr && (
                               <div className="mt-1 text-xs text-gray-500" data-testid={`text-lbnr-${user.id}`}>
                                 LBNR: {user.lbnr}
+                              </div>
+                            )}
+                            {workloadData && workloadData[user.id] && (
+                              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" data-testid={`workload-stats-${user.id}`}>
+                                <span
+                                  className="inline-flex items-center gap-1 text-gray-600 cursor-default"
+                                  title={`${workloadData[user.id].hvCount} Hauptverantwortung · ${workloadData[user.id].v1Count} Vertretung 1 · ${workloadData[user.id].v2Count} Vertretung 2`}
+                                >
+                                  <Users className="h-3 w-3" />
+                                  <span className="font-medium text-teal-700">{workloadData[user.id].hvCount}</span>
+                                  <span className="text-gray-400">/</span>
+                                  <span className="font-medium text-blue-600">{workloadData[user.id].v1Count}</span>
+                                  <span className="text-gray-400">/</span>
+                                  <span className="font-medium text-purple-600">{workloadData[user.id].v2Count}</span>
+                                </span>
+                                <span className="text-gray-300">|</span>
+                                <span
+                                  className="inline-flex items-center gap-1 text-gray-600 cursor-default"
+                                  title={`Ø letzte 3 Monate: ${workloadData[user.id].avgHwHours}h Hauswirtschaft · ${workloadData[user.id].avgAllHours}h Alltagsbegleitung`}
+                                >
+                                  <Calendar className="h-3 w-3" />
+                                  <span>Ø</span>
+                                  <span className="font-medium">{workloadData[user.id].avgHwHours}h</span>
+                                  <span className="text-gray-400">HW</span>
+                                  <span className="font-medium">{workloadData[user.id].avgAllHours}h</span>
+                                  <span className="text-gray-400">ALL</span>
+                                </span>
                               </div>
                             )}
                           </div>
