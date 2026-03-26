@@ -39,7 +39,7 @@ import { db } from "../lib/db";
 import { customerManagementStorage } from "../storage/customer-management";
 import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
 import { addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
-import { serviceRecordAppointments, monthlyServiceRecords, customers } from "@shared/schema";
+import { customers } from "@shared/schema";
 import { eq, and, or, inArray, gte, lte, ne, isNull } from "drizzle-orm";
 
 const router = Router();
@@ -106,6 +106,9 @@ router.get("/active-employees", asyncHandler("Mitarbeiter konnten nicht geladen 
 router.get("/coverage-check", asyncHandler("Fehler beim Laden der Terminabdeckung", async (req, res) => {
   const user = req.user!;
   const employeeIdParam = req.query.employeeId ? parseInt(req.query.employeeId as string, 10) : null;
+  if (employeeIdParam !== null && isNaN(employeeIdParam)) {
+    return res.status(400).json({ code: "BAD_REQUEST", message: "Ungültige Mitarbeiter-ID" });
+  }
   const effectiveEmployeeId = (user.isAdmin && employeeIdParam) ? employeeIdParam : user.id;
 
   const now = new Date();

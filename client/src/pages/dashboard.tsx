@@ -202,24 +202,28 @@ function getDefaultDateForMonth(year: number, month: number): string {
   return format(targetDate, "yyyy-MM-dd");
 }
 
-function CoverageMonthBanner({ data }: {
+function CoverageMonthBanner({ data, isCurrentMonth }: {
   data: CoverageData["currentMonth"];
+  isCurrentMonth: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const count = data.uncoveredCustomers.length;
   if (count === 0) return null;
 
   const prefillDate = getDefaultDateForMonth(data.year, data.month);
-  const isHighCount = count >= 5;
-  const bgColor = isHighCount ? "bg-red-50 border-red-200" : "bg-amber-50 border-amber-200";
-  const textColor = isHighCount ? "text-red-700" : "text-amber-700";
-  const iconColor = isHighCount ? "text-red-500" : "text-amber-500";
+  const bgColor = isCurrentMonth ? "bg-red-50 border-red-200" : "bg-amber-50 border-amber-200";
+  const textColor = isCurrentMonth ? "text-red-700" : "text-amber-700";
+  const iconColor = isCurrentMonth ? "text-red-500" : "text-amber-500";
+  const listId = `coverage-list-${data.month}`;
 
   return (
     <div className={`rounded-lg border ${bgColor} overflow-hidden`} data-testid={`coverage-banner-${data.month}`}>
       <button
         className={`w-full flex items-center gap-2 px-3 py-2.5 text-left ${textColor}`}
         onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+        aria-controls={listId}
+        aria-label={`${data.label}: ${count} ${count === 1 ? "Kunde" : "Kunden"} ohne Termin ${expanded ? "zuklappen" : "aufklappen"}`}
         data-testid={`button-toggle-coverage-${data.month}`}
       >
         <AlertTriangle className={`h-4 w-4 shrink-0 ${iconColor}`} />
@@ -229,23 +233,26 @@ function CoverageMonthBanner({ data }: {
         {expanded ? <ChevronUp className="h-4 w-4 shrink-0" /> : <ChevronDown className="h-4 w-4 shrink-0" />}
       </button>
       {expanded && (
-        <div className="px-3 pb-2 space-y-1" data-testid={`coverage-list-${data.month}`}>
+        <div className="px-3 pb-2 space-y-1" id={listId} data-testid={`coverage-list-${data.month}`}>
           {data.uncoveredCustomers.map((customer) => (
             <div
               key={customer.id}
-              className="flex items-center justify-between py-1.5 px-2 rounded-md bg-white/60"
+              className="flex items-center justify-between py-2 px-2 rounded-md bg-white/60"
               data-testid={`coverage-customer-${customer.id}`}
             >
               <span className="text-sm text-gray-800 truncate">{customer.name}</span>
               <div className="flex items-center gap-2 shrink-0">
-                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${ROLE_COLORS[customer.role] || ""}`}>
+                <span
+                  className={`text-xs font-medium px-1.5 py-0.5 rounded ${ROLE_COLORS[customer.role] || ""}`}
+                  title={customer.role === "primary" ? "Hauptverantwortlich" : customer.role === "backup1" ? "1. Vertretung" : "2. Vertretung"}
+                >
                   {ROLE_LABELS[customer.role] || customer.role}
                 </span>
                 <Link href={`/new-appointment?date=${prefillDate}&customerId=${customer.id}`}>
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-8 min-w-[44px] px-2 text-xs"
+                    className="min-h-[44px] min-w-[44px] px-2 text-xs"
                     data-testid={`button-create-appointment-${customer.id}`}
                   >
                     <Plus className="h-3 w-3 mr-1" />
@@ -517,8 +524,8 @@ export default function Dashboard() {
 
       {coverageData && (coverageData.currentMonth.uncoveredCustomers.length > 0 || coverageData.nextMonth.uncoveredCustomers.length > 0) && (
         <div className="space-y-2 mb-4" data-testid="coverage-banners">
-          <CoverageMonthBanner data={coverageData.currentMonth} />
-          <CoverageMonthBanner data={coverageData.nextMonth} />
+          <CoverageMonthBanner data={coverageData.currentMonth} isCurrentMonth={true} />
+          <CoverageMonthBanner data={coverageData.nextMonth} isCurrentMonth={false} />
         </div>
       )}
 
