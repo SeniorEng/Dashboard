@@ -39,8 +39,8 @@ import { db } from "../lib/db";
 import { customerManagementStorage } from "../storage/customer-management";
 import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
 import { addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
-import { serviceRecordAppointments, monthlyServiceRecords } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { serviceRecordAppointments, monthlyServiceRecords, customers } from "@shared/schema";
+import { eq, and, or, inArray, gte, lte, ne, isNull } from "drizzle-orm";
 
 const router = Router();
 
@@ -101,6 +101,111 @@ router.get("/active-employees", asyncHandler("Mitarbeiter konnten nicht geladen 
     displayName: e.displayName,
   }));
   res.json(safeEmployees);
+}));
+
+router.get("/coverage-check", asyncHandler(async (req, res) => {
+  const user = req.user!;
+  const employeeIdParam = req.query.employeeId ? parseInt(req.query.employeeId as string, 10) : null;
+  const effectiveEmployeeId = (user.isAdmin && employeeIdParam) ? employeeIdParam : user.id;
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+  const nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
+  const nextMonthYear = currentMonth === 12 ? currentYear + 1 : currentYear;
+
+  const monthNames = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
+
+  const assignedCustomers = await db.select({
+    id: customers.id,
+    name: customers.name,
+    primaryEmployeeId: customers.primaryEmployeeId,
+    backupEmployeeId: customers.backupEmployeeId,
+    backupEmployeeId2: customers.backupEmployeeId2,
+  })
+  .from(customers)
+  .where(
+    and(
+      eq(customers.status, "aktiv"),
+      isNull(customers.deletedAt),
+      or(
+        eq(customers.primaryEmployeeId, effectiveEmployeeId),
+        eq(customers.backupEmployeeId, effectiveEmployeeId),
+        eq(customers.backupEmployeeId2, effectiveEmployeeId),
+      )
+    )
+  );
+
+  if (assignedCustomers.length === 0) {
+    return res.json({
+      currentMonth: { label: `${monthNames[currentMonth - 1]} ${currentYear}`, year: currentYear, month: currentMonth, uncoveredCustomers: [] },
+      nextMonth: { label: `${monthNames[nextMonth - 1]} ${nextMonthYear}`, year: nextMonthYear, month: nextMonth, uncoveredCustomers: [] },
+    });
+  }
+
+  const customerIds = assignedCustomers.map(c => c.id);
+
+  const currentMonthStart = `${currentYear}-${String(currentMonth).padStart(2, "0")}-01`;
+  const currentMonthEnd = `${currentYear}-${String(currentMonth).padStart(2, "0")}-${new Date(currentYear, currentMonth, 0).getDate()}`;
+  const nextMonthStart = `${nextMonthYear}-${String(nextMonth).padStart(2, "0")}-01`;
+  const nextMonthEnd = `${nextMonthYear}-${String(nextMonth).padStart(2, "0")}-${new Date(nextMonthYear, nextMonth, 0).getDate()}`;
+
+  const [currentMonthAppts, nextMonthAppts] = await Promise.all([
+    db.select({ customerId: appointments.customerId })
+      .from(appointments)
+      .where(
+        and(
+          inArray(appointments.customerId, customerIds),
+          gte(appointments.date, currentMonthStart),
+          lte(appointments.date, currentMonthEnd),
+          ne(appointments.status, "cancelled"),
+          isNull(appointments.deletedAt),
+        )
+      ),
+    db.select({ customerId: appointments.customerId })
+      .from(appointments)
+      .where(
+        and(
+          inArray(appointments.customerId, customerIds),
+          gte(appointments.date, nextMonthStart),
+          lte(appointments.date, nextMonthEnd),
+          ne(appointments.status, "cancelled"),
+          isNull(appointments.deletedAt),
+        )
+      ),
+  ]);
+
+  const currentCoveredIds = new Set(currentMonthAppts.map(a => a.customerId));
+  const nextCoveredIds = new Set(nextMonthAppts.map(a => a.customerId));
+
+  function getRole(c: typeof assignedCustomers[0]): "primary" | "backup1" | "backup2" {
+    if (c.primaryEmployeeId === effectiveEmployeeId) return "primary";
+    if (c.backupEmployeeId === effectiveEmployeeId) return "backup1";
+    return "backup2";
+  }
+
+  const currentUncovered = assignedCustomers
+    .filter(c => !currentCoveredIds.has(c.id))
+    .map(c => ({ id: c.id, name: c.name, role: getRole(c) }));
+
+  const nextUncovered = assignedCustomers
+    .filter(c => !nextCoveredIds.has(c.id))
+    .map(c => ({ id: c.id, name: c.name, role: getRole(c) }));
+
+  res.json({
+    currentMonth: {
+      label: `${monthNames[currentMonth - 1]} ${currentYear}`,
+      year: currentYear,
+      month: currentMonth,
+      uncoveredCustomers: currentUncovered,
+    },
+    nextMonth: {
+      label: `${monthNames[nextMonth - 1]} ${nextMonthYear}`,
+      year: nextMonthYear,
+      month: nextMonth,
+      uncoveredCustomers: nextUncovered,
+    },
+  });
 }));
 
 router.get("/", asyncHandler(ErrorMessages.fetchAppointmentsFailed, async (req, res) => {

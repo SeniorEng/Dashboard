@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { format, addDays, startOfWeek, subWeeks, isSameDay } from "date-fns";
 import { de } from "date-fns/locale";
-import { Plus, ChevronsLeft, ChevronsRight, CalendarCheck, Clock, Pencil, Trash2, Loader2, Ban } from "lucide-react";
+import { Plus, ChevronsLeft, ChevronsRight, CalendarCheck, Clock, Pencil, Trash2, Loader2, Ban, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { getHolidayMap } from "@shared/utils/holidays";
 import { iconSize } from "@/design-system";
@@ -32,6 +32,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { ErrorState } from "@/components/patterns/error-state";
 import type { TimeEntry, TimeEntryType } from "@/lib/api/types";
 import type { AppointmentWithCustomer } from "@shared/types";
+import { useAppointmentCoverage, type CoverageData } from "@/features/appointments/hooks/use-appointment-coverage";
 
 const WEEKDAY_NAMES_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 
@@ -175,6 +176,91 @@ function TimeEntryCard({
   );
 }
 
+const ROLE_LABELS: Record<string, string> = {
+  primary: "HV",
+  backup1: "V1",
+  backup2: "V2",
+};
+
+const ROLE_COLORS: Record<string, string> = {
+  primary: "bg-blue-100 text-blue-700",
+  backup1: "bg-purple-100 text-purple-700",
+  backup2: "bg-gray-100 text-gray-600",
+};
+
+function getDefaultDateForMonth(year: number, month: number): string {
+  const today = new Date();
+  const todayYear = today.getFullYear();
+  const todayMonth = today.getMonth() + 1;
+  if (year === todayYear && month === todayMonth) {
+    return format(today, "yyyy-MM-dd");
+  }
+  const firstOfMonth = new Date(year, month - 1, 1);
+  const dayOfWeek = firstOfMonth.getDay();
+  const offset = dayOfWeek === 0 ? 1 : dayOfWeek === 6 ? 2 : 0;
+  const targetDate = addDays(firstOfMonth, offset);
+  return format(targetDate, "yyyy-MM-dd");
+}
+
+function CoverageMonthBanner({ data }: {
+  data: CoverageData["currentMonth"];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const count = data.uncoveredCustomers.length;
+  if (count === 0) return null;
+
+  const prefillDate = getDefaultDateForMonth(data.year, data.month);
+  const isHighCount = count >= 5;
+  const bgColor = isHighCount ? "bg-red-50 border-red-200" : "bg-amber-50 border-amber-200";
+  const textColor = isHighCount ? "text-red-700" : "text-amber-700";
+  const iconColor = isHighCount ? "text-red-500" : "text-amber-500";
+
+  return (
+    <div className={`rounded-lg border ${bgColor} overflow-hidden`} data-testid={`coverage-banner-${data.month}`}>
+      <button
+        className={`w-full flex items-center gap-2 px-3 py-2.5 text-left ${textColor}`}
+        onClick={() => setExpanded(!expanded)}
+        data-testid={`button-toggle-coverage-${data.month}`}
+      >
+        <AlertTriangle className={`h-4 w-4 shrink-0 ${iconColor}`} />
+        <span className="text-sm font-medium flex-1">
+          {data.label}: {count} {count === 1 ? "Kunde" : "Kunden"} ohne Termin
+        </span>
+        {expanded ? <ChevronUp className="h-4 w-4 shrink-0" /> : <ChevronDown className="h-4 w-4 shrink-0" />}
+      </button>
+      {expanded && (
+        <div className="px-3 pb-2 space-y-1" data-testid={`coverage-list-${data.month}`}>
+          {data.uncoveredCustomers.map((customer) => (
+            <div
+              key={customer.id}
+              className="flex items-center justify-between py-1.5 px-2 rounded-md bg-white/60"
+              data-testid={`coverage-customer-${customer.id}`}
+            >
+              <span className="text-sm text-gray-800 truncate">{customer.name}</span>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${ROLE_COLORS[customer.role] || ""}`}>
+                  {ROLE_LABELS[customer.role] || customer.role}
+                </span>
+                <Link href={`/new-appointment?date=${prefillDate}&customerId=${customer.id}`}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 min-w-[44px] px-2 text-xs"
+                    data-testid={`button-create-appointment-${customer.id}`}
+                  >
+                    <Plus className="h-3 w-3 mr-1" />
+                    Termin
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const { user } = useAuth();
   const isAdmin = user?.isAdmin ?? false;
@@ -192,6 +278,7 @@ export default function Dashboard() {
 
   const { data: appointments, isLoading, error, refetch } = useAppointments(dateString);
   const { data: dayTimeEntries } = useDayTimeEntries(dateString);
+  const { data: coverageData } = useAppointmentCoverage();
   const { data: adminEmployees = [] } = useAdminEmployees({ enabled: isAdmin });
   const employeeOptions = useMemo(() =>
     adminEmployees.filter(e => e.isActive).map(e => ({
@@ -427,6 +514,13 @@ export default function Dashboard() {
           </Button>
         </div>
       </div>
+
+      {coverageData && (coverageData.currentMonth.uncoveredCustomers.length > 0 || coverageData.nextMonth.uncoveredCustomers.length > 0) && (
+        <div className="space-y-2 mb-4" data-testid="coverage-banners">
+          <CoverageMonthBanner data={coverageData.currentMonth} />
+          <CoverageMonthBanner data={coverageData.nextMonth} />
+        </div>
+      )}
 
       <div className="space-y-4">
         <div className="flex items-center justify-between">

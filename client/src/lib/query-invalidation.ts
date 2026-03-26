@@ -15,6 +15,7 @@ const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
   appointments: [
     ["appointments"],
     ["appointment-counts"],
+    ["appointment-coverage"],
   ],
   "time-entries": [
     ["time-entries"],
