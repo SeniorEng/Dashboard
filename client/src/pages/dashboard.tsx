@@ -223,7 +223,7 @@ function CoverageBanner({ data }: { data: CoverageData }) {
       >
         <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
         <span className="text-sm font-medium flex-1">
-          {totalCount} {totalCount === 1 ? "Kunde" : "Kunden"} ohne Termin
+          Ohne Termin: {currentMonthShort} {currentCount} · {nextMonthShort} {nextCount}
         </span>
         {expanded ? <ChevronUp className="h-4 w-4 shrink-0" /> : <ChevronDown className="h-4 w-4 shrink-0" />}
       </button>
