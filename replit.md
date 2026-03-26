@@ -117,6 +117,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 ### Audit Status
 - **Data Integrity Audit (03.03.2026)**: Comprehensive audit of billing, budgets, time tracking flows. 6 fixes applied: atomic budget+appointment transactions, LN signing validation, customer-specific pricing in billing, FIFO split detail proportioning, missing price error handling, test data cleanup. Full report in `.local/audit-report.md`.
 - **Full 10-Agent Tiefenanalyse (09.03.2026)**: 10 audit agents ran (Database, Business Logic, Code Quality, Error Handling, Performance, Regression Guard, Security, UI/UX, QA, DevOps). Result: 1 FAIL, 31 WARN. Reports in `.local/audit-reports/`.
+- **Gestaffelte Tiefenanalyse Skill (26.03.2026)**: Reusable 3-phase audit methodology in `.agents/skills/deep-analysis/SKILL.md`. Replaces flat parallel audits with context-passing phases: Phase 1 (Code Quality + Database → structural facts), Phase 2 (Business Logic + Error Handling + Security + Performance → deep domain analysis with Phase 1 context), Phase 3 (UI/UX + QA + Regression Guard → user experience & stability with full context), then Architect consolidation. Supports Feature-Audit, Modul-Audit, and Full-App-Audit variants.
 - **Audit Fixes Applied**:
   - W1: English error message → German ("Sie haben keinen Zugriff auf diesen Termin.")
   - F2: Missing npm deps installed (@radix-ui/react-visually-hidden, nanoid)
