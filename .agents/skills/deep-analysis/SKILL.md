@@ -21,6 +21,94 @@ The phased approach produces:
 
 ---
 
+## Kontextfluss-Diagramm (Context-Flow Diagram)
+
+```mermaid
+graph TD
+    subgraph "Phase 1: Strukturelle Fakten"
+        CQ[Code Quality Supervisor]
+        DB[Database Audit]
+    end
+
+    CQ --> P1S[Phase 1 Summary]
+    DB --> P1S
+
+    subgraph "Phase 2: Tiefe Domänenanalyse"
+        BL[Business Logic]
+        EH[Error Handling]
+        SEC[Security]
+        PERF[Performance]
+    end
+
+    P1S -->|"Schema issues, missing constraints"| BL
+    P1S -->|"Dead code, convention violations"| EH
+    P1S -->|"Missing constraints, schema gaps"| SEC
+    P1S -->|"Missing indexes, N+1 patterns"| PERF
+
+    BL --> P2S[Phase 2 Summary]
+    EH --> P2S
+    SEC --> P2S
+    PERF --> P2S
+
+    subgraph "Phase 3: Nutzererfahrung & Stabilität"
+        UX[UI/UX & Accessibility]
+        QA[QA & Testing]
+        RG[Regression Guard]
+    end
+
+    P1S -->|condensed| P3IN[Phase 1+2 Context]
+    P2S --> P3IN
+
+    P3IN -->|"Error handling gaps → feedback check"| UX
+    P3IN -->|"Business rule violations → test scenarios"| QA
+    P3IN -->|"All findings → dependency impact"| RG
+
+    UX --> P3S[Phase 3 Summary]
+    QA --> P3S
+    RG --> P3S
+
+    P1S --> ARCH[Architect Consolidation]
+    P2S --> ARCH
+    P3S --> ARCH
+
+    ARCH --> REPORT[Final Tiefenanalyse Report<br/>Priorisiert: KRITISCH → NIEDRIG]
+```
+
+```
+ASCII Summary:
+
+Phase 1 (Structural Facts)          Phase 2 (Deep Domain)              Phase 3 (UX & Stability)
+┌─────────────┐ ┌──────────┐       ┌──────────────┐ ┌──────────────┐  ┌───────┐ ┌────┐ ┌────────────┐
+│ Code Quality │ │ Database │       │Business Logic│ │Error Handling│  │ UI/UX │ │ QA │ │ Regression │
+└──────┬───────┘ └────┬─────┘       └──────┬───────┘ └──────┬───────┘  └───┬───┘ └──┬─┘ │   Guard    │
+       │              │                    │                │              │        │    └─────┬──────┘
+       └──────┬───────┘              ┌─────┘    ┌──────────┘              └───┬────┘         │
+              │                      │          │                             │              │
+              ▼                      │    ┌─────┘  ┌──────────┐              └──────┬────────┘
+       ┌─────────────┐               │    │        │ Security │                     │
+       │Phase 1      │──────────────►│    │        └────┬─────┘              ┌──────────────┐
+       │Summary      │               │    │             │                    │Phase 3       │
+       └──────┬──────┘               │    │   ┌────────┘                    │Summary       │
+              │                      │    │   │   ┌─────────────┐           └──────┬───────┘
+              │                      ▼    ▼   ▼   │ Performance │                  │
+              │                    ┌────────────┐  └─────┬──────┘                  │
+              │                    │Phase 2     │◄───────┘                         │
+              │                    │Summary     │                                  │
+              │                    └─────┬──────┘                                  │
+              │                          │                                         │
+              │                          │ ┌───────────────────────────────────────┘
+              │                          │ │
+              ▼                          ▼ ▼
+           ┌──────────────────────────────────┐
+           │   Architect Consolidation        │
+           │   → Deduplicate                  │
+           │   → Prioritize (KRITISCH→NIEDRIG)│
+           │   → Final Report                 │
+           └──────────────────────────────────┘
+```
+
+---
+
 ## The 3 Phases
 
 ### Phase 1: Strukturelle Fakten (Structural Facts)
@@ -351,7 +439,7 @@ This skill **orchestrates** the existing 9 audit skills. It does NOT replace the
 | `ui-ux-audit` | Phase 3 agent |
 | `qa-testing` | Phase 3 agent |
 | `regression-guard` | Phase 3 agent |
-| `team-orchestration` | Replaced by this skill for deep audits (team-orchestration is for per-task agent selection) |
+| `team-orchestration` | Complementary: team-orchestration defines WANN (when/which agents to run per task); deep-analysis defines WIE (how to structure a deep audit with context-passing phases). Use team-orchestration for per-task agent selection, deep-analysis for thorough multi-agent audits |
 | `devops-release` | Run separately before deployment, not part of the 3-phase flow |
 
 ---
