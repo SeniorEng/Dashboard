@@ -88,6 +88,7 @@ export interface CustomerListItem {
   primaryEmployee: { id: number; displayName: string } | null;
   backupEmployee: { id: number; displayName: string } | null;
   backupEmployee2: { id: number; displayName: string } | null;
+  matchedRole?: "primary" | "backup" | "backup2";
   hasActiveContract: boolean;
   createdAt: string;
 }

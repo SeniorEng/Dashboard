@@ -80,6 +80,7 @@ export interface CustomerListItem {
   primaryEmployee: { id: number; displayName: string } | null;
   backupEmployee: { id: number; displayName: string } | null;
   backupEmployee2: { id: number; displayName: string } | null;
+  matchedRole?: "primary" | "backup" | "backup2";
   hasActiveContract: boolean;
   hasBetreuer: boolean;
   createdAt: Date;
@@ -300,33 +301,43 @@ export class CustomerManagementStorage {
       .limit(limit)
       .offset(offset);
 
-    const data: CustomerListItem[] = result.map((r) => ({
-      id: r.id,
-      name: r.name,
-      vorname: r.vorname,
-      nachname: r.nachname,
-      email: r.email,
-      telefon: r.telefon,
-      festnetz: r.festnetz,
-      geburtsdatum: r.geburtsdatum ? String(r.geburtsdatum) : null,
-      pflegegrad: r.pflegegrad,
-      address: r.address,
-      stadt: r.stadt,
-      status: r.status,
-      billingType: r.billingType,
-      primaryEmployee: r.primaryEmployeeId && r.primaryEmployeeName 
-        ? { id: r.primaryEmployeeId, displayName: r.primaryEmployeeName }
-        : null,
-      backupEmployee: r.backupEmployeeId && r.backupEmployeeName
-        ? { id: r.backupEmployeeId, displayName: r.backupEmployeeName }
-        : null,
-      backupEmployee2: r.backupEmployeeId2 && r.backupEmployee2Name
-        ? { id: r.backupEmployeeId2, displayName: r.backupEmployee2Name }
-        : null,
-      hasActiveContract: r.hasActiveContract === true,
-      hasBetreuer: r.hasBetreuer === true,
-      createdAt: r.createdAt,
-    }));
+    const responsibleId = filters?.responsibleEmployeeId;
+    const data: CustomerListItem[] = result.map((r) => {
+      let matchedRole: "primary" | "backup" | "backup2" | undefined;
+      if (responsibleId) {
+        if (r.primaryEmployeeId === responsibleId) matchedRole = "primary";
+        else if (r.backupEmployeeId === responsibleId) matchedRole = "backup";
+        else if (r.backupEmployeeId2 === responsibleId) matchedRole = "backup2";
+      }
+      return {
+        id: r.id,
+        name: r.name,
+        vorname: r.vorname,
+        nachname: r.nachname,
+        email: r.email,
+        telefon: r.telefon,
+        festnetz: r.festnetz,
+        geburtsdatum: r.geburtsdatum ? String(r.geburtsdatum) : null,
+        pflegegrad: r.pflegegrad,
+        address: r.address,
+        stadt: r.stadt,
+        status: r.status,
+        billingType: r.billingType,
+        primaryEmployee: r.primaryEmployeeId && r.primaryEmployeeName 
+          ? { id: r.primaryEmployeeId, displayName: r.primaryEmployeeName }
+          : null,
+        backupEmployee: r.backupEmployeeId && r.backupEmployeeName
+          ? { id: r.backupEmployeeId, displayName: r.backupEmployeeName }
+          : null,
+        backupEmployee2: r.backupEmployeeId2 && r.backupEmployee2Name
+          ? { id: r.backupEmployeeId2, displayName: r.backupEmployee2Name }
+          : null,
+        matchedRole,
+        hasActiveContract: r.hasActiveContract === true,
+        hasBetreuer: r.hasBetreuer === true,
+        createdAt: r.createdAt,
+      };
+    });
 
     return { data, total, limit, offset };
   }
@@ -510,11 +521,10 @@ export class CustomerManagementStorage {
     primaryEmployeeId: number | null,
     backupEmployeeId: number | null,
     changedByUserId?: number,
-    backupEmployeeId2?: number | null
+    backupEmployeeId2: number | null | undefined = undefined
   ) {
     const today = todayISO();
-    const backup2Provided = arguments.length >= 5;
-    const backup2 = backup2Provided ? (backupEmployeeId2 ?? null) : undefined;
+    const backup2 = backupEmployeeId2 === undefined ? undefined : backupEmployeeId2;
 
     const updated = await db.transaction(async (tx) => {
       const [existing] = await tx.select().from(customers).where(eq(customers.id, customerId));

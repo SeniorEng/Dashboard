@@ -37,6 +37,12 @@ import { PFLEGEGRAD_SELECT_OPTIONS, BILLING_TYPE_SELECT_OPTIONS } from "@shared/
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import type { CustomerListItem } from "@/lib/api/types";
 
+const ROLE_LABELS: Record<string, string> = {
+  primary: "Hauptverantwortlich",
+  backup: "1. Vertretung",
+  backup2: "2. Vertretung",
+};
+
 export default function AdminCustomers() {
   const [, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
@@ -459,6 +465,11 @@ export default function AdminCustomers() {
                       )}
                       {isChild(customer.geburtsdatum) && (
                         <StatusBadge type="warning" value="Minderjährig" data-testid={`badge-minor-${customer.id}`} />
+                      )}
+                      {customer.matchedRole && (
+                        <Badge variant="outline" className="text-xs border-teal-300 text-teal-700 bg-teal-50" data-testid={`badge-role-${customer.id}`}>
+                          {ROLE_LABELS[customer.matchedRole]}
+                        </Badge>
                       )}
                     </div>
                   </div>
