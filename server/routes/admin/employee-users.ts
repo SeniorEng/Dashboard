@@ -282,19 +282,23 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
     await authService.setUserRoles(id, roles);
   }
 
-  if (carryOverDays !== undefined) {
+  const vacationFieldsChanged = carryOverDays !== undefined || 'vacationDaysPerYear' in userUpdates || 'eintrittsdatum' in userUpdates;
+  if (vacationFieldsChanged) {
     const { timeTrackingStorage } = await import("../../storage/time-tracking");
     const { getVacationEntitlement } = await import("@shared/domain/vacation");
     const currentYear = new Date().getFullYear();
     const vacDays = updatedUser.vacationDaysPerYear ?? 30;
     const eintritt = updatedUser.eintrittsdatum ?? null;
     const totalDays = getVacationEntitlement(vacDays, eintritt, currentYear);
-    await timeTrackingStorage.setVacationAllowance({
-      userId: id,
-      year: currentYear,
-      totalDays,
-      carryOverDays: carryOverDays ?? 0,
-    });
+    const existingAllowance = await timeTrackingStorage.getVacationAllowance(id, currentYear);
+    if (carryOverDays !== undefined || existingAllowance) {
+      await timeTrackingStorage.setVacationAllowance({
+        userId: id,
+        year: currentYear,
+        totalDays,
+        carryOverDays: carryOverDays ?? existingAllowance?.carryOverDays ?? 0,
+      });
+    }
   }
 
   if (typeof whatsappEnabled === "boolean") {
