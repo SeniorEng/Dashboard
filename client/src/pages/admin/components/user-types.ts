@@ -13,6 +13,7 @@ export interface UserData {
   eintrittsdatum: string | null;
   austrittsDatum: string | null;
   vacationDaysPerYear: number;
+  carryOverDays?: number | null;
   isActive: boolean;
   isAnonymized: boolean;
   isAdmin: boolean;
@@ -42,6 +43,7 @@ export interface UserFormData {
   eintrittsdatum?: string;
   austrittsDatum?: string | null;
   vacationDaysPerYear?: number;
+  carryOverDays?: number | null;
   isAdmin: boolean;
   haustierAkzeptiert: boolean;
   isEuRentner: boolean;

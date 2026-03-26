@@ -189,6 +189,14 @@ async function runStartupTasks() {
       console.error("[startup] Budget-Sync fehlgeschlagen:", err);
     }
 
+    const { syncVacationCarryover } = await import("./startup/sync-vacation-carryover");
+    try {
+      const synced = await syncVacationCarryover();
+      if (synced > 0) log(`Urlaubsübertrag synchronisiert für ${synced} Mitarbeiter`, "startup");
+    } catch (err) {
+      console.error("[startup] Urlaubsübertrag-Sync fehlgeschlagen:", err);
+    }
+
     const { geocodeAllMissing } = await import("./services/geocoding");
     geocodeAllMissing().catch(err => console.error("[geocoding] Batch geocoding error:", err));
 

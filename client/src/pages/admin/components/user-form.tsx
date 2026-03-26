@@ -64,6 +64,9 @@ export function UserForm({
   const [monthlyWorkHours, setMonthlyWorkHours] = useState(user?.monthlyWorkHours?.toString() ?? "");
   const [lbnr, setLbnr] = useState(user?.lbnr ?? "");
   const [personalnummer, setPersonalnummer] = useState(user?.personalnummer ?? "");
+  const [carryOverDays, setCarryOverDays] = useState(
+    user?.carryOverDays?.toString() ?? ""
+  );
   const [roles, setRoles] = useState<string[]>(user?.roles ?? []);
   const [whatsappEnabled, setWhatsappEnabled] = useState(user?.whatsappEnabled ?? false);
 
@@ -131,6 +134,7 @@ export function UserForm({
       eintrittsdatum: eintrittsdatum || undefined,
       austrittsDatum: austrittsDatum || null,
       vacationDaysPerYear: vacationDaysPerYear ? parseInt(vacationDaysPerYear) : undefined,
+      carryOverDays: carryOverDays ? parseInt(carryOverDays) : null,
       isAdmin,
       haustierAkzeptiert,
       isEuRentner,
@@ -251,6 +255,20 @@ export function UserForm({
                 data-testid="input-user-vacation-days"
               />
               <p className="text-xs text-gray-500">Urlaubsanspruch auf 12 Monate</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="carryOverDays">Resturlaub Vorjahr (Tage)</Label>
+              <Input
+                id="carryOverDays"
+                type="number"
+                min="0"
+                max="365"
+                value={carryOverDays}
+                onChange={(e) => setCarryOverDays(e.target.value)}
+                placeholder="0"
+                data-testid="input-user-carry-over-days"
+              />
+              <p className="text-xs text-gray-500">Übertrag aus dem Vorjahr (verfällt 31.03.)</p>
             </div>
           </div>
         </div>

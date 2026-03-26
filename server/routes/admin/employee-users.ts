@@ -56,8 +56,17 @@ router.get("/users/:id", asyncHandler("Benutzer konnte nicht geladen werden", as
   }
 
   const { getUserWhatsAppPreferences } = await import("../../storage/whatsapp");
-  const whatsappPrefs = await getUserWhatsAppPreferences(id);
-  res.json({ ...sanitizeUser(user), whatsappEnabled: whatsappPrefs?.enabled ?? false });
+  const { timeTrackingStorage } = await import("../../storage/time-tracking");
+  const currentYear = new Date().getFullYear();
+  const [whatsappPrefs, vacationAllowance] = await Promise.all([
+    getUserWhatsAppPreferences(id),
+    timeTrackingStorage.getVacationAllowance(id, currentYear),
+  ]);
+  res.json({
+    ...sanitizeUser(user),
+    whatsappEnabled: whatsappPrefs?.enabled ?? false,
+    carryOverDays: vacationAllowance?.carryOverDays ?? null,
+  });
 }));
 
 router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", async (req: Request, res: Response) => {
@@ -177,6 +186,7 @@ const updateUserSchema = z.object({
   eintrittsdatum: z.string().optional(),
   austrittsDatum: z.string().nullable().optional(),
   vacationDaysPerYear: z.number().int().min(0, "Muss mindestens 0 sein").max(365, "Maximal 365 Tage").optional(),
+  carryOverDays: z.number().int().min(0, "Muss mindestens 0 sein").max(365, "Maximal 365 Tage").nullable().optional(),
   isActive: z.boolean().optional(),
   isAdmin: z.boolean().optional(),
   haustierAkzeptiert: z.boolean().optional(),
@@ -224,9 +234,9 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
     }
   }
 
-  const { whatsappEnabled, ...bodyWithoutWhatsapp } = req.body;
+  const { whatsappEnabled, carryOverDays: carryOverDaysRaw, ...bodyWithoutExtras } = req.body;
 
-  const result = updateUserSchema.safeParse(bodyWithoutWhatsapp);
+  const result = updateUserSchema.safeParse({ ...bodyWithoutExtras, carryOverDays: carryOverDaysRaw });
   if (!result.success) {
     res.status(400).json({
       error: "VALIDATION_ERROR",
@@ -244,7 +254,7 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
     }
   }
 
-  const { roles, ...userUpdates } = result.data;
+  const { roles, carryOverDays, ...userUpdates } = result.data;
 
   let updatedUser;
   try {
@@ -270,6 +280,21 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
 
   if (roles !== undefined) {
     await authService.setUserRoles(id, roles);
+  }
+
+  if (carryOverDays !== undefined) {
+    const { timeTrackingStorage } = await import("../../storage/time-tracking");
+    const { getVacationEntitlement } = await import("@shared/domain/vacation");
+    const currentYear = new Date().getFullYear();
+    const vacDays = updatedUser.vacationDaysPerYear ?? 30;
+    const eintritt = updatedUser.eintrittsdatum ?? null;
+    const totalDays = getVacationEntitlement(vacDays, eintritt, currentYear);
+    await timeTrackingStorage.setVacationAllowance({
+      userId: id,
+      year: currentYear,
+      totalDays,
+      carryOverDays: carryOverDays ?? 0,
+    });
   }
 
   if (typeof whatsappEnabled === "boolean") {
