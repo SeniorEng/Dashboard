@@ -32,6 +32,7 @@ import {
   customerAssignmentHistory,
 } from "@shared/schema";
 import { eq, and, isNull, isNotNull, desc, asc, count, or, ilike, sql as sqlBuilder } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { customerIdsCache } from "../services/cache";
 import { todayISO } from "@shared/utils/datetime";
 import { db } from "../lib/db";
@@ -45,7 +46,7 @@ import * as contractsModule from "./customer-mgmt/contracts";
 export interface CustomerListFilters {
   search?: string;
   pflegegrad?: number;
-  primaryEmployeeId?: number;
+  responsibleEmployeeId?: number;
   hasActiveContract?: boolean;
   status?: string;
   billingType?: string;
@@ -77,10 +78,10 @@ export interface CustomerListItem {
   status: string;
   billingType: string;
   primaryEmployee: { id: number; displayName: string } | null;
+  backupEmployee: { id: number; displayName: string } | null;
+  backupEmployee2: { id: number; displayName: string } | null;
   hasActiveContract: boolean;
   hasBetreuer: boolean;
-  hasBackupEmployee: boolean;
-  hasBackupEmployee2: boolean;
   createdAt: Date;
 }
 
@@ -148,8 +149,14 @@ export class CustomerManagementStorage {
       baseConditions.push(eq(customers.pflegegrad, filters.pflegegrad));
     }
     
-    if (filters?.primaryEmployeeId) {
-      baseConditions.push(eq(customers.primaryEmployeeId, filters.primaryEmployeeId));
+    if (filters?.responsibleEmployeeId) {
+      baseConditions.push(
+        or(
+          eq(customers.primaryEmployeeId, filters.responsibleEmployeeId),
+          eq(customers.backupEmployeeId, filters.responsibleEmployeeId),
+          eq(customers.backupEmployeeId2, filters.responsibleEmployeeId),
+        )
+      );
     }
 
     if (filters?.status) {
@@ -219,6 +226,9 @@ export class CustomerManagementStorage {
     const countResult = await countQueryBuilder.where(fullWhereClause);
     const total = Number(countResult[0]?.count ?? 0);
 
+    const backupUser = alias(users, "backup_user");
+    const backupUser2 = alias(users, "backup_user2");
+
     let dataQueryBuilder = db
       .select({
         id: customers.id,
@@ -239,11 +249,15 @@ export class CustomerManagementStorage {
         backupEmployeeId: customers.backupEmployeeId,
         backupEmployeeId2: customers.backupEmployeeId2,
         primaryEmployeeName: users.displayName,
+        backupEmployeeName: backupUser.displayName,
+        backupEmployee2Name: backupUser2.displayName,
         hasActiveContract: activeContractSubquery.hasContract,
         hasBetreuer: betreuerSubquery.hasBetreuer,
       })
       .from(customers)
       .leftJoin(users, eq(customers.primaryEmployeeId, users.id))
+      .leftJoin(backupUser, eq(customers.backupEmployeeId, backupUser.id))
+      .leftJoin(backupUser2, eq(customers.backupEmployeeId2, backupUser2.id))
       .leftJoin(activeContractSubquery, eq(customers.id, activeContractSubquery.customerId))
       .leftJoin(betreuerSubquery, eq(customers.id, betreuerSubquery.customerId));
     if (insuranceSubquery) {
@@ -303,10 +317,14 @@ export class CustomerManagementStorage {
       primaryEmployee: r.primaryEmployeeId && r.primaryEmployeeName 
         ? { id: r.primaryEmployeeId, displayName: r.primaryEmployeeName }
         : null,
+      backupEmployee: r.backupEmployeeId && r.backupEmployeeName
+        ? { id: r.backupEmployeeId, displayName: r.backupEmployeeName }
+        : null,
+      backupEmployee2: r.backupEmployeeId2 && r.backupEmployee2Name
+        ? { id: r.backupEmployeeId2, displayName: r.backupEmployee2Name }
+        : null,
       hasActiveContract: r.hasActiveContract === true,
       hasBetreuer: r.hasBetreuer === true,
-      hasBackupEmployee: r.backupEmployeeId != null,
-      hasBackupEmployee2: r.backupEmployeeId2 != null,
       createdAt: r.createdAt,
     }));
 
@@ -495,7 +513,8 @@ export class CustomerManagementStorage {
     backupEmployeeId2?: number | null
   ) {
     const today = todayISO();
-    const backup2 = backupEmployeeId2 ?? undefined;
+    const backup2Provided = arguments.length >= 5;
+    const backup2 = backup2Provided ? (backupEmployeeId2 ?? null) : undefined;
 
     const updated = await db.transaction(async (tx) => {
       const [existing] = await tx.select().from(customers).where(eq(customers.id, customerId));

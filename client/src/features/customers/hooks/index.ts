@@ -2,6 +2,7 @@ export {
   useCustomers,
   useCustomer,
   useCreateCustomer,
+  useAssignCustomer,
   customerKeys,
 } from './use-customers';
 

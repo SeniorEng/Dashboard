@@ -1,10 +1,3 @@
-/**
- * Admin Customer List Page
- * 
- * Displays paginated list of customers with search, filtering, and navigation.
- * Uses design system patterns for consistent styling.
- */
-
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -20,7 +13,8 @@ import { SectionCard } from "@/components/patterns/section-card";
 import { DataList, DataListItem } from "@/components/patterns/data-list";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { StatusBadge } from "@/components/patterns/status-badge";
-import { useCustomers, useEmployees, useInsuranceProviders } from "@/features/customers";
+import { useCustomers, useEmployees, useInsuranceProviders, useAssignCustomer } from "@/features/customers";
+import { useToast } from "@/hooks/use-toast";
 import { iconSize, getPflegegradColors, componentStyles } from "@/design-system";
 import { isChild } from "@shared/utils/datetime";
 import {
@@ -35,9 +29,13 @@ import {
   MapPin,
   Phone,
   AlertCircle,
+  Pencil,
+  Check,
+  X,
 } from "lucide-react";
 import { PFLEGEGRAD_SELECT_OPTIONS, BILLING_TYPE_SELECT_OPTIONS } from "@shared/domain/customers";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
+import type { CustomerListItem } from "@/lib/api/types";
 
 export default function AdminCustomers() {
   const [, setLocation] = useLocation();
@@ -53,6 +51,13 @@ export default function AdminCustomers() {
   const [sortOrder, setSortOrder] = useState<string>("asc");
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
 
+  const [editingCustomerId, setEditingCustomerId] = useState<number | null>(null);
+  const [editData, setEditData] = useState({
+    primaryEmployeeId: "",
+    backupEmployeeId: "",
+    backupEmployeeId2: "",
+  });
+
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(searchQuery);
@@ -60,11 +65,21 @@ export default function AdminCustomers() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
+  const { toast } = useToast();
   const { data: employees } = useEmployees();
   const { data: insuranceProviders } = useInsuranceProviders();
+  const assignCustomer = useAssignCustomer();
 
   const employeeFilterOptions = useMemo(() => [
     { value: "all", label: "Alle Mitarbeiter" },
+    ...(employees?.map((emp) => ({
+      value: emp.id.toString(),
+      label: emp.displayName,
+    })).sort((a, b) => a.label.localeCompare(b.label, "de")) || []),
+  ], [employees]);
+
+  const employeeEditOptions = useMemo(() => [
+    { value: "", label: "Nicht zugewiesen" },
     ...(employees?.map((emp) => ({
       value: emp.id.toString(),
       label: emp.displayName,
@@ -84,7 +99,7 @@ export default function AdminCustomers() {
     status: statusFilter || undefined,
     pflegegrad: pflegegradFilter || undefined,
     billingType: billingTypeFilter || undefined,
-    primaryEmployeeId: employeeFilter || undefined,
+    responsibleEmployeeId: employeeFilter || undefined,
     insuranceProviderId: insuranceProviderFilter || undefined,
     sortBy: sortBy || undefined,
     sortOrder: sortOrder || undefined,
@@ -148,6 +163,44 @@ export default function AdminCustomers() {
     if (sortBy !== "name" || sortOrder !== "asc") count++;
     return count;
   }, [statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter, insuranceProviderFilter, sortBy, sortOrder]);
+
+  const startEditing = useCallback((customer: CustomerListItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingCustomerId(customer.id);
+    setEditData({
+      primaryEmployeeId: customer.primaryEmployee?.id?.toString() || "",
+      backupEmployeeId: customer.backupEmployee?.id?.toString() || "",
+      backupEmployeeId2: customer.backupEmployee2?.id?.toString() || "",
+    });
+  }, []);
+
+  const cancelEditing = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingCustomerId(null);
+  }, []);
+
+  const saveAssignment = useCallback((customerId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const primaryId = editData.primaryEmployeeId ? parseInt(editData.primaryEmployeeId) : null;
+    const backupId = editData.backupEmployeeId ? parseInt(editData.backupEmployeeId) : null;
+    const backupId2 = editData.backupEmployeeId2 ? parseInt(editData.backupEmployeeId2) : null;
+
+    const ids = [primaryId, backupId, backupId2].filter((id): id is number => id !== null);
+    const uniqueIds = new Set(ids);
+    if (ids.length !== uniqueIds.size) {
+      toast({ title: "Ungültige Auswahl", description: "Alle zugewiesenen Mitarbeiter müssen unterschiedlich sein.", variant: "destructive" });
+      return;
+    }
+
+    assignCustomer.mutate({
+      customerId,
+      primaryEmployeeId: primaryId,
+      backupEmployeeId: backupId,
+      backupEmployeeId2: backupId2,
+    }, {
+      onSuccess: () => setEditingCustomerId(null),
+    });
+  }, [editData, assignCustomer]);
 
   const customers = data?.data || [];
   const totalPages = data?.totalPages || 1;
@@ -364,8 +417,8 @@ export default function AdminCustomers() {
               {customers.map((customer) => (
                 <DataListItem
                   key={customer.id}
-                  onClick={() => setLocation(`/admin/customers/${customer.id}`)}
-                  className="bg-white"
+                  onClick={editingCustomerId === customer.id ? undefined : () => setLocation(`/admin/customers/${customer.id}`)}
+                  className={`bg-white ${editingCustomerId === customer.id ? "cursor-default ring-2 ring-teal-300" : ""}`}
                   data-testid={`card-customer-${customer.id}`}
                 >
                   <div className="flex items-start justify-between">
@@ -409,16 +462,128 @@ export default function AdminCustomers() {
                       )}
                     </div>
                   </div>
-                  {customer.primaryEmployee && (
-                    <div className="mt-3 pt-3 border-t border-gray-100 text-sm text-gray-600">
-                      Betreut von: {customer.primaryEmployee.displayName}
+
+                  {editingCustomerId === customer.id ? (
+                    <div className="mt-3 pt-3 border-t border-gray-100" onClick={(e) => e.stopPropagation()}>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs text-gray-500">Hauptverantwortlich</Label>
+                          <SearchableSelect
+                            options={employeeEditOptions}
+                            value={editData.primaryEmployeeId}
+                            onValueChange={(value) => setEditData((prev) => ({ ...prev, primaryEmployeeId: value }))}
+                            placeholder="Auswählen..."
+                            searchPlaceholder="Suchen..."
+                            emptyText="Nicht gefunden."
+                            data-testid={`inline-select-primary-${customer.id}`}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-gray-500">1. Vertretung</Label>
+                          <SearchableSelect
+                            options={employeeEditOptions}
+                            value={editData.backupEmployeeId}
+                            onValueChange={(value) => setEditData((prev) => ({ ...prev, backupEmployeeId: value }))}
+                            placeholder="Auswählen..."
+                            searchPlaceholder="Suchen..."
+                            emptyText="Nicht gefunden."
+                            data-testid={`inline-select-backup-${customer.id}`}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-gray-500">2. Vertretung</Label>
+                          <SearchableSelect
+                            options={employeeEditOptions}
+                            value={editData.backupEmployeeId2}
+                            onValueChange={(value) => setEditData((prev) => ({ ...prev, backupEmployeeId2: value }))}
+                            placeholder="Auswählen..."
+                            searchPlaceholder="Suchen..."
+                            emptyText="Nicht gefunden."
+                            data-testid={`inline-select-backup2-${customer.id}`}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2 mt-3">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={cancelEditing}
+                          disabled={assignCustomer.isPending}
+                          data-testid={`button-cancel-assign-${customer.id}`}
+                        >
+                          <X className="h-4 w-4 mr-1" />
+                          Abbrechen
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={(e) => saveAssignment(customer.id, e)}
+                          disabled={assignCustomer.isPending}
+                          className="bg-teal-600 hover:bg-teal-700"
+                          data-testid={`button-save-assign-${customer.id}`}
+                        >
+                          {assignCustomer.isPending ? (
+                            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                          ) : (
+                            <Check className="h-4 w-4 mr-1" />
+                          )}
+                          Speichern
+                        </Button>
+                      </div>
                     </div>
-                  )}
-                  {!customer.primaryEmployee && !customer.hasBackupEmployee && (
-                    <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5" data-testid={`banner-no-betreuer-${customer.id}`}>
-                      <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
-                      <span>Kein Betreuer / Vertreter hinterlegt</span>
-                    </div>
+                  ) : (
+                    <>
+                      {(customer.primaryEmployee || customer.backupEmployee || customer.backupEmployee2) ? (
+                        <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between">
+                          <div className="text-sm text-gray-600 space-y-0.5">
+                            {customer.primaryEmployee && (
+                              <div data-testid={`text-primary-${customer.id}`}>
+                                <span className="text-gray-400 text-xs">HV</span>{" "}
+                                {customer.primaryEmployee.displayName}
+                              </div>
+                            )}
+                            {(customer.backupEmployee || customer.backupEmployee2) && (
+                              <div className="flex flex-wrap gap-x-4 text-xs text-gray-500">
+                                {customer.backupEmployee && (
+                                  <span data-testid={`text-backup-${customer.id}`}>
+                                    V1: {customer.backupEmployee.displayName}
+                                  </span>
+                                )}
+                                {customer.backupEmployee2 && (
+                                  <span data-testid={`text-backup2-${customer.id}`}>
+                                    V2: {customer.backupEmployee2.displayName}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-gray-400 hover:text-gray-600"
+                            onClick={(e) => startEditing(customer, e)}
+                            data-testid={`button-edit-assign-${customer.id}`}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="mt-2 flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5" data-testid={`banner-no-betreuer-${customer.id}`}>
+                            <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+                            <span>Kein Betreuer / Vertreter hinterlegt</span>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-gray-400 hover:text-gray-600"
+                            onClick={(e) => startEditing(customer, e)}
+                            data-testid={`button-edit-assign-${customer.id}`}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      )}
+                    </>
                   )}
                 </DataListItem>
               ))}

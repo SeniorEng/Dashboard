@@ -17,6 +17,13 @@ import type {
   CreateCustomerRequest,
 } from "@/lib/api/types";
 
+interface AssignCustomerData {
+  customerId: number;
+  primaryEmployeeId: number | null;
+  backupEmployeeId: number | null;
+  backupEmployeeId2: number | null;
+}
+
 // Query keys for cache management
 export const customerKeys = {
   all: ["customers"] as const,
@@ -36,7 +43,7 @@ function buildQueryString(params: CustomerListParams): string {
   if (params.search) searchParams.set("search", params.search);
   if (params.pflegegrad) searchParams.set("pflegegrad", params.pflegegrad);
   if (params.billingType) searchParams.set("billingType", params.billingType);
-  if (params.primaryEmployeeId) searchParams.set("primaryEmployeeId", params.primaryEmployeeId);
+  if (params.responsibleEmployeeId) searchParams.set("responsibleEmployeeId", params.responsibleEmployeeId);
   if (params.status) searchParams.set("status", params.status);
   if (params.insuranceProviderId) searchParams.set("insuranceProviderId", params.insuranceProviderId);
   if (params.sortBy) searchParams.set("sortBy", params.sortBy);
@@ -96,6 +103,29 @@ export function useCreateCustomer() {
     onSuccess: () => {
       invalidateRelated(queryClient, "customers");
       toast({ title: "Erfolg", description: "Kunde wurde angelegt" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+}
+
+export function useAssignCustomer() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (data: AssignCustomerData) => {
+      const result = await api.patch(`/admin/customers/${data.customerId}/assign`, {
+        primaryEmployeeId: data.primaryEmployeeId,
+        backupEmployeeId: data.backupEmployeeId,
+        backupEmployeeId2: data.backupEmployeeId2,
+      });
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: customerKeys.lists() });
+      toast({ title: "Zuordnung gespeichert" });
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });

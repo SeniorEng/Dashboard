@@ -85,9 +85,9 @@ export interface CustomerListItem {
   geburtsdatum: string | null;
   status: string;
   inaktivAb: string | null;
-  primaryEmployee: { displayName: string } | null;
-  hasBackupEmployee: boolean;
-  hasBackupEmployee2: boolean;
+  primaryEmployee: { id: number; displayName: string } | null;
+  backupEmployee: { id: number; displayName: string } | null;
+  backupEmployee2: { id: number; displayName: string } | null;
   hasActiveContract: boolean;
   createdAt: string;
 }
@@ -95,7 +95,7 @@ export interface CustomerListItem {
 export interface CustomerListParams extends PaginationParams {
   pflegegrad?: string;
   billingType?: string;
-  primaryEmployeeId?: string;
+  responsibleEmployeeId?: string;
   status?: string;
   insuranceProviderId?: string;
   sortBy?: string;

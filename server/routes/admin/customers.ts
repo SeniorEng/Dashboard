@@ -70,7 +70,7 @@ router.get("/customers/check-duplicate", asyncHandler("Duplikatprüfung fehlgesc
 }));
 
 router.get("/customers", asyncHandler("Kunden konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const { search, pflegegrad, primaryEmployeeId, status, billingType, insuranceProviderId, page, limit, sortBy, sortOrder } = req.query;
+  const { search, pflegegrad, responsibleEmployeeId, primaryEmployeeId, status, billingType, insuranceProviderId, page, limit, sortBy, sortOrder } = req.query;
   
   const validSortBy = ["name", "contractStart", "createdAt"].includes(sortBy as string)
     ? (sortBy as "name" | "contractStart" | "createdAt")
@@ -82,7 +82,7 @@ router.get("/customers", asyncHandler("Kunden konnten nicht geladen werden", asy
   const filters = {
     search: search as string | undefined,
     pflegegrad: pflegegrad ? parseInt(pflegegrad as string) : undefined,
-    primaryEmployeeId: primaryEmployeeId ? parseInt(primaryEmployeeId as string) : undefined,
+    responsibleEmployeeId: responsibleEmployeeId ? parseInt(responsibleEmployeeId as string) : (primaryEmployeeId ? parseInt(primaryEmployeeId as string) : undefined),
     status: status as string | undefined,
     billingType: billingType as string | undefined,
     insuranceProviderId: insuranceProviderId ? parseInt(insuranceProviderId as string) : undefined,
