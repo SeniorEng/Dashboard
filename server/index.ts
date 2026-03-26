@@ -121,51 +121,98 @@ function isNeonDriverBug(message: string): boolean {
 }
 
 (async () => {
-  const { serviceCatalogStorage } = await import("./storage/service-catalog");
-  await serviceCatalogStorage.ensureSystemServices();
-
-  const { documentStorage } = await import("./storage/documents");
-  await documentStorage.ensureCustomerDocumentTypes();
-
-  const { backfillAppointmentServices } = await import("./startup/backfill-appointment-services");
-  await backfillAppointmentServices();
-
-  const { importPflegekassen } = await import("./startup/import-pflegekassen");
-  await importPflegekassen();
-
-  const { migrateBudgetSources } = await import("./startup/migrate-budget-sources");
-  try {
-    await migrateBudgetSources();
-  } catch (err) {
-    console.error("[startup] Budget-Source-Migration fehlgeschlagen:", err);
-  }
-
-  const { seedWhatsAppRules } = await import("./startup/seed-whatsapp-rules");
-  try {
-    await seedWhatsAppRules();
-  } catch (err) {
-    console.error("[startup] WhatsApp-Regeln-Seed fehlgeschlagen:", err);
-  }
-
-  const { migrateErstberatungCustomers } = await import("./startup/migrate-erstberatung-customers");
-  try {
-    await migrateErstberatungCustomers();
-  } catch (err) {
-    console.error("[startup] Erstberatung-Kunden-Migration fehlgeschlagen:", err);
-  }
-
-  const { syncAllBudgetAllocations } = await import("./startup/sync-budget-allocations");
-  try {
-    const synced = await syncAllBudgetAllocations();
-    if (synced > 0) log(`Budget-Zuweisungen synchronisiert für ${synced} Kunden`, "startup");
-  } catch (err) {
-    console.error("[startup] Budget-Sync fehlgeschlagen:", err);
-  }
-
-  const { geocodeAllMissing } = await import("./services/geocoding");
-  geocodeAllMissing().catch(err => console.error("[geocoding] Batch geocoding error:", err));
-
   await registerRoutes(httpServer, app);
+
+  app.use(errorMiddleware);
+
+  if (process.env.NODE_ENV === "production") {
+    serveStatic(app);
+  } else {
+    const { setupVite } = await import("./vite");
+    await setupVite(httpServer, app);
+  }
+
+  const port = parseInt(process.env.PORT || "5000", 10);
+  httpServer.listen(
+    {
+      port,
+      host: "0.0.0.0",
+      reusePort: true,
+    },
+    () => {
+      log(`serving on port ${port}`);
+      runStartupTasks();
+    },
+  );
+})();
+
+async function runStartupTasks() {
+  try {
+    const { serviceCatalogStorage } = await import("./storage/service-catalog");
+    await serviceCatalogStorage.ensureSystemServices();
+
+    const { documentStorage } = await import("./storage/documents");
+    await documentStorage.ensureCustomerDocumentTypes();
+
+    const { backfillAppointmentServices } = await import("./startup/backfill-appointment-services");
+    await backfillAppointmentServices();
+
+    const { importPflegekassen } = await import("./startup/import-pflegekassen");
+    await importPflegekassen();
+
+    const { migrateBudgetSources } = await import("./startup/migrate-budget-sources");
+    try {
+      await migrateBudgetSources();
+    } catch (err) {
+      console.error("[startup] Budget-Source-Migration fehlgeschlagen:", err);
+    }
+
+    const { seedWhatsAppRules } = await import("./startup/seed-whatsapp-rules");
+    try {
+      await seedWhatsAppRules();
+    } catch (err) {
+      console.error("[startup] WhatsApp-Regeln-Seed fehlgeschlagen:", err);
+    }
+
+    const { migrateErstberatungCustomers } = await import("./startup/migrate-erstberatung-customers");
+    try {
+      await migrateErstberatungCustomers();
+    } catch (err) {
+      console.error("[startup] Erstberatung-Kunden-Migration fehlgeschlagen:", err);
+    }
+
+    const { syncAllBudgetAllocations } = await import("./startup/sync-budget-allocations");
+    try {
+      const synced = await syncAllBudgetAllocations();
+      if (synced > 0) log(`Budget-Zuweisungen synchronisiert für ${synced} Kunden`, "startup");
+    } catch (err) {
+      console.error("[startup] Budget-Sync fehlgeschlagen:", err);
+    }
+
+    const { geocodeAllMissing } = await import("./services/geocoding");
+    geocodeAllMissing().catch(err => console.error("[geocoding] Batch geocoding error:", err));
+
+    try {
+      const superAdminEmail = process.env.SUPER_ADMIN_EMAIL;
+      if (!superAdminEmail) {
+        log("SUPER_ADMIN_EMAIL nicht gesetzt, Superadmin-Promotion übersprungen", "startup");
+      } else {
+        const promoteResult = await db.execute(sqlBuilder`
+          UPDATE users SET is_super_admin = true 
+          WHERE email = ${superAdminEmail} AND is_admin = true AND is_super_admin = false
+        `);
+        if (promoteResult.rowCount && promoteResult.rowCount > 0) {
+          log(`Superadmin-Promotion: ${superAdminEmail}`);
+        }
+      }
+    } catch (e) {
+      console.error("Fehler bei Superadmin-Promotion:", e);
+    }
+
+    log("Alle Startup-Aufgaben abgeschlossen", "startup");
+  } catch (err) {
+    console.error("[startup] Kritischer Fehler bei Startup-Aufgaben:", err);
+  }
 
   const { authService } = await import("./services/auth");
   const runSessionCleanup = async () => {
@@ -226,45 +273,7 @@ function isNeonDriverBug(message: string): boolean {
   const reminderScheduler = startReminderScheduler();
   timeouts.push(reminderScheduler.timeout);
   if (reminderScheduler.interval) intervals.push(reminderScheduler.interval);
-
-  try {
-    const superAdminEmail = process.env.SUPER_ADMIN_EMAIL;
-    if (!superAdminEmail) {
-      log("SUPER_ADMIN_EMAIL nicht gesetzt, Superadmin-Promotion übersprungen", "startup");
-    } else {
-      const promoteResult = await db.execute(sqlBuilder`
-        UPDATE users SET is_super_admin = true 
-        WHERE email = ${superAdminEmail} AND is_admin = true AND is_super_admin = false
-      `);
-      if (promoteResult.rowCount && promoteResult.rowCount > 0) {
-        log(`Superadmin-Promotion: ${superAdminEmail}`);
-      }
-    }
-  } catch (e) {
-    console.error("Fehler bei Superadmin-Promotion:", e);
-  }
-
-  app.use(errorMiddleware);
-
-  if (process.env.NODE_ENV === "production") {
-    serveStatic(app);
-  } else {
-    const { setupVite } = await import("./vite");
-    await setupVite(httpServer, app);
-  }
-
-  const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    },
-    () => {
-      log(`serving on port ${port}`);
-    },
-  );
-})();
+}
 
 function gracefulShutdown(signal: string) {
   log(`${signal} received, shutting down gracefully...`);
