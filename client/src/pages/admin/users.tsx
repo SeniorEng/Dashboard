@@ -44,6 +44,7 @@ import {
   Users,
   Calendar,
   AlertTriangle,
+  Palmtree,
 } from "lucide-react";
 import { api, unwrapResult } from "@/lib/api/client";
 import {
@@ -54,6 +55,7 @@ import {
   formatPhoneForDisplay,
 } from "./components/user-types";
 import { useEmployeeWorkload } from "@/features/customers/hooks/use-employee-workload";
+import { useAllVacationSummaries } from "@/features/time-tracking/hooks/use-vacation-summaries";
 import { UserForm } from "./components/user-form";
 import { EmployeeDocumentsSection } from "./components/employee-documents-section";
 import { EmployeeServiceRates } from "./components/employee-service-rates";
@@ -430,6 +432,7 @@ export default function AdminUsers() {
   });
 
   const { data: workloadData } = useEmployeeWorkload();
+  const { data: vacationData } = useAllVacationSummaries();
 
   const createMutation = useMutation({
     mutationFn: async (data: UserFormData & { password?: string }) => {
@@ -726,6 +729,35 @@ export default function AdminUsers() {
                                     <span className="font-medium" data-testid={`workload-all-hours-${user.id}`}>{allHours}h</span>
                                     <span className="text-gray-400">ALL</span>
                                   </span>
+                                </div>
+                              );
+                            })()}
+                            {vacationData && vacationData[user.id] && (() => {
+                              const vac = vacationData[user.id];
+                              const totalAvailable = vac.totalDays + vac.carryOverDays;
+                              return (
+                                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600" data-testid={`vacation-stats-${user.id}`}>
+                                  <span className="inline-flex items-center gap-1 cursor-default">
+                                    <Palmtree className="h-3 w-3" />
+                                    <span className={`font-medium ${vac.remainingDays <= 0 ? 'text-red-600' : vac.remainingDays <= 3 ? 'text-amber-600' : 'text-teal-700'}`} data-testid={`vacation-remaining-${user.id}`}>
+                                      {vac.remainingDays} Tage übrig
+                                    </span>
+                                    <span className="text-gray-400">
+                                      (von {totalAvailable}{vac.carryOverDays > 0 ? ` inkl. ${vac.carryOverDays} Übertrag` : ''})
+                                    </span>
+                                  </span>
+                                  <span className="text-gray-300">|</span>
+                                  <span className="text-gray-500" data-testid={`vacation-used-${user.id}`}>
+                                    {vac.usedDays} genommen{vac.plannedDays > 0 ? ` · ${vac.plannedDays} geplant` : ''}
+                                  </span>
+                                  {vac.sickDays > 0 && (
+                                    <>
+                                      <span className="text-gray-300">|</span>
+                                      <span className="text-red-500" data-testid={`vacation-sick-${user.id}`}>
+                                        {vac.sickDays} krank
+                                      </span>
+                                    </>
+                                  )}
                                 </div>
                               );
                             })()}

@@ -585,4 +585,22 @@ router.post("/users/:id/anonymize", asyncHandler("Mitarbeiter konnte nicht anony
   });
 }));
 
+router.get("/vacation-summaries/:year", asyncHandler("Urlaubsübersichten konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const year = requireIntParam(req.params.year, res);
+  if (year === null) return;
+
+  const { timeTrackingStorage } = await import("../../storage/time-tracking");
+  const allEmployees = await db.select({ id: users.id })
+    .from(users)
+    .where(eq(users.isAnonymized, false));
+
+  const summaries: Record<number, any> = {};
+  await Promise.all(
+    allEmployees.map(async (emp) => {
+      summaries[emp.id] = await timeTrackingStorage.getVacationSummary(emp.id, year);
+    })
+  );
+  res.json(summaries);
+}));
+
 export default router;
