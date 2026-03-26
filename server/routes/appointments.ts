@@ -103,7 +103,7 @@ router.get("/active-employees", asyncHandler("Mitarbeiter konnten nicht geladen 
   res.json(safeEmployees);
 }));
 
-router.get("/coverage-check", asyncHandler(async (req, res) => {
+router.get("/coverage-check", asyncHandler("Fehler beim Laden der Terminabdeckung", async (req, res) => {
   const user = req.user!;
   const employeeIdParam = req.query.employeeId ? parseInt(req.query.employeeId as string, 10) : null;
   const effectiveEmployeeId = (user.isAdmin && employeeIdParam) ? employeeIdParam : user.id;
