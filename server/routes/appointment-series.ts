@@ -299,7 +299,19 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
     updateData.scheduledEnd = addMinutesToTimeHHMMSS(updateFields.scheduledStart, series.durationMinutes);
   }
   if (updateFields.date !== undefined) updateData.date = updateFields.date;
-  if (updateFields.assignedEmployeeId !== undefined) updateData.assignedEmployeeId = updateFields.assignedEmployeeId;
+  if (updateFields.assignedEmployeeId !== undefined) {
+    const customer = await storage.getCustomer(series.customerId);
+    if (customer) {
+      const isAssigned =
+        customer.primaryEmployeeId === updateFields.assignedEmployeeId ||
+        customer.backupEmployeeId === updateFields.assignedEmployeeId ||
+        customer.backupEmployeeId2 === updateFields.assignedEmployeeId;
+      if (!isAssigned) {
+        return sendBadRequest(res, "Der Mitarbeiter ist diesem Kunden nicht zugeordnet.");
+      }
+    }
+    updateData.assignedEmployeeId = updateFields.assignedEmployeeId;
+  }
   if (updateFields.notes !== undefined) updateData.notes = updateFields.notes;
 
   if (Object.keys(updateData).length === 0) {
