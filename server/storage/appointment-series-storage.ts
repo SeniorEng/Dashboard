@@ -61,8 +61,10 @@ export async function getAllActiveSeries(): Promise<SeriesWithCustomerName[]> {
 export async function updateSeries(
   id: number,
   data: Partial<InsertAppointmentSeries>,
+  tx?: DbOrTx,
 ): Promise<AppointmentSeries | undefined> {
-  const [result] = await db.update(appointmentSeries)
+  const client = tx || db;
+  const [result] = await client.update(appointmentSeries)
     .set({ ...data, updatedAt: new Date() })
     .where(eq(appointmentSeries.id, id))
     .returning();

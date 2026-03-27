@@ -226,7 +226,7 @@ router.delete("/:id", asyncHandler("Serie konnte nicht beendet werden", async (r
 
   await db.transaction(async (tx) => {
     await seriesStorage.bulkCancelSeriesAppointments(eligibleIds, tx);
-    await seriesStorage.updateSeries(id, { status: "ended" });
+    await seriesStorage.updateSeries(id, { status: "ended" }, tx);
   });
 
   res.json({ cancelled: eligibleIds.length, status: "ended" });
@@ -420,7 +420,7 @@ router.post("/:id/extend", asyncHandler("Serie konnte nicht verlängert werden",
       user.id,
       tx,
     );
-    await seriesStorage.updateSeries(id, { endDate: newEndDate });
+    await seriesStorage.updateSeries(id, { endDate: newEndDate }, tx);
   });
 
   try {
@@ -502,7 +502,7 @@ router.post("/:id/shorten", asyncHandler("Serie konnte nicht verkürzt werden", 
 
   await db.transaction(async (tx) => {
     await seriesStorage.bulkDeleteSeriesAppointments(deletableIds, tx);
-    await seriesStorage.updateSeries(id, { endDate: newEndDate });
+    await seriesStorage.updateSeries(id, { endDate: newEndDate }, tx);
   });
 
   res.json({
