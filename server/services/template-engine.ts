@@ -2,7 +2,7 @@ import { documentStorage } from "../storage/documents";
 import { storage } from "../storage";
 import { getCustomerCurrentInsurance, getInsuranceProvider } from "../storage/customer-mgmt/insurance";
 import { formatDateISO, formatDateForDisplay } from "@shared/utils/datetime";
-import { BILLING_TYPE_LABELS, type BillingType } from "@shared/domain/customers";
+import { BILLING_TYPE_LABELS, type BillingType, CONTACT_TYPE_LABELS } from "@shared/domain/customers";
 
 export interface TemplatePlaceholders {
   [key: string]: string;
@@ -218,7 +218,7 @@ export async function buildPlaceholdersFromFormData(
     placeholders.kontaktperson_name = [primaryContact.vorname, primaryContact.nachname].filter(Boolean).join(" ");
     placeholders.kontaktperson_telefon = primaryContact.telefon || "";
     placeholders.kontaktperson_email = primaryContact.email || "";
-    placeholders.kontaktperson_typ = primaryContact.contactType || "";
+    placeholders.kontaktperson_typ = CONTACT_TYPE_LABELS[primaryContact.contactType] ?? primaryContact.contactType ?? "";
   }
 
   try {
