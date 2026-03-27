@@ -23,7 +23,7 @@ interface CustomerDetails {
 
 export type EditSection = "contact" | "pflegegrad" | "pet" | "medical" | "services" | "emergencyContacts" | null;
 
-const emptyContactForm = { vorname: "", nachname: "", telefon: "", email: "", contactType: "familie" as string, isPrimary: false, notes: "" };
+const emptyContactForm = { vorname: "", nachname: "", telefon: "", email: "", contactType: "sonstige" as string, isPrimary: false, notes: "" };
 
 export type EmergencyContactFormType = typeof emptyContactForm;
 

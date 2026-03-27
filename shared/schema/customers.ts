@@ -71,13 +71,21 @@ export const customers = pgTable("customers", {
 // ============================================
 
 export const CONTACT_TYPES = [
-  "familie",
-  "angehoerige", 
-  "nachbar",
-  "hausarzt",
+  "partner",
+  "kind",
+  "eltern",
+  "geschwister",
+  "sonstige_verwandte",
   "betreuer",
+  "hausarzt",
+  "nachbar",
   "sonstige",
+  "familie",
+  "angehoerige",
 ] as const;
+
+export const LEGACY_CONTACT_TYPES = ["familie", "angehoerige"] as const;
+export type LegacyContactType = typeof LEGACY_CONTACT_TYPES[number];
 
 export type ContactType = typeof CONTACT_TYPES[number];
 

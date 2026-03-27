@@ -49,7 +49,7 @@ interface ContactFormState {
 const EMPTY_FORM: ContactFormState = {
   vorname: "",
   nachname: "",
-  contactType: "familie",
+  contactType: "sonstige",
   telefon: "",
   email: "",
   notes: "",

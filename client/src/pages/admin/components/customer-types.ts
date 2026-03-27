@@ -110,7 +110,7 @@ export const DEFAULT_BUDGETS = {
 export const EMPTY_CONTACT: ContactFormData = {
   vorname: "",
   nachname: "",
-  contactType: "familie",
+  contactType: "sonstige",
   telefon: "",
   email: "",
   notes: "",

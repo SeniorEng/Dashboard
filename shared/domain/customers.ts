@@ -1,6 +1,6 @@
-import { CONTACT_TYPES as CONTACT_TYPE_VALUES } from "../schema/customers";
+import { CONTACT_TYPES as CONTACT_TYPE_VALUES, LEGACY_CONTACT_TYPES } from "../schema/customers";
 
-export { CONTACT_TYPE_VALUES };
+export { CONTACT_TYPE_VALUES, LEGACY_CONTACT_TYPES };
 
 export const BILLING_TYPES = [
   "pflegekasse_gesetzlich",
@@ -90,15 +90,23 @@ export const PFLEGEGRAD_SELECT_OPTIONS = PFLEGEGRAD_VALUES.map((v) => ({
 }));
 
 export const CONTACT_TYPE_LABELS: Record<string, string> = {
-  familie: "Familienmitglied",
-  angehoerige: "Angehörige",
-  nachbar: "Nachbar/in",
-  hausarzt: "Hausarzt",
+  partner: "Partner/in",
+  kind: "Kind",
+  eltern: "Elternteil",
+  geschwister: "Geschwister",
+  sonstige_verwandte: "Sonstige Verwandte",
   betreuer: "Betreuer/in",
+  hausarzt: "Hausarzt",
+  nachbar: "Nachbar/in",
   sonstige: "Sonstige",
+  familie: "Familienmitglied (alt)",
+  angehoerige: "Angehörige (alt)",
 };
 
-export const CONTACT_TYPE_SELECT_OPTIONS = CONTACT_TYPE_VALUES.map((v) => ({
-  value: v,
-  label: CONTACT_TYPE_LABELS[v] ?? v,
-})).sort((a, b) => a.label.localeCompare(b.label, "de"));
+export const CONTACT_TYPE_SELECT_OPTIONS = CONTACT_TYPE_VALUES
+  .filter((v) => !(LEGACY_CONTACT_TYPES as readonly string[]).includes(v))
+  .map((v) => ({
+    value: v,
+    label: CONTACT_TYPE_LABELS[v] ?? v,
+  }))
+  .sort((a, b) => a.label.localeCompare(b.label, "de"));
