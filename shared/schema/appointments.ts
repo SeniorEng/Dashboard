@@ -9,6 +9,79 @@ import { users } from "./users";
 import { services } from "./services";
 
 // ============================================
+// APPOINTMENT SERIES (recurring appointment rules)
+// ============================================
+
+export const SERIES_FREQUENCIES = ["weekly", "biweekly"] as const;
+export type SeriesFrequency = typeof SERIES_FREQUENCIES[number];
+
+export const SERIES_STATUSES = ["active", "paused", "ended"] as const;
+export type SeriesStatus = typeof SERIES_STATUSES[number];
+
+export const WEEKDAYS = ["mo", "di", "mi", "do", "fr"] as const;
+export type Weekday = typeof WEEKDAYS[number];
+
+export const appointmentSeries = pgTable("appointment_series", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id").notNull().references(() => customers.id),
+  assignedEmployeeId: integer("assigned_employee_id").notNull().references(() => users.id),
+  createdByUserId: integer("created_by_user_id").references(() => users.id),
+  frequency: text("frequency").notNull().default("weekly"),
+  weekdays: text("weekdays").array().notNull(),
+  scheduledStart: time("scheduled_start").notNull(),
+  durationMinutes: integer("duration_minutes").notNull(),
+  serviceIds: integer("service_ids").array().notNull(),
+  serviceDurations: integer("service_durations").array().notNull(),
+  startDate: date("start_date").notNull(),
+  endDate: date("end_date").notNull(),
+  notes: text("notes"),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  index("appointment_series_customer_id_idx").on(table.customerId),
+  index("appointment_series_employee_id_idx").on(table.assignedEmployeeId),
+  index("appointment_series_status_idx").on(table.status),
+]);
+
+export type AppointmentSeries = typeof appointmentSeries.$inferSelect;
+export type InsertAppointmentSeries = typeof appointmentSeries.$inferInsert;
+
+export const insertAppointmentSeriesSchema = createInsertSchema(appointmentSeries).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const createSeriesSchema = z.object({
+  customerId: z.number(),
+  assignedEmployeeId: z.number(),
+  frequency: z.enum(SERIES_FREQUENCIES),
+  weekdays: z.array(z.enum(WEEKDAYS)).min(1, "Mindestens ein Wochentag muss ausgewählt werden"),
+  scheduledStart: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Ungültiges Zeitformat (HH:MM erwartet)"),
+  durationMinutes: z.number().min(15).multipleOf(15),
+  services: z.array(z.object({
+    serviceId: z.number(),
+    durationMinutes: z.number().min(15).multipleOf(15),
+  })).min(1, "Mindestens ein Service muss ausgewählt werden"),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat"),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat"),
+  notes: z.string().max(255).optional(),
+});
+
+export type CreateSeriesInput = z.infer<typeof createSeriesSchema>;
+
+export const updateSeriesSchema = z.object({
+  scheduledStart: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/).optional(),
+  assignedEmployeeId: z.number().optional(),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  notes: z.string().max(255).optional().nullable(),
+  status: z.enum(SERIES_STATUSES).optional(),
+});
+
+export type UpdateSeriesInput = z.infer<typeof updateSeriesSchema>;
+
+// ============================================
 // APPOINTMENT TABLES
 // ============================================
 
@@ -43,6 +116,8 @@ export const appointments = pgTable("appointments", {
   signatureHash: text("signature_hash"),
   signedAt: timestamp("signed_at"),
   signedByUserId: integer("signed_by_user_id").references(() => users.id),
+  seriesId: integer("series_id").references(() => appointmentSeries.id, { onDelete: "set null" }),
+  isSeriesException: boolean("is_series_exception").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   deletedAt: timestamp("deleted_at"),
 }, (table) => [
@@ -57,6 +132,7 @@ export const appointments = pgTable("appointments", {
   index("appointments_active_customer_idx").on(table.customerId).where(isNull(table.deletedAt)),
   index("appointments_active_employee_date_idx").on(table.assignedEmployeeId, table.date).where(isNull(table.deletedAt)),
   index("appointments_prospect_id_idx").on(table.prospectId),
+  index("appointments_series_id_idx").on(table.seriesId),
 ]);
 
 // ============================================

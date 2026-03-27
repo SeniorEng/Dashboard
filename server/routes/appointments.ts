@@ -687,6 +687,16 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
     }
   }
   
+  if (existingAppointment.seriesId && !existingAppointment.isSeriesException) {
+    const hasSchedulingChange = validatedData.date !== undefined
+      || validatedData.scheduledStart !== undefined
+      || validatedData.scheduledEnd !== undefined
+      || validatedData.assignedEmployeeId !== undefined;
+    if (hasSchedulingChange) {
+      (validatedData as Record<string, unknown>).isSeriesException = true;
+    }
+  }
+
   const updated = await storage.updateAppointment(id, validatedData);
   if (!updated) {
     return sendNotFound(res, ErrorMessages.appointmentNotFound);

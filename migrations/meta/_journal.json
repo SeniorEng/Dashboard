@@ -43,6 +43,13 @@
       "when": 1774262839744,
       "tag": "0005_flowery_kree",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1774646075274,
+      "tag": "0006_needy_victor_mancha",
+      "breakpoints": true
     }
   ]
 }

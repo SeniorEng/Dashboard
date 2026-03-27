@@ -21,6 +21,7 @@ import webhookRouter from "./webhook";
 import notificationsRouter from "./notifications";
 import whatsappRouter from "./whatsapp";
 import prospectsRouter from "./prospects";
+import appointmentSeriesRouter from "./appointment-series";
 import { csrfProtection, csrfTokenHandler } from "../middleware/csrf";
 import { authMiddleware, requireAuth } from "../middleware/auth";
 import { cacheHeaders } from "../middleware/cache-headers";
@@ -118,6 +119,7 @@ router.use("/statistics", statisticsRouter);
 router.use("/notifications", notificationsRouter);
 router.use("/whatsapp", whatsappRouter);
 router.use("/prospects", prospectsRouter);
+router.use("/appointment-series", appointmentSeriesRouter);
 
 router.get("/address-search", asyncHandler("Adresssuche fehlgeschlagen", async (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
