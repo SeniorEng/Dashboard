@@ -13,6 +13,8 @@ import { ChevronLeft, Loader2, Calendar, Clock, User, Plus, Users, AlertTriangle
 import { iconSize, componentStyles } from "@/design-system";
 import { useNewAppointmentForm, ServiceSelector, AppointmentSummary } from "@/features/appointments";
 import { EmployeeAvailability } from "@/features/appointments/components/employee-availability";
+import { AddressFields } from "@/pages/admin/components/address-fields";
+import { isDachPhone } from "@shared/schema/common";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS, formatDuration } from "@shared/types";
 import { useLocation } from "wouter";
 import { useUpdateProspect } from "@/features/prospects";
@@ -29,6 +31,7 @@ export default function NewAppointment() {
   const [ebEditNr, setEbEditNr] = useState("");
   const [ebEditPlz, setEbEditPlz] = useState("");
   const [ebEditStadt, setEbEditStadt] = useState("");
+  const [ebEditErrors, setEbEditErrors] = useState<Record<string, string>>({});
 
   const startEditingEbContact = () => {
     if (!form.prospectData) return;
@@ -38,11 +41,39 @@ export default function NewAppointment() {
     setEbEditNr(form.prospectData.nr || "");
     setEbEditPlz(form.prospectData.plz || "");
     setEbEditStadt(form.prospectData.stadt || "");
+    setEbEditErrors({});
     setEditingEbContact(true);
+  };
+
+  const handleEbAddressChange = (field: string, value: string) => {
+    if (field === "strasse") setEbEditStrasse(value);
+    else if (field === "nr") setEbEditNr(value);
+    else if (field === "plz") setEbEditPlz(value);
+    else if (field === "stadt") setEbEditStadt(value);
+  };
+
+  const handleInlineAddressChange = (field: string, value: string) => {
+    if (field === "strasse") form.setInlineProspectStrasse(value);
+    else if (field === "nr") form.setInlineProspectNr(value);
+    else if (field === "plz") form.setInlineProspectPlz(value);
+    else if (field === "stadt") form.setInlineProspectStadt(value);
   };
 
   const handleSaveEbContact = () => {
     if (!form.prospectData) return;
+    const errs: Record<string, string> = {};
+    if (ebEditTelefon.trim() && !isDachPhone(ebEditTelefon.trim())) {
+      errs.telefon = "Ungültige Telefonnummer (DE/AT/CH)";
+    }
+    if (ebEditEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ebEditEmail.trim())) {
+      errs.email = "Ungültige E-Mail-Adresse";
+    }
+    if (ebEditPlz.trim() && !/^\d{5}$/.test(ebEditPlz.trim())) {
+      errs.plz = "PLZ muss 5 Ziffern haben";
+    }
+    setEbEditErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+
     updateProspectMutation.mutate({
       id: form.prospectData.id,
       data: {
@@ -262,155 +293,107 @@ export default function NewAppointment() {
             <CardContent className="space-y-6">
               {!form.fromProspectId ? (
                 <div className="space-y-4">
-                  {form.isAdmin ? (
-                    <>
-                      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4" data-testid="panel-inline-prospect">
-                        <div className="flex items-center gap-2 text-blue-800 font-medium mb-3">
-                          <UserPlus className={iconSize.sm} />
-                          <span>Neuen Interessenten anlegen</span>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div className="space-y-1">
-                            <Label htmlFor="inline-vorname">Vorname *</Label>
-                            <Input
-                              id="inline-vorname"
-                              placeholder="Vorname"
-                              value={form.inlineProspectVorname}
-                              onChange={(e) => form.setInlineProspectVorname(e.target.value)}
-                              className={form.errors.inlineVorname ? "border-destructive" : ""}
-                              data-testid="input-inline-vorname"
-                            />
-                            {form.errors.inlineVorname && <p className="text-destructive text-xs">{form.errors.inlineVorname}</p>}
-                          </div>
-                          <div className="space-y-1">
-                            <Label htmlFor="inline-nachname">Nachname *</Label>
-                            <Input
-                              id="inline-nachname"
-                              placeholder="Nachname"
-                              value={form.inlineProspectNachname}
-                              onChange={(e) => form.setInlineProspectNachname(e.target.value)}
-                              className={form.errors.inlineNachname ? "border-destructive" : ""}
-                              data-testid="input-inline-nachname"
-                            />
-                            {form.errors.inlineNachname && <p className="text-destructive text-xs">{form.errors.inlineNachname}</p>}
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-                          <div className="space-y-1">
-                            <Label htmlFor="inline-telefon">
-                              <Phone className={`${iconSize.sm} inline mr-1`} /> Telefon *
-                            </Label>
-                            <Input
-                              id="inline-telefon"
-                              placeholder="z.B. 0151 12345678"
-                              value={form.inlineProspectTelefon}
-                              onChange={(e) => form.setInlineProspectTelefon(e.target.value)}
-                              className={form.errors.inlineTelefon ? "border-destructive" : ""}
-                              data-testid="input-inline-telefon"
-                            />
-                            {form.errors.inlineTelefon && <p className="text-destructive text-xs">{form.errors.inlineTelefon}</p>}
-                          </div>
-                          <div className="space-y-1">
-                            <Label htmlFor="inline-email">
-                              <Mail className={`${iconSize.sm} inline mr-1`} /> E-Mail
-                            </Label>
-                            <Input
-                              id="inline-email"
-                              type="email"
-                              placeholder="beispiel@email.de"
-                              value={form.inlineProspectEmail}
-                              onChange={(e) => form.setInlineProspectEmail(e.target.value)}
-                              data-testid="input-inline-email"
-                            />
-                          </div>
-                        </div>
-                        <div className="mt-3">
-                          <Label className="flex items-center gap-1 mb-2">
-                            <Home className={iconSize.sm} /> Adresse
-                          </Label>
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                            <div className="col-span-2 space-y-1">
-                              <Input
-                                placeholder="Straße"
-                                value={form.inlineProspectStrasse}
-                                onChange={(e) => form.setInlineProspectStrasse(e.target.value)}
-                                data-testid="input-inline-strasse"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Input
-                                placeholder="Nr."
-                                value={form.inlineProspectNr}
-                                onChange={(e) => form.setInlineProspectNr(e.target.value)}
-                                data-testid="input-inline-nr"
-                              />
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
-                            <div className="space-y-1">
-                              <Input
-                                placeholder="PLZ"
-                                maxLength={5}
-                                value={form.inlineProspectPlz}
-                                onChange={(e) => form.setInlineProspectPlz(e.target.value)}
-                                data-testid="input-inline-plz"
-                              />
-                            </div>
-                            <div className="col-span-2 space-y-1">
-                              <Input
-                                placeholder="Stadt"
-                                value={form.inlineProspectStadt}
-                                onChange={(e) => form.setInlineProspectStadt(e.target.value)}
-                                data-testid="input-inline-stadt"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                        <div className="mt-3 space-y-1">
-                          <Label>Pflegegrad</Label>
-                          <Select value={form.inlineProspectPflegegrad} onValueChange={form.setInlineProspectPflegegrad}>
-                            <SelectTrigger data-testid="select-inline-pflegegrad">
-                              <SelectValue placeholder="Pflegegrad wählen..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {PFLEGEGRAD_OPTIONS.map((p) => (
-                                <SelectItem key={p} value={p.toString()}>
-                                  Pflegegrad {p}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <Button
-                          className="mt-4 w-full"
-                          onClick={form.handleInlineProspectCreate}
-                          disabled={form.isCreatingProspect}
-                          data-testid="button-create-inline-prospect"
-                        >
-                          {form.isCreatingProspect ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : <UserPlus className={`${iconSize.sm} mr-2`} />}
-                          Interessent anlegen & weiter
-                        </Button>
-                      </div>
-                      <div className="relative flex items-center justify-center">
-                        <div className="absolute inset-0 flex items-center"><div className="w-full border-t" /></div>
-                        <span className="relative bg-card px-3 text-xs text-muted-foreground">oder</span>
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="w-full"
-                        onClick={() => setLocation("/admin/prospects")}
-                        data-testid="button-go-prospects"
-                      >
-                        Bestehenden Interessenten in der Verwaltung auswählen
-                      </Button>
-                    </>
-                  ) : (
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800" data-testid="banner-no-prospect">
-                      <p className="font-medium">Kein Interessent ausgewählt</p>
-                      <p className="mt-1">Erstberatungen werden über die Interessenten-Verwaltung erstellt. Bitte wenden Sie sich an einen Administrator.</p>
+                  <div className="rounded-lg border border-blue-200 bg-blue-50 p-4" data-testid="panel-inline-prospect">
+                    <div className="flex items-center gap-2 text-blue-800 font-medium mb-3">
+                      <UserPlus className={iconSize.sm} />
+                      <span>Neuen Interessenten anlegen</span>
                     </div>
-                  )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="inline-vorname">Vorname *</Label>
+                        <Input
+                          id="inline-vorname"
+                          placeholder="Vorname"
+                          value={form.inlineProspectVorname}
+                          onChange={(e) => form.setInlineProspectVorname(e.target.value)}
+                          className={form.errors.inlineVorname ? "border-destructive" : ""}
+                          data-testid="input-inline-vorname"
+                        />
+                        {form.errors.inlineVorname && <p className="text-destructive text-xs">{form.errors.inlineVorname}</p>}
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="inline-nachname">Nachname *</Label>
+                        <Input
+                          id="inline-nachname"
+                          placeholder="Nachname"
+                          value={form.inlineProspectNachname}
+                          onChange={(e) => form.setInlineProspectNachname(e.target.value)}
+                          className={form.errors.inlineNachname ? "border-destructive" : ""}
+                          data-testid="input-inline-nachname"
+                        />
+                        {form.errors.inlineNachname && <p className="text-destructive text-xs">{form.errors.inlineNachname}</p>}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="inline-telefon">
+                          <Phone className={`${iconSize.sm} inline mr-1`} /> Telefon *
+                        </Label>
+                        <Input
+                          id="inline-telefon"
+                          placeholder="z.B. 0151 12345678"
+                          value={form.inlineProspectTelefon}
+                          onChange={(e) => form.setInlineProspectTelefon(e.target.value)}
+                          className={form.errors.inlineTelefon ? "border-destructive" : ""}
+                          data-testid="input-inline-telefon"
+                        />
+                        {form.errors.inlineTelefon && <p className="text-destructive text-xs">{form.errors.inlineTelefon}</p>}
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="inline-email">
+                          <Mail className={`${iconSize.sm} inline mr-1`} /> E-Mail
+                        </Label>
+                        <Input
+                          id="inline-email"
+                          type="email"
+                          placeholder="beispiel@email.de"
+                          value={form.inlineProspectEmail}
+                          onChange={(e) => form.setInlineProspectEmail(e.target.value)}
+                          className={form.errors.inlineEmail ? "border-destructive" : ""}
+                          data-testid="input-inline-email"
+                        />
+                        {form.errors.inlineEmail && <p className="text-destructive text-xs">{form.errors.inlineEmail}</p>}
+                      </div>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      <Label className="flex items-center gap-1">
+                        <Home className={iconSize.sm} /> Adresse
+                      </Label>
+                      <AddressFields
+                        strasse={form.inlineProspectStrasse}
+                        nr={form.inlineProspectNr}
+                        plz={form.inlineProspectPlz}
+                        stadt={form.inlineProspectStadt}
+                        onChange={handleInlineAddressChange}
+                        testIdPrefix="inline"
+                      />
+                      {form.errors.inlinePlz && <p className="text-destructive text-xs">{form.errors.inlinePlz}</p>}
+                    </div>
+                    <div className="mt-3 space-y-1">
+                      <Label>Pflegegrad</Label>
+                      <Select value={form.inlineProspectPflegegrad} onValueChange={form.setInlineProspectPflegegrad}>
+                        <SelectTrigger data-testid="select-inline-pflegegrad">
+                          <SelectValue placeholder="Pflegegrad wählen..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PFLEGEGRAD_OPTIONS.map((p) => (
+                            <SelectItem key={p} value={p.toString()}>
+                              Pflegegrad {p}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button
+                      className="mt-4 w-full"
+                      onClick={form.handleInlineProspectCreate}
+                      disabled={form.isCreatingProspect}
+                      data-testid="button-create-inline-prospect"
+                    >
+                      {form.isCreatingProspect ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : <UserPlus className={`${iconSize.sm} mr-2`} />}
+                      Interessent anlegen & weiter
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <>
@@ -432,32 +415,23 @@ export default function NewAppointment() {
                           <div className="text-sm font-medium text-blue-800 mb-1">{form.prospectData.vorname} {form.prospectData.nachname}</div>
                           <div className="space-y-1">
                             <Label className="text-xs text-blue-600">Telefon</Label>
-                            <Input value={ebEditTelefon} onChange={(e) => setEbEditTelefon(e.target.value)} placeholder="z.B. 0151 12345678" className="bg-white" data-testid="input-eb-edit-telefon" />
+                            <Input value={ebEditTelefon} onChange={(e) => setEbEditTelefon(e.target.value)} placeholder="z.B. 0151 12345678" className={`bg-white ${ebEditErrors.telefon ? "border-destructive" : ""}`} data-testid="input-eb-edit-telefon" />
+                            {ebEditErrors.telefon && <p className="text-destructive text-xs">{ebEditErrors.telefon}</p>}
                           </div>
                           <div className="space-y-1">
                             <Label className="text-xs text-blue-600">E-Mail</Label>
-                            <Input value={ebEditEmail} onChange={(e) => setEbEditEmail(e.target.value)} placeholder="E-Mail-Adresse" type="email" className="bg-white" data-testid="input-eb-edit-email" />
+                            <Input value={ebEditEmail} onChange={(e) => setEbEditEmail(e.target.value)} placeholder="E-Mail-Adresse" type="email" className={`bg-white ${ebEditErrors.email ? "border-destructive" : ""}`} data-testid="input-eb-edit-email" />
+                            {ebEditErrors.email && <p className="text-destructive text-xs">{ebEditErrors.email}</p>}
                           </div>
-                          <div className="grid grid-cols-3 gap-2">
-                            <div className="col-span-2 space-y-1">
-                              <Label className="text-xs text-blue-600">Straße</Label>
-                              <Input value={ebEditStrasse} onChange={(e) => setEbEditStrasse(e.target.value)} placeholder="Straße" className="bg-white" data-testid="input-eb-edit-strasse" />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-blue-600">Nr.</Label>
-                              <Input value={ebEditNr} onChange={(e) => setEbEditNr(e.target.value)} placeholder="Nr." className="bg-white" data-testid="input-eb-edit-nr" />
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-3 gap-2">
-                            <div className="space-y-1">
-                              <Label className="text-xs text-blue-600">PLZ</Label>
-                              <Input value={ebEditPlz} onChange={(e) => setEbEditPlz(e.target.value)} placeholder="PLZ" maxLength={5} className="bg-white" data-testid="input-eb-edit-plz" />
-                            </div>
-                            <div className="col-span-2 space-y-1">
-                              <Label className="text-xs text-blue-600">Stadt</Label>
-                              <Input value={ebEditStadt} onChange={(e) => setEbEditStadt(e.target.value)} placeholder="Stadt" className="bg-white" data-testid="input-eb-edit-stadt" />
-                            </div>
-                          </div>
+                          <AddressFields
+                            strasse={ebEditStrasse}
+                            nr={ebEditNr}
+                            plz={ebEditPlz}
+                            stadt={ebEditStadt}
+                            onChange={handleEbAddressChange}
+                            testIdPrefix="eb-edit"
+                          />
+                          {ebEditErrors.plz && <p className="text-destructive text-xs">{ebEditErrors.plz}</p>}
                           <div className="flex gap-2 pt-1">
                             <Button size="sm" className="flex-1" onClick={handleSaveEbContact} disabled={updateProspectMutation.isPending} data-testid="button-save-eb-contact">
                               {updateProspectMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Check className="h-3.5 w-3.5 mr-1" />}

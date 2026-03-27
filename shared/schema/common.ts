@@ -7,7 +7,7 @@ export const timestamp = (name: string) => pgTimestamp(name, { withTimezone: tru
 const DACH_COUNTRIES: CountryCode[] = ["DE", "AT", "CH"];
 const PHONE_ERROR = "Ungültige Telefonnummer (DE/AT/CH)";
 
-function isDachPhone(value: string): boolean {
+export function isDachPhone(value: string): boolean {
   const trimmed = value.trim();
   if (!trimmed) return false;
   try {

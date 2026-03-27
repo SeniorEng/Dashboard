@@ -66,6 +66,8 @@ import {
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { useProspects, useProspectStats, useProspect, useCreateProspect, useUpdateProspect, useAddProspectNote, useReparseProspect, useDeleteProspect, useQualifyProspect, useProspectOffer, useDeclineProspectOffer } from "@/features/prospects";
+import { AddressFields } from "@/pages/admin/components/address-fields";
+import { isDachPhone } from "@shared/schema/common";
 import { PROSPECT_STATUS_LABELS, PROSPECT_STATUSES, PROSPECT_NOTE_TYPE_LABELS, DISQUALIFICATION_REASON_LABELS, DISQUALIFICATION_REASONS, type ProspectStatus, type ProspectNoteType, type DisqualificationReason } from "@shared/schema";
 import { formatDateForDisplay, todayISO } from "@shared/utils/datetime";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
@@ -128,9 +130,32 @@ function CreateProspectSheet({ open, onClose }: { open: boolean; onClose: () => 
   const [quelle, setQuelle] = useState("");
   const [notiz, setNotiz] = useState("");
   const [wiedervorlageDate, setWiedervorlageDate] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const createMutation = useCreateProspect();
 
+  const handleAddressChange = useCallback((field: string, value: string) => {
+    if (field === "strasse") setStrasse(value);
+    else if (field === "nr") setNr(value);
+    else if (field === "plz") setPlz(value);
+    else if (field === "stadt") setStadt(value);
+  }, []);
+
   const handleSubmit = () => {
+    const errs: Record<string, string> = {};
+    if (!vorname.trim()) errs.vorname = "Vorname ist erforderlich";
+    if (!nachname.trim()) errs.nachname = "Nachname ist erforderlich";
+    if (telefon.trim() && !isDachPhone(telefon.trim())) {
+      errs.telefon = "Ungültige Telefonnummer (DE/AT/CH)";
+    }
+    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      errs.email = "Ungültige E-Mail-Adresse";
+    }
+    if (plz.trim() && !/^\d{5}$/.test(plz.trim())) {
+      errs.plz = "PLZ muss 5 Ziffern haben";
+    }
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+
     createMutation.mutate({
       vorname,
       nachname,
@@ -149,6 +174,7 @@ function CreateProspectSheet({ open, onClose }: { open: boolean; onClose: () => 
         setVorname(""); setNachname(""); setTelefon(""); setEmail("");
         setStrasse(""); setNr(""); setPlz(""); setStadt("");
         setQuelle(""); setNotiz(""); setWiedervorlageDate("");
+        setErrors({});
         onClose();
       },
     });
@@ -164,41 +190,34 @@ function CreateProspectSheet({ open, onClose }: { open: boolean; onClose: () => 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Vorname *</Label>
-              <Input value={vorname} onChange={(e) => setVorname(e.target.value)} data-testid="input-prospect-vorname" />
+              <Input value={vorname} onChange={(e) => setVorname(e.target.value)} className={errors.vorname ? "border-destructive" : ""} data-testid="input-prospect-vorname" />
+              {errors.vorname && <p className="text-destructive text-xs mt-1">{errors.vorname}</p>}
             </div>
             <div>
               <Label>Nachname *</Label>
-              <Input value={nachname} onChange={(e) => setNachname(e.target.value)} data-testid="input-prospect-nachname" />
+              <Input value={nachname} onChange={(e) => setNachname(e.target.value)} className={errors.nachname ? "border-destructive" : ""} data-testid="input-prospect-nachname" />
+              {errors.nachname && <p className="text-destructive text-xs mt-1">{errors.nachname}</p>}
             </div>
           </div>
           <div>
             <Label>Telefon</Label>
-            <Input value={telefon} onChange={(e) => setTelefon(e.target.value)} type="tel" data-testid="input-prospect-telefon" />
+            <Input value={telefon} onChange={(e) => setTelefon(e.target.value)} type="tel" className={errors.telefon ? "border-destructive" : ""} data-testid="input-prospect-telefon" />
+            {errors.telefon && <p className="text-destructive text-xs mt-1">{errors.telefon}</p>}
           </div>
           <div>
             <Label>E-Mail</Label>
-            <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" data-testid="input-prospect-email" />
+            <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" className={errors.email ? "border-destructive" : ""} data-testid="input-prospect-email" />
+            {errors.email && <p className="text-destructive text-xs mt-1">{errors.email}</p>}
           </div>
-          <div className="grid grid-cols-[1fr_80px] gap-3">
-            <div>
-              <Label>Straße</Label>
-              <Input value={strasse} onChange={(e) => setStrasse(e.target.value)} placeholder="Musterstraße" data-testid="input-prospect-strasse" />
-            </div>
-            <div>
-              <Label>Nr.</Label>
-              <Input value={nr} onChange={(e) => setNr(e.target.value)} placeholder="12a" data-testid="input-prospect-nr" />
-            </div>
-          </div>
-          <div className="grid grid-cols-[100px_1fr] gap-3">
-            <div>
-              <Label>PLZ</Label>
-              <Input value={plz} onChange={(e) => setPlz(e.target.value)} placeholder="09111" maxLength={5} data-testid="input-prospect-plz" />
-            </div>
-            <div>
-              <Label>Stadt</Label>
-              <Input value={stadt} onChange={(e) => setStadt(e.target.value)} placeholder="Chemnitz" data-testid="input-prospect-stadt" />
-            </div>
-          </div>
+          <AddressFields
+            strasse={strasse}
+            nr={nr}
+            plz={plz}
+            stadt={stadt}
+            onChange={handleAddressChange}
+            testIdPrefix="prospect"
+          />
+          {errors.plz && <p className="text-destructive text-xs">{errors.plz}</p>}
           <div>
             <Label>Quelle</Label>
             <Input value={quelle} onChange={(e) => setQuelle(e.target.value)} placeholder="z.B. pflege24.de" data-testid="input-prospect-quelle" />
@@ -224,7 +243,7 @@ function CreateProspectSheet({ open, onClose }: { open: boolean; onClose: () => 
 
 function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number | null; open: boolean; onClose: () => void }) {
   const { data: prospect, isLoading } = useProspect(prospectId);
-  const updateMutation = useUpdateProspect();
+  const updateMutation = useUpdateProspect({ adminEndpoint: true });
   const qualifyMutation = useQualifyProspect();
   const addNoteMutation = useAddProspectNote();
   const deleteMutation = useDeleteProspect();
@@ -275,8 +294,23 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
     setEditingContact(true);
   };
 
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
+
   const handleSaveContact = () => {
     if (!prospectId || !editVorname.trim() || !editNachname.trim()) return;
+    const errs: Record<string, string> = {};
+    if (editTelefon.trim() && !isDachPhone(editTelefon.trim())) {
+      errs.telefon = "Ungültige Telefonnummer (DE/AT/CH)";
+    }
+    if (editEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(editEmail.trim())) {
+      errs.email = "Ungültige E-Mail-Adresse";
+    }
+    if (editPlz.trim() && !/^\d{5}$/.test(editPlz.trim())) {
+      errs.plz = "PLZ muss 5 Ziffern haben";
+    }
+    setEditErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+
     updateMutation.mutate({
       id: prospectId,
       data: {
@@ -291,7 +325,10 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
         pflegegrad: editPflegegrad && editPflegegrad !== "none" ? parseInt(editPflegegrad) : null,
       },
     }, {
-      onSuccess: () => setEditingContact(false),
+      onSuccess: () => {
+        setEditingContact(false);
+        setEditErrors({});
+      },
     });
   };
 
@@ -439,32 +476,28 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                         </div>
                         <div className="space-y-1">
                           <Label className="text-xs">Telefon</Label>
-                          <Input value={editTelefon} onChange={(e) => setEditTelefon(e.target.value)} placeholder="z.B. 0151 12345678" data-testid="input-edit-telefon" />
+                          <Input value={editTelefon} onChange={(e) => setEditTelefon(e.target.value)} placeholder="z.B. 0151 12345678" className={editErrors.telefon ? "border-destructive" : ""} data-testid="input-edit-telefon" />
+                          {editErrors.telefon && <p className="text-destructive text-xs">{editErrors.telefon}</p>}
                         </div>
                         <div className="space-y-1">
                           <Label className="text-xs">E-Mail</Label>
-                          <Input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} placeholder="E-Mail-Adresse" type="email" data-testid="input-edit-email" />
+                          <Input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} placeholder="E-Mail-Adresse" type="email" className={editErrors.email ? "border-destructive" : ""} data-testid="input-edit-email" />
+                          {editErrors.email && <p className="text-destructive text-xs">{editErrors.email}</p>}
                         </div>
-                        <div className="grid grid-cols-3 gap-2">
-                          <div className="col-span-2 space-y-1">
-                            <Label className="text-xs">Straße</Label>
-                            <Input value={editStrasse} onChange={(e) => setEditStrasse(e.target.value)} placeholder="Straße" data-testid="input-edit-strasse" />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Nr.</Label>
-                            <Input value={editNr} onChange={(e) => setEditNr(e.target.value)} placeholder="Nr." data-testid="input-edit-nr" />
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-3 gap-2">
-                          <div className="space-y-1">
-                            <Label className="text-xs">PLZ</Label>
-                            <Input value={editPlz} onChange={(e) => setEditPlz(e.target.value)} placeholder="PLZ" maxLength={5} data-testid="input-edit-plz" />
-                          </div>
-                          <div className="col-span-2 space-y-1">
-                            <Label className="text-xs">Stadt</Label>
-                            <Input value={editStadt} onChange={(e) => setEditStadt(e.target.value)} placeholder="Stadt" data-testid="input-edit-stadt" />
-                          </div>
-                        </div>
+                        <AddressFields
+                          strasse={editStrasse}
+                          nr={editNr}
+                          plz={editPlz}
+                          stadt={editStadt}
+                          onChange={(field, value) => {
+                            if (field === "strasse") setEditStrasse(value);
+                            else if (field === "nr") setEditNr(value);
+                            else if (field === "plz") setEditPlz(value);
+                            else if (field === "stadt") setEditStadt(value);
+                          }}
+                          testIdPrefix="edit"
+                        />
+                        {editErrors.plz && <p className="text-destructive text-xs">{editErrors.plz}</p>}
                         <div className="space-y-1">
                           <Label className="text-xs">Pflegegrad</Label>
                           <Select value={editPflegegrad} onValueChange={setEditPflegegrad}>

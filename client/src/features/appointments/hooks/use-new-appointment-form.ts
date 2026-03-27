@@ -8,6 +8,7 @@ import { useCustomerList } from "./use-customer-list";
 import { useAdminEmployees } from "./use-active-employees";
 import { useCreateKundentermin, useCreateErstberatung } from "./use-appointment-mutations";
 import { timeToMinutes, minutesToTimeDisplay, formatDurationDisplay, todayISO } from "@shared/utils/datetime";
+import { isDachPhone } from "@shared/schema/common";
 import type { Service } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 
@@ -99,7 +100,7 @@ export function useNewAppointmentForm() {
   const { data: prospectData } = useQuery<ProspectAppointmentData>({
     queryKey: ["prospect-appointment-data", fromProspectId],
     queryFn: async () => {
-      const result = await api.get<{ prospect: ProspectAppointmentData; appointments: unknown[] }>(`/admin/prospects/${fromProspectId}/appointment-data`);
+      const result = await api.get<{ prospect: ProspectAppointmentData; appointments: unknown[] }>(`/prospects/${fromProspectId}/appointment-data`);
       const data = unwrapResult(result);
       return data.prospect;
     },
@@ -136,10 +137,8 @@ export function useNewAppointmentForm() {
       stadt?: string;
       pflegegrad?: number;
     }) => {
-      const result = await api.post<{ id: number; vorname: string; nachname: string; telefon: string | null }>("/admin/prospects", {
+      const result = await api.post<{ id: number; vorname: string; nachname: string; telefon: string | null }>("/prospects/inline", {
         ...data,
-        status: "erstberatung_vereinbart",
-        quelle: "direktkontakt",
         quelleDetails: "Telefonischer Erstkontakt — Erstberatung direkt vereinbart",
       });
       return unwrapResult(result);
@@ -158,7 +157,7 @@ export function useNewAppointmentForm() {
   const { data: inlineProspectData } = useQuery<ProspectAppointmentData>({
     queryKey: ["prospect-appointment-data", inlineProspectCreatedId],
     queryFn: async () => {
-      const result = await api.get<{ prospect: ProspectAppointmentData; appointments: unknown[] }>(`/admin/prospects/${inlineProspectCreatedId}/appointment-data`);
+      const result = await api.get<{ prospect: ProspectAppointmentData; appointments: unknown[] }>(`/prospects/${inlineProspectCreatedId}/appointment-data`);
       return unwrapResult(result).prospect;
     },
     enabled: !!inlineProspectCreatedId && !fromProspectId,
@@ -320,7 +319,17 @@ export function useNewAppointmentForm() {
     const newErrors: Record<string, string> = {};
     if (!inlineProspectVorname.trim()) newErrors.inlineVorname = "Vorname ist erforderlich";
     if (!inlineProspectNachname.trim()) newErrors.inlineNachname = "Nachname ist erforderlich";
-    if (!inlineProspectTelefon.trim()) newErrors.inlineTelefon = "Telefonnummer ist erforderlich";
+    if (!inlineProspectTelefon.trim()) {
+      newErrors.inlineTelefon = "Telefonnummer ist erforderlich";
+    } else if (!isDachPhone(inlineProspectTelefon.trim())) {
+      newErrors.inlineTelefon = "Ungültige Telefonnummer (DE/AT/CH)";
+    }
+    if (inlineProspectEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inlineProspectEmail.trim())) {
+      newErrors.inlineEmail = "Ungültige E-Mail-Adresse";
+    }
+    if (inlineProspectPlz.trim() && !/^\d{5}$/.test(inlineProspectPlz.trim())) {
+      newErrors.inlinePlz = "PLZ muss 5 Ziffern haben";
+    }
     setErrors(newErrors);
     if (Object.keys(newErrors).length > 0) return;
 

@@ -61,13 +61,14 @@ export function useCreateProspect() {
   });
 }
 
-export function useUpdateProspect() {
+export function useUpdateProspect({ adminEndpoint = false }: { adminEndpoint?: boolean } = {}) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
   return useMutation({
     mutationFn: async ({ id, data }: { id: number; data: UpdateProspect }) => {
-      const result = await api.patch<Prospect>(`/admin/prospects/${id}`, data);
+      const endpoint = adminEndpoint ? `/admin/prospects/${id}` : `/prospects/${id}`;
+      const result = await api.patch<Prospect>(endpoint, data);
       return unwrapResult(result);
     },
     onSuccess: (_data, variables) => {
