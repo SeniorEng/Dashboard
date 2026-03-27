@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/hooks/use-auth";
+import { useAuth, canCreateErstberatung } from "@/hooks/use-auth";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useCustomerList } from "./use-customer-list";
 import { useAdminEmployees } from "./use-active-employees";
@@ -17,10 +17,11 @@ export function useNewAppointmentForm() {
   const { toast } = useToast();
   const { user } = useAuth();
   const copyFromId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("copyFrom") : null;
-  const initialTab = copyFromId ? "kundentermin" : (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("type") === "erstberatung" ? "erstberatung" : "kundentermin");
-  const [activeTab, setActiveTab] = useState<string>(initialTab);
-
   const isAdmin = user?.isAdmin ?? false;
+  const canErstberatung = canCreateErstberatung(user?.roles ?? [], isAdmin);
+  const wantsErstberatung = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("type") === "erstberatung";
+  const initialTab = copyFromId ? "kundentermin" : (wantsErstberatung && canErstberatung ? "erstberatung" : "kundentermin");
+  const [activeTab, setActiveTab] = useState<string>(initialTab);
 
   const { data: customers = [], isLoading: customersLoading } = useCustomerList();
   const { data: employees = [] } = useAdminEmployees({ enabled: isAdmin });
@@ -453,6 +454,7 @@ export function useNewAppointmentForm() {
     activeTab,
     setActiveTab,
     isAdmin,
+    canErstberatung,
     customersLoading,
 
     ktCustomerId,

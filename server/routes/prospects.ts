@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requireRoles } from "../middleware/auth";
 import { prospectStorage } from "../storage/prospects";
 import { asyncHandler } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
@@ -32,7 +32,7 @@ const prospectContactUpdateSchema = z.object({
   stadt: z.string().optional().nullable(),
 }).strict();
 
-router.post("/inline", asyncHandler("Interessent konnte nicht erstellt werden", async (req: Request, res: Response) => {
+router.post("/inline", requireRoles("erstberatung"), asyncHandler("Interessent konnte nicht erstellt werden", async (req: Request, res: Response) => {
   const parsed = inlineProspectSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Validierungsfehler", details: parsed.error.flatten() });

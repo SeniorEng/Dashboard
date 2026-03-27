@@ -111,14 +111,22 @@ export default function NewAppointment() {
       </div>
 
       <Tabs value={form.activeTab} onValueChange={form.setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-2 mb-6">
-          <TabsTrigger value="kundentermin" data-testid="tab-kundentermin">
-            <User className={`${iconSize.sm} mr-2`} /> Kundentermin
-          </TabsTrigger>
-          <TabsTrigger value="erstberatung" data-testid="tab-erstberatung">
-            <Plus className={`${iconSize.sm} mr-2`} /> Erstberatung
-          </TabsTrigger>
-        </TabsList>
+        {form.canErstberatung ? (
+          <TabsList className="grid w-full grid-cols-2 mb-6">
+            <TabsTrigger value="kundentermin" data-testid="tab-kundentermin">
+              <User className={`${iconSize.sm} mr-2`} /> Kundentermin
+            </TabsTrigger>
+            <TabsTrigger value="erstberatung" data-testid="tab-erstberatung">
+              <Plus className={`${iconSize.sm} mr-2`} /> Erstberatung
+            </TabsTrigger>
+          </TabsList>
+        ) : (
+          <TabsList className="grid w-full grid-cols-1 mb-6">
+            <TabsTrigger value="kundentermin" data-testid="tab-kundentermin">
+              <User className={`${iconSize.sm} mr-2`} /> Kundentermin
+            </TabsTrigger>
+          </TabsList>
+        )}
 
         {/* Kundentermin Form */}
         <TabsContent value="kundentermin">
@@ -284,7 +292,7 @@ export default function NewAppointment() {
           </Card>
         </TabsContent>
 
-        {/* Erstberatung Form */}
+        {form.canErstberatung && (
         <TabsContent value="erstberatung">
           <Card>
             <CardHeader>
@@ -588,6 +596,7 @@ export default function NewAppointment() {
             </CardContent>
           </Card>
         </TabsContent>
+        )}
       </Tabs>
     </Layout>
   );

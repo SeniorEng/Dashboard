@@ -192,7 +192,7 @@ function canCreateAlltagsbegleitung(roles: string[], isAdmin: boolean): boolean 
   return roles.includes("alltagsbegleitung");
 }
 
-function canCreateErstberatung(roles: string[], isAdmin: boolean): boolean {
+export function canCreateErstberatung(roles: string[], isAdmin: boolean): boolean {
   if (isAdmin) return true;
   return roles.includes("erstberatung");
 }
