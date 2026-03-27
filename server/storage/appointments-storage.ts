@@ -28,13 +28,13 @@ export async function getAppointmentIncludeDeleted(id: number): Promise<Appointm
 }
 
 export async function getAppointmentsByDate(date: string): Promise<Appointment[]> {
-  return await db.select().from(appointments).where(and(eq(appointments.date, date), isNull(appointments.deletedAt)));
+  return await db.select().from(appointments).where(and(eq(appointments.date, date), isNull(appointments.deletedAt), ne(appointments.status, "cancelled")));
 }
 
 export async function getAppointmentCountsByDates(dates: string[], customerIds?: number[], employeeId?: number, assignedOnly?: boolean): Promise<Record<string, number>> {
   if (dates.length === 0) return {};
 
-  const conditions = [inArray(appointments.date, dates), isNull(appointments.deletedAt)];
+  const conditions = [inArray(appointments.date, dates), isNull(appointments.deletedAt), ne(appointments.status, "cancelled")];
 
   const employeeCondition = employeeId
     ? assignedOnly
@@ -101,7 +101,7 @@ export async function deleteAppointment(id: number, tx?: DbOrTx): Promise<boolea
 }
 
 export async function getAppointmentsWithCustomers(date?: string, customerIds?: number[], employeeId?: number, assignedOnly?: boolean): Promise<AppointmentWithCustomer[]> {
-  const conditions = [isNull(appointments.deletedAt)];
+  const conditions = [isNull(appointments.deletedAt), ne(appointments.status, "cancelled")];
   if (date) {
     conditions.push(eq(appointments.date, date));
   }
@@ -146,8 +146,8 @@ export async function getAppointmentsWithCustomersPaginated(
   const offset = options?.offset ?? 0;
 
   const countResult = date
-    ? await db.select({ count: count() }).from(appointments).where(and(eq(appointments.date, date), isNull(appointments.deletedAt)))
-    : await db.select({ count: count() }).from(appointments).where(isNull(appointments.deletedAt));
+    ? await db.select({ count: count() }).from(appointments).where(and(eq(appointments.date, date), isNull(appointments.deletedAt), ne(appointments.status, "cancelled")))
+    : await db.select({ count: count() }).from(appointments).where(and(isNull(appointments.deletedAt), ne(appointments.status, "cancelled")));
 
   const total = Number(countResult[0]?.count ?? 0);
 
@@ -160,8 +160,8 @@ export async function getAppointmentsWithCustomersPaginated(
     .offset(offset);
 
   const results = date
-    ? await query.where(and(eq(appointments.date, date), isNull(appointments.deletedAt)))
-    : await query.where(isNull(appointments.deletedAt));
+    ? await query.where(and(eq(appointments.date, date), isNull(appointments.deletedAt), ne(appointments.status, "cancelled")))
+    : await query.where(and(isNull(appointments.deletedAt), ne(appointments.status, "cancelled")));
 
   const data = results.map(mapAppointmentRow);
 
@@ -223,7 +223,8 @@ export async function getAppointmentsForDay(employeeId: number, date: string): P
         eq(appointments.createdByUserId, employeeId),
         isNull(appointments.assignedEmployeeId)
       ),
-      isNull(appointments.deletedAt)
+      isNull(appointments.deletedAt),
+      ne(appointments.status, "cancelled")
     ))
     .orderBy(appointments.scheduledStart);
 
