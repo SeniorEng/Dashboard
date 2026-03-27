@@ -81,16 +81,16 @@ export interface IStorage {
   getAppointmentsByDate(date: string): Promise<Appointment[]>;
   
   // Appointments - Counts
-  getAppointmentCountsByDates(dates: string[], customerIds?: number[], employeeId?: number): Promise<Record<string, number>>;
+  getAppointmentCountsByDates(dates: string[], customerIds?: number[], employeeId?: number, assignedOnly?: boolean): Promise<Record<string, number>>;
 
   // Appointments - With Customer (optimized)
-  getAppointmentsWithCustomers(date?: string, customerIds?: number[], employeeId?: number): Promise<AppointmentWithCustomer[]>;
+  getAppointmentsWithCustomers(date?: string, customerIds?: number[], employeeId?: number, assignedOnly?: boolean): Promise<AppointmentWithCustomer[]>;
   getAppointmentsWithCustomersPaginated(
     date?: string, 
     options?: PaginationOptions
   ): Promise<PaginatedResult<AppointmentWithCustomer>>;
   getAppointmentWithCustomer(id: number): Promise<AppointmentWithCustomer | undefined>;
-  getUndocumentedAppointments(beforeDate: string, customerIds?: number[], employeeId?: number): Promise<AppointmentWithCustomer[]>;
+  getUndocumentedAppointments(beforeDate: string, customerIds?: number[], employeeId?: number, assignedOnly?: boolean): Promise<AppointmentWithCustomer[]>;
   
   // Get appointments for a specific employee on a specific day
   getAppointmentsForDay(employeeId: number, date: string): Promise<AppointmentWithCustomer[]>;

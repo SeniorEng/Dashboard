@@ -239,10 +239,11 @@ router.get("/", asyncHandler(ErrorMessages.fetchAppointmentsFailed, async (req, 
   
   let customerIds: number[] | undefined;
   let employeeId: number | undefined;
+  let assignedOnly = false;
   
   if (user.isAdmin && viewAsEmployeeId) {
-    customerIds = await storage.getAssignedCustomerIds(viewAsEmployeeId);
     employeeId = viewAsEmployeeId;
+    assignedOnly = true;
   } else if (!user.isAdmin) {
     customerIds = await storage.getAssignedCustomerIds(user.id);
     employeeId = user.id;
@@ -259,7 +260,7 @@ router.get("/", asyncHandler(ErrorMessages.fetchAppointmentsFailed, async (req, 
     }
   }
   
-  const appointments = await storage.getAppointmentsWithCustomers(date, customerIds, employeeId);
+  const appointments = await storage.getAppointmentsWithCustomers(date, customerIds, employeeId, assignedOnly);
   
   res.json(appointments);
 }));
@@ -278,16 +279,17 @@ router.get("/counts", asyncHandler("Fehler beim Laden der Terminzähler", async 
 
   let customerIds: number[] | undefined;
   let employeeId: number | undefined;
+  let assignedOnlyCounts = false;
 
   if (user.isAdmin && viewAsEmployeeId) {
-    customerIds = await storage.getAssignedCustomerIds(viewAsEmployeeId);
     employeeId = viewAsEmployeeId;
+    assignedOnlyCounts = true;
   } else if (!user.isAdmin) {
     customerIds = await storage.getAssignedCustomerIds(user.id);
     employeeId = user.id;
   }
 
-  const counts = await storage.getAppointmentCountsByDates(dates, customerIds, employeeId);
+  const counts = await storage.getAppointmentCountsByDates(dates, customerIds, employeeId, assignedOnlyCounts);
   res.json(counts);
 }));
 
@@ -298,16 +300,17 @@ router.get("/undocumented", asyncHandler("Fehler beim Laden der offenen Dokument
   
   let customerIds: number[] | undefined;
   let employeeId: number | undefined;
+  let assignedOnlyUndoc = false;
 
   if (user.isAdmin && viewAsEmployeeId) {
-    customerIds = await storage.getAssignedCustomerIds(viewAsEmployeeId);
     employeeId = viewAsEmployeeId;
+    assignedOnlyUndoc = true;
   } else if (!user.isAdmin) {
     customerIds = await storage.getAssignedCustomerIds(user.id);
     employeeId = user.id;
   }
 
-  const appointments = await storage.getUndocumentedAppointments(today, customerIds, employeeId);
+  const appointments = await storage.getUndocumentedAppointments(today, customerIds, employeeId, assignedOnlyUndoc);
   
   res.json(appointments);
 }));
