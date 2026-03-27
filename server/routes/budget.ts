@@ -198,28 +198,21 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     const monthlyRemaining45b = Math.max(0, summary45b.monthlyLimitCents - appointmentMonthUsedCents);
     const effectiveAvailable = summary45a.currentMonthAvailableCents + monthlyRemaining45b + summary39_42a.currentYearAvailableCents;
     if (totalCostCents > effectiveAvailable) {
-      const limitEuro = (summary45b.monthlyLimitCents / 100).toFixed(2);
-      const usedEuro = (appointmentMonthUsedCents / 100).toFixed(2);
-      const remainingEuro = (monthlyRemaining45b / 100).toFixed(2);
-      warning = `§45b-Monatslimit (${limitEuro} €): bereits ${usedEuro} € verbraucht, noch ${remainingEuro} € verfügbar.`;
+      const remainingEuro = (monthlyRemaining45b / 100).toFixed(2).replace(".", ",");
+      warning = `Monatslimit fast erreicht — noch ${remainingEuro} € verfügbar.`;
     }
   }
 
   if (totalCostCents > totalAvailable) {
     const shortfall = totalCostCents - totalAvailable;
-    const availableEuro = (totalAvailable / 100).toFixed(2);
-    const costEuro = (totalCostCents / 100).toFixed(2);
+    const shortfallEuro = (shortfall / 100).toFixed(2).replace(".", ",");
 
     if (acceptsPrivatePayment) {
       privateCents = shortfall;
       vatCents = Math.round(shortfall * (weightedVatRate / 100));
-      const privateEuro = (privateCents / 100).toFixed(2);
-      const vatEuro = (vatCents / 100).toFixed(2);
-      const budgetWarning = `Budget reicht nur für ${availableEuro} €. Restbetrag ${privateEuro} € wird privat berechnet (zzgl. ${vatEuro} € MwSt.).`;
-      warning = warning ? `${warning} ${budgetWarning}` : budgetWarning;
+      warning = `Budget reicht nicht — ${shortfallEuro} € werden privat berechnet.`;
     } else {
-      const budgetWarning = `Das verfügbare Gesamtbudget (${availableEuro} €) reicht nicht für diesen Termin (${costEuro} €).`;
-      warning = warning ? `${warning} ${budgetWarning}` : budgetWarning;
+      warning = `Budget reicht nicht — es fehlen ${shortfallEuro} €.`;
       isHardBlock = true;
     }
   }

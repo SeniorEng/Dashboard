@@ -1046,15 +1046,10 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
         if (costs.totalCents > totalAvailable) {
           const shortfall = costs.totalCents - totalAvailable;
-          const parts = [
-            `Budget reicht nicht aus. Fehlbetrag: ${(shortfall / 100).toFixed(2)} €.`,
-            `Kosten: ${(costs.totalCents / 100).toFixed(2)} €.`,
-            `§45b verfügbar: ${(total45b / 100).toFixed(2)} €,`,
-            `§39/42a verfügbar: ${(total39_42a / 100).toFixed(2)} €,`,
-            `§45a verfügbar: ${(total45a / 100).toFixed(2)} €.`,
-            `Kunde akzeptiert keine Privatzahlung.`,
-          ];
-          throw new Error(parts.join(" "));
+          const shortfallEuro = (shortfall / 100).toFixed(2).replace(".", ",");
+          throw new Error(
+            `Budget reicht nicht — es fehlen ${shortfallEuro} €. Kunde akzeptiert keine Privatzahlung.`
+          );
         }
       }
 
@@ -1097,9 +1092,9 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           }).returning();
           return cascadeResult.transactions[0] ?? privateTransaction;
         }
+        const shortfallEuro = (cascadeResult.outstandingCents / 100).toFixed(2).replace(".", ",");
         throw new Error(
-          `Budget reicht nicht aus. Fehlbetrag: ${(cascadeResult.outstandingCents / 100).toFixed(2)} €. ` +
-          `Kunde akzeptiert keine Privatzahlung.`
+          `Budget reicht nicht — es fehlen ${shortfallEuro} €. Kunde akzeptiert keine Privatzahlung.`
         );
       }
 

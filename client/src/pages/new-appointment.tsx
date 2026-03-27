@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DatePicker } from "@/components/ui/date-picker";
-import { ChevronLeft, Loader2, Calendar, Clock, User, Plus, Users, AlertTriangle, XCircle, Copy, UserCheck, Phone, UserPlus, Pencil, Check, X, Home, Mail } from "lucide-react";
+import { ChevronLeft, Loader2, Calendar, Clock, User, Plus, Users, AlertTriangle, XCircle, CheckCircle2, Copy, UserCheck, Phone, UserPlus, Pencil, Check, X, Home, Mail } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { useNewAppointmentForm, ServiceSelector, AppointmentSummary } from "@/features/appointments";
 import { EmployeeAvailability } from "@/features/appointments/components/employee-availability";
@@ -175,38 +175,55 @@ export default function NewAppointment() {
                 />
               )}
 
-              {form.costEstimate && !form.costEstimate.noPricing && form.costEstimate.totalCents > 0 && (
-                <div className="rounded-lg border bg-blue-50 border-blue-200 p-3 text-sm" data-testid="budget-cost-estimate">
-                  <p className="font-medium text-blue-800">
-                    Geschätzte Kosten: {(form.costEstimate.totalCents / 100).toFixed(2).replace(".", ",")} €
-                  </p>
-                  {form.costEstimate.availableCents !== undefined && (
-                    <p className="text-blue-600 text-xs mt-1">
-                      Verfügbares Budget: {(form.costEstimate.availableCents / 100).toFixed(2).replace(".", ",")} €
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {form.costEstimate?.isHardBlock && (
-                <div className="rounded-lg border bg-red-50 border-red-300 p-4 text-sm flex items-start gap-3" data-testid="budget-hard-block">
-                  <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
-                  <div>
-                    <p className="text-red-800 font-semibold">Termin kann nicht erstellt werden</p>
-                    <p className="text-red-700 mt-1">{form.costEstimate.warning || "Das Budget ist aufgebraucht und der Kunde akzeptiert keine private Zuzahlung."}</p>
-                  </div>
-                </div>
-              )}
-
-              {form.costEstimate?.warning && !form.costEstimate?.isHardBlock && (
-                <div className="rounded-lg border bg-amber-50 border-amber-200 p-4 text-sm flex items-start gap-3" data-testid="budget-warning">
+              {form.costEstimate?.noPricing && (
+                <div className="rounded-lg border bg-amber-50 border-amber-200 p-4 text-sm flex items-start gap-3" data-testid="budget-no-pricing">
                   <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
                   <div>
-                    <p className="text-amber-800 font-semibold">Budget-Hinweis</p>
-                    <p className="text-amber-700 mt-1">{form.costEstimate.warning}</p>
+                    <p className="text-amber-800 font-semibold">Keine Preisvereinbarung</p>
+                    <p className="text-amber-700 text-xs mt-1">Bitte hinterlegen Sie eine Preisvereinbarung für diesen Kunden.</p>
                   </div>
                 </div>
               )}
+
+              {form.costEstimate && !form.costEstimate.noPricing && form.costEstimate.totalCents > 0 && (() => {
+                const cost = form.costEstimate;
+                const costEuro = (cost.totalCents / 100).toFixed(2).replace(".", ",");
+                const availEuro = cost.availableCents !== undefined ? (cost.availableCents / 100).toFixed(2).replace(".", ",") : null;
+
+                if (cost.isHardBlock) {
+                  return (
+                    <div className="rounded-lg border bg-red-50 border-red-300 p-4 text-sm flex items-start gap-3" data-testid="budget-hard-block">
+                      <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-red-800 font-semibold">Budget reicht nicht</p>
+                        <p className="text-red-700 mt-1">Kosten: {costEuro} € — {availEuro !== null ? `verfügbar: ${availEuro} €` : "kein Budget"}</p>
+                        <p className="text-red-600 text-xs mt-1">{cost.warning}</p>
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (cost.warning) {
+                  return (
+                    <div className="rounded-lg border bg-amber-50 border-amber-200 p-4 text-sm flex items-start gap-3" data-testid="budget-warning">
+                      <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-amber-800 font-semibold">Kosten: {costEuro} € {availEuro !== null && <span className="font-normal">— verfügbar: {availEuro} €</span>}</p>
+                        <p className="text-amber-700 text-xs mt-1">{cost.warning}</p>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="rounded-lg border bg-green-50 border-green-200 p-3 text-sm flex items-start gap-3" data-testid="budget-cost-estimate">
+                    <CheckCircle2 className="h-5 w-5 text-green-600 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-green-800 font-medium">Kosten: {costEuro} € {availEuro !== null && <span className="font-normal text-green-600">— verfügbar: {availEuro} €</span>}</p>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Notes */}
               <div className="space-y-2">

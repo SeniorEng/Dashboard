@@ -110,15 +110,14 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
         try {
           const summary = await budgetLedgerStorage.getBudgetSummary(appointment.customerId!);
           if (summary.monthlyLimitCents !== null && summary.currentMonthUsedCents > summary.monthlyLimitCents) {
-            const limitEuro = (summary.monthlyLimitCents / 100).toFixed(2);
-            const usedEuro = (summary.currentMonthUsedCents / 100).toFixed(2);
-            budgetWarning = `Hinweis: Das vereinbarte Monatslimit von ${limitEuro} € wurde überschritten (aktuell ${usedEuro} €).`;
+            const overEuro = ((summary.currentMonthUsedCents - summary.monthlyLimitCents) / 100).toFixed(2).replace(".", ",");
+            budgetWarning = `Monatslimit überschritten — ${overEuro} € über dem Limit.`;
           }
         } catch {
         }
       } catch (budgetError: unknown) {
         const errorMessage = budgetError instanceof Error ? budgetError.message : "Budget-Abbuchung fehlgeschlagen";
-        if (errorMessage.includes("Preisvereinbarung") || errorMessage.includes("Budget reicht nicht aus")) {
+        if (errorMessage.includes("Preisvereinbarung") || errorMessage.includes("Budget reicht nicht")) {
           throw budgetError;
         }
         budgetWarning = errorMessage;
@@ -133,7 +132,7 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
     if (errorMessage.includes("Preisvereinbarung")) {
       throw badRequest(`${errorMessage}. Bitte hinterlegen Sie zuerst eine Preisvereinbarung für diesen Kunden.`);
     }
-    if (errorMessage.includes("Budget reicht nicht aus")) {
+    if (errorMessage.includes("Budget reicht nicht")) {
       throw badRequest(errorMessage);
     }
     throw err;
