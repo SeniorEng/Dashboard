@@ -282,8 +282,15 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
     return sendBadRequest(res, "Abgeschlossene Termine können nicht geändert werden.");
   }
 
-  if (updateFields.date && isWeekend(updateFields.date)) {
-    return sendBadRequest(res, "Termine können nicht auf Samstage oder Sonntage verschoben werden.");
+  if (updateFields.date) {
+    if (isWeekend(updateFields.date)) {
+      return sendBadRequest(res, "Termine können nicht auf Samstage oder Sonntage verschoben werden.");
+    }
+    const { isHoliday } = await import("@shared/utils/holidays");
+    const holidayName = isHoliday(updateFields.date);
+    if (holidayName) {
+      return sendBadRequest(res, `Termine können nicht auf Feiertage verschoben werden (${holidayName}).`);
+    }
   }
 
   const updateData: Record<string, unknown> = {};
