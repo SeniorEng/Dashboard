@@ -85,6 +85,14 @@ router.post("/", asyncHandler("Serie konnte nicht erstellt werden", async (req, 
     return sendBadRequest(res, "Das Enddatum muss nach dem Startdatum liegen.");
   }
 
+  const startD = new Date(input.startDate);
+  const maxEndD = new Date(startD);
+  maxEndD.setMonth(maxEndD.getMonth() + 12);
+  const maxEndStr = formatDateFromObj(maxEndD);
+  if (input.endDate > maxEndStr) {
+    return sendBadRequest(res, "Der Zeitraum darf maximal 12 Monate betragen.");
+  }
+
   const validation = await validateSeriesDates(input);
 
   if (!validation.valid) {
@@ -299,7 +307,7 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
     if (hasSchedulingChange) {
       const checkDate = updateFields.date || appointment.date;
       const checkStart = updateFields.scheduledStart || appointment.scheduledStart;
-      const checkEnd = updateData.scheduledEnd as string || appointment.scheduledEnd;
+      const checkEnd = (updateData.scheduledEnd as string | undefined) || appointment.scheduledEnd || addMinutesToTimeHHMMSS(checkStart, series.durationMinutes);
       const checkEmployee = updateFields.assignedEmployeeId || appointment.assignedEmployeeId;
 
       if (checkEmployee) {
@@ -309,11 +317,13 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
         }
       }
 
-      const customerOverlap = await appointmentService.checkCustomerOverlap(
-        checkDate, checkStart, checkEnd, appointment.customerId!, appointmentId,
-      );
-      if (customerOverlap) {
-        return sendBadRequest(res, "Terminüberschneidung: Der Kunde hat bereits einen Termin zu dieser Zeit.");
+      if (appointment.customerId) {
+        const customerOverlap = await appointmentService.checkCustomerOverlap(
+          checkDate, checkStart, checkEnd, appointment.customerId, appointmentId,
+        );
+        if (customerOverlap) {
+          return sendBadRequest(res, "Terminüberschneidung: Der Kunde hat bereits einen Termin zu dieser Zeit.");
+        }
       }
 
       updateData.isSeriesException = true;
@@ -322,7 +332,7 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
     return res.json({ updated: 1 });
   }
 
-  if (updateFields.date !== undefined && mode !== "single") {
+  if (updateFields.date !== undefined) {
     return sendBadRequest(res, "Datumsänderungen sind nur für einzelne Termine möglich (mode: single).");
   }
 
@@ -349,7 +359,7 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
 
     if (hasSchedulingChange) {
       const checkStart = updateFields.scheduledStart || apt.scheduledStart;
-      const checkEnd = updateData.scheduledEnd as string || apt.scheduledEnd;
+      const checkEnd = (updateData.scheduledEnd as string | undefined) || apt.scheduledEnd || addMinutesToTimeHHMMSS(checkStart, series.durationMinutes);
       const checkEmployee = updateFields.assignedEmployeeId || apt.assignedEmployeeId;
 
       if (checkEmployee) {
@@ -360,12 +370,14 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
         }
       }
 
-      const customerOverlap = await appointmentService.checkCustomerOverlap(
-        apt.date, checkStart, checkEnd, apt.customerId!, apt.id,
-      );
-      if (customerOverlap) {
-        conflicts.push({ appointmentId: apt.id, date: apt.date, reason: "Kunden-Terminüberschneidung" });
-        continue;
+      if (apt.customerId) {
+        const customerOverlap = await appointmentService.checkCustomerOverlap(
+          apt.date, checkStart, checkEnd, apt.customerId, apt.id,
+        );
+        if (customerOverlap) {
+          conflicts.push({ appointmentId: apt.id, date: apt.date, reason: "Kunden-Terminüberschneidung" });
+          continue;
+        }
       }
     }
 
@@ -458,6 +470,13 @@ router.post("/:id/extend", asyncHandler("Serie konnte nicht verlängert werden",
   const { newEndDate } = parsed.data;
   if (newEndDate <= series.endDate) {
     return sendBadRequest(res, "Das neue Enddatum muss nach dem aktuellen Enddatum liegen.");
+  }
+
+  const extendMaxEnd = new Date(series.startDate);
+  extendMaxEnd.setMonth(extendMaxEnd.getMonth() + 12);
+  const extendMaxEndStr = formatDateFromObj(extendMaxEnd);
+  if (newEndDate > extendMaxEndStr) {
+    return sendBadRequest(res, "Die Gesamtdauer der Serie darf maximal 12 Monate betragen.");
   }
 
   const services = series.serviceIds.map((serviceId, i) => ({

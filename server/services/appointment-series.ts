@@ -13,8 +13,6 @@ const WEEKDAY_TO_JS_DAY: Record<Weekday, number> = {
   fr: 5,
 };
 
-const MAX_SERIES_MONTHS = 12;
-
 export interface GeneratedDate {
   date: string;
   skipped: boolean;
@@ -50,10 +48,6 @@ export function generateSeriesDates(
   const start = parseDate(startDate);
   const end = parseDate(endDate);
 
-  const maxEnd = new Date(start);
-  maxEnd.setMonth(maxEnd.getMonth() + MAX_SERIES_MONTHS);
-  const effectiveEnd = end < maxEnd ? end : maxEnd;
-
   const targetDays = new Set(weekdays.map(w => WEEKDAY_TO_JS_DAY[w]));
 
   const results: GeneratedDate[] = [];
@@ -65,7 +59,7 @@ export function generateSeriesDates(
   let weekNumber = 0;
   let lastWeekStart = weekStart.getTime();
 
-  while (current <= effectiveEnd) {
+  while (current <= end) {
     const currentWeekStart = new Date(current);
     currentWeekStart.setDate(currentWeekStart.getDate() - ((currentWeekStart.getDay() + 6) % 7));
 
