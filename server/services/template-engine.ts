@@ -136,6 +136,8 @@ export interface WizardFormData {
     nachname?: string;
     contactType?: string;
     telefon?: string;
+    festnetz?: string;
+    mobilnummer?: string;
     email?: string;
     isPrimary?: boolean;
   }>;

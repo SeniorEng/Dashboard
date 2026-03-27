@@ -235,7 +235,7 @@ export function useCustomerDetailForm(
   }, [servicesForm, updateContractMutation]);
 
   const addContactMutation = useMutation({
-    mutationFn: async (data: typeof emptyContactForm) => {
+    mutationFn: async (data: Record<string, unknown>) => {
       const result = await api.post(`/customers/${customerId}/contacts`, data);
       return unwrapResult(result);
     },
@@ -251,7 +251,7 @@ export function useCustomerDetailForm(
   });
 
   const updateContactMutation = useMutation({
-    mutationFn: async ({ contactId, data }: { contactId: number; data: Partial<typeof emptyContactForm> }) => {
+    mutationFn: async ({ contactId, data }: { contactId: number; data: Record<string, unknown> }) => {
       const result = await api.patch(`/customers/${customerId}/contacts/${contactId}`, data);
       return unwrapResult(result);
     },
