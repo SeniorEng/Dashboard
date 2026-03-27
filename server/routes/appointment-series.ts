@@ -430,7 +430,7 @@ router.post("/:seriesId/appointments/:appointmentId/cancel", asyncHandler("Serie
   }
 
   const cancelSchema = seriesAppointmentActionSchema.extend({
-    includeExceptions: z.boolean().optional().default(true),
+    includeExceptions: z.boolean().optional().default(false),
   });
   const parsed = cancelSchema.safeParse(req.body);
   if (!parsed.success) {
