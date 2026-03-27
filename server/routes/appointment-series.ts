@@ -9,7 +9,8 @@ import { validateSeriesDates, createSeriesAppointments } from "../services/appoi
 import { storage } from "../storage";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
-import { todayISO, addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
+import { todayISO, addMinutesToTimeHHMMSS, isWeekend } from "@shared/utils/datetime";
+import { appointmentService } from "../services/appointments";
 import { db } from "../lib/db";
 
 const router = Router();
@@ -237,9 +238,11 @@ const seriesAppointmentActionSchema = z.object({
 });
 
 const seriesAppointmentUpdateSchema = seriesAppointmentActionSchema.extend({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   scheduledStart: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/).optional(),
   assignedEmployeeId: z.number().optional(),
   notes: z.string().max(255).optional().nullable(),
+  includeExceptions: z.boolean().optional().default(false),
 });
 
 router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serientermin konnte nicht geändert werden", async (req, res) => {
@@ -261,7 +264,7 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
     return sendBadRequest(res, "Validierungsfehler");
   }
 
-  const { mode, ...updateFields } = parsed.data;
+  const { mode, includeExceptions, ...updateFields } = parsed.data;
   const appointment = await storage.getAppointment(appointmentId);
   if (!appointment || appointment.seriesId !== seriesId) {
     return sendNotFound(res, "Termin nicht in dieser Serie gefunden.");
@@ -271,11 +274,16 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
     return sendBadRequest(res, "Abgeschlossene Termine können nicht geändert werden.");
   }
 
+  if (updateFields.date && isWeekend(updateFields.date)) {
+    return sendBadRequest(res, "Termine können nicht auf Samstage oder Sonntage verschoben werden.");
+  }
+
   const updateData: Record<string, unknown> = {};
   if (updateFields.scheduledStart !== undefined) {
     updateData.scheduledStart = updateFields.scheduledStart;
     updateData.scheduledEnd = addMinutesToTimeHHMMSS(updateFields.scheduledStart, series.durationMinutes);
   }
+  if (updateFields.date !== undefined) updateData.date = updateFields.date;
   if (updateFields.assignedEmployeeId !== undefined) updateData.assignedEmployeeId = updateFields.assignedEmployeeId;
   if (updateFields.notes !== undefined) updateData.notes = updateFields.notes;
 
@@ -283,15 +291,86 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
     return sendBadRequest(res, "Keine Änderungen angegeben.");
   }
 
+  const hasSchedulingChange = updateFields.scheduledStart !== undefined
+    || updateFields.date !== undefined
+    || updateFields.assignedEmployeeId !== undefined;
+
   if (mode === "single") {
-    updateData.isSeriesException = true;
+    if (hasSchedulingChange) {
+      const checkDate = updateFields.date || appointment.date;
+      const checkStart = updateFields.scheduledStart || appointment.scheduledStart;
+      const checkEnd = updateData.scheduledEnd as string || appointment.scheduledEnd;
+      const checkEmployee = updateFields.assignedEmployeeId || appointment.assignedEmployeeId;
+
+      if (checkEmployee) {
+        const empOverlap = await appointmentService.checkOverlap(checkDate, checkStart, checkEnd, checkEmployee, appointmentId);
+        if (empOverlap.hasOverlap) {
+          return sendBadRequest(res, "Terminüberschneidung: Der Mitarbeiter hat bereits einen Termin zu dieser Zeit.");
+        }
+      }
+
+      const customerOverlap = await appointmentService.checkCustomerOverlap(
+        checkDate, checkStart, checkEnd, appointment.customerId!, appointmentId,
+      );
+      if (customerOverlap) {
+        return sendBadRequest(res, "Terminüberschneidung: Der Kunde hat bereits einen Termin zu dieser Zeit.");
+      }
+
+      updateData.isSeriesException = true;
+    }
     await storage.updateAppointment(appointmentId, updateData);
     return res.json({ updated: 1 });
   }
 
+  if (updateFields.date !== undefined && mode !== "single") {
+    return sendBadRequest(res, "Datumsänderungen sind nur für einzelne Termine möglich (mode: single).");
+  }
+
   const today = todayISO();
   const fromDate = mode === "all_future" ? today : appointment.date;
-  const eligibleIds = await collectEligibleFutureIds(seriesId, fromDate);
+  const futureAppointments = await seriesStorage.getFutureSeriesAppointments(
+    seriesId, fromDate, { includeExceptions },
+  );
+
+  const eligibleIds: number[] = [];
+  const conflicts: Array<{ appointmentId: number; date: string; reason: string }> = [];
+
+  for (const apt of futureAppointments) {
+    if (apt.status === "completed") continue;
+
+    const employeeId = apt.assignedEmployeeId || apt.performedByEmployeeId;
+    if (employeeId) {
+      const monthClosed = await timeTrackingStorage.isMonthClosed(employeeId, apt.date);
+      if (monthClosed) continue;
+    }
+
+    const isLocked = await storage.isAppointmentLocked(apt.id);
+    if (isLocked) continue;
+
+    if (hasSchedulingChange) {
+      const checkStart = updateFields.scheduledStart || apt.scheduledStart;
+      const checkEnd = updateData.scheduledEnd as string || apt.scheduledEnd;
+      const checkEmployee = updateFields.assignedEmployeeId || apt.assignedEmployeeId;
+
+      if (checkEmployee) {
+        const empOverlap = await appointmentService.checkOverlap(apt.date, checkStart, checkEnd, checkEmployee, apt.id);
+        if (empOverlap.hasOverlap) {
+          conflicts.push({ appointmentId: apt.id, date: apt.date, reason: "Mitarbeiter-Terminüberschneidung" });
+          continue;
+        }
+      }
+
+      const customerOverlap = await appointmentService.checkCustomerOverlap(
+        apt.date, checkStart, checkEnd, apt.customerId!, apt.id,
+      );
+      if (customerOverlap) {
+        conflicts.push({ appointmentId: apt.id, date: apt.date, reason: "Kunden-Terminüberschneidung" });
+        continue;
+      }
+    }
+
+    eligibleIds.push(apt.id);
+  }
 
   const count = await seriesStorage.bulkUpdateSeriesAppointments(eligibleIds, updateData);
 
@@ -302,7 +381,7 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
     await seriesStorage.updateSeries(seriesId, seriesRuleUpdate);
   }
 
-  res.json({ updated: count });
+  res.json({ updated: count, conflicts });
 }));
 
 router.post("/:seriesId/appointments/:appointmentId/cancel", asyncHandler("Serientermin konnte nicht abgesagt werden", async (req, res) => {
@@ -319,12 +398,15 @@ router.post("/:seriesId/appointments/:appointmentId/cancel", asyncHandler("Serie
     return sendForbidden(res, "ACCESS_DENIED", "Kein Zugriff.");
   }
 
-  const parsed = seriesAppointmentActionSchema.safeParse(req.body);
+  const cancelSchema = seriesAppointmentActionSchema.extend({
+    includeExceptions: z.boolean().optional().default(true),
+  });
+  const parsed = cancelSchema.safeParse(req.body);
   if (!parsed.success) {
     return sendBadRequest(res, "Validierungsfehler");
   }
 
-  const { mode } = parsed.data;
+  const { mode, includeExceptions } = parsed.data;
   const appointment = await storage.getAppointment(appointmentId);
   if (!appointment || appointment.seriesId !== seriesId) {
     return sendNotFound(res, "Termin nicht in dieser Serie gefunden.");
@@ -340,7 +422,7 @@ router.post("/:seriesId/appointments/:appointmentId/cancel", asyncHandler("Serie
 
   const today = todayISO();
   const fromDate = mode === "all_future" ? today : appointment.date;
-  const eligibleIds = await collectEligibleFutureIds(seriesId, fromDate, { includeExceptions: true });
+  const eligibleIds = await collectEligibleFutureIds(seriesId, fromDate, { includeExceptions });
 
   const count = await seriesStorage.bulkCancelSeriesAppointments(eligibleIds);
 
