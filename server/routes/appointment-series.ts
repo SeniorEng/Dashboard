@@ -1,15 +1,15 @@
 import { Router } from "express";
 import { z } from "zod";
-import { requireAuth, requireRoles } from "../middleware/auth";
+import { requireAuth } from "../middleware/auth";
 import { asyncHandler, sendBadRequest, sendNotFound, sendForbidden } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
-import { createSeriesSchema, updateSeriesSchema } from "@shared/schema";
+import { createSeriesSchema, updateSeriesSchema, type Weekday } from "@shared/schema";
 import * as seriesStorage from "../storage/appointment-series-storage";
 import { validateSeriesDates, createSeriesAppointments } from "../services/appointment-series";
 import { storage } from "../storage";
 import { timeTrackingStorage } from "../storage/time-tracking";
+import { budgetLedgerStorage } from "../storage/budget-ledger";
 import { todayISO, addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
-import { appointmentService } from "../services/appointments";
 import { db } from "../lib/db";
 
 const router = Router();
@@ -21,6 +21,36 @@ async function checkSeriesAccess(
 ): Promise<boolean> {
   if (user.isAdmin) return true;
   return series.assignedEmployeeId === user.id;
+}
+
+async function collectEligibleFutureIds(
+  seriesId: number,
+  fromDate: string,
+  options?: { includeExceptions?: boolean },
+): Promise<number[]> {
+  const futureAppointments = await seriesStorage.getFutureSeriesAppointments(seriesId, fromDate, options);
+  const eligibleIds: number[] = [];
+
+  for (const apt of futureAppointments) {
+    if (apt.status === "completed") continue;
+
+    const employeeId = apt.assignedEmployeeId || apt.performedByEmployeeId;
+    if (employeeId) {
+      const monthClosed = await timeTrackingStorage.isMonthClosed(employeeId, apt.date);
+      if (monthClosed) continue;
+    }
+
+    const isLocked = await storage.isAppointmentLocked(apt.id);
+    if (isLocked) continue;
+
+    eligibleIds.push(apt.id);
+  }
+
+  return eligibleIds;
+}
+
+function formatDateFromObj(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 router.post("/", asyncHandler("Serie konnte nicht erstellt werden", async (req, res) => {
@@ -82,23 +112,34 @@ router.post("/", asyncHandler("Serie konnte nicht erstellt werden", async (req, 
       endDate: input.endDate,
       notes: input.notes || null,
       status: "active",
-    });
+    }, tx);
 
     const createdCount = await createSeriesAppointments(
       series.id,
       input,
       validation.validDates,
       user.id,
+      tx,
     );
 
     return { series, createdCount };
   });
+
+  let _budgetWarning: string | undefined;
+  try {
+    await budgetLedgerStorage.syncBudgetAllocations(input.customerId);
+    const budgetSummary = await budgetLedgerStorage.getBudgetSummary(input.customerId);
+    if (budgetSummary.availableAfterPlannedCents < 0) {
+      _budgetWarning = "Achtung: Das Budget dieses Kunden reicht möglicherweise nicht für alle geplanten Termine.";
+    }
+  } catch {}
 
   res.status(201).json({
     series: result.series,
     createdAppointments: result.createdCount,
     skippedDates: validation.dates.filter(d => d.skipped),
     conflicts: validation.conflicts,
+    _budgetWarning,
   });
 }));
 
@@ -164,6 +205,33 @@ router.patch("/:id", asyncHandler("Serie konnte nicht aktualisiert werden", asyn
   res.json(updated);
 }));
 
+router.delete("/:id", asyncHandler("Serie konnte nicht beendet werden", async (req, res) => {
+  const user = req.user!;
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
+  const series = await seriesStorage.getSeries(id);
+  if (!series) return sendNotFound(res, "Serie nicht gefunden.");
+
+  if (!(await checkSeriesAccess(user, series))) {
+    return sendForbidden(res, "ACCESS_DENIED", "Kein Zugriff auf diese Serie.");
+  }
+
+  if (series.status === "ended") {
+    return sendBadRequest(res, "Diese Serie ist bereits beendet.");
+  }
+
+  const today = todayISO();
+  const eligibleIds = await collectEligibleFutureIds(id, today, { includeExceptions: true });
+
+  await db.transaction(async (tx) => {
+    await seriesStorage.bulkCancelSeriesAppointments(eligibleIds, tx);
+    await seriesStorage.updateSeries(id, { status: "ended" });
+  });
+
+  res.json({ cancelled: eligibleIds.length, status: "ended" });
+}));
+
 const seriesAppointmentActionSchema = z.object({
   mode: z.enum(["single", "this_and_future", "all_future"]),
 });
@@ -223,23 +291,7 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
 
   const today = todayISO();
   const fromDate = mode === "all_future" ? today : appointment.date;
-  const futureAppointments = await seriesStorage.getFutureSeriesAppointments(seriesId, fromDate);
-
-  const eligibleIds: number[] = [];
-  for (const apt of futureAppointments) {
-    if (apt.status === "completed") continue;
-
-    const employeeId = apt.assignedEmployeeId || apt.performedByEmployeeId;
-    if (employeeId) {
-      const monthClosed = await timeTrackingStorage.isMonthClosed(employeeId, apt.date);
-      if (monthClosed) continue;
-    }
-
-    const isLocked = await storage.isAppointmentLocked(apt.id);
-    if (isLocked) continue;
-
-    eligibleIds.push(apt.id);
-  }
+  const eligibleIds = await collectEligibleFutureIds(seriesId, fromDate);
 
   const count = await seriesStorage.bulkUpdateSeriesAppointments(eligibleIds, updateData);
 
@@ -288,27 +340,7 @@ router.post("/:seriesId/appointments/:appointmentId/cancel", asyncHandler("Serie
 
   const today = todayISO();
   const fromDate = mode === "all_future" ? today : appointment.date;
-  const futureAppointments = await seriesStorage.getFutureSeriesAppointments(
-    seriesId,
-    fromDate,
-    { includeExceptions: true },
-  );
-
-  const eligibleIds: number[] = [];
-  for (const apt of futureAppointments) {
-    if (apt.status === "completed") continue;
-
-    const employeeId = apt.assignedEmployeeId || apt.performedByEmployeeId;
-    if (employeeId) {
-      const monthClosed = await timeTrackingStorage.isMonthClosed(employeeId, apt.date);
-      if (monthClosed) continue;
-    }
-
-    const isLocked = await storage.isAppointmentLocked(apt.id);
-    if (isLocked) continue;
-
-    eligibleIds.push(apt.id);
-  }
+  const eligibleIds = await collectEligibleFutureIds(seriesId, fromDate, { includeExceptions: true });
 
   const count = await seriesStorage.bulkCancelSeriesAppointments(eligibleIds);
 
@@ -353,13 +385,13 @@ router.post("/:id/extend", asyncHandler("Serie konnte nicht verlängert werden",
 
   const dayAfterCurrentEnd = new Date(series.endDate);
   dayAfterCurrentEnd.setDate(dayAfterCurrentEnd.getDate() + 1);
-  const startDate = `${dayAfterCurrentEnd.getFullYear()}-${String(dayAfterCurrentEnd.getMonth() + 1).padStart(2, "0")}-${String(dayAfterCurrentEnd.getDate()).padStart(2, "0")}`;
+  const startDate = formatDateFromObj(dayAfterCurrentEnd);
 
   const input: z.infer<typeof createSeriesSchema> = {
     customerId: series.customerId,
     assignedEmployeeId: series.assignedEmployeeId,
     frequency: series.frequency as "weekly" | "biweekly",
-    weekdays: series.weekdays as any,
+    weekdays: series.weekdays as Weekday[],
     scheduledStart: series.scheduledStart,
     durationMinutes: series.durationMinutes,
     services,
@@ -377,20 +409,34 @@ router.post("/:id/extend", asyncHandler("Serie konnte nicht verlängert werden",
     });
   }
 
-  const createdCount = await createSeriesAppointments(
-    series.id,
-    input,
-    validation.validDates,
-    user.id,
-  );
+  let createdCount: number;
+  let _budgetWarning: string | undefined;
 
-  await seriesStorage.updateSeries(id, { endDate: newEndDate });
+  await db.transaction(async (tx) => {
+    createdCount = await createSeriesAppointments(
+      series.id,
+      input,
+      validation.validDates,
+      user.id,
+      tx,
+    );
+    await seriesStorage.updateSeries(id, { endDate: newEndDate });
+  });
+
+  try {
+    await budgetLedgerStorage.syncBudgetAllocations(series.customerId);
+    const budgetSummary = await budgetLedgerStorage.getBudgetSummary(series.customerId);
+    if (budgetSummary.availableAfterPlannedCents < 0) {
+      _budgetWarning = "Achtung: Das Budget dieses Kunden reicht möglicherweise nicht für alle geplanten Termine.";
+    }
+  } catch {}
 
   res.json({
-    createdAppointments: createdCount,
+    createdAppointments: createdCount!,
     newEndDate,
     skippedDates: validation.dates.filter(d => d.skipped),
     conflicts: validation.conflicts,
+    _budgetWarning,
   });
 }));
 
@@ -419,7 +465,7 @@ router.post("/:id/shorten", asyncHandler("Serie konnte nicht verkürzt werden", 
 
   const dayAfterNewEnd = new Date(newEndDate);
   dayAfterNewEnd.setDate(dayAfterNewEnd.getDate() + 1);
-  const cutoffDate = `${dayAfterNewEnd.getFullYear()}-${String(dayAfterNewEnd.getMonth() + 1).padStart(2, "0")}-${String(dayAfterNewEnd.getDate()).padStart(2, "0")}`;
+  const cutoffDate = formatDateFromObj(dayAfterNewEnd);
 
   const futureAppointments = await seriesStorage.getFutureSeriesAppointments(
     id,
@@ -454,11 +500,13 @@ router.post("/:id/shorten", asyncHandler("Serie konnte nicht verkürzt werden", 
     deletableIds.push(apt.id);
   }
 
-  const deleted = await seriesStorage.bulkDeleteSeriesAppointments(deletableIds);
-  await seriesStorage.updateSeries(id, { endDate: newEndDate });
+  await db.transaction(async (tx) => {
+    await seriesStorage.bulkDeleteSeriesAppointments(deletableIds, tx);
+    await seriesStorage.updateSeries(id, { endDate: newEndDate });
+  });
 
   res.json({
-    deleted,
+    deleted: deletableIds.length,
     newEndDate,
     skipped: skippedCount,
   });

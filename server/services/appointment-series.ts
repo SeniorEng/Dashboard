@@ -1,8 +1,9 @@
 import { isWeekend, addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
 import { isHoliday } from "@shared/utils/holidays";
 import type { Weekday, CreateSeriesInput } from "@shared/schema";
+import { appointments, appointmentServices as appointmentServicesTable } from "@shared/schema";
 import { appointmentService } from "./appointments";
-import { storage } from "../storage";
+import { db, type DbOrTx } from "../lib/db";
 
 const WEEKDAY_TO_JS_DAY: Record<Weekday, number> = {
   mo: 1,
@@ -176,7 +177,9 @@ export async function createSeriesAppointments(
   input: CreateSeriesInput,
   validDates: string[],
   createdByUserId: number,
+  tx?: DbOrTx,
 ): Promise<number> {
+  const client = tx || db;
   const totalDuration = input.services.reduce((sum, s) => sum + s.durationMinutes, 0);
   const scheduledEnd = addMinutesToTimeHHMMSS(input.scheduledStart, totalDuration);
 
@@ -198,12 +201,12 @@ export async function createSeriesAppointments(
       isSeriesException: false,
     };
 
-    const appointment = await storage.createAppointment(appointmentData);
+    const [appointment] = await client.insert(appointments).values(appointmentData).returning();
 
     if (input.services.length > 0) {
-      await storage.createAppointmentServices(
-        appointment.id,
+      await client.insert(appointmentServicesTable).values(
         input.services.map(s => ({
+          appointmentId: appointment.id,
           serviceId: s.serviceId,
           plannedDurationMinutes: s.durationMinutes,
         })),

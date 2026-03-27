@@ -8,8 +8,9 @@ import {
 import { eq, and, isNull, gte, ne, inArray, desc } from "drizzle-orm";
 import { db, type DbOrTx } from "../lib/db";
 
-export async function createSeries(data: InsertAppointmentSeries): Promise<AppointmentSeries> {
-  const [result] = await db.insert(appointmentSeries).values(data).returning();
+export async function createSeries(data: InsertAppointmentSeries, tx?: DbOrTx): Promise<AppointmentSeries> {
+  const client = tx || db;
+  const [result] = await client.insert(appointmentSeries).values(data).returning();
   return result;
 }
 
