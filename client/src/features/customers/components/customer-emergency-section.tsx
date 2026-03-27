@@ -85,24 +85,49 @@ export function CustomerEmergencySection({
                       <Input value={emergencyContactForm.nachname} onChange={(e) => setEmergencyContactForm(f => ({ ...f, nachname: e.target.value }))} className="h-9" data-testid="input-contact-nachname" />
                     </div>
                   </div>
-                  <div>
-                    <Label className="text-xs">Telefon</Label>
-                    <Input
-                      value={emergencyContactForm.telefon}
-                      onChange={(e) => {
-                        setEmergencyContactForm(f => ({ ...f, telefon: formatPhoneAsYouType(e.target.value) }));
-                        setEmergencyFormErrors(prev => ({ ...prev, telefon: "" }));
-                      }}
-                      onBlur={() => {
-                        const err = validatePhone(emergencyContactForm.telefon, "telefon");
-                        if (err) setEmergencyFormErrors(prev => ({ ...prev, telefon: err }));
-                      }}
-                      placeholder="0151 12345678"
-                      inputMode="tel"
-                      className={`h-9 ${emergencyFormErrors.telefon ? "border-red-400" : ""}`}
-                      data-testid="input-contact-telefon"
-                    />
-                    {emergencyFormErrors.telefon && <span className="text-xs text-red-500 mt-0.5">{emergencyFormErrors.telefon}</span>}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-xs">Festnetz</Label>
+                      <Input
+                        value={emergencyContactForm.festnetz}
+                        onChange={(e) => {
+                          setEmergencyContactForm(f => ({ ...f, festnetz: formatPhoneAsYouType(e.target.value) }));
+                          setEmergencyFormErrors(prev => ({ ...prev, festnetz: "" }));
+                        }}
+                        onBlur={() => {
+                          if (emergencyContactForm.festnetz?.trim()) {
+                            const err = validatePhone(emergencyContactForm.festnetz, "festnetz");
+                            if (err) setEmergencyFormErrors(prev => ({ ...prev, festnetz: err }));
+                          }
+                        }}
+                        placeholder="09121 12345"
+                        inputMode="tel"
+                        className={`h-9 ${emergencyFormErrors.festnetz ? "border-red-400" : ""}`}
+                        data-testid="input-contact-festnetz"
+                      />
+                      {emergencyFormErrors.festnetz && <span className="text-xs text-red-500 mt-0.5">{emergencyFormErrors.festnetz}</span>}
+                    </div>
+                    <div>
+                      <Label className="text-xs">Mobilnummer</Label>
+                      <Input
+                        value={emergencyContactForm.mobilnummer}
+                        onChange={(e) => {
+                          setEmergencyContactForm(f => ({ ...f, mobilnummer: formatPhoneAsYouType(e.target.value) }));
+                          setEmergencyFormErrors(prev => ({ ...prev, mobilnummer: "" }));
+                        }}
+                        onBlur={() => {
+                          if (emergencyContactForm.mobilnummer?.trim()) {
+                            const err = validatePhone(emergencyContactForm.mobilnummer, "mobilnummer");
+                            if (err) setEmergencyFormErrors(prev => ({ ...prev, mobilnummer: err }));
+                          }
+                        }}
+                        placeholder="0170 1234567"
+                        inputMode="tel"
+                        className={`h-9 ${emergencyFormErrors.mobilnummer ? "border-red-400" : ""}`}
+                        data-testid="input-contact-mobilnummer"
+                      />
+                      {emergencyFormErrors.mobilnummer && <span className="text-xs text-red-500 mt-0.5">{emergencyFormErrors.mobilnummer}</span>}
+                    </div>
                   </div>
                   <div>
                     <Label className="text-xs">E-Mail</Label>
@@ -166,15 +191,17 @@ export function CustomerEmergencySection({
                     </span>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    <a
-                      href={`tel:${contact.telefon}`}
-                      className="text-primary hover:underline flex items-center gap-1 text-sm"
-                      onClick={(e) => e.stopPropagation()}
-                      data-testid={`link-contact-phone-${contact.id}`}
-                    >
-                      <Phone className={iconSize.xs} />
-                      {formatPhoneForDisplay(contact.telefon)}
-                    </a>
+                    {(contact.mobilnummer || contact.festnetz || contact.telefon) && (
+                      <a
+                        href={`tel:${contact.mobilnummer || contact.festnetz || contact.telefon}`}
+                        className="text-primary hover:underline flex items-center gap-1 text-sm"
+                        onClick={(e) => e.stopPropagation()}
+                        data-testid={`link-contact-phone-${contact.id}`}
+                      >
+                        <Phone className={iconSize.xs} />
+                        {formatPhoneForDisplay(contact.mobilnummer || contact.festnetz || contact.telefon || "")}
+                      </a>
+                    )}
                     <Button variant="ghost" size="sm" className="min-h-[44px] min-w-[44px] p-0" onClick={() => startEditContact(contact)} data-testid={`button-edit-contact-${contact.id}`}>
                       <Pencil className="h-3 w-3 text-muted-foreground" />
                     </Button>
@@ -208,24 +235,49 @@ export function CustomerEmergencySection({
                 <Input value={emergencyContactForm.nachname} onChange={(e) => setEmergencyContactForm(f => ({ ...f, nachname: e.target.value }))} className="h-9" data-testid="input-new-contact-nachname" />
               </div>
             </div>
-            <div>
-              <Label className="text-xs">Telefon</Label>
-              <Input
-                value={emergencyContactForm.telefon}
-                onChange={(e) => {
-                  setEmergencyContactForm(f => ({ ...f, telefon: formatPhoneAsYouType(e.target.value) }));
-                  setEmergencyFormErrors(prev => ({ ...prev, telefon: "" }));
-                }}
-                onBlur={() => {
-                  const err = validatePhone(emergencyContactForm.telefon, "telefon");
-                  if (err) setEmergencyFormErrors(prev => ({ ...prev, telefon: err }));
-                }}
-                placeholder="0151 12345678"
-                inputMode="tel"
-                className={`h-9 ${emergencyFormErrors.telefon ? "border-red-400" : ""}`}
-                data-testid="input-new-contact-telefon"
-              />
-              {emergencyFormErrors.telefon && <span className="text-xs text-red-500 mt-0.5">{emergencyFormErrors.telefon}</span>}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-xs">Festnetz</Label>
+                <Input
+                  value={emergencyContactForm.festnetz}
+                  onChange={(e) => {
+                    setEmergencyContactForm(f => ({ ...f, festnetz: formatPhoneAsYouType(e.target.value) }));
+                    setEmergencyFormErrors(prev => ({ ...prev, festnetz: "" }));
+                  }}
+                  onBlur={() => {
+                    if (emergencyContactForm.festnetz?.trim()) {
+                      const err = validatePhone(emergencyContactForm.festnetz, "festnetz");
+                      if (err) setEmergencyFormErrors(prev => ({ ...prev, festnetz: err }));
+                    }
+                  }}
+                  placeholder="09121 12345"
+                  inputMode="tel"
+                  className={`h-9 ${emergencyFormErrors.festnetz ? "border-red-400" : ""}`}
+                  data-testid="input-new-contact-festnetz"
+                />
+                {emergencyFormErrors.festnetz && <span className="text-xs text-red-500 mt-0.5">{emergencyFormErrors.festnetz}</span>}
+              </div>
+              <div>
+                <Label className="text-xs">Mobilnummer</Label>
+                <Input
+                  value={emergencyContactForm.mobilnummer}
+                  onChange={(e) => {
+                    setEmergencyContactForm(f => ({ ...f, mobilnummer: formatPhoneAsYouType(e.target.value) }));
+                    setEmergencyFormErrors(prev => ({ ...prev, mobilnummer: "" }));
+                  }}
+                  onBlur={() => {
+                    if (emergencyContactForm.mobilnummer?.trim()) {
+                      const err = validatePhone(emergencyContactForm.mobilnummer, "mobilnummer");
+                      if (err) setEmergencyFormErrors(prev => ({ ...prev, mobilnummer: err }));
+                    }
+                  }}
+                  placeholder="0170 1234567"
+                  inputMode="tel"
+                  className={`h-9 ${emergencyFormErrors.mobilnummer ? "border-red-400" : ""}`}
+                  data-testid="input-new-contact-mobilnummer"
+                />
+                {emergencyFormErrors.mobilnummer && <span className="text-xs text-red-500 mt-0.5">{emergencyFormErrors.mobilnummer}</span>}
+              </div>
             </div>
             <div>
               <Label className="text-xs">E-Mail</Label>
@@ -267,7 +319,7 @@ export function CustomerEmergencySection({
               <Label className="text-xs">Primärer Kontakt</Label>
             </div>
             <div className="flex gap-2 pt-1">
-              <Button size="sm" onClick={handleSaveEmergencyContact} disabled={contactSaving || !emergencyContactForm.vorname || !emergencyContactForm.nachname || !emergencyContactForm.telefon} className="min-h-[36px]" data-testid="button-save-new-contact">
+              <Button size="sm" onClick={handleSaveEmergencyContact} disabled={contactSaving || !emergencyContactForm.vorname || !emergencyContactForm.nachname} className="min-h-[36px]" data-testid="button-save-new-contact">
                 {contactSaving ? <Loader2 className={`${iconSize.sm} animate-spin`} /> : <><Save className={`${iconSize.sm} mr-1`} />Speichern</>}
               </Button>
               <Button size="sm" variant="outline" onClick={cancelEditContact} disabled={contactSaving} className="min-h-[36px]" data-testid="button-cancel-new-contact">

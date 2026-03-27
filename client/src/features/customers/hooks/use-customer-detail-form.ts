@@ -23,7 +23,7 @@ interface CustomerDetails {
 
 export type EditSection = "contact" | "pflegegrad" | "pet" | "medical" | "services" | "emergencyContacts" | null;
 
-const emptyContactForm = { vorname: "", nachname: "", telefon: "", email: "", contactType: "sonstige" as string, isPrimary: false, notes: "" };
+const emptyContactForm = { vorname: "", nachname: "", festnetz: "", mobilnummer: "", email: "", contactType: "sonstige" as string, isPrimary: false, notes: "" };
 
 export type EmergencyContactFormType = typeof emptyContactForm;
 
@@ -290,7 +290,8 @@ export function useCustomerDetailForm(
     setEmergencyContactForm({
       vorname: contact.vorname,
       nachname: contact.nachname,
-      telefon: contact.telefon ? formatPhoneForDisplay(contact.telefon) : "",
+      festnetz: contact.festnetz ? formatPhoneForDisplay(contact.festnetz) : "",
+      mobilnummer: contact.mobilnummer ? formatPhoneForDisplay(contact.mobilnummer) : "",
       email: contact.email || "",
       contactType: contact.contactType,
       isPrimary: contact.isPrimary ?? false,
@@ -309,8 +310,14 @@ export function useCustomerDetailForm(
 
   const handleSaveEmergencyContact = useCallback(() => {
     const errors: Record<string, string> = {};
-    const telefonErr = validatePhone(emergencyContactForm.telefon, "telefon");
-    if (telefonErr) errors.telefon = telefonErr;
+    if (emergencyContactForm.festnetz?.trim()) {
+      const festnetzErr = validatePhone(emergencyContactForm.festnetz, "festnetz");
+      if (festnetzErr) errors.festnetz = festnetzErr;
+    }
+    if (emergencyContactForm.mobilnummer?.trim()) {
+      const mobilErr = validatePhone(emergencyContactForm.mobilnummer, "mobilnummer");
+      if (mobilErr) errors.mobilnummer = mobilErr;
+    }
     const emailErr = validateEmail(emergencyContactForm.email);
     if (emailErr) errors.email = emailErr;
     if (Object.keys(errors).length > 0) {
@@ -320,7 +327,8 @@ export function useCustomerDetailForm(
     setEmergencyFormErrors({});
     const payload = {
       ...emergencyContactForm,
-      telefon: emergencyContactForm.telefon?.trim() || "",
+      festnetz: emergencyContactForm.festnetz?.trim() || null,
+      mobilnummer: emergencyContactForm.mobilnummer?.trim() || null,
       email: emergencyContactForm.email?.trim() || "",
       notes: emergencyContactForm.notes?.trim() || "",
     };

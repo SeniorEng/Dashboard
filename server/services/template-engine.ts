@@ -43,7 +43,8 @@ const PLACEHOLDER_CATALOG: Record<string, { label: string; source: string }> = {
   vertragsstunden: { label: "Vereinbarte Stunden", source: "contract" },
   vertragsperiode: { label: "Vertragsperiode (pro Woche/Monat)", source: "contract" },
   kontaktperson_name: { label: "Kontaktperson Name", source: "contact" },
-  kontaktperson_telefon: { label: "Kontaktperson Telefon", source: "contact" },
+  kontaktperson_telefon: { label: "Kontaktperson Telefon (Mobil)", source: "contact" },
+  kontaktperson_festnetz: { label: "Kontaktperson Festnetz", source: "contact" },
   kontaktperson_email: { label: "Kontaktperson E-Mail", source: "contact" },
   kontaktperson_typ: { label: "Kontaktperson Typ", source: "contact" },
   mandatsreferenz: { label: "SEPA-Mandatsreferenz", source: "system" },
@@ -187,6 +188,7 @@ export async function buildPlaceholdersFromFormData(
     vertragsperiode: formData.contractPeriod === "monthly" ? "pro Monat" : formData.contractPeriod === "weekly" ? "pro Woche" : "",
     kontaktperson_name: "",
     kontaktperson_telefon: "",
+    kontaktperson_festnetz: "",
     kontaktperson_email: "",
     kontaktperson_typ: "",
     mandatsreferenz: `SE-NEU-${today.getFullYear()}`,
@@ -216,7 +218,8 @@ export async function buildPlaceholdersFromFormData(
   const primaryContact = formData.contacts?.find(c => c.isPrimary) || formData.contacts?.[0];
   if (primaryContact) {
     placeholders.kontaktperson_name = [primaryContact.vorname, primaryContact.nachname].filter(Boolean).join(" ");
-    placeholders.kontaktperson_telefon = primaryContact.telefon || "";
+    placeholders.kontaktperson_telefon = primaryContact.mobilnummer || primaryContact.festnetz || primaryContact.telefon || "";
+    placeholders.kontaktperson_festnetz = primaryContact.festnetz || "";
     placeholders.kontaktperson_email = primaryContact.email || "";
     placeholders.kontaktperson_typ = CONTACT_TYPE_LABELS[primaryContact.contactType] ?? primaryContact.contactType ?? "";
   }
@@ -341,6 +344,7 @@ export async function buildPlaceholders(
     vertragsperiode: "",
     kontaktperson_name: "",
     kontaktperson_telefon: "",
+    kontaktperson_festnetz: "",
     kontaktperson_email: "",
     kontaktperson_typ: "",
     mandatsreferenz: `SE-${customerId}-${today.getFullYear()}`,

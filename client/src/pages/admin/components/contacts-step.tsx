@@ -15,6 +15,25 @@ interface ContactsStepProps {
   onRemoveContact: (index: number) => void;
 }
 
+function PhoneField({ label, value, onChange, placeholder, error, testId }: {
+  label: string; value: string; onChange: (v: string) => void;
+  placeholder: string; error?: string | null; testId: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={error ? "border-red-500" : ""}
+        data-testid={testId}
+      />
+      {error && <p className="text-xs text-red-500">{error}</p>}
+    </div>
+  );
+}
+
 function isContactEmpty(contact: ContactFormData): boolean {
   return !contact.vorname.trim() && !contact.nachname.trim();
 }
@@ -89,20 +108,25 @@ export function ContactsStep({ contacts, phoneErrors, onContactChange, onAddCont
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor={`contactTelefon-${index}`}>Telefon</Label>
-              <Input
-                id={`contactTelefon-${index}`}
-                value={contact.telefon}
-                onChange={(e) => onContactChange(index, "telefon", e.target.value)}
-                placeholder="0170 1234567"
-                className={phoneErrors[`contact_${index}`] ? "border-red-500" : ""}
-                data-testid={`input-contact-telefon-${index}`}
-              />
-              {phoneErrors[`contact_${index}`] && (
-                <p className="text-xs text-red-500">{phoneErrors[`contact_${index}`]}</p>
-              )}
-            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <PhoneField
+              label="Festnetz"
+              value={contact.festnetz}
+              onChange={(v) => onContactChange(index, "festnetz", v)}
+              placeholder="09121 12345"
+              error={phoneErrors[`contact_${index}_festnetz`]}
+              testId={`input-contact-festnetz-${index}`}
+            />
+            <PhoneField
+              label="Mobilnummer"
+              value={contact.mobilnummer}
+              onChange={(v) => onContactChange(index, "mobilnummer", v)}
+              placeholder="0170 1234567"
+              error={phoneErrors[`contact_${index}_mobilnummer`]}
+              testId={`input-contact-mobilnummer-${index}`}
+            />
           </div>
 
           <div className="space-y-2">

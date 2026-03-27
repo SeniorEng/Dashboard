@@ -40,7 +40,8 @@ interface ContactFormState {
   vorname: string;
   nachname: string;
   contactType: string;
-  telefon: string;
+  festnetz: string;
+  mobilnummer: string;
   email: string;
   notes: string;
   isPrimary: boolean;
@@ -50,7 +51,8 @@ const EMPTY_FORM: ContactFormState = {
   vorname: "",
   nachname: "",
   contactType: "sonstige",
-  telefon: "",
+  festnetz: "",
+  mobilnummer: "",
   email: "",
   notes: "",
   isPrimary: false,
@@ -61,7 +63,8 @@ function contactToForm(c: CustomerContactItem): ContactFormState {
     vorname: c.vorname,
     nachname: c.nachname,
     contactType: c.contactType,
-    telefon: formatPhoneForDisplay(c.telefon),
+    festnetz: c.festnetz ? formatPhoneForDisplay(c.festnetz) : "",
+    mobilnummer: c.mobilnummer ? formatPhoneForDisplay(c.mobilnummer) : "",
     email: c.email ?? "",
     notes: c.notes ?? "",
     isPrimary: c.isPrimary,
@@ -94,9 +97,9 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
   });
 
   const updateField = useCallback((field: keyof ContactFormState, value: string | boolean) => {
-    if (field === "telefon" && typeof value === "string") {
+    if ((field === "festnetz" || field === "mobilnummer") && typeof value === "string") {
       const formatted = formatPhoneAsYouType(value);
-      setForm(prev => ({ ...prev, telefon: formatted }));
+      setForm(prev => ({ ...prev, [field]: formatted }));
       if (value.trim()) {
         const validation = validateGermanPhone(value);
         setPhoneError(validation.valid ? null : validation.error || "Ungültige Telefonnummer");
@@ -110,14 +113,16 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
 
   const addMutation = useMutation({
     mutationFn: async (data: ContactFormState) => {
-      const normalizedPhone = data.telefon.trim() ? (normalizePhone(data.telefon) ?? data.telefon) : "";
+      const normalizedFestnetz = data.festnetz.trim() ? (normalizePhone(data.festnetz) ?? data.festnetz) : null;
+      const normalizedMobil = data.mobilnummer.trim() ? (normalizePhone(data.mobilnummer) ?? data.mobilnummer) : null;
       const result = await api.post(`/admin/customers/${customerId}/contacts`, {
         customerId,
         contactType: data.contactType,
         isPrimary: data.isPrimary,
         vorname: data.vorname,
         nachname: data.nachname,
-        telefon: normalizedPhone,
+        festnetz: normalizedFestnetz,
+        mobilnummer: normalizedMobil,
         email: data.email || null,
         notes: data.notes.trim() || null,
       });
@@ -137,13 +142,15 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: number; data: ContactFormState }) => {
-      const normalizedPhone = data.telefon.trim() ? (normalizePhone(data.telefon) ?? data.telefon) : "";
+      const normalizedFestnetz = data.festnetz.trim() ? (normalizePhone(data.festnetz) ?? data.festnetz) : null;
+      const normalizedMobil = data.mobilnummer.trim() ? (normalizePhone(data.mobilnummer) ?? data.mobilnummer) : null;
       const result = await api.patch(`/admin/customers/${customerId}/contacts/${id}`, {
         contactType: data.contactType,
         isPrimary: data.isPrimary,
         vorname: data.vorname,
         nachname: data.nachname,
-        telefon: normalizedPhone,
+        festnetz: normalizedFestnetz,
+        mobilnummer: normalizedMobil,
         email: data.email || null,
         notes: data.notes.trim() || null,
       });
@@ -204,10 +211,17 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
       toast({ title: "Bitte Vor- und Nachname eingeben", variant: "destructive" });
       return;
     }
-    if (form.telefon.trim()) {
-      const validation = validateGermanPhone(form.telefon);
+    if (form.festnetz.trim()) {
+      const validation = validateGermanPhone(form.festnetz);
       if (!validation.valid) {
-        setPhoneError(validation.error || "Ungültige Telefonnummer");
+        setPhoneError(validation.error || "Ungültige Festnetznummer");
+        return;
+      }
+    }
+    if (form.mobilnummer.trim()) {
+      const validation = validateGermanPhone(form.mobilnummer);
+      if (!validation.valid) {
+        setPhoneError(validation.error || "Ungültige Mobilnummer");
         return;
       }
     }
@@ -246,28 +260,39 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
         </div>
       </div>
 
+      <div className="space-y-1">
+        <Label className="text-xs">Kontaktart</Label>
+        <Select value={form.contactType} onValueChange={(v) => updateField("contactType", v)}>
+          <SelectTrigger data-testid="select-contact-edit-type">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {CONTACT_TYPE_SELECT_OPTIONS.map(t => (
+              <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">
-          <Label className="text-xs">Kontaktart</Label>
-          <Select value={form.contactType} onValueChange={(v) => updateField("contactType", v)}>
-            <SelectTrigger data-testid="select-contact-edit-type">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {CONTACT_TYPE_SELECT_OPTIONS.map(t => (
-                <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Label className="text-xs">Festnetz</Label>
+          <Input
+            value={form.festnetz}
+            onChange={(e) => updateField("festnetz", e.target.value)}
+            placeholder="09121 12345"
+            className="text-base"
+            data-testid="input-contact-edit-festnetz"
+          />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Telefon</Label>
+          <Label className="text-xs">Mobilnummer</Label>
           <Input
-            value={form.telefon}
-            onChange={(e) => updateField("telefon", e.target.value)}
+            value={form.mobilnummer}
+            onChange={(e) => updateField("mobilnummer", e.target.value)}
             placeholder="0170 1234567"
             className={`text-base ${phoneError ? "border-red-500" : ""}`}
-            data-testid="input-contact-edit-telefon"
+            data-testid="input-contact-edit-mobilnummer"
           />
           {phoneError && <p className="text-[11px] text-red-500">{phoneError}</p>}
         </div>
@@ -370,14 +395,24 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
                       )}
                     </div>
                     <p className="text-xs text-gray-500">{getContactTypeLabel(contact.contactType)}</p>
-                    {contact.telefon && (
+                    {contact.festnetz && (
                       <a
-                        href={`tel:${contact.telefon}`}
+                        href={`tel:${contact.festnetz}`}
                         className="text-sm text-gray-700 flex items-center gap-1 mt-1 hover:text-teal-600"
-                        data-testid={`contact-phone-${contact.id}`}
+                        data-testid={`contact-festnetz-${contact.id}`}
                       >
                         <Phone className="h-3 w-3" />
-                        {formatPhoneForDisplay(contact.telefon)}
+                        {formatPhoneForDisplay(contact.festnetz)}
+                      </a>
+                    )}
+                    {contact.mobilnummer && (
+                      <a
+                        href={`tel:${contact.mobilnummer}`}
+                        className="text-sm text-gray-700 flex items-center gap-1 mt-0.5 hover:text-teal-600"
+                        data-testid={`contact-mobilnummer-${contact.id}`}
+                      >
+                        <Phone className="h-3 w-3" />
+                        {formatPhoneForDisplay(contact.mobilnummer)}
                       </a>
                     )}
                     {contact.email && (

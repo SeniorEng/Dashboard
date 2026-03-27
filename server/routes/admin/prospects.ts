@@ -324,7 +324,9 @@ const convertProspectSchema = z.object({
     isPrimary: z.boolean(),
     vorname: z.string(),
     nachname: z.string(),
-    telefon: z.string(),
+    telefon: z.string().optional(),
+    festnetz: z.string().optional(),
+    mobilnummer: z.string().optional(),
     email: z.string().optional(),
   })).optional(),
   budgets: z.object({
@@ -477,7 +479,9 @@ router.post("/prospects/:id/convert", asyncHandler("Konvertierung fehlgeschlagen
           isPrimary: c.isPrimary,
           vorname: c.vorname,
           nachname: c.nachname,
-          telefon: c.telefon,
+          telefon: c.telefon || null,
+          festnetz: c.festnetz || null,
+          mobilnummer: c.mobilnummer || null,
           email: c.email || null,
           sortOrder: i,
         });

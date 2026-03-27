@@ -140,9 +140,10 @@ export default function ProspectConvert() {
   const [pflegesachleistungen36, setPflegesachleistungen36] = useState("0");
   const [contactVorname, setContactVorname] = useState("");
   const [contactNachname, setContactNachname] = useState("");
-  const [contactTelefon, setContactTelefon] = useState("");
+  const [contactFestnetz, setContactFestnetz] = useState("");
+  const [contactMobilnummer, setContactMobilnummer] = useState("");
   const [contactEmail, setContactEmail] = useState("");
-  const [contactType, setContactType] = useState("angehoerige");
+  const [contactType, setContactType] = useState("sonstige");
   const [primaryEmployeeId, setPrimaryEmployeeId] = useState("");
   const [backupEmployeeId, setBackupEmployeeId] = useState("");
 
@@ -196,7 +197,8 @@ export default function ProspectConvert() {
       if (wd.contactType) setContactType(wd.contactType);
       if (wd.contactVorname) setContactVorname(wd.contactVorname);
       if (wd.contactNachname) setContactNachname(wd.contactNachname);
-      if (wd.contactTelefon) setContactTelefon(wd.contactTelefon);
+      if (wd.contactFestnetz) setContactFestnetz(wd.contactFestnetz);
+      if (wd.contactMobilnummer) setContactMobilnummer(wd.contactMobilnummer);
       if (wd.contactEmail) setContactEmail(wd.contactEmail);
       if (wd.primaryEmployeeId) setPrimaryEmployeeId(String(wd.primaryEmployeeId));
       if (wd.backupEmployeeId) setBackupEmployeeId(String(wd.backupEmployeeId));
@@ -231,7 +233,8 @@ export default function ProspectConvert() {
       isPrimary: true,
       vorname: contactVorname,
       nachname: contactNachname,
-      telefon: contactTelefon,
+      festnetz: contactFestnetz || undefined,
+      mobilnummer: contactMobilnummer || undefined,
       email: contactEmail || undefined,
     }] : undefined,
     budgets: {
@@ -298,7 +301,8 @@ export default function ProspectConvert() {
     contactType,
     contactVorname,
     contactNachname,
-    contactTelefon,
+    contactFestnetz,
+    contactMobilnummer,
     contactEmail,
     primaryEmployeeId,
     backupEmployeeId,
@@ -614,9 +618,15 @@ export default function ProspectConvert() {
                     <Input value={contactNachname} onChange={(e) => setContactNachname(e.target.value)} data-testid="input-contact-nachname" />
                   </div>
                 </div>
-                <div>
-                  <Label>Telefon</Label>
-                  <Input value={contactTelefon} onChange={(e) => setContactTelefon(e.target.value)} data-testid="input-contact-telefon" />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label>Festnetz</Label>
+                    <Input value={contactFestnetz} onChange={(e) => setContactFestnetz(e.target.value)} placeholder="09121 12345" data-testid="input-contact-festnetz" />
+                  </div>
+                  <div>
+                    <Label>Mobilnummer</Label>
+                    <Input value={contactMobilnummer} onChange={(e) => setContactMobilnummer(e.target.value)} placeholder="0170 1234567" data-testid="input-contact-mobilnummer" />
+                  </div>
                 </div>
                 <div>
                   <Label>E-Mail</Label>

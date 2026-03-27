@@ -199,18 +199,18 @@ export function useCustomerWizard() {
   );
 
   const handleContactChange = useCallback((index: number, field: keyof ContactFormData, value: string | boolean) => {
-    if (field === "telefon" && typeof value === "string") {
+    if ((field === "festnetz" || field === "mobilnummer") && typeof value === "string") {
       const formatted = formatPhoneAsYouType(value);
       setFormData((prev) => {
         const newContacts = [...prev.contacts];
-        newContacts[index] = { ...newContacts[index], telefon: formatted };
+        newContacts[index] = { ...newContacts[index], [field]: formatted };
         return { ...prev, contacts: newContacts };
       });
       if (value.trim()) {
         const validation = validateGermanPhone(value);
-        setPhoneErrors((prev) => ({ ...prev, [`contact_${index}`]: validation.valid ? null : validation.error || "Ungültige Telefonnummer" }));
+        setPhoneErrors((prev) => ({ ...prev, [`contact_${index}_${field}`]: validation.valid ? null : validation.error || "Ungültige Telefonnummer" }));
       } else {
-        setPhoneErrors((prev) => ({ ...prev, [`contact_${index}`]: null }));
+        setPhoneErrors((prev) => ({ ...prev, [`contact_${index}_${field}`]: null }));
       }
       return;
     }
@@ -244,7 +244,8 @@ export function useCustomerWizard() {
     });
     setPhoneErrors((prev) => {
       const next = { ...prev };
-      delete next[`contact_${index}`];
+      delete next[`contact_${index}_festnetz`];
+      delete next[`contact_${index}_mobilnummer`];
       return next;
     });
   }, []);
@@ -262,9 +263,13 @@ export function useCustomerWizard() {
       if (!result.valid) phoneValidationErrors.push(`Festnetz: ${result.error}`);
     }
     formData.contacts.forEach((contact, index) => {
-      if (contact.telefon.trim()) {
-        const result = validateGermanPhone(contact.telefon);
-        if (!result.valid) phoneValidationErrors.push(`Kontakt ${index + 1} Telefon: ${result.error}`);
+      if (contact.festnetz?.trim()) {
+        const result = validateGermanPhone(contact.festnetz);
+        if (!result.valid) phoneValidationErrors.push(`Kontakt ${index + 1} Festnetz: ${result.error}`);
+      }
+      if (contact.mobilnummer?.trim()) {
+        const result = validateGermanPhone(contact.mobilnummer);
+        if (!result.valid) phoneValidationErrors.push(`Kontakt ${index + 1} Mobilnummer: ${result.error}`);
       }
     });
     
@@ -302,7 +307,8 @@ export function useCustomerWizard() {
         isPrimary: c.isPrimary,
         vorname: c.vorname.trim(),
         nachname: c.nachname.trim(),
-        telefon: c.telefon.trim() ? (normalizePhone(c.telefon) || c.telefon.trim()) : "",
+        festnetz: c.festnetz?.trim() ? (normalizePhone(c.festnetz) || c.festnetz.trim()) : undefined,
+        mobilnummer: c.mobilnummer?.trim() ? (normalizePhone(c.mobilnummer) || c.mobilnummer.trim()) : undefined,
         email: c.email.trim() || undefined,
         notes: c.notes.trim() || undefined,
       }));

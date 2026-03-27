@@ -194,7 +194,9 @@ export interface CustomerContactItem {
   isPrimary: boolean;
   vorname: string;
   nachname: string;
-  telefon: string;
+  telefon: string | null;
+  festnetz: string | null;
+  mobilnummer: string | null;
   email: string | null;
   notes: string | null;
 }
