@@ -479,7 +479,6 @@ router.post("/prospects/:id/convert", asyncHandler("Konvertierung fehlgeschlagen
           isPrimary: c.isPrimary,
           vorname: c.vorname,
           nachname: c.nachname,
-          telefon: c.telefon || null,
           festnetz: c.festnetz || null,
           mobilnummer: c.mobilnummer || null,
           email: c.email || null,

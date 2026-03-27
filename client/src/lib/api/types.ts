@@ -240,7 +240,9 @@ export interface CreateCustomerRequest {
     isPrimary: boolean;
     vorname: string;
     nachname: string;
-    telefon: string;
+    telefon?: string;
+    festnetz?: string;
+    mobilnummer?: string;
     email?: string;
     notes?: string;
   }>;

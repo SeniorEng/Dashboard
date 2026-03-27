@@ -223,7 +223,7 @@ export async function buildPlaceholdersFromFormData(
     placeholders.kontaktperson_telefon = primaryContact.mobilnummer || primaryContact.festnetz || primaryContact.telefon || "";
     placeholders.kontaktperson_festnetz = primaryContact.festnetz || "";
     placeholders.kontaktperson_email = primaryContact.email || "";
-    placeholders.kontaktperson_typ = CONTACT_TYPE_LABELS[primaryContact.contactType] ?? primaryContact.contactType ?? "";
+    placeholders.kontaktperson_typ = (primaryContact.contactType ? CONTACT_TYPE_LABELS[primaryContact.contactType] : undefined) ?? primaryContact.contactType ?? "";
   }
 
   try {
