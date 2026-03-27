@@ -69,8 +69,9 @@ export default function ContactMigrationPage() {
         const result = await api.patch(`/admin/contact-migration/${entry.id}`, { contactType: entry.contactType });
         try {
           unwrapResult(result);
-        } catch (e: any) {
-          errors.push(`Kontakt ${entry.id}: ${e.message}`);
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          errors.push(`Kontakt ${entry.id}: ${msg}`);
         }
       }
       if (errors.length > 0) {

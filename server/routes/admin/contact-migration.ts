@@ -5,7 +5,7 @@ import { requireIntParam } from "../../lib/params";
 import { db } from "../../lib/db";
 import { customerContacts, customers } from "@shared/schema";
 import { LEGACY_CONTACT_TYPES, CONTACT_TYPE_SELECT_OPTIONS } from "@shared/domain/customers";
-import { eq, sql, and, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 const router = Router();
@@ -34,10 +34,7 @@ router.get("/contact-migration/legacy", requireSuperAdmin, asyncHandler("Legacy-
     .from(customerContacts)
     .innerJoin(customers, eq(customerContacts.customerId, customers.id))
     .where(
-      and(
-        inArray(customerContacts.contactType, [...LEGACY_CONTACT_TYPES]),
-        eq(customerContacts.isActive, true),
-      )
+      inArray(customerContacts.contactType, [...LEGACY_CONTACT_TYPES])
     )
     .orderBy(customers.name, customerContacts.vorname);
 
