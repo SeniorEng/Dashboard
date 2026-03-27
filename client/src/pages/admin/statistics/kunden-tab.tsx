@@ -6,8 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StatCard, BarSimple, BarStacked, DonutChart } from "@/components/charts";
 import {
-  Loader2, Users, TrendingUp,
-  Clock, UserCheck, Heart,
+  Loader2, Users, TrendingUp, ArrowUpRight, ArrowDownRight, Minus,
+  Clock, UserCheck, Heart, Euro,
   CalendarCheck, UserX, Wallet,
 } from "lucide-react";
 import { iconSize } from "@/design-system";
@@ -44,6 +44,21 @@ interface LifecycleDetailsResponse {
   lost: LifecycleCustomer[];
 }
 
+interface CustomerRevenueResponse {
+  mode: "month" | "year";
+  month: number | null;
+  year: number;
+  activeCustomers: number;
+  activeCustomersDelta: number;
+  totalRevenueCents: number;
+  totalRevenueDeltaCents: number;
+  avgRevenuePerCustomerCents: number;
+  avgRevenueDeltaCents: number;
+  prevMonth?: number;
+  prevMonthYear?: number;
+  prevYear?: number;
+}
+
 interface KundenTabProps {
   selectedYear: number;
   selectedMonth: string;
@@ -75,6 +90,15 @@ export function KundenTab({ selectedYear, selectedMonth }: KundenTabProps) {
     queryKey: ["statistics-budget-potential", selectedYear],
     queryFn: async () => {
       const result = await api.get<BudgetPotentialResponse>(`/statistics/budget-potential?year=${selectedYear}`);
+      return unwrapResult(result);
+    },
+    staleTime: 60000,
+  });
+
+  const { data: customerRevenue } = useQuery<CustomerRevenueResponse>({
+    queryKey: ["statistics-customer-revenue", selectedYear, selectedMonth],
+    queryFn: async () => {
+      const result = await api.get<CustomerRevenueResponse>(`/statistics/customer-revenue?year=${selectedYear}${monthParam}`);
       return unwrapResult(result);
     },
     staleTime: 60000,
@@ -126,8 +150,107 @@ export function KundenTab({ selectedYear, selectedMonth }: KundenTabProps) {
       color: SERVICE_TYPE_COLORS[s.service_type!] || "#a3a3a3",
     }));
 
+  const deltaIcon = (delta: number) => {
+    if (delta > 0) return <ArrowUpRight className="h-3.5 w-3.5 text-green-600" />;
+    if (delta < 0) return <ArrowDownRight className="h-3.5 w-3.5 text-red-500" />;
+    return <Minus className="h-3.5 w-3.5 text-gray-400" />;
+  };
+
+  const deltaColor = (delta: number) => delta > 0 ? "text-green-600" : delta < 0 ? "text-red-500" : "text-gray-400";
+
+  const deltaText = (delta: number, suffix = "") => {
+    if (delta === 0) return "±0" + suffix;
+    return `${delta > 0 ? "+" : ""}${delta}${suffix}`;
+  };
+
+  const revenueCompareLabel = (() => {
+    if (!customerRevenue) return "";
+    if (customerRevenue.mode === "month") {
+      const pm = customerRevenue.prevMonth!;
+      const pmName = (MONTH_NAMES[pm - 1] || "").slice(0, 3);
+      return customerRevenue.prevMonthYear !== customerRevenue.year
+        ? `${pmName} ${customerRevenue.prevMonthYear}`
+        : pmName;
+    }
+    return String(customerRevenue.prevYear || customerRevenue.year - 1);
+  })();
+
+  const revenueTitle = (() => {
+    if (!customerRevenue) return "";
+    if (customerRevenue.mode === "month" && customerRevenue.month) {
+      return `${MONTH_NAMES[customerRevenue.month - 1]} ${customerRevenue.year}`;
+    }
+    return `Gesamt ${customerRevenue.year}`;
+  })();
+
+  const formatDeltaCents = (deltaCents: number) => {
+    const euro = (Math.abs(deltaCents) / 100).toFixed(2).replace(".", ",");
+    if (deltaCents === 0) return "±0,00 €";
+    return `${deltaCents > 0 ? "+" : "-"}${euro} €`;
+  };
+
   return (
     <>
+      {customerRevenue && (
+        <Card className="mb-4" data-testid="revenue-overview-card">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Euro className={iconSize.sm} />
+              Kunden-Umsatz — {revenueTitle}
+            </CardTitle>
+            <div className="text-xs text-muted-foreground">
+              Umsatz aus Budget-Verbräuchen · Vergleich {customerRevenue.mode === "month" ? "zum Vormonat" : "zum Vorjahr"} ({revenueCompareLabel})
+              {customerRevenue.mode === "year" && <span> · Ø = Durchschnitt pro Kunde-Monat</span>}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="flex items-center gap-3 p-3 bg-blue-50/50 rounded-lg border border-blue-100" data-testid="revenue-active-customers">
+                <div className="p-2 bg-blue-100 rounded-lg">
+                  <Users className="h-5 w-5 text-blue-600" />
+                </div>
+                <div>
+                  <div className="text-2xl font-bold text-blue-700" data-testid="revenue-active-customers-value">{customerRevenue.activeCustomers}</div>
+                  <div className="text-xs text-muted-foreground">Aktive Kunden</div>
+                  <div className={`text-xs font-medium flex items-center gap-0.5 ${deltaColor(customerRevenue.activeCustomersDelta)}`}>
+                    {deltaIcon(customerRevenue.activeCustomersDelta)}
+                    {deltaText(customerRevenue.activeCustomersDelta)} vs. {revenueCompareLabel}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 p-3 bg-emerald-50/50 rounded-lg border border-emerald-100" data-testid="revenue-total">
+                <div className="p-2 bg-emerald-100 rounded-lg">
+                  <Euro className="h-5 w-5 text-emerald-600" />
+                </div>
+                <div>
+                  <div className="text-2xl font-bold text-emerald-700" data-testid="revenue-total-value">{cents(customerRevenue.totalRevenueCents)}</div>
+                  <div className="text-xs text-muted-foreground">Gesamtumsatz</div>
+                  <div className={`text-xs font-medium flex items-center gap-0.5 ${deltaColor(customerRevenue.totalRevenueDeltaCents)}`}>
+                    {deltaIcon(customerRevenue.totalRevenueDeltaCents)}
+                    {formatDeltaCents(customerRevenue.totalRevenueDeltaCents)} vs. {revenueCompareLabel}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 p-3 bg-violet-50/50 rounded-lg border border-violet-100" data-testid="revenue-avg-per-customer">
+                <div className="p-2 bg-violet-100 rounded-lg">
+                  <TrendingUp className="h-5 w-5 text-violet-600" />
+                </div>
+                <div>
+                  <div className="text-2xl font-bold text-violet-700" data-testid="revenue-avg-value">{cents(customerRevenue.avgRevenuePerCustomerCents)}</div>
+                  <div className="text-xs text-muted-foreground">Ø pro Kunde{customerRevenue.mode === "year" ? "/Monat" : ""}</div>
+                  <div className={`text-xs font-medium flex items-center gap-0.5 ${deltaColor(customerRevenue.avgRevenueDeltaCents)}`}>
+                    {deltaIcon(customerRevenue.avgRevenueDeltaCents)}
+                    {formatDeltaCents(customerRevenue.avgRevenueDeltaCents)} vs. {revenueCompareLabel}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         <StatCard label="Aktive Kunden" value={customerStats.activeCustomers || 0} icon={<Users className={iconSize.sm} />} color="text-green-600" testId="cust-active" />
         <StatCard label={`Gewonnen ${selectedYear}`} value={summary.gainedThisYear || 0} icon={<UserCheck className={iconSize.sm} />} color="text-green-600" testId="cust-gained" />

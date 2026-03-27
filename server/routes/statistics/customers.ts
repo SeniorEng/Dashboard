@@ -249,4 +249,112 @@ router.get("/budget-potential", asyncHandler("Budget-Potenzial konnte nicht gela
   res.json({ customers });
 }));
 
+router.get("/customer-revenue", asyncHandler("Kunden-Umsatz-Statistiken konnten nicht geladen werden", async (req, res) => {
+  if (!req.user!.isAdmin) throw forbidden("FORBIDDEN", "Nur für Administratoren");
+
+  const year = parseInt(req.query.year as string) || new Date().getFullYear();
+  const month = req.query.month ? parseInt(req.query.month as string) : null;
+
+  if (month !== null && (month < 1 || month > 12 || isNaN(month))) {
+    res.status(400).json({ error: "Ungültiger Monat (1-12)" });
+    return;
+  }
+
+  if (month) {
+    const prevMonth = month === 1 ? 12 : month - 1;
+    const prevMonthYear = month === 1 ? year - 1 : year;
+
+    const [currentData, prevData] = await Promise.all([
+      db.execute(sql`
+        SELECT
+          COUNT(DISTINCT bt.customer_id)::int AS active_customers,
+          COALESCE(SUM(ABS(bt.amount_cents)), 0)::bigint AS total_revenue_cents
+        FROM budget_transactions bt
+        WHERE bt.transaction_type = 'consumption'
+          AND EXTRACT(YEAR FROM bt.transaction_date::date) = ${year}
+          AND EXTRACT(MONTH FROM bt.transaction_date::date) = ${month}
+      `),
+      db.execute(sql`
+        SELECT
+          COUNT(DISTINCT bt.customer_id)::int AS active_customers,
+          COALESCE(SUM(ABS(bt.amount_cents)), 0)::bigint AS total_revenue_cents
+        FROM budget_transactions bt
+        WHERE bt.transaction_type = 'consumption'
+          AND EXTRACT(YEAR FROM bt.transaction_date::date) = ${prevMonthYear}
+          AND EXTRACT(MONTH FROM bt.transaction_date::date) = ${prevMonth}
+      `),
+    ]);
+
+    const cur = currentData.rows[0] as any;
+    const prev = prevData.rows[0] as any;
+
+    const activeCustomers = Number(cur?.active_customers || 0);
+    const prevActiveCustomers = Number(prev?.active_customers || 0);
+    const totalRevenueCents = Number(cur?.total_revenue_cents || 0);
+    const prevTotalRevenueCents = Number(prev?.total_revenue_cents || 0);
+    const avgRevenuePerCustomerCents = activeCustomers > 0 ? Math.round(totalRevenueCents / activeCustomers) : 0;
+    const prevAvgRevenuePerCustomerCents = prevActiveCustomers > 0 ? Math.round(prevTotalRevenueCents / prevActiveCustomers) : 0;
+
+    res.json({
+      mode: "month" as const,
+      month,
+      year,
+      activeCustomers,
+      activeCustomersDelta: activeCustomers - prevActiveCustomers,
+      totalRevenueCents,
+      totalRevenueDeltaCents: totalRevenueCents - prevTotalRevenueCents,
+      avgRevenuePerCustomerCents,
+      avgRevenueDeltaCents: avgRevenuePerCustomerCents - prevAvgRevenuePerCustomerCents,
+      prevMonth,
+      prevMonthYear,
+    });
+  } else {
+    const [currentData, prevData] = await Promise.all([
+      db.execute(sql`
+        SELECT
+          COUNT(DISTINCT bt.customer_id)::int AS active_customers,
+          COALESCE(SUM(ABS(bt.amount_cents)), 0)::bigint AS total_revenue_cents,
+          COUNT(DISTINCT CONCAT(bt.customer_id, '-', EXTRACT(MONTH FROM bt.transaction_date::date)))::int AS customer_months
+        FROM budget_transactions bt
+        WHERE bt.transaction_type = 'consumption'
+          AND EXTRACT(YEAR FROM bt.transaction_date::date) = ${year}
+      `),
+      db.execute(sql`
+        SELECT
+          COUNT(DISTINCT bt.customer_id)::int AS active_customers,
+          COALESCE(SUM(ABS(bt.amount_cents)), 0)::bigint AS total_revenue_cents,
+          COUNT(DISTINCT CONCAT(bt.customer_id, '-', EXTRACT(MONTH FROM bt.transaction_date::date)))::int AS customer_months
+        FROM budget_transactions bt
+        WHERE bt.transaction_type = 'consumption'
+          AND EXTRACT(YEAR FROM bt.transaction_date::date) = ${year - 1}
+      `),
+    ]);
+
+    const cur = currentData.rows[0] as any;
+    const prev = prevData.rows[0] as any;
+
+    const activeCustomers = Number(cur?.active_customers || 0);
+    const prevActiveCustomers = Number(prev?.active_customers || 0);
+    const totalRevenueCents = Number(cur?.total_revenue_cents || 0);
+    const prevTotalRevenueCents = Number(prev?.total_revenue_cents || 0);
+    const customerMonths = Number(cur?.customer_months || 0);
+    const prevCustomerMonths = Number(prev?.customer_months || 0);
+    const avgRevenuePerCustomerCents = customerMonths > 0 ? Math.round(totalRevenueCents / customerMonths) : 0;
+    const prevAvgRevenuePerCustomerCents = prevCustomerMonths > 0 ? Math.round(prevTotalRevenueCents / prevCustomerMonths) : 0;
+
+    res.json({
+      mode: "year" as const,
+      month: null,
+      year,
+      activeCustomers,
+      activeCustomersDelta: activeCustomers - prevActiveCustomers,
+      totalRevenueCents,
+      totalRevenueDeltaCents: totalRevenueCents - prevTotalRevenueCents,
+      avgRevenuePerCustomerCents,
+      avgRevenueDeltaCents: avgRevenuePerCustomerCents - prevAvgRevenuePerCustomerCents,
+      prevYear: year - 1,
+    });
+  }
+}));
+
 export default router;
