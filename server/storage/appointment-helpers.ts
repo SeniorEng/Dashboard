@@ -39,6 +39,8 @@ export const appointmentWithCustomerSelectFields = {
   deletedAt: appointments.deletedAt,
   createdAt: appointments.createdAt,
   performedByEmployeeId: appointments.performedByEmployeeId,
+  seriesId: appointments.seriesId,
+  isSeriesException: appointments.isSeriesException,
   assignedEmployeeName: assignedEmployee,
   customer: {
     id: customers.id,
@@ -113,6 +115,8 @@ export function mapAppointmentRow(row: AppointmentQueryRow & Record<string, unkn
     deletedAt: (row.deletedAt as Date | null) ?? null,
     createdAt: row.createdAt as Date,
     performedByEmployeeId: row.performedByEmployeeId as number | null,
+    seriesId: (row.seriesId as number | null) ?? null,
+    isSeriesException: (row.isSeriesException as boolean | null) ?? false,
     assignedEmployeeName: (row.assignedEmployeeName as string | null) ?? null,
     customer: (row.customer as { id?: number })?.id
       ? row.customer as AppointmentWithCustomer["customer"]

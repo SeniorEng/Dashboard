@@ -7,7 +7,10 @@ import { api, unwrapResult } from "@/lib/api/client";
 import { useCustomerList } from "./use-customer-list";
 import { useAdminEmployees } from "./use-active-employees";
 import { useCreateKundentermin, useCreateErstberatung } from "./use-appointment-mutations";
+import { useCreateAppointmentSeries, usePreviewAppointmentSeries } from "./use-appointment-series";
+import type { SeriesCreateInput } from "./use-appointment-series";
 import { timeToMinutes, minutesToTimeDisplay, formatDurationDisplay, todayISO } from "@shared/utils/datetime";
+import type { Weekday, SeriesFrequency } from "@shared/schema/appointments";
 import { isDachPhone } from "@shared/schema/common";
 import type { Service } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
@@ -28,6 +31,17 @@ export function useNewAppointmentForm() {
 
   const createKundenterminMutation = useCreateKundentermin();
   const createErstberatungMutation = useCreateErstberatung();
+  const createSeriesMutation = useCreateAppointmentSeries();
+  const previewSeriesMutation = usePreviewAppointmentSeries();
+
+  const [seriesEnabled, setSeriesEnabled] = useState(false);
+  const [seriesWeekdays, setSeriesWeekdays] = useState<Weekday[]>([]);
+  const [seriesFrequency, setSeriesFrequency] = useState<SeriesFrequency>("weekly");
+  const [seriesEndDate, setSeriesEndDate] = useState<string>("");
+  const [seriesConflicts, setSeriesConflicts] = useState<Array<{ date: string; reason: string }>>([]);
+  const [showSeriesConflictDialog, setShowSeriesConflictDialog] = useState(false);
+  const [seriesConflictInfo, setSeriesConflictInfo] = useState<{ totalDates: number; validDates: number } | null>(null);
+  const [pendingSeriesInput, setPendingSeriesInput] = useState<SeriesCreateInput | null>(null);
 
   const { data: catalogServices = [] } = useQuery<Service[]>({
     queryKey: ["/api/services"],
@@ -290,8 +304,145 @@ export function useNewAppointmentForm() {
     return Object.keys(newErrors).length === 0;
   };
 
+  const seriesPreview = useMemo(() => {
+    if (!seriesEnabled || seriesWeekdays.length === 0 || !seriesEndDate || !ktDate) return null;
+
+    const startDateObj = new Date(ktDate + "T00:00:00");
+    const endDateObj = new Date(seriesEndDate + "T00:00:00");
+    if (endDateObj <= startDateObj) return null;
+
+    const weekdayMap: Record<string, number> = { mo: 1, di: 2, mi: 3, do: 4, fr: 5 };
+    const selectedJsDays = seriesWeekdays.map(d => weekdayMap[d]).filter(Boolean);
+
+    const dates: string[] = [];
+    const current = new Date(startDateObj);
+    let weekCounter = 0;
+    let lastWeek = -1;
+
+    while (current <= endDateObj) {
+      const jsDay = current.getDay();
+      const weekNum = Math.floor((current.getTime() - startDateObj.getTime()) / (7 * 24 * 60 * 60 * 1000));
+
+      if (weekNum !== lastWeek) {
+        if (lastWeek >= 0) weekCounter++;
+        lastWeek = weekNum;
+      }
+
+      const isActiveWeek = seriesFrequency === "weekly" || weekCounter % 2 === 0;
+
+      if (isActiveWeek && selectedJsDays.includes(jsDay === 0 ? 7 : jsDay)) {
+        const y = current.getFullYear();
+        const m = String(current.getMonth() + 1).padStart(2, "0");
+        const d = String(current.getDate()).padStart(2, "0");
+        dates.push(`${y}-${m}-${d}`);
+      }
+
+      current.setDate(current.getDate() + 1);
+    }
+
+    const totalMinutes = ktServices.reduce((sum, s) => sum + s.durationMinutes, 0);
+
+    return {
+      count: dates.length,
+      dates,
+      totalMinutes,
+      weekdays: seriesWeekdays,
+      frequency: seriesFrequency,
+      startDate: ktDate,
+      endDate: seriesEndDate,
+      startTime: ktTime,
+    };
+  }, [seriesEnabled, seriesWeekdays, seriesFrequency, seriesEndDate, ktDate, ktTime, ktServices]);
+
+  const confirmSeriesCreate = (input: SeriesCreateInput) => {
+    createSeriesMutation.mutate(input, {
+      onSuccess: (response) => {
+        const created = response.createdAppointments;
+        toast({ title: "Terminserie erstellt", description: `${created} Termine wurden angelegt.` });
+        if (response._budgetWarning) {
+          setTimeout(() => {
+            toast({ title: "Budget-Hinweis", description: response._budgetWarning, variant: "destructive" });
+          }, 500);
+        }
+        setShowSeriesConflictDialog(false);
+        setSeriesConflicts([]);
+        setSeriesConflictInfo(null);
+        setPendingSeriesInput(null);
+        setLocation(input.startDate ? `/?date=${input.startDate}` : "/");
+      },
+      onError: (error: Error) => {
+        toast({ variant: "destructive", title: "Fehler", description: error.message });
+      },
+    });
+  };
+
   const handleKundenterminSubmit = () => {
     if (!validateKundentermin()) return;
+
+    if (seriesEnabled) {
+      if (seriesWeekdays.length === 0) {
+        setErrors(prev => ({ ...prev, seriesWeekdays: "Bitte wählen Sie mindestens einen Wochentag" }));
+        return;
+      }
+      if (!seriesEndDate) {
+        setErrors(prev => ({ ...prev, seriesEndDate: "Bitte wählen Sie ein Enddatum" }));
+        return;
+      }
+      if (seriesEndDate <= ktDate) {
+        setErrors(prev => ({ ...prev, seriesEndDate: "Enddatum muss nach dem Startdatum liegen" }));
+        return;
+      }
+      const startMs = new Date(ktDate).getTime();
+      const endMs = new Date(seriesEndDate).getTime();
+      const maxMs = 365 * 24 * 60 * 60 * 1000;
+      if (endMs - startMs > maxMs) {
+        setErrors(prev => ({ ...prev, seriesEndDate: "Maximaler Zeitraum: 12 Monate" }));
+        return;
+      }
+
+      const totalMinutes = ktServices.reduce((sum, s) => sum + s.durationMinutes, 0);
+      const employeeId = isAdmin && ktAssignedEmployeeId ? parseInt(ktAssignedEmployeeId) : user?.id;
+      if (!employeeId) {
+        toast({ variant: "destructive", title: "Fehler", description: "Kein Mitarbeiter zugewiesen" });
+        return;
+      }
+
+      const seriesInput: SeriesCreateInput = {
+        customerId: parseInt(ktCustomerId),
+        assignedEmployeeId: employeeId,
+        frequency: seriesFrequency,
+        weekdays: seriesWeekdays,
+        scheduledStart: ktTime,
+        durationMinutes: totalMinutes,
+        services: ktServices,
+        startDate: ktDate,
+        endDate: seriesEndDate,
+        notes: ktNotes || undefined,
+      };
+
+      previewSeriesMutation.mutate(seriesInput, {
+        onSuccess: (preview) => {
+          setPendingSeriesInput(seriesInput);
+
+          if (preview.conflicts.length > 0) {
+            setSeriesConflicts(preview.conflicts);
+            setSeriesConflictInfo({
+              totalDates: preview.totalDates,
+              validDates: preview.validDates,
+            });
+            setShowSeriesConflictDialog(true);
+          } else if (!preview.valid) {
+            toast({ variant: "destructive", title: "Fehler", description: preview.error || "Keine gültigen Termine gefunden." });
+          } else {
+            confirmSeriesCreate(seriesInput);
+          }
+        },
+        onError: (error: Error) => {
+          toast({ variant: "destructive", title: "Fehler", description: error.message });
+        },
+      });
+      return;
+    }
 
     createKundenterminMutation.mutate({
       customerId: parseInt(ktCustomerId),
@@ -448,7 +599,7 @@ export function useNewAppointmentForm() {
       .sort((a, b) => a.label.localeCompare(b.label, "de"));
   }, [employees]);
 
-  const isPending = createKundenterminMutation.isPending || createErstberatungMutation.isPending;
+  const isPending = createKundenterminMutation.isPending || createErstberatungMutation.isPending || createSeriesMutation.isPending || previewSeriesMutation.isPending;
 
   return {
     activeTab,
@@ -518,5 +669,30 @@ export function useNewAppointmentForm() {
 
     handleKundenterminSubmit,
     handleErstberatungSubmit,
+
+    seriesEnabled,
+    setSeriesEnabled,
+    seriesWeekdays,
+    setSeriesWeekdays,
+    seriesFrequency,
+    setSeriesFrequency,
+    seriesEndDate,
+    setSeriesEndDate,
+    seriesPreview,
+    seriesConflicts,
+    showSeriesConflictDialog,
+    seriesConflictInfo,
+    isSeriesCreating: createSeriesMutation.isPending,
+    confirmSeriesWithSkippedConflicts: () => {
+      if (pendingSeriesInput) {
+        confirmSeriesCreate(pendingSeriesInput);
+      }
+    },
+    dismissSeriesConflictDialog: () => {
+      setShowSeriesConflictDialog(false);
+      setSeriesConflicts([]);
+      setSeriesConflictInfo(null);
+      setPendingSeriesInput(null);
+    },
   };
 }

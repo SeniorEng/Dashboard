@@ -54,6 +54,41 @@ function formatDateFromObj(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+router.post("/preview", asyncHandler("Vorschau konnte nicht erstellt werden", async (req, res) => {
+  const user = req.user!;
+  const parsed = createSeriesSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return sendBadRequest(res, "Validierungsfehler: " + parsed.error.issues.map(i => i.message).join(", "));
+  }
+  const input = parsed.data;
+
+  const customer = await storage.getCustomer(input.customerId);
+  if (!customer) return sendNotFound(res, "Kunde nicht gefunden.");
+
+  if (!user.isAdmin) {
+    input.assignedEmployeeId = user.id;
+    const assignedIds = await storage.getCurrentlyAssignedCustomerIds(user.id);
+    if (!assignedIds.includes(input.customerId)) {
+      return sendForbidden(res, "NOT_ASSIGNED", "Sie sind diesem Kunden nicht zugeordnet.");
+    }
+  }
+
+  if (input.startDate >= input.endDate) {
+    return sendBadRequest(res, "Das Enddatum muss nach dem Startdatum liegen.");
+  }
+
+  const validation = await validateSeriesDates(input);
+
+  res.json({
+    valid: validation.valid,
+    totalDates: validation.dates.length,
+    validDates: validation.validDates.length,
+    skippedDates: validation.dates.filter(d => d.skipped),
+    conflicts: validation.conflicts,
+    error: validation.error || null,
+  });
+}));
+
 router.post("/", asyncHandler("Serie konnte nicht erstellt werden", async (req, res) => {
   const user = req.user!;
   const parsed = createSeriesSchema.safeParse(req.body);
@@ -278,8 +313,8 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
     return sendNotFound(res, "Termin nicht in dieser Serie gefunden.");
   }
 
-  if (appointment.status === "completed") {
-    return sendBadRequest(res, "Abgeschlossene Termine können nicht geändert werden.");
+  if (appointment.status === "completed" && mode === "single") {
+    return sendBadRequest(res, "Abgeschlossene Termine können nicht einzeln geändert werden.");
   }
 
   if (updateFields.date) {

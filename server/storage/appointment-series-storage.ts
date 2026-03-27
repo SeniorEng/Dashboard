@@ -4,8 +4,9 @@ import {
   appointmentSeries,
   appointments,
   customers,
+  users,
 } from "@shared/schema";
-import { eq, and, isNull, gte, ne, inArray, desc } from "drizzle-orm";
+import { eq, and, isNull, gte, ne, inArray, desc, sql } from "drizzle-orm";
 import { db, type DbOrTx } from "../lib/db";
 
 export async function createSeries(data: InsertAppointmentSeries, tx?: DbOrTx): Promise<AppointmentSeries> {
@@ -45,17 +46,33 @@ export async function getActiveSeriesForCustomer(customerId: number): Promise<Ap
     .orderBy(desc(appointmentSeries.createdAt));
 }
 
-export async function getAllActiveSeries(): Promise<SeriesWithCustomerName[]> {
+export async function getAllActiveSeries(): Promise<(SeriesWithCustomerName & { remainingCount: number; employeeName: string | null })[]> {
   const rows = await db.select({
     series: appointmentSeries,
     customerName: customers.name,
+    employeeName: users.displayName,
   })
     .from(appointmentSeries)
     .innerJoin(customers, eq(appointmentSeries.customerId, customers.id))
+    .leftJoin(users, eq(appointmentSeries.assignedEmployeeId, users.id))
     .where(ne(appointmentSeries.status, "ended"))
     .orderBy(customers.name, appointmentSeries.startDate);
 
-  return rows.map(r => ({ ...r.series, customerName: r.customerName }));
+  const today = new Date().toISOString().split("T")[0];
+  const results = [];
+  for (const r of rows) {
+    const futureCount = await db.select({ id: appointments.id })
+      .from(appointments)
+      .where(and(
+        eq(appointments.seriesId, r.series.id),
+        isNull(appointments.deletedAt),
+        ne(appointments.status, "cancelled"),
+        ne(appointments.status, "completed"),
+        sql`${appointments.date} >= ${today}`,
+      ));
+    results.push({ ...r.series, customerName: r.customerName, employeeName: r.employeeName, remainingCount: futureCount.length });
+  }
+  return results;
 }
 
 export async function updateSeries(

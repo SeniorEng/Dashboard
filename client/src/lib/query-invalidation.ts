@@ -9,7 +9,8 @@ type Domain =
   | "notifications"
   | "auth"
   | "prospects"
-  | "tasks";
+  | "tasks"
+  | "appointment-series";
 
 const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
   appointments: [
@@ -56,6 +57,9 @@ const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
   tasks: [
     ["tasks"],
   ],
+  "appointment-series": [
+    ["appointment-series"],
+  ],
 };
 
 const RELATED_DOMAINS: Record<Domain, Domain[]> = {
@@ -68,6 +72,7 @@ const RELATED_DOMAINS: Record<Domain, Domain[]> = {
   auth: [],
   prospects: [],
   tasks: [],
+  "appointment-series": ["appointments"],
 };
 
 export function invalidateRelated(

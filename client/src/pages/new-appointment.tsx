@@ -9,7 +9,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DatePicker } from "@/components/ui/date-picker";
-import { ChevronLeft, Loader2, Calendar, Clock, User, Plus, Users, AlertTriangle, XCircle, CheckCircle2, Copy, UserCheck, Phone, UserPlus, Pencil, Check, X, Home, Mail } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { ChevronLeft, Loader2, Calendar, Clock, User, Plus, Users, AlertTriangle, XCircle, CheckCircle2, Copy, UserCheck, Phone, UserPlus, Pencil, Check, X, Home, Mail, Repeat } from "lucide-react";
+import { WEEKDAYS, type Weekday } from "@shared/schema/appointments";
+import { WEEKDAY_LABELS, formatWeekdays } from "@/features/appointments/hooks/use-appointment-series";
 import { iconSize, componentStyles } from "@/design-system";
 import { useNewAppointmentForm, ServiceSelector, AppointmentSummary } from "@/features/appointments";
 import { EmployeeAvailability } from "@/features/appointments/components/employee-availability";
@@ -264,6 +275,134 @@ export default function NewAppointment() {
                 );
               })()}
 
+              {/* Series Toggle */}
+              {!form.copyFromId && (
+                <div className="rounded-lg border p-4 space-y-4" data-testid="panel-series">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Repeat className={`${iconSize.sm} text-primary`} />
+                      <Label htmlFor="series-toggle" className="font-medium cursor-pointer">
+                        Serientermin
+                      </Label>
+                    </div>
+                    <Switch
+                      id="series-toggle"
+                      checked={form.seriesEnabled}
+                      onCheckedChange={form.setSeriesEnabled}
+                      data-testid="switch-series-toggle"
+                    />
+                  </div>
+
+                  {form.seriesEnabled && (
+                    <div className="space-y-4 pt-2 border-t">
+                      <div className="space-y-2">
+                        <Label>Wochentage</Label>
+                        <div className="flex gap-2">
+                          {WEEKDAYS.map((day) => {
+                            const isSelected = form.seriesWeekdays.includes(day);
+                            return (
+                              <button
+                                key={day}
+                                type="button"
+                                onClick={() => {
+                                  form.setSeriesWeekdays(
+                                    isSelected
+                                      ? form.seriesWeekdays.filter(d => d !== day)
+                                      : [...form.seriesWeekdays, day]
+                                  );
+                                }}
+                                className={`flex-1 min-h-[48px] rounded-lg text-sm font-semibold transition-colors ${
+                                  isSelected
+                                    ? "bg-primary text-primary-foreground shadow-sm"
+                                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                                }`}
+                                data-testid={`button-weekday-${day}`}
+                              >
+                                {WEEKDAY_LABELS[day]}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {form.errors.seriesWeekdays && <p className="text-destructive text-sm">{form.errors.seriesWeekdays}</p>}
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Häufigkeit</Label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => form.setSeriesFrequency("weekly")}
+                            className={`min-h-[48px] rounded-lg text-sm font-medium transition-colors ${
+                              form.seriesFrequency === "weekly"
+                                ? "bg-primary text-primary-foreground shadow-sm"
+                                : "bg-muted text-muted-foreground hover:bg-muted/80"
+                            }`}
+                            data-testid="button-freq-weekly"
+                          >
+                            Wöchentlich
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => form.setSeriesFrequency("biweekly")}
+                            className={`min-h-[48px] rounded-lg text-sm font-medium transition-colors ${
+                              form.seriesFrequency === "biweekly"
+                                ? "bg-primary text-primary-foreground shadow-sm"
+                                : "bg-muted text-muted-foreground hover:bg-muted/80"
+                            }`}
+                            data-testid="button-freq-biweekly"
+                          >
+                            Alle 2 Wochen
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>
+                          <Calendar className={`${iconSize.sm} inline mr-1`} /> Enddatum
+                        </Label>
+                        <DatePicker
+                          value={form.seriesEndDate || null}
+                          onChange={(val) => form.setSeriesEndDate(val || "")}
+                          data-testid="input-series-end-date"
+                        />
+                        <p className="text-xs text-muted-foreground">Max. 12 Monate in die Zukunft</p>
+                        {form.errors.seriesEndDate && <p className="text-destructive text-sm">{form.errors.seriesEndDate}</p>}
+                      </div>
+
+                      {form.seriesPreview && (
+                        <div className="rounded-lg bg-primary/5 border border-primary/20 p-4 space-y-3" data-testid="panel-series-preview">
+                          <div className="flex items-center gap-2 text-primary font-semibold text-sm">
+                            <Repeat className={iconSize.sm} />
+                            <span>Vorschau</span>
+                          </div>
+                          <p className="text-sm">
+                            <strong>{form.seriesPreview.count} Termine</strong> werden erstellt
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatWeekdays(form.seriesPreview.weekdays)}, {form.seriesPreview.startTime} Uhr,{" "}
+                            {form.seriesPreview.frequency === "biweekly" ? "alle 2 Wochen" : "wöchentlich"},{" "}
+                            bis {new Date(form.seriesPreview.endDate + "T00:00:00").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })}
+                          </p>
+                          {form.seriesPreview.dates.length > 0 && (
+                            <div className="space-y-1">
+                              <p className="text-xs font-medium text-muted-foreground">Termine:</p>
+                              <div className="max-h-40 overflow-y-auto space-y-0.5 text-xs text-muted-foreground">
+                                {form.seriesPreview.dates.map((d, i) => (
+                                  <div key={d} className="flex items-center gap-2 py-0.5" data-testid={`preview-date-${i}`}>
+                                    <span className="w-5 text-right text-muted-foreground/60">{i + 1}.</span>
+                                    <span>{new Date(d + "T00:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" })}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Notes */}
               <div className="space-y-2">
                 <Label htmlFor="kt-notes">Notizen (optional, max. 255 Zeichen)</Label>
@@ -286,7 +425,7 @@ export default function NewAppointment() {
                 data-testid="button-create-kundentermin"
               >
                 {form.isPending ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : null}
-                Kundentermin erstellen
+                {form.seriesEnabled ? "Terminserie erstellen" : "Kundentermin erstellen"}
               </Button>
             </CardContent>
           </Card>
@@ -598,6 +737,68 @@ export default function NewAppointment() {
         </TabsContent>
         )}
       </Tabs>
+
+      <AlertDialog open={form.showSeriesConflictDialog} onOpenChange={(open) => { if (!open && !form.isSeriesCreating) form.dismissSeriesConflictDialog(); }}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className={`${iconSize.md} text-amber-500`} />
+              Terminkonflikt erkannt
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="text-sm text-muted-foreground">
+                {form.seriesConflictInfo && form.seriesConflictInfo.validDates > 0 ? (
+                  <span>
+                    <strong>{form.seriesConflicts.length}</strong> von <strong>{form.seriesConflictInfo.totalDates}</strong> Terminen haben Konflikte. Diese Tage werden übersprungen und <strong>{form.seriesConflictInfo.validDates}</strong> Termine werden erstellt.
+                  </span>
+                ) : (
+                  <span>
+                    Alle {form.seriesConflicts.length} Termine haben Konflikte. Es können keine Termine erstellt werden.
+                  </span>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {form.seriesConflicts.length > 0 && (
+            <div className="max-h-48 overflow-y-auto space-y-1 py-2">
+              {form.seriesConflicts.map((c, i) => (
+                <div key={i} className="flex items-start gap-2 py-1 px-2 rounded bg-destructive/5 text-sm" data-testid={`conflict-${i}`}>
+                  <XCircle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-medium">
+                      {new Date(c.date + "T00:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" })}
+                    </span>
+                    <span className="text-muted-foreground ml-2">{c.reason}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <AlertDialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button
+              variant="outline"
+              onClick={form.dismissSeriesConflictDialog}
+              disabled={form.isSeriesCreating}
+              data-testid="button-cancel-series-create"
+            >
+              Abbrechen
+            </Button>
+            {form.seriesConflictInfo && form.seriesConflictInfo.validDates > 0 && (
+              <Button
+                onClick={form.confirmSeriesWithSkippedConflicts}
+                className={componentStyles.btnPrimary}
+                disabled={form.isSeriesCreating}
+                data-testid="button-confirm-skip-conflicts"
+              >
+                {form.isSeriesCreating ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : null}
+                Konflikte überspringen & erstellen
+              </Button>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Layout>
   );
 }

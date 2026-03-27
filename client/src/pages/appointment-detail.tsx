@@ -21,10 +21,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { 
   MapPin, Calendar, FileText, ChevronLeft, Loader2, 
-  Pencil, Trash2, AlertTriangle, Phone, Car, Home, ArrowRight, UserPlus, RotateCcw, Copy
+  Pencil, Trash2, AlertTriangle, Phone, Car, Home, ArrowRight, UserPlus, RotateCcw, Copy, Repeat
 } from "lucide-react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
+import { useAppointmentSeriesDetail, formatSeriesInfo } from "@/features/appointments/hooks/use-appointment-series";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { invalidateRelated } from "@/lib/query-invalidation";
@@ -47,6 +48,7 @@ export default function AppointmentDetail() {
   const canConvert = user?.isAdmin || user?.roles?.includes("erstberatung");
 
   const [showReopenDialog, setShowReopenDialog] = useState(false);
+  const [showSeriesDeleteDialog, setShowSeriesDeleteDialog] = useState(false);
 
   const reopenMutation = useMutation({
     mutationFn: async () => {
@@ -67,6 +69,27 @@ export default function AppointmentDetail() {
   });
   
   const { data: appointment, isLoading } = useAppointment(id);
+
+  const seriesId = appointment?.seriesId ?? undefined;
+  const { data: seriesDetail } = useAppointmentSeriesDetail(seriesId ?? 0);
+
+  const seriesCancelMutation = useMutation({
+    mutationFn: async (data: { mode: "single" | "this_and_future" | "all_future" }) => {
+      if (!seriesId) throw new Error("Kein Serien-ID");
+      const result = await api.post(`/appointment-series/${seriesId}/appointments/${id}/cancel`, data);
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      invalidateRelated(queryClient, "appointments");
+      queryClient.invalidateQueries({ queryKey: ["appointment-series"] });
+      toast({ title: "Serientermine abgesagt" });
+      setShowSeriesDeleteDialog(false);
+      setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
 
   const { data: existingServiceRecord, isLoading: isLoadingServiceRecord } = useQuery<{
     id: number;
@@ -250,6 +273,29 @@ export default function AppointmentDetail() {
           </div>
         )}
       </div>
+
+      {seriesId && seriesDetail && (
+        <div className="mb-4 p-3 bg-primary/5 border border-primary/20 rounded-lg" data-testid="banner-series-info">
+          <div className="flex items-center gap-2">
+            <Repeat className={`${iconSize.sm} text-primary`} />
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-medium text-primary">
+                Teil einer Serie
+              </span>
+              <span className="text-sm text-muted-foreground ml-2">
+                {formatSeriesInfo(seriesDetail.series)}
+              </span>
+            </div>
+            {user?.isAdmin && (
+              <Link href={`/admin/appointment-series?id=${seriesId}`}>
+                <Button variant="ghost" size="sm" className="text-xs text-primary h-7" data-testid="link-series-overview">
+                  Zur Serie <ArrowRight className="w-3 h-3 ml-1" />
+                </Button>
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
 
       <SectionCard
         title={isCompleted ? "Termin & Leistungen" : "Terminübersicht"}
@@ -539,7 +585,13 @@ export default function AppointmentDetail() {
           <Button 
             variant="outline" 
             className="flex-1 text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
-            onClick={() => setShowDeleteDialog(true)}
+            onClick={() => {
+              if (seriesId) {
+                setShowSeriesDeleteDialog(true);
+              } else {
+                setShowDeleteDialog(true);
+              }
+            }}
             data-testid="button-delete"
           >
             <Trash2 className={`${iconSize.sm} mr-2`} />
@@ -631,6 +683,76 @@ export default function AppointmentDetail() {
               Zur Korrektur öffnen
             </AlertDialogAction>
           </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showSeriesDeleteDialog} onOpenChange={setShowSeriesDeleteDialog}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Repeat className={`${iconSize.md} text-destructive`} />
+              Serientermin absagen
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="text-sm text-muted-foreground">
+                Dieser Termin gehört zu einer Serie. Welche Termine möchten Sie absagen?
+                {appointment?.status === "completed" && (
+                  <span className="block mt-2 text-amber-600 font-medium">
+                    Dieser Termin ist bereits dokumentiert und kann nicht einzeln abgesagt werden. Sie können aber alle zukünftigen Termine der Serie absagen.
+                  </span>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-3 py-2">
+            <button
+              onClick={() => {
+                seriesCancelMutation.mutate({ mode: "single" });
+              }}
+              disabled={seriesCancelMutation.isPending || appointment?.status === "completed"}
+              className="w-full p-4 rounded-lg border-2 text-left hover:border-destructive/50 hover:bg-destructive/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              data-testid="button-series-delete-single"
+            >
+              <span className="font-semibold text-sm">Nur diesen Termin absagen</span>
+              <span className="block text-xs text-muted-foreground mt-1">
+                Alle anderen Serientermine bleiben bestehen
+              </span>
+            </button>
+            <button
+              onClick={() => {
+                seriesCancelMutation.mutate({ mode: "this_and_future" });
+              }}
+              disabled={seriesCancelMutation.isPending}
+              className="w-full p-4 rounded-lg border-2 text-left hover:border-destructive/50 hover:bg-destructive/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              data-testid="button-series-delete-this-and-future"
+            >
+              <span className="font-semibold text-sm">Diesen und alle folgenden absagen</span>
+              <span className="block text-xs text-muted-foreground mt-1">
+                Ab diesem Termin werden alle zukünftigen Termine abgesagt
+              </span>
+            </button>
+            <button
+              onClick={() => {
+                seriesCancelMutation.mutate({ mode: "all_future" });
+              }}
+              disabled={seriesCancelMutation.isPending}
+              className="w-full p-4 rounded-lg border-2 text-left hover:border-destructive/50 hover:bg-destructive/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              data-testid="button-series-delete-all-future"
+            >
+              <span className="font-semibold text-sm">Alle zukünftigen Termine absagen</span>
+              <span className="block text-xs text-muted-foreground mt-1">
+                Die gesamte Serie wird ab heute beendet
+              </span>
+            </button>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={seriesCancelMutation.isPending}>Abbrechen</AlertDialogCancel>
+          </AlertDialogFooter>
+          {seriesCancelMutation.isPending && (
+            <div className="flex items-center justify-center py-2">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          )}
         </AlertDialogContent>
       </AlertDialog>
 

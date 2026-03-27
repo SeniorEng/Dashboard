@@ -2,7 +2,7 @@ import { memo, useCallback, useMemo } from "react";
 import { format, parseISO } from "date-fns";
 import { de } from "date-fns/locale";
 import { Card } from "@/components/ui/card";
-import { MapPin, CheckCircle2, Clock, FileText, Phone, Navigation, User } from "lucide-react";
+import { MapPin, CheckCircle2, Clock, FileText, Phone, Navigation, User, Repeat } from "lucide-react";
 import { useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import type { AppointmentWithCustomer } from "@shared/types";
@@ -119,6 +119,9 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
               <h3 className="font-semibold text-sm text-foreground truncate">
                 {appointment.customer?.name}
               </h3>
+              {appointment.seriesId && (
+                <Repeat className="w-3 h-3 text-primary/60 shrink-0" data-testid={`icon-series-${appointment.id}`} />
+              )}
               {getStatusIcon(appointment.status)}
             </div>
             <div className="flex items-center text-xs text-muted-foreground mt-0.5">

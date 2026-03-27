@@ -50,6 +50,7 @@ const AdminImportAppointments = lazy(() => import("@/pages/admin/import-appointm
 const AdminAvailability = lazy(() => import("@/pages/admin/availability"));
 const AdminContactMigration = lazy(() => import("@/pages/admin/contact-migration"));
 const AdminMonthClosing = lazy(() => import("@/pages/admin/month-closing"));
+const AdminAppointmentSeries = lazy(() => import("@/pages/admin/appointment-series"));
 const UndocumentedAppointments = lazy(() => import("@/pages/undocumented-appointments"));
 const CustomerDetail = lazy(() => import("@/pages/customer-detail"));
 const TasksPage = lazy(() => import("@/pages/tasks"));
@@ -243,6 +244,9 @@ function Router() {
       </Route>
       <Route path="/admin/month-closing">
         <AdminRoute component={AdminMonthClosing} />
+      </Route>
+      <Route path="/admin/appointment-series">
+        <AdminRoute component={AdminAppointmentSeries} />
       </Route>
       <Route component={NotFound} />
     </Switch>

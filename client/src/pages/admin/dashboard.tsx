@@ -6,7 +6,7 @@ import { Layout } from "@/components/layout";
 import {
   Users, ArrowLeft, Contact2, Clock, Settings,
   Building2, ClipboardList, FileText, Shield, Receipt, Gift, BarChart3, UserPlus,
-  GraduationCap, FileCheck, Landmark, MessageSquare, FileSpreadsheet, CalendarCheck, Lock,
+  GraduationCap, FileCheck, Landmark, MessageSquare, FileSpreadsheet, CalendarCheck, Lock, Repeat,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -97,6 +97,15 @@ export default function AdminDashboard() {
       title: "Verfügbarkeiten",
       description: "Wochenübersicht freie Zeiten für Erstberatungen",
       permissionKey: "users",
+    },
+    {
+      href: "/admin/appointment-series",
+      testId: "card-appointment-series",
+      icon: <Repeat className={`${iconSize.lg} text-purple-600`} />,
+      iconBg: "bg-purple-100",
+      title: "Serientermine",
+      description: "Aktive Terminserien pro Kunde verwalten, verlängern oder beenden",
+      permissionKey: "customers",
     },
     {
       href: "/admin/birthday-cards",

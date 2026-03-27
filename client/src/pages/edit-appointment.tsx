@@ -11,7 +11,16 @@ import { Label } from "@/components/ui/label";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import { ChevronLeft, Loader2, Calendar, Clock, AlertTriangle, Home, Users, UserCheck } from "lucide-react";
+import { 
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { ChevronLeft, Loader2, Calendar, Clock, AlertTriangle, Home, Users, UserCheck, Repeat } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
@@ -70,6 +79,7 @@ export default function EditAppointment() {
   const [duration, setDuration] = useState<number>(60);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [ktAssignedEmployeeId, setKtAssignedEmployeeId] = useState<string>("");
+  const [showSeriesEditDialog, setShowSeriesEditDialog] = useState(false);
 
   const [ebVorname, setEbVorname] = useState("");
   const [ebNachname, setEbNachname] = useState("");
@@ -221,6 +231,29 @@ export default function EditAppointment() {
     },
   });
 
+  const seriesUpdateMutation = useMutation({
+    mutationFn: async (data: { mode: "single" | "this_and_future" | "all_future"; updateFields: Record<string, unknown> }) => {
+      const seriesId = appointment?.seriesId;
+      if (!seriesId) throw new Error("Kein Serien-ID");
+      const result = await api.post(`/appointment-series/${seriesId}/appointments/${id}/update`, {
+        mode: data.mode,
+        ...data.updateFields,
+      });
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      invalidateRelated(queryClient, "appointments");
+      queryClient.invalidateQueries({ queryKey: ["appointment-series"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}/services`] });
+      toast({ title: "Serientermine aktualisiert" });
+      setShowSeriesEditDialog(false);
+      setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+    },
+  });
+
 
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
@@ -245,8 +278,49 @@ export default function EditAppointment() {
     return Object.keys(newErrors).length === 0;
   };
 
+  const getSeriesUpdateFields = () => {
+    if (!appointment) return {};
+    const fields: Record<string, unknown> = {};
+    if (date !== appointment.date) fields.date = date;
+    const normalizedStart = (appointment.scheduledStart || "").slice(0, 5);
+    if (time !== normalizedStart) fields.scheduledStart = time;
+    if (isAdmin && ktAssignedEmployeeId && parseInt(ktAssignedEmployeeId) !== appointment.assignedEmployeeId) {
+      fields.assignedEmployeeId = parseInt(ktAssignedEmployeeId);
+    }
+    if ((notes || null) !== (appointment.notes || null)) fields.notes = notes || null;
+    return fields;
+  };
+
+  const handleSeriesUpdate = (mode: "single" | "this_and_future" | "all_future") => {
+    if (mode === "single") {
+      const totalDuration = services.reduce((sum, s) => sum + s.durationMinutes, 0);
+      const calculatedEndTime = addMinutesToTime(time, totalDuration);
+      updateMutation.mutate({
+        date,
+        scheduledStart: time,
+        scheduledEnd: calculatedEndTime,
+        durationPromised: totalDuration,
+        notes: notes || null,
+        assignedEmployeeId: isAdmin && ktAssignedEmployeeId ? parseInt(ktAssignedEmployeeId) : undefined,
+        services: services.map(s => ({
+          serviceId: s.serviceId,
+          plannedDurationMinutes: s.durationMinutes,
+        })),
+      });
+      setShowSeriesEditDialog(false);
+      return;
+    }
+    const updateFields = getSeriesUpdateFields();
+    seriesUpdateMutation.mutate({ mode, updateFields });
+  };
+
   const handleSubmit = () => {
     if (!validate() || !appointment) return;
+
+    if (appointment.seriesId && appointment.appointmentType === "Kundentermin") {
+      setShowSeriesEditDialog(true);
+      return;
+    }
     
     if (appointment.appointmentType === "Kundentermin") {
       const totalDuration = services.reduce((sum, s) => sum + s.durationMinutes, 0);
@@ -303,7 +377,7 @@ export default function EditAppointment() {
     }
   };
 
-  const isPending = updateMutation.isPending || updateProspectMutation.isPending;
+  const isPending = updateMutation.isPending || updateProspectMutation.isPending || seriesUpdateMutation.isPending;
 
   if (appointmentLoading) {
     return (
@@ -323,7 +397,7 @@ export default function EditAppointment() {
     );
   }
 
-  if (appointment.status === "completed") {
+  if (appointment.status === "completed" && !appointment.seriesId) {
     return (
       <Layout>
         <Button 
@@ -366,6 +440,20 @@ export default function EditAppointment() {
           <p className="text-muted-foreground mt-1">{appointment.customer.name}</p>
         )}
       </div>
+
+      {appointment.seriesId && (
+        <div className="mb-4 p-3 bg-primary/5 border border-primary/20 rounded-lg" data-testid="banner-series-edit-info">
+          <div className="flex items-center gap-2">
+            <Repeat className={`${iconSize.sm} text-primary`} />
+            <span className="text-sm font-medium text-primary">
+              Teil einer Serie
+            </span>
+            <span className="text-xs text-muted-foreground">
+              — Beim Speichern wählen Sie, ob nur dieser oder weitere Termine geändert werden
+            </span>
+          </div>
+        </div>
+      )}
 
       <Card>
         <CardHeader>
@@ -717,6 +805,71 @@ export default function EditAppointment() {
           </Button>
         </CardContent>
       </Card>
+
+      <AlertDialog open={showSeriesEditDialog} onOpenChange={setShowSeriesEditDialog}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Repeat className={`${iconSize.md} text-primary`} />
+              Serientermin ändern
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="text-sm text-muted-foreground space-y-1">
+                <span className="block">Dieser Termin gehört zu einer Serie. Welche Termine möchten Sie ändern?</span>
+                <span className="block text-xs">Bei Einzeländerung werden alle Felder inkl. Leistungen gespeichert. Bei Mehrfachänderung werden nur Datum, Uhrzeit, Mitarbeiter und Notizen für die Serie angepasst.</span>
+                {appointment?.status === "completed" && (
+                  <span className="block mt-2 text-amber-600 font-medium">
+                    Dieser Termin ist bereits dokumentiert und kann nicht einzeln geändert werden. Sie können aber alle zukünftigen Termine anpassen.
+                  </span>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-3 py-2">
+            <button
+              onClick={() => handleSeriesUpdate("single")}
+              disabled={seriesUpdateMutation.isPending || appointment?.status === "completed"}
+              className="w-full p-4 rounded-lg border-2 text-left hover:border-primary/50 hover:bg-primary/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              data-testid="button-series-edit-single"
+            >
+              <span className="font-semibold text-sm">Nur diesen Termin ändern</span>
+              <span className="block text-xs text-muted-foreground mt-1">
+                Alle anderen Serientermine bleiben unverändert
+              </span>
+            </button>
+            <button
+              onClick={() => handleSeriesUpdate("this_and_future")}
+              disabled={seriesUpdateMutation.isPending}
+              className="w-full p-4 rounded-lg border-2 text-left hover:border-primary/50 hover:bg-primary/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              data-testid="button-series-edit-this-and-future"
+            >
+              <span className="font-semibold text-sm">Diesen und alle folgenden ändern</span>
+              <span className="block text-xs text-muted-foreground mt-1">
+                Ab diesem Termin werden alle zukünftigen Termine geändert
+              </span>
+            </button>
+            <button
+              onClick={() => handleSeriesUpdate("all_future")}
+              disabled={seriesUpdateMutation.isPending}
+              className="w-full p-4 rounded-lg border-2 text-left hover:border-primary/50 hover:bg-primary/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              data-testid="button-series-edit-all-future"
+            >
+              <span className="font-semibold text-sm">Alle zukünftigen Termine ändern</span>
+              <span className="block text-xs text-muted-foreground mt-1">
+                Alle zukünftigen Termine der Serie werden angepasst
+              </span>
+            </button>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={seriesUpdateMutation.isPending}>Abbrechen</AlertDialogCancel>
+          </AlertDialogFooter>
+          {seriesUpdateMutation.isPending && (
+            <div className="flex items-center justify-center py-2">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          )}
+        </AlertDialogContent>
+      </AlertDialog>
     </Layout>
   );
 }

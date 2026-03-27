@@ -110,7 +110,6 @@ function delay(ms: number): Promise<void> {
 async function parseErrorResponse(response: Response): Promise<ApiErrorInfo> {
   try {
     const data = await response.json();
-    // Extract message from various backend response formats
     let message = 'Ein unbekannter Fehler ist aufgetreten';
     if (typeof data.message === 'string' && data.message) {
       message = data.message;
@@ -119,10 +118,13 @@ async function parseErrorResponse(response: Response): Promise<ApiErrorInfo> {
     } else if (typeof data.error?.message === 'string' && data.error.message) {
       message = data.error.message;
     }
+    const details: Record<string, unknown> = { ...(data.details || {}) };
+    if (data.conflicts) details.conflicts = data.conflicts;
+    if (data.dates) details.dates = data.dates;
     return {
-      code: data.code || 'API_ERROR',
+      code: data.code || data.error || 'API_ERROR',
       message,
-      details: data.details,
+      details: Object.keys(details).length > 0 ? details : undefined,
     };
   } catch {
     return {

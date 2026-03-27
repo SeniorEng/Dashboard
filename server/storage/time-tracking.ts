@@ -436,6 +436,8 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
         performedByEmployeeId: appointments.performedByEmployeeId,
         prospectId: appointments.prospectId,
         deletedAt: appointments.deletedAt,
+        seriesId: appointments.seriesId,
+        isSeriesException: appointments.isSeriesException,
         customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as('customer_name'),
       })
       .from(appointments)
@@ -490,6 +492,8 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
         performedByEmployeeId: appointments.performedByEmployeeId,
         prospectId: appointments.prospectId,
         deletedAt: appointments.deletedAt,
+        seriesId: appointments.seriesId,
+        isSeriesException: appointments.isSeriesException,
         customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as('customer_name'),
       })
       .from(appointments)
