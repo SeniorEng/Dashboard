@@ -627,3 +627,86 @@ describe("BIZ-17: durationPromised wird bei Erstellung aus Services berechnet", 
     expect(createRes.data.durationPromised).toBe(60);
   });
 });
+
+describe("BIZ-18: Termin löschen entfernt aus Tagesliste", () => {
+  it("BIZ-18.1 – Gelöschter Termin erscheint nicht mehr in Tagesliste", async () => {
+    const date = getFutureDate(238);
+    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date,
+      scheduledStart: "07:00",
+      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      assignedEmployeeId: auth.user.id,
+    });
+    expect(createRes.status).toBe(201);
+    const id = createRes.data.id;
+
+    const beforeList = await apiGet<any[]>(`/api/appointments?date=${date}`);
+    expect(beforeList.status).toBe(200);
+    const foundBefore = beforeList.data.find((a: any) => a.id === id);
+    expect(foundBefore).toBeDefined();
+
+    const delRes = await apiDelete(`/api/appointments/${id}`);
+    expect(delRes.status).toBe(200);
+
+    const afterList = await apiGet<any[]>(`/api/appointments?date=${date}`);
+    expect(afterList.status).toBe(200);
+    const foundAfter = afterList.data.find((a: any) => a.id === id);
+    expect(foundAfter).toBeUndefined();
+  });
+});
+
+describe("BIZ-19: Documenting-Status erlaubt Notizen", () => {
+  it("BIZ-19.1 – Termin in documenting-Status: notes-Feld kann geändert werden", async () => {
+    const res = await findFreeSlot({
+      offsetRange: [2, 60],
+      times: ["05:00", "05:30", "19:00", "19:30"],
+      past: true,
+    });
+    expect(res, "Freier Slot für BIZ-19 muss gefunden werden").toBeTruthy();
+    const id = res!.data.id;
+
+    await apiPost<any>(`/api/appointments/${id}/start`, {});
+    await apiPost<any>(`/api/appointments/${id}/end`, {});
+
+    const verify = await apiGet<any>(`/api/appointments/${id}`);
+    expect(verify.data.status).toBe("documenting");
+
+    const patchRes = await apiPatch<any>(`/api/appointments/${id}`, {
+      notes: "Notiz im documenting-Status erlaubt",
+    });
+    expect(patchRes.status).toBe(200);
+
+    await apiDelete(`/api/appointments/${id}`);
+  });
+});
+
+describe("BIZ-20: Completed-Termin PATCH wird exakt mit 403 abgelehnt", () => {
+  it("BIZ-20.1 – Abgeschlossener Termin: scheduledStart-Änderung → 403", async () => {
+    const res = await findFreeSlot({
+      offsetRange: [2, 60],
+      times: ["02:00", "02:30", "22:30", "23:00"],
+      past: true,
+    });
+    expect(res, "Freier Slot für BIZ-20 muss gefunden werden").toBeTruthy();
+    const id = res!.data.id;
+
+    await apiPost<any>(`/api/appointments/${id}/document`, {
+      actualStart: "02:00",
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "BIZ-20 Test" }],
+    });
+
+    const verify = await apiGet<any>(`/api/appointments/${id}`);
+    expect(verify.data.status).toBe("completed");
+
+    const patchRes = await apiPatch<any>(`/api/appointments/${id}`, {
+      scheduledStart: "14:00",
+    });
+    expect(patchRes.status).toBe(403);
+
+    await apiDelete(`/api/appointments/${id}`);
+  });
+});

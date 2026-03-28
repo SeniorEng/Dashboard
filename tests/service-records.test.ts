@@ -370,6 +370,22 @@ describe("LN-10: In-progress Termin blockiert LN", () => {
   });
 });
 
+describe("LN-12: Monatlicher LN – Erstellung und Blocking", () => {
+  it("LN-12.1 – Monatlicher LN ohne dokumentierte Termine wird abgelehnt", async () => {
+    const now = new Date();
+    const futureMonth = now.getMonth() + 4;
+    const year = futureMonth > 12 ? now.getFullYear() + 1 : now.getFullYear();
+    const month = futureMonth > 12 ? futureMonth - 12 : futureMonth;
+
+    const res = await apiPost<any>("/api/service-records", {
+      customerId: testCustomerId,
+      year,
+      month,
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("LN-11: Signatur-Daten Validierung", () => {
   it("LN-11.1 – Unterschrift ohne signatureData wird abgelehnt", async () => {
     const apptId = await createAndDocumentAppointment(

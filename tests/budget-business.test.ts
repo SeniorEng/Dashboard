@@ -456,12 +456,37 @@ describe("BB-13: Budget-Allokationen", () => {
 describe("BB-14: PG1 – kein §45a Anspruch", () => {
   it("BB-14.1 – PG1 Kunde hat keinen §45a Umwandlungsanspruch", async () => {
     const custRes = await apiGet<{ data: any[] }>("/api/admin/customers?limit=50");
+    expect(custRes.status).toBe(200);
     const pg1 = custRes.data.data.find((c: any) => c.pflegegrad === 1);
-    if (pg1) {
-      const res = await apiGet<any>(`/api/budget/${pg1.id}/overview`);
-      if (res.status === 200 && res.data.umwandlung45a) {
-        expect(res.data.umwandlung45a.monthlyBudgetCents).toBe(0);
-      }
+    if (!pg1) {
+      console.warn("Kein PG1 Kunde vorhanden – Test wird als INFO übersprungen");
+      return;
     }
+    const res = await apiGet<any>(`/api/budget/${pg1.id}/overview`);
+    expect(res.status).toBe(200);
+    if (res.data.umwandlung45a) {
+      expect(res.data.umwandlung45a.monthlyBudgetCents).toBe(0);
+    }
+  });
+});
+
+describe("BB-15: Budget-Transaktionsliste vollständig", () => {
+  it("BB-15.1 – Transaktionsliste enthält Pflichtfelder", async () => {
+    const res = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=5`);
+    expect(res.status).toBe(200);
+    if (res.data.length > 0) {
+      const tx = res.data[0];
+      expect(tx).toHaveProperty("id");
+      expect(tx).toHaveProperty("amountCents");
+      expect(tx).toHaveProperty("transactionType");
+      expect(tx).toHaveProperty("createdAt");
+    }
+  });
+
+  it("BB-15.2 – Manuelle Korrekturbuchung erscheint in Liste", async () => {
+    const res = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=50`);
+    expect(res.status).toBe(200);
+    const manualTx = res.data.find((t: any) => t.transactionType === "manual_adjustment");
+    expect(manualTx).toBeDefined();
   });
 });

@@ -437,3 +437,37 @@ describe("KV-17: Kunde nicht gefunden", () => {
     expect([200, 404]).toContain(res.status);
   });
 });
+
+describe("KV-18: Deaktivierung ohne Vertragsende blockiert", () => {
+  it("KV-18.1 – Deaktivierung ohne Vertragsende wird abgelehnt", async () => {
+    expect(createdCustomerIds.length).toBeGreaterThan(0);
+    const res = await apiPost<any>(
+      `/api/admin/customers/${createdCustomerIds[0]}/complete-deactivation`,
+      { deactivationReason: "Test" }
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("KV-19: Anonymisierung nur für inaktive Kunden", () => {
+  it("KV-19.1 – Anonymisierung für aktiven Kunden wird abgelehnt", async () => {
+    expect(createdCustomerIds.length).toBeGreaterThan(0);
+    const res = await apiPost<any>(
+      `/api/admin/customers/${createdCustomerIds[0]}/anonymize`,
+      {}
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("KV-20: Deaktivierungs-Readiness Endpoint", () => {
+  it("KV-20.1 – Readiness-Check für Kunden ohne Vertragsende zeigt nicht bereit", async () => {
+    expect(createdCustomerIds.length).toBeGreaterThan(0);
+    const res = await apiGet<any>(
+      `/api/admin/customers/${createdCustomerIds[0]}/deactivation-readiness`
+    );
+    expect(res.status).toBe(200);
+    expect(res.data).toHaveProperty("ready");
+    expect(res.data.ready).toBe(false);
+  });
+});

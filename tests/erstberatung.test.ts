@@ -261,3 +261,46 @@ describe("EB-6: Prospect bearbeiten (PATCH)", () => {
     expect(res.data.telefon).toBe("+4917699999999");
   });
 });
+
+describe("EB-7: Prospect-Sichtbarkeit", () => {
+  it("EB-7.1 – Prospect erscheint NICHT in Admin-Kundenliste", async () => {
+    expect(prospectId, "prospectId muss gesetzt sein").toBeTruthy();
+    const res = await apiGet<any>("/api/admin/customers?limit=200");
+    expect(res.status).toBe(200);
+    const list = Array.isArray(res.data) ? res.data : res.data.data || [];
+    const found = list.find((c: any) => c.id === prospectId);
+    expect(found).toBeUndefined();
+  });
+
+  it("EB-7.2 – Prospect erscheint in Admin-Prospect-Liste", async () => {
+    expect(prospectId, "prospectId muss gesetzt sein").toBeTruthy();
+    const res = await apiGet<any>("/api/admin/prospects");
+    expect(res.status).toBe(200);
+    const list = Array.isArray(res.data) ? res.data : res.data.data || [];
+    const found = list.find((p: any) => p.id === prospectId);
+    expect(found).toBeDefined();
+  });
+});
+
+describe("EB-8: Erstberatung-Service automatisch verknüpft", () => {
+  it("EB-8.1 – Erstberatungs-Termin hat automatisch verknüpften Service", async () => {
+    expect(erstberatungId, "erstberatungId muss gesetzt sein").toBeTruthy();
+    const res = await apiGet<any>(`/api/appointments/${erstberatungId}`);
+    expect(res.status).toBe(200);
+    expect(res.data.appointmentType).toBe("Erstberatung");
+    if (res.data.services && res.data.services.length > 0) {
+      expect(res.data.services[0]).toHaveProperty("serviceId");
+    }
+  });
+});
+
+describe("EB-9: Admin-Prospect PATCH (vollständig)", () => {
+  it("EB-9.1 – Admin kann Prospect-Status und Kontaktdaten aktualisieren", async () => {
+    expect(prospectId, "prospectId muss gesetzt sein").toBeTruthy();
+    const res = await apiPatch<any>(`/api/admin/prospects/${prospectId}`, {
+      telefon: "+4917611111111",
+      stadt: "München",
+    });
+    expect(res.status).toBe(200);
+  });
+});

@@ -9,6 +9,9 @@ import {
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 const cleanupIds: number[] = [];
+let testCustomerId: number;
+let hwServiceId: number;
+const apptCleanupIds: number[] = [];
 
 function getNextWeekday(date: Date): Date {
   const dow = date.getDay();
@@ -19,11 +22,21 @@ function getNextWeekday(date: Date): Date {
 
 beforeAll(async () => {
   auth = await getAuthCookie();
+
+  const custRes = await apiGet<{ data: any[] }>("/api/admin/customers?limit=1");
+  testCustomerId = custRes.data.data[0].id;
+
+  const svcRes = await apiGet<any[]>("/api/services/all");
+  const hwSvc = svcRes.data.find((s: any) => s.kpiGroup === "HW" && s.isActive);
+  hwServiceId = hwSvc?.id ?? svcRes.data[0].id;
 });
 
 afterAll(async () => {
   for (const id of cleanupIds) {
     try { await apiDelete(`/api/time-entries/${id}`); } catch {}
+  }
+  for (const id of apptCleanupIds) {
+    try { await apiDelete(`/api/appointments/${id}`); } catch {}
   }
 });
 
@@ -479,5 +492,90 @@ describe("TE-BIZ-14: Ungültige Eintragstypen", () => {
       isFullDay: false,
     });
     expect(res.status).toBe(400);
+  });
+});
+
+describe("TE-BIZ-15: Ganztags-Eintrag blockiert bei bestehendem Termin", () => {
+  it("TE-BIZ-15.1 – Urlaub an Tag mit Kundentermin wird abgelehnt (400)", async () => {
+    const date = getFutureDate(290);
+    const apptRes = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date,
+      scheduledStart: "10:00",
+      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      assignedEmployeeId: auth.user.id,
+    });
+    expect(apptRes.status).toBe(201);
+
+    const teRes = await apiPost<any>("/api/time-entries", {
+      entryDate: date,
+      entryType: "urlaub",
+      isFullDay: true,
+    });
+    expect(teRes.status).toBe(400);
+
+    await apiDelete(`/api/appointments/${apptRes.data.id}`);
+  });
+});
+
+describe("TE-BIZ-16: Zeitbasierter Eintrag überlappt mit Termin", () => {
+  it("TE-BIZ-16.1 – Büroarbeit überlappend mit Termin wird abgelehnt (400)", async () => {
+    const date = getFutureDate(291);
+    const apptRes = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date,
+      scheduledStart: "10:00",
+      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
+      assignedEmployeeId: auth.user.id,
+    });
+    expect(apptRes.status).toBe(201);
+
+    const teRes = await apiPost<any>("/api/time-entries", {
+      entryDate: date,
+      entryType: "bueroarbeit",
+      startTime: "10:30",
+      endTime: "11:30",
+      isFullDay: false,
+    });
+    expect(teRes.status).toBe(400);
+
+    await apiDelete(`/api/appointments/${apptRes.data.id}`);
+  });
+});
+
+describe("TE-BIZ-17: Konflikt-Vorprüfung API", () => {
+  it("TE-BIZ-17.1 – check-conflicts Endpoint liefert Konflikte", async () => {
+    const date = getFutureDate(392);
+    const teRes = await apiPost<any>("/api/time-entries", {
+      entryDate: date,
+      entryType: "bueroarbeit",
+      startTime: "08:00",
+      endTime: "10:00",
+      isFullDay: false,
+    });
+    expect(teRes.status, `Time entry creation for ${date} should succeed`).toBe(201);
+
+    const checkRes = await apiPost<any>("/api/time-entries/check-conflicts", {
+      date,
+      startTime: "09:00",
+      endTime: "11:00",
+      isFullDay: false,
+    });
+    expect(checkRes.status).toBe(200);
+    expect(checkRes.data).toHaveProperty("conflict");
+    expect(checkRes.data.conflict).toBeTruthy();
+
+    await apiDelete(`/api/time-entries/${teRes.data.id}`);
+  });
+
+  it("TE-BIZ-17.2 – check-conflicts ohne Konflikt", async () => {
+    const date = getFutureDate(293);
+    const checkRes = await apiPost<any>("/api/time-entries/check-conflicts", {
+      date,
+      startTime: "08:00",
+      endTime: "09:00",
+      isFullDay: false,
+    });
+    expect(checkRes.status).toBe(200);
   });
 });
