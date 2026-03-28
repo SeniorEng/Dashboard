@@ -88,7 +88,7 @@ describe("Zeiterfassung (Time Entries) CRUD", () => {
     });
 
     it("sollte ganztägigen Urlaub erstellen können", async () => {
-      const vacationDate = getFutureDate(30);
+      const vacationDate = getFutureDate(350);
       const { status, data } = await apiPost<TimeEntry>("/api/time-entries", {
         entryDate: vacationDate,
         entryType: "urlaub",
@@ -254,8 +254,8 @@ describe("Pausenprüfung §4 ArbZG", () => {
     daysWithMissingBreaks: { date: string; workMinutes: number }[];
   }
 
-  const pauseTestDate1 = getFutureDate(100);
-  const pauseTestDate2 = getFutureDate(101);
+  const pauseTestDate1 = getFutureDate(500);
+  const pauseTestDate2 = getFutureDate(501);
 
   beforeAll(async () => {
     await getAuthCookie();
