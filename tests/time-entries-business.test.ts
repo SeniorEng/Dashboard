@@ -10,6 +10,13 @@ import {
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 const cleanupIds: number[] = [];
 
+function getNextWeekday(date: Date): Date {
+  const dow = date.getDay();
+  if (dow === 0) date.setDate(date.getDate() + 1);
+  else if (dow === 6) date.setDate(date.getDate() + 2);
+  return date;
+}
+
 beforeAll(async () => {
   auth = await getAuthCookie();
 });
@@ -81,11 +88,14 @@ describe("TE-BIZ-2: Zeitkonflikte", () => {
       isFullDay: false,
     });
     expect(res.status).toBe(201);
+    expect(res.data).toHaveProperty("id");
+    expect(res.data.entryType).toBe("bueroarbeit");
     baseId = res.data.id;
     cleanupIds.push(baseId);
   });
 
   it("TE-BIZ-2.2 – Überlappender Eintrag 10:00-11:00 wird abgelehnt", async () => {
+    expect(baseId, "baseId muss aus TE-BIZ-2.1 gesetzt sein").toBeTruthy();
     const res = await apiPost<any>("/api/time-entries", {
       entryDate: conflictDate,
       entryType: "bueroarbeit",
@@ -105,6 +115,7 @@ describe("TE-BIZ-2: Zeitkonflikte", () => {
       isFullDay: false,
     });
     expect(res.status).toBe(201);
+    expect(res.data.startTime).toContain("13:00");
     cleanupIds.push(res.data.id);
   });
 });
@@ -131,6 +142,8 @@ describe("TE-BIZ-3: Ganztags-Konflikte", () => {
       isFullDay: true,
     });
     expect(res.status).toBe(201);
+    expect(res.data.entryType).toBe("urlaub");
+    expect(res.data.isFullDay).toBe(true);
     cleanupIds.push(res.data.id);
   });
 
@@ -154,6 +167,145 @@ describe("TE-BIZ-4: Urlaubsübersicht", () => {
     expect(res.data).toHaveProperty("totalDays");
     expect(res.data).toHaveProperty("usedDays");
     expect(res.data).toHaveProperty("remainingDays");
+    expect(typeof res.data.totalDays).toBe("number");
+    expect(typeof res.data.usedDays).toBe("number");
+    expect(typeof res.data.remainingDays).toBe("number");
     expect(res.data.totalDays).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("TE-BIZ-5: Mehrtägiger Urlaub überspringt Wochenenden", () => {
+  const vacStartDate = getFutureDate(240);
+  let createdEntryIds: number[] = [];
+
+  beforeAll(async () => {
+    const d = new Date(vacStartDate);
+    const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
+    if (existing.status === 200 && Array.isArray(existing.data)) {
+      for (const entry of existing.data) {
+        if (entry.entryDate >= vacStartDate) {
+          await apiDelete(`/api/time-entries/${entry.id}`);
+        }
+      }
+    }
+  });
+
+  it("TE-BIZ-5.1 – Mehrtägiger Urlaub (Montag-Sonntag) erstellt nur Werktage", async () => {
+    const start = new Date(vacStartDate);
+    while (start.getDay() !== 1) {
+      start.setDate(start.getDate() + 1);
+    }
+    const startStr = start.toISOString().split("T")[0];
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    const endStr = end.toISOString().split("T")[0];
+
+    const res = await apiPost<any>("/api/time-entries/range", {
+      startDate: startStr,
+      endDate: endStr,
+      entryType: "urlaub",
+    });
+
+    if (res.status === 201) {
+      expect(Array.isArray(res.data), "time-entries gibt ein Array zurück").toBe(true);
+      const entries = res.data as any[];
+      for (const e of entries) {
+        if (e.id) {
+          createdEntryIds.push(e.id);
+          cleanupIds.push(e.id);
+        }
+        const day = new Date(e.entryDate + "T00:00:00").getDay();
+        expect(day).not.toBe(0);
+        expect(day).not.toBe(6);
+      }
+      expect(entries.length).toBe(5);
+    } else {
+      expect(res.status).toBe(200);
+    }
+  });
+});
+
+describe("TE-BIZ-6: Krankheitseintrag", () => {
+  const sickDate = getFutureDate(250);
+
+  beforeAll(async () => {
+    const d = new Date(sickDate);
+    const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
+    if (existing.status === 200 && Array.isArray(existing.data)) {
+      for (const entry of existing.data) {
+        if (entry.entryDate === sickDate) {
+          await apiDelete(`/api/time-entries/${entry.id}`);
+        }
+      }
+    }
+  });
+
+  it("TE-BIZ-6.1 – Krankheitseintrag erstellen", async () => {
+    const res = await apiPost<any>("/api/time-entries", {
+      entryDate: sickDate,
+      entryType: "krankheit",
+      isFullDay: true,
+    });
+    expect(res.status).toBe(201);
+    expect(res.data.entryType).toBe("krankheit");
+    expect(res.data.isFullDay).toBe(true);
+    cleanupIds.push(res.data.id);
+  });
+});
+
+describe("TE-BIZ-7: Zeiterfassungs-Löschung", () => {
+  it("TE-BIZ-7.1 – Zukunfts-Zeiteintrag kann gelöscht werden", async () => {
+    const futureDate = getFutureDate(215);
+    const d = new Date(futureDate);
+    const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
+    if (existing.status === 200 && Array.isArray(existing.data)) {
+      for (const entry of existing.data) {
+        if (entry.entryDate === futureDate) {
+          await apiDelete(`/api/time-entries/${entry.id}`);
+        }
+      }
+    }
+
+    const createRes = await apiPost<any>("/api/time-entries", {
+      entryDate: futureDate,
+      entryType: "bueroarbeit",
+      startTime: "08:00",
+      endTime: "09:00",
+      isFullDay: false,
+    });
+    expect(createRes.status).toBe(201);
+    const id = createRes.data.id;
+
+    const delRes = await apiDelete(`/api/time-entries/${id}`);
+    expect(delRes.status).toBe(204);
+  });
+});
+
+describe("TE-BIZ-8: Verschiedene Eintragstypen", () => {
+  const typeDate = getFutureDate(260);
+
+  beforeAll(async () => {
+    const d = new Date(typeDate);
+    const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
+    if (existing.status === 200 && Array.isArray(existing.data)) {
+      for (const entry of existing.data) {
+        if (entry.entryDate === typeDate) {
+          await apiDelete(`/api/time-entries/${entry.id}`);
+        }
+      }
+    }
+  });
+
+  it("TE-BIZ-8.1 – Schulung-Eintrag erstellen", async () => {
+    const res = await apiPost<any>("/api/time-entries", {
+      entryDate: typeDate,
+      entryType: "schulung",
+      startTime: "09:00",
+      endTime: "12:00",
+      isFullDay: false,
+    });
+    expect(res.status).toBe(201);
+    expect(res.data.entryType).toBe("schulung");
+    cleanupIds.push(res.data.id);
   });
 });

@@ -16,9 +16,9 @@ beforeAll(async () => {
   auth = await getAuthCookie();
 
   const provRes = await apiGet<any[]>("/api/admin/insurance-providers");
-  if (provRes.status === 200 && provRes.data.length > 0) {
-    insuranceProviderId = provRes.data[0].id;
-  }
+  expect(provRes.status).toBe(200);
+  expect(provRes.data.length).toBeGreaterThan(0);
+  insuranceProviderId = provRes.data[0].id;
 });
 
 afterAll(async () => {
@@ -66,6 +66,7 @@ describe("KV-1: PLZ-Validierung", () => {
   it("KV-1.1 – PLZ mit 5 Ziffern ist gültig", async () => {
     const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({ plz: "10115" }));
     expect(res.status).toBe(201);
+    expect(res.data).toHaveProperty("id");
     createdCustomerIds.push(res.data.id);
   });
 
@@ -76,6 +77,11 @@ describe("KV-1: PLZ-Validierung", () => {
 
   it("KV-1.3 – PLZ mit Buchstaben wird abgelehnt", async () => {
     const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({ plz: "1011A" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("KV-1.4 – PLZ mit 6 Ziffern wird abgelehnt", async () => {
+    const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({ plz: "101150" }));
     expect(res.status).toBe(400);
   });
 });
@@ -151,6 +157,7 @@ describe("KV-4: Pflegegrad-Historie", () => {
   });
 
   it("KV-4.2 – Pflegegrad auf 4 erhöhen", async () => {
+    expect(historyCustomerId, "historyCustomerId muss aus KV-4.1 gesetzt sein").toBeTruthy();
     const res = await apiPost<any>(`/api/admin/customers/${historyCustomerId}/care-level`, {
       pflegegrad: 4,
       validFrom: "2025-06-01",
@@ -160,6 +167,7 @@ describe("KV-4: Pflegegrad-Historie", () => {
   });
 
   it("KV-4.3 – Details zeigen aktuellen Pflegegrad 4", async () => {
+    expect(historyCustomerId, "historyCustomerId muss aus KV-4.1 gesetzt sein").toBeTruthy();
     const res = await apiGet<any>(`/api/admin/customers/${historyCustomerId}/details`);
     expect(res.status).toBe(200);
     expect(res.data.pflegegrad).toBe(4);
@@ -180,14 +188,39 @@ describe("KV-5: Pflichtfelder", () => {
     const res = await apiPost<any>("/api/admin/customers", payload);
     expect(res.status).toBe(400);
   });
+
+  it("KV-5.3 – Ohne Vorname wird abgelehnt", async () => {
+    const payload = validCustomerPayload();
+    delete (payload as any).vorname;
+    const res = await apiPost<any>("/api/admin/customers", payload);
+    expect(res.status).toBe(400);
+  });
+
+  it("KV-5.4 – Ohne Stadt wird abgelehnt", async () => {
+    const payload = validCustomerPayload();
+    delete (payload as any).stadt;
+    const res = await apiPost<any>("/api/admin/customers", payload);
+    expect(res.status).toBe(400);
+  });
+
+  it("KV-5.5 – Ohne Hausnummer wird abgelehnt", async () => {
+    const payload = validCustomerPayload();
+    delete (payload as any).nr;
+    const res = await apiPost<any>("/api/admin/customers", payload);
+    expect(res.status).toBe(400);
+  });
 });
 
-describe("KV-6: Mitarbeiter-Zuweisung", () => {
-  it("KV-6.1 – Primären Mitarbeiter zuweisen", async () => {
-    if (createdCustomerIds.length === 0) return;
-    const custId = createdCustomerIds[0];
+describe("KV-6: Mitarbeiter-Zuweisung & Kundenlistenfilter", () => {
+  let assignedCustomerId: number;
 
-    const res = await apiPatch<any>(`/api/admin/customers/${custId}/assign`, {
+  it("KV-6.1 – Kunde erstellen und Mitarbeiter zuweisen", async () => {
+    const createRes = await apiPost<any>("/api/admin/customers", validCustomerPayload());
+    expect(createRes.status).toBe(201);
+    assignedCustomerId = createRes.data.id;
+    createdCustomerIds.push(assignedCustomerId);
+
+    const res = await apiPatch<any>(`/api/admin/customers/${assignedCustomerId}/assign`, {
       primaryEmployeeId: auth.user.id,
       backupEmployeeId: null,
       backupEmployeeId2: null,
@@ -196,8 +229,92 @@ describe("KV-6: Mitarbeiter-Zuweisung", () => {
   });
 
   it("KV-6.2 – Zugewiesener Kunde erscheint in eigener Liste", async () => {
-    const res = await apiGet<any[]>("/api/customers");
+    expect(assignedCustomerId, "assignedCustomerId muss gesetzt sein").toBeTruthy();
+    const res = await apiGet<any>("/api/customers");
     expect(res.status).toBe(200);
-    expect(Array.isArray(res.data)).toBe(true);
+    expect(Array.isArray(res.data), "/api/customers gibt ein Array zurück").toBe(true);
+    const customers = res.data as any[];
+    const found = customers.find((c: any) => c.id === assignedCustomerId);
+    expect(found, "Zugewiesener Kunde muss in eigener Liste erscheinen").toBeDefined();
+  });
+});
+
+describe("KV-7: Geburtsdatum-Validierung", () => {
+  it("KV-7.1 – Geburtsdatum in der Zukunft wird abgelehnt", async () => {
+    const futureDate = new Date();
+    futureDate.setFullYear(futureDate.getFullYear() + 1);
+    const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({
+      geburtsdatum: futureDate.toISOString().split("T")[0],
+    }));
+    expect(res.status).toBe(400);
+  });
+
+  it("KV-7.2 – Geburtsdatum >120 Jahre wird abgelehnt", async () => {
+    const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({
+      geburtsdatum: "1890-01-01",
+    }));
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("KV-8: Kundensuche", () => {
+  it("KV-8.1 – Suche mit mindestens 2 Zeichen liefert Ergebnisse", async () => {
+    const res = await apiGet<any>("/api/search?q=Test&limit=5");
+    expect(res.status).toBe(200);
+  });
+
+  it("KV-8.2 – Admin-Kundenliste unterstützt Filter", async () => {
+    const res = await apiGet<any>("/api/admin/customers?status=aktiv&limit=5");
+    expect(res.status).toBe(200);
+    expect(res.data).toHaveProperty("data");
+    expect(Array.isArray(res.data.data)).toBe(true);
+  });
+});
+
+describe("KV-9: Duplikatprüfung", () => {
+  it("KV-9.1 – check-duplicate mit existierenden Daten findet Match", async () => {
+    expect(createdCustomerIds.length, "Kunden müssen aus vorherigen Tests vorhanden sein").toBeGreaterThan(0);
+    const custRes = await apiGet<any>(`/api/admin/customers/${createdCustomerIds[0]}/details`);
+    expect(custRes.status).toBe(200);
+
+    const res = await apiPost<any>("/api/admin/customers/check-duplicate", {
+      vorname: custRes.data.vorname,
+      nachname: custRes.data.nachname,
+    });
+    expect(res.status).toBe(200);
+    expect(res.data).toBeDefined();
+    if (res.data && typeof res.data === "object") {
+      const hasMatch = res.data.hasDuplicate || res.data.exists || (Array.isArray(res.data.duplicates) && res.data.duplicates.length > 0) || false;
+      expect(hasMatch).toBe(true);
+    }
+  });
+
+  it("KV-9.2 – check-duplicate mit neuem Namen findet kein Duplikat", async () => {
+    const res = await apiPost<any>("/api/admin/customers/check-duplicate", {
+      vorname: "Einzigartig-" + uniqueId(),
+      nachname: "Kein-Duplikat-" + uniqueId(),
+    });
+    expect(res.status).toBe(200);
+    if (res.data && typeof res.data === "object") {
+      const hasMatch = res.data.hasDuplicate || res.data.exists || (Array.isArray(res.data.duplicates) && res.data.duplicates.length > 0) || false;
+      expect(hasMatch).toBe(false);
+    }
+  });
+});
+
+describe("KV-10: E-Mail-Validierung", () => {
+  it("KV-10.1 – Gültige E-Mail wird akzeptiert", async () => {
+    const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({
+      email: "test-" + uniqueId() + "@example.com",
+    }));
+    expect(res.status).toBe(201);
+    createdCustomerIds.push(res.data.id);
+  });
+
+  it("KV-10.2 – Ungültige E-Mail wird abgelehnt", async () => {
+    const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({
+      email: "keine-email",
+    }));
+    expect(res.status).toBe(400);
   });
 });

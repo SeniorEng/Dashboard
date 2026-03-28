@@ -13,6 +13,7 @@ let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let prospectId: number;
 let erstberatungId: number;
 const cleanupIds: number[] = [];
+const cleanupProspectIds: number[] = [];
 
 beforeAll(async () => {
   auth = await getAuthCookie();
@@ -21,6 +22,9 @@ beforeAll(async () => {
 afterAll(async () => {
   for (const id of cleanupIds) {
     try { await apiDelete(`/api/appointments/${id}`); } catch {}
+  }
+  for (const id of cleanupProspectIds) {
+    try { await apiDelete(`/api/prospects/${id}`); } catch {}
   }
 });
 
@@ -36,14 +40,17 @@ describe("EB-1: Prospect (Interessent) erstellen (inline)", () => {
     expect(res.status).toBe(201);
     expect(res.data).toHaveProperty("id");
     expect(res.data.vorname).toBe("Erika");
+    expect(res.data.nachname).toBe(nachname);
     expect(res.data.status).toBe("erstberatung_vereinbart");
     prospectId = res.data.id;
+    cleanupProspectIds.push(prospectId);
   });
 
   it("EB-1.2 – Prospect Termindaten abrufen", async () => {
     expect(prospectId, "prospectId muss aus EB-1.1 gesetzt sein").toBeTruthy();
     const res = await apiGet<any>(`/api/prospects/${prospectId}/appointment-data`);
     expect(res.status).toBe(200);
+    expect(res.data).toHaveProperty("prospect");
   });
 
   it("EB-1.3 – Prospect Kontaktdaten aktualisieren", async () => {
@@ -53,19 +60,33 @@ describe("EB-1: Prospect (Interessent) erstellen (inline)", () => {
     });
     expect(res.status).toBe(200);
   });
+
+  it("EB-1.4 – Prospect ohne Vorname wird abgelehnt", async () => {
+    const res = await apiPost<any>("/api/prospects/inline", {
+      nachname: "Nur-Nachname-" + uniqueId(),
+      telefon: "+4917600000000",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("EB-1.5 – Prospect ohne Nachname wird abgelehnt", async () => {
+    const res = await apiPost<any>("/api/prospects/inline", {
+      vorname: "Nur-Vorname",
+      telefon: "+4917600000000",
+    });
+    expect(res.status).toBe(400);
+  });
 });
 
 describe("EB-2: Erstberatung-Termin erstellen", () => {
-  const ebDate = getFutureDate(18);
-
   it("EB-2.1 – Erstberatung (prospect-erstberatung) erstellen", async () => {
     expect(prospectId, "prospectId muss aus EB-1.1 gesetzt sein").toBeTruthy();
 
     const timeSlots = ["07:00", "16:00", "17:00", "06:30", "18:00"];
     const dates = [getFutureDate(18), getFutureDate(19), getFutureDate(21)];
     let res: any = null;
+    let success = false;
 
-    outer:
     for (const date of dates) {
       for (const time of timeSlots) {
         res = await apiPost<any>("/api/appointments/prospect-erstberatung", {
@@ -76,11 +97,15 @@ describe("EB-2: Erstberatung-Termin erstellen", () => {
           assignedEmployeeId: auth.user.id,
           notes: "Erstberatung für Prospect " + prospectId,
         });
-        if (res.status === 201) break outer;
+        if (res.status === 201) {
+          success = true;
+          break;
+        }
       }
+      if (success) break;
     }
 
-    expect(res?.status).toBe(201);
+    expect(success, "Erstberatung muss erfolgreich erstellt werden (201)").toBe(true);
     const appt = res.data.appointment || res.data;
     expect(appt).toHaveProperty("id");
     expect(appt.appointmentType.toLowerCase()).toBe("erstberatung");
@@ -111,13 +136,15 @@ describe("EB-2: Erstberatung-Termin erstellen", () => {
     const res = await apiGet<any>(`/api/appointments/${erstberatungId}`);
     expect(res.status).toBe(200);
     expect(res.data.appointmentType.toLowerCase()).toBe("erstberatung");
+    expect(res.data).toHaveProperty("id");
+    expect(res.data).toHaveProperty("scheduledStart");
   });
 
   it("EB-2.4 – Erstberatung mit ungültiger Dauer (10 Min) wird abgelehnt", async () => {
     expect(prospectId, "prospectId muss aus EB-1.1 gesetzt sein").toBeTruthy();
     const res = await apiPost<any>("/api/appointments/prospect-erstberatung", {
       prospectId,
-      date: getFutureDate(19),
+      date: getFutureDate(30),
       scheduledStart: "14:00",
       erstberatungDauer: 10,
       assignedEmployeeId: auth.user.id,
@@ -129,11 +156,49 @@ describe("EB-2: Erstberatung-Termin erstellen", () => {
     expect(prospectId, "prospectId muss aus EB-1.1 gesetzt sein").toBeTruthy();
     const res = await apiPost<any>("/api/appointments/prospect-erstberatung", {
       prospectId,
-      date: getFutureDate(19),
+      date: getFutureDate(31),
       scheduledStart: "14:00",
       erstberatungDauer: 40,
       assignedEmployeeId: auth.user.id,
     });
     expect(res.status).toBe(400);
+  });
+
+  it("EB-2.6 – Erstberatung mit gültiger Dauer 15 Min wird akzeptiert", async () => {
+    expect(prospectId, "prospectId muss aus EB-1.1 gesetzt sein").toBeTruthy();
+    const res = await apiPost<any>("/api/appointments/prospect-erstberatung", {
+      prospectId,
+      date: getFutureDate(32),
+      scheduledStart: "06:00",
+      erstberatungDauer: 15,
+      assignedEmployeeId: auth.user.id,
+    });
+    if (res.status === 201) {
+      const appt = res.data.appointment || res.data;
+      cleanupIds.push(appt.id);
+      expect(appt.appointmentType.toLowerCase()).toBe("erstberatung");
+    } else {
+      expect(res.status).toBe(409);
+    }
+  });
+
+  it("EB-2.7 – Erstberatung ohne prospectId wird abgelehnt", async () => {
+    const res = await apiPost<any>("/api/appointments/prospect-erstberatung", {
+      date: getFutureDate(33),
+      scheduledStart: "10:00",
+      erstberatungDauer: 60,
+      assignedEmployeeId: auth.user.id,
+    });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+  });
+});
+
+describe("EB-3: Prospect-Daten", () => {
+  it("EB-3.1 – Prospect hat korrekten Status nach Erstberatungs-Buchung", async () => {
+    expect(prospectId, "prospectId muss gesetzt sein").toBeTruthy();
+    const res = await apiGet<any>(`/api/prospects/${prospectId}/appointment-data`);
+    expect(res.status).toBe(200);
+    expect(res.data.prospect).toBeDefined();
+    expect(res.data.prospect.id).toBe(prospectId);
   });
 });

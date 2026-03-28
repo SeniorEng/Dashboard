@@ -88,12 +88,35 @@ describe("SER-1: Serie erstellen", () => {
   });
 });
 
+describe("SER-1B: Serie Termine haben seriesId", () => {
+  it("SER-1B.1 – Alle Termine der Serie verweisen auf die seriesId", async () => {
+    expect(seriesId, "seriesId muss aus SER-1.1 gesetzt sein").toBeTruthy();
+    const res = await apiGet<any>(`/api/appointment-series/${seriesId}`);
+    expect(res.status).toBe(200);
+    for (const appt of res.data.appointments) {
+      expect(appt.seriesId).toBe(seriesId);
+    }
+  });
+
+  it("SER-1B.2 – Serie zeigt korrekte counts", async () => {
+    expect(seriesId, "seriesId muss aus SER-1.1 gesetzt sein").toBeTruthy();
+    const res = await apiGet<any>(`/api/appointment-series/${seriesId}`);
+    expect(res.status).toBe(200);
+    expect(res.data).toHaveProperty("counts");
+    expect(typeof res.data.counts.total).toBe("number");
+    expect(res.data.counts.total).toBeGreaterThan(0);
+  });
+});
+
 describe("SER-2: Vorschau (Preview)", () => {
   it("SER-2.1 – Preview liefert generierte Termine ohne Speicherung", async () => {
     const payload = seriesPayload({ _offset: 150, _span: 14, weekdays: ["do"] });
+
     const res = await apiPost<any>("/api/appointment-series/preview", payload);
     expect(res.status).toBe(200);
     expect(res.data).toHaveProperty("validDates");
+    expect(res.data.validDates).toBeGreaterThan(0);
+    expect(res.data).toHaveProperty("totalDates");
   });
 });
 
@@ -129,7 +152,7 @@ describe("SER-4: Alle zukünftigen absagen", () => {
 
     const seriesRes = await apiGet<any>(`/api/appointment-series/${tempSeriesId}`);
     const appts = (seriesRes.data.appointments || []).filter((a: any) => a.status === "scheduled");
-    if (appts.length < 2) return;
+    expect(appts.length, "Serie muss mindestens 2 geplante Termine haben").toBeGreaterThanOrEqual(2);
 
     const midAppt = appts[Math.floor(appts.length / 2)];
     const cancelRes = await apiPost<any>(
