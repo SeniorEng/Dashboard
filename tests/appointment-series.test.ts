@@ -292,3 +292,53 @@ describe("SER-10: Serie Status nach Löschung", () => {
     }
   });
 });
+
+describe("SER-11: Serie Counts und Details", () => {
+  it("SER-11.1 – Serie counts zeigen scheduled/cancelled Aufschlüsselung", async () => {
+    expect(seriesId, "seriesId muss gesetzt sein").toBeTruthy();
+    const res = await apiGet<any>(`/api/appointment-series/${seriesId}`);
+    expect(res.status).toBe(200);
+    expect(res.data.counts).toHaveProperty("total");
+    expect(res.data.counts).toHaveProperty("future");
+    expect(res.data.counts).toHaveProperty("completed");
+    expect(typeof res.data.counts.total).toBe("number");
+    expect(res.data.counts.total).toBeGreaterThan(0);
+  });
+
+  it("SER-11.2 – Alle Termine der Serie enthalten Wochentagsdaten", async () => {
+    expect(seriesId, "seriesId muss gesetzt sein").toBeTruthy();
+    const res = await apiGet<any>(`/api/appointment-series/${seriesId}`);
+    expect(res.status).toBe(200);
+    for (const appt of res.data.appointments) {
+      const d = new Date(appt.date + "T00:00:00");
+      expect(d.getDay()).not.toBe(0);
+      expect(d.getDay()).not.toBe(6);
+    }
+  });
+});
+
+describe("SER-12: Serie mit ungültigen Daten", () => {
+  it("SER-12.1 – Serie ohne weekdays wird abgelehnt (400)", async () => {
+    const res = await apiPost<any>("/api/appointment-series",
+      seriesPayload({ _offset: 295, _span: 14, weekdays: [] })
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("SER-12.2 – Serie Enddatum vor Startdatum wird abgelehnt (400)", async () => {
+    const start = getFutureDate(300);
+    const end = getFutureDate(295);
+    const res = await apiPost<any>("/api/appointment-series", {
+      customerId: testCustomerId,
+      startDate: start,
+      endDate: end,
+      weekdays: ["mi"],
+      frequency: "weekly",
+      scheduledStart: "09:00",
+      durationMinutes: 60,
+      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
+      assignedEmployeeId: auth.user.id,
+    });
+    expect(res.status).toBe(400);
+  });
+});

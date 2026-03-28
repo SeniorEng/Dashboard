@@ -23,6 +23,39 @@ function getWeekday(d: Date): Date {
   return d;
 }
 
+async function createAndDocumentAppointment(timeSlots: string[], offsetRange: [number, number]): Promise<number | null> {
+  for (let offset = offsetRange[0]; offset <= offsetRange[1]; offset++) {
+    const candidate = new Date();
+    candidate.setDate(candidate.getDate() - offset);
+    getWeekday(candidate);
+    const dateStr = candidate.toISOString().split("T")[0];
+
+    for (const time of timeSlots) {
+      const createRes = await apiPost<any>("/api/appointments/kundentermin", {
+        customerId: testCustomerId,
+        date: dateStr,
+        scheduledStart: time,
+        services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+        assignedEmployeeId: auth.user.id,
+      });
+      if (createRes.status === 201) {
+        cleanupApptIds.push(createRes.data.id);
+        const docRes = await apiPost<any>(`/api/appointments/${createRes.data.id}/document`, {
+          actualStart: time,
+          travelOriginType: "home",
+          travelKilometers: 0,
+          customerKilometers: 0,
+          services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "LN-Test" }],
+        });
+        if (docRes.status === 200) {
+          return createRes.data.id;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 beforeAll(async () => {
   auth = await getAuthCookie();
 
@@ -83,51 +116,32 @@ describe("LN-2: Periodenprüfung", () => {
     expect(typeof res.data.documentedCount).toBe("number");
     expect(typeof res.data.undocumentedCount).toBe("number");
   });
+
+  it("LN-2.2 – check-period: canCreateRecord hängt von undocumentedCount ab", async () => {
+    const now = new Date();
+    const res = await apiGet<any>(
+      `/api/service-records/check-period?customerId=${testCustomerId}&year=${now.getFullYear()}&month=${now.getMonth() + 1}`
+    );
+    expect(res.status).toBe(200);
+    if (res.data.undocumentedCount > 0) {
+      expect(res.data.canCreateRecord).toBe(false);
+    }
+  });
 });
 
 describe("LN-3: Einzeltermin-Leistungsnachweis erstellen & unterschreiben", () => {
   it("LN-3.1 – Termin erstellen und dokumentieren", async () => {
-    const timeSlots = ["06:00", "06:30", "18:00", "18:30", "19:00"];
-    let createRes: any = null;
-    let success = false;
+    completedAppointmentId = await createAndDocumentAppointment(
+      ["06:00", "06:30", "18:00", "18:30", "19:00"],
+      [2, 60]
+    );
+    expect(completedAppointmentId, "Termin muss erfolgreich erstellt und dokumentiert werden").toBeTruthy();
 
-    for (let offset = 2; offset <= 60; offset++) {
-      const candidate = new Date();
-      candidate.setDate(candidate.getDate() - offset);
-      getWeekday(candidate);
-      const dateStr = candidate.toISOString().split("T")[0];
-
-      for (const time of timeSlots) {
-        createRes = await apiPost<any>("/api/appointments/kundentermin", {
-          customerId: testCustomerId,
-          date: dateStr,
-          scheduledStart: time,
-          services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
-          assignedEmployeeId: auth.user.id,
-        });
-        if (createRes.status === 201) {
-          success = true;
-          break;
-        }
-      }
-      if (success) break;
-    }
-
-    expect(success, "Termin muss erfolgreich erstellt werden").toBe(true);
-    completedAppointmentId = createRes.data.id;
-    cleanupApptIds.push(completedAppointmentId!);
-
-    const docRes = await apiPost<any>(`/api/appointments/${completedAppointmentId}/document`, {
-      actualStart: "06:00",
-      travelOriginType: "home",
-      travelKilometers: 0,
-      customerKilometers: 0,
-      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "LN-Test" }],
-    });
-    expect(docRes.status).toBe(200);
+    const fetchRes = await apiGet<any>(`/api/appointments/${completedAppointmentId}`);
+    expect(fetchRes.data.status).toBe("completed");
   });
 
-  it("LN-3.2 – Einzeltermin-Leistungsnachweis erstellen", async () => {
+  it("LN-3.2 – Einzeltermin-Leistungsnachweis erstellen (201, status=pending)", async () => {
     expect(completedAppointmentId, "completedAppointmentId muss aus LN-3.1 gesetzt sein").toBeTruthy();
 
     const res = await apiPost<any>("/api/service-records/single", {
@@ -136,7 +150,6 @@ describe("LN-3: Einzeltermin-Leistungsnachweis erstellen & unterschreiben", () =
     });
     expect(res.status).toBe(201);
     expect(res.data).toHaveProperty("id");
-    expect(res.data).toHaveProperty("status");
     expect(res.data.status).toBe("pending");
     serviceRecordId = res.data.id;
   });
@@ -150,15 +163,14 @@ describe("LN-3: Einzeltermin-Leistungsnachweis erstellen & unterschreiben", () =
     expect(res.data.status).toBe("pending");
   });
 
-  it("LN-3.4 – Verknüpfte Termine abrufen enthält den dokumentierten Termin", async () => {
+  it("LN-3.4 – Verknüpfte Termine enthält den dokumentierten Termin", async () => {
     expect(serviceRecordId, "serviceRecordId muss aus LN-3.2 gesetzt sein").toBeTruthy();
 
     const res = await apiGet<any>(`/api/service-records/${serviceRecordId}/appointments`);
     expect(res.status).toBe(200);
-    expect(Array.isArray(res.data), "Termine-Endpunkt gibt ein Array zurück").toBe(true);
-    const appts = res.data as any[];
-    const found = appts.find((a: any) => a.id === completedAppointmentId);
-    expect(found, "Der dokumentierte Termin muss in der Liste enthalten sein").toBeDefined();
+    expect(Array.isArray(res.data)).toBe(true);
+    const found = (res.data as any[]).find((a: any) => a.id === completedAppointmentId);
+    expect(found, "Dokumentierter Termin muss in LN-Terminliste enthalten sein").toBeDefined();
   });
 
   it("LN-3.5 – Kundenunterschrift VOR Mitarbeiter wird abgelehnt", async () => {
@@ -180,7 +192,7 @@ describe("LN-3: Einzeltermin-Leistungsnachweis erstellen & unterschreiben", () =
       signerType: "employee",
       signingLocation: "Vor Ort",
     });
-    expect([200, 201]).toContain(res.status);
+    expect(res.status).toBe(200);
 
     const fetchRes = await apiGet<any>(`/api/service-records/${serviceRecordId}`);
     expect(fetchRes.data.status).toBe("employee_signed");
@@ -205,7 +217,7 @@ describe("LN-3: Einzeltermin-Leistungsnachweis erstellen & unterschreiben", () =
       signerType: "customer",
       signingLocation: "Vor Ort",
     });
-    expect([200, 201]).toContain(res.status);
+    expect(res.status).toBe(200);
 
     const fetchRes = await apiGet<any>(`/api/service-records/${serviceRecordId}`);
     expect(fetchRes.data.status).toBe("completed");
@@ -213,24 +225,40 @@ describe("LN-3: Einzeltermin-Leistungsnachweis erstellen & unterschreiben", () =
 });
 
 describe("LN-4: Gesperrte Termine nach Unterschrift", () => {
-  it("LN-4.1 – Termin in unterschriebenem LN kann nicht bearbeitet werden", async () => {
+  it("LN-4.1 – Termin in unterschriebenem LN: PATCH wird abgelehnt", async () => {
     expect(completedAppointmentId, "completedAppointmentId muss gesetzt sein").toBeTruthy();
 
     const res = await apiPatch<any>(`/api/appointments/${completedAppointmentId}`, {
       scheduledStart: "08:00",
     });
-    expect([400, 403]).toContain(res.status);
+    expect(res.status).toBe(403);
+  });
+
+  it("LN-4.2 – Termin in unterschriebenem LN: Re-Dokumentation wird abgelehnt (403)", async () => {
+    expect(completedAppointmentId, "completedAppointmentId muss gesetzt sein").toBeTruthy();
+    expect(serviceRecordId, "serviceRecordId muss gesetzt sein").toBeTruthy();
+
+    const recRes = await apiGet<any>(`/api/service-records/${serviceRecordId}`);
+    expect(["completed", "employee_signed"]).toContain(recRes.data.status);
+
+    const docRes = await apiPost<any>(`/api/appointments/${completedAppointmentId}/document`, {
+      actualStart: "10:00",
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "Locked test" }],
+    });
+    expect(docRes.status).toBe(403);
   });
 });
 
 describe("LN-5: Kunden-Leistungsnachweise", () => {
-  it("LN-5.1 – Leistungsnachweise für Kunden abrufen enthält erstellten LN", async () => {
+  it("LN-5.1 – Leistungsnachweise für Kunden enthält erstellten LN", async () => {
     const res = await apiGet<any>(`/api/service-records/customer/${testCustomerId}`);
     expect(res.status).toBe(200);
-    expect(Array.isArray(res.data), "Kunden-LN Endpunkt gibt ein Array zurück").toBe(true);
-    const records = res.data as any[];
+    expect(Array.isArray(res.data)).toBe(true);
     expect(serviceRecordId, "serviceRecordId muss gesetzt sein").toBeTruthy();
-    const found = records.find((r: any) => r.id === serviceRecordId);
+    const found = (res.data as any[]).find((r: any) => r.id === serviceRecordId);
     expect(found, "Erstellter LN muss in Kundenliste erscheinen").toBeDefined();
   });
 });
@@ -248,7 +276,7 @@ describe("LN-6: Duplikat-Erkennung", () => {
 });
 
 describe("LN-7: Nicht-dokumentierter Termin blockiert LN", () => {
-  it("LN-7.1 – LN für nicht-abgeschlossenen Termin wird abgelehnt", async () => {
+  it("LN-7.1 – LN für scheduled Termin wird abgelehnt (400)", async () => {
     const futureDate = getFutureDate(290);
     const apptRes = await apiPost<any>("/api/appointments/kundentermin", {
       customerId: testCustomerId,
@@ -269,29 +297,97 @@ describe("LN-7: Nicht-dokumentierter Termin blockiert LN", () => {
 });
 
 describe("LN-8: LN-Status nach Unterschriften", () => {
-  it("LN-8.1 – LN-Status wechselt korrekt durch Workflow", async () => {
+  it("LN-8.1 – LN-Status completed nach vollständiger Unterschrift", async () => {
     expect(serviceRecordId, "serviceRecordId muss gesetzt sein").toBeTruthy();
     const res = await apiGet<any>(`/api/service-records/${serviceRecordId}`);
     expect(res.status).toBe(200);
-    expect(["pending", "employee_signed", "completed"]).toContain(res.data.status);
+    expect(res.data.status).toBe("completed");
   });
 });
 
-describe("LN-9: Gesperrte Termine nach LN-Unterschrift", () => {
-  it("LN-9.1 – Termin in unterschriebenem LN ist gesperrt", async () => {
-    expect(completedAppointmentId, "completedAppointmentId muss gesetzt sein").toBeTruthy();
-    expect(serviceRecordId, "serviceRecordId muss gesetzt sein").toBeTruthy();
+describe("LN-9: Monatlicher Leistungsnachweis", () => {
+  it("LN-9.1 – check-period für Kunden prüfen", async () => {
+    const now = new Date();
+    const prevMonth = new Date(now);
+    prevMonth.setMonth(prevMonth.getMonth() - 1);
+    const res = await apiGet<any>(
+      `/api/service-records/check-period?customerId=${testCustomerId}&year=${prevMonth.getFullYear()}&month=${prevMonth.getMonth() + 1}`
+    );
+    expect(res.status).toBe(200);
+    expect(res.data).toHaveProperty("canCreateRecord");
+    expect(res.data).toHaveProperty("documentedCount");
+    expect(res.data).toHaveProperty("undocumentedCount");
+    expect(res.data).toHaveProperty("uncoveredDocumentedCount");
+  });
 
-    const recRes = await apiGet<any>(`/api/service-records/${serviceRecordId}`);
-    if (recRes.data.status === "completed" || recRes.data.status === "employee_signed") {
-      const docRes = await apiPost<any>(`/api/appointments/${completedAppointmentId}/document`, {
-        actualStart: "10:00",
-        travelOriginType: "home",
-        travelKilometers: 0,
-        customerKilometers: 0,
-        services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "Locked test" }],
-      });
-      expect([400, 403]).toContain(docRes.status);
+  it("LN-9.2 – Monatlicher LN blockiert wenn undokumentierte Termine vorhanden", async () => {
+    const futureDate = getFutureDate(291);
+    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date: futureDate,
+      scheduledStart: "07:00",
+      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      assignedEmployeeId: auth.user.id,
+    });
+    expect(createRes.status).toBe(201);
+    cleanupApptIds.push(createRes.data.id);
+
+    const d = new Date(futureDate);
+    const checkRes = await apiGet<any>(
+      `/api/service-records/check-period?customerId=${testCustomerId}&year=${d.getFullYear()}&month=${d.getMonth() + 1}`
+    );
+    expect(checkRes.status).toBe(200);
+    if (checkRes.data.undocumentedCount > 0) {
+      expect(checkRes.data.canCreateRecord).toBe(false);
     }
+  });
+});
+
+describe("LN-10: In-progress Termin blockiert LN", () => {
+  it("LN-10.1 – LN für documenting-Status Termin wird abgelehnt (400)", async () => {
+    const futureDate = getFutureDate(292);
+    const apptRes = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date: futureDate,
+      scheduledStart: "08:00",
+      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      assignedEmployeeId: auth.user.id,
+    });
+    expect(apptRes.status).toBe(201);
+    cleanupApptIds.push(apptRes.data.id);
+
+    await apiPost<any>(`/api/appointments/${apptRes.data.id}/start`, {});
+    await apiPost<any>(`/api/appointments/${apptRes.data.id}/end`, {});
+
+    const verify = await apiGet<any>(`/api/appointments/${apptRes.data.id}`);
+    expect(verify.data.status).toBe("documenting");
+
+    const res = await apiPost<any>("/api/service-records/single", {
+      customerId: testCustomerId,
+      appointmentId: apptRes.data.id,
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("LN-11: Signatur-Daten Validierung", () => {
+  it("LN-11.1 – Unterschrift ohne signatureData wird abgelehnt", async () => {
+    const apptId = await createAndDocumentAppointment(
+      ["04:00", "04:30", "21:00", "21:30"],
+      [2, 60]
+    );
+    expect(apptId, "Termin muss für LN-11 erstellt und dokumentiert werden").toBeTruthy();
+
+    const lnRes = await apiPost<any>("/api/service-records/single", {
+      customerId: testCustomerId,
+      appointmentId: apptId,
+    });
+    expect(lnRes.status, "LN muss für Signatur-Test erstellt werden").toBe(201);
+
+    const signRes = await apiPost<any>(`/api/service-records/${lnRes.data.id}/sign`, {
+      signerType: "employee",
+      signingLocation: "Vor Ort",
+    });
+    expect(signRes.status).toBe(400);
   });
 });

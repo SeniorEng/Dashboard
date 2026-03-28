@@ -3,8 +3,8 @@ import {
   apiGet,
   apiPost,
   apiDelete,
-  getFutureDate,
   getAuthCookie,
+  getFutureDate,
 } from "./test-utils";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
@@ -28,7 +28,7 @@ afterAll(async () => {
 });
 
 describe("TE-BIZ-1: Wochenend-Sperre", () => {
-  it("TE-BIZ-1.1 – Zeiteintrag am Samstag wird abgelehnt", async () => {
+  it("TE-BIZ-1.1 – Zeiteintrag am Samstag wird abgelehnt (400)", async () => {
     const today = new Date();
     const daysUntilSat = (6 - today.getDay() + 7) % 7 || 7;
     const sat = new Date(today);
@@ -45,7 +45,7 @@ describe("TE-BIZ-1: Wochenend-Sperre", () => {
     expect(res.status).toBe(400);
   });
 
-  it("TE-BIZ-1.2 – Zeiteintrag am Sonntag wird abgelehnt", async () => {
+  it("TE-BIZ-1.2 – Zeiteintrag am Sonntag wird abgelehnt (400)", async () => {
     const today = new Date();
     const daysUntilSun = (7 - today.getDay()) % 7 || 7;
     const sun = new Date(today);
@@ -94,7 +94,7 @@ describe("TE-BIZ-2: Zeitkonflikte", () => {
     cleanupIds.push(baseId);
   });
 
-  it("TE-BIZ-2.2 – Überlappender Eintrag 10:00-11:00 wird abgelehnt", async () => {
+  it("TE-BIZ-2.2 – Überlappender Eintrag 10:00-11:00 wird abgelehnt (400)", async () => {
     expect(baseId, "baseId muss aus TE-BIZ-2.1 gesetzt sein").toBeTruthy();
     const res = await apiPost<any>("/api/time-entries", {
       entryDate: conflictDate,
@@ -106,7 +106,7 @@ describe("TE-BIZ-2: Zeitkonflikte", () => {
     expect(res.status).toBe(400);
   });
 
-  it("TE-BIZ-2.3 – Nicht-überlappender Eintrag 13:00-14:00 funktioniert", async () => {
+  it("TE-BIZ-2.3 – Nicht-überlappender Eintrag 13:00-14:00 funktioniert (201)", async () => {
     const res = await apiPost<any>("/api/time-entries", {
       entryDate: conflictDate,
       entryType: "bueroarbeit",
@@ -135,7 +135,7 @@ describe("TE-BIZ-3: Ganztags-Konflikte", () => {
     }
   });
 
-  it("TE-BIZ-3.1 – Ganztags-Urlaub erstellen", async () => {
+  it("TE-BIZ-3.1 – Ganztags-Urlaub erstellen (201)", async () => {
     const res = await apiPost<any>("/api/time-entries", {
       entryDate: fullDayDate,
       entryType: "urlaub",
@@ -147,7 +147,7 @@ describe("TE-BIZ-3: Ganztags-Konflikte", () => {
     cleanupIds.push(res.data.id);
   });
 
-  it("TE-BIZ-3.2 – Zweiter Eintrag am selben Ganztag wird abgelehnt", async () => {
+  it("TE-BIZ-3.2 – Zweiter Eintrag am selben Ganztag wird abgelehnt (400)", async () => {
     const res = await apiPost<any>("/api/time-entries", {
       entryDate: fullDayDate,
       entryType: "bueroarbeit",
@@ -176,7 +176,6 @@ describe("TE-BIZ-4: Urlaubsübersicht", () => {
 
 describe("TE-BIZ-5: Mehrtägiger Urlaub überspringt Wochenenden", () => {
   const vacStartDate = getFutureDate(240);
-  let createdEntryIds: number[] = [];
 
   beforeAll(async () => {
     const d = new Date(vacStartDate);
@@ -211,7 +210,6 @@ describe("TE-BIZ-5: Mehrtägiger Urlaub überspringt Wochenenden", () => {
       const entries = res.data as any[];
       for (const e of entries) {
         if (e.id) {
-          createdEntryIds.push(e.id);
           cleanupIds.push(e.id);
         }
         const day = new Date(e.entryDate + "T00:00:00").getDay();
@@ -240,7 +238,7 @@ describe("TE-BIZ-6: Krankheitseintrag", () => {
     }
   });
 
-  it("TE-BIZ-6.1 – Krankheitseintrag erstellen", async () => {
+  it("TE-BIZ-6.1 – Krankheitseintrag erstellen (201)", async () => {
     const res = await apiPost<any>("/api/time-entries", {
       entryDate: sickDate,
       entryType: "krankheit",
@@ -254,7 +252,7 @@ describe("TE-BIZ-6: Krankheitseintrag", () => {
 });
 
 describe("TE-BIZ-7: Zeiterfassungs-Löschung", () => {
-  it("TE-BIZ-7.1 – Zukunfts-Zeiteintrag kann gelöscht werden", async () => {
+  it("TE-BIZ-7.1 – Zukunfts-Zeiteintrag kann gelöscht werden (204)", async () => {
     const futureDate = getFutureDate(215);
     const d = new Date(futureDate);
     const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
@@ -296,7 +294,7 @@ describe("TE-BIZ-8: Verschiedene Eintragstypen", () => {
     }
   });
 
-  it("TE-BIZ-8.1 – Schulung-Eintrag erstellen", async () => {
+  it("TE-BIZ-8.1 – Schulung-Eintrag erstellen (201)", async () => {
     const res = await apiPost<any>("/api/time-entries", {
       entryDate: typeDate,
       entryType: "schulung",
@@ -308,46 +306,36 @@ describe("TE-BIZ-8: Verschiedene Eintragstypen", () => {
     expect(res.data.entryType).toBe("schulung");
     cleanupIds.push(res.data.id);
   });
-});
 
-describe("TE-BIZ-9: Wochenend-Einschränkung", () => {
-  it("TE-BIZ-9.1 – Eintrag am Samstag wird abgelehnt", async () => {
-    const today = new Date();
-    const daysUntilSat = (6 - today.getDay() + 7) % 7 || 7;
-    const sat = new Date(today);
-    sat.setDate(sat.getDate() + daysUntilSat + 7);
-    const satStr = sat.toISOString().split("T")[0];
-
+  it("TE-BIZ-8.2 – Pause-Eintrag erstellen (201)", async () => {
     const res = await apiPost<any>("/api/time-entries", {
-      entryDate: satStr,
-      entryType: "bueroarbeit",
-      startTime: "09:00",
-      endTime: "12:00",
+      entryDate: typeDate,
+      entryType: "pause",
+      startTime: "12:00",
+      endTime: "12:30",
       isFullDay: false,
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(201);
+    expect(res.data.entryType).toBe("pause");
+    cleanupIds.push(res.data.id);
   });
 
-  it("TE-BIZ-9.2 – Eintrag am Sonntag wird abgelehnt", async () => {
-    const today = new Date();
-    const daysUntilSun = (7 - today.getDay()) % 7 || 7;
-    const sun = new Date(today);
-    sun.setDate(sun.getDate() + daysUntilSun + 7);
-    const sunStr = sun.toISOString().split("T")[0];
-
+  it("TE-BIZ-8.3 – Besprechung-Eintrag erstellen (201)", async () => {
     const res = await apiPost<any>("/api/time-entries", {
-      entryDate: sunStr,
-      entryType: "bueroarbeit",
-      startTime: "09:00",
-      endTime: "12:00",
+      entryDate: typeDate,
+      entryType: "besprechung",
+      startTime: "13:00",
+      endTime: "14:00",
       isFullDay: false,
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(201);
+    expect(res.data.entryType).toBe("besprechung");
+    cleanupIds.push(res.data.id);
   });
 });
 
-describe("TE-BIZ-10: End-Zeit vor Start-Zeit", () => {
-  it("TE-BIZ-10.1 – Endzeit vor Startzeit wird abgelehnt", async () => {
+describe("TE-BIZ-9: End-Zeit vor Start-Zeit", () => {
+  it("TE-BIZ-9.1 – Endzeit vor Startzeit wird abgelehnt (400)", async () => {
     const date = getFutureDate(265);
     const res = await apiPost<any>("/api/time-entries", {
       entryDate: date,
@@ -360,8 +348,8 @@ describe("TE-BIZ-10: End-Zeit vor Start-Zeit", () => {
   });
 });
 
-describe("TE-BIZ-11: Ganztags-Konflikte", () => {
-  it("TE-BIZ-11.1 – Ganztags-Urlaub blockiert weitere Einträge", async () => {
+describe("TE-BIZ-10: Ganztags-Urlaub blockiert weitere Einträge", () => {
+  it("TE-BIZ-10.1 – Ganztags-Urlaub blockiert timed Eintrag (400)", async () => {
     const date = getFutureDate(270);
     const d = new Date(date);
     const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
@@ -388,12 +376,12 @@ describe("TE-BIZ-11: Ganztags-Konflikte", () => {
       endTime: "12:00",
       isFullDay: false,
     });
-    expect([400, 409]).toContain(workRes.status);
+    expect(workRes.status).toBe(400);
   });
 });
 
-describe("TE-BIZ-12: Überlappungserkennung", () => {
-  it("TE-BIZ-12.1 – Überlappende Zeiteinträge werden abgelehnt", async () => {
+describe("TE-BIZ-11: Überlappungserkennung", () => {
+  it("TE-BIZ-11.1 – Überlappende Zeiteinträge werden abgelehnt (400)", async () => {
     const date = getFutureDate(275);
     const d = new Date(date);
     const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
@@ -422,6 +410,74 @@ describe("TE-BIZ-12: Überlappungserkennung", () => {
       endTime: "13:00",
       isFullDay: false,
     });
-    expect([400, 409]).toContain(res2.status);
+    expect(res2.status).toBe(400);
+  });
+});
+
+describe("TE-BIZ-12: Auto-Break Vorschau (ArbZG §4)", () => {
+  it("TE-BIZ-12.1 – Monats-Vorschau liefert Auto-Break-Daten", async () => {
+    const now = new Date();
+    const res = await apiGet<any>(
+      `/api/time-entries/month-closing/${now.getFullYear()}/${now.getMonth() + 1}/preview`
+    );
+    expect(res.status).toBe(200);
+    expect(res.data).toHaveProperty("autoBreaks");
+    expect(Array.isArray(res.data.autoBreaks)).toBe(true);
+    if (res.data.autoBreaks.length > 0) {
+      const entry = res.data.autoBreaks[0];
+      expect(entry).toHaveProperty("date");
+      expect(entry).toHaveProperty("totalWorkMinutes");
+      expect(entry).toHaveProperty("requiredBreakMinutes");
+      expect(entry).toHaveProperty("autoBreakMinutes");
+    }
+  });
+
+  it("TE-BIZ-12.2 – ArbZG: >6h erfordert 30min, >9h erfordert 45min Pause", async () => {
+    const now = new Date();
+    const res = await apiGet<any>(
+      `/api/time-entries/month-closing/${now.getFullYear()}/${now.getMonth() + 1}/preview`
+    );
+    expect(res.status).toBe(200);
+    for (const entry of res.data.autoBreaks) {
+      if (entry.totalWorkMinutes > 360 && entry.totalWorkMinutes <= 540) {
+        expect(entry.requiredBreakMinutes).toBe(30);
+      }
+      if (entry.totalWorkMinutes > 540) {
+        expect(entry.requiredBreakMinutes).toBe(45);
+      }
+    }
+  });
+});
+
+describe("TE-BIZ-13: Monatsübersicht", () => {
+  it("TE-BIZ-13.1 – page-data liefert Zeiterfassungsdaten", async () => {
+    const now = new Date();
+    const res = await apiGet<any>(
+      `/api/time-entries/page-data/${now.getFullYear()}/${now.getMonth() + 1}`
+    );
+    expect(res.status).toBe(200);
+    expect(res.data).toBeDefined();
+  });
+
+  it("TE-BIZ-13.2 – Tages-Einträge abrufen", async () => {
+    const today = new Date();
+    getNextWeekday(today);
+    const dateStr = today.toISOString().split("T")[0];
+    const res = await apiGet<any>(`/api/time-entries/by-date/${dateStr}`);
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("TE-BIZ-14: Ungültige Eintragstypen", () => {
+  it("TE-BIZ-14.1 – Unbekannter Eintragstyp wird abgelehnt (400)", async () => {
+    const date = getFutureDate(280);
+    const res = await apiPost<any>("/api/time-entries", {
+      entryDate: date,
+      entryType: "invalidtype",
+      startTime: "09:00",
+      endTime: "10:00",
+      isFullDay: false,
+    });
+    expect(res.status).toBe(400);
   });
 });

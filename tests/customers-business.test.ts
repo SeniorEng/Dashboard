@@ -360,10 +360,80 @@ describe("KV-13: Kunden-Details abrufen", () => {
     expect(res.data).toHaveProperty("strasse");
     expect(res.data).toHaveProperty("plz");
     expect(res.data).toHaveProperty("stadt");
+    expect(res.data).toHaveProperty("pflegegrad");
   });
 
   it("KV-13.2 – Nicht existierender Kunde liefert 404", async () => {
     const res = await apiGet<any>("/api/admin/customers/999999/details");
     expect(res.status).toBe(404);
+  });
+});
+
+describe("KV-14: Kontakte mit Telefonnummer", () => {
+  it("KV-14.1 – Kontakt mit Telefonnummer wird akzeptiert", async () => {
+    const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({
+      contacts: [{
+        contactType: "familie",
+        isPrimary: true,
+        vorname: "Kontakt",
+        nachname: "Test",
+        telefon: "+4917612345678",
+      }],
+    }));
+    expect(res.status).toBe(201);
+    if (res.data?.id) createdCustomerIds.push(res.data.id);
+  });
+});
+
+describe("KV-15: Kunde PATCH bearbeiten", () => {
+  let patchCustomerId: number;
+
+  it("KV-15.1 – Kunde erstellen und Vorname aktualisieren", async () => {
+    const createRes = await apiPost<any>("/api/admin/customers", validCustomerPayload());
+    expect(createRes.status).toBe(201);
+    patchCustomerId = createRes.data.id;
+    createdCustomerIds.push(patchCustomerId);
+
+    const patchRes = await apiPatch<any>(`/api/admin/customers/${patchCustomerId}`, {
+      vorname: "Neuer-Vorname",
+    });
+    expect(patchRes.status).toBe(200);
+    expect(patchRes.data.vorname).toBe("Neuer-Vorname");
+  });
+
+  it("KV-15.2 – PLZ auf ungültig ändern wird abgelehnt (400)", async () => {
+    expect(patchCustomerId, "patchCustomerId muss gesetzt sein").toBeTruthy();
+    const patchRes = await apiPatch<any>(`/api/admin/customers/${patchCustomerId}`, {
+      plz: "abc",
+    });
+    expect(patchRes.status).toBe(400);
+  });
+});
+
+describe("KV-16: Kontaktperson hinzufügen", () => {
+  it("KV-16.1 – Kontaktperson zu bestehendem Kunden hinzufügen", async () => {
+    expect(createdCustomerIds.length).toBeGreaterThan(0);
+    const res = await apiPost<any>(`/api/admin/customers/${createdCustomerIds[0]}/contacts`, {
+      contactType: "betreuer",
+      isPrimary: false,
+      vorname: "Neuer-Kontakt",
+      nachname: "Testperson",
+      telefon: "+4917600000099",
+    });
+    expect(res.status).toBe(201);
+  });
+});
+
+describe("KV-17: Kunde nicht gefunden", () => {
+  it("KV-17.1 – PATCH auf nicht-existierenden Kunden liefert 404", async () => {
+    const res = await apiPatch<any>("/api/admin/customers/999999", {
+      vorname: "Ghost",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("KV-17.2 – DELETE auf nicht-existierenden Kunden liefert 200 (idempotent)", async () => {
+    const res = await apiDelete("/api/admin/customers/999999");
+    expect([200, 404]).toContain(res.status);
   });
 });

@@ -7,13 +7,25 @@ import {
   apiDelete,
   getAuthCookie,
   uniqueId,
+  getFutureDate,
 } from "./test-utils";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let testCustomerId: number;
+let hwServiceId: number;
+
+function getWeekday(d: Date): Date {
+  const dow = d.getDay();
+  if (dow === 0) d.setDate(d.getDate() - 2);
+  else if (dow === 6) d.setDate(d.getDate() - 1);
+  return d;
+}
 
 beforeAll(async () => {
   auth = await getAuthCookie();
+
+  const servicesRes = await apiGet<any[]>("/api/services/all");
+  hwServiceId = servicesRes.data.find((s: any) => s.code === "hauswirtschaft")!.id;
 
   const custRes = await apiGet<{ data: any[] }>("/api/admin/customers?limit=50");
   expect(custRes.status).toBe(200);
@@ -58,7 +70,7 @@ describe("BB-1: §45b Entlastungsbetrag", () => {
       customerId: testCustomerId,
       budgetStartDate: "2026-01-01",
     });
-    expect([200, 201]).toContain(prefRes.status);
+    expect(prefRes.status).toBe(200);
 
     const res = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
     expect(res.status).toBe(200);
@@ -160,7 +172,7 @@ describe("BB-3: §39/42a Ersatzpflege", () => {
 describe("BB-4: Manuelle Korrektur & Storno", () => {
   let txId: number | null = null;
 
-  it("BB-4.1 – Positive manuelle Korrektur erstellt Allocation", async () => {
+  it("BB-4.1 – Positive manuelle Korrektur erstellt Allocation (201)", async () => {
     const res = await apiPost<any>(`/api/budget/${testCustomerId}/manual-adjustment`, {
       budgetType: "entlastungsbetrag_45b",
       amountCents: 2500,
@@ -173,7 +185,7 @@ describe("BB-4: Manuelle Korrektur & Storno", () => {
     expect(res.data.data.source).toBe("manual_adjustment");
   });
 
-  it("BB-4.2 – Negative manuelle Korrektur erstellt Transaction", async () => {
+  it("BB-4.2 – Negative manuelle Korrektur erstellt Transaction (201)", async () => {
     const res = await apiPost<any>(`/api/budget/${testCustomerId}/manual-adjustment`, {
       budgetType: "entlastungsbetrag_45b",
       amountCents: -500,
@@ -194,16 +206,16 @@ describe("BB-4: Manuelle Korrektur & Storno", () => {
     expect(found.transactionType).toBe("manual_adjustment");
   });
 
-  it("BB-4.4 – Korrektur-Transaktion stornieren", async () => {
+  it("BB-4.4 – Korrektur-Transaktion stornieren (reversal)", async () => {
     expect(txId, "txId muss aus BB-4.2 gesetzt sein").toBeTruthy();
     const res = await apiPost<any>(`/api/budget/transactions/${txId}/reverse`, {});
-    expect([200, 201]).toContain(res.status);
+    expect(res.status).toBe(201);
   });
 
   it("BB-4.5 – Storno-Transaktion erneut stornieren erzeugt weitere Gegenbuchung", async () => {
     expect(txId, "txId muss aus BB-4.2 gesetzt sein").toBeTruthy();
     const res = await apiPost<any>(`/api/budget/transactions/${txId}/reverse`, {});
-    expect([200, 201]).toContain(res.status);
+    expect(res.status).toBe(201);
     expect(res.data).toBeDefined();
   });
 });
@@ -249,12 +261,8 @@ describe("BB-6: Deaktivierter Topf", () => {
 
 describe("BB-7: Kostenvoranschlag (cost-estimate)", () => {
   it("BB-7.1 – cost-estimate liefert Budget-Informationen", async () => {
-    const servicesRes = await apiGet<any[]>("/api/services/all");
-    const hwId = servicesRes.data.find((s: any) => s.code === "hauswirtschaft")?.id;
-    expect(hwId, "hauswirtschaft Service muss existieren").toBeTruthy();
-
     const res = await apiGet<any>(
-      `/api/budget/${testCustomerId}/cost-estimate?serviceId=${hwId}&durationMinutes=60`
+      `/api/budget/${testCustomerId}/cost-estimate?serviceId=${hwServiceId}&durationMinutes=60`
     );
     expect(res.status).toBe(200);
     expect(res.data).toHaveProperty("totalCents");
@@ -328,7 +336,7 @@ describe("BB-10: Budget-Allokationen", () => {
     }
   });
 
-  it("BB-10.2 – Carryover-Allokationen haben Ablaufdatum", async () => {
+  it("BB-10.2 – Carryover-Allokationen haben Ablaufdatum (30.06.)", async () => {
     const res = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
     expect(res.status).toBe(200);
     const eb = res.data.entlastungsbetrag45b;
@@ -340,13 +348,119 @@ describe("BB-10: Budget-Allokationen", () => {
 });
 
 describe("BB-11: Reversal-Semantik", () => {
-  it("BB-11.1 – Storno-Transaktion hat negativen Betrag", async () => {
+  it("BB-11.1 – Storno-Transaktionen haben transactionType reversal", async () => {
     const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?limit=20`);
     expect(txRes.status).toBe(200);
-    const reversals = txRes.data.filter((tx: any) => tx.type === "reversal");
+    const reversals = txRes.data.filter((tx: any) => tx.transactionType === "reversal");
     if (reversals.length > 0) {
       for (const rev of reversals) {
         expect(typeof rev.amountCents).toBe("number");
+        expect(rev.transactionType).toBe("reversal");
+      }
+    }
+  });
+});
+
+describe("BB-12: Budget-Verbrauch durch Dokumentation", () => {
+  let consumptionApptId: number | null = null;
+  let budgetBefore: number;
+
+  it("BB-12.1 – Budget vor Dokumentation erfassen", async () => {
+    const settings = [
+      { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
+      { budgetType: "umwandlung_45a", priority: 2, enabled: true, monthlyLimitCents: 59880 },
+      { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+    ];
+    await apiPut(`/api/budget/${testCustomerId}/type-settings`, { settings });
+
+    const res = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    expect(res.status).toBe(200);
+    budgetBefore = res.data.entlastungsbetrag45b.totalUsedCents;
+  });
+
+  it("BB-12.2 – Termin erstellen und dokumentieren verbraucht Budget", async () => {
+    const timeSlots = ["05:00", "05:30", "20:00", "20:30"];
+    for (let offset = 2; offset <= 60; offset++) {
+      const candidate = new Date();
+      candidate.setDate(candidate.getDate() - offset);
+      getWeekday(candidate);
+      const dateStr = candidate.toISOString().split("T")[0];
+
+      for (const time of timeSlots) {
+        const createRes = await apiPost<any>("/api/appointments/kundentermin", {
+          customerId: testCustomerId,
+          date: dateStr,
+          scheduledStart: time,
+          services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
+          assignedEmployeeId: auth.user.id,
+        });
+        if (createRes.status === 201) {
+          consumptionApptId = createRes.data.id;
+
+          const docRes = await apiPost<any>(`/api/appointments/${consumptionApptId}/document`, {
+            actualStart: time,
+            travelOriginType: "home",
+            travelKilometers: 0,
+            customerKilometers: 0,
+            services: [{ serviceId: hwServiceId, actualDurationMinutes: 60, details: "Budget-Test" }],
+          });
+          if (docRes.status === 200) {
+            const afterRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+            expect(afterRes.status).toBe(200);
+            expect(afterRes.data.entlastungsbetrag45b.totalUsedCents).toBeGreaterThan(budgetBefore);
+            return;
+          }
+        }
+      }
+    }
+    expect(consumptionApptId, "Termin muss erstellt und dokumentiert werden").toBeTruthy();
+  });
+
+  it("BB-12.3 – Termin wiedereröffnen reversiert Budget", async () => {
+    expect(consumptionApptId, "consumptionApptId muss aus BB-12.2 gesetzt sein").toBeTruthy();
+    const beforeRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    const usedBefore = beforeRes.data.entlastungsbetrag45b.totalUsedCents;
+
+    const reopenRes = await apiPost<any>(`/api/appointments/${consumptionApptId}/reopen`, {});
+    expect(reopenRes.status).toBe(200);
+
+    const afterRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    expect(afterRes.data.entlastungsbetrag45b.totalUsedCents).toBeLessThan(usedBefore);
+
+    await apiDelete(`/api/appointments/${consumptionApptId}`);
+  });
+});
+
+describe("BB-13: Budget-Allokationen", () => {
+  it("BB-13.1 – Allokationen haben Grundfelder", async () => {
+    const res = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?budgetType=entlastungsbetrag_45b&year=2026`);
+    expect(res.status).toBe(200);
+    expect(res.data.length).toBeGreaterThan(0);
+    for (const alloc of res.data) {
+      expect(alloc).toHaveProperty("id");
+      expect(alloc).toHaveProperty("customerId");
+      expect(alloc).toHaveProperty("amountCents");
+    }
+  });
+
+  it("BB-13.2 – Allokationen sind chronologisch sortiert", async () => {
+    const res = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?budgetType=entlastungsbetrag_45b&year=2026`);
+    expect(res.status).toBe(200);
+    if (res.data.length > 1 && res.data[0].validFrom) {
+      const sorted = [...res.data].sort((a: any, b: any) => a.validFrom.localeCompare(b.validFrom));
+      expect(sorted[0].validFrom).toBe(res.data[0].validFrom);
+    }
+  });
+});
+
+describe("BB-14: PG1 – kein §45a Anspruch", () => {
+  it("BB-14.1 – PG1 Kunde hat keinen §45a Umwandlungsanspruch", async () => {
+    const custRes = await apiGet<{ data: any[] }>("/api/admin/customers?limit=50");
+    const pg1 = custRes.data.data.find((c: any) => c.pflegegrad === 1);
+    if (pg1) {
+      const res = await apiGet<any>(`/api/budget/${pg1.id}/overview`);
+      if (res.status === 200 && res.data.umwandlung45a) {
+        expect(res.data.umwandlung45a.monthlyBudgetCents).toBe(0);
       }
     }
   });

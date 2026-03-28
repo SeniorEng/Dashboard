@@ -86,8 +86,8 @@ export async function loginAs(email: string, password: string): Promise<AuthCook
   };
 }
 
-const MAX_RETRIES = 3;
-const BACKOFF_BASE_MS = 1000;
+const MAX_RETRIES = 5;
+const BACKOFF_BASE_MS = 1500;
 
 async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
   const method = init.method || "GET";
