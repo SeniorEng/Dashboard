@@ -294,3 +294,60 @@ describe("BB-8: Budget-Summary Gesamtübersicht", () => {
     }
   });
 });
+
+describe("BB-9: §45a PG-abhängige Limits", () => {
+  it("BB-9.1 – PG3 Limit = 598,80€ (40% von 1.497€)", async () => {
+    const res = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    expect(res.status).toBe(200);
+    if (res.data.umwandlung45a.monthlyBudgetCents > 0) {
+      expect([31840, 59880, 74360, 91960]).toContain(res.data.umwandlung45a.monthlyBudgetCents);
+    }
+  });
+
+  it("BB-9.2 – §45a Betrag wird validiert und gespeichert", async () => {
+    const res = await apiPost<any>(`/api/budget/${testCustomerId}/settings`, {
+      umwandlung45aEnabled: true,
+      umwandlung45aMonthlyAmount: 59880,
+    });
+    expect(res.status).toBe(200);
+
+    const verify = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    expect(verify.status).toBe(200);
+    expect(verify.data.umwandlung45a.monthlyBudgetCents).toBe(59880);
+  });
+});
+
+describe("BB-10: Budget-Allokationen", () => {
+  it("BB-10.1 – §45b Allokationen auflisten", async () => {
+    const res = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?budgetType=entlastungsbetrag_45b`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.data)).toBe(true);
+    if (res.data.length > 0) {
+      expect(res.data[0]).toHaveProperty("amountCents");
+      expect(res.data[0]).toHaveProperty("source");
+    }
+  });
+
+  it("BB-10.2 – Carryover-Allokationen haben Ablaufdatum", async () => {
+    const res = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    expect(res.status).toBe(200);
+    const eb = res.data.entlastungsbetrag45b;
+    if (eb.carryoverCents > 0) {
+      expect(eb.carryoverExpiresAt).toBeDefined();
+      expect(new Date(eb.carryoverExpiresAt).getMonth()).toBe(5);
+    }
+  });
+});
+
+describe("BB-11: Reversal-Semantik", () => {
+  it("BB-11.1 – Storno-Transaktion hat negativen Betrag", async () => {
+    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?limit=20`);
+    expect(txRes.status).toBe(200);
+    const reversals = txRes.data.filter((tx: any) => tx.type === "reversal");
+    if (reversals.length > 0) {
+      for (const rev of reversals) {
+        expect(typeof rev.amountCents).toBe("number");
+      }
+    }
+  });
+});

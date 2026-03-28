@@ -309,3 +309,119 @@ describe("TE-BIZ-8: Verschiedene Eintragstypen", () => {
     cleanupIds.push(res.data.id);
   });
 });
+
+describe("TE-BIZ-9: Wochenend-Einschränkung", () => {
+  it("TE-BIZ-9.1 – Eintrag am Samstag wird abgelehnt", async () => {
+    const today = new Date();
+    const daysUntilSat = (6 - today.getDay() + 7) % 7 || 7;
+    const sat = new Date(today);
+    sat.setDate(sat.getDate() + daysUntilSat + 7);
+    const satStr = sat.toISOString().split("T")[0];
+
+    const res = await apiPost<any>("/api/time-entries", {
+      entryDate: satStr,
+      entryType: "bueroarbeit",
+      startTime: "09:00",
+      endTime: "12:00",
+      isFullDay: false,
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("TE-BIZ-9.2 – Eintrag am Sonntag wird abgelehnt", async () => {
+    const today = new Date();
+    const daysUntilSun = (7 - today.getDay()) % 7 || 7;
+    const sun = new Date(today);
+    sun.setDate(sun.getDate() + daysUntilSun + 7);
+    const sunStr = sun.toISOString().split("T")[0];
+
+    const res = await apiPost<any>("/api/time-entries", {
+      entryDate: sunStr,
+      entryType: "bueroarbeit",
+      startTime: "09:00",
+      endTime: "12:00",
+      isFullDay: false,
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("TE-BIZ-10: End-Zeit vor Start-Zeit", () => {
+  it("TE-BIZ-10.1 – Endzeit vor Startzeit wird abgelehnt", async () => {
+    const date = getFutureDate(265);
+    const res = await apiPost<any>("/api/time-entries", {
+      entryDate: date,
+      entryType: "bueroarbeit",
+      startTime: "14:00",
+      endTime: "10:00",
+      isFullDay: false,
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("TE-BIZ-11: Ganztags-Konflikte", () => {
+  it("TE-BIZ-11.1 – Ganztags-Urlaub blockiert weitere Einträge", async () => {
+    const date = getFutureDate(270);
+    const d = new Date(date);
+    const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
+    if (existing.status === 200 && Array.isArray(existing.data)) {
+      for (const entry of existing.data) {
+        if (entry.entryDate === date) {
+          await apiDelete(`/api/time-entries/${entry.id}`);
+        }
+      }
+    }
+
+    const vacRes = await apiPost<any>("/api/time-entries", {
+      entryDate: date,
+      entryType: "urlaub",
+      isFullDay: true,
+    });
+    expect(vacRes.status).toBe(201);
+    cleanupIds.push(vacRes.data.id);
+
+    const workRes = await apiPost<any>("/api/time-entries", {
+      entryDate: date,
+      entryType: "bueroarbeit",
+      startTime: "09:00",
+      endTime: "12:00",
+      isFullDay: false,
+    });
+    expect([400, 409]).toContain(workRes.status);
+  });
+});
+
+describe("TE-BIZ-12: Überlappungserkennung", () => {
+  it("TE-BIZ-12.1 – Überlappende Zeiteinträge werden abgelehnt", async () => {
+    const date = getFutureDate(275);
+    const d = new Date(date);
+    const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
+    if (existing.status === 200 && Array.isArray(existing.data)) {
+      for (const entry of existing.data) {
+        if (entry.entryDate === date) {
+          await apiDelete(`/api/time-entries/${entry.id}`);
+        }
+      }
+    }
+
+    const res1 = await apiPost<any>("/api/time-entries", {
+      entryDate: date,
+      entryType: "bueroarbeit",
+      startTime: "09:00",
+      endTime: "12:00",
+      isFullDay: false,
+    });
+    expect(res1.status).toBe(201);
+    cleanupIds.push(res1.data.id);
+
+    const res2 = await apiPost<any>("/api/time-entries", {
+      entryDate: date,
+      entryType: "schulung",
+      startTime: "11:00",
+      endTime: "13:00",
+      isFullDay: false,
+    });
+    expect([400, 409]).toContain(res2.status);
+  });
+});

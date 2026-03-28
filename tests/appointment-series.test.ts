@@ -257,3 +257,38 @@ describe("SER-8: Serien-Liste", () => {
     expect(Array.isArray(res.data)).toBe(true);
   });
 });
+
+describe("SER-9: Zweiwöchentliche Serie", () => {
+  it("SER-9.1 – biweekly Serie erstellen", async () => {
+    const res = await apiPost<any>("/api/appointment-series",
+      seriesPayload({ _offset: 270, _span: 56, weekdays: ["mi"], frequency: "biweekly", scheduledStart: "14:00" })
+    );
+    expect(res.status).toBe(201);
+    expect(res.data.series).toBeDefined();
+    expect(res.data.series.frequency).toBe("biweekly");
+    cleanupSeriesIds.push(res.data.series.id);
+
+    const created = res.data.createdAppointments || 0;
+    expect(created).toBeGreaterThan(0);
+    expect(created).toBeLessThan(8);
+  });
+});
+
+describe("SER-10: Serie Status nach Löschung", () => {
+  it("SER-10.1 – Gelöschte Serie hat Status ended", async () => {
+    const createRes = await apiPost<any>("/api/appointment-series",
+      seriesPayload({ _offset: 290, _span: 14, weekdays: ["do"], scheduledStart: "16:00" })
+    );
+    expect(createRes.status).toBe(201);
+    const id = createRes.data.series.id;
+
+    const delRes = await apiDelete(`/api/appointment-series/${id}`);
+    expect(delRes.status).toBe(200);
+
+    const listRes = await apiGet<any[]>("/api/appointment-series");
+    const found = listRes.data.find((s: any) => s.id === id);
+    if (found) {
+      expect(found.status).toBe("ended");
+    }
+  });
+});

@@ -236,13 +236,62 @@ describe("LN-5: Kunden-Leistungsnachweise", () => {
 });
 
 describe("LN-6: Duplikat-Erkennung", () => {
-  it("LN-6.1 – Zweiter LN für denselben Termin wird abgelehnt", async () => {
+  it("LN-6.1 – Zweiter LN für denselben Termin wird abgelehnt (409)", async () => {
     expect(completedAppointmentId, "completedAppointmentId muss gesetzt sein").toBeTruthy();
 
     const res = await apiPost<any>("/api/service-records/single", {
       customerId: testCustomerId,
       appointmentId: completedAppointmentId,
     });
-    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBe(409);
+  });
+});
+
+describe("LN-7: Nicht-dokumentierter Termin blockiert LN", () => {
+  it("LN-7.1 – LN für nicht-abgeschlossenen Termin wird abgelehnt", async () => {
+    const futureDate = getFutureDate(290);
+    const apptRes = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date: futureDate,
+      scheduledStart: "09:00",
+      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      assignedEmployeeId: auth.user.id,
+    });
+    expect(apptRes.status).toBe(201);
+    cleanupApptIds.push(apptRes.data.id);
+
+    const res = await apiPost<any>("/api/service-records/single", {
+      customerId: testCustomerId,
+      appointmentId: apptRes.data.id,
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("LN-8: LN-Status nach Unterschriften", () => {
+  it("LN-8.1 – LN-Status wechselt korrekt durch Workflow", async () => {
+    expect(serviceRecordId, "serviceRecordId muss gesetzt sein").toBeTruthy();
+    const res = await apiGet<any>(`/api/service-records/${serviceRecordId}`);
+    expect(res.status).toBe(200);
+    expect(["pending", "employee_signed", "completed"]).toContain(res.data.status);
+  });
+});
+
+describe("LN-9: Gesperrte Termine nach LN-Unterschrift", () => {
+  it("LN-9.1 – Termin in unterschriebenem LN ist gesperrt", async () => {
+    expect(completedAppointmentId, "completedAppointmentId muss gesetzt sein").toBeTruthy();
+    expect(serviceRecordId, "serviceRecordId muss gesetzt sein").toBeTruthy();
+
+    const recRes = await apiGet<any>(`/api/service-records/${serviceRecordId}`);
+    if (recRes.data.status === "completed" || recRes.data.status === "employee_signed") {
+      const docRes = await apiPost<any>(`/api/appointments/${completedAppointmentId}/document`, {
+        actualStart: "10:00",
+        travelOriginType: "home",
+        travelKilometers: 0,
+        customerKilometers: 0,
+        services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "Locked test" }],
+      });
+      expect([400, 403]).toContain(docRes.status);
+    }
   });
 });

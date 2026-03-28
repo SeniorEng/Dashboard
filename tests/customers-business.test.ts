@@ -318,3 +318,52 @@ describe("KV-10: E-Mail-Validierung", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("KV-11: Deaktivierungs-Workflow", () => {
+  it("KV-11.1 – Deaktivierungs-Bereitschaft prüfen", async () => {
+    expect(createdCustomerIds.length).toBeGreaterThan(0);
+    const res = await apiGet<any>(`/api/admin/customers/${createdCustomerIds[0]}/deactivation-readiness`);
+    expect(res.status).toBe(200);
+    expect(res.data).toHaveProperty("ready");
+  });
+
+  it("KV-11.2 – Deaktivierung ohne Grund wird abgelehnt", async () => {
+    expect(createdCustomerIds.length).toBeGreaterThan(0);
+    const res = await apiPost<any>(`/api/admin/customers/${createdCustomerIds[0]}/complete-deactivation`, {});
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("KV-12: Pflichtfelder", () => {
+  it("KV-12.1 – Kunde ohne Nachname wird abgelehnt", async () => {
+    const payload = validCustomerPayload({});
+    delete (payload as any).nachname;
+    const res = await apiPost<any>("/api/admin/customers", payload);
+    expect(res.status).toBe(400);
+  });
+
+  it("KV-12.2 – Kunde ohne Straße wird abgelehnt", async () => {
+    const payload = validCustomerPayload({});
+    delete (payload as any).strasse;
+    const res = await apiPost<any>("/api/admin/customers", payload);
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("KV-13: Kunden-Details abrufen", () => {
+  it("KV-13.1 – Details enthalten alle Pflichtfelder", async () => {
+    expect(createdCustomerIds.length).toBeGreaterThan(0);
+    const res = await apiGet<any>(`/api/admin/customers/${createdCustomerIds[0]}/details`);
+    expect(res.status).toBe(200);
+    expect(res.data).toHaveProperty("vorname");
+    expect(res.data).toHaveProperty("nachname");
+    expect(res.data).toHaveProperty("strasse");
+    expect(res.data).toHaveProperty("plz");
+    expect(res.data).toHaveProperty("stadt");
+  });
+
+  it("KV-13.2 – Nicht existierender Kunde liefert 404", async () => {
+    const res = await apiGet<any>("/api/admin/customers/999999/details");
+    expect(res.status).toBe(404);
+  });
+});

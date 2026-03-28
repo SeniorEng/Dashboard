@@ -246,7 +246,7 @@ describe("BIZ-5: Status-Workflow", () => {
   it("BIZ-5.4 – Doppeltes Starten im documenting-Status wird abgelehnt", async () => {
     expect(apptId, "apptId muss aus BIZ-5.1 gesetzt sein").toBeTruthy();
     const res = await apiPost<any>(`/api/appointments/${apptId}/start`, {});
-    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect([400, 403]).toContain(res.status);
   });
 
   it("BIZ-5.5 – Geplanter Termin löschen als Absage-Äquivalent", async () => {
@@ -373,5 +373,135 @@ describe("BIZ-9: Geplanter Termin löschen", () => {
 
     const delRes = await apiDelete(`/api/appointments/${tmpId}`);
     expect(delRes.status).toBe(200);
+  });
+
+  it("BIZ-9.2 – Gelöschter Termin liefert 404 beim erneuten Abrufen", async () => {
+    const date = getFutureDate(230);
+    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date,
+      scheduledStart: "15:30",
+      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      assignedEmployeeId: auth.user.id,
+    });
+    expect(createRes.status).toBe(201);
+    const tmpId = createRes.data.id;
+    await apiDelete(`/api/appointments/${tmpId}`);
+
+    const fetchRes = await apiGet<any>(`/api/appointments/${tmpId}`);
+    expect(fetchRes.status).toBe(404);
+  });
+});
+
+describe("BIZ-10: Kunden-Überlappung", () => {
+  it("BIZ-10.1 – Zweiter Termin für gleichen Kunden zur gleichen Zeit wird abgelehnt", async () => {
+    const date = getFutureDate(231);
+    const res1 = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date,
+      scheduledStart: "10:00",
+      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
+      assignedEmployeeId: auth.user.id,
+    });
+    expect(res1.status).toBe(201);
+    createdIds.push(res1.data.id);
+
+    const res2 = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date,
+      scheduledStart: "10:30",
+      services: [{ serviceId: abServiceId, durationMinutes: 30 }],
+      assignedEmployeeId: auth.user.id,
+    });
+    expect(res2.status).toBe(409);
+  });
+});
+
+describe("BIZ-11: PATCH Wochenend-Validierung", () => {
+  it("BIZ-11.1 – Termin auf Wochenende verschieben wird abgelehnt", async () => {
+    const date = getFutureDate(232);
+    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date,
+      scheduledStart: "09:00",
+      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
+      assignedEmployeeId: auth.user.id,
+    });
+    expect(createRes.status).toBe(201);
+    createdIds.push(createRes.data.id);
+
+    const today = new Date();
+    const daysUntilSat = (6 - today.getDay() + 7) % 7 || 7;
+    const sat = new Date(today);
+    sat.setDate(sat.getDate() + daysUntilSat + 7);
+    const satStr = sat.toISOString().split("T")[0];
+
+    const patchRes = await apiPatch<any>(`/api/appointments/${createRes.data.id}`, {
+      date: satStr,
+    });
+    expect(patchRes.status).toBe(400);
+  });
+});
+
+describe("BIZ-12: Vergangenheits-Einschränkung", () => {
+  it("BIZ-12.1 – Admin kann Termin >3 Monate in der Vergangenheit erstellen", async () => {
+    const pastDate = new Date();
+    pastDate.setMonth(pastDate.getMonth() - 4);
+    const dow = pastDate.getDay();
+    if (dow === 0) pastDate.setDate(pastDate.getDate() + 1);
+    else if (dow === 6) pastDate.setDate(pastDate.getDate() + 2);
+    const dateStr = pastDate.toISOString().split("T")[0];
+
+    const res = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date: dateStr,
+      scheduledStart: "07:00",
+      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      assignedEmployeeId: auth.user.id,
+    });
+    if (res.status === 201) {
+      createdIds.push(res.data.id);
+      expect(res.data.id).toBeDefined();
+    } else {
+      expect([400, 409]).toContain(res.status);
+    }
+  });
+});
+
+describe("BIZ-13: Status-Workflow Reihenfolge", () => {
+  it("BIZ-13.1 – Direktes End ohne Start wird abgelehnt", async () => {
+    const date = getFutureDate(233);
+    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date,
+      scheduledStart: "06:00",
+      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      assignedEmployeeId: auth.user.id,
+    });
+    expect(createRes.status).toBe(201);
+    createdIds.push(createRes.data.id);
+
+    const endRes = await apiPost<any>(`/api/appointments/${createRes.data.id}/end`, {});
+    expect([400, 403]).toContain(endRes.status);
+  });
+
+  it("BIZ-13.2 – Doppeltes End im documenting-Status wird abgelehnt", async () => {
+    const date = getFutureDate(234);
+    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date,
+      scheduledStart: "06:00",
+      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      assignedEmployeeId: auth.user.id,
+    });
+    expect(createRes.status).toBe(201);
+    createdIds.push(createRes.data.id);
+
+    await apiPost<any>(`/api/appointments/${createRes.data.id}/start`, {});
+    const endRes1 = await apiPost<any>(`/api/appointments/${createRes.data.id}/end`, {});
+    expect(endRes1.status).toBe(200);
+
+    const endRes2 = await apiPost<any>(`/api/appointments/${createRes.data.id}/end`, {});
+    expect([400, 403]).toContain(endRes2.status);
   });
 });

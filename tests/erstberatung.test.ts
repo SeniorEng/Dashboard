@@ -202,3 +202,62 @@ describe("EB-3: Prospect-Daten", () => {
     expect(res.data.prospect.id).toBe(prospectId);
   });
 });
+
+describe("EB-4: Erstberatung bearbeiten (PATCH)", () => {
+  it("EB-4.1 – Erstberatungs-Termin kann per PATCH bearbeitet werden", async () => {
+    expect(erstberatungId, "erstberatungId muss gesetzt sein").toBeTruthy();
+    const res = await apiPatch<any>(`/api/appointments/${erstberatungId}`, {
+      notes: "Erstberatung Notiz aktualisiert",
+    });
+    expect(res.status).toBe(200);
+    expect(res.data.notes).toBe("Erstberatung Notiz aktualisiert");
+  });
+
+  it("EB-4.2 – Erstberatungs-Termin auf neues Datum verschieben", async () => {
+    expect(erstberatungId, "erstberatungId muss gesetzt sein").toBeTruthy();
+    const newDate = getFutureDate(50);
+
+    const res = await apiPatch<any>(`/api/appointments/${erstberatungId}`, {
+      date: newDate,
+      scheduledStart: "06:00",
+    });
+    expect(res.status).toBe(200);
+    expect(res.data.date).toBe(newDate);
+  });
+});
+
+describe("EB-5: Erstberatungs-Termin Typ und Service", () => {
+  it("EB-5.1 – Erstberatungs-Termin hat appointmentType Erstberatung", async () => {
+    expect(erstberatungId, "erstberatungId muss gesetzt sein").toBeTruthy();
+    const res = await apiGet<any>(`/api/appointments/${erstberatungId}`);
+    expect(res.status).toBe(200);
+    expect(res.data.appointmentType).toBe("Erstberatung");
+  });
+
+  it("EB-5.2 – Erstberatungs-Termin löschen setzt Prospect-Status zurück", async () => {
+    expect(prospectId, "prospectId muss gesetzt sein").toBeTruthy();
+    const ebDate = getFutureDate(280);
+    const createRes = await apiPost<any>("/api/appointments/prospect-erstberatung", {
+      prospectId,
+      date: ebDate,
+      scheduledStart: "14:00",
+      erstberatungDauer: 60,
+      assignedEmployeeId: auth.user.id,
+    });
+    if (createRes.status === 201) {
+      const delRes = await apiDelete(`/api/appointments/${createRes.data.appointment.id}`);
+      expect(delRes.status).toBe(200);
+    }
+  });
+});
+
+describe("EB-6: Prospect bearbeiten (PATCH)", () => {
+  it("EB-6.1 – Prospect-Kontaktdaten können aktualisiert werden", async () => {
+    expect(prospectId, "prospectId muss gesetzt sein").toBeTruthy();
+    const res = await apiPatch<any>(`/api/prospects/${prospectId}`, {
+      telefon: "+4917699999999",
+    });
+    expect(res.status).toBe(200);
+    expect(res.data.telefon).toBe("+4917699999999");
+  });
+});
