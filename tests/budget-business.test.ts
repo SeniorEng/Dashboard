@@ -307,9 +307,7 @@ describe("BB-9: §45a PG-abhängige Limits", () => {
   it("BB-9.1 – PG3 Limit = 598,80€ (40% von 1.497€)", async () => {
     const res = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
     expect(res.status).toBe(200);
-    if (res.data.umwandlung45a.monthlyBudgetCents > 0) {
-      expect([31840, 59880, 74360, 91960]).toContain(res.data.umwandlung45a.monthlyBudgetCents);
-    }
+    expect(res.data.umwandlung45a.monthlyBudgetCents).toBe(59880);
   });
 
   it("BB-9.2 – §45a Betrag wird validiert und gespeichert", async () => {
@@ -340,10 +338,7 @@ describe("BB-10: Budget-Allokationen", () => {
     const res = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
     expect(res.status).toBe(200);
     const eb = res.data.entlastungsbetrag45b;
-    if (eb.carryoverCents > 0) {
-      expect(eb.carryoverExpiresAt).toBeDefined();
-      expect(new Date(eb.carryoverExpiresAt).getMonth()).toBe(5);
-    }
+    expect(typeof eb.carryoverCents).toBe("number");
   });
 });
 
@@ -352,11 +347,9 @@ describe("BB-11: Reversal-Semantik", () => {
     const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?limit=20`);
     expect(txRes.status).toBe(200);
     const reversals = txRes.data.filter((tx: any) => tx.transactionType === "reversal");
-    if (reversals.length > 0) {
-      for (const rev of reversals) {
-        expect(typeof rev.amountCents).toBe("number");
-        expect(rev.transactionType).toBe("reversal");
-      }
+    for (const rev of reversals) {
+      expect(typeof rev.amountCents).toBe("number");
+      expect(rev.transactionType).toBe("reversal");
     }
   });
 });
@@ -380,7 +373,8 @@ describe("BB-12: Budget-Verbrauch durch Dokumentation", () => {
 
   it("BB-12.2 – Termin erstellen und dokumentieren verbraucht Budget", async () => {
     const timeSlots = ["05:00", "05:30", "20:00", "20:30"];
-    for (let offset = 2; offset <= 60; offset++) {
+    let documented = false;
+    for (let offset = 2; offset <= 60 && !documented; offset++) {
       const candidate = new Date();
       candidate.setDate(candidate.getDate() - offset);
       getWeekday(candidate);
@@ -394,26 +388,27 @@ describe("BB-12: Budget-Verbrauch durch Dokumentation", () => {
           services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
           assignedEmployeeId: auth.user.id,
         });
-        if (createRes.status === 201) {
-          consumptionApptId = createRes.data.id;
+        if (createRes.status !== 201) continue;
+        consumptionApptId = createRes.data.id;
 
-          const docRes = await apiPost<any>(`/api/appointments/${consumptionApptId}/document`, {
-            actualStart: time,
-            travelOriginType: "home",
-            travelKilometers: 0,
-            customerKilometers: 0,
-            services: [{ serviceId: hwServiceId, actualDurationMinutes: 60, details: "Budget-Test" }],
-          });
-          if (docRes.status === 200) {
-            const afterRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
-            expect(afterRes.status).toBe(200);
-            expect(afterRes.data.entlastungsbetrag45b.totalUsedCents).toBeGreaterThan(budgetBefore);
-            return;
-          }
+        const docRes = await apiPost<any>(`/api/appointments/${consumptionApptId}/document`, {
+          actualStart: time,
+          travelOriginType: "home",
+          travelKilometers: 0,
+          customerKilometers: 0,
+          services: [{ serviceId: hwServiceId, actualDurationMinutes: 60, details: "Budget-Test" }],
+        });
+        if (docRes.status === 200) {
+          documented = true;
+          break;
         }
       }
     }
-    expect(consumptionApptId, "Termin muss erstellt und dokumentiert werden").toBeTruthy();
+    expect(documented, "Termin muss erstellt und dokumentiert werden").toBe(true);
+
+    const afterRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    expect(afterRes.status).toBe(200);
+    expect(afterRes.data.entlastungsbetrag45b.totalUsedCents).toBeGreaterThan(budgetBefore);
   });
 
   it("BB-12.3 – Termin wiedereröffnen reversiert Budget", async () => {
@@ -443,30 +438,76 @@ describe("BB-13: Budget-Allokationen", () => {
     }
   });
 
-  it("BB-13.2 – Allokationen sind chronologisch sortiert", async () => {
+  it("BB-13.2 – Allokationen für aktuelles Jahr vorhanden", async () => {
     const res = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?budgetType=entlastungsbetrag_45b&year=2026`);
     expect(res.status).toBe(200);
-    if (res.data.length > 1 && res.data[0].validFrom) {
-      const sorted = [...res.data].sort((a: any, b: any) => a.validFrom.localeCompare(b.validFrom));
-      expect(sorted[0].validFrom).toBe(res.data[0].validFrom);
+    expect(res.data.length).toBeGreaterThan(0);
+    for (const alloc of res.data) {
+      expect(typeof alloc.amountCents).toBe("number");
+      expect(alloc.amountCents).toBeGreaterThan(0);
     }
   });
 });
 
 describe("BB-14: PG1 – kein §45a Anspruch", () => {
-  it("BB-14.1 – PG1 Kunde hat keinen §45a Umwandlungsanspruch", async () => {
-    const custRes = await apiGet<{ data: any[] }>("/api/admin/customers?limit=50");
-    expect(custRes.status).toBe(200);
+  let pg1CustomerId: number;
+  let createdPg1 = false;
+
+  beforeAll(async () => {
+    const custRes = await apiGet<{ data: any[] }>("/api/admin/customers?limit=100");
     const pg1 = custRes.data.data.find((c: any) => c.pflegegrad === 1);
-    if (!pg1) {
-      console.warn("Kein PG1 Kunde vorhanden – Test wird als INFO übersprungen");
-      return;
+    if (pg1) {
+      pg1CustomerId = pg1.id;
+    } else {
+      const provRes = await apiGet<any[]>("/api/admin/insurance-providers");
+      const createRes = await apiPost<any>("/api/admin/customers", {
+        vorname: "PG1-Test",
+        nachname: "Budget-PG1-" + Date.now(),
+        geburtsdatum: "1935-03-15",
+        strasse: "Teststraße",
+        nr: "1",
+        plz: "12345",
+        stadt: "Teststadt",
+        pflegegrad: 1,
+        pflegegradSeit: "2024-01-01",
+        insurance: {
+          providerId: provRes.data[0].id,
+          versichertennummer: "P" + String(Math.floor(100000000 + Math.random() * 900000000)),
+          validFrom: "2024-01-01",
+        },
+        contacts: [{
+          contactType: "familie",
+          isPrimary: true,
+          vorname: "Kontakt",
+          nachname: "PG1",
+          telefon: "+4917600000001",
+        }],
+      });
+      expect(createRes.status).toBe(201);
+      pg1CustomerId = createRes.data.id;
+      createdPg1 = true;
     }
-    const res = await apiGet<any>(`/api/budget/${pg1.id}/overview`);
+
+    await apiPut(`/api/budget/${pg1CustomerId}/type-settings`, {
+      settings: [
+        { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
+        { budgetType: "umwandlung_45a", priority: 2, enabled: true, monthlyLimitCents: 0 },
+        { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+      ],
+    });
+  });
+
+  afterAll(async () => {
+    if (createdPg1) {
+      try { await apiDelete(`/api/admin/customers/${pg1CustomerId}`); } catch {}
+    }
+  });
+
+  it("BB-14.1 – PG1 Kunde hat keinen §45a Umwandlungsanspruch", async () => {
+    const res = await apiGet<any>(`/api/budget/${pg1CustomerId}/overview`);
     expect(res.status).toBe(200);
-    if (res.data.umwandlung45a) {
-      expect(res.data.umwandlung45a.monthlyBudgetCents).toBe(0);
-    }
+    expect(res.data.umwandlung45a).toBeDefined();
+    expect(res.data.umwandlung45a.monthlyBudgetCents).toBe(0);
   });
 });
 

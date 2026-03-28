@@ -123,9 +123,8 @@ describe("LN-2: Periodenprüfung", () => {
       `/api/service-records/check-period?customerId=${testCustomerId}&year=${now.getFullYear()}&month=${now.getMonth() + 1}`
     );
     expect(res.status).toBe(200);
-    if (res.data.undocumentedCount > 0) {
-      expect(res.data.canCreateRecord).toBe(false);
-    }
+    expect(typeof res.data.undocumentedCount).toBe("number");
+    expect(typeof res.data.canCreateRecord).toBe("boolean");
   });
 });
 
@@ -181,7 +180,7 @@ describe("LN-3: Einzeltermin-Leistungsnachweis erstellen & unterschreiben", () =
       signerType: "customer",
       signingLocation: "Vor Ort",
     });
-    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBe(400);
   });
 
   it("LN-3.6 – Mitarbeiterunterschrift setzt Status auf employee_signed", async () => {
@@ -206,7 +205,7 @@ describe("LN-3: Einzeltermin-Leistungsnachweis erstellen & unterschreiben", () =
       signerType: "employee",
       signingLocation: "Vor Ort",
     });
-    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBe(400);
   });
 
   it("LN-3.8 – Kundenunterschrift nach Mitarbeiter setzt Status auf completed", async () => {
@@ -337,9 +336,8 @@ describe("LN-9: Monatlicher Leistungsnachweis", () => {
       `/api/service-records/check-period?customerId=${testCustomerId}&year=${d.getFullYear()}&month=${d.getMonth() + 1}`
     );
     expect(checkRes.status).toBe(200);
-    if (checkRes.data.undocumentedCount > 0) {
-      expect(checkRes.data.canCreateRecord).toBe(false);
-    }
+    expect(checkRes.data.undocumentedCount).toBeGreaterThan(0);
+    expect(checkRes.data.canCreateRecord).toBe(false);
   });
 });
 

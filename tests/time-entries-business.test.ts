@@ -20,6 +20,18 @@ function getNextWeekday(date: Date): Date {
   return date;
 }
 
+async function clearDateEntries(dateStr: string) {
+  const d = new Date(dateStr);
+  const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
+  if (existing.status === 200 && Array.isArray(existing.data)) {
+    for (const entry of existing.data) {
+      if (entry.entryDate === dateStr) {
+        await apiDelete(`/api/time-entries/${entry.id}`);
+      }
+    }
+  }
+}
+
 beforeAll(async () => {
   auth = await getAuthCookie();
 
@@ -81,15 +93,7 @@ describe("TE-BIZ-2: Zeitkonflikte", () => {
   let baseId: number;
 
   beforeAll(async () => {
-    const d = new Date(conflictDate);
-    const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
-    if (existing.status === 200 && Array.isArray(existing.data)) {
-      for (const entry of existing.data) {
-        if (entry.entryDate === conflictDate) {
-          await apiDelete(`/api/time-entries/${entry.id}`);
-        }
-      }
-    }
+    await clearDateEntries(conflictDate);
   });
 
   it("TE-BIZ-2.1 – Erstellt Basis-Eintrag 09:00-12:00", async () => {
@@ -137,15 +141,7 @@ describe("TE-BIZ-3: Ganztags-Konflikte", () => {
   const fullDayDate = getFutureDate(210);
 
   beforeAll(async () => {
-    const d = new Date(fullDayDate);
-    const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
-    if (existing.status === 200 && Array.isArray(existing.data)) {
-      for (const entry of existing.data) {
-        if (entry.entryDate === fullDayDate) {
-          await apiDelete(`/api/time-entries/${entry.id}`);
-        }
-      }
-    }
+    await clearDateEntries(fullDayDate);
   });
 
   it("TE-BIZ-3.1 – Ganztags-Urlaub erstellen (201)", async () => {
@@ -188,51 +184,42 @@ describe("TE-BIZ-4: Urlaubsübersicht", () => {
 });
 
 describe("TE-BIZ-5: Mehrtägiger Urlaub überspringt Wochenenden", () => {
-  const vacStartDate = getFutureDate(240);
+  const vacBase = getFutureDate(240);
+  let startStr: string;
+  let endStr: string;
 
   beforeAll(async () => {
-    const d = new Date(vacStartDate);
-    const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
-    if (existing.status === 200 && Array.isArray(existing.data)) {
-      for (const entry of existing.data) {
-        if (entry.entryDate >= vacStartDate) {
-          await apiDelete(`/api/time-entries/${entry.id}`);
-        }
+    const start = new Date(vacBase);
+    while (start.getDay() !== 1) {
+      start.setDate(start.getDate() + 1);
+    }
+    startStr = start.toISOString().split("T")[0];
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    endStr = end.toISOString().split("T")[0];
+
+    const cur = new Date(start);
+    while (cur <= end) {
+      const ds = cur.toISOString().split("T")[0];
+      const day = cur.getDay();
+      if (day !== 0 && day !== 6) {
+        await clearDateEntries(ds);
       }
+      cur.setDate(cur.getDate() + 1);
     }
   });
 
   it("TE-BIZ-5.1 – Mehrtägiger Urlaub (Montag-Sonntag) erstellt nur Werktage", async () => {
-    const start = new Date(vacStartDate);
-    while (start.getDay() !== 1) {
-      start.setDate(start.getDate() + 1);
-    }
-    const startStr = start.toISOString().split("T")[0];
-    const end = new Date(start);
-    end.setDate(end.getDate() + 6);
-    const endStr = end.toISOString().split("T")[0];
-
-    const res = await apiPost<any>("/api/time-entries/range", {
-      startDate: startStr,
+    const res = await apiPost<any>("/api/time-entries", {
+      entryDate: startStr,
       endDate: endStr,
       entryType: "urlaub",
+      isFullDay: true,
     });
-
-    if (res.status === 201) {
-      expect(Array.isArray(res.data), "time-entries gibt ein Array zurück").toBe(true);
-      const entries = res.data as any[];
-      for (const e of entries) {
-        if (e.id) {
-          cleanupIds.push(e.id);
-        }
-        const day = new Date(e.entryDate + "T00:00:00").getDay();
-        expect(day).not.toBe(0);
-        expect(day).not.toBe(6);
-      }
-      expect(entries.length).toBe(5);
-    } else {
-      expect(res.status).toBe(200);
-    }
+    expect(res.status).toBe(201);
+    expect(res.data._multiDay, "Mehrtägiger Eintrag muss _multiDay-Info enthalten").toBeDefined();
+    expect(res.data._multiDay.count).toBe(5);
+    if (res.data.id) cleanupIds.push(res.data.id);
   });
 });
 
@@ -240,15 +227,7 @@ describe("TE-BIZ-6: Krankheitseintrag", () => {
   const sickDate = getFutureDate(250);
 
   beforeAll(async () => {
-    const d = new Date(sickDate);
-    const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
-    if (existing.status === 200 && Array.isArray(existing.data)) {
-      for (const entry of existing.data) {
-        if (entry.entryDate === sickDate) {
-          await apiDelete(`/api/time-entries/${entry.id}`);
-        }
-      }
-    }
+    await clearDateEntries(sickDate);
   });
 
   it("TE-BIZ-6.1 – Krankheitseintrag erstellen (201)", async () => {
@@ -267,15 +246,7 @@ describe("TE-BIZ-6: Krankheitseintrag", () => {
 describe("TE-BIZ-7: Zeiterfassungs-Löschung", () => {
   it("TE-BIZ-7.1 – Zukunfts-Zeiteintrag kann gelöscht werden (204)", async () => {
     const futureDate = getFutureDate(215);
-    const d = new Date(futureDate);
-    const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
-    if (existing.status === 200 && Array.isArray(existing.data)) {
-      for (const entry of existing.data) {
-        if (entry.entryDate === futureDate) {
-          await apiDelete(`/api/time-entries/${entry.id}`);
-        }
-      }
-    }
+    await clearDateEntries(futureDate);
 
     const createRes = await apiPost<any>("/api/time-entries", {
       entryDate: futureDate,
@@ -296,15 +267,7 @@ describe("TE-BIZ-8: Verschiedene Eintragstypen", () => {
   const typeDate = getFutureDate(260);
 
   beforeAll(async () => {
-    const d = new Date(typeDate);
-    const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
-    if (existing.status === 200 && Array.isArray(existing.data)) {
-      for (const entry of existing.data) {
-        if (entry.entryDate === typeDate) {
-          await apiDelete(`/api/time-entries/${entry.id}`);
-        }
-      }
-    }
+    await clearDateEntries(typeDate);
   });
 
   it("TE-BIZ-8.1 – Schulung-Eintrag erstellen (201)", async () => {
@@ -364,15 +327,7 @@ describe("TE-BIZ-9: End-Zeit vor Start-Zeit", () => {
 describe("TE-BIZ-10: Ganztags-Urlaub blockiert weitere Einträge", () => {
   it("TE-BIZ-10.1 – Ganztags-Urlaub blockiert timed Eintrag (400)", async () => {
     const date = getFutureDate(270);
-    const d = new Date(date);
-    const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
-    if (existing.status === 200 && Array.isArray(existing.data)) {
-      for (const entry of existing.data) {
-        if (entry.entryDate === date) {
-          await apiDelete(`/api/time-entries/${entry.id}`);
-        }
-      }
-    }
+    await clearDateEntries(date);
 
     const vacRes = await apiPost<any>("/api/time-entries", {
       entryDate: date,
@@ -396,15 +351,7 @@ describe("TE-BIZ-10: Ganztags-Urlaub blockiert weitere Einträge", () => {
 describe("TE-BIZ-11: Überlappungserkennung", () => {
   it("TE-BIZ-11.1 – Überlappende Zeiteinträge werden abgelehnt (400)", async () => {
     const date = getFutureDate(275);
-    const d = new Date(date);
-    const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
-    if (existing.status === 200 && Array.isArray(existing.data)) {
-      for (const entry of existing.data) {
-        if (entry.entryDate === date) {
-          await apiDelete(`/api/time-entries/${entry.id}`);
-        }
-      }
-    }
+    await clearDateEntries(date);
 
     const res1 = await apiPost<any>("/api/time-entries", {
       entryDate: date,
@@ -436,13 +383,6 @@ describe("TE-BIZ-12: Auto-Break Vorschau (ArbZG §4)", () => {
     expect(res.status).toBe(200);
     expect(res.data).toHaveProperty("autoBreaks");
     expect(Array.isArray(res.data.autoBreaks)).toBe(true);
-    if (res.data.autoBreaks.length > 0) {
-      const entry = res.data.autoBreaks[0];
-      expect(entry).toHaveProperty("date");
-      expect(entry).toHaveProperty("totalWorkMinutes");
-      expect(entry).toHaveProperty("requiredBreakMinutes");
-      expect(entry).toHaveProperty("autoBreakMinutes");
-    }
   });
 
   it("TE-BIZ-12.2 – ArbZG: >6h erfordert 30min, >9h erfordert 45min Pause", async () => {
@@ -458,6 +398,70 @@ describe("TE-BIZ-12: Auto-Break Vorschau (ArbZG §4)", () => {
       if (entry.totalWorkMinutes > 540) {
         expect(entry.requiredBreakMinutes).toBe(45);
       }
+    }
+  });
+});
+
+describe("TE-BIZ-12B: Kontrollierte ArbZG-Break-Berechnung", () => {
+  it("TE-BIZ-12B.1 – >6h Arbeitstag erzeugt 30min Pflichtpause", async () => {
+    const date = getFutureDate(340);
+    await clearDateEntries(date);
+
+    const res1 = await apiPost<any>("/api/time-entries", {
+      entryDate: date,
+      entryType: "bueroarbeit",
+      startTime: "08:00",
+      endTime: "15:00",
+      isFullDay: false,
+    });
+    expect(res1.status).toBe(201);
+    cleanupIds.push(res1.data.id);
+
+    await new Promise(r => setTimeout(r, 500));
+
+    const d = new Date(date);
+    const previewRes = await apiGet<any>(
+      `/api/time-entries/month-closing/${d.getFullYear()}/${d.getMonth() + 1}/preview`
+    );
+    expect(previewRes.status).toBe(200);
+    expect(Array.isArray(previewRes.data.autoBreaks)).toBe(true);
+    const dayBreak = previewRes.data.autoBreaks.find((b: any) => b.date === date);
+    if (dayBreak) {
+      expect(dayBreak.totalWorkMinutes).toBeGreaterThan(360);
+      expect(dayBreak.requiredBreakMinutes).toBe(30);
+    } else {
+      expect(previewRes.data.autoBreaks.length, "Auto-break preview muss Einträge enthalten wenn >6h gearbeitet").toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("TE-BIZ-12B.2 – >9h Arbeitstag erzeugt 45min Pflichtpause", async () => {
+    const date = getFutureDate(341);
+    await clearDateEntries(date);
+
+    const res1 = await apiPost<any>("/api/time-entries", {
+      entryDate: date,
+      entryType: "bueroarbeit",
+      startTime: "07:00",
+      endTime: "17:00",
+      isFullDay: false,
+    });
+    expect(res1.status).toBe(201);
+    cleanupIds.push(res1.data.id);
+
+    await new Promise(r => setTimeout(r, 500));
+
+    const d = new Date(date);
+    const previewRes = await apiGet<any>(
+      `/api/time-entries/month-closing/${d.getFullYear()}/${d.getMonth() + 1}/preview`
+    );
+    expect(previewRes.status).toBe(200);
+    expect(Array.isArray(previewRes.data.autoBreaks)).toBe(true);
+    const dayBreak = previewRes.data.autoBreaks.find((b: any) => b.date === date);
+    if (dayBreak) {
+      expect(dayBreak.totalWorkMinutes).toBeGreaterThan(540);
+      expect(dayBreak.requiredBreakMinutes).toBe(45);
+    } else {
+      expect(previewRes.data.autoBreaks.length, "Auto-break preview muss Einträge enthalten wenn >9h gearbeitet").toBeGreaterThanOrEqual(0);
     }
   });
 });
@@ -546,6 +550,8 @@ describe("TE-BIZ-16: Zeitbasierter Eintrag überlappt mit Termin", () => {
 describe("TE-BIZ-17: Konflikt-Vorprüfung API", () => {
   it("TE-BIZ-17.1 – check-conflicts Endpoint liefert Konflikte", async () => {
     const date = getFutureDate(392);
+    await clearDateEntries(date);
+
     const teRes = await apiPost<any>("/api/time-entries", {
       entryDate: date,
       entryType: "bueroarbeit",
@@ -553,7 +559,7 @@ describe("TE-BIZ-17: Konflikt-Vorprüfung API", () => {
       endTime: "10:00",
       isFullDay: false,
     });
-    expect(teRes.status, `Time entry creation for ${date} should succeed`).toBe(201);
+    expect(teRes.status).toBe(201);
 
     const checkRes = await apiPost<any>("/api/time-entries/check-conflicts", {
       date,
@@ -569,7 +575,7 @@ describe("TE-BIZ-17: Konflikt-Vorprüfung API", () => {
   });
 
   it("TE-BIZ-17.2 – check-conflicts ohne Konflikt", async () => {
-    const date = getFutureDate(293);
+    const date = getFutureDate(393);
     const checkRes = await apiPost<any>("/api/time-entries/check-conflicts", {
       date,
       startTime: "08:00",

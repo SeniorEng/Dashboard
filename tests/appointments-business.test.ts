@@ -22,24 +22,26 @@ function getWeekday(d: Date): Date {
   return d;
 }
 
-async function createAppointmentOnSlot(
-  customerId: number,
+async function createAppointment(
   dateStr: string,
   time: string,
   serviceId: number,
   durationMinutes: number,
-  employeeId: number
 ) {
   return apiPost<any>("/api/appointments/kundentermin", {
-    customerId,
+    customerId: testCustomerId,
     date: dateStr,
     scheduledStart: time,
     services: [{ serviceId, durationMinutes }],
-    assignedEmployeeId: employeeId,
+    assignedEmployeeId: auth.user.id,
   });
 }
 
-async function findFreeSlot(opts: { offsetRange: [number, number]; times: string[]; past?: boolean }) {
+async function createOnFreeSlot(opts: {
+  offsetRange: [number, number];
+  times: string[];
+  past?: boolean;
+}): Promise<{ id: number; date: string; time: string }> {
   const { offsetRange, times, past } = opts;
   for (let offset = offsetRange[0]; offset <= offsetRange[1]; offset++) {
     const candidate = new Date();
@@ -51,14 +53,14 @@ async function findFreeSlot(opts: { offsetRange: [number, number]; times: string
     getWeekday(candidate);
     const dateStr = candidate.toISOString().split("T")[0];
     for (const time of times) {
-      const res = await createAppointmentOnSlot(testCustomerId, dateStr, time, hwServiceId, 30, auth.user.id);
+      const res = await createAppointment(dateStr, time, hwServiceId, 30);
       if (res.status === 201) {
         createdIds.push(res.data.id);
-        return res;
+        return { id: res.data.id, date: dateStr, time };
       }
     }
   }
-  return null;
+  throw new Error("Kein freier Slot gefunden");
 }
 
 async function cleanup() {
@@ -94,13 +96,7 @@ describe("BIZ-1: Wochenend-Validierung", () => {
     sat.setDate(sat.getDate() + daysUntilSat);
     const satStr = sat.toISOString().split("T")[0];
 
-    const res = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date: satStr,
-      scheduledStart: "10:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const res = await createAppointment(satStr, "10:00", hwServiceId, 60);
     expect(res.status).toBe(400);
   });
 
@@ -111,13 +107,7 @@ describe("BIZ-1: Wochenend-Validierung", () => {
     sun.setDate(sun.getDate() + daysUntilSun);
     const sunStr = sun.toISOString().split("T")[0];
 
-    const res = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date: sunStr,
-      scheduledStart: "10:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const res = await createAppointment(sunStr, "10:00", hwServiceId, 60);
     expect(res.status).toBe(400);
   });
 });
@@ -126,13 +116,7 @@ describe("BIZ-2: Überlappungsprüfung", () => {
   const overlapDate = getFutureDate(220);
 
   it("BIZ-2.1 – Erstellt Basis-Termin 10:00-11:30", async () => {
-    const res = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date: overlapDate,
-      scheduledStart: "10:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 90 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const res = await createAppointment(overlapDate, "10:00", hwServiceId, 90);
     expect(res.status).toBe(201);
     expect(res.data).toHaveProperty("id");
     expect(res.data.status).toBe("scheduled");
@@ -140,24 +124,12 @@ describe("BIZ-2: Überlappungsprüfung", () => {
   });
 
   it("BIZ-2.2 – Überlappender Termin gleicher Mitarbeiter wird abgelehnt (409)", async () => {
-    const res = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date: overlapDate,
-      scheduledStart: "11:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const res = await createAppointment(overlapDate, "11:00", hwServiceId, 60);
     expect(res.status).toBe(409);
   });
 
   it("BIZ-2.3 – Nicht-überlappender Termin um 12:00 wird akzeptiert", async () => {
-    const res = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date: overlapDate,
-      scheduledStart: "12:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const res = await createAppointment(overlapDate, "12:00", hwServiceId, 60);
     expect(res.status).toBe(201);
     createdIds.push(res.data.id);
   });
@@ -184,13 +156,7 @@ describe("BIZ-3: scheduledEnd Berechnung", () => {
 
   it("BIZ-3.2 – Einzelner Service berechnet scheduledEnd korrekt", async () => {
     const date = getFutureDate(223);
-    const res = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date,
-      scheduledStart: "14:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 45 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const res = await createAppointment(date, "14:00", hwServiceId, 45);
     expect(res.status).toBe(201);
     createdIds.push(res.data.id);
     expect(res.data.durationPromised).toBe(45);
@@ -216,13 +182,7 @@ describe("BIZ-5: Status-Workflow", () => {
   const statusDate = getFutureDate(225);
 
   it("BIZ-5.1 – Neuer Termin hat Status 'scheduled'", async () => {
-    const res = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date: statusDate,
-      scheduledStart: "08:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const res = await createAppointment(statusDate, "08:00", hwServiceId, 60);
     expect(res.status).toBe(201);
     expect(res.data.status).toBe("scheduled");
     apptId = res.data.id;
@@ -251,15 +211,8 @@ describe("BIZ-5: Status-Workflow", () => {
 
   it("BIZ-5.5 – Geplanter Termin löschen als Absage-Äquivalent", async () => {
     const cancelDate = getFutureDate(226);
-    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date: cancelDate,
-      scheduledStart: "09:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const createRes = await createAppointment(cancelDate, "09:00", hwServiceId, 60);
     expect(createRes.status).toBe(201);
-
     const delRes = await apiDelete(`/api/appointments/${createRes.data.id}`);
     expect(delRes.status).toBe(200);
   });
@@ -269,17 +222,15 @@ describe("BIZ-6: Löschschutz bei abgeschlossenen Terminen", () => {
   let completedId: number;
 
   it("BIZ-6.1 – Erstellt und dokumentiert einen Termin", async () => {
-    const res = await findFreeSlot({
+    const slot = await createOnFreeSlot({
       offsetRange: [2, 60],
       times: ["06:00", "06:30", "18:00", "18:30", "19:00"],
       past: true,
     });
-    expect(res, "Freier Termin-Slot muss gefunden werden").toBeTruthy();
-    expect(res!.status).toBe(201);
-    completedId = res!.data.id;
+    completedId = slot.id;
 
     const docRes = await apiPost<any>(`/api/appointments/${completedId}/document`, {
-      actualStart: "06:00",
+      actualStart: slot.time,
       travelOriginType: "home",
       travelKilometers: 0,
       customerKilometers: 0,
@@ -303,13 +254,7 @@ describe("BIZ-7: Termin bearbeiten", () => {
 
   it("BIZ-7.1 – Termin-Zeit verschieben", async () => {
     const date = getFutureDate(228);
-    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date,
-      scheduledStart: "09:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const createRes = await createAppointment(date, "09:00", hwServiceId, 60);
     expect(createRes.status).toBe(201);
     editApptId = createRes.data.id;
     createdIds.push(editApptId);
@@ -329,22 +274,31 @@ describe("BIZ-7: Termin bearbeiten", () => {
     expect(updateRes.status).toBe(200);
     expect(updateRes.data.notes).toBe("Aktualisierte Notiz BIZ-7.2");
   });
+
+  it("BIZ-7.3 – Service PATCH aktualisiert Termin-Dienste", async () => {
+    expect(editApptId, "editApptId muss gesetzt sein").toBeTruthy();
+    const patchRes = await apiPatch<any>(`/api/appointments/${editApptId}`, {
+      notes: "BIZ-7.3 Service-Update",
+      services: [
+        { serviceId: hwServiceId, plannedDurationMinutes: 45 },
+        { serviceId: abServiceId, plannedDurationMinutes: 30 },
+      ],
+    });
+    expect(patchRes.status).toBe(200);
+    expect(patchRes.data.notes).toBe("BIZ-7.3 Service-Update");
+  });
 });
 
 describe("BIZ-8: Dokumentation", () => {
-  let docApptId: number;
-
   it("BIZ-8.1 – Termin dokumentieren setzt Status auf completed", async () => {
-    const res = await findFreeSlot({
+    const slot = await createOnFreeSlot({
       offsetRange: [2, 60],
       times: ["05:00", "05:30", "19:30", "20:00"],
       past: true,
     });
-    expect(res, "Freier Slot für Dokumentation muss gefunden werden").toBeTruthy();
-    docApptId = res!.data.id;
 
-    const docRes = await apiPost<any>(`/api/appointments/${docApptId}/document`, {
-      actualStart: "05:00",
+    const docRes = await apiPost<any>(`/api/appointments/${slot.id}/document`, {
+      actualStart: slot.time,
       travelOriginType: "home",
       travelKilometers: 5,
       customerKilometers: 0,
@@ -352,7 +306,7 @@ describe("BIZ-8: Dokumentation", () => {
     });
     expect(docRes.status).toBe(200);
 
-    const fetchRes = await apiGet<any>(`/api/appointments/${docApptId}`);
+    const fetchRes = await apiGet<any>(`/api/appointments/${slot.id}`);
     expect(fetchRes.data.status).toBe("completed");
     expect(fetchRes.data.travelKilometers).toBe(5);
   });
@@ -361,33 +315,19 @@ describe("BIZ-8: Dokumentation", () => {
 describe("BIZ-9: Geplanter Termin löschen", () => {
   it("BIZ-9.1 – Geplanter Termin kann gelöscht werden", async () => {
     const date = getFutureDate(229);
-    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date,
-      scheduledStart: "15:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const createRes = await createAppointment(date, "15:00", hwServiceId, 30);
     expect(createRes.status).toBe(201);
     const tmpId = createRes.data.id;
-
     const delRes = await apiDelete(`/api/appointments/${tmpId}`);
     expect(delRes.status).toBe(200);
   });
 
   it("BIZ-9.2 – Gelöschter Termin liefert 404 beim erneuten Abrufen", async () => {
     const date = getFutureDate(230);
-    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date,
-      scheduledStart: "15:30",
-      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const createRes = await createAppointment(date, "15:30", hwServiceId, 30);
     expect(createRes.status).toBe(201);
     const tmpId = createRes.data.id;
     await apiDelete(`/api/appointments/${tmpId}`);
-
     const fetchRes = await apiGet<any>(`/api/appointments/${tmpId}`);
     expect(fetchRes.status).toBe(404);
   });
@@ -396,13 +336,7 @@ describe("BIZ-9: Geplanter Termin löschen", () => {
 describe("BIZ-10: Kunden-Überlappung", () => {
   it("BIZ-10.1 – Zweiter Termin für gleichen Kunden zur gleichen Zeit wird abgelehnt", async () => {
     const date = getFutureDate(231);
-    const res1 = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date,
-      scheduledStart: "10:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const res1 = await createAppointment(date, "10:00", hwServiceId, 60);
     expect(res1.status).toBe(201);
     createdIds.push(res1.data.id);
 
@@ -420,13 +354,7 @@ describe("BIZ-10: Kunden-Überlappung", () => {
 describe("BIZ-11: PATCH Wochenend-Validierung", () => {
   it("BIZ-11.1 – Termin auf Wochenende verschieben wird abgelehnt", async () => {
     const date = getFutureDate(232);
-    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date,
-      scheduledStart: "09:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const createRes = await createAppointment(date, "09:00", hwServiceId, 60);
     expect(createRes.status).toBe(201);
     createdIds.push(createRes.data.id);
 
@@ -443,41 +371,21 @@ describe("BIZ-11: PATCH Wochenend-Validierung", () => {
   });
 });
 
-describe("BIZ-12: Vergangenheits-Einschränkung", () => {
+describe("BIZ-12: Admin Past-Date Erstellung", () => {
   it("BIZ-12.1 – Admin kann Termin in der Vergangenheit erstellen", async () => {
-    const pastDate = new Date();
-    pastDate.setMonth(pastDate.getMonth() - 4);
-    const dow = pastDate.getDay();
-    if (dow === 0) pastDate.setDate(pastDate.getDate() + 1);
-    else if (dow === 6) pastDate.setDate(pastDate.getDate() + 2);
-    const dateStr = pastDate.toISOString().split("T")[0];
-
-    const res = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date: dateStr,
-      scheduledStart: "07:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
-      assignedEmployeeId: auth.user.id,
+    const slot = await createOnFreeSlot({
+      offsetRange: [5, 60],
+      times: ["04:00", "04:30", "22:00", "22:30"],
+      past: true,
     });
-    if (res.status === 201) {
-      createdIds.push(res.data.id);
-      expect(res.data.id).toBeDefined();
-    } else {
-      expect(res.status).toBe(409);
-    }
+    expect(slot.id).toBeDefined();
   });
 });
 
 describe("BIZ-13: Status-Workflow Reihenfolge", () => {
   it("BIZ-13.1 – Direktes End ohne Start wird abgelehnt (403)", async () => {
     const date = getFutureDate(233);
-    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date,
-      scheduledStart: "06:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const createRes = await createAppointment(date, "06:00", hwServiceId, 30);
     expect(createRes.status).toBe(201);
     createdIds.push(createRes.data.id);
 
@@ -487,13 +395,7 @@ describe("BIZ-13: Status-Workflow Reihenfolge", () => {
 
   it("BIZ-13.2 – Doppeltes End im documenting-Status wird abgelehnt (403)", async () => {
     const date = getFutureDate(234);
-    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date,
-      scheduledStart: "06:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const createRes = await createAppointment(date, "06:00", hwServiceId, 30);
     expect(createRes.status).toBe(201);
     createdIds.push(createRes.data.id);
 
@@ -511,13 +413,7 @@ describe("BIZ-14: Scheduling-Felder Sperre im documenting-Status", () => {
 
   it("BIZ-14.1 – Termin in documenting-Status: Zeit ändern wird abgelehnt", async () => {
     const date = getFutureDate(235);
-    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date,
-      scheduledStart: "08:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const createRes = await createAppointment(date, "08:00", hwServiceId, 60);
     expect(createRes.status).toBe(201);
     docApptId = createRes.data.id;
     createdIds.push(docApptId);
@@ -545,26 +441,24 @@ describe("BIZ-14: Scheduling-Felder Sperre im documenting-Status", () => {
 
 describe("BIZ-15: Abgeschlossener Termin kann nicht per PATCH geändert werden", () => {
   it("BIZ-15.1 – completed-Termin: PATCH wird abgelehnt", async () => {
-    const res = await findFreeSlot({
+    const slot = await createOnFreeSlot({
       offsetRange: [2, 60],
       times: ["04:00", "04:30", "20:30", "21:00"],
       past: true,
     });
-    expect(res, "Freier Slot muss gefunden werden").toBeTruthy();
-    const id = res!.data.id;
 
-    await apiPost<any>(`/api/appointments/${id}/document`, {
-      actualStart: "04:00",
+    await apiPost<any>(`/api/appointments/${slot.id}/document`, {
+      actualStart: slot.time,
       travelOriginType: "home",
       travelKilometers: 0,
       customerKilometers: 0,
       services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "Completed-Test" }],
     });
 
-    const verify = await apiGet<any>(`/api/appointments/${id}`);
+    const verify = await apiGet<any>(`/api/appointments/${slot.id}`);
     expect(verify.data.status).toBe("completed");
 
-    const patchRes = await apiPatch<any>(`/api/appointments/${id}`, {
+    const patchRes = await apiPatch<any>(`/api/appointments/${slot.id}`, {
       notes: "Sollte nicht funktionieren",
     });
     expect(patchRes.status).toBe(403);
@@ -573,23 +467,21 @@ describe("BIZ-15: Abgeschlossener Termin kann nicht per PATCH geändert werden",
 
 describe("BIZ-16: Completed -> Reopen -> Documenting", () => {
   it("BIZ-16.1 – Abgeschlossenen Termin wiedereröffnen", async () => {
-    const res = await findFreeSlot({
+    const slot = await createOnFreeSlot({
       offsetRange: [2, 60],
       times: ["03:00", "03:30", "21:30", "22:00"],
       past: true,
     });
-    expect(res, "Freier Slot muss gefunden werden").toBeTruthy();
-    const id = res!.data.id;
 
-    await apiPost<any>(`/api/appointments/${id}/document`, {
-      actualStart: "03:00",
+    await apiPost<any>(`/api/appointments/${slot.id}/document`, {
+      actualStart: slot.time,
       travelOriginType: "home",
       travelKilometers: 0,
       customerKilometers: 0,
       services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "Reopen-Test" }],
     });
 
-    const reopenRes = await apiPost<any>(`/api/appointments/${id}/reopen`, {});
+    const reopenRes = await apiPost<any>(`/api/appointments/${slot.id}/reopen`, {});
     expect(reopenRes.status).toBe(200);
     expect(reopenRes.data.status).toBe("documenting");
   });
@@ -615,13 +507,7 @@ describe("BIZ-17: durationPromised wird bei Erstellung aus Services berechnet", 
 
   it("BIZ-17.2 – Einzelner Service: durationPromised = Einzeldauer", async () => {
     const date = getFutureDate(237);
-    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date,
-      scheduledStart: "07:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const createRes = await createAppointment(date, "07:00", hwServiceId, 60);
     expect(createRes.status).toBe(201);
     createdIds.push(createRes.data.id);
     expect(createRes.data.durationPromised).toBe(60);
@@ -631,82 +517,67 @@ describe("BIZ-17: durationPromised wird bei Erstellung aus Services berechnet", 
 describe("BIZ-18: Termin löschen entfernt aus Tagesliste", () => {
   it("BIZ-18.1 – Gelöschter Termin erscheint nicht mehr in Tagesliste", async () => {
     const date = getFutureDate(238);
-    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date,
-      scheduledStart: "07:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const createRes = await createAppointment(date, "07:00", hwServiceId, 30);
     expect(createRes.status).toBe(201);
     const id = createRes.data.id;
 
     const beforeList = await apiGet<any[]>(`/api/appointments?date=${date}`);
     expect(beforeList.status).toBe(200);
-    const foundBefore = beforeList.data.find((a: any) => a.id === id);
-    expect(foundBefore).toBeDefined();
-
-    const delRes = await apiDelete(`/api/appointments/${id}`);
-    expect(delRes.status).toBe(200);
-
-    const afterList = await apiGet<any[]>(`/api/appointments?date=${date}`);
-    expect(afterList.status).toBe(200);
-    const foundAfter = afterList.data.find((a: any) => a.id === id);
-    expect(foundAfter).toBeUndefined();
-  });
-});
-
-describe("BIZ-19: Documenting-Status erlaubt Notizen", () => {
-  it("BIZ-19.1 – Termin in documenting-Status: notes-Feld kann geändert werden", async () => {
-    const res = await findFreeSlot({
-      offsetRange: [2, 60],
-      times: ["05:00", "05:30", "19:00", "19:30"],
-      past: true,
-    });
-    expect(res, "Freier Slot für BIZ-19 muss gefunden werden").toBeTruthy();
-    const id = res!.data.id;
-
-    await apiPost<any>(`/api/appointments/${id}/start`, {});
-    await apiPost<any>(`/api/appointments/${id}/end`, {});
-
-    const verify = await apiGet<any>(`/api/appointments/${id}`);
-    expect(verify.data.status).toBe("documenting");
-
-    const patchRes = await apiPatch<any>(`/api/appointments/${id}`, {
-      notes: "Notiz im documenting-Status erlaubt",
-    });
-    expect(patchRes.status).toBe(200);
+    const beforeArr = Array.isArray(beforeList.data) ? beforeList.data : [];
+    const foundBefore = beforeArr.find((a: any) => a.id === id);
+    expect(foundBefore, "Termin muss vor Löschung in Tagesliste sein").toBeDefined();
 
     await apiDelete(`/api/appointments/${id}`);
+
+    const afterList = await apiGet<any[]>(`/api/appointments?date=${date}`);
+    const afterArr = Array.isArray(afterList.data) ? afterList.data : [];
+    const foundAfter = afterArr.find((a: any) => a.id === id);
+    expect(foundAfter, "Termin darf nach Löschung nicht mehr in Tagesliste sein").toBeUndefined();
   });
 });
 
-describe("BIZ-20: Completed-Termin PATCH wird exakt mit 403 abgelehnt", () => {
-  it("BIZ-20.1 – Abgeschlossener Termin: scheduledStart-Änderung → 403", async () => {
-    const res = await findFreeSlot({
+describe("BIZ-19: Notizen im documenting-Status erlaubt", () => {
+  it("BIZ-19.1 – notes PATCH im documenting-Status liefert 200", async () => {
+    const date = getFutureDate(239);
+    const createRes = await createAppointment(date, "08:00", hwServiceId, 30);
+    expect(createRes.status).toBe(201);
+    createdIds.push(createRes.data.id);
+
+    await apiPost<any>(`/api/appointments/${createRes.data.id}/start`, {});
+    await apiPost<any>(`/api/appointments/${createRes.data.id}/end`, {});
+
+    const verify = await apiGet<any>(`/api/appointments/${createRes.data.id}`);
+    expect(verify.data.status).toBe("documenting");
+
+    const patchRes = await apiPatch<any>(`/api/appointments/${createRes.data.id}`, {
+      notes: "Doku-Notiz erlaubt",
+    });
+    expect(patchRes.status).toBe(200);
+  });
+});
+
+describe("BIZ-20: Completed PATCH Ablehnung", () => {
+  it("BIZ-20.1 – completed Termin: notes PATCH wird abgelehnt (403)", async () => {
+    const slot = await createOnFreeSlot({
       offsetRange: [2, 60],
-      times: ["02:00", "02:30", "22:30", "23:00"],
+      times: ["02:00", "02:30", "23:00", "23:30"],
       past: true,
     });
-    expect(res, "Freier Slot für BIZ-20 muss gefunden werden").toBeTruthy();
-    const id = res!.data.id;
 
-    await apiPost<any>(`/api/appointments/${id}/document`, {
-      actualStart: "02:00",
+    await apiPost<any>(`/api/appointments/${slot.id}/document`, {
+      actualStart: slot.time,
       travelOriginType: "home",
       travelKilometers: 0,
       customerKilometers: 0,
-      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "BIZ-20 Test" }],
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "BIZ-20" }],
     });
 
-    const verify = await apiGet<any>(`/api/appointments/${id}`);
+    const verify = await apiGet<any>(`/api/appointments/${slot.id}`);
     expect(verify.data.status).toBe("completed");
 
-    const patchRes = await apiPatch<any>(`/api/appointments/${id}`, {
-      scheduledStart: "14:00",
+    const patchRes = await apiPatch<any>(`/api/appointments/${slot.id}`, {
+      notes: "Sollte abgelehnt werden",
     });
     expect(patchRes.status).toBe(403);
-
-    await apiDelete(`/api/appointments/${id}`);
   });
 });

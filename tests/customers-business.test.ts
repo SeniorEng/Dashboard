@@ -277,28 +277,27 @@ describe("KV-9: Duplikatprüfung", () => {
     const custRes = await apiGet<any>(`/api/admin/customers/${createdCustomerIds[0]}/details`);
     expect(custRes.status).toBe(200);
 
-    const res = await apiPost<any>("/api/admin/customers/check-duplicate", {
+    const params = new URLSearchParams({
       vorname: custRes.data.vorname,
       nachname: custRes.data.nachname,
     });
+    const res = await apiGet<any>(`/api/admin/customers/check-duplicate?${params}`);
     expect(res.status).toBe(200);
     expect(res.data).toBeDefined();
-    if (res.data && typeof res.data === "object") {
-      const hasMatch = res.data.hasDuplicate || res.data.exists || (Array.isArray(res.data.duplicates) && res.data.duplicates.length > 0) || false;
-      expect(hasMatch).toBe(true);
-    }
+    expect(Array.isArray(res.data.duplicates), "duplicates muss ein Array sein").toBe(true);
+    expect(res.data.duplicates.length, "Duplikat-Check muss existierenden Kunden finden").toBeGreaterThan(0);
   });
 
   it("KV-9.2 – check-duplicate mit neuem Namen findet kein Duplikat", async () => {
-    const res = await apiPost<any>("/api/admin/customers/check-duplicate", {
+    const params = new URLSearchParams({
       vorname: "Einzigartig-" + uniqueId(),
       nachname: "Kein-Duplikat-" + uniqueId(),
     });
+    const res = await apiGet<any>(`/api/admin/customers/check-duplicate?${params}`);
     expect(res.status).toBe(200);
-    if (res.data && typeof res.data === "object") {
-      const hasMatch = res.data.hasDuplicate || res.data.exists || (Array.isArray(res.data.duplicates) && res.data.duplicates.length > 0) || false;
-      expect(hasMatch).toBe(false);
-    }
+    expect(res.data).toBeDefined();
+    expect(Array.isArray(res.data.duplicates), "duplicates muss ein Array sein").toBe(true);
+    expect(res.data.duplicates.length, "Kein Duplikat erwartet für einzigartigen Namen").toBe(0);
   });
 });
 
@@ -432,9 +431,9 @@ describe("KV-17: Kunde nicht gefunden", () => {
     expect(res.status).toBe(404);
   });
 
-  it("KV-17.2 – DELETE auf nicht-existierenden Kunden liefert 200 (idempotent)", async () => {
+  it("KV-17.2 – DELETE auf nicht-existierenden Kunden ist idempotent", async () => {
     const res = await apiDelete("/api/admin/customers/999999");
-    expect([200, 404]).toContain(res.status);
+    expect(res.status).toBe(200);
   });
 });
 
