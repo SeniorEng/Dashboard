@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 
 const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:5000";
 const TEST_EMAIL = process.env.TEST_USER_EMAIL || "alrikdegenkolb@seniorenengel-alltagsbegleitung.de";
-const TEST_PASSWORD = process.env.TEST_USER_PASSWORD;
+const TEST_PASSWORD = process.env.TEST_USER_PASSWORD || process.env.TEST_USER_PASSWORD_INTERNAL;
 
 interface TestUser {
   id: number;
