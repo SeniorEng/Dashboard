@@ -68,8 +68,8 @@ describe("LN-2: Periodenprüfung", () => {
       `/api/service-records/check-period?customerId=${testCustomerId}&year=${now.getFullYear()}&month=${now.getMonth() + 1}`
     );
     expect(res.status).toBe(200);
-    expect(res.data).toHaveProperty("documented");
-    expect(res.data).toHaveProperty("undocumented");
+    expect(res.data).toHaveProperty("documentedCount");
+    expect(res.data).toHaveProperty("undocumentedCount");
   });
 });
 

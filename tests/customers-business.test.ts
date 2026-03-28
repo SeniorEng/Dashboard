@@ -174,9 +174,9 @@ describe("KV-5: Pflichtfelder", () => {
     expect(res.status).toBe(400);
   });
 
-  it("KV-5.2 – Ohne Geburtsdatum wird abgelehnt", async () => {
+  it("KV-5.2 – Ohne Strasse wird abgelehnt", async () => {
     const payload = validCustomerPayload();
-    delete (payload as any).geburtsdatum;
+    delete (payload as any).strasse;
     const res = await apiPost<any>("/api/admin/customers", payload);
     expect(res.status).toBe(400);
   });
@@ -190,6 +190,7 @@ describe("KV-6: Mitarbeiter-Zuweisung", () => {
     const res = await apiPatch<any>(`/api/admin/customers/${custId}/assign`, {
       primaryEmployeeId: auth.user.id,
       backupEmployeeId: null,
+      backupEmployeeId2: null,
     });
     expect(res.status).toBe(200);
   });

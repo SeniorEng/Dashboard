@@ -167,30 +167,31 @@ describe("BB-3: §39/42a Ersatzpflege", () => {
 describe("BB-4: Manuelle Korrektur & Storno", () => {
   let txId: number | null = null;
 
-  it("BB-4.1 – Manuelle Korrektur erstellen", async () => {
+  it("BB-4.1 – Manuelle Korrektur (positiv = Allocation) erstellen", async () => {
     const res = await apiPost<any>(`/api/budget/${testCustomerId}/manual-adjustment`, {
       budgetType: "entlastungsbetrag_45b",
       amountCents: 2500,
-      notes: "BB-Test Korrektur",
+      notes: "BB-Test Korrektur positiv",
     });
     expect(res.status).toBe(201);
-    if (res.data.type === "transaction" && res.data.data?.id) {
-      txId = res.data.data.id;
-    }
+    expect(res.data.type).toBe("allocation");
+    expect(res.data.data).toHaveProperty("id");
   });
 
-  it("BB-4.2 – Korrektur in Transaktionsliste sichtbar", async () => {
-    const res = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=10`);
-    expect(res.status).toBe(200);
-    if (txId) {
-      const found = res.data.find((t: any) => t.id === txId);
-      expect(found).toBeDefined();
-      expect(found.transactionType).toBe("manual_adjustment");
-    }
+  it("BB-4.2 – Manuelle Korrektur (negativ = Transaktion) erstellen", async () => {
+    const res = await apiPost<any>(`/api/budget/${testCustomerId}/manual-adjustment`, {
+      budgetType: "entlastungsbetrag_45b",
+      amountCents: -500,
+      notes: "BB-Test Korrektur negativ",
+    });
+    expect(res.status).toBe(201);
+    expect(res.data.type).toBe("transaction");
+    txId = res.data.data?.id || res.data.id || null;
+    expect(txId, "txId muss aus Transaktion-Response extrahierbar sein").toBeTruthy();
   });
 
-  it("BB-4.3 – Korrektur stornieren", async () => {
-    if (!txId) return;
+  it("BB-4.3 – Korrektur-Transaktion stornieren", async () => {
+    expect(txId, "txId muss aus BB-4.2 gesetzt sein").toBeTruthy();
     const res = await apiPost<any>(`/api/budget/transactions/${txId}/reverse`, {});
     expect([200, 201]).toContain(res.status);
   });

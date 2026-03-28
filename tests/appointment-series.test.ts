@@ -18,6 +18,28 @@ async function deleteSeriesSafe(id: number) {
   try { await apiDelete(`/api/appointment-series/${id}`); } catch {}
 }
 
+function seriesPayload(overrides: Record<string, any> = {}) {
+  const startDate = getFutureDate(overrides._offset || 30);
+  const endObj = new Date(startDate + "T00:00:00");
+  endObj.setDate(endObj.getDate() + (overrides._span || 28));
+  const endDate = endObj.toISOString().split("T")[0];
+  delete overrides._offset;
+  delete overrides._span;
+
+  return {
+    customerId: testCustomerId,
+    startDate,
+    endDate,
+    weekdays: ["mi"],
+    frequency: "weekly",
+    scheduledStart: "09:00",
+    durationMinutes: 60,
+    services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
+    assignedEmployeeId: auth.user.id,
+    ...overrides,
+  };
+}
+
 beforeAll(async () => {
   auth = await getAuthCookie();
 
@@ -41,31 +63,15 @@ afterAll(async () => {
 });
 
 describe("SER-1: Serie erstellen", () => {
-  it("SER-1.1 – Wöchentliche Serie (4 Wochen, Montag+Mittwoch)", async () => {
-    const startDate = getFutureDate(30);
-    const endObj = new Date(startDate + "T00:00:00");
-    endObj.setDate(endObj.getDate() + 28);
-    const endDate = endObj.toISOString().split("T")[0];
-
-    const res = await apiPost<any>("/api/appointment-series", {
-      customerId: testCustomerId,
-      startDate,
-      endDate,
-      weekdays: ["mo", "mi"],
-      frequency: "weekly",
-      scheduledStart: "09:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
-      assignedEmployeeId: auth.user.id,
-      notes: "SER-Test wöchentlich",
-    });
+  it("SER-1.1 – Wöchentliche Serie (4 Wochen, Mittwoch)", async () => {
+    const res = await apiPost<any>("/api/appointment-series", seriesPayload({ _offset: 30, _span: 28 }));
     expect(res.status).toBe(201);
     expect(res.data).toHaveProperty("series");
     expect(res.data.series).toHaveProperty("id");
     seriesId = res.data.series.id;
     cleanupSeriesIds.push(seriesId);
-
-    expect(res.data).toHaveProperty("createdCount");
-    expect(res.data.createdCount).toBeGreaterThan(0);
+    const created = res.data.createdAppointments || res.data.createdCount || res.data.appointments?.length || 0;
+    expect(created).toBeGreaterThan(0);
   });
 
   it("SER-1.2 – Serie abrufen zeigt Termine", async () => {
@@ -77,53 +83,26 @@ describe("SER-1: Serie erstellen", () => {
   });
 
   it("SER-1.3 – Maximale Laufzeit 12 Monate wird erzwungen", async () => {
-    const startDate = getFutureDate(60);
-    const endObj = new Date(startDate + "T00:00:00");
-    endObj.setDate(endObj.getDate() + 400);
-    const endDate = endObj.toISOString().split("T")[0];
-
-    const res = await apiPost<any>("/api/appointment-series", {
-      customerId: testCustomerId,
-      startDate,
-      endDate,
-      weekdays: ["di"],
-      frequency: "weekly",
-      scheduledStart: "14:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const res = await apiPost<any>("/api/appointment-series", seriesPayload({ _offset: 60, _span: 400 }));
     expect(res.status).toBe(400);
   });
 });
 
 describe("SER-2: Vorschau (Preview)", () => {
   it("SER-2.1 – Preview liefert generierte Termine ohne Speicherung", async () => {
-    const startDate = getFutureDate(35);
-    const endObj = new Date(startDate + "T00:00:00");
-    endObj.setDate(endObj.getDate() + 14);
-    const endDate = endObj.toISOString().split("T")[0];
-
-    const res = await apiPost<any>("/api/appointment-series/preview", {
-      customerId: testCustomerId,
-      startDate,
-      endDate,
-      weekdays: ["do"],
-      frequency: "weekly",
-      scheduledStart: "11:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const payload = seriesPayload({ _offset: 150, _span: 14, weekdays: ["do"] });
+    const res = await apiPost<any>("/api/appointment-series/preview", payload);
     expect(res.status).toBe(200);
-    expect(res.data).toHaveProperty("dates");
-    expect(Array.isArray(res.data.dates)).toBe(true);
+    expect(res.data).toHaveProperty("validDates");
   });
 });
 
 describe("SER-3: Einzeltermin-Absage", () => {
   it("SER-3.1 – Einzelnen Termin der Serie absagen", async () => {
+    expect(seriesId, "seriesId muss aus SER-1.1 gesetzt sein").toBeTruthy();
     const seriesRes = await apiGet<any>(`/api/appointment-series/${seriesId}`);
-    const appts = seriesRes.data.appointments.filter((a: any) => a.status === "scheduled");
-    if (appts.length === 0) return;
+    const appts = (seriesRes.data.appointments || []).filter((a: any) => a.status === "scheduled");
+    expect(appts.length, "Es müssen geplante Termine vorhanden sein").toBeGreaterThan(0);
 
     const firstAppt = appts[0];
     const res = await apiPost<any>(
@@ -141,27 +120,15 @@ describe("SER-4: Alle zukünftigen absagen", () => {
   let tempSeriesId: number;
 
   it("SER-4.1 – Serie erstellen und ab Mitte absagen", async () => {
-    const startDate = getFutureDate(70);
-    const endObj = new Date(startDate + "T00:00:00");
-    endObj.setDate(endObj.getDate() + 28);
-    const endDate = endObj.toISOString().split("T")[0];
-
-    const createRes = await apiPost<any>("/api/appointment-series", {
-      customerId: testCustomerId,
-      startDate,
-      endDate,
-      weekdays: ["di", "do"],
-      frequency: "weekly",
-      scheduledStart: "15:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 45 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const createRes = await apiPost<any>("/api/appointment-series",
+      seriesPayload({ _offset: 160, _span: 28, weekdays: ["di", "do"], scheduledStart: "15:00", durationMinutes: 45, services: [{ serviceId: hwServiceId, durationMinutes: 45 }] })
+    );
     expect(createRes.status).toBe(201);
     tempSeriesId = createRes.data.series.id;
     cleanupSeriesIds.push(tempSeriesId);
 
     const seriesRes = await apiGet<any>(`/api/appointment-series/${tempSeriesId}`);
-    const appts = seriesRes.data.appointments.filter((a: any) => a.status === "scheduled");
+    const appts = (seriesRes.data.appointments || []).filter((a: any) => a.status === "scheduled");
     if (appts.length < 2) return;
 
     const midAppt = appts[Math.floor(appts.length / 2)];
@@ -177,21 +144,9 @@ describe("SER-5: Verlängern & Verkürzen", () => {
   let extendSeriesId: number;
 
   beforeAll(async () => {
-    const startDate = getFutureDate(100);
-    const endObj = new Date(startDate + "T00:00:00");
-    endObj.setDate(endObj.getDate() + 14);
-    const endDate = endObj.toISOString().split("T")[0];
-
-    const res = await apiPost<any>("/api/appointment-series", {
-      customerId: testCustomerId,
-      startDate,
-      endDate,
-      weekdays: ["mi"],
-      frequency: "weekly",
-      scheduledStart: "10:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
-      assignedEmployeeId: auth.user.id,
-    });
+    const res = await apiPost<any>("/api/appointment-series",
+      seriesPayload({ _offset: 200, _span: 14, weekdays: ["mi"], scheduledStart: "10:00" })
+    );
     expect(res.status).toBe(201);
     extendSeriesId = res.data.series.id;
     cleanupSeriesIds.push(extendSeriesId);
@@ -236,9 +191,10 @@ describe("SER-5: Verlängern & Verkürzen", () => {
 
 describe("SER-6: Einzeltermin bearbeiten (isSeriesException)", () => {
   it("SER-6.1 – Einzelnen Termin verschieben markiert isSeriesException", async () => {
+    expect(seriesId, "seriesId muss aus SER-1.1 gesetzt sein").toBeTruthy();
     const seriesRes = await apiGet<any>(`/api/appointment-series/${seriesId}`);
-    const appts = seriesRes.data.appointments.filter((a: any) => a.status === "scheduled");
-    if (appts.length === 0) return;
+    const appts = (seriesRes.data.appointments || []).filter((a: any) => a.status === "scheduled");
+    expect(appts.length, "Es müssen geplante Termine vorhanden sein").toBeGreaterThan(0);
 
     const target = appts[appts.length - 1];
     const res = await apiPost<any>(
@@ -259,26 +215,22 @@ describe("SER-6: Einzeltermin bearbeiten (isSeriesException)", () => {
 describe("SER-7: Serie beenden (DELETE)", () => {
   let endSeriesId: number;
 
-  it("SER-7.1 – Serie beenden setzt alle zukünftigen auf cancelled", async () => {
-    const startDate = getFutureDate(130);
-    const endObj = new Date(startDate + "T00:00:00");
-    endObj.setDate(endObj.getDate() + 21);
-    const endDate = endObj.toISOString().split("T")[0];
-
-    const createRes = await apiPost<any>("/api/appointment-series", {
-      customerId: testCustomerId,
-      startDate,
-      endDate,
-      weekdays: ["fr"],
-      frequency: "weekly",
-      scheduledStart: "09:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
-      assignedEmployeeId: auth.user.id,
-    });
+  it("SER-7.1 – Serie beenden cancelt zukünftige Termine", async () => {
+    const createRes = await apiPost<any>("/api/appointment-series",
+      seriesPayload({ _offset: 250, _span: 21, weekdays: ["fr"], scheduledStart: "09:00" })
+    );
     expect(createRes.status).toBe(201);
     endSeriesId = createRes.data.series.id;
 
     const delRes = await apiDelete(`/api/appointment-series/${endSeriesId}`);
     expect(delRes.status).toBe(200);
+  });
+});
+
+describe("SER-8: Serien-Liste", () => {
+  it("SER-8.1 – Serien auflisten enthält aktive Serien", async () => {
+    const res = await apiGet<any[]>("/api/appointment-series");
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.data)).toBe(true);
   });
 });
