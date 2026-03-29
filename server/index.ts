@@ -281,12 +281,20 @@ async function runStartupTasks() {
   const reminderScheduler = startReminderScheduler();
   timeouts.push(reminderScheduler.timeout);
   if (reminderScheduler.interval) intervals.push(reminderScheduler.interval);
+
+  const { startCallSchedulerPoller } = await import("./services/call-scheduler");
+  startCallSchedulerPoller();
 }
 
-function gracefulShutdown(signal: string) {
+async function gracefulShutdown(signal: string) {
   log(`${signal} received, shutting down gracefully...`);
   intervals.forEach(interval => clearInterval(interval));
   timeouts.forEach(timeout => clearTimeout(timeout));
+  try {
+    const { stopCallSchedulerPoller } = await import("./services/call-scheduler");
+    stopCallSchedulerPoller();
+  } catch {}
+
   httpServer.close(async () => {
     try {
       await closeBrowser();

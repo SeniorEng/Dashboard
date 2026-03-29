@@ -181,3 +181,27 @@ export type ProspectNote = typeof prospectNotes.$inferSelect;
 export type InsertProspectNote = z.infer<typeof insertProspectNoteSchema>;
 export type ProspectOffer = typeof prospectOffers.$inferSelect;
 export type InsertProspectOffer = z.infer<typeof insertProspectOfferSchema>;
+
+export const SCHEDULED_CALL_STATUSES = ["pending", "processing", "completed", "failed", "cancelled"] as const;
+export type ScheduledCallStatus = (typeof SCHEDULED_CALL_STATUSES)[number];
+
+export const scheduledCalls = pgTable("scheduled_calls", {
+  id: serial("id").primaryKey(),
+  prospectId: integer("prospect_id").notNull().references(() => prospects.id, { onDelete: "cascade" }),
+  leadName: text("lead_name").notNull(),
+  leadPhone: text("lead_phone").notNull(),
+  quelle: text("quelle"),
+  scheduledAt: timestamp("scheduled_at").notNull(),
+  status: text("status").notNull().default("pending"),
+  reason: text("reason"),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  executedAt: timestamp("executed_at"),
+}, (table) => [
+  index("scheduled_calls_status_idx").on(table.status),
+  index("scheduled_calls_scheduled_at_idx").on(table.scheduledAt),
+]);
+
+export type ScheduledCall = typeof scheduledCalls.$inferSelect;
+export type InsertScheduledCall = typeof scheduledCalls.$inferInsert;

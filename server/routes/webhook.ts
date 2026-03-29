@@ -4,8 +4,8 @@ import { z } from "zod";
 import { prospectStorage } from "../storage/prospects";
 import { parseLeadEmail } from "../services/email-parser";
 import { asyncHandler } from "../lib/errors";
-import { initiateLeadCallBridge } from "../services/twilio-call-bridge";
 import { sendLeadAutoReply } from "../services/lead-auto-reply";
+import { scheduleLeadCall } from "../services/call-scheduler";
 
 const router = Router();
 
@@ -73,13 +73,13 @@ router.post("/email-lead", asyncHandler("Webhook-Verarbeitung fehlgeschlagen", a
   });
 
   if (leadData.telefon) {
-    initiateLeadCallBridge({
+    scheduleLeadCall({
       prospectId: prospect.id,
       leadName: `${leadData.vorname} ${leadData.nachname}`.trim(),
       leadPhone: leadData.telefon,
       quelle: leadData.quelle || from || "unbekannt",
     }).catch(err => {
-      console.error("[webhook] Lead call bridge error (non-blocking):", err);
+      console.error("[webhook] Lead call scheduling error (non-blocking):", err);
     });
   }
 

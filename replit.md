@@ -163,6 +163,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 ## Lead-Automatische-Antwort-E-Mail
 - **Funktion**: Bei neuem Lead mit E-Mail-Adresse wird automatisch eine formatierte E-Mail an den Interessenten gesendet, mit optionalem PDF-Anhang (z.B. Infobroschüre).
 - **Service**: `server/services/lead-auto-reply.ts` — `sendLeadAutoReply()` (fire-and-forget aus Webhook).
+- **Retry-Logik**: DB-Lookup (`getCompanySettings`) und E-Mail-Versand jeweils mit 3 Versuchen und exponentiellem Backoff (1s, 3s, 9s). Bei Totalausfall wird Prospect-Notiz erstellt.
 - **E-Mail-Design**: Nutzt das bestehende `buildEmailLayout` (Logo, Teal-Header, Footer). Automatische Anrede mit Vor-/Nachname, Firmen-Kontaktdaten im Footer.
 - **Admin-UI**: Karte "Automatische Antwort bei Kundenanfrage" in Einstellungen (`client/src/pages/admin/settings/lead-auto-reply-card.tsx`) mit Betreff, Text (Textarea), PDF-Upload/Entfernen und Enable-Toggle.
 - **DB-Felder**: `company_settings.lead_auto_reply_enabled`, `lead_auto_reply_subject`, `lead_auto_reply_body`, `lead_auto_reply_attachment_path`, `lead_auto_reply_attachment_name`.
@@ -170,7 +171,9 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 
 ## Lead-Anruf-Brücke (Twilio)
 - **Funktion**: Bei neuem Lead mit Telefonnummer wird automatisch der konfigurierte Mitarbeiter angerufen (via Twilio). Ansage mit Lead-Details, bei Tastendruck "1" wird der Lead-Interessent direkt verbunden.
-- **Service**: `server/services/twilio-call-bridge.ts` — `initiateLeadCallBridge()` (fire-and-forget aus Webhook) + `initiateTestCall()` (Admin-Test).
+- **Service**: `server/services/twilio-call-bridge.ts` — `initiateLeadCallBridge()` + `initiateTestCall()` (Admin-Test).
+- **Anruf-Scheduling**: `server/services/call-scheduler.ts` — alle Anrufe werden in `scheduled_calls` DB-Tabelle persistiert (restart-sicher). 10 Min Verzögerung zwischen Lead-Eingang und Anruf. Wochenend-Regel (Sa ab 12:00 + So ganztags → Montag 09:00 Europe/Berlin). Poller alle 60s mit atomarem Claiming (`FOR UPDATE SKIP LOCKED`). Max 3 Versuche bei Fehler. Prospect-Notiz mit geplantem Zeitpunkt.
+- **DB-Tabelle**: `scheduled_calls` (id, prospect_id, lead_name, lead_phone, quelle, scheduled_at, status [pending/processing/completed/failed/cancelled], reason, attempts, last_error, created_at, executed_at).
 - **Webhook-Routen**: `server/routes/webhook-twilio.ts` — `/api/webhook/twilio/gather` (TwiML Gather→Dial) + `/api/webhook/twilio/status` (Anruf-Status-Notiz). Beide mit strenger Twilio-Signaturvalidierung.
 - **Admin-UI**: Karte "Lead-Anruf-Brücke" in Einstellungen mit Twilio-Feldern, Enable-Toggle und Testanruf-Button.
 - **DB-Felder**: `company_settings.twilio_account_sid`, `twilio_auth_token`, `twilio_phone_number`, `lead_call_bridge_phone`, `lead_call_bridge_enabled`.

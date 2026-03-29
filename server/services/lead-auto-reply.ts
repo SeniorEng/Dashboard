@@ -81,16 +81,34 @@ async function downloadAttachment(objectPath: string): Promise<Buffer | null> {
   }
 }
 
+async function getCompanySettingsWithRetry(): Promise<ReturnType<typeof storage.getCompanySettings> | null> {
+  const maxAttempts = 3;
+  const backoffMs = [1000, 3000, 9000];
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await withTimeout(
+        () => storage.getCompanySettings(),
+        10000,
+        `leadAutoReply DB lookup (attempt ${attempt + 1}/${maxAttempts})`
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[lead-auto-reply] DB lookup attempt ${attempt + 1}/${maxAttempts} failed: ${msg}`);
+      if (attempt < maxAttempts - 1) {
+        await new Promise(resolve => setTimeout(resolve, backoffMs[attempt]));
+      }
+    }
+  }
+  return null;
+}
+
 export async function sendLeadAutoReply(params: LeadAutoReplyParams): Promise<void> {
   const { prospectId, leadEmail, leadVorname, leadNachname } = params;
 
-  const settings = await withTimeout(
-    () => storage.getCompanySettings(),
-    10000,
-    "leadAutoReply DB lookup"
-  );
+  const settings = await getCompanySettingsWithRetry();
   if (!settings) {
-    console.log("[lead-auto-reply] No company settings found, skipping");
+    console.log("[lead-auto-reply] No company settings found after retries, skipping");
+    await safeAddNote(prospectId, "Automatische Antwort-E-Mail konnte nicht gesendet werden: DB-Lookup fehlgeschlagen nach 3 Versuchen");
     return;
   }
 
@@ -136,27 +154,40 @@ export async function sendLeadAutoReply(params: LeadAutoReplyParams): Promise<vo
     }
   }
 
-  try {
-    const result = await sendEmail(settings, {
-      to: leadEmail,
-      subject: settings.leadAutoReplySubject,
-      html,
-      attachments: attachments.length > 0 ? attachments : undefined,
-    });
+  const emailPayload = {
+    to: leadEmail,
+    subject: settings.leadAutoReplySubject,
+    html,
+    attachments: attachments.length > 0 ? attachments : undefined,
+  };
 
-    console.log(`[lead-auto-reply] Sent auto-reply to ${leadEmail} for prospect ${prospectId}, messageId=${result.messageId}`);
+  const sendMaxAttempts = 3;
+  const sendBackoffMs = [1000, 3000, 9000];
+  let lastSendError: string = "";
 
-    const attachmentNote = attachments.length > 0
-      ? ` (mit Anhang: ${settings.leadAutoReplyAttachmentName || "Information.pdf"})`
-      : "";
+  for (let attempt = 0; attempt < sendMaxAttempts; attempt++) {
+    try {
+      const result = await sendEmail(settings, emailPayload);
 
-    await safeAddNote(prospectId, `Automatische Antwort-E-Mail gesendet an ${leadEmail}${attachmentNote}`, "email");
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : "Unbekannter Fehler";
-    console.error(`[lead-auto-reply] Failed to send auto-reply to ${leadEmail}:`, err);
+      console.log(`[lead-auto-reply] Sent auto-reply to ${leadEmail} for prospect ${prospectId}, messageId=${result.messageId}`);
 
-    await safeAddNote(prospectId, `Automatische Antwort-E-Mail an ${leadEmail} fehlgeschlagen: ${errorMsg}`);
+      const attachmentNote = attachments.length > 0
+        ? ` (mit Anhang: ${settings.leadAutoReplyAttachmentName || "Information.pdf"})`
+        : "";
+
+      await safeAddNote(prospectId, `Automatische Antwort-E-Mail gesendet an ${leadEmail}${attachmentNote}`, "email");
+      return;
+    } catch (err) {
+      lastSendError = err instanceof Error ? err.message : "Unbekannter Fehler";
+      console.warn(`[lead-auto-reply] Send attempt ${attempt + 1}/${sendMaxAttempts} failed for ${leadEmail}: ${lastSendError}`);
+      if (attempt < sendMaxAttempts - 1) {
+        await new Promise(resolve => setTimeout(resolve, sendBackoffMs[attempt]));
+      }
+    }
   }
+
+  console.error(`[lead-auto-reply] All ${sendMaxAttempts} send attempts failed for ${leadEmail}: ${lastSendError}`);
+  await safeAddNote(prospectId, `Automatische Antwort-E-Mail an ${leadEmail} fehlgeschlagen nach ${sendMaxAttempts} Versuchen: ${lastSendError}`);
 }
 
 async function safeAddNote(prospectId: number, noteText: string, noteType: "email" | "notiz" | "anruf" | "statuswechsel" = "notiz"): Promise<void> {
