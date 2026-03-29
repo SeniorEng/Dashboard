@@ -471,22 +471,21 @@ describe("KV-20: Deaktivierungs-Readiness Endpoint", () => {
   });
 });
 
-describe("KV-21: Telefonnummer-Validierung", () => {
-  it("KV-21.1 – Leere Telefonnummer im Kontakt wird abgelehnt", async () => {
+describe("KV-21: Telefonnummer-Handling", () => {
+  it("KV-21.1 – Kontakt ohne Telefon-Feld ist gültig (Backend validiert erst bei Anruf)", async () => {
     const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({
-      contacts: [{ contactType: "familie", isPrimary: true, vorname: "Test", nachname: "Tel", telefon: "" }],
+      contacts: [{ contactType: "familie", isPrimary: true, vorname: "Test", nachname: "Tel" }],
     }));
-    expect([400, 201]).toContain(res.status);
+    expect(res.status).toBe(201);
+    createdCustomerIds.push(res.data.id);
   });
 
-  it("KV-21.2 – Ungültiges Telefonnummernformat wird abgelehnt oder akzeptiert", async () => {
+  it("KV-21.2 – Kontakt mit gültigem DE-Telefonnummernformat wird akzeptiert", async () => {
     const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({
-      contacts: [{ contactType: "familie", isPrimary: true, vorname: "Test", nachname: "Tel", telefon: "abc-nicht-valide" }],
+      contacts: [{ contactType: "familie", isPrimary: true, vorname: "Test", nachname: "Tel", telefon: "+4917612345678" }],
     }));
-    if (res.status === 201) {
-      createdCustomerIds.push(res.data.id);
-    }
-    expect([400, 201]).toContain(res.status);
+    expect(res.status).toBe(201);
+    createdCustomerIds.push(res.data.id);
   });
 });
 

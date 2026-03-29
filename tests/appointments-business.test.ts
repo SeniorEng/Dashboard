@@ -6,6 +6,11 @@ import {
   apiDelete,
   getFutureDate,
   getAuthCookie,
+  loginAs,
+  apiPostAs,
+  apiPatchAs,
+  apiDeleteAs,
+  apiGetAs,
   uniqueId,
 } from "./test-utils";
 
@@ -113,22 +118,31 @@ describe("BIZ-1: Wochenend-Validierung", () => {
 });
 
 describe("BIZ-2: Überlappungsprüfung", () => {
-  const overlapDate = getFutureDate(220);
+  let overlapDate: string;
 
   it("BIZ-2.1 – Erstellt Basis-Termin 10:00-11:30", async () => {
-    const res = await createAppointment(overlapDate, "10:00", hwServiceId, 90);
-    expect(res.status).toBe(201);
-    expect(res.data).toHaveProperty("id");
-    expect(res.data.status).toBe("scheduled");
-    createdIds.push(res.data.id);
+    for (let off = 220; off <= 235; off++) {
+      const d = getFutureDate(off);
+      const res = await createAppointment(d, "10:00", hwServiceId, 90);
+      if (res.status === 201) {
+        overlapDate = d;
+        createdIds.push(res.data.id);
+        expect(res.data).toHaveProperty("id");
+        expect(res.data.status).toBe("scheduled");
+        return;
+      }
+    }
+    throw new Error("Kein freier Slot gefunden");
   });
 
   it("BIZ-2.2 – Überlappender Termin gleicher Mitarbeiter wird abgelehnt (409)", async () => {
+    expect(overlapDate).toBeDefined();
     const res = await createAppointment(overlapDate, "11:00", hwServiceId, 60);
     expect(res.status).toBe(409);
   });
 
   it("BIZ-2.3 – Nicht-überlappender Termin um 12:00 wird akzeptiert", async () => {
+    expect(overlapDate).toBeDefined();
     const res = await createAppointment(overlapDate, "12:00", hwServiceId, 60);
     expect(res.status).toBe(201);
     createdIds.push(res.data.id);
@@ -137,30 +151,44 @@ describe("BIZ-2: Überlappungsprüfung", () => {
 
 describe("BIZ-3: scheduledEnd Berechnung", () => {
   it("BIZ-3.1 – scheduledEnd = start + summe(durationMinutes)", async () => {
-    const date = getFutureDate(222);
-    const res = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date,
-      scheduledStart: "09:00",
-      services: [
-        { serviceId: hwServiceId, durationMinutes: 60 },
-        { serviceId: abServiceId, durationMinutes: 30 },
-      ],
-      assignedEmployeeId: auth.user.id,
-    });
-    expect(res.status).toBe(201);
-    createdIds.push(res.data.id);
-    expect(res.data.durationPromised).toBe(90);
-    expect(res.data.scheduledEnd).toBe("10:30:00");
+    let created = false;
+    for (let off = 283; off <= 295; off++) {
+      const date = getFutureDate(off);
+      const res = await apiPost<any>("/api/appointments/kundentermin", {
+        customerId: testCustomerId,
+        date,
+        scheduledStart: "09:00",
+        services: [
+          { serviceId: hwServiceId, durationMinutes: 60 },
+          { serviceId: abServiceId, durationMinutes: 30 },
+        ],
+        assignedEmployeeId: auth.user.id,
+      });
+      if (res.status === 201) {
+        createdIds.push(res.data.id);
+        expect(res.data.durationPromised).toBe(90);
+        expect(res.data.scheduledEnd).toBe("10:30:00");
+        created = true;
+        break;
+      }
+    }
+    expect(created, "Termin muss erstellt werden").toBe(true);
   });
 
   it("BIZ-3.2 – Einzelner Service berechnet scheduledEnd korrekt", async () => {
-    const date = getFutureDate(223);
-    const res = await createAppointment(date, "14:00", hwServiceId, 45);
-    expect(res.status).toBe(201);
-    createdIds.push(res.data.id);
-    expect(res.data.durationPromised).toBe(45);
-    expect(res.data.scheduledEnd).toBe("14:45:00");
+    let created = false;
+    for (let off = 296; off <= 308; off++) {
+      const date = getFutureDate(off);
+      const createRes = await createAppointment(date, "14:00", hwServiceId, 45);
+      if (createRes.status === 201) {
+        createdIds.push(createRes.data.id);
+        expect(createRes.data.durationPromised).toBe(45);
+        expect(createRes.data.scheduledEnd).toBe("14:45:00");
+        created = true;
+        break;
+      }
+    }
+    expect(created, "Termin muss erstellt werden").toBe(true);
   });
 });
 
@@ -179,14 +207,15 @@ describe("BIZ-4: Leere Services", () => {
 
 describe("BIZ-5: Status-Workflow", () => {
   let apptId: number;
-  const statusDate = getFutureDate(225);
 
   it("BIZ-5.1 – Neuer Termin hat Status 'scheduled'", async () => {
-    const res = await createAppointment(statusDate, "08:00", hwServiceId, 60);
-    expect(res.status).toBe(201);
+    const slot = await createOnFreeSlot({
+      offsetRange: [225, 240],
+      times: ["08:00", "08:30", "09:00", "09:30", "17:00", "17:30"],
+    });
+    apptId = slot.id;
+    const res = await apiGet<any>(`/api/appointments/${apptId}`);
     expect(res.data.status).toBe("scheduled");
-    apptId = res.data.id;
-    createdIds.push(apptId);
   });
 
   it("BIZ-5.2 – Start => in-progress", async () => {
@@ -210,10 +239,11 @@ describe("BIZ-5: Status-Workflow", () => {
   });
 
   it("BIZ-5.5 – Geplanter Termin löschen als Absage-Äquivalent", async () => {
-    const cancelDate = getFutureDate(226);
-    const createRes = await createAppointment(cancelDate, "09:00", hwServiceId, 60);
-    expect(createRes.status).toBe(201);
-    const delRes = await apiDelete(`/api/appointments/${createRes.data.id}`);
+    const slot = await createOnFreeSlot({
+      offsetRange: [421, 435],
+      times: ["09:00", "09:30", "14:00", "14:30"],
+    });
+    const delRes = await apiDelete(`/api/appointments/${slot.id}`);
     expect(delRes.status).toBe(200);
   });
 });
@@ -314,35 +344,44 @@ describe("BIZ-8: Dokumentation", () => {
 
 describe("BIZ-9: Geplanter Termin löschen", () => {
   it("BIZ-9.1 – Geplanter Termin kann gelöscht werden", async () => {
-    const date = getFutureDate(229);
-    const createRes = await createAppointment(date, "15:00", hwServiceId, 30);
-    expect(createRes.status).toBe(201);
-    const tmpId = createRes.data.id;
-    const delRes = await apiDelete(`/api/appointments/${tmpId}`);
+    const slot = await createOnFreeSlot({
+      offsetRange: [366, 378],
+      times: ["15:00", "15:30", "16:00", "16:30"],
+    });
+    const delRes = await apiDelete(`/api/appointments/${slot.id}`);
     expect(delRes.status).toBe(200);
   });
 
   it("BIZ-9.2 – Gelöschter Termin liefert 404 beim erneuten Abrufen", async () => {
-    const date = getFutureDate(230);
-    const createRes = await createAppointment(date, "15:30", hwServiceId, 30);
-    expect(createRes.status).toBe(201);
-    const tmpId = createRes.data.id;
-    await apiDelete(`/api/appointments/${tmpId}`);
-    const fetchRes = await apiGet<any>(`/api/appointments/${tmpId}`);
+    const slot = await createOnFreeSlot({
+      offsetRange: [379, 391],
+      times: ["15:30", "16:00", "16:30", "17:00"],
+    });
+    await apiDelete(`/api/appointments/${slot.id}`);
+    const fetchRes = await apiGet<any>(`/api/appointments/${slot.id}`);
     expect(fetchRes.status).toBe(404);
   });
 });
 
 describe("BIZ-10: Kunden-Überlappung", () => {
   it("BIZ-10.1 – Zweiter Termin für gleichen Kunden zur gleichen Zeit wird abgelehnt", async () => {
-    const date = getFutureDate(231);
-    const res1 = await createAppointment(date, "10:00", hwServiceId, 60);
-    expect(res1.status).toBe(201);
-    createdIds.push(res1.data.id);
+    let foundDate: string | undefined;
+    let firstId: number | undefined;
+    for (let off = 392; off <= 405; off++) {
+      const d = getFutureDate(off);
+      const res1 = await createAppointment(d, "10:00", hwServiceId, 60);
+      if (res1.status === 201) {
+        createdIds.push(res1.data.id);
+        foundDate = d;
+        firstId = res1.data.id;
+        break;
+      }
+    }
+    expect(foundDate).toBeDefined();
 
     const res2 = await apiPost<any>("/api/appointments/kundentermin", {
       customerId: testCustomerId,
-      date,
+      date: foundDate,
       scheduledStart: "10:30",
       services: [{ serviceId: abServiceId, durationMinutes: 30 }],
       assignedEmployeeId: auth.user.id,
@@ -353,10 +392,10 @@ describe("BIZ-10: Kunden-Überlappung", () => {
 
 describe("BIZ-11: PATCH Wochenend-Validierung", () => {
   it("BIZ-11.1 – Termin auf Wochenende verschieben wird abgelehnt", async () => {
-    const date = getFutureDate(232);
-    const createRes = await createAppointment(date, "09:00", hwServiceId, 60);
-    expect(createRes.status).toBe(201);
-    createdIds.push(createRes.data.id);
+    const slot = await createOnFreeSlot({
+      offsetRange: [406, 420],
+      times: ["09:00", "09:30", "13:00", "13:30"],
+    });
 
     const today = new Date();
     const daysUntilSat = (6 - today.getDay() + 7) % 7 || 7;
@@ -364,7 +403,7 @@ describe("BIZ-11: PATCH Wochenend-Validierung", () => {
     sat.setDate(sat.getDate() + daysUntilSat + 7);
     const satStr = sat.toISOString().split("T")[0];
 
-    const patchRes = await apiPatch<any>(`/api/appointments/${createRes.data.id}`, {
+    const patchRes = await apiPatch<any>(`/api/appointments/${slot.id}`, {
       date: satStr,
     });
     expect(patchRes.status).toBe(400);
@@ -384,26 +423,26 @@ describe("BIZ-12: Admin Past-Date Erstellung", () => {
 
 describe("BIZ-13: Status-Workflow Reihenfolge", () => {
   it("BIZ-13.1 – Direktes End ohne Start wird abgelehnt (403)", async () => {
-    const date = getFutureDate(233);
-    const createRes = await createAppointment(date, "06:00", hwServiceId, 30);
-    expect(createRes.status).toBe(201);
-    createdIds.push(createRes.data.id);
+    const slot = await createOnFreeSlot({
+      offsetRange: [233, 245],
+      times: ["06:00", "06:30", "07:00", "16:00", "16:30"],
+    });
 
-    const endRes = await apiPost<any>(`/api/appointments/${createRes.data.id}/end`, {});
+    const endRes = await apiPost<any>(`/api/appointments/${slot.id}/end`, {});
     expect(endRes.status).toBe(403);
   });
 
   it("BIZ-13.2 – Doppeltes End im documenting-Status wird abgelehnt (403)", async () => {
-    const date = getFutureDate(234);
-    const createRes = await createAppointment(date, "06:00", hwServiceId, 30);
-    expect(createRes.status).toBe(201);
-    createdIds.push(createRes.data.id);
+    const slot = await createOnFreeSlot({
+      offsetRange: [246, 258],
+      times: ["06:00", "06:30", "07:00", "16:00", "16:30"],
+    });
 
-    await apiPost<any>(`/api/appointments/${createRes.data.id}/start`, {});
-    const endRes1 = await apiPost<any>(`/api/appointments/${createRes.data.id}/end`, {});
+    await apiPost<any>(`/api/appointments/${slot.id}/start`, {});
+    const endRes1 = await apiPost<any>(`/api/appointments/${slot.id}/end`, {});
     expect(endRes1.status).toBe(200);
 
-    const endRes2 = await apiPost<any>(`/api/appointments/${createRes.data.id}/end`, {});
+    const endRes2 = await apiPost<any>(`/api/appointments/${slot.id}/end`, {});
     expect(endRes2.status).toBe(403);
   });
 });
@@ -412,11 +451,11 @@ describe("BIZ-14: Scheduling-Felder Sperre im documenting-Status", () => {
   let docApptId: number;
 
   it("BIZ-14.1 – Termin in documenting-Status: Zeit ändern wird abgelehnt", async () => {
-    const date = getFutureDate(235);
-    const createRes = await createAppointment(date, "08:00", hwServiceId, 60);
-    expect(createRes.status).toBe(201);
-    docApptId = createRes.data.id;
-    createdIds.push(docApptId);
+    const slot = await createOnFreeSlot({
+      offsetRange: [260, 275],
+      times: ["08:00", "08:30", "09:00", "15:00", "15:30"],
+    });
+    docApptId = slot.id;
 
     await apiPost<any>(`/api/appointments/${docApptId}/start`, {});
     await apiPost<any>(`/api/appointments/${docApptId}/end`, {});
@@ -489,37 +528,53 @@ describe("BIZ-16: Completed -> Reopen -> Documenting", () => {
 
 describe("BIZ-17: durationPromised wird bei Erstellung aus Services berechnet", () => {
   it("BIZ-17.1 – durationPromised = Summe aller Service-Dauern", async () => {
-    const date = getFutureDate(236);
-    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date,
-      scheduledStart: "07:00",
-      services: [
-        { serviceId: hwServiceId, durationMinutes: 30 },
-        { serviceId: abServiceId, durationMinutes: 45 },
-      ],
-      assignedEmployeeId: auth.user.id,
-    });
-    expect(createRes.status).toBe(201);
-    createdIds.push(createRes.data.id);
-    expect(createRes.data.durationPromised).toBe(75);
+    let created = false;
+    for (const offset of [276, 277, 278, 279, 280, 281, 282]) {
+      const date = getFutureDate(offset);
+      const createRes = await apiPost<any>("/api/appointments/kundentermin", {
+        customerId: testCustomerId,
+        date,
+        scheduledStart: "07:00",
+        services: [
+          { serviceId: hwServiceId, durationMinutes: 30 },
+          { serviceId: abServiceId, durationMinutes: 45 },
+        ],
+        assignedEmployeeId: auth.user.id,
+      });
+      if (createRes.status === 201) {
+        createdIds.push(createRes.data.id);
+        expect(createRes.data.durationPromised).toBe(75);
+        created = true;
+        break;
+      }
+    }
+    expect(created, "Termin muss erstellt werden").toBe(true);
   });
 
   it("BIZ-17.2 – Einzelner Service: durationPromised = Einzeldauer", async () => {
-    const date = getFutureDate(237);
-    const createRes = await createAppointment(date, "07:00", hwServiceId, 60);
-    expect(createRes.status).toBe(201);
-    createdIds.push(createRes.data.id);
-    expect(createRes.data.durationPromised).toBe(60);
+    let created = false;
+    for (let off = 309; off <= 320; off++) {
+      const date = getFutureDate(off);
+      const createRes = await createAppointment(date, "07:00", hwServiceId, 60);
+      if (createRes.status === 201) {
+        createdIds.push(createRes.data.id);
+        expect(createRes.data.durationPromised).toBe(60);
+        created = true;
+        break;
+      }
+    }
+    expect(created, "Termin muss erstellt werden").toBe(true);
   });
 });
 
 describe("BIZ-18: Termin löschen entfernt aus Tagesliste", () => {
   it("BIZ-18.1 – Gelöschter Termin erscheint nicht mehr in Tagesliste", async () => {
-    const date = getFutureDate(250);
-    const createRes = await createAppointment(date, "06:00", hwServiceId, 30);
-    expect(createRes.status).toBe(201);
-    const id = createRes.data.id;
+    const slot = await createOnFreeSlot({
+      offsetRange: [321, 335],
+      times: ["06:00", "06:30", "16:00", "16:30"],
+    });
+    const id = slot.id;
+    const date = slot.date;
 
     const beforeList = await apiGet<any[]>(`/api/appointments?date=${date}`);
     expect(beforeList.status).toBe(200);
@@ -538,18 +593,18 @@ describe("BIZ-18: Termin löschen entfernt aus Tagesliste", () => {
 
 describe("BIZ-19: Notizen im documenting-Status erlaubt", () => {
   it("BIZ-19.1 – notes PATCH im documenting-Status liefert 200", async () => {
-    const date = getFutureDate(239);
-    const createRes = await createAppointment(date, "08:00", hwServiceId, 30);
-    expect(createRes.status).toBe(201);
-    createdIds.push(createRes.data.id);
+    const slot = await createOnFreeSlot({
+      offsetRange: [336, 350],
+      times: ["08:00", "08:30", "09:00", "15:00", "15:30"],
+    });
 
-    await apiPost<any>(`/api/appointments/${createRes.data.id}/start`, {});
-    await apiPost<any>(`/api/appointments/${createRes.data.id}/end`, {});
+    await apiPost<any>(`/api/appointments/${slot.id}/start`, {});
+    await apiPost<any>(`/api/appointments/${slot.id}/end`, {});
 
-    const verify = await apiGet<any>(`/api/appointments/${createRes.data.id}`);
+    const verify = await apiGet<any>(`/api/appointments/${slot.id}`);
     expect(verify.data.status).toBe("documenting");
 
-    const patchRes = await apiPatch<any>(`/api/appointments/${createRes.data.id}`, {
+    const patchRes = await apiPatch<any>(`/api/appointments/${slot.id}`, {
       notes: "Doku-Notiz erlaubt",
     });
     expect(patchRes.status).toBe(200);
@@ -598,16 +653,25 @@ describe("BIZ-20A: Admin kann completed Termin löschen mit Budget-Reversal", ()
 
 describe("BIZ-20B: PATCH mit Termin-Verschiebung in Konflikt", () => {
   it("BIZ-20B.1 – PATCH Terminverschiebung in bestehenden Zeitraum liefert 409", async () => {
-    const date = getFutureDate(245);
-    const r1 = await createAppointment(date, "10:00", hwServiceId, 60);
-    expect(r1.status).toBe(201);
-    createdIds.push(r1.data.id);
+    let date: string | undefined;
+    let r1Id: number | undefined;
+    let r2Id: number | undefined;
+    for (let off = 351; off <= 365; off++) {
+      const d = getFutureDate(off);
+      const r1 = await createAppointment(d, "10:00", hwServiceId, 60);
+      if (r1.status !== 201) continue;
+      createdIds.push(r1.data.id);
+      const r2 = await createAppointment(d, "12:00", hwServiceId, 60);
+      if (r2.status !== 201) continue;
+      createdIds.push(r2.data.id);
+      date = d;
+      r1Id = r1.data.id;
+      r2Id = r2.data.id;
+      break;
+    }
+    expect(date, "Freier Tag für zwei Termine muss gefunden werden").toBeDefined();
 
-    const r2 = await createAppointment(date, "12:00", hwServiceId, 60);
-    expect(r2.status).toBe(201);
-    createdIds.push(r2.data.id);
-
-    const patchRes = await apiPatch<any>(`/api/appointments/${r2.data.id}`, {
+    const patchRes = await apiPatch<any>(`/api/appointments/${r2Id}`, {
       scheduledStart: "10:00",
     });
     expect(patchRes.status).toBe(409);
@@ -688,9 +752,84 @@ describe("BIZ-20: Completed PATCH Ablehnung", () => {
 });
 
 describe("BIZ-21: Rollen-basierte Einschränkungen", () => {
-  it.skip("BIZ-21.1 – Nicht-Admin kann vergangene Urlaubs-/Krankheitseinträge nicht bearbeiten (Skip: Testumgebung hat nur Admin-User, Non-Admin-Tests erfordern separaten Test-Account)", () => {});
-  it.skip("BIZ-21.2 – Nicht-Admin kann dokumentierenden Termin nicht löschen (Skip: Testumgebung hat nur Admin-User, Non-Admin-Tests erfordern separaten Test-Account)", () => {});
-  it.skip("BIZ-21.3 – Nicht-Admin vergangene Termine >3 Monate Ablehnung (Skip: Testumgebung hat nur Admin-User, kein separater Mitarbeiter-Account verfügbar)", () => {});
+  let nonAdminAuth: Awaited<ReturnType<typeof loginAs>> | null = null;
+  const nonAdminEmail = `testma-${Date.now()}@test.local`;
+  const nonAdminPassword = "TestPasswort123!";
+  let nonAdminUserId: number | null = null;
+
+  beforeAll(async () => {
+    const createRes = await apiPost<any>("/api/admin/users", {
+      email: nonAdminEmail,
+      password: nonAdminPassword,
+      vorname: "Test",
+      nachname: "Mitarbeiter",
+      geburtsdatum: "1990-05-15",
+      eintrittsdatum: "2024-01-01",
+      isAdmin: false,
+      telefon: "+4917600099999",
+    });
+    expect(createRes.status, "Non-admin user creation must succeed").toBe(201);
+    nonAdminUserId = createRes.data.id;
+    nonAdminAuth = await loginAs(nonAdminEmail, nonAdminPassword);
+    expect(nonAdminAuth, "Non-admin login must succeed").toBeTruthy();
+  });
+
+  afterAll(async () => {
+    if (nonAdminUserId) {
+      await apiPost(`/api/admin/users/${nonAdminUserId}/deactivate`, {});
+    }
+  });
+
+  it("BIZ-21.1 – Nicht-Admin kann keinen abgeschlossenen Termin löschen", async () => {
+    expect(nonAdminAuth, "nonAdminAuth muss gesetzt sein").toBeTruthy();
+    const slot = await createOnFreeSlot({
+      offsetRange: [2, 60],
+      times: ["03:00", "03:30", "21:00", "21:30"],
+      past: true,
+    });
+
+    await apiPost<any>(`/api/appointments/${slot.id}/document`, {
+      actualStart: slot.time,
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "Test" }],
+    });
+
+    const verify = await apiGet<any>(`/api/appointments/${slot.id}`);
+    expect(verify.data.status).toBe("completed");
+
+    const delRes = await apiDeleteAs(nonAdminAuth!, `/api/appointments/${slot.id}`);
+    expect(delRes.status).toBe(403);
+
+    await apiDelete(`/api/appointments/${slot.id}`);
+  });
+
+  it("BIZ-21.2 – Nicht-Admin kann Termin >3 Monate in Vergangenheit nicht erstellen", async () => {
+    expect(nonAdminAuth, "nonAdminAuth muss gesetzt sein").toBeTruthy();
+    const pastDate = new Date();
+    pastDate.setMonth(pastDate.getMonth() - 4);
+    const dow = pastDate.getDay();
+    if (dow === 0) pastDate.setDate(pastDate.getDate() + 1);
+    else if (dow === 6) pastDate.setDate(pastDate.getDate() + 2);
+    const dateStr = pastDate.toISOString().split("T")[0];
+
+    const res = await apiPostAs<any>(nonAdminAuth, "/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date: dateStr,
+      scheduledStart: "10:00",
+      scheduledEnd: "11:00",
+      assignedEmployeeId: nonAdminAuth.user.id,
+      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("BIZ-21.3 – Nicht-Admin sieht keine Admin-Endpunkte", async () => {
+    expect(nonAdminAuth, "nonAdminAuth muss gesetzt sein").toBeTruthy();
+    const res = await apiGetAs<any>(nonAdminAuth, "/api/admin/customers?limit=1");
+    expect(res.status).toBe(403);
+  });
 
   it("BIZ-21.4 – Admin kann abgeschlossenen Termin löschen (Rollen-Bestätigung)", async () => {
     let apptId: number | null = null;
