@@ -129,9 +129,19 @@ export async function scheduleLeadCall(params: {
   }, delayMs);
 }
 
+const STALE_PROCESSING_TIMEOUT_MS = 5 * 60_000;
+
 async function processPendingCalls(): Promise<void> {
   try {
     const now = new Date();
+    const staleThreshold = new Date(now.getTime() - STALE_PROCESSING_TIMEOUT_MS);
+
+    await db.execute(sql`
+      UPDATE scheduled_calls
+      SET status = 'pending'
+      WHERE status = 'processing'
+        AND scheduled_at <= ${staleThreshold}
+    `);
 
     const claimedResult = await db.execute(sql`
       UPDATE scheduled_calls
