@@ -686,3 +686,42 @@ describe("BIZ-20: Completed PATCH Ablehnung", () => {
     expect(patchRes.status).toBe(403);
   });
 });
+
+describe("BIZ-21: Rollen-basierte Einschränkungen", () => {
+  it.skip("BIZ-21.1 – Nicht-Admin kann vergangene Urlaubs-/Krankheitseinträge nicht bearbeiten (Skip: Testumgebung hat nur Admin-User, Non-Admin-Tests erfordern separaten Test-Account)", () => {});
+  it.skip("BIZ-21.2 – Nicht-Admin kann dokumentierenden Termin nicht löschen (Skip: Testumgebung hat nur Admin-User, Non-Admin-Tests erfordern separaten Test-Account)", () => {});
+  it.skip("BIZ-21.3 – Nicht-Admin vergangene Termine >3 Monate Ablehnung (Skip: Testumgebung hat nur Admin-User, kein separater Mitarbeiter-Account verfügbar)", () => {});
+
+  it("BIZ-21.4 – Admin kann abgeschlossenen Termin löschen (Rollen-Bestätigung)", async () => {
+    let apptId: number | null = null;
+    let lastError = "";
+    for (const offset of [7, 8, 9, 10, 11, 12, 13, 14]) {
+      const futureDate = getFutureDate(offset);
+      const createRes = await apiPost<any>("/api/appointments/kundentermin", {
+        customerId: testCustomerId,
+        date: futureDate,
+        scheduledStart: "06:00",
+        scheduledEnd: "07:00",
+        assignedEmployeeId: auth.user.id,
+        services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      });
+      if (createRes.status === 201) {
+        apptId = createRes.data.id;
+        break;
+      }
+      lastError = `${createRes.status}: ${JSON.stringify(createRes.data)}`;
+    }
+    expect(apptId, `Termin muss für Delete-Test erstellt werden. Letzter Fehler: ${lastError}`).toBeTruthy();
+
+    await apiPost<any>(`/api/appointments/${apptId}/document`, {
+      actualStart: "06:00",
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "Admin-Delete-Test" }],
+    });
+
+    const delRes = await apiDelete(`/api/appointments/${apptId}`);
+    expect(delRes.status).toBe(200);
+  });
+});

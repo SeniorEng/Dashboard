@@ -405,6 +405,56 @@ describe("LN-12: Monatlicher LN – Erstellung und Blocking", () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it("LN-12.2 – Monatlicher LN: check-period zeigt dokumentierten Termin als abdeckbar", async () => {
+    const apptId = await createAndDocumentAppointment(
+      ["06:00", "06:30", "19:00", "19:30"],
+      [0, 30]
+    );
+    expect(apptId, "Termin muss erstellt und dokumentiert werden").toBeTruthy();
+
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const checkRes = await apiGet<any>(
+      `/api/service-records/check-period?customerId=${testCustomerId}&year=${year}&month=${month}`
+    );
+    expect(checkRes.status).toBe(200);
+    expect(checkRes.data.documentedCount).toBeGreaterThan(0);
+  });
+
+  it("LN-12.2B – Monatlicher LN POST erstellt Nachweis oder wird blockiert (Integrations-Check)", async () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+
+    const res = await apiPost<any>("/api/service-records", {
+      customerId: testCustomerId,
+      year,
+      month,
+    });
+    expect([200, 201, 400]).toContain(res.status);
+    if (res.status === 200 || res.status === 201) {
+      expect(res.data).toBeDefined();
+    }
+    if (res.status === 400) {
+      expect(res.data.message).toBeDefined();
+    }
+  });
+
+  it("LN-12.3 – Erneuter monatlicher LN ohne ungedeckte Termine → 400", async () => {
+    const now = new Date();
+    const futureMonth = now.getMonth() + 5;
+    const year = futureMonth > 12 ? now.getFullYear() + 1 : now.getFullYear();
+    const month = futureMonth > 12 ? futureMonth - 12 : futureMonth;
+
+    const res = await apiPost<any>("/api/service-records", {
+      customerId: testCustomerId,
+      year,
+      month,
+    });
+    expect(res.status).toBe(400);
+  });
 });
 
 describe("LN-12B: Bereits abgedeckte Termine → 400", () => {

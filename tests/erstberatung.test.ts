@@ -210,6 +210,25 @@ describe("EB-4: Erstberatung bearbeiten (PATCH)", () => {
     expect(res.status).toBe(200);
     expect(res.data.date).toBe(newDate);
   });
+
+  it("EB-4.3 – PATCH Erstberatung behält appointmentType bei", async () => {
+    expect(erstberatungId, "erstberatungId muss gesetzt sein").toBeTruthy();
+    const res = await apiPatch<any>(`/api/appointments/${erstberatungId}`, {
+      notes: "Erstberatung Typ-Prüfung",
+    });
+    expect(res.status).toBe(200);
+    expect(res.data.appointmentType).toBe("Erstberatung");
+    expect(res.data.prospectId).toBeTruthy();
+  });
+
+  it("EB-4.4 – PATCH Erstberatung durationPromised ändern", async () => {
+    expect(erstberatungId, "erstberatungId muss gesetzt sein").toBeTruthy();
+    const res = await apiPatch<any>(`/api/appointments/${erstberatungId}`, {
+      durationPromised: 90,
+    });
+    expect(res.status).toBe(200);
+    expect(res.data.durationPromised).toBe(90);
+  });
 });
 
 describe("EB-5: Erstberatungs-Termin Typ und Service", () => {
