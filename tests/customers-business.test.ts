@@ -499,3 +499,84 @@ describe("KV-22: Kunde ist nicht in regulärer Kundenliste vor Aktivierung", () 
     }
   });
 });
+
+describe("KV-23: Ungültiges Telefonnummernformat wird abgelehnt (Employee-Route)", () => {
+  let phoneTestCustId: number;
+
+  it("KV-23.0 – Testkunden für Telefonvalidierung anlegen", async () => {
+    const createRes = await apiPost<any>("/api/admin/customers", validCustomerPayload());
+    expect(createRes.status).toBe(201);
+    phoneTestCustId = createRes.data.id;
+    createdCustomerIds.push(phoneTestCustId);
+  });
+
+  it("KV-23.1 – Ungültige Telefonnummer wird abgelehnt (Employee-Update)", async () => {
+    expect(phoneTestCustId, "phoneTestCustId muss gesetzt sein").toBeTruthy();
+    const res = await apiPatch<any>(`/api/customers/${phoneTestCustId}`, {
+      telefon: "not-a-phone-number",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("KV-23.2 – US-Telefonnummer wird abgelehnt (nur DACH erlaubt)", async () => {
+    expect(phoneTestCustId, "phoneTestCustId muss gesetzt sein").toBeTruthy();
+    const res = await apiPatch<any>(`/api/customers/${phoneTestCustId}`, {
+      telefon: "+12025551234",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("KV-23.3 – Gültige DE-Telefonnummer wird akzeptiert (Employee-Update)", async () => {
+    expect(phoneTestCustId, "phoneTestCustId muss gesetzt sein").toBeTruthy();
+    const res = await apiPatch<any>(`/api/customers/${phoneTestCustId}`, {
+      telefon: "+4917612345678",
+    });
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("KV-24: DSGVO-Anonymisierung inaktiver Kunden", () => {
+  it("KV-24.1 – Aktiven Kunden kann man nicht anonymisieren (400)", async () => {
+    const createRes = await apiPost<any>("/api/admin/customers", validCustomerPayload());
+    expect(createRes.status).toBe(201);
+    createdCustomerIds.push(createRes.data.id);
+    const custId = createRes.data.id;
+
+    const anonRes = await apiPost<any>(`/api/admin/customers/${custId}/anonymize`, {});
+    expect(anonRes.status).toBe(400);
+    expect(anonRes.data.message).toContain("inaktiv");
+  });
+
+  it("KV-24.2 – Bereits anonymisierten Kunden kann man nicht erneut anonymisieren", async () => {
+    const custRes = await apiGet<{ data: any[] }>("/api/admin/customers?limit=500");
+    expect(custRes.status).toBe(200);
+    const anonymized = custRes.data.data.find((c: any) => c.isAnonymized === true);
+    if (anonymized) {
+      const anonRes = await apiPost<any>(`/api/admin/customers/${anonymized.id}/anonymize`, {});
+      expect(anonRes.status).toBe(400);
+    }
+  });
+
+  it("KV-24.3 – Inaktiven Kunden ohne offene Termine erfolgreich anonymisieren", async () => {
+    const custRes = await apiGet<{ data: any[] }>("/api/admin/customers?limit=500&status=inaktiv");
+    expect(custRes.status).toBe(200);
+    const inactiveCustomers = custRes.data.data?.filter(
+      (c: any) => c.status === "inaktiv" && !c.isAnonymized
+    ) || [];
+    if (inactiveCustomers.length === 0) return;
+
+    const custId = inactiveCustomers[0].id;
+    const anonRes = await apiPost<any>(`/api/admin/customers/${custId}/anonymize`, {});
+    if (anonRes.status === 200) {
+      const afterRes = await apiGet<any>(`/api/admin/customers/${custId}`);
+      expect(afterRes.status).toBe(200);
+      expect(afterRes.data.isAnonymized).toBe(true);
+      expect(afterRes.data.vorname).toBeNull();
+      expect(afterRes.data.nachname).toBeNull();
+      expect(afterRes.data.email).toBeNull();
+      expect(afterRes.data.address).toBe("Anonymisiert");
+    } else {
+      expect(anonRes.status).toBe(400);
+    }
+  });
+});

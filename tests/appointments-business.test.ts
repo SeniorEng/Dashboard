@@ -905,8 +905,8 @@ describe("BIZ-22: Nicht-Admin kann documenting-Termin nicht löschen", () => {
   });
 });
 
-describe("BIZ-23: Direktes Dokumentieren eines geplanten Termins", () => {
-  it("BIZ-23.1 – Dokumentation eines scheduled-Termins setzt completed (skip Start/End erlaubt)", async () => {
+describe("BIZ-23: Scheduled-Termin direkt dokumentieren (positiver Pfad)", () => {
+  it("BIZ-23.1 – scheduled-Termin kann direkt dokumentiert werden (Start/End optional) → completed", async () => {
     const slot = await createOnFreeSlot({ offsetRange: [2, 60], times: ["04:30", "05:00"], past: true });
 
     const docRes = await apiPost<any>(`/api/appointments/${slot.id}/document`, {

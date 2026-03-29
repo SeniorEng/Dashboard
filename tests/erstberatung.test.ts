@@ -316,6 +316,30 @@ describe("EB-8B: Erstberatung-PATCH Updates", () => {
     expect(res.status).toBe(200);
     expect(res.data.notes).toBe("EB-8B Aktualisierte Erstberatungs-Notizen");
   });
+
+  it("EB-8B.2 – Erstberatungs-Termin PATCH auf Wochenende wird abgelehnt", async () => {
+    expect(erstberatungId, "erstberatungId muss gesetzt sein").toBeTruthy();
+    const now = new Date();
+    const daysUntilSaturday = (6 - now.getDay() + 7) % 7 || 7;
+    const saturday = new Date(now);
+    saturday.setDate(saturday.getDate() + daysUntilSaturday);
+    const saturdayStr = saturday.toISOString().split("T")[0];
+
+    const res = await apiPatch<any>(`/api/appointments/${erstberatungId}`, {
+      date: saturdayStr,
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("EB-8B.3 – Erstberatungs-Termin PATCH Datum auf Werktag aktualisiert", async () => {
+    expect(erstberatungId, "erstberatungId muss gesetzt sein").toBeTruthy();
+    const futureDate = getFutureDate(14);
+    const res = await apiPatch<any>(`/api/appointments/${erstberatungId}`, {
+      date: futureDate,
+    });
+    expect(res.status).toBe(200);
+    expect(res.data.date).toBe(futureDate);
+  });
 });
 
 describe("EB-9: Admin-Prospect PATCH (vollständig)", () => {

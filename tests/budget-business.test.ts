@@ -714,4 +714,34 @@ describe("BB-18: FIFO-Verbrauch – Carryover vor regulärer Allokation", () => 
       expect(tx.allocationId).toBeGreaterThan(0);
     }
   });
+
+  it("BB-18.4 – FIFO-Reihenfolge: Carryover wird vor regulärer Allokation verbraucht", async () => {
+    const allocRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?budgetType=entlastungsbetrag_45b`);
+    expect(allocRes.status).toBe(200);
+    const carryovers = allocRes.data.filter((a: any) => a.source === "carryover");
+    const regulars = allocRes.data.filter((a: any) => a.source === "monthly_auto");
+    if (carryovers.length > 0 && regulars.length > 0) {
+      const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=200`);
+      expect(txRes.status).toBe(200);
+      const consumptions = txRes.data.filter((t: any) => t.transactionType === "consumption");
+      if (consumptions.length > 0) {
+        const carryoverIds = new Set(carryovers.map((c: any) => c.id));
+        const regularIds = new Set(regulars.map((r: any) => r.id));
+        const carryoverConsumptions = consumptions.filter((t: any) => carryoverIds.has(t.allocationId));
+        const regularConsumptions = consumptions.filter((t: any) => regularIds.has(t.allocationId));
+        if (carryoverConsumptions.length > 0 && regularConsumptions.length > 0) {
+          const lastCarryoverDate = new Date(
+            Math.max(...carryoverConsumptions.map((t: any) => new Date(t.createdAt || t.date).getTime()))
+          );
+          const firstRegularDate = new Date(
+            Math.min(...regularConsumptions.map((t: any) => new Date(t.createdAt || t.date).getTime()))
+          );
+          expect(
+            lastCarryoverDate.getTime() <= firstRegularDate.getTime(),
+            "Carryover muss zeitlich vor regulärer Allokation verbraucht werden (FIFO)"
+          ).toBe(true);
+        }
+      }
+    }
+  });
 });

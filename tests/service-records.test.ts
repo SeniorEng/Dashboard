@@ -224,6 +224,14 @@ describe("LN-3: Einzeltermin-Leistungsnachweis erstellen & unterschreiben", () =
 });
 
 describe("LN-4: Gesperrte Termine nach Unterschrift", () => {
+  it("LN-4.0 – Termin in unterschriebenem LN hat isLocked=true", async () => {
+    expect(completedAppointmentId, "completedAppointmentId muss gesetzt sein").toBeTruthy();
+
+    const apptRes = await apiGet<any>(`/api/appointments/${completedAppointmentId}`);
+    expect(apptRes.status).toBe(200);
+    expect(apptRes.data.isLocked).toBe(true);
+  });
+
   it("LN-4.1 – Termin in unterschriebenem LN: PATCH wird abgelehnt", async () => {
     expect(completedAppointmentId, "completedAppointmentId muss gesetzt sein").toBeTruthy();
 
