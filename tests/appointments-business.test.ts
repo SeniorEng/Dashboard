@@ -923,6 +923,20 @@ describe("BIZ-23: Scheduled-Termin direkt dokumentieren (positiver Pfad)", () =>
 
     await apiDelete(`/api/appointments/${slot.id}`);
   });
+
+  it("BIZ-23.2 – Direkter Status-PATCH scheduled → completed wird abgelehnt (nur Dokument-Workflow erlaubt)", async () => {
+    const slot = await createOnFreeSlot({ offsetRange: [2, 60], times: ["04:00", "04:15"], past: true });
+
+    const patchRes = await apiPatch<any>(`/api/appointments/${slot.id}`, {
+      status: "completed",
+    });
+    expect([400, 403, 422]).toContain(patchRes.status);
+
+    const verify = await apiGet<any>(`/api/appointments/${slot.id}`);
+    expect(verify.data.status).toBe("scheduled");
+
+    await apiDelete(`/api/appointments/${slot.id}`);
+  });
 });
 
 describe("BIZ-24: Service-Swap aktualisiert Termin-Dienste", () => {
@@ -949,6 +963,13 @@ describe("BIZ-24: Service-Swap aktualisiert Termin-Dienste", () => {
     const serviceIds = servicesAfter.data.map((s: any) => s.serviceId);
     expect(serviceIds).toContain(hwServiceId);
     expect(serviceIds).toContain(abServiceId);
+
+    const apptAfter = await apiGet<any>(`/api/appointments/${slot.id}`);
+    expect(apptAfter.status).toBe(200);
+    const totalServiceDuration = servicesAfter.data.reduce(
+      (sum: number, s: any) => sum + (s.plannedDurationMinutes || 0), 0
+    );
+    expect(totalServiceDuration).toBe(75);
 
     await apiDelete(`/api/appointments/${slot.id}`);
   });
