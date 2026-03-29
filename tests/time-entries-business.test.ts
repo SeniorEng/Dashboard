@@ -3,8 +3,11 @@ import {
   apiGet,
   apiPost,
   apiDelete,
+  apiPutAs,
+  apiDeleteAs,
   getAuthCookie,
   getFutureDate,
+  loginAs,
 } from "./test-utils";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
@@ -729,5 +732,79 @@ describe("TE-BIZ-17: Konflikt-Vorprüfung API", () => {
       isFullDay: false,
     });
     expect(checkRes.status).toBe(200);
+  });
+});
+
+describe("TE-BIZ-18: Nicht-Admin Einschränkungen für vergangene Urlaub/Krankheit", () => {
+  let nonAdminAuth: Awaited<ReturnType<typeof loginAs>> | null = null;
+  const nonAdminEmail = `testma-te18-${Date.now()}@test.local`;
+  const nonAdminPassword = "TestPasswort123!";
+  let nonAdminUserId: number | null = null;
+  const te18CleanupIds: number[] = [];
+
+  beforeAll(async () => {
+    const createRes = await apiPost<any>("/api/admin/users", {
+      email: nonAdminEmail, password: nonAdminPassword, vorname: "Test", nachname: "TE18",
+      geburtsdatum: "1990-01-01", eintrittsdatum: "2024-01-01", isAdmin: false, telefon: "+4917600098818",
+    });
+    expect(createRes.status, "Non-admin user creation must succeed").toBe(201);
+    nonAdminUserId = createRes.data.id;
+    nonAdminAuth = await loginAs(nonAdminEmail, nonAdminPassword);
+    expect(nonAdminAuth).toBeTruthy();
+  });
+
+  afterAll(async () => {
+    for (const id of te18CleanupIds) {
+      try { await apiDelete(`/api/time-entries/${id}`); } catch {}
+    }
+    if (nonAdminUserId) {
+      const deactivateRes = await apiPost(`/api/admin/users/${nonAdminUserId}/deactivate`, {});
+      expect(deactivateRes.status).toBeLessThan(500);
+    }
+  });
+
+  it("TE-BIZ-18.1 – Nicht-Admin kann vergangenen Urlaub nicht bearbeiten (403)", async () => {
+    expect(nonAdminAuth).toBeTruthy();
+    const pastDate = new Date();
+    pastDate.setDate(pastDate.getDate() - 5);
+    getNextWeekday(pastDate);
+    const dateStr = pastDate.toISOString().split("T")[0];
+
+    const createRes = await apiPost<any>("/api/time-entries", {
+      entryDate: dateStr,
+      entryType: "urlaub",
+      isFullDay: true,
+      targetUserId: nonAdminUserId,
+    });
+    expect(createRes.status).toBe(201);
+    te18CleanupIds.push(createRes.data.id);
+
+    const editRes = await apiPutAs<any>(nonAdminAuth!, `/api/time-entries/${createRes.data.id}`, {
+      entryDate: dateStr,
+      entryType: "urlaub",
+      isFullDay: true,
+      notes: "Versuch der Bearbeitung",
+    });
+    expect(editRes.status).toBe(403);
+  });
+
+  it("TE-BIZ-18.2 – Nicht-Admin kann vergangene Krankheit nicht löschen (403)", async () => {
+    expect(nonAdminAuth).toBeTruthy();
+    const pastDate = new Date();
+    pastDate.setDate(pastDate.getDate() - 7);
+    getNextWeekday(pastDate);
+    const dateStr = pastDate.toISOString().split("T")[0];
+
+    const createRes = await apiPost<any>("/api/time-entries", {
+      entryDate: dateStr,
+      entryType: "krankheit",
+      isFullDay: true,
+      targetUserId: nonAdminUserId,
+    });
+    expect(createRes.status).toBe(201);
+    te18CleanupIds.push(createRes.data.id);
+
+    const delRes = await apiDeleteAs(nonAdminAuth!, `/api/time-entries/${createRes.data.id}`);
+    expect(delRes.status).toBe(403);
   });
 });

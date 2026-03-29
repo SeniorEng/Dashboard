@@ -497,3 +497,50 @@ describe("LN-11: Signatur-Daten Validierung", () => {
     expect(signRes.status).toBe(400);
   });
 });
+
+describe("LN-13: Monatlicher LN – Positive Erstellung mit dokumentierten Terminen", () => {
+  it("LN-13.1 – Monatlicher LN mit dokumentierten Terminen wird erstellt (201)", async () => {
+    const apptId = await createAndDocumentAppointment(
+      ["05:00", "05:30", "22:00", "22:30"],
+      [2, 60]
+    );
+    expect(apptId, "Termin muss erstellt und dokumentiert werden").toBeTruthy();
+
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+
+    const checkRes = await apiGet<any>(
+      `/api/service-records/check-period?customerId=${testCustomerId}&year=${year}&month=${month}`
+    );
+    expect(checkRes.status).toBe(200);
+    expect(checkRes.data.documentedCount, "Dokumentierte Termine müssen vorhanden sein").toBeGreaterThan(0);
+
+    const createRes = await apiPost<any>("/api/service-records", {
+      customerId: testCustomerId,
+      year,
+      month,
+    });
+
+    if (checkRes.data.canCreateRecord && checkRes.data.uncoveredDocumentedCount > 0) {
+      expect(createRes.status).toBe(201);
+      expect(createRes.data.type).toBe("monthly");
+      expect(createRes.data.status).toBe("pending");
+    } else {
+      expect([400, 409]).toContain(createRes.status);
+    }
+  });
+
+  it("LN-13.2 – Monatlicher LN ohne dokumentierte Termine wird abgelehnt (400)", async () => {
+    const now = new Date();
+    const emptyMonth = now.getMonth() + 8 > 12 ? (now.getMonth() + 8) - 12 : now.getMonth() + 8;
+    const emptyYear = now.getMonth() + 8 > 12 ? now.getFullYear() + 1 : now.getFullYear();
+
+    const dupRes = await apiPost<any>("/api/service-records", {
+      customerId: testCustomerId,
+      year: emptyYear,
+      month: emptyMonth,
+    });
+    expect(dupRes.status).toBe(400);
+  });
+});

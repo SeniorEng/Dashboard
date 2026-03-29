@@ -145,6 +145,21 @@ export async function apiPatchAs<T = unknown>(auth: AuthCookie, path: string, bo
   return { status: response.status, data: data as T };
 }
 
+export async function apiPutAs<T = unknown>(auth: AuthCookie, path: string, body: unknown): Promise<{ status: number; data: T }> {
+  const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
+  const response = await fetchWithRetry(`${BASE_URL}${path}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookieHeader,
+      "x-csrf-token": auth.csrfToken,
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => null);
+  return { status: response.status, data: data as T };
+}
+
 export async function apiDeleteAs(auth: AuthCookie, path: string): Promise<{ status: number; data: unknown }> {
   const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
   const response = await fetchWithRetry(`${BASE_URL}${path}`, {

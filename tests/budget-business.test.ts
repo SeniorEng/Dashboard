@@ -620,3 +620,98 @@ describe("BB-16: Budget-Typ-Prioritäten und FIFO-Verbrauch", () => {
     }
   });
 });
+
+describe("BB-17: Kaskadenreihenfolge (§45a → §45b → §39/42a)", () => {
+  it("BB-17.1 – Kaskadenreihenfolge kann gesetzt und gelesen werden", async () => {
+    const patchRes = await apiPatch<any>(`/api/budget/${testCustomerId}/type-settings`, {
+      settings: [
+        { budgetType: "umwandlung_45a", enabled: true, priority: 1 },
+        { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 2 },
+        { budgetType: "ersatzpflege_39_42a", enabled: true, priority: 3 },
+      ],
+    });
+    expect(patchRes.status).toBe(200);
+
+    const settingsRes = await apiGet<any>(`/api/budget/${testCustomerId}/type-settings`);
+    expect(settingsRes.status).toBe(200);
+    expect(Array.isArray(settingsRes.data)).toBe(true);
+    expect(settingsRes.data.length).toBe(3);
+    for (const setting of settingsRes.data) {
+      expect(setting).toHaveProperty("budgetType");
+      expect(setting).toHaveProperty("priority");
+      expect(setting).toHaveProperty("enabled");
+    }
+  });
+
+  it("BB-17.2 – Kunden-spezifische Kaskadenreihenfolge wird angewendet", async () => {
+    const patchRes = await apiPatch<any>(`/api/budget/${testCustomerId}/type-settings`, {
+      settings: [
+        { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1 },
+        { budgetType: "umwandlung_45a", enabled: true, priority: 2 },
+        { budgetType: "ersatzpflege_39_42a", enabled: true, priority: 3 },
+      ],
+    });
+    expect(patchRes.status).toBe(200);
+
+    const verifyRes = await apiGet<any>(`/api/budget/${testCustomerId}/type-settings`);
+    expect(verifyRes.status).toBe(200);
+    const sorted = verifyRes.data.sort((a: any, b: any) => a.priority - b.priority);
+    expect(sorted[0].budgetType).toBe("entlastungsbetrag_45b");
+    expect(sorted[1].budgetType).toBe("umwandlung_45a");
+
+    await apiPatch(`/api/budget/${testCustomerId}/type-settings`, {
+      settings: [
+        { budgetType: "umwandlung_45a", enabled: true, priority: 1 },
+        { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 2 },
+        { budgetType: "ersatzpflege_39_42a", enabled: true, priority: 3 },
+      ],
+    });
+  });
+
+  it("BB-17.3 – Kostenvoranschlag (cost-estimate) liefert Budget-Informationen", async () => {
+    const costRes = await apiGet<any>(
+      `/api/budget/${testCustomerId}/cost-estimate?serviceIds=${hwServiceId}&serviceDurations=60`
+    );
+    expect(costRes.status).toBe(200);
+    expect(costRes.data).toHaveProperty("totalCents");
+    expect(typeof costRes.data.totalCents).toBe("number");
+  });
+});
+
+describe("BB-18: FIFO-Verbrauch – Carryover vor regulärer Allokation", () => {
+  it("BB-18.1 – §45b Allokationen enthalten source-Feld (monthly_auto oder carryover)", async () => {
+    const allocRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?budgetType=entlastungsbetrag_45b`);
+    expect(allocRes.status).toBe(200);
+    expect(allocRes.data.length).toBeGreaterThan(0);
+    const validSources = ["monthly_auto", "carryover", "manual", "manual_adjustment", "yearly_auto"];
+    for (const alloc of allocRes.data) {
+      expect(validSources).toContain(alloc.source);
+      expect(alloc).toHaveProperty("validFrom");
+      expect(alloc).toHaveProperty("amountCents");
+      expect(typeof alloc.amountCents).toBe("number");
+    }
+  });
+
+  it("BB-18.2 – Carryover-Allokation hat Ablaufdatum 30.06.", async () => {
+    const allocRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?budgetType=entlastungsbetrag_45b`);
+    expect(allocRes.status).toBe(200);
+    const carryovers = allocRes.data.filter((a: any) => a.source === "carryover");
+    for (const co of carryovers) {
+      expect(co.expiresAt, "Carryover muss expiresAt haben").toBeDefined();
+      const expiry = new Date(co.expiresAt);
+      expect(expiry.getMonth()).toBe(5);
+      expect(expiry.getDate()).toBe(30);
+    }
+  });
+
+  it("BB-18.3 – Verbrauchte Transaktionen referenzieren eine gültige Allokation", async () => {
+    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=50`);
+    expect(txRes.status).toBe(200);
+    const consumptions = txRes.data.filter((t: any) => t.transactionType === "consumption");
+    for (const tx of consumptions) {
+      expect(tx.allocationId, "Consumption muss allocationId haben").toBeDefined();
+      expect(typeof tx.allocationId).toBe("number");
+      expect(tx.allocationId).toBeGreaterThan(0);
+    }
+  });
+});

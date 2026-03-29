@@ -864,3 +864,144 @@ describe("BIZ-21: Rollen-basierte Einschränkungen", () => {
     expect(delRes.status).toBe(200);
   });
 });
+
+describe("BIZ-22: Nicht-Admin kann documenting-Termin nicht löschen", () => {
+  let nonAdminAuth22: Awaited<ReturnType<typeof loginAs>> | null = null;
+  const email22 = `testma22-${Date.now()}@test.local`;
+  const pwd22 = "TestPasswort123!";
+  let userId22: number | null = null;
+
+  beforeAll(async () => {
+    const createRes = await apiPost<any>("/api/admin/users", {
+      email: email22, password: pwd22, vorname: "Test", nachname: "MA22",
+      geburtsdatum: "1990-01-01", eintrittsdatum: "2024-01-01", isAdmin: false, telefon: "+4917600099922",
+    });
+    expect(createRes.status).toBe(201);
+    userId22 = createRes.data.id;
+    nonAdminAuth22 = await loginAs(email22, pwd22);
+  });
+
+  afterAll(async () => {
+    if (userId22) {
+      const deactivateRes = await apiPost(`/api/admin/users/${userId22}/deactivate`, {});
+      expect(deactivateRes.status).toBeLessThan(500);
+    }
+  });
+
+  it("BIZ-22.1 – Nicht-Admin kann documenting-Termin nicht löschen (403)", async () => {
+    expect(nonAdminAuth22).toBeTruthy();
+    const slot = await createOnFreeSlot({ offsetRange: [2, 60], times: ["04:00", "04:30"] });
+
+    await apiPost<any>(`/api/appointments/${slot.id}/start`, {});
+    await apiPost<any>(`/api/appointments/${slot.id}/end`, {});
+
+    const verify = await apiGet<any>(`/api/appointments/${slot.id}`);
+    expect(verify.data.status).toBe("documenting");
+
+    const delRes = await apiDeleteAs(nonAdminAuth22!, `/api/appointments/${slot.id}`);
+    expect(delRes.status).toBe(403);
+
+    await apiDelete(`/api/appointments/${slot.id}`);
+  });
+});
+
+describe("BIZ-23: Direktes Dokumentieren eines geplanten Termins", () => {
+  it("BIZ-23.1 – Dokumentation eines scheduled-Termins setzt completed (skip Start/End erlaubt)", async () => {
+    const slot = await createOnFreeSlot({ offsetRange: [2, 60], times: ["04:30", "05:00"], past: true });
+
+    const docRes = await apiPost<any>(`/api/appointments/${slot.id}/document`, {
+      actualStart: slot.time,
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "Direct-Doc-Test" }],
+    });
+    expect(docRes.status).toBe(200);
+
+    const verify = await apiGet<any>(`/api/appointments/${slot.id}`);
+    expect(verify.data.status).toBe("completed");
+
+    await apiDelete(`/api/appointments/${slot.id}`);
+  });
+});
+
+describe("BIZ-24: Service-Swap aktualisiert Termin-Dienste", () => {
+  it("BIZ-24.1 – Service ändern via PATCH aktualisiert Services-Liste", async () => {
+    const slot = await createOnFreeSlot({ offsetRange: [2, 60], times: ["05:30", "06:00"] });
+
+    const servicesBefore = await apiGet<any[]>(`/api/appointments/${slot.id}/services`);
+    expect(servicesBefore.status).toBe(200);
+    expect(servicesBefore.data.length).toBe(1);
+    expect(servicesBefore.data[0].serviceId).toBe(hwServiceId);
+
+    const patchRes = await apiPatch(`/api/appointments/${slot.id}`, {
+      notes: "BIZ-24 Service-Swap-Test",
+      services: [
+        { serviceId: hwServiceId, plannedDurationMinutes: 45 },
+        { serviceId: abServiceId, plannedDurationMinutes: 30 },
+      ],
+    });
+    expect(patchRes.status).toBe(200);
+
+    const servicesAfter = await apiGet<any[]>(`/api/appointments/${slot.id}/services`);
+    expect(servicesAfter.status).toBe(200);
+    expect(servicesAfter.data.length).toBe(2);
+    const serviceIds = servicesAfter.data.map((s: any) => s.serviceId);
+    expect(serviceIds).toContain(hwServiceId);
+    expect(serviceIds).toContain(abServiceId);
+
+    await apiDelete(`/api/appointments/${slot.id}`);
+  });
+});
+
+describe("BIZ-25: PATCH Mitarbeiter-Wechsel Überlappungsprüfung", () => {
+  it("BIZ-25.1 – Employee-Switch auf Mitarbeiter mit bestehendem Termin prüft Überlappung", async () => {
+    const nonAdminEmail25 = `testma25-${Date.now()}@test.local`;
+    const createUserRes = await apiPost<any>("/api/admin/users", {
+      email: nonAdminEmail25, password: "TestPasswort123!", vorname: "Test", nachname: "MA25",
+      geburtsdatum: "1990-01-01", eintrittsdatum: "2024-01-01", isAdmin: false, telefon: "+4917600099925",
+    });
+    expect(createUserRes.status).toBe(201);
+    const otherEmployeeId = createUserRes.data.id;
+
+    const custRes2 = await apiPost<any>("/api/admin/customers", {
+      vorname: "Overlap", nachname: `Test-${Date.now()}`, geburtsdatum: "1935-01-01",
+      strasse: "Teststr.", nr: "1", plz: "10115", stadt: "Berlin", pflegegrad: 3,
+    });
+    expect(custRes2.status).toBe(201);
+    const secondCustomerId = custRes2.data.id;
+
+    const assignRes = await apiPatch(`/api/admin/customers/${secondCustomerId}/assign`, {
+      primaryEmployeeId: otherEmployeeId,
+      backupEmployeeId: null,
+      backupEmployeeId2: null,
+    });
+    expect(assignRes.status).toBe(200);
+
+    const slot1 = await createOnFreeSlot({ offsetRange: [2, 60], times: ["14:00", "14:30"] });
+
+    let slot2Created = false;
+    const slot2Res = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: secondCustomerId,
+      date: slot1.date,
+      scheduledStart: slot1.time,
+      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      assignedEmployeeId: otherEmployeeId,
+    });
+    if (slot2Res.status === 201) {
+      createdIds.push(slot2Res.data.id);
+      slot2Created = true;
+
+      const patchRes = await apiPatch(`/api/appointments/${slot1.id}`, {
+        assignedEmployeeId: otherEmployeeId,
+      });
+      expect([409, 400]).toContain(patchRes.status);
+
+      await apiDelete(`/api/appointments/${slot2Res.data.id}`);
+    }
+    expect(slot2Created, "Zweiter Termin für Overlap-Test muss erstellt werden").toBe(true);
+
+    await apiPost(`/api/admin/users/${otherEmployeeId}/deactivate`, {});
+    await apiDelete(`/api/appointments/${slot1.id}`);
+  });
+});
