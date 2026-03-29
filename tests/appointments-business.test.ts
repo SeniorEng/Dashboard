@@ -615,27 +615,7 @@ describe("BIZ-20B: PATCH mit Termin-Verschiebung in Konflikt", () => {
 });
 
 describe("BIZ-20C: Statusübergangs-Validierung", () => {
-  it("BIZ-20C.1 – scheduled kann direkt dokumentiert werden (→ completed)", async () => {
-    const slot = await createOnFreeSlot({
-      offsetRange: [2, 60],
-      times: ["00:00", "00:30", "05:00", "05:30"],
-      past: true,
-    });
-
-    const docRes = await apiPost<any>(`/api/appointments/${slot.id}/document`, {
-      actualStart: slot.time,
-      travelOriginType: "home",
-      travelKilometers: 0,
-      customerKilometers: 0,
-      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "Direkt-Doku" }],
-    });
-    expect(docRes.status).toBe(200);
-
-    const verify = await apiGet<any>(`/api/appointments/${slot.id}`);
-    expect(verify.data.status).toBe("completed");
-  });
-
-  it("BIZ-20C.2 – document ohne services wird abgelehnt (400)", async () => {
+  it("BIZ-20C.1 – document ohne services wird abgelehnt (400)", async () => {
     const slot = await createOnFreeSlot({
       offsetRange: [2, 60],
       times: ["00:30", "01:00", "05:30", "04:30"],
@@ -650,6 +630,34 @@ describe("BIZ-20C: Statusübergangs-Validierung", () => {
       services: [],
     });
     expect(docRes.status).toBe(400);
+  });
+
+  it("BIZ-20C.2 – completed Termin kann nicht erneut dokumentiert werden", async () => {
+    const slot = await createOnFreeSlot({
+      offsetRange: [2, 60],
+      times: ["00:00", "00:30", "05:00", "05:30"],
+      past: true,
+    });
+
+    await apiPost<any>(`/api/appointments/${slot.id}/document`, {
+      actualStart: slot.time,
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "Erst-Doku" }],
+    });
+
+    const verify = await apiGet<any>(`/api/appointments/${slot.id}`);
+    expect(verify.data.status).toBe("completed");
+
+    const reDocRes = await apiPost<any>(`/api/appointments/${slot.id}/document`, {
+      actualStart: slot.time,
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "Doppelt" }],
+    });
+    expect(reDocRes.status).toBe(403);
   });
 });
 

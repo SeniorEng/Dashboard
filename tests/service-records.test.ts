@@ -333,13 +333,13 @@ describe("LN-9: Monatlicher Leistungsnachweis", () => {
     expect(checkRes.data.documentedCount).toBe(0);
   });
 
-  it("LN-9.1C – Monatlicher LN-Endpoint für leere Periode liefert 200", async () => {
-    const createRes = await apiPost<any>("/api/service-records/monthly", {
+  it("LN-9.1C – Monatlicher LN ohne dokumentierte Termine wird abgelehnt (400)", async () => {
+    const createRes = await apiPost<any>("/api/service-records", {
       customerId: testCustomerId,
       year: 2020,
       month: 1,
     });
-    expect(createRes.status).toBe(200);
+    expect(createRes.status).toBe(400);
   });
 
   it("LN-9.2 – Monatlicher LN blockiert wenn undokumentierte Termine vorhanden", async () => {
