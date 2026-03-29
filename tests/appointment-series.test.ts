@@ -149,7 +149,7 @@ describe("SER-3: Einzeltermin-Absage", () => {
 
 describe("SER-4: Alle zukünftigen absagen mit Verifikation", () => {
   let tempSeriesId: number;
-  let cancelledFromId: number;
+  let cancelledFromDate: string;
 
   it("SER-4.1 – Serie erstellen und ab Mitte alle zukünftigen absagen", async () => {
     const createRes = await apiPost<any>("/api/appointment-series",
@@ -163,9 +163,10 @@ describe("SER-4: Alle zukünftigen absagen mit Verifikation", () => {
     const appts = (seriesRes.data.appointments || []).filter((a: any) => a.status === "scheduled");
     expect(appts.length, "Serie muss mindestens 2 geplante Termine haben").toBeGreaterThanOrEqual(2);
 
-    const midIndex = Math.floor(appts.length / 2);
-    const midAppt = appts[midIndex];
-    cancelledFromId = midAppt.id;
+    const sorted = [...appts].sort((a: any, b: any) => a.date.localeCompare(b.date));
+    const midIndex = Math.floor(sorted.length / 2);
+    const midAppt = sorted[midIndex];
+    cancelledFromDate = midAppt.date;
 
     const cancelRes = await apiPost<any>(
       `/api/appointment-series/${tempSeriesId}/appointments/${midAppt.id}/cancel`,
@@ -174,14 +175,15 @@ describe("SER-4: Alle zukünftigen absagen mit Verifikation", () => {
     expect(cancelRes.status).toBe(200);
   });
 
-  it("SER-4.2 – Verifikation: Termine nach Absagepunkt sind cancelled/gelöscht", async () => {
+  it("SER-4.2 – Verifikation: Termine ab Absagepunkt-Datum sind nicht mehr scheduled", async () => {
     expect(tempSeriesId, "tempSeriesId muss gesetzt sein").toBeTruthy();
+    expect(cancelledFromDate, "cancelledFromDate muss gesetzt sein").toBeTruthy();
     const afterRes = await apiGet<any>(`/api/appointment-series/${tempSeriesId}`);
     expect(afterRes.status).toBe(200);
-    const scheduledAfter = (afterRes.data.appointments || []).filter(
-      (a: any) => a.status === "scheduled" && a.id >= cancelledFromId
+    const scheduledAfterDate = (afterRes.data.appointments || []).filter(
+      (a: any) => a.status === "scheduled" && a.date >= cancelledFromDate
     );
-    expect(scheduledAfter.length).toBe(0);
+    expect(scheduledAfterDate.length).toBe(0);
   });
 });
 

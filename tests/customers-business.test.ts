@@ -558,25 +558,30 @@ describe("KV-24: DSGVO-Anonymisierung inaktiver Kunden", () => {
   });
 
   it("KV-24.3 – Inaktiven Kunden ohne offene Termine erfolgreich anonymisieren", async () => {
-    const custRes = await apiGet<{ data: any[] }>("/api/admin/customers?limit=500&status=inaktiv");
+    const custRes = await apiGet<{ data: any[] }>("/api/admin/customers?limit=500");
     expect(custRes.status).toBe(200);
     const inactiveCustomers = custRes.data.data?.filter(
       (c: any) => c.status === "inaktiv" && !c.isAnonymized
     ) || [];
-    if (inactiveCustomers.length === 0) return;
 
-    const custId = inactiveCustomers[0].id;
-    const anonRes = await apiPost<any>(`/api/admin/customers/${custId}/anonymize`, {});
-    if (anonRes.status === 200) {
-      const afterRes = await apiGet<any>(`/api/admin/customers/${custId}`);
-      expect(afterRes.status).toBe(200);
-      expect(afterRes.data.isAnonymized).toBe(true);
-      expect(afterRes.data.vorname).toBeNull();
-      expect(afterRes.data.nachname).toBeNull();
-      expect(afterRes.data.email).toBeNull();
-      expect(afterRes.data.address).toBe("Anonymisiert");
+    if (inactiveCustomers.length > 0) {
+      const custId = inactiveCustomers[0].id;
+      const anonRes = await apiPost<any>(`/api/admin/customers/${custId}/anonymize`, {});
+      if (anonRes.status === 200) {
+        const afterRes = await apiGet<any>(`/api/admin/customers/${custId}`);
+        expect(afterRes.status).toBe(200);
+        expect(afterRes.data.isAnonymized).toBe(true);
+        expect(afterRes.data.vorname).toBeNull();
+        expect(afterRes.data.nachname).toBeNull();
+        expect(afterRes.data.email).toBeNull();
+        expect(afterRes.data.address).toBe("Anonymisiert");
+      } else {
+        expect(anonRes.status).toBe(400);
+        expect(anonRes.data.message).toContain("Termin");
+      }
     } else {
-      expect(anonRes.status).toBe(400);
+      const anonEndpoint = await apiPost<any>("/api/admin/customers/99999/anonymize", {});
+      expect(anonEndpoint.status).toBe(404);
     }
   });
 });

@@ -351,4 +351,43 @@ describe("EB-9: Admin-Prospect PATCH (vollständig)", () => {
     });
     expect(res.status).toBe(200);
   });
+
+  it("EB-9.2 – Prospect PATCH aktualisiert Adressfelder", async () => {
+    expect(prospectId, "prospectId muss gesetzt sein").toBeTruthy();
+    const res = await apiPatch<any>(`/api/admin/prospects/${prospectId}`, {
+      strasse: "Testweg",
+      nr: "42",
+      plz: "80331",
+      stadt: "München",
+    });
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("EB-10: Erstberatungs-Termin PATCH (Scheduling-Felder)", () => {
+  it("EB-10.1 – Erstberatungs-Termin scheduledStart aktualisieren", async () => {
+    expect(erstberatungId, "erstberatungId muss gesetzt sein").toBeTruthy();
+    const res = await apiPatch<any>(`/api/appointments/${erstberatungId}`, {
+      scheduledStart: "06:15",
+    });
+    if (res.status === 200) {
+      expect(res.data.scheduledStart).toBe("06:15:00");
+    } else {
+      expect(res.status, "Nur 200 oder 409 (Overlap) sind erlaubt").toBe(409);
+    }
+  });
+
+  it("EB-10.2 – Erstberatung PATCH auf Sonntag wird abgelehnt", async () => {
+    expect(erstberatungId, "erstberatungId muss gesetzt sein").toBeTruthy();
+    const now = new Date();
+    const daysUntilSunday = (7 - now.getDay()) % 7 || 7;
+    const sunday = new Date(now);
+    sunday.setDate(sunday.getDate() + daysUntilSunday);
+    const sundayStr = sunday.toISOString().split("T")[0];
+
+    const res = await apiPatch<any>(`/api/appointments/${erstberatungId}`, {
+      date: sundayStr,
+    });
+    expect(res.status).toBe(400);
+  });
 });

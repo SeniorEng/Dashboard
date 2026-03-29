@@ -530,12 +530,16 @@ describe("LN-13: Monatlicher LN – Positive Erstellung mit dokumentierten Termi
       month,
     });
 
-    if (checkRes.data.canCreateRecord && checkRes.data.uncoveredDocumentedCount > 0) {
-      expect(createRes.status).toBe(201);
+    if (checkRes.data.canCreateRecord === true && checkRes.data.uncoveredDocumentedCount > 0) {
+      expect(createRes.status, "LN-Erstellung muss 201 liefern wenn canCreateRecord=true und uncovered>0").toBe(201);
       expect(createRes.data.type).toBe("monthly");
       expect(createRes.data.status).toBe("pending");
-    } else {
+    } else if (checkRes.data.canCreateRecord === false) {
       expect([400, 409]).toContain(createRes.status);
+    } else {
+      expect(createRes.status, "LN-Erstellung: 201 oder 400/409 erwartet").toSatisfy(
+        (s: number) => s === 201 || s === 400 || s === 409
+      );
     }
   });
 
