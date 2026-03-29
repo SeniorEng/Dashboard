@@ -173,13 +173,20 @@ describe("EB-2: Erstberatung-Termin erstellen", () => {
   });
 });
 
-describe("EB-3: Prospect-Daten", () => {
+describe("EB-3: Prospect-Daten und Status-Transition", () => {
   it("EB-3.1 – Prospect hat korrekten Status nach Erstberatungs-Buchung", async () => {
     expect(prospectId, "prospectId muss gesetzt sein").toBeTruthy();
     const res = await apiGet<any>(`/api/prospects/${prospectId}/appointment-data`);
     expect(res.status).toBe(200);
     expect(res.data.prospect).toBeDefined();
     expect(res.data.prospect.id).toBe(prospectId);
+  });
+
+  it("EB-3.2 – Prospect-Status ist erstberatung_vereinbart nach Terminbuchung", async () => {
+    expect(prospectId, "prospectId muss gesetzt sein").toBeTruthy();
+    const res = await apiGet<any>(`/api/admin/prospects/${prospectId}`);
+    expect(res.status).toBe(200);
+    expect(res.data.status).toBe("erstberatung_vereinbart");
   });
 });
 

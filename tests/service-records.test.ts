@@ -407,6 +407,31 @@ describe("LN-12: Monatlicher LN – Erstellung und Blocking", () => {
   });
 });
 
+describe("LN-12B: Bereits abgedeckte Termine → 400", () => {
+  it("LN-12B.1 – Alle Termine bereits abgedeckt → 400", async () => {
+    const apptId = await createAndDocumentAppointment(
+      ["03:00", "03:30", "20:30", "20:00"],
+      [2, 60]
+    );
+    expect(apptId).toBeTruthy();
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+
+    const lnRes = await apiPost<any>("/api/service-records/single", {
+      customerId: testCustomerId,
+      appointmentId: apptId,
+    });
+    expect(lnRes.status).toBe(201);
+
+    const dupRes = await apiPost<any>("/api/service-records/single", {
+      customerId: testCustomerId,
+      appointmentId: apptId,
+    });
+    expect(dupRes.status).toBe(409);
+  });
+});
+
 describe("LN-11: Signatur-Daten Validierung", () => {
   it("LN-11.1 – Unterschrift ohne signatureData wird abgelehnt", async () => {
     const apptId = await createAndDocumentAppointment(

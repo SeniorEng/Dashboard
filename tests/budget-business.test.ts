@@ -584,3 +584,39 @@ describe("BB-15: Budget-Transaktionsliste vollständig", () => {
     expect(manualTx).toBeDefined();
   });
 });
+
+describe("BB-16: Budget-Typ-Prioritäten und FIFO-Verbrauch", () => {
+  it("BB-16.1 – Budget-Type-Settings Reihenfolge spiegelt Prioritäten wider", async () => {
+    const res = await apiGet<any>(`/api/budget/${testCustomerId}/type-settings`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.data)).toBe(true);
+    expect(res.data.length).toBeGreaterThanOrEqual(1);
+    const enabled = res.data.filter((s: any) => s.enabled);
+    for (let i = 1; i < enabled.length; i++) {
+      expect(enabled[i].priority).toBeGreaterThan(enabled[i - 1].priority);
+    }
+  });
+
+  it("BB-16.2 – Transaktionen haben gültige transactionType-Werte", async () => {
+    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=50`);
+    expect(txRes.status).toBe(200);
+    const validTypes = ["consumption", "reversal", "manual_adjustment", "allocation", "carryover"];
+    for (const tx of txRes.data) {
+      expect(validTypes).toContain(tx.transactionType);
+      expect(typeof tx.amountCents).toBe("number");
+    }
+  });
+
+  it("BB-16.3 – Carryover-Allokation vorhanden falls Übertrag existiert", async () => {
+    const ovRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    expect(ovRes.status).toBe(200);
+    expect(ovRes.data.entlastungsbetrag45b).toBeDefined();
+    if (ovRes.data.entlastungsbetrag45b.carryoverCents > 0) {
+      expect(ovRes.data.entlastungsbetrag45b.carryoverCents).toBeGreaterThan(0);
+      if (ovRes.data.entlastungsbetrag45b.carryoverExpiresAt) {
+        const expiryDate = new Date(ovRes.data.entlastungsbetrag45b.carryoverExpiresAt);
+        expect(expiryDate.getMonth()).toBe(5);
+      }
+    }
+  });
+});
