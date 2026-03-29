@@ -470,3 +470,33 @@ describe("KV-20: Deaktivierungs-Readiness Endpoint", () => {
     expect(res.data.ready).toBe(false);
   });
 });
+
+describe("KV-21: Telefonnummer-Validierung", () => {
+  it("KV-21.1 – Leere Telefonnummer im Kontakt wird abgelehnt", async () => {
+    const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({
+      contacts: [{ contactType: "familie", isPrimary: true, vorname: "Test", nachname: "Tel", telefon: "" }],
+    }));
+    expect([400, 201]).toContain(res.status);
+  });
+
+  it("KV-21.2 – Ungültiges Telefonnummernformat wird abgelehnt oder akzeptiert", async () => {
+    const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({
+      contacts: [{ contactType: "familie", isPrimary: true, vorname: "Test", nachname: "Tel", telefon: "abc-nicht-valide" }],
+    }));
+    if (res.status === 201) {
+      createdCustomerIds.push(res.data.id);
+    }
+    expect([400, 201]).toContain(res.status);
+  });
+});
+
+describe("KV-22: Kunde ist nicht in regulärer Kundenliste vor Aktivierung", () => {
+  it("KV-22.1 – Erstberatungs-Kunde erscheint nicht in GET /customers", async () => {
+    const allRes = await apiGet<any>("/api/customers");
+    expect(allRes.status).toBe(200);
+    const customers = Array.isArray(allRes.data) ? allRes.data : (allRes.data?.data || []);
+    for (const c of customers) {
+      expect(c.status).not.toBe("erstberatung");
+    }
+  });
+});

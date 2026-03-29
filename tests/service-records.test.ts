@@ -423,23 +423,17 @@ describe("LN-12: Monatlicher LN – Erstellung und Blocking", () => {
     expect(checkRes.data.documentedCount).toBeGreaterThan(0);
   });
 
-  it("LN-12.2B – Monatlicher LN POST erstellt Nachweis oder wird blockiert (Integrations-Check)", async () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
+  it("LN-12.2B – Monatlicher LN ohne dokumentierte Termine in leerem Monat → 400", async () => {
+    const emptyYear = 2025;
+    const emptyMonth = 1;
 
     const res = await apiPost<any>("/api/service-records", {
       customerId: testCustomerId,
-      year,
-      month,
+      year: emptyYear,
+      month: emptyMonth,
     });
-    expect([200, 201, 400]).toContain(res.status);
-    if (res.status === 200 || res.status === 201) {
-      expect(res.data).toBeDefined();
-    }
-    if (res.status === 400) {
-      expect(res.data.message).toBeDefined();
-    }
+    expect(res.status).toBe(400);
+    expect(res.data.message).toBeDefined();
   });
 
   it("LN-12.3 – Erneuter monatlicher LN ohne ungedeckte Termine → 400", async () => {

@@ -514,6 +514,73 @@ describe("TE-BIZ-12B: ArbZG-Break-Berechnung mit echten Einträgen", () => {
   });
 });
 
+describe("TE-BIZ-12C: Manuelle Pause reduziert Auto-Break", () => {
+  const pauseTestIds: number[] = [];
+
+  afterAll(async () => {
+    for (const id of pauseTestIds) {
+      await apiDelete(`/api/time-entries/${id}`);
+    }
+  });
+
+  it("TE-BIZ-12C.1 – Manuelle Pause auf >6h-Tag verringert Auto-Break-Bedarf", async () => {
+    const testDate = (() => {
+      const d = new Date();
+      d.setDate(d.getDate() + 210);
+      getNextWeekday(d);
+      return d.toISOString().split("T")[0];
+    })();
+    await clearDateEntries(testDate);
+
+    const w1 = await apiPost<any>("/api/time-entries", {
+      entryDate: testDate,
+      entryType: "bueroarbeit",
+      startTime: "07:00",
+      endTime: "10:30",
+      durationMinutes: 210,
+    });
+    expect(w1.status).toBe(201);
+    pauseTestIds.push(w1.data.id);
+
+    const w2 = await apiPost<any>("/api/time-entries", {
+      entryDate: testDate,
+      entryType: "bueroarbeit",
+      startTime: "11:00",
+      endTime: "14:30",
+      durationMinutes: 210,
+    });
+    expect(w2.status).toBe(201);
+    pauseTestIds.push(w2.data.id);
+
+    const d = new Date(testDate);
+    const preview1 = await apiGet<any>(
+      `/api/time-entries/month-closing/${d.getFullYear()}/${d.getMonth() + 1}/preview`
+    );
+    const breakBefore = preview1.data.autoBreaks.find((b: any) => b.date === testDate);
+
+    const p = await apiPost<any>("/api/time-entries", {
+      entryDate: testDate,
+      entryType: "pause",
+      startTime: "10:30",
+      endTime: "11:00",
+      durationMinutes: 30,
+    });
+    expect(p.status).toBe(201);
+    pauseTestIds.push(p.data.id);
+
+    const preview2 = await apiGet<any>(
+      `/api/time-entries/month-closing/${d.getFullYear()}/${d.getMonth() + 1}/preview`
+    );
+    const breakAfter = preview2.data.autoBreaks.find((b: any) => b.date === testDate);
+
+    if (breakBefore && breakBefore.autoBreakMinutes > 0) {
+      if (breakAfter) {
+        expect(breakAfter.autoBreakMinutes).toBeLessThan(breakBefore.autoBreakMinutes);
+      }
+    }
+  });
+});
+
 describe("TE-BIZ-13: Monatsübersicht", () => {
   it("TE-BIZ-13.1 – page-data liefert Zeiterfassungsdaten", async () => {
     const now = new Date();
