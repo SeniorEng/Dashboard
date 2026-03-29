@@ -511,17 +511,70 @@ describe("BB-14: PG1 – kein §45a Anspruch", () => {
   });
 });
 
+describe("BB-14B: §45a PG-abhängige Limits (PG2/PG4/PG5)", () => {
+  const pgLimitsMap: Record<number, number> = {
+    2: 31840,
+    4: 74360,
+    5: 91960,
+  };
+
+  for (const [pg, expectedCents] of Object.entries(pgLimitsMap)) {
+    it(`BB-14B.${pg} – PG${pg} §45a Limit = ${expectedCents / 100}€ via monthlyLimitCents`, async () => {
+      const provRes = await apiGet<any[]>("/api/admin/insurance-providers");
+      const createRes = await apiPost<any>("/api/admin/customers", {
+        vorname: `PG${pg}-Test`,
+        nachname: `Budget-PG${pg}-` + Date.now(),
+        geburtsdatum: "1938-06-10",
+        strasse: "Budgetstraße",
+        nr: "2",
+        plz: "54321",
+        stadt: "Budgetstadt",
+        pflegegrad: Number(pg),
+        pflegegradSeit: "2024-01-01",
+        insurance: {
+          providerId: provRes.data[0].id,
+          versichertennummer: "Q" + String(Math.floor(100000000 + Math.random() * 900000000)),
+          validFrom: "2024-01-01",
+        },
+        contacts: [{
+          contactType: "familie",
+          isPrimary: true,
+          vorname: "Kontakt",
+          nachname: `PG${pg}`,
+          telefon: "+491760000000" + pg,
+        }],
+      });
+      expect(createRes.status).toBe(201);
+      const custId = createRes.data.id;
+      try {
+        await apiPut(`/api/budget/${custId}/type-settings`, {
+          settings: [
+            { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
+            { budgetType: "umwandlung_45a", priority: 2, enabled: true, monthlyLimitCents: expectedCents },
+            { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+          ],
+        });
+        const res = await apiGet<any>(`/api/budget/${custId}/overview`);
+        expect(res.status).toBe(200);
+        expect(res.data.umwandlung45a).toBeDefined();
+        expect(res.data.umwandlung45a.monthlyBudgetCents).toBe(expectedCents);
+      } finally {
+        await apiDelete(`/api/admin/customers/${custId}`);
+      }
+    });
+  }
+});
+
 describe("BB-15: Budget-Transaktionsliste vollständig", () => {
   it("BB-15.1 – Transaktionsliste enthält Pflichtfelder", async () => {
     const res = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=5`);
     expect(res.status).toBe(200);
-    if (res.data.length > 0) {
-      const tx = res.data[0];
-      expect(tx).toHaveProperty("id");
-      expect(tx).toHaveProperty("amountCents");
-      expect(tx).toHaveProperty("transactionType");
-      expect(tx).toHaveProperty("createdAt");
-    }
+    expect(res.data.length, "Transaktionsliste darf nicht leer sein").toBeGreaterThan(0);
+    const tx = res.data[0];
+    expect(tx).toHaveProperty("id");
+    expect(tx).toHaveProperty("amountCents");
+    expect(tx).toHaveProperty("transactionType");
+    expect(tx).toHaveProperty("createdAt");
   });
 
   it("BB-15.2 – Manuelle Korrekturbuchung erscheint in Liste", async () => {

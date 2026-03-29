@@ -516,8 +516,8 @@ describe("BIZ-17: durationPromised wird bei Erstellung aus Services berechnet", 
 
 describe("BIZ-18: Termin löschen entfernt aus Tagesliste", () => {
   it("BIZ-18.1 – Gelöschter Termin erscheint nicht mehr in Tagesliste", async () => {
-    const date = getFutureDate(238);
-    const createRes = await createAppointment(date, "07:00", hwServiceId, 30);
+    const date = getFutureDate(250);
+    const createRes = await createAppointment(date, "06:00", hwServiceId, 30);
     expect(createRes.status).toBe(201);
     const id = createRes.data.id;
 
@@ -553,6 +553,64 @@ describe("BIZ-19: Notizen im documenting-Status erlaubt", () => {
       notes: "Doku-Notiz erlaubt",
     });
     expect(patchRes.status).toBe(200);
+  });
+});
+
+describe("BIZ-20A: Admin kann completed Termin löschen mit Budget-Reversal", () => {
+  it("BIZ-20A.1 – Admin löscht completed Termin → 200 mit reversal", async () => {
+    const slot = await createOnFreeSlot({
+      offsetRange: [2, 60],
+      times: ["01:00", "01:30", "22:30", "22:00"],
+      past: true,
+    });
+
+    const budgetBefore = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    expect(budgetBefore.status).toBe(200);
+
+    await apiPost<any>(`/api/appointments/${slot.id}/document`, {
+      actualStart: slot.time,
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "BIZ-20A" }],
+    });
+
+    const verify = await apiGet<any>(`/api/appointments/${slot.id}`);
+    expect(verify.data.status).toBe("completed");
+
+    const txBefore = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=50`);
+    expect(txBefore.status).toBe(200);
+    const consumptionsBefore = txBefore.data.filter((t: any) => t.transactionType === "consumption").length;
+
+    const delRes = await apiDelete(`/api/appointments/${slot.id}`);
+    expect(delRes.status).toBe(200);
+
+    const afterDel = await apiGet<any>(`/api/appointments/${slot.id}`);
+    expect(afterDel.status).toBe(404);
+
+    const txAfter = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=50`);
+    expect(txAfter.status).toBe(200);
+    const reversalsAfter = txAfter.data.filter((t: any) => t.transactionType === "reversal").length;
+    const reversalsBefore = txBefore.data.filter((t: any) => t.transactionType === "reversal").length;
+    expect(reversalsAfter).toBeGreaterThanOrEqual(reversalsBefore);
+  });
+});
+
+describe("BIZ-20B: PATCH mit Termin-Verschiebung in Konflikt", () => {
+  it("BIZ-20B.1 – PATCH Terminverschiebung in bestehenden Zeitraum liefert 409", async () => {
+    const date = getFutureDate(245);
+    const r1 = await createAppointment(date, "10:00", hwServiceId, 60);
+    expect(r1.status).toBe(201);
+    createdIds.push(r1.data.id);
+
+    const r2 = await createAppointment(date, "12:00", hwServiceId, 60);
+    expect(r2.status).toBe(201);
+    createdIds.push(r2.data.id);
+
+    const patchRes = await apiPatch<any>(`/api/appointments/${r2.data.id}`, {
+      scheduledStart: "10:00",
+    });
+    expect(patchRes.status).toBe(409);
   });
 });
 

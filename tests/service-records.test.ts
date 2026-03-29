@@ -319,6 +319,29 @@ describe("LN-9: Monatlicher Leistungsnachweis", () => {
     expect(res.data).toHaveProperty("uncoveredDocumentedCount");
   });
 
+  it("LN-9.1B – check-period für zukünftigen Monat ohne Termine", async () => {
+    const futureDate = new Date();
+    futureDate.setMonth(futureDate.getMonth() + 10);
+    const year = futureDate.getFullYear();
+    const month = futureDate.getMonth() + 1;
+
+    const checkRes = await apiGet<any>(
+      `/api/service-records/check-period?customerId=${testCustomerId}&year=${year}&month=${month}`
+    );
+    expect(checkRes.status).toBe(200);
+    expect(checkRes.data.canCreateRecord).toBe(false);
+    expect(checkRes.data.documentedCount).toBe(0);
+  });
+
+  it("LN-9.1C – Monatlicher LN-Endpoint akzeptiert Aufruf und liefert 200/201", async () => {
+    const createRes = await apiPost<any>("/api/service-records/monthly", {
+      customerId: testCustomerId,
+      year: 2020,
+      month: 1,
+    });
+    expect([200, 201]).toContain(createRes.status);
+  });
+
   it("LN-9.2 – Monatlicher LN blockiert wenn undokumentierte Termine vorhanden", async () => {
     const futureDate = getFutureDate(291);
     const createRes = await apiPost<any>("/api/appointments/kundentermin", {

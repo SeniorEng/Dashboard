@@ -281,6 +281,17 @@ describe("EB-8: Erstberatung-Service automatisch verknüpft", () => {
   });
 });
 
+describe("EB-8B: Erstberatung-PATCH Updates", () => {
+  it("EB-8B.1 – Erstberatungs-Termin kann mit PATCH aktualisiert werden", async () => {
+    expect(erstberatungId, "erstberatungId muss gesetzt sein").toBeTruthy();
+    const res = await apiPatch<any>(`/api/appointments/${erstberatungId}`, {
+      notes: "EB-8B Aktualisierte Erstberatungs-Notizen",
+    });
+    expect(res.status).toBe(200);
+    expect(res.data.notes).toBe("EB-8B Aktualisierte Erstberatungs-Notizen");
+  });
+});
+
 describe("EB-9: Admin-Prospect PATCH (vollständig)", () => {
   it("EB-9.1 – Admin kann Prospect-Kontaktdaten aktualisieren", async () => {
     expect(prospectId, "prospectId muss gesetzt sein").toBeTruthy();
