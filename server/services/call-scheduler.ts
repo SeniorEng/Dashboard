@@ -16,6 +16,21 @@ interface CallScheduleResult {
   reason: string;
 }
 
+interface ScheduledCallRow {
+  id: number;
+  prospect_id: number;
+  lead_name: string;
+  lead_phone: string;
+  quelle: string | null;
+  scheduled_at: Date;
+  status: string;
+  reason: string | null;
+  attempts: number;
+  last_error: string | null;
+  created_at: Date;
+  executed_at: Date | null;
+}
+
 function getBerlinTime(date: Date): { day: number; hour: number } {
   const berlinStr = date.toLocaleString("en-US", { timeZone: "Europe/Berlin", weekday: "short", hour: "numeric", hour12: false });
   const parts = berlinStr.split(", ");
@@ -26,19 +41,8 @@ function getBerlinTime(date: Date): { day: number; hour: number } {
 }
 
 function getNextMondayAt9Berlin(referenceDate: Date): Date {
-  const berlinDateStr = referenceDate.toLocaleString("en-US", {
-    timeZone: "Europe/Berlin",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    weekday: "short",
-  });
-
-  const parts = berlinDateStr.split(", ");
-  const dayName = parts[0];
-  const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-  const currentDay = dayMap[dayName] ?? 0;
-  const daysUntilMonday = currentDay === 0 ? 1 : (currentDay === 6 ? 2 : 0);
+  const berlin = getBerlinTime(referenceDate);
+  const daysUntilMonday = berlin.day === 0 ? 1 : 2;
 
   const mondayCallAt = new Date(referenceDate);
   mondayCallAt.setDate(mondayCallAt.getDate() + daysUntilMonday);
@@ -94,27 +98,42 @@ export async function scheduleLeadCall(params: {
   const schedule = calculateNextCallTime(now);
 
   const noteText = `Anruf geplant für ${formatGermanDateTime(schedule.callAt)} (${schedule.reason})`;
-
   await safeAddNote(params.prospectId, noteText);
 
-  await db.insert(scheduledCalls).values({
-    prospectId: params.prospectId,
-    leadName: params.leadName,
-    leadPhone: params.leadPhone,
-    quelle: params.quelle,
-    scheduledAt: schedule.callAt,
-    status: "pending",
-    reason: schedule.reason,
-  });
+  if (schedule.isWeekendDeferred) {
+    await db.insert(scheduledCalls).values({
+      prospectId: params.prospectId,
+      leadName: params.leadName,
+      leadPhone: params.leadPhone,
+      quelle: params.quelle,
+      scheduledAt: schedule.callAt,
+      status: "pending",
+      reason: schedule.reason,
+    });
+    console.log(`[call-scheduler] Weekend call scheduled for prospect ${params.prospectId} at ${schedule.callAt.toISOString()}`);
+    return;
+  }
 
-  console.log(`[call-scheduler] Call scheduled for prospect ${params.prospectId} at ${schedule.callAt.toISOString()} (${schedule.reason})`);
+  const delayMs = schedule.callAt.getTime() - now.getTime();
+  console.log(`[call-scheduler] Call for prospect ${params.prospectId} delayed by ${Math.round(delayMs / 1000)}s via setTimeout (until ${schedule.callAt.toISOString()})`);
+
+  setTimeout(() => {
+    initiateLeadCallBridge({
+      prospectId: params.prospectId,
+      leadName: params.leadName,
+      leadPhone: params.leadPhone,
+      quelle: params.quelle,
+    }).catch(err => {
+      console.error(`[call-scheduler] Delayed call failed for prospect ${params.prospectId}:`, err);
+    });
+  }, delayMs);
 }
 
 async function processPendingCalls(): Promise<void> {
   try {
     const now = new Date();
 
-    const claimedCalls = await db.execute(sql`
+    const claimedResult = await db.execute(sql`
       UPDATE scheduled_calls
       SET status = 'processing'
       WHERE id IN (
@@ -125,7 +144,7 @@ async function processPendingCalls(): Promise<void> {
       RETURNING *
     `);
 
-    const rows = claimedCalls.rows as any[];
+    const rows = claimedResult.rows as ScheduledCallRow[];
 
     for (const call of rows) {
       try {
@@ -134,6 +153,7 @@ async function processPendingCalls(): Promise<void> {
           leadName: call.lead_name,
           leadPhone: call.lead_phone,
           quelle: call.quelle || "unbekannt",
+          throwOnError: true,
         });
 
         await db
@@ -141,14 +161,14 @@ async function processPendingCalls(): Promise<void> {
           .set({
             status: "completed",
             executedAt: new Date(),
-            attempts: (call.attempts || 0) + 1,
+            attempts: (call.attempts ?? 0) + 1,
           })
           .where(eq(scheduledCalls.id, call.id));
 
         console.log(`[call-scheduler] Executed scheduled call ${call.id} for prospect ${call.prospect_id}`);
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        const newAttempts = (call.attempts || 0) + 1;
+        const newAttempts = (call.attempts ?? 0) + 1;
         const newStatus = newAttempts >= 3 ? "failed" : "pending";
 
         await db

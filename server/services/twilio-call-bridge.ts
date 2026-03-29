@@ -43,8 +43,8 @@ function buildCallbackBaseUrl(): string {
   return "https://localhost:5000";
 }
 
-export async function initiateLeadCallBridge(params: CallBridgeParams): Promise<void> {
-  const { prospectId, leadName, leadPhone, quelle } = params;
+export async function initiateLeadCallBridge(params: CallBridgeParams & { throwOnError?: boolean }): Promise<void> {
+  const { prospectId, leadName, leadPhone, quelle, throwOnError } = params;
 
   const config = await getTwilioConfig();
   if (!config) {
@@ -54,8 +54,10 @@ export async function initiateLeadCallBridge(params: CallBridgeParams): Promise<
 
   const phoneResult = validateGermanPhone(leadPhone);
   if (!phoneResult.valid) {
+    const errorMsg = `Telefonnummer ungültig (${leadPhone})`;
     console.log(`[twilio-bridge] Invalid lead phone for prospect ${prospectId}: ${phoneResult.error}`);
-    await safeAddNote(prospectId, `Automatischer Anruf nicht möglich: Telefonnummer ungültig (${leadPhone})`, "notiz");
+    await safeAddNote(prospectId, `Automatischer Anruf nicht möglich: ${errorMsg}`, "notiz");
+    if (throwOnError) throw new Error(errorMsg);
     return;
   }
 
@@ -89,6 +91,7 @@ export async function initiateLeadCallBridge(params: CallBridgeParams): Promise<
     console.error(`[twilio-bridge] Failed to initiate call for prospect ${prospectId}: ${msg}`);
 
     await safeAddNote(prospectId, `Automatischer Anruf fehlgeschlagen: ${msg}`, "notiz");
+    if (throwOnError) throw err;
   }
 }
 

@@ -50,6 +50,13 @@
       "when": 1774646075274,
       "tag": "0006_needy_victor_mancha",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1774972800000,
+      "tag": "0007_scheduled_calls",
+      "breakpoints": true
     }
   ]
 }
