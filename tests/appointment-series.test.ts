@@ -351,21 +351,11 @@ describe("SER-11: Serie Counts und Details", () => {
 });
 
 describe("SER-12A: Wochenendtag-Filterung", () => {
-  it("SER-12A.1 – Serie mit sa/so in weekdays wird abgelehnt oder filtert Wochenenden", async () => {
+  it("SER-12A.1 – Serie mit ungültigen Wochenendtagen sa/so wird abgelehnt (400)", async () => {
     const res = await apiPost<any>("/api/appointment-series",
       seriesPayload({ _offset: 305, _span: 21, weekdays: ["sa", "so"], scheduledStart: "10:00" })
     );
-    expect([201, 400]).toContain(res.status);
-    if (res.status === 201) {
-      cleanupSeriesIds.push(res.data.series.id);
-      const detail = await apiGet<any>(`/api/appointment-series/${res.data.series.id}`);
-      expect(detail.status).toBe(200);
-      expect(detail.data.appointments.length).toBeGreaterThan(0);
-      for (const appt of detail.data.appointments) {
-        const day = new Date(appt.date + "T00:00:00").getDay();
-        expect([0, 6]).toContain(day);
-      }
-    }
+    expect(res.status).toBe(400);
   });
 
   it("SER-12A.2 – Serie mit nur Wochentagen enthält keine Wochenenden", async () => {

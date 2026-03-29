@@ -614,6 +614,45 @@ describe("BIZ-20B: PATCH mit Termin-Verschiebung in Konflikt", () => {
   });
 });
 
+describe("BIZ-20C: Statusübergangs-Validierung", () => {
+  it("BIZ-20C.1 – scheduled kann direkt dokumentiert werden (→ completed)", async () => {
+    const slot = await createOnFreeSlot({
+      offsetRange: [2, 60],
+      times: ["00:00", "00:30", "05:00", "05:30"],
+      past: true,
+    });
+
+    const docRes = await apiPost<any>(`/api/appointments/${slot.id}/document`, {
+      actualStart: slot.time,
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "Direkt-Doku" }],
+    });
+    expect(docRes.status).toBe(200);
+
+    const verify = await apiGet<any>(`/api/appointments/${slot.id}`);
+    expect(verify.data.status).toBe("completed");
+  });
+
+  it("BIZ-20C.2 – document ohne services wird abgelehnt (400)", async () => {
+    const slot = await createOnFreeSlot({
+      offsetRange: [2, 60],
+      times: ["00:30", "01:00", "05:30", "04:30"],
+      past: true,
+    });
+
+    const docRes = await apiPost<any>(`/api/appointments/${slot.id}/document`, {
+      actualStart: slot.time,
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [],
+    });
+    expect(docRes.status).toBe(400);
+  });
+});
+
 describe("BIZ-20: Completed PATCH Ablehnung", () => {
   it("BIZ-20.1 – completed Termin: notes PATCH wird abgelehnt (403)", async () => {
     const slot = await createOnFreeSlot({
