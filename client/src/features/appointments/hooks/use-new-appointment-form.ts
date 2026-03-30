@@ -129,6 +129,9 @@ export function useNewAppointmentForm() {
   const [ebNotes, setEbNotes] = useState<string>("");
   const [ebAssignedEmployeeId, setEbAssignedEmployeeId] = useState<string>(urlParams.get("employeeId") || "");
 
+  const [prospectMode, setProspectMode] = useState<"existing" | "new">("existing");
+  const [selectedExistingProspectId, setSelectedExistingProspectId] = useState<number | null>(null);
+
   const [inlineProspectVorname, setInlineProspectVorname] = useState<string>("");
   const [inlineProspectNachname, setInlineProspectNachname] = useState<string>("");
   const [inlineProspectTelefon, setInlineProspectTelefon] = useState<string>("");
@@ -167,7 +170,7 @@ export function useNewAppointmentForm() {
     },
   });
 
-  const effectiveProspectId = fromProspectId || (inlineProspectCreatedId ? String(inlineProspectCreatedId) : null);
+  const effectiveProspectId = fromProspectId || (selectedExistingProspectId ? String(selectedExistingProspectId) : null) || (inlineProspectCreatedId ? String(inlineProspectCreatedId) : null);
 
   const { data: inlineProspectData } = useQuery<ProspectAppointmentData>({
     queryKey: ["prospect-appointment-data", inlineProspectCreatedId],
@@ -179,7 +182,17 @@ export function useNewAppointmentForm() {
     staleTime: 60_000,
   });
 
-  const effectiveProspectData = fromProspectId ? (prospectData ?? null) : (inlineProspectData ?? null);
+  const { data: selectedProspectData } = useQuery<ProspectAppointmentData>({
+    queryKey: ["prospect-appointment-data", selectedExistingProspectId],
+    queryFn: async () => {
+      const result = await api.get<{ prospect: ProspectAppointmentData; appointments: unknown[] }>(`/prospects/${selectedExistingProspectId}/appointment-data`);
+      return unwrapResult(result).prospect;
+    },
+    enabled: !!selectedExistingProspectId && !fromProspectId,
+    staleTime: 60_000,
+  });
+
+  const effectiveProspectData = fromProspectId ? (prospectData ?? null) : (selectedProspectData ?? inlineProspectData ?? null);
 
   const defaultsInitialized = useRef(false);
   const copyFromInitialized = useRef(false);
@@ -644,6 +657,14 @@ export function useNewAppointmentForm() {
     employeeOptions,
     ebEmployeeOptions,
     isPending,
+
+    prospectMode,
+    setProspectMode,
+    selectedExistingProspectId,
+    setSelectedExistingProspectId,
+    clearSelectedProspect: () => {
+      setSelectedExistingProspectId(null);
+    },
 
     inlineProspectVorname,
     setInlineProspectVorname,

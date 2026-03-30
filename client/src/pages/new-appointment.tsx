@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,7 +19,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ChevronLeft, Loader2, Calendar, Clock, User, Plus, Users, AlertTriangle, XCircle, CheckCircle2, Copy, UserCheck, Phone, UserPlus, Pencil, Check, X, Home, Mail, Repeat } from "lucide-react";
+import { ChevronLeft, Loader2, Calendar, Clock, User, Plus, Users, AlertTriangle, XCircle, CheckCircle2, Copy, UserCheck, Phone, UserPlus, Pencil, Check, X, Home, Mail, Repeat, Search } from "lucide-react";
 import { WEEKDAYS, type Weekday } from "@shared/schema/appointments";
 import { WEEKDAY_LABELS, formatWeekdays } from "@/features/appointments/hooks/use-appointment-series";
 import { iconSize, componentStyles } from "@/design-system";
@@ -27,8 +28,10 @@ import { EmployeeAvailability } from "@/features/appointments/components/employe
 import { AddressFields } from "@/pages/admin/components/address-fields";
 import { isDachPhone } from "@shared/schema/common";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS, formatDuration } from "@shared/types";
+import type { Prospect } from "@shared/schema";
 import { useLocation } from "wouter";
 import { useUpdateProspect } from "@/features/prospects";
+import { api, unwrapResult } from "@/lib/api/client";
 
 export default function NewAppointment() {
   const [, setLocation] = useLocation();
@@ -43,6 +46,31 @@ export default function NewAppointment() {
   const [ebEditPlz, setEbEditPlz] = useState("");
   const [ebEditStadt, setEbEditStadt] = useState("");
   const [ebEditErrors, setEbEditErrors] = useState<Record<string, string>>({});
+
+  const ELIGIBLE_STATUSES = "neu,kontaktiert,wiedervorlage,qualifiziert";
+  const { data: availableProspects = [], isLoading: prospectsLoading } = useQuery<Prospect[]>({
+    queryKey: ["prospects-for-erstberatung"],
+    queryFn: async () => {
+      const params = new URLSearchParams({ status: ELIGIBLE_STATUSES });
+      const result = await api.get<Prospect[]>(`/admin/prospects?${params}`);
+      return unwrapResult(result);
+    },
+    staleTime: 30_000,
+    enabled: form.prospectMode === "existing" && !form.fromProspectId,
+  });
+
+  const prospectOptions = useMemo(() =>
+    availableProspects.map((p) => {
+      const parts = [`${p.vorname} ${p.nachname}`];
+      if (p.telefon) parts.push(p.telefon);
+      if (p.email) parts.push(p.email);
+      return {
+        value: p.id.toString(),
+        label: parts.join(" — "),
+      };
+    }),
+    [availableProspects]
+  );
 
   const startEditingEbContact = () => {
     if (!form.prospectData) return;
@@ -440,6 +468,54 @@ export default function NewAppointment() {
             <CardContent className="space-y-6">
               {!form.fromProspectId ? (
                 <div className="space-y-4">
+                  <div className="flex gap-2" data-testid="panel-prospect-mode-toggle">
+                    <Button
+                      variant={form.prospectMode === "existing" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => form.setProspectMode("existing")}
+                      className="flex-1"
+                      data-testid="button-prospect-mode-existing"
+                    >
+                      <Search className={`${iconSize.sm} mr-2`} />
+                      Bestehenden auswählen
+                    </Button>
+                    <Button
+                      variant={form.prospectMode === "new" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => form.setProspectMode("new")}
+                      className="flex-1"
+                      data-testid="button-prospect-mode-new"
+                    >
+                      <UserPlus className={`${iconSize.sm} mr-2`} />
+                      Neu anlegen
+                    </Button>
+                  </div>
+
+                  {form.prospectMode === "existing" && !form.selectedExistingProspectId && (
+                    <div className="rounded-lg border border-teal-200 bg-teal-50 p-4" data-testid="panel-prospect-search">
+                      <div className="flex items-center gap-2 text-teal-800 font-medium mb-3">
+                        <Search className={iconSize.sm} />
+                        <span>Bestehenden Interessenten auswählen</span>
+                      </div>
+                      <SearchableSelect
+                        options={prospectOptions}
+                        value=""
+                        onValueChange={(val) => {
+                          form.setSelectedExistingProspectId(Number(val));
+                        }}
+                        placeholder="Interessent suchen…"
+                        searchPlaceholder="Name, Telefon oder E-Mail…"
+                        emptyText={prospectsLoading ? "Wird geladen…" : "Keine passenden Interessenten gefunden."}
+                        isLoading={prospectsLoading}
+                        data-testid="select-existing-prospect"
+                      />
+                      <p className="text-xs text-teal-600 mt-2">
+                        Zeigt Interessenten mit Status: Neu, Kontaktiert, Wiedervorlage, Qualifiziert
+                      </p>
+                    </div>
+                  )}
+
+                  {form.prospectMode === "new" && (
                   <div className="rounded-lg border border-blue-200 bg-blue-50 p-4" data-testid="panel-inline-prospect">
                     <div className="flex items-center gap-2 text-blue-800 font-medium mb-3">
                       <UserPlus className={iconSize.sm} />
@@ -541,9 +617,23 @@ export default function NewAppointment() {
                       Interessent anlegen & weiter
                     </Button>
                   </div>
+                  )}
                 </div>
               ) : (
                 <>
+                  {!form.prospectData && (
+                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 flex items-center justify-between" data-testid="panel-prospect-loading">
+                      <div className="flex items-center gap-2 text-blue-700">
+                        <Loader2 className={`${iconSize.sm} animate-spin`} />
+                        <span className="text-sm">Interessent wird geladen…</span>
+                      </div>
+                      {form.selectedExistingProspectId && (
+                        <Button variant="ghost" size="sm" className="h-6 text-xs gap-1 text-blue-700 hover:text-blue-900" onClick={() => form.clearSelectedProspect()} data-testid="button-change-prospect-loading">
+                          <X className="h-3 w-3" /> Ändern
+                        </Button>
+                      )}
+                    </div>
+                  )}
                   {form.prospectData && (
                     <div className="rounded-lg border border-blue-200 bg-blue-50 p-4" data-testid="panel-prospect-info">
                       <div className="flex items-center justify-between mb-2">
@@ -551,11 +641,18 @@ export default function NewAppointment() {
                           <UserCheck className={iconSize.sm} />
                           <span>Interessent</span>
                         </div>
-                        {!editingEbContact && (
-                          <Button variant="ghost" size="sm" className="h-6 text-xs gap-1 text-blue-700 hover:text-blue-900" onClick={startEditingEbContact} data-testid="button-edit-eb-contact">
-                            <Pencil className="h-3 w-3" /> Bearbeiten
-                          </Button>
-                        )}
+                        <div className="flex items-center gap-1">
+                          {form.selectedExistingProspectId && !editingEbContact && (
+                            <Button variant="ghost" size="sm" className="h-6 text-xs gap-1 text-blue-700 hover:text-blue-900" onClick={() => form.clearSelectedProspect()} data-testid="button-change-selected-prospect">
+                              <X className="h-3 w-3" /> Ändern
+                            </Button>
+                          )}
+                          {!editingEbContact && (
+                            <Button variant="ghost" size="sm" className="h-6 text-xs gap-1 text-blue-700 hover:text-blue-900" onClick={startEditingEbContact} data-testid="button-edit-eb-contact">
+                              <Pencil className="h-3 w-3" /> Bearbeiten
+                            </Button>
+                          )}
+                        </div>
                       </div>
                       {editingEbContact ? (
                         <div className="space-y-2">

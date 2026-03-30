@@ -10,7 +10,7 @@ import {
   prospectOffers,
   appointments,
 } from "@shared/schema";
-import { eq, and, or, ilike, isNull, desc, sql } from "drizzle-orm";
+import { eq, and, or, ilike, isNull, desc, sql, inArray } from "drizzle-orm";
 import { db } from "../lib/db";
 
 export const prospectStorage = {
@@ -26,7 +26,12 @@ export const prospectStorage = {
     const conditions = [isNull(prospects.deletedAt)];
 
     if (filters?.status) {
-      conditions.push(eq(prospects.status, filters.status));
+      const statuses = filters.status.split(",").map(s => s.trim()).filter(Boolean);
+      if (statuses.length === 1) {
+        conditions.push(eq(prospects.status, statuses[0]));
+      } else if (statuses.length > 1) {
+        conditions.push(inArray(prospects.status, statuses));
+      }
     }
 
     if (filters?.search) {
