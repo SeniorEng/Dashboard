@@ -70,7 +70,7 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
       onFocus={handlePrefetch}
     >
       <Card 
-        className="border-0 shadow-sm cursor-pointer hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+        className="border-0 shadow-sm cursor-pointer hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 overflow-hidden"
         onClick={handleCardClick}
         onKeyDown={handleKeyDown}
         tabIndex={0}
@@ -79,12 +79,12 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
       >
         <div className="flex items-stretch">
           {serviceInfo.hasBoth ? (
-            <div className="w-1.5 flex flex-col rounded-l-xl overflow-hidden">
+            <div className="w-1.5 flex flex-col overflow-hidden">
               <div className="flex-1 bg-amber-500" />
               <div className="flex-1 bg-sky-500" />
             </div>
           ) : (
-            <div className={`w-1.5 ${serviceInfo.borderClass} rounded-l-xl`} />
+            <div className={`w-1.5 ${serviceInfo.borderClass}`} />
           )}
 
           <div className="w-[4.5rem] flex flex-col items-center justify-center py-2.5 px-1.5 text-center border-r border-border/30">
@@ -145,7 +145,7 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
             const hasAddress = !!appointment.customer?.address;
             if (!hasPhone && !hasAddress) return null;
             return (
-              <div className="shrink-0 flex flex-col border-l border-border/30 rounded-r-xl overflow-hidden">
+              <div className="shrink-0 flex flex-col border-l border-border/30">
                 {hasPhone && (
                   <a
                     href={`tel:${phoneNumber}`}
