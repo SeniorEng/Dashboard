@@ -618,7 +618,8 @@ export default function Dashboard() {
           <div className="flex flex-col gap-3 animate-in fade-in duration-300">
             {sortedTimeline.map((item) => {
               if (item.type === "appointment") {
-                return <AppointmentCard key={`appt-${item.data.id}`} appointment={item.data} />;
+                const isSub = !isAdmin && item.data.assignedEmployeeId !== user?.id;
+                return <AppointmentCard key={`appt-${item.data.id}`} appointment={item.data} isSubstitute={isSub} />;
               }
               return (
                 <TimeEntryCard

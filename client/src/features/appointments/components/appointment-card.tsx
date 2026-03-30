@@ -14,6 +14,7 @@ import { formatTimeSlot, getEndTime } from "../utils";
 interface AppointmentCardProps {
   appointment: AppointmentWithCustomer;
   showDate?: boolean;
+  isSubstitute?: boolean;
 }
 
 function getStatusIcon(status: string) {
@@ -29,7 +30,7 @@ function getStatusIcon(status: string) {
   }
 }
 
-function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProps) {
+function AppointmentCardComponent({ appointment, showDate, isSubstitute }: AppointmentCardProps) {
   const [, navigate] = useLocation();
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -64,13 +65,16 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
   return (
     <div 
       className={`rounded-xl transition-opacity duration-200 ${
+        isSubstitute ? "opacity-50 hover:opacity-75" :
         appointment.status === "completed" ? "opacity-60 hover:opacity-100" : ""
       }`}
       onMouseEnter={handlePrefetch}
       onFocus={handlePrefetch}
     >
       <Card 
-        className="border-0 shadow-sm cursor-pointer hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 overflow-hidden"
+        className={`shadow-sm cursor-pointer hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 overflow-hidden ${
+          isSubstitute ? "border border-dashed border-border/50" : "border-0"
+        }`}
         onClick={handleCardClick}
         onKeyDown={handleKeyDown}
         tabIndex={0}
@@ -128,7 +132,13 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
               <MapPin className="w-3 h-3 mr-1 shrink-0" />
               <span className="truncate">{appointment.customer?.address || "Keine Adresse"}</span>
             </div>
-            {user?.isAdmin && appointment.assignedEmployeeName && (
+            {isSubstitute && appointment.assignedEmployeeName && (
+              <div className="flex items-center text-xs text-muted-foreground mt-0.5" data-testid={`text-substitute-${appointment.id}`}>
+                <User className="w-3 h-3 mr-1 shrink-0" />
+                <span className="truncate">Vertretung: {appointment.assignedEmployeeName}</span>
+              </div>
+            )}
+            {!isSubstitute && user?.isAdmin && appointment.assignedEmployeeName && (
               <div className="flex items-center text-xs text-muted-foreground mt-0.5" data-testid={`text-employee-${appointment.id}`}>
                 <User className="w-3 h-3 mr-1 shrink-0" />
                 <span className="truncate">{appointment.assignedEmployeeName}</span>
@@ -139,7 +149,7 @@ function AppointmentCardComponent({ appointment, showDate }: AppointmentCardProp
             </div>
           </div>
 
-          {(() => {
+          {!isSubstitute && (() => {
             const phoneNumber = appointment.customer?.telefon || appointment.customer?.festnetz;
             const hasPhone = !!phoneNumber;
             const hasAddress = !!appointment.customer?.address;
