@@ -30,6 +30,7 @@ const prospectContactUpdateSchema = z.object({
   nr: z.string().optional().nullable(),
   plz: z.string().optional().nullable(),
   stadt: z.string().optional().nullable(),
+  pflegegrad: z.number().int().min(1).max(5).optional().nullable(),
 }).strict();
 
 router.post("/inline", requireRoles("erstberatung"), asyncHandler("Interessent konnte nicht erstellt werden", async (req: Request, res: Response) => {

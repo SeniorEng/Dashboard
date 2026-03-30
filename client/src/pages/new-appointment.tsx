@@ -45,6 +45,7 @@ export default function NewAppointment() {
   const [ebEditNr, setEbEditNr] = useState("");
   const [ebEditPlz, setEbEditPlz] = useState("");
   const [ebEditStadt, setEbEditStadt] = useState("");
+  const [ebEditPflegegrad, setEbEditPflegegrad] = useState("");
   const [ebEditErrors, setEbEditErrors] = useState<Record<string, string>>({});
 
   const ELIGIBLE_STATUSES = "neu,kontaktiert,wiedervorlage,qualifiziert";
@@ -94,6 +95,7 @@ export default function NewAppointment() {
     setEbEditNr(form.prospectData.nr || "");
     setEbEditPlz(form.prospectData.plz || "");
     setEbEditStadt(form.prospectData.stadt || "");
+    setEbEditPflegegrad(form.prospectData.pflegegrad ? form.prospectData.pflegegrad.toString() : "");
     setEbEditErrors({});
     setEditingEbContact(true);
   };
@@ -136,6 +138,7 @@ export default function NewAppointment() {
         nr: ebEditNr.trim() || null,
         plz: ebEditPlz.trim() || null,
         stadt: ebEditStadt.trim() || null,
+        pflegegrad: ebEditPflegegrad ? parseInt(ebEditPflegegrad) : null,
       },
     }, {
       onSuccess: () => setEditingEbContact(false),
@@ -692,6 +695,21 @@ export default function NewAppointment() {
                             testIdPrefix="eb-edit"
                           />
                           {ebEditErrors.plz && <p className="text-destructive text-xs">{ebEditErrors.plz}</p>}
+                          <div className="space-y-1">
+                            <Label className="text-xs text-blue-600">Pflegegrad</Label>
+                            <Select value={ebEditPflegegrad} onValueChange={setEbEditPflegegrad}>
+                              <SelectTrigger className="bg-white" data-testid="select-eb-edit-pflegegrad">
+                                <SelectValue placeholder="Pflegegrad wählen..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PFLEGEGRAD_OPTIONS.map((p) => (
+                                  <SelectItem key={p} value={p.toString()}>
+                                    Pflegegrad {p}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
                           <div className="flex gap-2 pt-1">
                             <Button size="sm" className="flex-1" onClick={handleSaveEbContact} disabled={updateProspectMutation.isPending} data-testid="button-save-eb-contact">
                               {updateProspectMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Check className="h-3.5 w-3.5 mr-1" />}
@@ -709,6 +727,9 @@ export default function NewAppointment() {
                           {form.prospectData.email && <div><span className="text-blue-500">E-Mail:</span> {form.prospectData.email}</div>}
                           {form.prospectData.strasse && (
                             <div className="col-span-2"><span className="text-blue-500">Adresse:</span> {form.prospectData.strasse} {form.prospectData.nr}, {form.prospectData.plz} {form.prospectData.stadt}</div>
+                          )}
+                          {form.prospectData.pflegegrad && (
+                            <div><span className="text-blue-500">Pflegegrad:</span> {form.prospectData.pflegegrad}</div>
                           )}
                           {!form.prospectData.telefon && !form.prospectData.email && !form.prospectData.strasse && (
                             <div className="col-span-2 text-blue-400 italic">Keine Kontaktdaten — <button className="underline" onClick={startEditingEbContact}>jetzt ergänzen</button></div>
