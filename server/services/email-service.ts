@@ -67,8 +67,9 @@ export async function testSmtpConnection(settings: CompanySettings): Promise<{ s
 
 function toAbsoluteUrl(relativeUrl: string | null | undefined): string | null {
   if (!relativeUrl) return null;
+  if (relativeUrl.startsWith("data:")) return relativeUrl;
   if (relativeUrl.startsWith("http://") || relativeUrl.startsWith("https://")) return relativeUrl;
-  const domain = process.env.REPLIT_DEV_DOMAIN || process.env.REPLIT_DOMAINS?.split(",")[0];
+  const domain = process.env.REPLIT_DOMAINS?.split(",")[0] || process.env.REPLIT_DEV_DOMAIN;
   if (!domain) return null;
   const base = `https://${domain}`;
   return `${base}${relativeUrl.startsWith("/") ? "" : "/"}${relativeUrl}`;
