@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { format, addDays, startOfWeek, subWeeks, isSameDay } from "date-fns";
 import { de } from "date-fns/locale";
-import { Plus, ChevronsLeft, ChevronsRight, CalendarCheck, Clock, Pencil, Trash2, Loader2, Ban, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, ChevronsLeft, ChevronsRight, CalendarCheck, Clock, Pencil, Trash2, Loader2, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { getHolidayMap } from "@shared/utils/holidays";
 import { iconSize } from "@/design-system";
@@ -37,8 +37,6 @@ import { useAppointmentCoverage, type CoverageData } from "@/features/appointmen
 const WEEKDAY_NAMES_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 
 const FULL_DAY_TYPES: string[] = ["urlaub", "krankheit"];
-const AVAILABILITY_TYPES: string[] = ["verfuegbar"];
-const BLOCKER_TYPES: string[] = [];
 
 interface DayButtonProps {
   dayStr: string;
@@ -140,8 +138,11 @@ function TimeEntryCard({
               {entry.startTime.slice(0, 5)} – {entry.endTime.slice(0, 5)}
             </div>
           )}
-          {!entry.startTime && entry.durationMinutes && (
+          {!entry.startTime && !entry.isFullDay && entry.durationMinutes && (
             <div className="text-xs text-gray-500">{entry.durationMinutes} Min.</div>
+          )}
+          {entry.isFullDay && !entry.startTime && (
+            <div className="text-xs text-gray-500">Ganztägig</div>
           )}
           {entry.notes && (
             <div className="text-xs text-gray-500 truncate mt-0.5">{entry.notes}</div>
@@ -424,27 +425,21 @@ export default function Dashboard() {
   const goToToday = () => setSelectedDate(new Date());
   const monthLabel = format(selectedDate, "MMMM yyyy", { locale: de });
 
-  const { fullDayEntries, availabilityEntries, blockerEntries, timelineEntries } = useMemo(() => {
+  const { fullDayEntries, timelineEntries } = useMemo(() => {
     const fullDay: TimeEntry[] = [];
-    const availability: TimeEntry[] = [];
-    const blockers: TimeEntry[] = [];
     const timed: TimeEntry[] = [];
 
     if (dayTimeEntries) {
       for (const entry of dayTimeEntries) {
-        if (FULL_DAY_TYPES.includes(entry.entryType)) {
+        if (FULL_DAY_TYPES.includes(entry.entryType) || entry.isFullDay) {
           fullDay.push(entry);
-        } else if (AVAILABILITY_TYPES.includes(entry.entryType)) {
-          availability.push(entry);
-        } else if (BLOCKER_TYPES.includes(entry.entryType)) {
-          blockers.push(entry);
         } else {
           timed.push(entry);
         }
       }
     }
 
-    return { fullDayEntries: fullDay, availabilityEntries: availability, blockerEntries: blockers, timelineEntries: timed };
+    return { fullDayEntries: fullDay, timelineEntries: timed };
   }, [dayTimeEntries]);
 
   const sortedTimeline = useMemo(() => {
@@ -471,7 +466,7 @@ export default function Dashboard() {
     return items;
   }, [appointments, timelineEntries]);
 
-  const hasAnyContent = sortedTimeline.length > 0 || fullDayEntries.length > 0 || availabilityEntries.length > 0 || blockerEntries.length > 0;
+  const hasAnyContent = sortedTimeline.length > 0 || fullDayEntries.length > 0;
 
   return (
     <Layout>
@@ -584,50 +579,15 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {fullDayEntries.map((entry) => {
-          const config = TIME_ENTRY_TYPE_CONFIG[entry.entryType as TimeEntryType];
-          if (!config) return null;
-          const Icon = config.icon;
-          return (
-            <div
-              key={`fullday-${entry.id}`}
-              className={`p-3 rounded-xl ${config.bgColor} flex items-center gap-3`}
-              data-testid={`fullday-banner-${entry.id}`}
-            >
-              <Icon className={`${iconSize.md} ${config.color}`} />
-              <div>
-                <span className={`font-medium text-sm ${config.color}`}>{config.label}</span>
-                {entry.notes && <span className="text-xs text-gray-500 ml-2">{entry.notes}</span>}
-              </div>
-            </div>
-          );
-        })}
-
-        {availabilityEntries.length > 0 && (
-          <div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 px-3 py-2 rounded-lg" data-testid="availability-stripe">
-            <CalendarCheck className="h-3.5 w-3.5 shrink-0" />
-            <span>
-              Verfügbar: {availabilityEntries.map((e) =>
-                e.startTime && e.endTime
-                  ? `${e.startTime.slice(0, 5)} – ${e.endTime.slice(0, 5)}`
-                  : "Ganztägig"
-              ).join(", ")}
-            </span>
-          </div>
-        )}
-
-        {blockerEntries.length > 0 && (
-          <div className="flex items-center gap-2 text-xs text-orange-700 bg-orange-50 px-3 py-2 rounded-lg" data-testid="blocker-stripe">
-            <Ban className="h-3.5 w-3.5 shrink-0" />
-            <span>
-              Blockiert: {blockerEntries.map((e) =>
-                e.startTime && e.endTime
-                  ? `${e.startTime.slice(0, 5)} – ${e.endTime.slice(0, 5)}`
-                  : "Ganztägig"
-              ).join(", ")}
-            </span>
-          </div>
-        )}
+        {fullDayEntries.map((entry) => (
+          <TimeEntryCard
+            key={`fullday-${entry.id}`}
+            entry={entry}
+            onEdit={handleOpenEdit}
+            onDelete={setDeleteTarget}
+            isMonthClosed={isMonthClosed}
+          />
+        ))}
 
         {isLoading ? (
           <div className="min-h-[200px] space-y-3 p-2" data-testid="loading-appointments">
