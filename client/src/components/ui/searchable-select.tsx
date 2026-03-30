@@ -40,6 +40,8 @@ interface SearchableSelectProps {
   className?: string;
   "data-testid"?: string;
   isLoading?: boolean;
+  onSearchChange?: (search: string) => void;
+  serverSideSearch?: boolean;
 }
 
 export function SearchableSelect({
@@ -53,6 +55,8 @@ export function SearchableSelect({
   className,
   "data-testid": testId,
   isLoading = false,
+  onSearchChange,
+  serverSideSearch = false,
 }: SearchableSelectProps) {
   const [open, setOpen] = React.useState(false);
   const isMobile = useIsMobile();
@@ -91,10 +95,11 @@ export function SearchableSelect({
   );
 
   const commandList = (
-    <Command shouldFilter={true}>
+    <Command shouldFilter={!serverSideSearch}>
       <CommandInput
         placeholder={searchPlaceholder}
         className="min-h-[44px]"
+        onValueChange={onSearchChange}
       />
       <CommandList className={isMobile ? "max-h-[60vh]" : "max-h-[300px]"}>
         <CommandEmpty>{emptyText}</CommandEmpty>

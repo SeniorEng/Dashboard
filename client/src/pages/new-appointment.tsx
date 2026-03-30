@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -48,10 +48,18 @@ export default function NewAppointment() {
   const [ebEditErrors, setEbEditErrors] = useState<Record<string, string>>({});
 
   const ELIGIBLE_STATUSES = "neu,kontaktiert,wiedervorlage,qualifiziert";
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleProspectSearch = useCallback((term: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedSearch(term), 300);
+  }, []);
+
   const { data: availableProspects = [], isLoading: prospectsLoading } = useQuery<Prospect[]>({
-    queryKey: ["prospects-for-erstberatung"],
+    queryKey: ["prospects-for-erstberatung", debouncedSearch],
     queryFn: async () => {
       const params = new URLSearchParams({ status: ELIGIBLE_STATUSES });
+      if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       const result = await api.get<Prospect[]>(`/admin/prospects?${params}`);
       return unwrapResult(result);
     },
@@ -59,16 +67,19 @@ export default function NewAppointment() {
     enabled: form.prospectMode === "existing" && !form.fromProspectId,
   });
 
+  const STATUS_BADGE_LABELS: Record<string, string> = {
+    neu: "Neu",
+    kontaktiert: "Kontaktiert",
+    wiedervorlage: "Wiedervorlage",
+    qualifiziert: "Qualifiziert",
+  };
+
   const prospectOptions = useMemo(() =>
-    availableProspects.map((p) => {
-      const parts = [`${p.vorname} ${p.nachname}`];
-      if (p.telefon) parts.push(p.telefon);
-      if (p.email) parts.push(p.email);
-      return {
-        value: p.id.toString(),
-        label: parts.join(" — "),
-      };
-    }),
+    availableProspects.map((p) => ({
+      value: p.id.toString(),
+      label: `${p.vorname} ${p.nachname}`,
+      sublabel: [p.telefon, p.email, STATUS_BADGE_LABELS[p.status as string] || p.status].filter(Boolean).join(" · "),
+    })),
     [availableProspects]
   );
 
@@ -482,7 +493,7 @@ export default function NewAppointment() {
                     <Button
                       variant={form.prospectMode === "new" ? "default" : "outline"}
                       size="sm"
-                      onClick={() => form.setProspectMode("new")}
+                      onClick={() => { form.setProspectMode("new"); form.clearSelectedProspect(); }}
                       className="flex-1"
                       data-testid="button-prospect-mode-new"
                     >
@@ -508,6 +519,8 @@ export default function NewAppointment() {
                         emptyText={prospectsLoading ? "Wird geladen…" : "Keine passenden Interessenten gefunden."}
                         isLoading={prospectsLoading}
                         data-testid="select-existing-prospect"
+                        onSearchChange={handleProspectSearch}
+                        serverSideSearch
                       />
                       <p className="text-xs text-teal-600 mt-2">
                         Zeigt Interessenten mit Status: Neu, Kontaktiert, Wiedervorlage, Qualifiziert
