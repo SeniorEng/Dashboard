@@ -29,6 +29,7 @@ import { TIME_ENTRY_TYPE_CONFIG } from "@/features/time-tracking/constants";
 import { useMonthClosingStatus } from "@/features/time-tracking/hooks/use-month-closing";
 import { useAdminEmployees } from "@/features/appointments/hooks/use-active-employees";
 import { useAuth } from "@/hooks/use-auth";
+import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
 import { ErrorState } from "@/components/patterns/error-state";
 import type { TimeEntry, TimeEntryType } from "@/lib/api/types";
 import type { AppointmentWithCustomer } from "@shared/types";
@@ -294,6 +295,7 @@ function CoverageBanner({ data }: { data: CoverageData }) {
 export default function Dashboard() {
   const { user } = useAuth();
   const isAdmin = user?.isAdmin ?? false;
+  const { viewAsEmployeeId } = useViewAsEmployee();
   const searchString = useSearch();
   const [selectedDate, setSelectedDate] = useState(() => {
     const params = new URLSearchParams(searchString);
@@ -618,7 +620,8 @@ export default function Dashboard() {
           <div className="flex flex-col gap-3 animate-in fade-in duration-300">
             {sortedTimeline.map((item) => {
               if (item.type === "appointment") {
-                const isSub = !isAdmin && item.data.assignedEmployeeId !== user?.id;
+                const effectiveEmployeeId = viewAsEmployeeId ?? user?.id;
+                const isSub = !!effectiveEmployeeId && item.data.assignedEmployeeId !== effectiveEmployeeId && (!isAdmin || !!viewAsEmployeeId);
                 return <AppointmentCard key={`appt-${item.data.id}`} appointment={item.data} isSubstitute={isSub} />;
               }
               return (
