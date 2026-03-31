@@ -1304,16 +1304,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     ]);
     const amounts = await this.getCustomerBudgetAmounts(customerId, undefined, typeSettings);
 
-    const today = todayISO();
-    const isTypeActive = (bt: string) => {
-      const s = typeSettings.find(ts => ts.budgetType === bt);
-      if (!s || !s.enabled) return false;
-      if (s.validFrom && today < s.validFrom) return false;
-      if (s.validTo && today > s.validTo) return false;
-      return true;
-    };
-    const is45aEnabled = isTypeActive("umwandlung_45a");
-    const is39Enabled = isTypeActive("ersatzpflege_39_42a");
+    const is45aEnabled = typeSettings.some(s => s.budgetType === "umwandlung_45a" && s.enabled);
+    const is39Enabled = typeSettings.some(s => s.budgetType === "ersatzpflege_39_42a" && s.enabled);
 
     const [entlastungsbetrag45b, umwandlung45a, ersatzpflege39_42a] = await Promise.all([
       this.getBudgetSummary(customerId, preferences, typeSettings),
