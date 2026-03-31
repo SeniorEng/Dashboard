@@ -250,14 +250,13 @@ router.get("/", asyncHandler(ErrorMessages.fetchAppointmentsFailed, async (req, 
   }
   
   if (customerId) {
-    if (customerIds) {
-      if (!customerIds.includes(customerId)) {
+    if (employeeId) {
+      const allAssignedIds = await storage.getAssignedCustomerIds(employeeId);
+      if (!allAssignedIds.includes(customerId)) {
         return res.json([]);
       }
-      customerIds = [customerId];
-    } else {
-      customerIds = [customerId];
     }
+    customerIds = [customerId];
   }
   
   const appointments = await storage.getAppointmentsWithCustomers(date, customerIds, employeeId, assignedOnly);
