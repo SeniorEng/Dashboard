@@ -55,6 +55,27 @@ export async function getCurrentlyAssignedCustomerIds(employeeId: number): Promi
   return result.map(r => r.id);
 }
 
+export async function getPrimaryCustomerIds(employeeId: number): Promise<number[]> {
+  const cached = customerIdsCache.get(employeeId, "primary");
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const result = await db
+    .selectDistinct({ id: customers.id })
+    .from(customers)
+    .where(
+      and(
+        isNull(customers.deletedAt),
+        eq(customers.primaryEmployeeId, employeeId),
+      )
+    );
+
+  const ids = result.map(r => r.id);
+  customerIdsCache.set(employeeId, ids, "primary");
+  return ids;
+}
+
 export async function getAssignedCustomerIds(employeeId: number): Promise<number[]> {
   const cached = customerIdsCache.get(employeeId);
   if (cached !== undefined) {

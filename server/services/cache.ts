@@ -69,20 +69,21 @@ const CUSTOMER_IDS_TTL = 10 * 60 * 1000;
 class CustomerIdsCacheService {
   private cache = new SimpleCache<number[]>(CUSTOMER_IDS_TTL);
 
-  private getKey(employeeId: number): string {
-    return `assigned_customers:${employeeId}`;
+  private getKey(employeeId: number, prefix = "assigned"): string {
+    return `${prefix}_customers:${employeeId}`;
   }
 
-  get(employeeId: number): number[] | undefined {
-    return this.cache.get(this.getKey(employeeId));
+  get(employeeId: number, prefix = "assigned"): number[] | undefined {
+    return this.cache.get(this.getKey(employeeId, prefix));
   }
 
-  set(employeeId: number, customerIds: number[]): void {
-    this.cache.set(this.getKey(employeeId), customerIds);
+  set(employeeId: number, customerIds: number[], prefix = "assigned"): void {
+    this.cache.set(this.getKey(employeeId, prefix), customerIds);
   }
 
   invalidateForEmployee(employeeId: number): void {
-    this.cache.delete(this.getKey(employeeId));
+    this.cache.delete(this.getKey(employeeId, "assigned"));
+    this.cache.delete(this.getKey(employeeId, "primary"));
   }
 
   invalidateForCustomer(primaryEmployeeId?: number | null, backupEmployeeId?: number | null, backupEmployeeId2?: number | null): void {

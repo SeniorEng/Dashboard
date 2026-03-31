@@ -60,6 +60,7 @@ export interface IStorage {
   createCustomer(customer: InsertCustomer): Promise<Customer>;
   deleteCustomer(id: number): Promise<boolean>;
   getAssignedCustomerIds(employeeId: number): Promise<number[]>;
+  getPrimaryCustomerIds(employeeId: number): Promise<number[]>;
   getCurrentlyAssignedCustomerIds(employeeId: number): Promise<number[]>;
 
   // Birthday queries
@@ -171,6 +172,7 @@ export class DatabaseStorage implements IStorage {
   deleteCustomer = customersStorage.deleteCustomer;
   getCurrentlyAssignedCustomerIds = customersStorage.getCurrentlyAssignedCustomerIds;
   getAssignedCustomerIds = customersStorage.getAssignedCustomerIds;
+  getPrimaryCustomerIds = customersStorage.getPrimaryCustomerIds;
   getCustomersForEmployee = customersStorage.getCustomersForEmployee;
   getCustomersByIds = customersStorage.getCustomersByIds;
   getActiveEmployeesWithBirthday = customersStorage.getActiveEmployeesWithBirthday;

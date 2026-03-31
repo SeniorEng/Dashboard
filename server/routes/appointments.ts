@@ -242,10 +242,10 @@ router.get("/", asyncHandler(ErrorMessages.fetchAppointmentsFailed, async (req, 
   let assignedOnly = false;
   
   if (user.isAdmin && viewAsEmployeeId) {
-    customerIds = await storage.getAssignedCustomerIds(viewAsEmployeeId);
+    customerIds = await storage.getPrimaryCustomerIds(viewAsEmployeeId);
     employeeId = viewAsEmployeeId;
   } else if (!user.isAdmin) {
-    customerIds = await storage.getAssignedCustomerIds(user.id);
+    customerIds = await storage.getPrimaryCustomerIds(user.id);
     employeeId = user.id;
   }
   
@@ -282,10 +282,10 @@ router.get("/counts", asyncHandler("Fehler beim Laden der Terminzähler", async 
   let assignedOnlyCounts = false;
 
   if (user.isAdmin && viewAsEmployeeId) {
-    customerIds = await storage.getAssignedCustomerIds(viewAsEmployeeId);
+    customerIds = await storage.getPrimaryCustomerIds(viewAsEmployeeId);
     employeeId = viewAsEmployeeId;
   } else if (!user.isAdmin) {
-    customerIds = await storage.getAssignedCustomerIds(user.id);
+    customerIds = await storage.getPrimaryCustomerIds(user.id);
     employeeId = user.id;
   }
 
