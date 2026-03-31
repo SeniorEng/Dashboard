@@ -97,6 +97,7 @@ export const budgetTransactions = pgTable("budget_transactions", {
   // Reference to source
   appointmentId: integer("appointment_id").references(() => appointments.id),
   allocationId: integer("allocation_id").references(() => budgetAllocations.id),
+  reversedTransactionId: integer("reversed_transaction_id"),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),

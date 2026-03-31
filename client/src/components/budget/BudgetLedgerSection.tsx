@@ -118,9 +118,14 @@ export function BudgetLedgerSection({ customerId, customerName, onRefresh }: Bud
     staleTime: 30000,
   });
 
+  const today = new Date().toISOString().slice(0, 10);
   const enabledTypes = (typeSettings || [])
     .filter(s => s.enabled)
-    .sort((a, b) => a.priority - b.priority);
+    .sort((a, b) => a.priority - b.priority)
+    .map(s => ({
+      ...s,
+      isCurrentlyActive: (!s.validFrom || today >= s.validFrom) && (!s.validTo || today <= s.validTo),
+    }));
 
   const handleRefresh = () => {
     invalidateRelated(queryClient, "budget");
@@ -154,12 +159,25 @@ export function BudgetLedgerSection({ customerId, customerName, onRefresh }: Bud
       {enabledTypes.map(setting => {
         const budgetType = setting.budgetType;
         const label = BUDGET_TYPE_LABELS[budgetType] || budgetType;
+        const inactiveLabel = !setting.isCurrentlyActive
+          ? setting.validFrom && today < setting.validFrom
+            ? `(ab ${setting.validFrom} gültig)`
+            : `(abgelaufen seit ${setting.validTo})`
+          : null;
+
+        const wrapInactive = (content: React.ReactNode) => (
+          <div key={budgetType} className={!setting.isCurrentlyActive ? "opacity-50" : ""}>
+            {!setting.isCurrentlyActive && (
+              <p className="text-xs text-amber-600 mb-1 font-medium">{inactiveLabel}</p>
+            )}
+            {content}
+          </div>
+        );
 
         if (budgetType === "entlastungsbetrag_45b" && overview) {
           const data = overview.entlastungsbetrag45b;
-          return (
+          return wrapInactive(
             <SectionCard
-              key={budgetType}
               title={label}
               icon={<Wallet className={iconSize.sm} />}
             >
@@ -174,9 +192,8 @@ export function BudgetLedgerSection({ customerId, customerName, onRefresh }: Bud
 
         if (budgetType === "umwandlung_45a" && overview) {
           const data = overview.umwandlung45a;
-          return (
+          return wrapInactive(
             <SectionCard
-              key={budgetType}
               title={label}
               icon={<Wallet className={iconSize.sm} />}
             >
@@ -187,9 +204,8 @@ export function BudgetLedgerSection({ customerId, customerName, onRefresh }: Bud
 
         if (budgetType === "ersatzpflege_39_42a" && overview) {
           const data = overview.ersatzpflege39_42a;
-          return (
+          return wrapInactive(
             <SectionCard
-              key={budgetType}
               title={label}
               icon={<Wallet className={iconSize.sm} />}
             >

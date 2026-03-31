@@ -1859,8 +1859,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         .where(and(
           eq(budgetTransactions.customerId, customerId),
           eq(budgetTransactions.transactionType, "reversal"),
-          eq(budgetTransactions.budgetType, original.budgetType),
-          sql`${budgetTransactions.notes} LIKE ${'%Transaktion #' + transactionId + ')%'}`,
+          eq(budgetTransactions.reversedTransactionId, transactionId),
         ))
         .limit(1);
 
@@ -1879,6 +1878,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           amountCents: absAmount,
           appointmentId: original.appointmentId,
           allocationId: original.allocationId,
+          reversedTransactionId: transactionId,
           notes: `Storno für Umbuchung nach ${targetBudgetType} (Transaktion #${transactionId})`,
           createdByUserId: userId,
         })
