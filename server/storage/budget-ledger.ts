@@ -268,6 +268,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       amountCents: -original[0].amountCents,
       appointmentId: original[0].appointmentId,
       allocationId: original[0].allocationId,
+      reversedTransactionId: transactionId,
       notes: `Storno von Transaktion #${transactionId}`,
       createdByUserId: userId,
     }).returning();
@@ -1859,7 +1860,11 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         .where(and(
           eq(budgetTransactions.customerId, customerId),
           eq(budgetTransactions.transactionType, "reversal"),
-          eq(budgetTransactions.reversedTransactionId, transactionId),
+          or(
+            eq(budgetTransactions.reversedTransactionId, transactionId),
+            sql`${budgetTransactions.notes} LIKE ${'%Transaktion #' + transactionId + ')%'}`,
+            sql`${budgetTransactions.notes} LIKE ${'%Transaktion #' + transactionId}`,
+          ),
         ))
         .limit(1);
 
@@ -2040,6 +2045,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
               amountCents: -oldTx.amountCents,
               appointmentId: oldTx.appointmentId,
               allocationId: oldTx.allocationId,
+              reversedTransactionId: oldTx.id,
               notes: `Storno von Transaktion #${oldTx.id} (Umbuchung)`,
               createdByUserId: userId,
             });
