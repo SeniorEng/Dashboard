@@ -595,16 +595,19 @@ function TransactionList({
     staleTime: 30000,
   });
 
-  const today = new Date().toISOString().slice(0, 10);
-  const otherBudgetTypes = Object.entries(BUDGET_TYPE_LABELS)
-    .filter(([key]) => key !== budgetType)
-    .filter(([key]) => {
-      const setting = typeSettings?.find(s => s.budgetType === key);
-      if (!setting || !setting.enabled) return false;
-      if (setting.validFrom && today < setting.validFrom) return false;
-      if (setting.validTo && today > setting.validTo) return false;
-      return true;
-    });
+  const getEligibleTargetPots = (refDate?: string) => {
+    const checkDate = refDate ?? new Date().toISOString().slice(0, 10);
+    return Object.entries(BUDGET_TYPE_LABELS)
+      .filter(([key]) => key !== budgetType)
+      .filter(([key]) => {
+        const setting = typeSettings?.find(s => s.budgetType === key);
+        if (!setting || !setting.enabled) return false;
+        if (setting.validFrom && checkDate < setting.validFrom) return false;
+        if (setting.validTo && checkDate > setting.validTo) return false;
+        return true;
+      });
+  };
+  const otherBudgetTypes = getEligibleTargetPots(rebookTx?.transactionDate);
 
   return (
     <Card>

@@ -1303,8 +1303,16 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     ]);
     const amounts = await this.getCustomerBudgetAmounts(customerId, undefined, typeSettings);
 
-    const is45aEnabled = typeSettings.some(s => s.budgetType === "umwandlung_45a" && s.enabled);
-    const is39Enabled = typeSettings.some(s => s.budgetType === "ersatzpflege_39_42a" && s.enabled);
+    const today = todayISO();
+    const isTypeActive = (bt: string) => {
+      const s = typeSettings.find(ts => ts.budgetType === bt);
+      if (!s || !s.enabled) return false;
+      if (s.validFrom && today < s.validFrom) return false;
+      if (s.validTo && today > s.validTo) return false;
+      return true;
+    };
+    const is45aEnabled = isTypeActive("umwandlung_45a");
+    const is39Enabled = isTypeActive("ersatzpflege_39_42a");
 
     const [entlastungsbetrag45b, umwandlung45a, ersatzpflege39_42a] = await Promise.all([
       this.getBudgetSummary(customerId, preferences, typeSettings),
@@ -1833,13 +1841,26 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         throw new Error("Ziel-Topf ist gleich dem aktuellen Topf");
       }
 
+      const typeSettings = await this.getBudgetTypeSettings(customerId, tx);
+      const targetSetting = typeSettings.find(s => s.budgetType === targetBudgetType);
+      if (!targetSetting || !targetSetting.enabled) {
+        throw new Error("Ziel-Topf ist nicht aktiviert");
+      }
+      const txDate = original.transactionDate;
+      if (targetSetting.validFrom && txDate < targetSetting.validFrom) {
+        throw new Error("Ziel-Topf ist für das Buchungsdatum noch nicht gültig");
+      }
+      if (targetSetting.validTo && txDate > targetSetting.validTo) {
+        throw new Error("Ziel-Topf ist für das Buchungsdatum abgelaufen");
+      }
+
       const existingReversal = await tx.select({ id: budgetTransactions.id })
         .from(budgetTransactions)
         .where(and(
           eq(budgetTransactions.customerId, customerId),
           eq(budgetTransactions.transactionType, "reversal"),
-          eq(budgetTransactions.appointmentId, original.appointmentId!),
           eq(budgetTransactions.budgetType, original.budgetType),
+          sql`${budgetTransactions.notes} LIKE ${'%Transaktion #' + transactionId + ')%'}`,
         ))
         .limit(1);
 
