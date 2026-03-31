@@ -2,12 +2,13 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Wallet, History, AlertTriangle, Calendar, Euro, Clock } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Plus, Wallet, History, AlertTriangle, Calendar, Euro, Clock, ArrowRightLeft } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system/tokens";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -49,6 +50,8 @@ interface BudgetTypeSetting {
   budgetType: string;
   enabled: boolean;
   priority: number;
+  validFrom: string | null;
+  validTo: string | null;
 }
 
 interface BudgetTransaction {
@@ -562,6 +565,47 @@ function TransactionList({
   showAdjustmentDialog: boolean;
   setShowAdjustmentDialog: (v: boolean) => void;
 }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [rebookTx, setRebookTx] = useState<BudgetTransaction | null>(null);
+  const [targetBudgetType, setTargetBudgetType] = useState<string>("");
+
+  const rebookMutation = useMutation({
+    mutationFn: async ({ transactionId, target }: { transactionId: number; target: string }) => {
+      return unwrapResult(await api.post(`/budget/${customerId}/rebook-transaction`, {
+        transactionId,
+        targetBudgetType: target,
+      }));
+    },
+    onSuccess: () => {
+      toast({ title: "Umbuchung erfolgreich" });
+      invalidateRelated(queryClient, "budget");
+      setRebookTx(null);
+      setTargetBudgetType("");
+      onRefresh();
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Fehler bei Umbuchung", description: error.message });
+    },
+  });
+
+  const { data: typeSettings } = useQuery<BudgetTypeSetting[]>({
+    queryKey: ["budget-type-settings", customerId],
+    queryFn: async () => unwrapResult(await api.get<BudgetTypeSetting[]>(`/budget/${customerId}/type-settings`)),
+    staleTime: 30000,
+  });
+
+  const today = new Date().toISOString().slice(0, 10);
+  const otherBudgetTypes = Object.entries(BUDGET_TYPE_LABELS)
+    .filter(([key]) => key !== budgetType)
+    .filter(([key]) => {
+      const setting = typeSettings?.find(s => s.budgetType === key);
+      if (!setting || !setting.enabled) return false;
+      if (setting.validFrom && today < setting.validFrom) return false;
+      if (setting.validTo && today > setting.validTo) return false;
+      return true;
+    });
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -602,7 +646,7 @@ function TransactionList({
                 className="flex items-center justify-between p-3 rounded-lg bg-gray-50"
                 data-testid={`row-transaction-${tx.id}`}
               >
-                <div>
+                <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <Badge variant={tx.amountCents < 0 ? "destructive" : "secondary"}>
                       {getTransactionTypeLabel(tx.transactionType)}
@@ -621,9 +665,22 @@ function TransactionList({
                     </p>
                   )}
                 </div>
-                <span className={`font-medium ${tx.amountCents < 0 ? "text-red-600" : "text-green-600"}`}>
-                  {tx.amountCents > 0 ? "+" : ""}{formatCurrency(tx.amountCents)}
-                </span>
+                <div className="flex items-center gap-2 ml-2 shrink-0">
+                  {tx.transactionType === "consumption" && (
+                    <button
+                      type="button"
+                      onClick={() => { setRebookTx(tx); setTargetBudgetType(""); }}
+                      className="p-1.5 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600"
+                      title="Umbuchen"
+                      data-testid={`btn-rebook-${tx.id}`}
+                    >
+                      <ArrowRightLeft className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  <span className={`font-medium ${tx.amountCents < 0 ? "text-red-600" : "text-green-600"}`}>
+                    {tx.amountCents > 0 ? "+" : ""}{formatCurrency(tx.amountCents)}
+                  </span>
+                </div>
               </div>
             ))}
           </div>
@@ -633,6 +690,62 @@ function TransactionList({
           </p>
         )}
       </CardContent>
+
+      <Dialog open={rebookTx !== null} onOpenChange={(open) => { if (!open) { setRebookTx(null); setTargetBudgetType(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowRightLeft className="h-5 w-5" />
+              Einzelbuchung umbuchen
+            </DialogTitle>
+          </DialogHeader>
+          {rebookTx && (
+            <div className="space-y-4">
+              <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-1">
+                <p><span className="text-gray-500">Datum:</span> {formatDateForDisplay(rebookTx.transactionDate)}</p>
+                <p><span className="text-gray-500">Betrag:</span> {formatCurrency(rebookTx.amountCents)}</p>
+                <p><span className="text-gray-500">Aktueller Topf:</span> {BUDGET_TYPE_LABELS[budgetType]}</p>
+              </div>
+              <div>
+                <Label className="text-sm">Ziel-Topf</Label>
+                <Select value={targetBudgetType} onValueChange={setTargetBudgetType}>
+                  <SelectTrigger className="mt-1" data-testid="select-rebook-target">
+                    <SelectValue placeholder="Topf auswählen..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {otherBudgetTypes.map(([key, label]) => (
+                      <SelectItem key={key} value={key} data-testid={`option-rebook-${key}`}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <p className="text-xs text-amber-800">
+                  Die bestehende Buchung wird storniert und der Betrag auf den gewählten Topf neu gebucht.
+                </p>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => { setRebookTx(null); setTargetBudgetType(""); }}>
+              Abbrechen
+            </Button>
+            <Button
+              size="sm"
+              disabled={!targetBudgetType || rebookMutation.isPending}
+              onClick={() => {
+                if (rebookTx && targetBudgetType) {
+                  rebookMutation.mutate({ transactionId: rebookTx.id, target: targetBudgetType });
+                }
+              }}
+              data-testid="btn-confirm-single-rebook"
+            >
+              <ArrowRightLeft className={`h-3.5 w-3.5 mr-1.5 ${rebookMutation.isPending ? "animate-spin" : ""}`} />
+              {rebookMutation.isPending ? "Wird umgebucht..." : "Umbuchen"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

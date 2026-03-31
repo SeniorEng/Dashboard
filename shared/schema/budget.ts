@@ -132,6 +132,8 @@ export const customerBudgetTypeSettings = pgTable("customer_budget_type_settings
   yearlyLimitCents: integer("yearly_limit_cents"),
   initialBalanceCents: integer("initial_balance_cents"),
   initialBalanceMonth: text("initial_balance_month"),
+  validFrom: date("valid_from"),
+  validTo: date("valid_to"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [

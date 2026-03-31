@@ -21,6 +21,8 @@ interface BudgetTypeSetting {
   priority: number;
   monthlyLimitCents: number | null;
   yearlyLimitCents: number | null;
+  validFrom: string | null;
+  validTo: string | null;
 }
 
 interface InitialBalanceAllocation {
@@ -91,6 +93,7 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
   const [expandedHistory, setExpandedHistory] = useState<Record<string, boolean>>({});
   const [expandedInitialBalance, setExpandedInitialBalance] = useState<Record<string, boolean>>({});
   const [euroValues, setEuroValues] = useState<Record<string, { monthly: string; yearly: string }>>({});
+  const [dateValues, setDateValues] = useState<Record<string, { validFrom: string; validTo: string }>>({});
 
   const { data, isLoading } = useQuery<BudgetTypeSetting[]>({
     queryKey: ["budget-type-settings", customerId],
@@ -107,13 +110,19 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
       setSettings(sorted);
       setHasChanges(false);
       const initEuro: Record<string, { monthly: string; yearly: string }> = {};
+      const initDates: Record<string, { validFrom: string; validTo: string }> = {};
       sorted.forEach(s => {
         initEuro[s.budgetType] = {
           monthly: centsToEuroString(s.monthlyLimitCents),
           yearly: centsToEuroString(s.yearlyLimitCents),
         };
+        initDates[s.budgetType] = {
+          validFrom: s.validFrom || "",
+          validTo: s.validTo || "",
+        };
       });
       setEuroValues(initEuro);
+      setDateValues(initDates);
     }
   }, [data]);
 
@@ -121,12 +130,15 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
     mutationFn: async (newSettings: BudgetTypeSetting[]) => {
       const settingsPayload = newSettings.map(s => {
         const ev = euroValues[s.budgetType];
+        const dv = dateValues[s.budgetType];
         return {
           budgetType: s.budgetType,
           enabled: s.enabled,
           priority: s.priority,
           monthlyLimitCents: euroStringToCents(ev?.monthly || ""),
           yearlyLimitCents: euroStringToCents(ev?.yearly || ""),
+          validFrom: dv?.validFrom || null,
+          validTo: dv?.validTo || null,
         };
       });
       return unwrapResult(await api.put(`/budget/${customerId}/type-settings`, {
@@ -288,6 +300,44 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
                         <p className="text-[11px] text-gray-500 mt-0.5">{getMaxHint(setting.budgetType)}</p>
                       )}
                     </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-xs text-gray-500">Gültig ab</Label>
+                      <Input
+                        type="date"
+                        value={dateValues[setting.budgetType]?.validFrom || ""}
+                        onChange={(e) => {
+                          setDateValues(prev => ({
+                            ...prev,
+                            [setting.budgetType]: { ...prev[setting.budgetType], validFrom: e.target.value },
+                          }));
+                          setHasChanges(true);
+                        }}
+                        className="h-8 mt-1 text-sm"
+                        data-testid={`input-valid-from-${setting.budgetType}`}
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-gray-500">Gültig bis</Label>
+                      <Input
+                        type="date"
+                        value={dateValues[setting.budgetType]?.validTo || ""}
+                        onChange={(e) => {
+                          setDateValues(prev => ({
+                            ...prev,
+                            [setting.budgetType]: { ...prev[setting.budgetType], validTo: e.target.value },
+                          }));
+                          setHasChanges(true);
+                        }}
+                        className="h-8 mt-1 text-sm"
+                        data-testid={`input-valid-to-${setting.budgetType}`}
+                      />
+                    </div>
+                  </div>
+                  {dateValues[setting.budgetType]?.validTo && dateValues[setting.budgetType].validTo < new Date().toISOString().slice(0, 10) && (
+                    <p className="text-[11px] text-amber-600 mt-0.5">Dieser Topf ist abgelaufen</p>
                   )}
 
                   {setting.budgetType === "entlastungsbetrag_45b" && (

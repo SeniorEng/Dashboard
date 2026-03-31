@@ -273,10 +273,10 @@ router.get("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
   const customerId = requireIntParam(req.params.customerId, res);
   if (customerId === null) return;
   const settings = await budgetLedgerStorage.getBudgetTypeSettings(customerId);
-  const defaults: { budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null; yearlyLimitCents: number | null }[] = [
-    { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null },
-    { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null },
-    { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, monthlyLimitCents: null, yearlyLimitCents: null },
+  const defaults: { budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null; yearlyLimitCents: number | null; validFrom: string | null; validTo: string | null }[] = [
+    { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+    { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+    { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
   ];
   if (settings.length === 0) {
     const prefs = await budgetLedgerStorage.getBudgetPreferences(customerId);
@@ -424,6 +424,8 @@ const bulkBudgetTypeSettingsSchema = z.object({
     priority: z.number().min(1).max(3),
     monthlyLimitCents: z.number().min(0).nullable().optional(),
     yearlyLimitCents: z.number().min(0).nullable().optional(),
+    validFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+    validTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   })).min(1).max(3),
 });
 
@@ -443,6 +445,13 @@ router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
     return;
   }
 
+  for (const s of result.data.settings) {
+    if (s.validFrom && s.validTo && s.validFrom > s.validTo) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: `'Gültig ab' darf nicht nach 'Gültig bis' liegen (${s.budgetType})` });
+      return;
+    }
+  }
+
   const userId = req.user?.id;
   const saved = await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, result.data.settings);
 
@@ -456,6 +465,8 @@ router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
         priority: s.priority,
         monthlyLimitCents: s.monthlyLimitCents ?? null,
         yearlyLimitCents: s.yearlyLimitCents ?? null,
+        validFrom: s.validFrom ?? null,
+        validTo: s.validTo ?? null,
       })),
     }, ip);
   }
@@ -701,6 +712,38 @@ router.post("/transactions/:transactionId/reverse", asyncHandler("Storno konnte 
   }
 
   res.status(201).json(reversal);
+}));
+
+const rebookTransactionSchema = z.object({
+  transactionId: z.number().int(),
+  targetBudgetType: z.enum(BUDGET_TYPES),
+});
+
+router.post("/:customerId/rebook-transaction", requireAdmin, asyncHandler("Einzelumbuchung konnte nicht durchgeführt werden", async (req: Request, res: Response) => {
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
+
+  const result = rebookTransactionSchema.safeParse(req.body);
+  if (!result.success) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Daten", details: result.error.issues });
+    return;
+  }
+
+  const { transactionId, targetBudgetType } = result.data;
+  const userId = req.user!.id;
+
+  const rebookResult = await budgetLedgerStorage.rebookSingleTransaction(customerId, transactionId, targetBudgetType, userId);
+
+  const ip = req.ip || req.socket?.remoteAddress || "unknown";
+  await auditService.log(userId, "budget_rebook_single", "budget", customerId, {
+    originalTransactionId: transactionId,
+    targetBudgetType,
+    reversalId: rebookResult.reversalTransaction.id,
+    newTransactionId: rebookResult.newTransaction?.id ?? null,
+    amountCents: rebookResult.amountCents,
+  }, ip);
+
+  res.json(rebookResult);
 }));
 
 router.get("/:customerId/rebook-preview", requireAdmin, asyncHandler("Umbuchungs-Vorschau konnte nicht geladen werden", async (req: Request, res: Response) => {

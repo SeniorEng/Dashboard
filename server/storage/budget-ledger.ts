@@ -116,9 +116,15 @@ export interface BudgetLedgerStorage {
   getAllBudgetSummaries(customerId: number): Promise<AllBudgetSummaries>;
   
   getBudgetTypeSettings(customerId: number): Promise<CustomerBudgetTypeSetting[]>;
-  upsertBudgetTypeSettings(customerId: number, settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null }>): Promise<CustomerBudgetTypeSetting[]>;
+  upsertBudgetTypeSettings(customerId: number, settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null; validFrom?: string | null; validTo?: string | null }>): Promise<CustomerBudgetTypeSetting[]>;
   upsertInitialBalanceAllocation(params: { customerId: number; budgetType: string; year: number; month: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string }, userId?: number): Promise<void>;
   getInitialBalanceAllocations(customerId: number, budgetType: string): Promise<BudgetAllocation[]>;
+  
+  rebookSingleTransaction(customerId: number, transactionId: number, targetBudgetType: string, userId: number): Promise<{
+    reversalTransaction: BudgetTransaction;
+    newTransaction: BudgetTransaction | null;
+    amountCents: number;
+  }>;
   
   processExpiredCarryover(customerId: number): Promise<BudgetTransaction[]>;
   
@@ -764,7 +770,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
   async upsertBudgetTypeSettings(
     customerId: number,
-    settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null }>
+    settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null; validFrom?: string | null; validTo?: string | null }>
   ): Promise<CustomerBudgetTypeSetting[]> {
     if (settings.length === 0) {
       await db.delete(customerBudgetTypeSettings)
@@ -784,6 +790,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           priority: s.priority,
           monthlyLimitCents: s.monthlyLimitCents ?? null,
           yearlyLimitCents: s.yearlyLimitCents ?? null,
+          validFrom: s.validFrom ?? null,
+          validTo: s.validTo ?? null,
         })))
         .returning();
     });
@@ -1621,7 +1629,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         { budgetType: "ersatzpflege_39_42a", enabled: true, priority: 3, monthlyLimitCents: null },
       ];
 
-      let priorityOrder: Array<{ budgetType: string; enabled: boolean; monthlyLimitCents: number | null; yearlyLimitCents: number | null }>;
+      let priorityOrder: Array<{ budgetType: string; enabled: boolean; monthlyLimitCents: number | null; yearlyLimitCents: number | null; validFrom: string | null; validTo: string | null }>;
 
       if (typeSettings.length > 0) {
         const settingsMap = new Map(typeSettings.map(s => [s.budgetType, s]));
@@ -1632,6 +1640,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
             enabled: s ? s.enabled : d.enabled,
             monthlyLimitCents: s ? s.monthlyLimitCents : d.monthlyLimitCents,
             yearlyLimitCents: s?.yearlyLimitCents ?? null,
+            validFrom: s?.validFrom ?? null,
+            validTo: s?.validTo ?? null,
           };
         });
         priorityOrder.sort((a, b) => {
@@ -1645,6 +1655,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
           ...d,
           monthlyLimitCents: d.budgetType === "entlastungsbetrag_45b" ? (preferences?.monthlyLimitCents ?? null) : null,
           yearlyLimitCents: null,
+          validFrom: null,
+          validTo: null,
         }));
       }
 
@@ -1655,6 +1667,15 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       for (const pot of priorityOrder) {
         if (remaining <= 0) break;
         if (!pot.enabled) {
+          breakdown.push({ budgetType: pot.budgetType, consumedCents: 0 });
+          continue;
+        }
+
+        if (pot.validFrom && params.transactionDate < pot.validFrom) {
+          breakdown.push({ budgetType: pot.budgetType, consumedCents: 0 });
+          continue;
+        }
+        if (pot.validTo && params.transactionDate > pot.validTo) {
           breakdown.push({ budgetType: pot.budgetType, consumedCents: 0 });
           continue;
         }
@@ -1788,6 +1809,93 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     }
     return await db.transaction(async (tx: DbClient) => doWork(tx));
   }
+  async rebookSingleTransaction(
+    customerId: number,
+    transactionId: number,
+    targetBudgetType: string,
+    userId: number
+  ): Promise<{ reversalTransaction: BudgetTransaction; newTransaction: BudgetTransaction | null; amountCents: number }> {
+    return await db.transaction(async (tx) => {
+      const [original] = await tx.select()
+        .from(budgetTransactions)
+        .where(and(
+          eq(budgetTransactions.id, transactionId),
+          eq(budgetTransactions.customerId, customerId),
+          eq(budgetTransactions.transactionType, "consumption"),
+        ))
+        .limit(1);
+
+      if (!original) {
+        throw new Error("Transaktion nicht gefunden oder keine Verbrauchsbuchung");
+      }
+
+      if (original.budgetType === targetBudgetType) {
+        throw new Error("Ziel-Topf ist gleich dem aktuellen Topf");
+      }
+
+      const existingReversal = await tx.select({ id: budgetTransactions.id })
+        .from(budgetTransactions)
+        .where(and(
+          eq(budgetTransactions.customerId, customerId),
+          eq(budgetTransactions.transactionType, "reversal"),
+          eq(budgetTransactions.appointmentId, original.appointmentId!),
+          eq(budgetTransactions.budgetType, original.budgetType),
+        ))
+        .limit(1);
+
+      if (existingReversal.length > 0) {
+        throw new Error("Diese Buchung wurde bereits storniert oder umgebucht");
+      }
+
+      const absAmount = Math.abs(original.amountCents);
+
+      const [reversalTransaction] = await tx.insert(budgetTransactions)
+        .values({
+          customerId,
+          budgetType: original.budgetType,
+          transactionDate: original.transactionDate,
+          transactionType: "reversal",
+          amountCents: absAmount,
+          appointmentId: original.appointmentId,
+          allocationId: original.allocationId,
+          notes: `Storno für Umbuchung nach ${targetBudgetType} (Transaktion #${transactionId})`,
+          createdByUserId: userId,
+        })
+        .returning();
+
+      const fifoResult = await this.consumeFifo(
+        customerId,
+        targetBudgetType,
+        absAmount,
+        original.transactionDate,
+        {
+          appointmentId: original.appointmentId ?? undefined,
+          userId,
+          hauswirtschaftMinutes: original.hauswirtschaftMinutes ?? undefined,
+          hauswirtschaftCents: original.hauswirtschaftCents ?? undefined,
+          alltagsbegleitungMinutes: original.alltagsbegleitungMinutes ?? undefined,
+          alltagsbegleitungCents: original.alltagsbegleitungCents ?? undefined,
+          travelKilometers: original.travelKilometers ?? undefined,
+          travelCents: original.travelCents ?? undefined,
+          customerKilometers: original.customerKilometers ?? undefined,
+          customerKilometersCents: original.customerKilometersCents ?? undefined,
+          notes: `Umbuchung von ${original.budgetType} (Transaktion #${transactionId})`,
+        },
+        tx
+      );
+
+      if (fifoResult.consumedCents < absAmount) {
+        throw new Error(`Ziel-Topf hat nicht genug Budget. Verfügbar: ${(fifoResult.consumedCents / 100).toFixed(2)} €, benötigt: ${(absAmount / 100).toFixed(2)} €`);
+      }
+
+      return {
+        reversalTransaction,
+        newTransaction: fifoResult.transactions[0] ?? null,
+        amountCents: absAmount,
+      };
+    });
+  }
+
   async getRebookPreview(customerId: number): Promise<{
     disabledTypes: string[];
     affectedAppointments: number;
