@@ -243,7 +243,15 @@ export default function AppointmentDetail() {
             </h1>
             <div className="flex items-center text-muted-foreground text-sm mt-2">
               <MapPin className={`${iconSize.sm} mr-1.5 text-primary shrink-0`} />
-              <span>{appointment.customer.address}</span>
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(appointment.customer.address)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-primary hover:underline"
+                data-testid="link-customer-address"
+              >
+                {appointment.customer.address}
+              </a>
             </div>
             {appointment.customer.telefon && (
               <div className="flex items-center text-muted-foreground text-sm mt-1">

@@ -225,19 +225,43 @@ export function ContactSection({ customer, customerId, editingSection, setEditin
           </div>
           <div className="flex items-center gap-2 text-gray-700">
             <MapPin className={`${iconSize.sm} text-gray-500`} />
-            {formatAddress(customer) || "Keine Adresse"}
+            {formatAddress(customer) ? (
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formatAddress(customer))}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline"
+                data-testid="link-address"
+              >
+                {formatAddress(customer)}
+              </a>
+            ) : (
+              "Keine Adresse"
+            )}
           </div>
           <div className="flex items-center gap-2 text-gray-700">
             <Phone className={`${iconSize.sm} text-gray-500`} />
-            Mobil: {customer.telefon ? formatPhoneForDisplay(customer.telefon) : "Nicht angegeben"}
+            Mobil: {customer.telefon ? (
+              <a href={`tel:${customer.telefon}`} className="text-primary hover:underline" data-testid="link-phone-mobil">
+                {formatPhoneForDisplay(customer.telefon)}
+              </a>
+            ) : "Nicht angegeben"}
           </div>
           <div className="flex items-center gap-2 text-gray-700">
             <Phone className={`${iconSize.sm} text-gray-500`} />
-            Festnetz: {customer.festnetz ? formatPhoneForDisplay(customer.festnetz) : "Kein Festnetz"}
+            Festnetz: {customer.festnetz ? (
+              <a href={`tel:${customer.festnetz}`} className="text-primary hover:underline" data-testid="link-phone-festnetz">
+                {formatPhoneForDisplay(customer.festnetz)}
+              </a>
+            ) : "Kein Festnetz"}
           </div>
           <div className="flex items-center gap-2 text-gray-700">
             <Mail className={`${iconSize.sm} text-gray-500`} />
-            {customer.email || "Keine E-Mail"}
+            {customer.email ? (
+              <a href={`mailto:${customer.email}`} className="text-primary hover:underline" data-testid="link-email">
+                {customer.email}
+              </a>
+            ) : "Keine E-Mail"}
           </div>
         </div>
       )}

@@ -535,10 +535,16 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                           </a>
                         )}
                         {(prospect.strasse || prospect.stadt) && (
-                          <div className="flex items-center gap-2 text-muted-foreground">
+                          <a
+                            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formatAddress(prospect))}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-2 text-primary hover:underline"
+                            data-testid="link-prospect-address"
+                          >
                             <MapPin className="h-3.5 w-3.5" />
                             {formatAddress(prospect)}
-                          </div>
+                          </a>
                         )}
                         {prospect.pflegegrad && (
                           <Badge variant="outline" className="mt-1">Pflegegrad {prospect.pflegegrad}</Badge>
@@ -1002,9 +1008,16 @@ export default function AdminProspects() {
                         </span>
                       )}
                       {prospect.stadt && (
-                        <span className="flex items-center gap-1">
+                        <a
+                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formatAddress(prospect) || prospect.stadt)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-primary hover:underline"
+                          data-testid={`link-prospect-address-${prospect.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <MapPin className="h-3 w-3" /> {prospect.stadt}
-                        </span>
+                        </a>
                       )}
                       {prospect.quelle && (
                         <span className="italic">{prospect.quelle}</span>

@@ -368,9 +368,22 @@ const CustomerCard = memo(function CustomerCard({ customer }: { customer: Custom
 
               <div className="flex items-start gap-2 text-muted-foreground">
                 <MapPin className={`${iconSize.sm} mt-0.5 flex-shrink-0 text-primary/60`} />
-                <span className="break-words" data-testid={`text-customer-address-${customer.id}`}>
-                  {address}
-                </span>
+                {address ? (
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="break-words text-primary hover:underline"
+                    data-testid={`link-customer-address-${customer.id}`}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {address}
+                  </a>
+                ) : (
+                  <span className="break-words" data-testid={`text-customer-address-${customer.id}`}>
+                    Keine Adresse
+                  </span>
+                )}
               </div>
 
               <div className="flex items-center gap-2 text-muted-foreground">
