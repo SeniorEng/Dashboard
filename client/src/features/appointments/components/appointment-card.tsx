@@ -2,7 +2,7 @@ import { memo, useCallback, useMemo } from "react";
 import { format, parseISO } from "date-fns";
 import { de } from "date-fns/locale";
 import { Card } from "@/components/ui/card";
-import { MapPin, CheckCircle2, Clock, FileText, Phone, Navigation, User, Repeat, ArrowLeftRight } from "lucide-react";
+import { MapPin, CheckCircle2, Clock, FileText, Phone, Navigation, User, Repeat } from "lucide-react";
 import { useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import type { AppointmentWithCustomer } from "@shared/types";
@@ -73,7 +73,7 @@ function AppointmentCardComponent({ appointment, showDate, isSubstitute }: Appoi
     >
       <Card 
         className={`shadow-sm cursor-pointer hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 overflow-hidden ${
-          isSubstitute ? "border border-amber-300 bg-amber-50/60" : "border-0"
+          isSubstitute ? "border border-border/50 bg-muted/30" : "border-0"
         }`}
         onClick={handleCardClick}
         onKeyDown={handleKeyDown}
@@ -83,7 +83,7 @@ function AppointmentCardComponent({ appointment, showDate, isSubstitute }: Appoi
       >
         <div className="flex items-stretch">
           {isSubstitute ? (
-            <div className="w-1.5 bg-amber-400" />
+            <div className="w-1.5 bg-muted-foreground/30" />
           ) : serviceInfo.hasBoth ? (
             <div className="w-1.5 flex flex-col overflow-hidden">
               <div className="flex-1 bg-amber-500" />
@@ -134,17 +134,12 @@ function AppointmentCardComponent({ appointment, showDate, isSubstitute }: Appoi
               <MapPin className="w-3 h-3 mr-1 shrink-0" />
               <span className="truncate">{appointment.customer?.address || "Keine Adresse"}</span>
             </div>
-            {isSubstitute && (
-              <div className="flex items-center gap-1.5 mt-1" data-testid={`text-substitute-${appointment.id}`}>
-                <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-amber-100 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-md">
-                  <ArrowLeftRight className="w-3 h-3 shrink-0" />
-                  Vertretung
+            {isSubstitute && appointment.assignedEmployeeName && (
+              <div className="flex items-center gap-1 mt-0.5" data-testid={`text-substitute-${appointment.id}`}>
+                <User className="w-3 h-3 text-muted-foreground/60 shrink-0" />
+                <span className="text-[11px] text-muted-foreground">
+                  Durchgeführt von {appointment.assignedEmployeeName}
                 </span>
-                {appointment.assignedEmployeeName && (
-                  <span className="text-xs text-amber-600 truncate">
-                    für {appointment.assignedEmployeeName}
-                  </span>
-                )}
               </div>
             )}
             {!isSubstitute && user?.isAdmin && appointment.assignedEmployeeName && (
