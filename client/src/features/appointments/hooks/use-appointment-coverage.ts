@@ -6,6 +6,7 @@ interface UncoveredCustomer {
   id: number;
   name: string;
   role: "primary" | "backup1" | "backup2";
+  primaryEmployeeName?: string;
 }
 
 interface MonthCoverage {

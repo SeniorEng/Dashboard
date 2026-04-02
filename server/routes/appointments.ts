@@ -39,7 +39,7 @@ import { db } from "../lib/db";
 import { customerManagementStorage } from "../storage/customer-management";
 import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
 import { addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
-import { customers } from "@shared/schema";
+import { customers, users } from "@shared/schema";
 import { customerContracts } from "@shared/schema/contracts";
 import { eq, and, or, inArray, gte, lte, ne, isNull, sql } from "drizzle-orm";
 
@@ -147,6 +147,13 @@ router.get("/coverage-check", asyncHandler("Fehler beim Laden der Terminabdeckun
     });
   }
 
+  const primaryEmployeeIds = [...new Set(assignedCustomers.map(c => c.primaryEmployeeId).filter((id): id is number => id !== null && id !== effectiveEmployeeId))];
+  const primaryEmployeeNames = new Map<number, string>();
+  if (primaryEmployeeIds.length > 0) {
+    const empRows = await db.select({ id: users.id, displayName: users.displayName }).from(users).where(inArray(users.id, primaryEmployeeIds));
+    for (const e of empRows) primaryEmployeeNames.set(e.id, e.displayName);
+  }
+
   const customerIds = assignedCustomers.map(c => c.id);
 
   const currentMonthStart = `${currentYear}-${String(currentMonth).padStart(2, "0")}-01`;
@@ -207,13 +214,22 @@ router.get("/coverage-check", asyncHandler("Fehler beim Laden der Terminabdeckun
     return "backup2";
   }
 
+  function buildUncoveredEntry(c: typeof assignedCustomers[0]) {
+    const role = getRole(c);
+    const entry: { id: number; name: string; role: string; primaryEmployeeName?: string } = { id: c.id, name: c.name, role };
+    if (role !== "primary" && c.primaryEmployeeId) {
+      entry.primaryEmployeeName = primaryEmployeeNames.get(c.primaryEmployeeId) ?? undefined;
+    }
+    return entry;
+  }
+
   const currentUncovered = assignedCustomers
     .filter(c => !currentCoveredIds.has(c.id) && hasActiveContractForMonth(c.id, currentMonthStart))
-    .map(c => ({ id: c.id, name: c.name, role: getRole(c) }));
+    .map(buildUncoveredEntry);
 
   const nextUncovered = assignedCustomers
     .filter(c => !nextCoveredIds.has(c.id) && hasActiveContractForMonth(c.id, nextMonthStart))
-    .map(c => ({ id: c.id, name: c.name, role: getRole(c) }));
+    .map(buildUncoveredEntry);
 
   res.json({
     currentMonth: {

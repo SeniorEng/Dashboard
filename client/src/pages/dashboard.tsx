@@ -261,7 +261,10 @@ function CoverageBanner({ data }: { data: CoverageData }) {
             </p>
           ) : (
             <div className="space-y-1">
-              {activeData.uncoveredCustomers.map((customer) => (
+              {[...activeData.uncoveredCustomers].sort((a, b) => {
+                const order = { primary: 0, backup1: 1, backup2: 2 };
+                return (order[a.role] ?? 3) - (order[b.role] ?? 3);
+              }).map((customer) => (
                 <div
                   key={customer.id}
                   className="flex items-center justify-between py-1.5 px-2 rounded-md bg-white/60"
@@ -269,7 +272,12 @@ function CoverageBanner({ data }: { data: CoverageData }) {
                 >
                   <div className="min-w-0 flex-1">
                     <span className="text-sm text-gray-800 block truncate">{customer.name}</span>
-                    <span className="text-[11px] text-gray-500">{ROLE_LABELS[customer.role] || customer.role}</span>
+                    <span className="text-[11px] text-gray-500">
+                      {ROLE_LABELS[customer.role] || customer.role}
+                      {customer.role !== "primary" && customer.primaryEmployeeName && (
+                        <> · HV: {customer.primaryEmployeeName}</>
+                      )}
+                    </span>
                   </div>
                   <Link href={`/new-appointment?date=${prefillDate}&customerId=${customer.id}`}>
                     <Button
