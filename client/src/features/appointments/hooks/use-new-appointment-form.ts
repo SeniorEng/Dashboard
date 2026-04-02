@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, canCreateErstberatung } from "@/hooks/use-auth";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -18,6 +18,7 @@ import type { AppointmentWithCustomer } from "@shared/types";
 export function useNewAppointmentForm() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { user } = useAuth();
   const copyFromId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("copyFrom") : null;
   const isAdmin = user?.isAdmin ?? false;
@@ -523,6 +524,7 @@ export function useNewAppointmentForm() {
       assignedEmployeeId: isAdmin && ebAssignedEmployeeId ? parseInt(ebAssignedEmployeeId) : undefined,
     }, {
       onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ["/admin/employees/availability"] });
         toast({ title: "Erstberatung erstellt", description: "Die Erstberatung wurde erfolgreich angelegt." });
         setLocation(ebDate ? `/?date=${ebDate}` : "/");
       },

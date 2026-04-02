@@ -15,10 +15,16 @@ interface EmployeeAppointment {
   customerName: string;
 }
 
+interface FreeSlot {
+  start: string;
+  end: string;
+}
+
 interface EmployeeAvailabilityData {
   id: number;
   displayName: string;
   availability: AvailabilitySlot[];
+  freeSlots?: FreeSlot[];
   appointments: EmployeeAppointment[];
   absence: "urlaub" | "krankheit" | null;
 }
@@ -103,7 +109,7 @@ export function EmployeeAvailability({ date, selectedEmployeeId, onSelectEmploye
                   Krank
                 </span>
               )}
-              {!emp.absence && emp.availability.length > 0 && (
+              {!emp.absence && (emp.freeSlots ? emp.freeSlots.length > 0 : emp.availability.length > 0) && (
                 <span className="text-xs font-medium text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full" data-testid={`badge-available-${emp.id}`}>
                   Verfügbar
                 </span>
@@ -112,21 +118,28 @@ export function EmployeeAvailability({ date, selectedEmployeeId, onSelectEmploye
 
             {!emp.absence && (
               <div className="ml-6 space-y-1">
-                {emp.availability.length > 0 ? (
-                  <div className="flex flex-wrap gap-1.5">
-                    {emp.availability.map((slot, i) => (
-                      <span
-                        key={i}
-                        className="text-xs px-2 py-0.5 bg-emerald-50 border border-emerald-200 rounded text-emerald-700"
-                        data-testid={`slot-available-${emp.id}-${i}`}
-                      >
-                        {slot.startTime} – {slot.endTime}
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <span className="text-xs text-gray-500">Keine Verfügbarkeit gemeldet</span>
-                )}
+                {(() => {
+                  const slots = emp.freeSlots
+                    ? emp.freeSlots.map(s => ({ startTime: s.start, endTime: s.end }))
+                    : emp.availability;
+                  return slots.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {slots.map((slot, i) => (
+                        <span
+                          key={i}
+                          className="text-xs px-2 py-0.5 bg-emerald-50 border border-emerald-200 rounded text-emerald-700"
+                          data-testid={`slot-available-${emp.id}-${i}`}
+                        >
+                          {slot.startTime} – {slot.endTime}
+                        </span>
+                      ))}
+                    </div>
+                  ) : emp.availability.length > 0 ? (
+                    <span className="text-xs text-gray-500">Vollständig belegt</span>
+                  ) : (
+                    <span className="text-xs text-gray-500">Keine Verfügbarkeit gemeldet</span>
+                  );
+                })()}
 
                 {emp.appointments.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mt-1">

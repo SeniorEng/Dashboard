@@ -321,7 +321,7 @@ router.get("/employees/availability", asyncHandler("Verfügbarkeiten konnten nic
     return res.json([]);
   }
 
-  const [employeeData, availabilityEntries, absenceEntries, dayAppointments] = await Promise.all([
+  const [employeeData, availabilityEntries, absenceEntries, dayAppointments, timeEntries, blockerEntries] = await Promise.all([
     db.select({
       id: users.id,
       displayName: users.displayName,
@@ -376,6 +376,33 @@ router.get("/employees/availability", asyncHandler("Verfügbarkeiten konnten nic
       sql`${appointments.status} != 'cancelled'`
     ))
     .orderBy(asc(appointments.scheduledStart)),
+
+    db.select({
+      userId: employeeTimeEntries.userId,
+      startTime: employeeTimeEntries.startTime,
+      endTime: employeeTimeEntries.endTime,
+    })
+    .from(employeeTimeEntries)
+    .where(and(
+      inArray(employeeTimeEntries.userId, employeeIds),
+      eq(employeeTimeEntries.entryDate, date),
+      inArray(employeeTimeEntries.entryType, ["arbeitszeit", "pause", "fahrt"]),
+      isNull(employeeTimeEntries.deletedAt)
+    )),
+
+    db.select({
+      userId: employeeTimeEntries.userId,
+      startTime: employeeTimeEntries.startTime,
+      endTime: employeeTimeEntries.endTime,
+      isFullDay: employeeTimeEntries.isFullDay,
+    })
+    .from(employeeTimeEntries)
+    .where(and(
+      inArray(employeeTimeEntries.userId, employeeIds),
+      eq(employeeTimeEntries.entryDate, date),
+      eq(employeeTimeEntries.entryType, "blocker"),
+      isNull(employeeTimeEntries.deletedAt)
+    )),
   ]);
 
   const result = employeeData.map(emp => {
@@ -397,10 +424,46 @@ router.get("/employees/availability", asyncHandler("Verfügbarkeiten konnten nic
 
     const absence = absenceEntries.find(a => a.userId === emp.id);
 
+    const dayTimeEntries = timeEntries
+      .filter(t => t.userId === emp.id && t.startTime && t.endTime);
+
+    const dayBlockers = blockerEntries
+      .filter(b => b.userId === emp.id);
+
+    const hasFullDayBlocker = dayBlockers.some(b => b.isFullDay);
+
+    const blockedSlots: { start: number; end: number }[] = [];
+    for (const appt of existingAppointments) {
+      if (appt.scheduledStart) {
+        const s = timeToMinutes(appt.scheduledStart);
+        const e = appt.scheduledEnd ? timeToMinutes(appt.scheduledEnd) : s + (appt.durationMinutes || 60);
+        blockedSlots.push({ start: s, end: e });
+      }
+    }
+    for (const te of dayTimeEntries) {
+      if (te.startTime && te.endTime) {
+        blockedSlots.push({
+          start: timeToMinutes(te.startTime.slice(0, 5)),
+          end: timeToMinutes(te.endTime.slice(0, 5)),
+        });
+      }
+    }
+    for (const blocker of dayBlockers) {
+      if (blocker.startTime && blocker.endTime) {
+        blockedSlots.push({
+          start: timeToMinutes(blocker.startTime.slice(0, 5)),
+          end: timeToMinutes(blocker.endTime.slice(0, 5)),
+        });
+      }
+    }
+
+    const freeSlots = (absence || hasFullDayBlocker) ? [] : computeFreeSlots(availability, blockedSlots);
+
     return {
       id: emp.id,
       displayName: emp.displayName || `${emp.vorname || ""} ${emp.nachname || ""}`.trim(),
       availability,
+      freeSlots,
       appointments: existingAppointments,
       absence: absence ? absence.entryType as "urlaub" | "krankheit" : null,
     };
@@ -409,8 +472,8 @@ router.get("/employees/availability", asyncHandler("Verfügbarkeiten konnten nic
   result.sort((a, b) => {
     if (a.absence && !b.absence) return 1;
     if (!a.absence && b.absence) return -1;
-    if (a.availability.length > 0 && b.availability.length === 0) return -1;
-    if (a.availability.length === 0 && b.availability.length > 0) return 1;
+    if (a.freeSlots.length > 0 && b.freeSlots.length === 0) return -1;
+    if (a.freeSlots.length === 0 && b.freeSlots.length > 0) return 1;
     return a.displayName.localeCompare(b.displayName);
   });
 
