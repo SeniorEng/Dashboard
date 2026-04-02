@@ -641,9 +641,12 @@ router.get("/:id/pdf", asyncHandler("PDF konnte nicht generiert werden", async (
   const html = generateInvoiceHtml(pdfData);
   const { buffer } = await generatePdf(html);
   
+  const { embedZugferdXml } = await import("../lib/zugferd");
+  const zugferdBuffer = await embedZugferdXml(buffer, pdfData);
+  
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `inline; filename="${invoice.invoiceNumber}.pdf"`);
-  res.send(buffer);
+  res.send(zugferdBuffer);
 }));
 
 router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nicht generiert werden", async (req, res) => {
