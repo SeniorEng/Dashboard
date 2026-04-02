@@ -1,10 +1,12 @@
 import type { InvoicePdfData } from "./pdf-generator";
 
+interface ZugferdInvoice {
+  toXML(): Promise<string>;
+  embedInPdf(pdf: Buffer | Uint8Array, options?: Record<string, unknown>): Promise<Uint8Array>;
+}
+
 interface ZugferdInstance {
-  create(data: Record<string, unknown>): {
-    toXML(): Promise<string>;
-    embedInPdf(pdf: Buffer | Uint8Array, options?: Record<string, unknown>): Promise<Uint8Array>;
-  };
+  create(data: ZugferdInvoiceData): ZugferdInvoice;
 }
 
 interface ZugferdFactory {
@@ -16,8 +18,10 @@ let cachedBasic: unknown = null;
 
 async function loadZugferd(): Promise<{ zugferd: ZugferdFactory; BASIC: unknown }> {
   if (!cachedZugferd || !cachedBasic) {
-    const mod = await import("node-zugferd");
-    const basicMod = await import("node-zugferd/profile/basic");
+    const modPath = "node-zugferd";
+    const basicPath = "node-zugferd/profile/basic";
+    const mod: Record<string, unknown> = await import(modPath);
+    const basicMod: Record<string, unknown> = await import(basicPath);
     cachedZugferd = mod.zugferd as ZugferdFactory;
     cachedBasic = basicMod.BASIC;
   }
@@ -74,6 +78,7 @@ interface ZugferdInvoiceData {
         postalAddress: { countryCode: string; line1?: string; postCode?: string; city?: string };
         organization?: { registrationIdentifier: { value: string } };
       };
+      buyerReference?: string;
     };
     tradeDelivery: {
       information: { deliveryDate: Date };
@@ -81,7 +86,7 @@ interface ZugferdInvoiceData {
     line: {
       identifier: string;
       note: string;
-      tradeProduct: { name: string };
+      tradeProduct: { name: string; description?: string };
       tradeAgreement: { netTradePrice: { chargeAmount: string } };
       tradeDelivery: { billedQuantity: { amount: number; unitMeasureCode: string } };
       tradeSettlement: {
@@ -141,6 +146,7 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
       note: item.serviceDescription,
       tradeProduct: {
         name: item.serviceDescription,
+        ...(item.serviceCode ? { description: item.serviceCode } : {}),
       },
       tradeAgreement: {
         netTradePrice: {
@@ -166,7 +172,7 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
     };
   });
 
-  const result: ProfileBasic = {
+  const result: ZugferdInvoiceData = {
     number: data.invoiceNumber,
     typeCode,
     issueDate,
@@ -206,6 +212,7 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
             },
           } : {}),
         },
+        ...(data.versichertennummer ? { buyerReference: data.versichertennummer } : {}),
       },
       tradeDelivery: {
         information: {
@@ -255,6 +262,30 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
   return result;
 }
 
+function validateXmlStructure(xml: string | null | undefined): string[] {
+  const errors: string[] = [];
+  if (!xml) {
+    errors.push("XML ist leer");
+    return errors;
+  }
+  const requiredElements = [
+    "CrossIndustryInvoice",
+    "ExchangedDocumentContext",
+    "ExchangedDocument",
+    "SupplyChainTradeTransaction",
+    "SellerTradeParty",
+    "BuyerTradeParty",
+    "IncludedSupplyChainTradeLineItem",
+    "SpecifiedTradeSettlementHeaderMonetarySummation",
+  ];
+  for (const el of requiredElements) {
+    if (!xml.includes(el)) {
+      errors.push(`Pflicht-Element fehlt: ${el}`);
+    }
+  }
+  return errors;
+}
+
 function validateZugferdData(data: ZugferdInvoiceData, pdfData: InvoicePdfData): string[] {
   const errors: string[] = [];
   if (!data.number) errors.push("Rechnungsnummer fehlt");
@@ -291,8 +322,9 @@ export async function embedZugferdXml(
     const invoice = invoicer.create(zugferdData);
 
     const xml = await invoice.toXML();
-    if (!xml || !xml.includes("CrossIndustryInvoice")) {
-      console.warn("[ZUGFeRD] Generierte XML ist ungültig, verwende Standard-PDF");
+    const xmlErrors = validateXmlStructure(xml);
+    if (xmlErrors.length > 0) {
+      console.warn("[ZUGFeRD] XML-Strukturfehler, verwende Standard-PDF:", xmlErrors.join("; "));
       return pdfBuffer;
     }
 
@@ -328,8 +360,9 @@ export async function generateZugferdXml(data: InvoicePdfData): Promise<string |
     const invoice = invoicer.create(zugferdData);
 
     const xml = await invoice.toXML();
-    if (!xml || !xml.includes("CrossIndustryInvoice")) {
-      console.warn("[ZUGFeRD] Generierte XML ist ungültig");
+    const xmlErrors = validateXmlStructure(xml);
+    if (xmlErrors.length > 0) {
+      console.warn("[ZUGFeRD] XML-Strukturfehler:", xmlErrors.join("; "));
       return null;
     }
 
