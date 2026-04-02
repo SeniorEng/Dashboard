@@ -36,3 +36,15 @@ id = "ea938InAlABobCRZ4kMXc"
 uri = "file://LN-mit-Unterschriften.pdf"
 type = "pdf"
 title = "Leistungsnachweise mit sichtbaren Unterschriften (K=Kunde, M=Mitarbeiter)"
+
+[[outputs]]
+id = "PXrs7yKKY7zw8fX9lfyzy"
+uri = "file://LN-aktuell.pdf"
+type = "pdf"
+title = "Leistungsnachweise – Anfahrt + Fahrten für/mit Kunde"
+
+[[outputs]]
+id = "R5yyjZwWu3KW0jv2F3eNa"
+uri = "file://Rechnung-aktuell.pdf"
+type = "pdf"
+title = "Rechnung – Anfahrt + Fahrten für/mit Kunde"

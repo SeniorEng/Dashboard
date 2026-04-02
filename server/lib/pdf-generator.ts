@@ -396,7 +396,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
         </tr>`);
       }
       for (const km of group.kmItems) {
-        const kmLabel = km.serviceCode === "customer_km" ? "Begleitfahrten" : "Anfahrtskilometer";
+        const kmLabel = km.serviceCode === "customer_km" ? "Fahrten für/mit Kunde" : "Anfahrt";
         rows.push(`
         <tr>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;"></td>
@@ -609,8 +609,8 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     </table>
 
     <div style="margin-top: 10px;">
-      <table style="width: 250px; margin-left: auto;">
-        <tr><td style="padding: 3px 8px;">Gesamtbetrag:</td><td style="text-align: right; font-weight: bold;">${formatCents(data.grossAmountCents)}</td></tr>
+      <table style="width: 300px; margin-left: auto;">
+        <tr><td style="padding: 3px 8px;">Gesamtbetrag:</td><td style="text-align: right; font-weight: bold; white-space: nowrap;">${formatCents(data.grossAmountCents)}</td></tr>
       </table>
     </div>
 
@@ -718,8 +718,8 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
 
   ${hasMultipleLNs ? `
   <div style="margin-top: 30px; border-top: 2px solid #0d9488; padding-top: 10px;">
-    <table style="width: 250px; margin-left: auto;">
-      <tr><td style="padding: 3px 8px; font-weight: bold;">Gesamtbetrag:</td><td style="text-align: right; font-weight: bold;">${formatCents(data.grossAmountCents)}</td></tr>
+    <table style="width: 300px; margin-left: auto;">
+      <tr><td style="padding: 3px 8px; font-weight: bold;">Gesamtbetrag:</td><td style="text-align: right; font-weight: bold; white-space: nowrap;">${formatCents(data.grossAmountCents)}</td></tr>
     </table>
   </div>
   ` : ''}

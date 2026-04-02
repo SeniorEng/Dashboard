@@ -228,7 +228,7 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
       lineItems.push({
         appointmentId: appt.id,
         appointmentDate: appt.date,
-        serviceDescription: kmSvc.name || (kmEntry.code === "travel_km" ? "Anfahrtskilometer" : "Kundenkilometer"),
+        serviceDescription: kmSvc.name || (kmEntry.code === "travel_km" ? "Anfahrt" : "Fahrten für/mit Kunde"),
         serviceCode: kmEntry.code,
         startTime: appt.actualStart || appt.scheduledStart,
         endTime: appt.actualEnd || appt.scheduledEnd,
