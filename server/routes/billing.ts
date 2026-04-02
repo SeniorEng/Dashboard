@@ -369,6 +369,14 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
       providerName: insuranceProviders.name,
       ikNummer: insuranceProviders.ikNummer,
       versichertennummer: customerInsuranceHistory.versichertennummer,
+      empfaenger: insuranceProviders.empfaenger,
+      empfaengerZeile2: insuranceProviders.empfaengerZeile2,
+      anschrift: insuranceProviders.anschrift,
+      plzOrt: insuranceProviders.plzOrt,
+      strasse: insuranceProviders.strasse,
+      hausnummer: insuranceProviders.hausnummer,
+      plz: insuranceProviders.plz,
+      stadt: insuranceProviders.stadt,
     })
     .from(customerInsuranceHistory)
     .innerJoin(insuranceProviders, eq(customerInsuranceHistory.insuranceProviderId, insuranceProviders.id))
@@ -379,14 +387,27 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
     .limit(1);
 
     if (insuranceData.length > 0) {
-      recipientName = insuranceData[0].providerName;
-      insuranceProviderName = insuranceData[0].providerName;
-      insuranceIkNummer = insuranceData[0].ikNummer;
-      versichertennummer = insuranceData[0].versichertennummer;
+      const ins = insuranceData[0];
+      recipientName = ins.empfaenger || ins.providerName;
+      insuranceProviderName = ins.providerName;
+      insuranceIkNummer = ins.ikNummer;
+      versichertennummer = ins.versichertennummer;
+      const addrParts: string[] = [];
+      if (ins.empfaengerZeile2) addrParts.push(ins.empfaengerZeile2);
+      if (ins.anschrift) {
+        addrParts.push(ins.anschrift);
+      } else if (ins.strasse) {
+        addrParts.push([ins.strasse, ins.hausnummer].filter(Boolean).join(" "));
+      }
+      if (ins.plzOrt) {
+        addrParts.push(ins.plzOrt);
+      } else if (ins.plz || ins.stadt) {
+        addrParts.push([ins.plz, ins.stadt].filter(Boolean).join(" "));
+      }
+      recipientAddress = addrParts.join("\n");
     } else {
       recipientName = customerName;
     }
-    recipientAddress = "";
   } else {
     recipientName = customerName;
     recipientAddress = customerAddress;
@@ -608,6 +629,15 @@ router.get("/:id/pdf", asyncHandler("PDF konnte nicht generiert werden", async (
   const { generateInvoiceHtml, generatePdf } = await import("../lib/pdf-generator");
   
   const pdfData = buildPdfData(invoice, lineItems, companySettings);
+
+  const customerForInv = await db.select({ geburtsdatum: customersTable.geburtsdatum })
+    .from(customersTable)
+    .where(eq(customersTable.id, invoice.customerId))
+    .limit(1);
+  if (customerForInv.length > 0 && customerForInv[0].geburtsdatum) {
+    pdfData.customerGeburtsdatum = customerForInv[0].geburtsdatum;
+  }
+
   const html = generateInvoiceHtml(pdfData);
   const { buffer } = await generatePdf(html);
   

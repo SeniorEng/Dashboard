@@ -234,16 +234,18 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
 
   <div class="recipient">
     <div class="recipient-label">Empfänger:</div>
-    <strong>${data.recipientName}</strong>
-    ${data.recipientAddress ? `<br>${data.recipientAddress.replace(/\n/g, "<br>")}` : ""}
+    <strong>${escapeHtml(data.recipientName)}</strong>
+    ${data.insuranceIkNummer && data.billingType === "pflegekasse_gesetzlich" ? `<br>IK: ${escapeHtml(data.insuranceIkNummer)}` : ""}
+    ${data.recipientAddress ? `<br>${escapeHtml(data.recipientAddress).replace(/\n/g, "<br>")}` : ""}
   </div>
 
-  ${data.billingType !== "selbstzahler" && data.versichertennummer ? `
+  ${data.billingType !== "selbstzahler" ? `
   <div class="insurance-ref">
-    <strong>Versicherte/r:</strong> ${data.customerName}<br>
-    <strong>Versichertennummer:</strong> ${data.versichertennummer}
+    <strong>Versicherte/r:</strong> ${escapeHtml(data.customerName)}
+    ${data.customerGeburtsdatum ? `<br><strong>Geb.:</strong> ${formatDate(data.customerGeburtsdatum)}` : ""}
+    ${data.versichertennummer ? `<br><strong>Versichertennummer:</strong> ${escapeHtml(data.versichertennummer)}` : ""}
     ${data.pflegegrad ? ` | <strong>Pflegegrad:</strong> ${data.pflegegrad}` : ""}
-    ${data.insuranceProviderName && data.billingType === "pflegekasse_privat" ? `<br><strong>Pflegekasse:</strong> ${data.insuranceProviderName}${data.insuranceIkNummer ? ` (IK: ${data.insuranceIkNummer})` : ""}` : ""}
+    ${data.insuranceProviderName && data.billingType === "pflegekasse_privat" ? `<br><strong>Pflegekasse:</strong> ${escapeHtml(data.insuranceProviderName)}${data.insuranceIkNummer ? ` (IK: ${escapeHtml(data.insuranceIkNummer)})` : ""}` : ""}
   </div>
   ` : ""}
 
