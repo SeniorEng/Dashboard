@@ -627,7 +627,9 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       <div class="info-value">${employeeLabel}</div>
       ${lbnrLabel ? `<div style="font-size: 9pt;">LBNR: ${lbnrLabel}</div>` : ""}
       ${data.employeeQualifications && data.employeeQualifications.size > 0
-        ? `<div style="font-size: 9pt; color: #0d9488;">${Array.from(new Set(data.employeeQualifications.values())).map(escapeHtml).join(", ")}</div>`
+        ? (employeeNames.length <= 1
+          ? `<div style="font-size: 9pt; color: #0d9488;">${Array.from(new Set(data.employeeQualifications.values())).map(escapeHtml).join(", ")}</div>`
+          : `<div style="font-size: 9pt; color: #0d9488;">${employeeNames.map(n => { const q = data.employeeQualifications!.get(n); return q ? `${escapeHtml(n)}: ${escapeHtml(q)}` : ""; }).filter(Boolean).join("; ")}</div>`)
         : ""}
     </div>
   </div>
