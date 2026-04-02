@@ -263,7 +263,11 @@ function CoverageBanner({ data }: { data: CoverageData }) {
             <div className="space-y-1">
               {[...activeData.uncoveredCustomers].sort((a, b) => {
                 const order = { primary: 0, backup1: 1, backup2: 2 };
-                return (order[a.role] ?? 3) - (order[b.role] ?? 3);
+                const roleDiff = (order[a.role] ?? 3) - (order[b.role] ?? 3);
+                if (roleDiff !== 0) return roleDiff;
+                const hvA = a.primaryEmployeeName ?? "";
+                const hvB = b.primaryEmployeeName ?? "";
+                return hvA.localeCompare(hvB, "de");
               }).map((customer) => (
                 <div
                   key={customer.id}
