@@ -1,15 +1,27 @@
 import type { InvoicePdfData } from "./pdf-generator";
 
-let zugferdModule: any = null;
-let basicProfile: any = null;
+interface ZugferdInstance {
+  create(data: Record<string, unknown>): {
+    toXML(): Promise<string>;
+    embedInPdf(pdf: Buffer | Uint8Array, options?: Record<string, unknown>): Promise<Uint8Array>;
+  };
+}
 
-async function loadZugferd() {
-  if (!zugferdModule) {
-    zugferdModule = await import("node-zugferd");
+interface ZugferdFactory {
+  (options: { profile: unknown; strict?: boolean }): ZugferdInstance;
+}
+
+let cachedZugferd: ZugferdFactory | null = null;
+let cachedBasic: unknown = null;
+
+async function loadZugferd(): Promise<{ zugferd: ZugferdFactory; BASIC: unknown }> {
+  if (!cachedZugferd || !cachedBasic) {
+    const mod = await import("node-zugferd");
     const basicMod = await import("node-zugferd/profile/basic");
-    basicProfile = basicMod.BASIC;
+    cachedZugferd = mod.zugferd as ZugferdFactory;
+    cachedBasic = basicMod.BASIC;
   }
-  return { zugferd: zugferdModule.zugferd, BASIC: basicProfile };
+  return { zugferd: cachedZugferd, BASIC: cachedBasic };
 }
 
 function parseDateString(dateStr: string): Date {
@@ -24,67 +36,94 @@ function centsToDecimal(cents: number): string {
   return (cents / 100).toFixed(2);
 }
 
-function buildZugferdData(data: InvoicePdfData) {
-  const isStorno = data.invoiceType === "stornorechnung";
-  const typeCode = isStorno ? "384" : "380";
-  const issueDate = parseDateString(data.invoiceDate);
-
-  const companyAddressParts = data.companyAddress ? data.companyAddress.split(", ") : [];
-  const sellerAddress: any = {
-    countryCode: "DE" as const,
-    ...(companyAddressParts.length >= 1 ? { line1: companyAddressParts[0] } : {}),
-    ...(companyAddressParts.length >= 2 ? { postCode: companyAddressParts[1].split(" ")[0], city: companyAddressParts[1].split(" ").slice(1).join(" ") } : {}),
-  };
-
-  const sellerTax: any = {};
-  if (data.ustId) {
-    sellerTax.vatIdentifier = data.ustId;
-  }
-  if (data.steuernummer) {
-    sellerTax.localIdentifier = data.steuernummer;
-  }
-
-  const seller: any = {
-    name: data.companyName,
-    postalAddress: sellerAddress,
-  };
-  if (data.ikNummer) {
-    seller.organization = {
-      registrationIdentifier: {
-        value: data.ikNummer,
-      },
-    };
-  }
-  if (Object.keys(sellerTax).length > 0) {
-    seller.taxRegistration = sellerTax;
-  }
-
-  const buyerAddress: any = {
-    countryCode: "DE" as const,
-  };
-  if (data.recipientAddress) {
-    const addrLines = data.recipientAddress.split(/[\n,]/).map(l => l.trim()).filter(Boolean);
-    if (addrLines.length >= 1) buyerAddress.line1 = addrLines[0];
-    if (addrLines.length >= 2) {
-      const plzMatch = addrLines[addrLines.length - 1].match(/^(\d{5})\s+(.+)/);
-      if (plzMatch) {
-        buyerAddress.postCode = plzMatch[1];
-        buyerAddress.city = plzMatch[2];
-      }
+function parseAddress(raw: string | null): { line1?: string; postCode?: string; city?: string } {
+  if (!raw) return {};
+  const lines = raw.split(/[\n,]/).map(l => l.trim()).filter(Boolean);
+  const result: { line1?: string; postCode?: string; city?: string } = {};
+  if (lines.length >= 1) result.line1 = lines[0];
+  if (lines.length >= 2) {
+    const plzMatch = lines[lines.length - 1].match(/^(\d{5})\s+(.+)/);
+    if (plzMatch) {
+      result.postCode = plzMatch[1];
+      result.city = plzMatch[2];
     }
   }
+  return result;
+}
 
-  const buyer: any = {
-    name: data.recipientName,
-    postalAddress: buyerAddress,
-  };
-  if (data.insuranceIkNummer) {
-    buyer.organization = {
-      registrationIdentifier: {
-        value: data.insuranceIkNummer,
-      },
+function computeServicePeriod(data: InvoicePdfData): { start: Date; end: Date } {
+  const start = new Date(data.billingYear, data.billingMonth - 1, 1);
+  const end = new Date(data.billingYear, data.billingMonth, 0);
+  return { start, end };
+}
+
+interface ZugferdInvoiceData {
+  number: string;
+  typeCode: string;
+  issueDate: Date;
+  transaction: {
+    tradeAgreement: {
+      seller: {
+        name: string;
+        postalAddress: { countryCode: string; line1?: string; postCode?: string; city?: string };
+        organization?: { registrationIdentifier: { value: string } };
+        taxRegistration?: { vatIdentifier?: string; localIdentifier?: string };
+      };
+      buyer: {
+        name: string;
+        postalAddress: { countryCode: string; line1?: string; postCode?: string; city?: string };
+        organization?: { registrationIdentifier: { value: string } };
+      };
     };
-  }
+    tradeDelivery: {
+      information: { deliveryDate: Date };
+    };
+    line: {
+      identifier: string;
+      note: string;
+      tradeProduct: { name: string };
+      tradeAgreement: { netTradePrice: { chargeAmount: string } };
+      tradeDelivery: { billedQuantity: { amount: number; unitMeasureCode: string } };
+      tradeSettlement: {
+        tradeTax: { typeCode: string; categoryCode: string; rateApplicablePercent: number };
+        monetarySummation: { totalAmount: string };
+      };
+    }[];
+    tradeSettlement: {
+      currencyCode: string;
+      paymentMeans: {
+        typeCode: string;
+        payeeAccount: { iban: string };
+        payeeInstitution?: { bic: string };
+      };
+      tradeTax: {
+        calculatedAmount: string;
+        typeCode: string;
+        basisAmount: string;
+        categoryCode: string;
+        rateApplicablePercent: number;
+        exemptionReason?: string;
+      }[];
+      invoicingPeriod: { startDate: Date; endDate: Date };
+      monetarySummation: {
+        lineTotalAmount: string;
+        taxBasisTotalAmount: string;
+        taxTotal: { amount: string; currencyCode: string };
+        grandTotalAmount: string;
+        duePayableAmount: string;
+      };
+    };
+  };
+}
+
+function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
+  const isStorno = data.invoiceType === "stornorechnung";
+  const typeCode = isStorno ? "384" as const : "380" as const;
+  const issueDate = parseDateString(data.invoiceDate);
+
+  const sellerAddr = parseAddress(data.companyAddress);
+  const buyerAddr = parseAddress(data.recipientAddress);
+  const period = computeServicePeriod(data);
 
   const vatExempt = data.vatAmountCents === 0;
   const taxCategoryCode = vatExempt ? "E" : "S";
@@ -127,41 +166,78 @@ function buildZugferdData(data: InvoicePdfData) {
     };
   });
 
-  const paymentMeans: any = {
-    typeCode: "58",
-    payeeAccount: {
-      iban: data.iban,
-    },
-  };
-  if (data.bic) {
-    paymentMeans.payeeInstitution = {
-      bic: data.bic,
-    };
-  }
-
-  const taxBreakdown = [{
-    calculatedAmount: centsToDecimal(data.vatAmountCents),
-    typeCode: "VAT" as const,
-    basisAmount: centsToDecimal(data.netAmountCents),
-    categoryCode: taxCategoryCode,
-    rateApplicablePercent: taxPercent,
-    ...(vatExempt ? { exemptionReason: "Umsatzsteuerbefreit gem. § 4 Nr. 16 UStG" } : {}),
-  }];
-
-  return {
+  const result: ProfileBasic = {
     number: data.invoiceNumber,
     typeCode,
     issueDate,
     transaction: {
       tradeAgreement: {
-        seller,
-        buyer,
+        seller: {
+          name: data.companyName,
+          postalAddress: {
+            countryCode: "DE" as const,
+            ...sellerAddr,
+          },
+          ...(data.ikNummer ? {
+            organization: {
+              registrationIdentifier: {
+                value: data.ikNummer,
+              },
+            },
+          } : {}),
+          ...((data.ustId || data.steuernummer) ? {
+            taxRegistration: {
+              ...(data.ustId ? { vatIdentifier: data.ustId } : {}),
+              ...(data.steuernummer ? { localIdentifier: data.steuernummer } : {}),
+            },
+          } : {}),
+        },
+        buyer: {
+          name: data.recipientName,
+          postalAddress: {
+            countryCode: "DE" as const,
+            ...buyerAddr,
+          },
+          ...(data.insuranceIkNummer ? {
+            organization: {
+              registrationIdentifier: {
+                value: data.insuranceIkNummer,
+              },
+            },
+          } : {}),
+        },
+      },
+      tradeDelivery: {
+        information: {
+          deliveryDate: period.end,
+        },
       },
       line: lineItems,
       tradeSettlement: {
         currencyCode: "EUR" as const,
-        paymentMeans,
-        tradeTax: taxBreakdown,
+        paymentMeans: {
+          typeCode: "58",
+          payeeAccount: {
+            iban: data.iban,
+          },
+          ...(data.bic ? {
+            payeeInstitution: {
+              bic: data.bic,
+            },
+          } : {}),
+        },
+        tradeTax: [{
+          calculatedAmount: centsToDecimal(data.vatAmountCents),
+          typeCode: "VAT" as const,
+          basisAmount: centsToDecimal(data.netAmountCents),
+          categoryCode: taxCategoryCode,
+          rateApplicablePercent: taxPercent,
+          ...(vatExempt ? { exemptionReason: "Umsatzsteuerbefreit gem. § 4 Nr. 16 UStG" } : {}),
+        }],
+        invoicingPeriod: {
+          startDate: period.start,
+          endDate: period.end,
+        },
         monetarySummation: {
           lineTotalAmount: centsToDecimal(data.netAmountCents),
           taxBasisTotalAmount: centsToDecimal(data.netAmountCents),
@@ -175,6 +251,25 @@ function buildZugferdData(data: InvoicePdfData) {
       },
     },
   };
+
+  return result;
+}
+
+function validateZugferdData(data: ZugferdInvoiceData, pdfData: InvoicePdfData): string[] {
+  const errors: string[] = [];
+  if (!data.number) errors.push("Rechnungsnummer fehlt");
+  if (!data.issueDate) errors.push("Rechnungsdatum fehlt");
+  if (!data.transaction?.tradeAgreement?.seller?.name) errors.push("Verkäufername fehlt");
+  if (!data.transaction?.tradeAgreement?.buyer?.name) errors.push("Käufername fehlt");
+  if (!data.transaction?.line?.length) errors.push("Keine Rechnungspositionen");
+  if (!pdfData.iban) errors.push("IBAN fehlt");
+
+  const lineTotalSum = pdfData.lineItems.reduce((sum, item) => sum + item.totalCents, 0);
+  if (Math.abs(lineTotalSum - pdfData.netAmountCents) > 1) {
+    errors.push(`Positionssumme (${lineTotalSum}) stimmt nicht mit Nettobetrag (${pdfData.netAmountCents}) überein`);
+  }
+
+  return errors;
 }
 
 export async function embedZugferdXml(
@@ -184,9 +279,22 @@ export async function embedZugferdXml(
   try {
     const { zugferd, BASIC } = await loadZugferd();
 
-    const invoicer = zugferd({ profile: BASIC, strict: false });
     const zugferdData = buildZugferdData(data);
+
+    const validationErrors = validateZugferdData(zugferdData, data);
+    if (validationErrors.length > 0) {
+      console.warn("[ZUGFeRD] Validierungsfehler, verwende Standard-PDF:", validationErrors.join("; "));
+      return pdfBuffer;
+    }
+
+    const invoicer = zugferd({ profile: BASIC, strict: false });
     const invoice = invoicer.create(zugferdData);
+
+    const xml = await invoice.toXML();
+    if (!xml || !xml.includes("CrossIndustryInvoice")) {
+      console.warn("[ZUGFeRD] Generierte XML ist ungültig, verwende Standard-PDF");
+      return pdfBuffer;
+    }
 
     const resultPdf = await invoice.embedInPdf(pdfBuffer, {
       metadata: {
@@ -196,6 +304,7 @@ export async function embedZugferdXml(
       },
     });
 
+    console.log(`[ZUGFeRD] XML erfolgreich in PDF eingebettet für ${data.invoiceNumber}`);
     return Buffer.from(resultPdf);
   } catch (err) {
     console.error("[ZUGFeRD] Fehler beim Einbetten der XML-Daten, verwende Standard-PDF:", err);
@@ -207,11 +316,24 @@ export async function generateZugferdXml(data: InvoicePdfData): Promise<string |
   try {
     const { zugferd, BASIC } = await loadZugferd();
 
-    const invoicer = zugferd({ profile: BASIC, strict: false });
     const zugferdData = buildZugferdData(data);
+
+    const validationErrors = validateZugferdData(zugferdData, data);
+    if (validationErrors.length > 0) {
+      console.warn("[ZUGFeRD] Validierungsfehler:", validationErrors.join("; "));
+      return null;
+    }
+
+    const invoicer = zugferd({ profile: BASIC, strict: false });
     const invoice = invoicer.create(zugferdData);
 
-    return await invoice.toXML();
+    const xml = await invoice.toXML();
+    if (!xml || !xml.includes("CrossIndustryInvoice")) {
+      console.warn("[ZUGFeRD] Generierte XML ist ungültig");
+      return null;
+    }
+
+    return xml;
   } catch (err) {
     console.error("[ZUGFeRD] Fehler beim Generieren der XML-Daten:", err);
     return null;
