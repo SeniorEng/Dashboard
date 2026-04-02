@@ -224,6 +224,7 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
   }
   
   const { customerId, year, month } = parsed.data;
+  const effectiveEmployeeId = req.user!.isAdmin ? parsed.data.employeeId : userId;
   
   const hasAccess = await canAccessCustomer(
     userId,
@@ -238,7 +239,7 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
     });
   }
   
-  const undocumentedAppointments = await storage.getUndocumentedAppointmentsForPeriod(customerId, userId, year, month);
+  const undocumentedAppointments = await storage.getUndocumentedAppointmentsForPeriod(customerId, effectiveEmployeeId, year, month);
   if (undocumentedAppointments.length > 0) {
     return res.status(400).json({ 
       message: `Es gibt noch ${undocumentedAppointments.length} nicht dokumentierte Termine in diesem Monat. Bitte dokumentieren Sie alle Termine, bevor Sie den Leistungsnachweis erstellen.`,
@@ -246,7 +247,7 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
     });
   }
   
-  const documentedAppointments = await storage.getDocumentedAppointmentsForPeriod(customerId, userId, year, month);
+  const documentedAppointments = await storage.getDocumentedAppointmentsForPeriod(customerId, effectiveEmployeeId, year, month);
   if (documentedAppointments.length === 0) {
     return res.status(400).json({ 
       message: "Es gibt keine dokumentierten Termine in diesem Monat." 
@@ -265,7 +266,7 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
   
   const record = await storage.createServiceRecord({
     customerId,
-    employeeId: userId,
+    employeeId: effectiveEmployeeId,
     year,
     month,
     recordType: "monthly",
@@ -342,9 +343,11 @@ router.post("/single", requireAuth, asyncHandler("Einzeltermin-Leistungsnachweis
   const year = appointmentDate.getFullYear();
   const month = appointmentDate.getMonth() + 1;
   
+  const appointmentEmployeeId = appointment.performedByEmployeeId || appointment.assignedEmployeeId || userId;
+  
   const record = await storage.createServiceRecord({
     customerId,
-    employeeId: userId,
+    employeeId: appointmentEmployeeId,
     year,
     month,
     recordType: "single",

@@ -129,7 +129,7 @@ export default function ServiceRecordsPage() {
       }
       const result = await api.post<MonthlyServiceRecord>("/service-records", {
         customerId,
-        employeeId: user.id,
+        employeeId: viewAsEmployeeId || user.id,
         year: selectedYear,
         month: selectedMonth,
       });
