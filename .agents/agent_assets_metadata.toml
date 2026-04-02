@@ -30,3 +30,9 @@ id = "MwYM-mCWzc8KX_abmZ_yl"
 uri = "file://LN-RE-2026-0003-neu.pdf"
 type = "pdf"
 title = "Leistungsnachweise RE-2026-0003 (aktualisiert)"
+
+[[outputs]]
+id = "ea938InAlABobCRZ4kMXc"
+uri = "file://LN-mit-Unterschriften.pdf"
+type = "pdf"
+title = "Leistungsnachweise mit sichtbaren Unterschriften (K=Kunde, M=Mitarbeiter)"
