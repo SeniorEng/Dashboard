@@ -203,8 +203,8 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     table.items { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
     table.items th { background: #f3f4f6; padding: 8px; text-align: left; font-size: 9pt; font-weight: 600; border-bottom: 2px solid #d1d5db; }
     table.items th:nth-child(4), table.items th:nth-child(5), table.items th:nth-child(6) { text-align: right; }
-    .totals { margin-left: auto; width: 250px; }
-    .totals td { padding: 4px 8px; }
+    .totals { margin-left: auto; width: 300px; }
+    .totals td { padding: 4px 8px; white-space: nowrap; }
     .totals td:last-child { text-align: right; }
     .total-row { font-weight: bold; font-size: 12pt; border-top: 2px solid #0d9488; }
     .footer { margin-top: 40px; font-size: 8pt; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 10px; }
@@ -232,22 +232,30 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     </div>
   </div>
 
+  ${data.billingType !== "selbstzahler" ? `
+  <div style="display: flex; gap: 30px; margin-bottom: 20px;">
+    <div class="recipient" style="flex: 1; margin-bottom: 0;">
+      <div class="recipient-label">Rechnungsempfänger:</div>
+      <strong>${escapeHtml(data.recipientName)}</strong>
+      ${data.insuranceIkNummer ? `<br>IK: ${escapeHtml(data.insuranceIkNummer)}` : ""}
+      ${data.recipientAddress ? `<br>${escapeHtml(data.recipientAddress).replace(/\n/g, "<br>")}` : ""}
+    </div>
+    <div class="insurance-ref" style="flex: 1; margin-top: 0;">
+      <div class="recipient-label">Versicherte/r:</div>
+      <strong>${escapeHtml(data.customerName)}</strong>
+      ${data.customerGeburtsdatum ? `<br>Geb.: ${formatDate(data.customerGeburtsdatum)}` : ""}
+      ${data.versichertennummer ? `<br>Vers.-Nr.: ${escapeHtml(data.versichertennummer)}` : ""}
+      ${data.pflegegrad ? `<br>Pflegegrad: ${data.pflegegrad}` : ""}
+      ${data.insuranceProviderName && data.billingType === "pflegekasse_privat" ? `<br>Pflegekasse: ${escapeHtml(data.insuranceProviderName)}${data.insuranceIkNummer ? ` (IK: ${escapeHtml(data.insuranceIkNummer)})` : ""}` : ""}
+    </div>
+  </div>
+  ` : `
   <div class="recipient">
     <div class="recipient-label">Empfänger:</div>
     <strong>${escapeHtml(data.recipientName)}</strong>
-    ${data.insuranceIkNummer && data.billingType === "pflegekasse_gesetzlich" ? `<br>IK: ${escapeHtml(data.insuranceIkNummer)}` : ""}
     ${data.recipientAddress ? `<br>${escapeHtml(data.recipientAddress).replace(/\n/g, "<br>")}` : ""}
   </div>
-
-  ${data.billingType !== "selbstzahler" ? `
-  <div class="insurance-ref">
-    <strong>Versicherte/r:</strong> ${escapeHtml(data.customerName)}
-    ${data.customerGeburtsdatum ? `<br><strong>Geb.:</strong> ${formatDate(data.customerGeburtsdatum)}` : ""}
-    ${data.versichertennummer ? `<br><strong>Versichertennummer:</strong> ${escapeHtml(data.versichertennummer)}` : ""}
-    ${data.pflegegrad ? ` | <strong>Pflegegrad:</strong> ${data.pflegegrad}` : ""}
-    ${data.insuranceProviderName && data.billingType === "pflegekasse_privat" ? `<br><strong>Pflegekasse:</strong> ${escapeHtml(data.insuranceProviderName)}${data.insuranceIkNummer ? ` (IK: ${escapeHtml(data.insuranceIkNummer)})` : ""}` : ""}
-  </div>
-  ` : ""}
+  `}
 
   <div class="invoice-meta">
     <div class="invoice-title">${typeLabel}</div>
