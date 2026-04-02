@@ -95,7 +95,7 @@ function escapeHtml(str: string): string {
 }
 
 function isValidDataUrl(str: string): boolean {
-  return /^data:image\/(png|jpeg|svg\+xml);base64,[A-Za-z0-9+/=]+$/.test(str);
+  return /^data:image\/(png|jpeg|svg\+xml);base64,[A-Za-z0-9+/=\s]+$/.test(str.trim());
 }
 
 function formatDate(dateStr: string): string {
@@ -169,16 +169,20 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
   const billingNote = getBillingTypeNote(data.billingType, data.insuranceProviderName);
   const isStorno = data.invoiceType === "stornorechnung";
   
-  const lineItemsHtml = data.lineItems.map(item => `
+  const lineItemsHtml = data.lineItems.map(item => {
+    const isKm = item.serviceCode === "travel_km" || item.serviceCode === "customer_km";
+    const quantityDisplay = isKm ? `${item.durationMinutes} km` : formatMinutes(item.durationMinutes);
+    const unitLabel = isKm ? "/km" : "/Std.";
+    return `
     <tr>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${formatDate(item.appointmentDate)}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${item.startTime ? item.startTime.slice(0, 5) : ""}-${item.endTime ? item.endTime.slice(0, 5) : ""}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${item.serviceDescription}</td>
-      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatMinutes(item.durationMinutes)}</td>
-      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(item.unitPriceCents)}/Std.</td>
+      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${quantityDisplay}</td>
+      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(item.unitPriceCents)}${unitLabel}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right; font-weight: ${isStorno ? 'bold; color: #dc2626' : '500'};">${formatCents(item.totalCents)}</td>
-    </tr>
-  `).join("");
+    </tr>`;
+  }).join("");
 
   return `<!DOCTYPE html>
 <html lang="de">
@@ -596,7 +600,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     table.items th { background: #f3f4f6; padding: 8px; text-align: left; font-size: 9pt; font-weight: 600; border-bottom: 2px solid #d1d5db; }
     table.items th:nth-child(5), table.items th:nth-child(6), table.items th:nth-child(7) { text-align: right; }
     .total-row td { font-weight: bold; border-top: 2px solid #0d9488; padding: 8px; }
-    .signature-area { margin-top: 40px; display: flex; justify-content: space-between; }
+    .signature-area { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; }
     .signature-box { width: 45%; position: relative; }
     .signature-img-wrapper { position: relative; margin-bottom: -18px; z-index: 1; }
     .signature-img { max-width: 260px; max-height: 150px; filter: brightness(0) saturate(100%) invert(18%) sepia(60%) saturate(600%) hue-rotate(190deg); }

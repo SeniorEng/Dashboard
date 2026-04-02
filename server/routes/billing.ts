@@ -84,8 +84,9 @@ async function getAppointmentIdsFromServiceRecords(serviceRecordIds: number[]): 
   return rows.map(r => r.appointmentId);
 }
 
-async function buildLineItemsFromAppointments(apptIds: number[], customerId?: number) {
+async function buildLineItemsFromAppointments(apptIds: number[], customerId?: number, billingType?: string) {
   if (apptIds.length === 0) return { lineItems: [], totalNetCents: 0, totalVatCents: 0 };
+  const isVatExempt = billingType && billingType !== "selbstzahler";
 
   const appts = await db.select()
     .from(appointments)
@@ -152,6 +153,17 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
     }
   }
 
+  const kmServiceRows = await db.select({
+    id: servicesTable.id,
+    code: servicesTable.code,
+    name: servicesTable.name,
+    defaultPriceCents: servicesTable.defaultPriceCents,
+    vatRate: servicesTable.vatRate,
+  })
+  .from(servicesTable)
+  .where(inArray(servicesTable.code, ["travel_km", "customer_km"]));
+  const kmServiceMap = new Map(kmServiceRows.map(s => [s.code, s]));
+
   const lineItems: BuildLineItem[] = [];
   let totalNetCents = 0;
   let totalVatCents = 0;
@@ -173,7 +185,7 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
         throw badRequest(`Kein Preis hinterlegt für Dienstleistung "${svc.serviceName || svc.serviceCode}". Bitte prüfen Sie den Dienstleistungskatalog.`);
       }
       const totalCents = Math.round((durationMinutes / 60) * pricePer60Min);
-      const vatBasisPoints = svc.vatRate || 0;
+      const vatBasisPoints = isVatExempt ? 0 : (svc.vatRate || 0);
       const vatCents = Math.round(totalCents * vatBasisPoints / 10000);
 
       lineItems.push({
@@ -194,6 +206,43 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
 
       totalNetCents += totalCents;
       totalVatCents += vatCents;
+    }
+
+    const kmEntries: { code: string; km: number }[] = [];
+    if (appt.travelKilometers && appt.travelKilometers > 0) {
+      kmEntries.push({ code: "travel_km", km: appt.travelKilometers });
+    }
+    if (appt.customerKilometers && appt.customerKilometers > 0) {
+      kmEntries.push({ code: "customer_km", km: appt.customerKilometers });
+    }
+    for (const kmEntry of kmEntries) {
+      const kmSvc = kmServiceMap.get(kmEntry.code);
+      if (!kmSvc) continue;
+      const kmCustomerPrice = getCustomerPrice(kmSvc.id, apptDate);
+      const pricePerKm = kmCustomerPrice ?? kmSvc.defaultPriceCents ?? 35;
+      const kmRounded = Math.round(kmEntry.km);
+      const kmTotalCents = Math.round(kmEntry.km * pricePerKm);
+      const kmVatBasisPoints = isVatExempt ? 0 : (kmSvc.vatRate || 0);
+      const kmVatCents = Math.round(kmTotalCents * kmVatBasisPoints / 10000);
+
+      lineItems.push({
+        appointmentId: appt.id,
+        appointmentDate: appt.date,
+        serviceDescription: kmSvc.name || (kmEntry.code === "travel_km" ? "Anfahrtskilometer" : "Kundenkilometer"),
+        serviceCode: kmEntry.code,
+        startTime: appt.actualStart || appt.scheduledStart,
+        endTime: appt.actualEnd || appt.scheduledEnd,
+        durationMinutes: kmRounded,
+        unitPriceCents: pricePerKm,
+        totalCents: kmTotalCents,
+        employeeName,
+        employeeLbnr,
+        appointmentNotes: null,
+        serviceDetails: null,
+      });
+
+      totalNetCents += kmTotalCents;
+      totalVatCents += kmVatCents;
     }
   }
 
@@ -301,9 +350,8 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
     throw badRequest("Alle Termine aus dem Leistungsnachweis wurden bereits abgerechnet.");
   }
 
-  const { lineItems, totalNetCents, totalVatCents } = await buildLineItemsFromAppointments(apptIds, customerId);
-
   const billingType = customer.billingType || "selbstzahler";
+  const { lineItems, totalNetCents, totalVatCents } = await buildLineItemsFromAppointments(apptIds, customerId, billingType);
   let recipientName = "";
   let recipientAddress = "";
   let insuranceProviderName = "";
@@ -384,7 +432,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
     netAmountCents: totalNetCents,
     vatAmountCents: totalVatCents,
     grossAmountCents: totalNetCents + totalVatCents,
-    vatRate: 0,
+    vatRate: billingType === "selbstzahler" ? 1900 : 0,
     status: "entwurf",
   };
 
