@@ -565,10 +565,8 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
         <tbody>
           ${tableRowsHtml}
           <tr class="total-row">
-            <td colspan="4">Summe</td>
-            <td style="text-align: right;">${formatMinutes(sectionServiceMinutes)}${sectionKm > 0 ? ` + ${sectionKm} km` : ""}</td>
-            <td></td>
-            <td style="text-align: right;">${formatCents(sectionCents)}</td>
+            <td colspan="6">Summe</td>
+            <td style="text-align: right; white-space: nowrap;">${formatCents(sectionCents)}</td>
           </tr>
         </tbody>
       </table>
@@ -608,10 +606,8 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       <tbody>
         ${tableRowsHtml}
         <tr class="total-row">
-          <td colspan="4">Gesamt</td>
-          <td style="text-align: right;">${formatMinutes(totalServiceMinutes)}${totalKmAll > 0 ? ` + ${totalKmAll} km` : ""}</td>
-          <td></td>
-          <td style="text-align: right;">${formatCents(totalCentsAll)}</td>
+          <td colspan="6">Gesamt</td>
+          <td style="text-align: right; white-space: nowrap;">${formatCents(totalCentsAll)}</td>
         </tr>
       </tbody>
     </table>
