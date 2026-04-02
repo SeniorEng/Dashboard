@@ -191,15 +191,15 @@ export function CustomerEmergencySection({
                     </span>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    {(contact.mobilnummer || contact.festnetz || contact.telefon) && (
+                    {(contact.mobilnummer || contact.festnetz) && (
                       <a
-                        href={`tel:${contact.mobilnummer || contact.festnetz || contact.telefon}`}
+                        href={`tel:${contact.mobilnummer || contact.festnetz}`}
                         className="text-primary hover:underline flex items-center gap-1 text-sm"
                         onClick={(e) => e.stopPropagation()}
                         data-testid={`link-contact-phone-${contact.id}`}
                       >
                         <Phone className={iconSize.xs} />
-                        {formatPhoneForDisplay(contact.mobilnummer || contact.festnetz || contact.telefon || "")}
+                        {formatPhoneForDisplay(contact.mobilnummer || contact.festnetz || "")}
                       </a>
                     )}
                     <Button variant="ghost" size="sm" className="min-h-[44px] min-w-[44px] p-0" onClick={() => startEditContact(contact)} data-testid={`button-edit-contact-${contact.id}`}>

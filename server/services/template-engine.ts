@@ -135,7 +135,6 @@ export interface WizardFormData {
     vorname?: string;
     nachname?: string;
     contactType?: string;
-    telefon?: string;
     festnetz?: string;
     mobilnummer?: string;
     email?: string;
@@ -220,7 +219,7 @@ export async function buildPlaceholdersFromFormData(
   const primaryContact = formData.contacts?.find(c => c.isPrimary) || formData.contacts?.[0];
   if (primaryContact) {
     placeholders.kontaktperson_name = [primaryContact.vorname, primaryContact.nachname].filter(Boolean).join(" ");
-    placeholders.kontaktperson_telefon = primaryContact.mobilnummer || primaryContact.festnetz || primaryContact.telefon || "";
+    placeholders.kontaktperson_telefon = primaryContact.mobilnummer || primaryContact.festnetz || "";
     placeholders.kontaktperson_festnetz = primaryContact.festnetz || "";
     placeholders.kontaktperson_email = primaryContact.email || "";
     placeholders.kontaktperson_typ = (primaryContact.contactType ? CONTACT_TYPE_LABELS[primaryContact.contactType] : undefined) ?? primaryContact.contactType ?? "";

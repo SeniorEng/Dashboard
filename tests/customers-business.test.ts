@@ -49,7 +49,7 @@ function validCustomerPayload(overrides: Record<string, any> = {}) {
         isPrimary: true,
         vorname: "Kontakt",
         nachname: "Test",
-        telefon: "+4917600000001",
+        mobilnummer: "+4917600000001",
       },
     ],
     budgets: {
@@ -376,7 +376,7 @@ describe("KV-14: Kontakte mit Telefonnummer", () => {
         isPrimary: true,
         vorname: "Kontakt",
         nachname: "Test",
-        telefon: "+4917612345678",
+        mobilnummer: "+4917612345678",
       }],
     }));
     expect(res.status).toBe(201);
@@ -417,7 +417,7 @@ describe("KV-16: Kontaktperson hinzufügen", () => {
       isPrimary: false,
       vorname: "Neuer-Kontakt",
       nachname: "Testperson",
-      telefon: "+4917600000099",
+      mobilnummer: "+4917600000099",
     });
     expect(res.status).toBe(201);
   });
@@ -482,7 +482,7 @@ describe("KV-21: Telefonnummer-Handling", () => {
 
   it("KV-21.2 – Kontakt mit gültigem DE-Telefonnummernformat wird akzeptiert", async () => {
     const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({
-      contacts: [{ contactType: "familie", isPrimary: true, vorname: "Test", nachname: "Tel", telefon: "+4917612345678" }],
+      contacts: [{ contactType: "familie", isPrimary: true, vorname: "Test", nachname: "Tel", mobilnummer: "+4917612345678" }],
     }));
     expect(res.status).toBe(201);
     createdCustomerIds.push(res.data.id);

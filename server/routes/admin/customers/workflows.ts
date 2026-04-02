@@ -89,7 +89,8 @@ router.post("/customers/:id/anonymize", asyncHandler("Kunde konnte nicht anonymi
     await tx.update(customerContacts).set({
       vorname: "Anonymisiert",
       nachname: "Anonymisiert",
-      telefon: "0000000000",
+      festnetz: null,
+      mobilnummer: "0000000000",
       email: null,
       notes: null,
     }).where(eq(customerContacts.customerId, id));

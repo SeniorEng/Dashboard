@@ -96,7 +96,6 @@ export const customerContacts = pgTable("customer_contacts", {
   isPrimary: boolean("is_primary").notNull().default(false),
   vorname: text("vorname").notNull(),
   nachname: text("nachname").notNull(),
-  telefon: text("telefon"),
   festnetz: text("festnetz"),
   mobilnummer: text("mobilnummer"),
   email: text("email"),

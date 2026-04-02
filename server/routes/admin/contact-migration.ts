@@ -27,7 +27,8 @@ router.get("/contact-migration/legacy", requireSuperAdmin, asyncHandler("Legacy-
       vorname: customerContacts.vorname,
       nachname: customerContacts.nachname,
       contactType: customerContacts.contactType,
-      telefon: customerContacts.telefon,
+      festnetz: customerContacts.festnetz,
+      mobilnummer: customerContacts.mobilnummer,
       isPrimary: customerContacts.isPrimary,
       isActive: customerContacts.isActive,
     })

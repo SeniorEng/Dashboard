@@ -57,6 +57,13 @@
       "when": 1774972800000,
       "tag": "0007_scheduled_calls",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1775260800000,
+      "tag": "0008_contact_telefon_to_mobilnummer",
+      "breakpoints": true
     }
   ]
 }

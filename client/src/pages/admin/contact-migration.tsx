@@ -25,7 +25,8 @@ interface LegacyContact {
   vorname: string;
   nachname: string;
   contactType: string;
-  telefon: string;
+  festnetz: string | null;
+  mobilnummer: string | null;
   isPrimary: boolean;
   isActive: boolean;
 }

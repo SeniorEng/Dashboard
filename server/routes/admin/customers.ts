@@ -182,7 +182,6 @@ const simpleCreateCustomerSchema = z.object({
     isPrimary: z.boolean(),
     vorname: z.string(),
     nachname: z.string(),
-    telefon: z.string().optional(),
     festnetz: z.string().optional(),
     mobilnummer: z.string().optional(),
     email: z.string().optional(),

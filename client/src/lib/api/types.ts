@@ -194,7 +194,6 @@ export interface CustomerContactItem {
   isPrimary: boolean;
   vorname: string;
   nachname: string;
-  telefon: string | null;
   festnetz: string | null;
   mobilnummer: string | null;
   email: string | null;
@@ -240,7 +239,6 @@ export interface CreateCustomerRequest {
     isPrimary: boolean;
     vorname: string;
     nachname: string;
-    telefon?: string;
     festnetz?: string;
     mobilnummer?: string;
     email?: string;
