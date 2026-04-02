@@ -24,3 +24,9 @@ id = "2KCqr1ukWoOEUAaNg60uS"
 uri = "file://LN-RE-2026-0003.pdf"
 type = "pdf"
 title = "3 Leistungsnachweise mit Unterschriften – RE-2026-0003"
+
+[[outputs]]
+id = "MwYM-mCWzc8KX_abmZ_yl"
+uri = "file://LN-RE-2026-0003-neu.pdf"
+type = "pdf"
+title = "Leistungsnachweise RE-2026-0003 (aktualisiert)"
