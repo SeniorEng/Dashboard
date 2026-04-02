@@ -493,8 +493,6 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
 
       const groups = groupByAppointment(sectionItems);
       const tableRowsHtml = renderTableRows(groups);
-      const sectionServiceMinutes = sectionItems.filter(i => !isKmItem(i)).reduce((sum, item) => sum + item.durationMinutes, 0);
-      const sectionKm = sectionItems.filter(i => isKmItem(i)).reduce((sum, item) => sum + item.durationMinutes, 0);
       const sectionCents = sectionItems.reduce((sum, item) => sum + item.totalCents, 0);
 
       const sectionLabel = sig.recordType === "single" ? "Einzeltermin-Leistungsnachweis" : "Monatlicher Leistungsnachweis";
@@ -583,8 +581,6 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   } else {
     const groups = groupByAppointment(allSorted);
     const tableRowsHtml = renderTableRows(groups);
-    const totalServiceMinutes = allSorted.filter(i => !isKmItem(i)).reduce((sum, item) => sum + item.durationMinutes, 0);
-    const totalKmAll = allSorted.filter(i => isKmItem(i)).reduce((sum, item) => sum + item.durationMinutes, 0);
     const totalCentsAll = allSorted.reduce((sum, item) => sum + item.totalCents, 0);
 
     const sig = data.signatures && data.signatures.length > 0 ? data.signatures[0] : null;
