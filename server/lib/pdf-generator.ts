@@ -429,15 +429,21 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     </div>`;
   }
 
+  function cleanDataUrl(dataUrl: string): string {
+    return dataUrl.replace(/\s/g, "");
+  }
+
   function renderSignature(sig: NonNullable<InvoicePdfData["signatures"]>[0], fallbackEmployeeLabel: string): string {
     const custSigValid = sig.customerSignatureData && isValidDataUrl(sig.customerSignatureData);
     const empSigValid = sig.employeeSignatureData && isValidDataUrl(sig.employeeSignatureData);
+    const custSigClean = custSigValid ? cleanDataUrl(sig.customerSignatureData!) : "";
+    const empSigClean = empSigValid ? cleanDataUrl(sig.employeeSignatureData!) : "";
     return `
     <div class="signature-area">
       <div class="signature-box">
         ${custSigValid ? `
           <div class="signature-img-wrapper">
-            <img src="${sig.customerSignatureData}" class="signature-img" />
+            <img src="${custSigClean}" class="signature-img" />
           </div>
           <div class="signature-line signature-line-signed">
             ${escapeHtml(sig.customerSignedAt || "")}, ${escapeHtml(sig.customerName || data.customerName)}<br>
@@ -450,7 +456,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       <div class="signature-box">
         ${empSigValid ? `
           <div class="signature-img-wrapper">
-            <img src="${sig.employeeSignatureData}" class="signature-img" />
+            <img src="${empSigClean}" class="signature-img" />
           </div>
           <div class="signature-line signature-line-signed">
             ${escapeHtml(sig.employeeSignedAt || "")}, ${escapeHtml(sig.employeeName || "")}<br>
