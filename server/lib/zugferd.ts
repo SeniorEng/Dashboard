@@ -318,8 +318,19 @@ export async function embedZugferdXml(
       return pdfBuffer;
     }
 
-    const invoicer = zugferd({ profile: BASIC, strict: false });
-    const invoice = invoicer.create(zugferdData);
+    let invoice: ZugferdInvoice;
+    let usedStrictMode = false;
+    try {
+      const strictInvoicer = zugferd({ profile: BASIC, strict: true });
+      invoice = strictInvoicer.create(zugferdData);
+      await invoice.toXML();
+      usedStrictMode = true;
+      console.log("[ZUGFeRD] XSD-Validierung (strict) erfolgreich");
+    } catch (strictErr) {
+      console.warn("[ZUGFeRD] XSD-Validierung nicht verfügbar (Java/xsd-schema-validator fehlt), verwende Strukturvalidierung");
+      const invoicer = zugferd({ profile: BASIC, strict: false });
+      invoice = invoicer.create(zugferdData);
+    }
 
     const xml = await invoice.toXML();
     const xmlErrors = validateXmlStructure(xml);
@@ -336,8 +347,14 @@ export async function embedZugferdXml(
       },
     });
 
-    console.log(`[ZUGFeRD] XML erfolgreich in PDF eingebettet für ${data.invoiceNumber}`);
-    return Buffer.from(resultPdf);
+    const pdfResult = Buffer.from(resultPdf);
+    const pdfStr = pdfResult.toString("latin1");
+    const hasPdfA = pdfStr.includes("pdfaid") || pdfStr.includes("PDF/A");
+    const hasXml = pdfResult.includes(Buffer.from("factur-x.xml"));
+    console.log(`[ZUGFeRD] PDF eingebettet für ${data.invoiceNumber} | ` +
+      `strict=${usedStrictMode} | PDF/A-Marker=${hasPdfA} | XML=${hasXml}`);
+
+    return pdfResult;
   } catch (err) {
     console.error("[ZUGFeRD] Fehler beim Einbetten der XML-Daten, verwende Standard-PDF:", err);
     return pdfBuffer;

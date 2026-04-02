@@ -192,14 +192,15 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     @page { margin: 20mm 15mm; size: A4; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: 10pt; color: #1f2937; line-height: 1.5; margin: 0; padding: 0; }
     .header { display: flex; justify-content: space-between; margin-bottom: 30px; }
-    .company-info { font-size: 9pt; color: #374151; }
+    .company-info { font-size: 9pt; color: #1f2937; }
     .company-name { font-size: 14pt; font-weight: bold; color: #0d9488; margin-bottom: 4px; }
     .recipient { margin-bottom: 20px; min-height: 80px; }
     .recipient-label { font-size: 9pt; color: #6b7280; margin-bottom: 2px; }
     .invoice-meta { display: flex; justify-content: space-between; margin-bottom: 20px; }
     .invoice-title { font-size: 16pt; font-weight: bold; color: ${isStorno ? '#dc2626' : '#0d9488'}; }
     .meta-table td { padding: 2px 8px; font-size: 9pt; }
-    .meta-table td:first-child { color: #374151; }
+    .meta-table td:first-child { color: #1f2937; }
+    .meta-table td:last-child { color: #111827; }
     table.items { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
     table.items th { background: #f3f4f6; padding: 8px; text-align: left; font-size: 9pt; font-weight: 600; border-bottom: 2px solid #d1d5db; }
     table.items th:nth-child(4), table.items th:nth-child(5), table.items th:nth-child(6) { text-align: right; }
@@ -207,7 +208,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     .totals td { padding: 4px 8px; white-space: nowrap; }
     .totals td:last-child { text-align: right; }
     .total-row { font-weight: bold; font-size: 12pt; border-top: 2px solid #0d9488; }
-    .footer { margin-top: 40px; font-size: 9pt; color: #374151; border-top: 1px solid #e5e7eb; padding-top: 10px; }
+    .footer { margin-top: 40px; font-size: 9pt; color: #1f2937; border-top: 1px solid #e5e7eb; padding-top: 10px; }
     .footer-grid { display: flex; justify-content: space-between; }
     .footer-col { flex: 1; }
     .note { margin-top: 15px; padding: 10px; background: #f0fdfa; border-left: 3px solid #0d9488; font-size: 9pt; }
@@ -286,7 +287,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
 
   <table class="totals">
     <tr><td>Nettobetrag:</td><td>${formatCents(data.netAmountCents)}</td></tr>
-    ${data.vatAmountCents !== 0 ? `<tr><td>USt. ${(data.vatRate / 100).toFixed(0)}%:</td><td>${formatCents(data.vatAmountCents)}</td></tr>` : `<tr><td colspan="2" style="font-size: 9pt; color: #374151;">Umsatzsteuerbefreit gem. § 4 Nr. 16 UStG</td></tr>`}
+    ${data.vatAmountCents !== 0 ? `<tr><td>USt. ${(data.vatRate / 100).toFixed(0)}%:</td><td>${formatCents(data.vatAmountCents)}</td></tr>` : `<tr><td colspan="2" style="font-size: 9pt; color: #1f2937;">Umsatzsteuerbefreit gem. § 4 Nr. 16 UStG</td></tr>`}
     <tr class="total-row"><td>Gesamtbetrag:</td><td style="color: ${isStorno ? '#dc2626' : 'inherit'};">${formatCents(data.grossAmountCents)}</td></tr>
   </table>
 
@@ -296,9 +297,9 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
   <div style="margin-top: 20px; font-size: 9pt;">
     <p>Bitte überweisen Sie den Betrag innerhalb von 14 Tagen auf folgendes Konto:</p>
     <table style="margin-top: 5px;">
-      <tr><td style="color: #374151; padding-right: 10px;">IBAN:</td><td><strong>${data.iban}</strong></td></tr>
-      <tr><td style="color: #374151; padding-right: 10px;">BIC:</td><td>${data.bic}</td></tr>
-      <tr><td style="color: #374151; padding-right: 10px;">Bank:</td><td>${data.bankName}</td></tr>
+      <tr><td style="color: #1f2937; padding-right: 10px;">IBAN:</td><td style="color: #111827;"><strong>${data.iban}</strong></td></tr>
+      <tr><td style="color: #1f2937; padding-right: 10px;">BIC:</td><td style="color: #111827;">${data.bic}</td></tr>
+      <tr><td style="color: #1f2937; padding-right: 10px;">Bank:</td><td style="color: #111827;">${data.bankName}</td></tr>
     </table>
   </div>
   ` : `
@@ -307,7 +308,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
   </div>
   `}
 
-  ${data.notes ? `<div style="margin-top: 15px; font-size: 9pt; color: #374151;"><strong>Hinweis:</strong> ${data.notes}</div>` : ""}
+  ${data.notes ? `<div style="margin-top: 15px; font-size: 9pt; color: #1f2937;"><strong>Hinweis:</strong> ${data.notes}</div>` : ""}
 
   <div class="footer">
     <div class="footer-grid">
@@ -411,7 +412,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       if (group.notes) {
         rows.push(`
         <tr>
-          <td colspan="7" style="padding: 4px 8px 8px 8px; border-bottom: 2px solid #e5e7eb; font-size: 9pt; color: #374151; font-style: italic;">
+          <td colspan="7" style="padding: 4px 8px 8px 8px; border-bottom: 2px solid #e5e7eb; font-size: 9pt; color: #1f2937; font-style: italic;">
             ${escapeHtml(group.notes)}
           </td>
         </tr>`);
@@ -505,7 +506,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
 
       <div class="header">
         <div class="title">LEISTUNGSNACHWEIS</div>
-        <div style="font-size: 9pt; color: #374151;">
+        <div style="font-size: 9pt; color: #1f2937;">
           ${data.companyName || ""} | ${data.ikNummer ? `IK-Nr.: ${data.ikNummer}` : ""}
           ${data.anerkennungsnummer45a ? ` | Anerkennung §45a: ${data.anerkennungsnummer45a}` : ""}
         </div>
@@ -644,7 +645,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     .info-grid { display: flex; justify-content: space-between; margin-bottom: 20px; }
     .info-box { padding: 10px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 4px; flex: 1; margin-right: 10px; }
     .info-box:last-child { margin-right: 0; }
-    .info-label { font-size: 9pt; color: #374151; margin-bottom: 2px; }
+    .info-label { font-size: 9pt; color: #1f2937; margin-bottom: 2px; }
     .info-value { font-weight: 600; }
     table.items { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
     table.items th { background: #f3f4f6; padding: 8px; text-align: left; font-size: 9pt; font-weight: 600; border-bottom: 2px solid #d1d5db; }
@@ -654,9 +655,9 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     .signature-box { width: 45%; position: relative; }
     .signature-img-wrapper { position: relative; margin-bottom: -18px; z-index: 1; }
     .signature-img { max-width: 260px; max-height: 150px; filter: brightness(0) saturate(100%) invert(18%) sepia(60%) saturate(600%) hue-rotate(190deg); }
-    .signature-line { border-top: 1px solid #1f2937; margin-top: 40px; padding-top: 5px; font-size: 9pt; color: #374151; }
+    .signature-line { border-top: 1px solid #1f2937; margin-top: 40px; padding-top: 5px; font-size: 9pt; color: #1f2937; }
     .signature-line-signed { margin-top: 0; }
-    .footer { margin-top: 30px; font-size: 9pt; color: #374151; border-top: 1px solid #e5e7eb; padding-top: 10px; }
+    .footer { margin-top: 30px; font-size: 9pt; color: #1f2937; border-top: 1px solid #e5e7eb; padding-top: 10px; }
     .confirm-text { margin-top: 20px; font-size: 9pt; font-style: italic; color: #4b5563; padding: 10px; background: #f0fdfa; border-left: 3px solid #0d9488; }
   </style>
 </head>
@@ -664,7 +665,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   ${hasMultipleLNs ? sectionsHtml : `
   <div class="header">
     <div class="title">LEISTUNGSNACHWEIS</div>
-    <div style="font-size: 9pt; color: #374151;">
+    <div style="font-size: 9pt; color: #1f2937;">
       ${data.companyName || ""} | ${data.ikNummer ? `IK-Nr.: ${data.ikNummer}` : ""}
       ${data.anerkennungsnummer45a ? ` | Anerkennung §45a: ${data.anerkennungsnummer45a}` : ""}
     </div>
