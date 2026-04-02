@@ -354,6 +354,11 @@ export async function embedZugferdXml(
     console.log(`[ZUGFeRD] PDF eingebettet für ${data.invoiceNumber} | ` +
       `strict=${usedStrictMode} | PDF/A-Marker=${hasPdfA} | XML=${hasXml}`);
 
+    if (!hasPdfA || !hasXml) {
+      console.warn(`[ZUGFeRD] Konformitätsprüfung fehlgeschlagen (PDF/A=${hasPdfA}, XML=${hasXml}), verwende Standard-PDF`);
+      return pdfBuffer;
+    }
+
     return pdfResult;
   } catch (err) {
     console.error("[ZUGFeRD] Fehler beim Einbetten der XML-Daten, verwende Standard-PDF:", err);
