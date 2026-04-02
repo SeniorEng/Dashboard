@@ -492,13 +492,55 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       const sectionCents = sectionItems.reduce((sum, item) => sum + item.totalCents, 0);
 
       const sectionLabel = sig.recordType === "single" ? "Einzeltermin-Leistungsnachweis" : "Monatlicher Leistungsnachweis";
-      const sectionEmployeeLabel = sig.employeeName ? escapeHtml(sig.employeeName) : employeeLabel;
+      const sectionEmployeeName = sig.employeeName ? escapeHtml(sig.employeeName) : employeeLabel;
+      const sectionEmployeeLbnr = sectionItems[0]?.employeeLbnr ? escapeHtml(sectionItems[0].employeeLbnr) : "";
+      const sectionEmployeeQual = sig.employeeName && data.employeeQualifications ? data.employeeQualifications.get(sig.employeeName) || "" : "";
 
       sections.push(`
       ${sections.length > 0 ? '<div style="page-break-before: always;"></div>' : ''}
-      <div style="margin-bottom: 10px;">
-        <div style="font-size: 12pt; font-weight: bold; color: #0d9488; margin-bottom: 10px; border-bottom: 2px solid #0d9488; padding-bottom: 4px;">
+
+      <div class="header">
+        <div class="title">LEISTUNGSNACHWEIS</div>
+        <div style="font-size: 9pt; color: #6b7280;">
+          ${data.companyName || ""} | ${data.ikNummer ? `IK-Nr.: ${data.ikNummer}` : ""}
+          ${data.anerkennungsnummer45a ? ` | Anerkennung §45a: ${data.anerkennungsnummer45a}` : ""}
+        </div>
+        <div style="font-size: 10pt; font-weight: bold; color: #0d9488; margin-top: 6px;">
           ${sectionLabel}
+        </div>
+      </div>
+
+      <div class="info-grid">
+        <div class="info-box">
+          <div class="info-label">Leistungsempfänger/in</div>
+          <div class="info-value">${escapeHtml(data.customerName)}</div>
+          ${data.customerAddress ? `<div style="font-size: 9pt;">${escapeHtml(data.customerAddress).replace(/\n/g, "<br>")}</div>` : ""}
+          ${data.customerGeburtsdatum ? `<div style="font-size: 9pt;">Geb.: ${formatDate(data.customerGeburtsdatum)}</div>` : ""}
+        </div>
+        <div class="info-box">
+          <div class="info-label">Leistungserbringer/in</div>
+          <div class="info-value">${sectionEmployeeName}</div>
+          ${sectionEmployeeLbnr ? `<div style="font-size: 9pt;">LBNR: ${sectionEmployeeLbnr}</div>` : ""}
+          ${sectionEmployeeQual ? `<div style="font-size: 9pt; color: #0d9488;">${escapeHtml(sectionEmployeeQual)}</div>` : ""}
+        </div>
+      </div>
+      <div class="info-grid">
+        <div class="info-box">
+          <div class="info-label">Versicherung</div>
+          ${data.versichertennummer ? `<div class="info-value">${escapeHtml(data.versichertennummer)}</div>` : ""}
+          ${data.pflegegrad ? `<div style="font-size: 9pt;">Pflegegrad: ${data.pflegegrad}</div>` : ""}
+          ${data.insuranceProviderName ? `<div style="font-size: 9pt;">${escapeHtml(data.insuranceProviderName)}${data.insuranceIkNummer ? ` (IK: ${data.insuranceIkNummer})` : ""}</div>` : `<div style="font-size: 9pt; color: #9ca3af;">Selbstzahler</div>`}
+        </div>
+        <div class="info-box">
+          <div class="info-label">Zeitraum</div>
+          <div class="info-value">${escapeHtml(periodLabel)}</div>
+          <div style="font-size: 9pt;">Rechnungsnr.: ${escapeHtml(data.invoiceNumber)}</div>
+        </div>
+      </div>
+      <div class="info-grid">
+        <div class="info-box" style="flex: 1;">
+          <div class="info-label">Abrechnungsgrundlage</div>
+          <div class="info-value" style="font-size: 9pt;">${escapeHtml(getBudgettopfLabel(data.billingType))}</div>
         </div>
       </div>
 
@@ -517,7 +559,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
         <tbody>
           ${tableRowsHtml}
           <tr class="total-row">
-            <td colspan="4">Zwischensumme</td>
+            <td colspan="4">Summe</td>
             <td style="text-align: right;">${formatMinutes(sectionServiceMinutes)}${sectionKm > 0 ? ` + ${sectionKm} km` : ""}</td>
             <td></td>
             <td style="text-align: right;">${formatCents(sectionCents)}</td>
@@ -529,7 +571,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
 
       ${renderAbtretungserklaerung()}
 
-      ${renderSignature(sig, sectionEmployeeLabel)}
+      ${renderSignature(sig, sectionEmployeeName)}
       `);
     }
 
@@ -621,6 +663,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   </style>
 </head>
 <body>
+  ${hasMultipleLNs ? sectionsHtml : `
   <div class="header">
     <div class="title">LEISTUNGSNACHWEIS</div>
     <div style="font-size: 9pt; color: #6b7280;">
@@ -673,6 +716,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   </div>
 
   ${sectionsHtml}
+  `}
 
   ${hasMultipleLNs ? `
   <div style="margin-top: 30px; border-top: 2px solid #0d9488; padding-top: 10px;">
