@@ -10,6 +10,7 @@ import {
   appointmentServices as appointmentServicesTable,
   services as servicesTable,
   users,
+  userRoles,
   customers as customersTable,
   customerInsuranceHistory,
   insuranceProviders,
@@ -43,6 +44,7 @@ interface BuildLineItem extends Record<string, unknown> {
   employeeName: string;
   employeeLbnr: string;
   appointmentNotes: string | null;
+  serviceDetails: string | null;
 }
 
 const router = Router();
@@ -98,6 +100,7 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
     actualDurationMinutes: appointmentServicesTable.actualDurationMinutes,
     defaultPriceCents: servicesTable.defaultPriceCents,
     vatRate: servicesTable.vatRate,
+    details: appointmentServicesTable.details,
   })
   .from(appointmentServicesTable)
   .innerJoin(servicesTable, eq(appointmentServicesTable.serviceId, servicesTable.id))
@@ -186,6 +189,7 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
         employeeName,
         employeeLbnr,
         appointmentNotes: appt.notes || null,
+        serviceDetails: svc.details || null,
       });
 
       totalNetCents += totalCents;
@@ -468,6 +472,7 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
       employeeName: item.employeeName,
       employeeLbnr: item.employeeLbnr,
       appointmentNotes: item.appointmentNotes || null,
+      serviceDetails: item.serviceDetails || null,
     }));
 
     const stornoInvoice = await storage.createInvoice(stornoData, stornoLineItems, req.user!.id);
@@ -534,6 +539,7 @@ function buildPdfData(invoice: Invoice, lineItems: InvoiceLineItem[], companySet
       employeeName: item.employeeName ?? null,
       employeeLbnr: item.employeeLbnr ?? null,
       appointmentNotes: item.appointmentNotes || null,
+      serviceDetails: item.serviceDetails || null,
     })),
     netAmountCents: invoice.netAmountCents,
     vatAmountCents: invoice.vatAmountCents,
@@ -608,7 +614,7 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
     const recordIds = signedRecords.map(r => r.id);
     const employeeIds = Array.from(new Set(signedRecords.map(r => r.employeeId)));
     
-    const [employeeRows, recordAppointments] = await Promise.all([
+    const [employeeRows, recordAppointments, empRoles] = await Promise.all([
       db.select({ id: users.id, displayName: users.displayName })
         .from(users)
         .where(inArray(users.id, employeeIds)),
@@ -618,9 +624,29 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
       })
         .from(serviceRecordAppointments)
         .where(inArray(serviceRecordAppointments.serviceRecordId, recordIds)),
+      db.select({ userId: userRoles.userId, role: userRoles.role })
+        .from(userRoles)
+        .where(inArray(userRoles.userId, employeeIds)),
     ]);
     
     const employeeMap = new Map(employeeRows.map(e => [e.id, e.displayName]));
+
+    const qualMap = new Map<string, string>();
+    for (const emp of employeeRows) {
+      const roles = empRoles.filter(r => r.userId === emp.id).map(r => r.role);
+      let label = "";
+      if (roles.includes("alltagsbegleitung")) {
+        label = "Alltagsbegleiter/in";
+      } else if (roles.includes("hauswirtschaft")) {
+        label = "Hauswirtschafter/in";
+      }
+      if (label) {
+        qualMap.set(emp.displayName, label);
+      }
+    }
+    if (qualMap.size > 0) {
+      pdfData.employeeQualifications = qualMap;
+    }
     const appointmentsByRecord = new Map<number, number[]>();
     for (const ra of recordAppointments) {
       const existing = appointmentsByRecord.get(ra.serviceRecordId) ?? [];
@@ -638,6 +664,32 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
       appointmentIds: appointmentsByRecord.get(r.id) ?? [],
       recordType: r.recordType,
     }));
+  }
+
+  if (!pdfData.employeeQualifications || pdfData.employeeQualifications.size === 0) {
+    const employeeNamesFromItems = Array.from(new Set(lineItems.map(i => i.employeeName).filter(Boolean))) as string[];
+    if (employeeNamesFromItems.length > 0) {
+      const empRows = await db.select({ id: users.id, displayName: users.displayName })
+        .from(users)
+        .where(inArray(users.displayName, employeeNamesFromItems));
+      if (empRows.length > 0) {
+        const roleRows = await db.select({ userId: userRoles.userId, role: userRoles.role })
+          .from(userRoles)
+          .where(inArray(userRoles.userId, empRows.map(e => e.id)));
+        const qualMap = new Map<string, string>();
+        for (const emp of empRows) {
+          const roles = roleRows.filter(r => r.userId === emp.id).map(r => r.role);
+          let label = "";
+          if (roles.includes("alltagsbegleitung")) {
+            label = "Alltagsbegleiter/in";
+          } else if (roles.includes("hauswirtschaft")) {
+            label = "Hauswirtschafter/in";
+          }
+          if (label) qualMap.set(emp.displayName, label);
+        }
+        if (qualMap.size > 0) pdfData.employeeQualifications = qualMap;
+      }
+    }
   }
 
   const html = generateLeistungsnachweisHtml(pdfData);
