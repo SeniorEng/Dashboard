@@ -1,0 +1,14 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "4khVTViufmES48dxOYt2f"
+uri = "file://rechnung_RE-2026-0003.pdf"
+type = "pdf"
+title = "Rechnung RE-2026-0003 (März 2026)"
+
+[[outputs]]
+id = "kapYawrd-iFkN_DUuGAVR"
+uri = "file://leistungsnachweis_RE-2026-0003.pdf"
+type = "pdf"
+title = "Leistungsnachweise RE-2026-0003 (März 2026)"
