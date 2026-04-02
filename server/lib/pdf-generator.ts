@@ -195,7 +195,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     .company-info { font-size: 9pt; color: #1f2937; }
     .company-name { font-size: 14pt; font-weight: bold; color: #0d9488; margin-bottom: 4px; }
     .recipient { margin-bottom: 20px; min-height: 80px; }
-    .recipient-label { font-size: 9pt; color: #6b7280; margin-bottom: 2px; }
+    .recipient-label { font-size: 9pt; color: #4b5563; margin-bottom: 2px; }
     .invoice-meta { display: flex; justify-content: space-between; margin-bottom: 20px; }
     .invoice-title { font-size: 16pt; font-weight: bold; color: ${isStorno ? '#dc2626' : '#0d9488'}; }
     .meta-table td { padding: 2px 8px; font-size: 9pt; }
@@ -448,10 +448,10 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
           </div>
           <div class="signature-line signature-line-signed">
             ${escapeHtml(sig.customerSignedAt || "")}, ${escapeHtml(sig.customerName || data.customerName)}<br>
-            <span style="color: #6b7280;">(Leistungsempfänger/in)</span>
+            <span style="color: #4b5563;">(Leistungsempfänger/in)</span>
           </div>
         ` : `
-          <div class="signature-line">${escapeHtml(data.customerName)}<br><span style="color: #6b7280;">(Leistungsempfänger/in oder gesetzl. Vertreter/in)</span></div>
+          <div class="signature-line">${escapeHtml(data.customerName)}<br><span style="color: #4b5563;">(Leistungsempfänger/in oder gesetzl. Vertreter/in)</span></div>
         `}
       </div>
       <div class="signature-box">
@@ -461,10 +461,10 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
           </div>
           <div class="signature-line signature-line-signed">
             ${escapeHtml(sig.employeeSignedAt || "")}, ${escapeHtml(sig.employeeName || "")}<br>
-            <span style="color: #6b7280;">(Leistungserbringer/in)</span>
+            <span style="color: #4b5563;">(Leistungserbringer/in)</span>
           </div>
         ` : `
-          <div class="signature-line">${fallbackEmployeeLabel}<br><span style="color: #6b7280;">(Leistungserbringer/in)</span></div>
+          <div class="signature-line">${fallbackEmployeeLabel}<br><span style="color: #4b5563;">(Leistungserbringer/in)</span></div>
         `}
       </div>
     </div>`;
@@ -534,7 +534,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
           <div class="info-label">Versicherung</div>
           ${data.versichertennummer ? `<div class="info-value">${escapeHtml(data.versichertennummer)}</div>` : ""}
           ${data.pflegegrad ? `<div style="font-size: 9pt;">Pflegegrad: ${data.pflegegrad}</div>` : ""}
-          ${data.insuranceProviderName ? `<div style="font-size: 9pt;">${escapeHtml(data.insuranceProviderName)}${data.insuranceIkNummer ? ` (IK: ${data.insuranceIkNummer})` : ""}</div>` : `<div style="font-size: 9pt; color: #6b7280;">Selbstzahler</div>`}
+          ${data.insuranceProviderName ? `<div style="font-size: 9pt;">${escapeHtml(data.insuranceProviderName)}${data.insuranceIkNummer ? ` (IK: ${data.insuranceIkNummer})` : ""}</div>` : `<div style="font-size: 9pt; color: #4b5563;">Selbstzahler</div>`}
         </div>
         <div class="info-box">
           <div class="info-label">Zeitraum</div>
@@ -624,10 +624,10 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     ${data.signatures && data.signatures.length > 0 ? data.signatures.map(s => renderSignature(s, employeeLabel)).join("") : `
     <div class="signature-area">
       <div class="signature-box">
-        <div class="signature-line">${escapeHtml(data.customerName)}<br><span style="color: #6b7280;">(Leistungsempfänger/in oder gesetzl. Vertreter/in)</span></div>
+        <div class="signature-line">${escapeHtml(data.customerName)}<br><span style="color: #4b5563;">(Leistungsempfänger/in oder gesetzl. Vertreter/in)</span></div>
       </div>
       <div class="signature-box">
-        <div class="signature-line">${employeeLabel}<br><span style="color: #6b7280;">(Leistungserbringer/in)</span></div>
+        <div class="signature-line">${employeeLabel}<br><span style="color: #4b5563;">(Leistungserbringer/in)</span></div>
       </div>
     </div>
     `}`;
@@ -699,7 +699,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       <div class="info-label">Versicherung</div>
       ${data.versichertennummer ? `<div class="info-value">${escapeHtml(data.versichertennummer)}</div>` : ""}
       ${data.pflegegrad ? `<div style="font-size: 9pt;">Pflegegrad: ${data.pflegegrad}</div>` : ""}
-      ${data.insuranceProviderName ? `<div style="font-size: 9pt;">${escapeHtml(data.insuranceProviderName)}</div>` : `<div style="font-size: 9pt; color: #6b7280;">Selbstzahler</div>`}
+      ${data.insuranceProviderName ? `<div style="font-size: 9pt;">${escapeHtml(data.insuranceProviderName)}</div>` : `<div style="font-size: 9pt; color: #4b5563;">Selbstzahler</div>`}
     </div>
     <div class="info-box">
       <div class="info-label">Zeitraum</div>
