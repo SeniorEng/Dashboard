@@ -626,11 +626,16 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       <div class="info-label">Leistungserbringer/in</div>
       <div class="info-value">${employeeLabel}</div>
       ${lbnrLabel ? `<div style="font-size: 9pt;">LBNR: ${lbnrLabel}</div>` : ""}
-      ${data.employeeQualifications && data.employeeQualifications.size > 0
-        ? (employeeNames.length <= 1
-          ? `<div style="font-size: 9pt; color: #0d9488;">${Array.from(new Set(data.employeeQualifications.values())).map(escapeHtml).join(", ")}</div>`
-          : `<div style="font-size: 9pt; color: #0d9488;">${employeeNames.map(n => { const q = data.employeeQualifications!.get(n); return q ? `${escapeHtml(n)}: ${escapeHtml(q)}` : ""; }).filter(Boolean).join("; ")}</div>`)
-        : ""}
+      ${(() => {
+        if (!data.employeeQualifications || data.employeeQualifications.size === 0) return "";
+        const quals = employeeNames.map(n => data.employeeQualifications!.get(n)).filter(Boolean) as string[];
+        if (quals.length === 0) return "";
+        const uniqueQuals = Array.from(new Set(quals));
+        if (employeeNames.length <= 1 || uniqueQuals.length === 1) {
+          return `<div style="font-size: 9pt; color: #0d9488;">${uniqueQuals.map(escapeHtml).join(", ")}</div>`;
+        }
+        return `<div style="font-size: 9pt; color: #0d9488;">${employeeNames.map(n => { const q = data.employeeQualifications!.get(n); return q ? `${escapeHtml(n)}: ${escapeHtml(q)}` : ""; }).filter(Boolean).join("; ")}</div>`;
+      })()}
     </div>
   </div>
   <div class="info-grid">
