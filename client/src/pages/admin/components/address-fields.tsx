@@ -58,9 +58,10 @@ export function AddressFields({ strasse, nr, plz, stadt, onChange, required = fa
           <Input
             id={`${prefix}plz`}
             value={plz}
-            onChange={(e) => onChange("plz", e.target.value)}
+            onChange={(e) => onChange("plz", e.target.value.replace(/\D/g, "").slice(0, 5))}
             placeholder="12345"
             maxLength={5}
+            inputMode="numeric"
             required={required}
             data-testid={`input-${prefix}plz`}
           />

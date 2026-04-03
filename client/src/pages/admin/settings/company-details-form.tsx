@@ -92,7 +92,9 @@ export function CompanyDetailsForm({ companyForm, updateField, onSubmit, isSavin
                   id="plz"
                   data-testid="input-company-plz"
                   value={companyForm.plz}
-                  onChange={(e) => updateField("plz", e.target.value)}
+                  onChange={(e) => updateField("plz", e.target.value.replace(/\D/g, "").slice(0, 5))}
+                  maxLength={5}
+                  inputMode="numeric"
                 />
               </div>
               <div>

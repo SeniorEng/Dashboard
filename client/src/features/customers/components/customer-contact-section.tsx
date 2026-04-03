@@ -2,6 +2,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
 import {
   MapPin, Phone, Mail, Loader2, Cake, PhoneCall, Pencil, Save,
 } from "lucide-react";
@@ -69,7 +70,21 @@ export function CustomerContactSection({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <div className="col-span-2">
                 <Label>Straße</Label>
-                <Input value={contactForm.strasse} onChange={(e) => setContactForm(f => ({ ...f, strasse: e.target.value }))} data-testid="input-strasse" />
+                <AddressAutocomplete
+                  value={contactForm.strasse}
+                  onChange={(val) => setContactForm(f => ({ ...f, strasse: val }))}
+                  onAddressSelect={(addr) => {
+                    setContactForm(f => ({
+                      ...f,
+                      strasse: addr.strasse,
+                      nr: addr.hausnummer,
+                      plz: addr.plz,
+                      stadt: addr.stadt,
+                    }));
+                    setContactFormErrors(prev => ({ ...prev, plz: "" }));
+                  }}
+                  data-testid="input-strasse"
+                />
               </div>
               <div>
                 <Label>Nr.</Label>

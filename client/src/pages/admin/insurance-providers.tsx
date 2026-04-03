@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { Switch } from "@/components/ui/switch";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
@@ -420,10 +421,16 @@ export default function AdminInsuranceProviders() {
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   <div className="col-span-3 space-y-2">
                     <Label htmlFor="strasse">Straße</Label>
-                    <Input
+                    <AddressAutocomplete
                       id="strasse"
                       value={form.strasse || ""}
-                      onChange={(e) => handleChange("strasse", e.target.value)}
+                      onChange={(val) => handleChange("strasse", val)}
+                      onAddressSelect={(addr) => {
+                        handleChange("strasse", addr.strasse);
+                        handleChange("hausnummer", addr.hausnummer);
+                        handleChange("plz", addr.plz);
+                        handleChange("stadt", addr.stadt);
+                      }}
                       placeholder="Musterstraße"
                       data-testid="input-provider-strasse"
                     />
@@ -445,9 +452,10 @@ export default function AdminInsuranceProviders() {
                     <Input
                       id="plz"
                       value={form.plz || ""}
-                      onChange={(e) => handleChange("plz", e.target.value.replace(/\D/g, ""))}
+                      onChange={(e) => handleChange("plz", e.target.value.replace(/\D/g, "").slice(0, 5))}
                       placeholder="12345"
                       maxLength={5}
+                      inputMode="numeric"
                       data-testid="input-provider-plz"
                     />
                   </div>

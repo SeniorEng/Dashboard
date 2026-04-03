@@ -375,7 +375,9 @@ export function UserForm({
               <Input
                 id="plz"
                 value={plz}
-                onChange={(e) => setPlz(e.target.value)}
+                onChange={(e) => setPlz(e.target.value.replace(/\D/g, "").slice(0, 5))}
+                maxLength={5}
+                inputMode="numeric"
                 data-testid="input-user-plz"
               />
             </div>

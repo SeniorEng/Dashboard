@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
@@ -254,10 +255,16 @@ export function InsuranceStep({
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   <div className="col-span-3 space-y-2">
                     <Label htmlFor="newProviderStrasse">Straße</Label>
-                    <Input
+                    <AddressAutocomplete
                       id="newProviderStrasse"
                       value={newProvider.strasse || ""}
-                      onChange={(e) => handleNewProviderChange("strasse", e.target.value)}
+                      onChange={(val) => handleNewProviderChange("strasse", val)}
+                      onAddressSelect={(addr) => {
+                        handleNewProviderChange("strasse", addr.strasse);
+                        handleNewProviderChange("hausnummer", addr.hausnummer);
+                        handleNewProviderChange("plz", addr.plz);
+                        handleNewProviderChange("stadt", addr.stadt);
+                      }}
                       placeholder="Musterstraße"
                       data-testid="input-new-provider-strasse"
                     />
@@ -279,9 +286,10 @@ export function InsuranceStep({
                     <Input
                       id="newProviderPlz"
                       value={newProvider.plz || ""}
-                      onChange={(e) => handleNewProviderChange("plz", e.target.value.replace(/\D/g, ""))}
+                      onChange={(e) => handleNewProviderChange("plz", e.target.value.replace(/\D/g, "").slice(0, 5))}
                       placeholder="12345"
                       maxLength={5}
+                      inputMode="numeric"
                       data-testid="input-new-provider-plz"
                     />
                   </div>

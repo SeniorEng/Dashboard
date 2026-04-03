@@ -28,6 +28,10 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Adressformatierung** (zentral in `@shared/utils/format`):
   - **Anzeige**: Immer `formatAddress()` verwenden. Akzeptiert Objekte mit `strasse`, `nr`/`hausnummer`, `plz`, `stadt` und fällt auf das `address`-Feld zurück. Ausgabe: `"Strasse Nr, PLZ Stadt"`.
   - Niemals Adresskomponenten manuell im JSX zusammensetzen.
+  - **Eingabe**: Immer `AddressAutocomplete` aus `@/components/address-autocomplete` für das Straßenfeld verwenden. Die Komponente nutzt Nominatim und befüllt automatisch Straße, Hausnummer, PLZ und Stadt.
+  - **PLZ-Felder**: Immer `maxLength={5}`, `inputMode="numeric"` und `replace(/\D/g, "").slice(0, 5)` im onChange verwenden.
+  - **Schema-Hinweis**: Kunden/Interessenten nutzen `nr` als Hausnummer-Feld, Mitarbeiter/Firma/Pflegekassen nutzen `hausnummer`. `formatAddress()` akzeptiert beides. Bei `onAddressSelect` das richtige Feld-Mapping beachten (`addr.hausnummer → nr` bei Kunden).
+  - **Reusable Komponente**: `AddressFields` in `client/src/pages/admin/components/address-fields.tsx` — kapselt Straße+Nr+PLZ+Stadt mit Autocomplete für Kunden/Interessenten (nutzt `nr`-Feld).
 - **Km-Formatierung** (zentral in `@shared/utils/format`):
   - **Anzeige**: Immer `formatKm()` verwenden — gibt `"1,5"` zurück (deutsches Komma-Format, 1 Dezimalstelle). Re-Export in `@/lib/utils` für Frontend-Kompatibilität.
 - **Logging** (zentral in `server/index.ts`):

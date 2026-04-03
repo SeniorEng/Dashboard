@@ -6,11 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useUpload } from "@/hooks/use-upload";
 import { formatPhoneForDisplay, validateGermanPhone } from "@shared/utils/phone";
+import { formatAddress } from "@shared/utils/format";
 import {
   User as UserIcon,
   Phone,
@@ -208,11 +210,19 @@ function PersonalDataSection({ profile }: { profile: ProfileData }) {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <div className="col-span-2 space-y-2">
               <Label htmlFor="profile-strasse">Straße</Label>
-              <Input
+              <AddressAutocomplete
                 id="profile-strasse"
                 value={form.strasse}
-                onChange={(e) => setForm((f) => ({ ...f, strasse: e.target.value }))}
-                className="text-base"
+                onChange={(val) => setForm((f) => ({ ...f, strasse: val }))}
+                onAddressSelect={(addr) => {
+                  setForm((f) => ({
+                    ...f,
+                    strasse: addr.strasse,
+                    hausnummer: addr.hausnummer,
+                    plz: addr.plz,
+                    stadt: addr.stadt,
+                  }));
+                }}
                 data-testid="input-profile-strasse"
               />
             </div>
@@ -233,7 +243,9 @@ function PersonalDataSection({ profile }: { profile: ProfileData }) {
               <Input
                 id="profile-plz"
                 value={form.plz}
-                onChange={(e) => setForm((f) => ({ ...f, plz: e.target.value }))}
+                onChange={(e) => setForm((f) => ({ ...f, plz: e.target.value.replace(/\D/g, "").slice(0, 5) }))}
+                maxLength={5}
+                inputMode="numeric"
                 className="text-base"
                 data-testid="input-profile-plz"
               />
@@ -277,8 +289,8 @@ function PersonalDataSection({ profile }: { profile: ProfileData }) {
             icon={<MapPin className="h-4 w-4" />}
             label="Adresse"
             value={
-              profile.strasse
-                ? `${profile.strasse} ${profile.hausnummer || ""}, ${profile.plz || ""} ${profile.stadt || ""}`.trim()
+              formatAddress(profile) !== "Keine Adresse hinterlegt"
+                ? formatAddress(profile)
                 : "—"
             }
             testId="text-profile-adresse"

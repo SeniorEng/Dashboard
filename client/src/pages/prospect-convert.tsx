@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { Badge } from "@/components/ui/badge";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
@@ -464,7 +465,17 @@ export default function ProspectConvert() {
               <div className="grid grid-cols-[1fr_80px] gap-3">
                 <div>
                   <Label>Straße *</Label>
-                  <Input value={strasse} onChange={(e) => setStrasse(e.target.value)} data-testid="input-strasse" />
+                  <AddressAutocomplete
+                    value={strasse}
+                    onChange={(val) => setStrasse(val)}
+                    onAddressSelect={(addr) => {
+                      setStrasse(addr.strasse);
+                      setNr(addr.hausnummer);
+                      setPlz(addr.plz);
+                      setStadt(addr.stadt);
+                    }}
+                    data-testid="input-strasse"
+                  />
                 </div>
                 <div>
                   <Label>Nr. *</Label>
@@ -474,7 +485,7 @@ export default function ProspectConvert() {
               <div className="grid grid-cols-[100px_1fr] gap-3">
                 <div>
                   <Label>PLZ *</Label>
-                  <Input value={plz} onChange={(e) => setPlz(e.target.value)} maxLength={5} data-testid="input-plz" />
+                  <Input value={plz} onChange={(e) => setPlz(e.target.value.replace(/\D/g, "").slice(0, 5))} maxLength={5} inputMode="numeric" data-testid="input-plz" />
                 </div>
                 <div>
                   <Label>Stadt *</Label>
