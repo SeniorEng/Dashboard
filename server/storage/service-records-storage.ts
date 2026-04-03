@@ -208,7 +208,7 @@ export async function getDocumentedAppointmentsForPeriod(customerId: number, emp
   if (!isPrimary) {
     conditions.push(or(
       eq(appointments.assignedEmployeeId, employeeId),
-      eq(appointments.createdByUserId, employeeId)
+      eq(appointments.performedByEmployeeId, employeeId)
     ));
   }
 
@@ -239,7 +239,7 @@ export async function getUndocumentedAppointmentsForPeriod(customerId: number, e
   if (!isPrimary) {
     conditions.push(or(
       eq(appointments.assignedEmployeeId, employeeId),
-      eq(appointments.createdByUserId, employeeId)
+      eq(appointments.performedByEmployeeId, employeeId)
     ));
   }
 
@@ -387,7 +387,7 @@ export async function getServiceRecordsOverview(employeeId: number, year: number
       eq(appointments.customerId, customers.id),
       or(
         eq(appointments.assignedEmployeeId, employeeId),
-        eq(appointments.createdByUserId, employeeId)
+        eq(appointments.performedByEmployeeId, employeeId)
       ),
       ...dateConditions,
     ))
@@ -508,7 +508,7 @@ export async function getAppointmentCountsForPeriod(customerId: number, employee
   if (!isPrimary) {
     conditions.push(or(
       eq(appointments.assignedEmployeeId, employeeId),
-      eq(appointments.createdByUserId, employeeId)
+      eq(appointments.performedByEmployeeId, employeeId)
     ));
   }
 
@@ -542,7 +542,7 @@ export async function getCoveredBySingleCount(customerId: number, employeeId: nu
   if (!isPrimary) {
     conditions.push(or(
       eq(appointments.assignedEmployeeId, employeeId),
-      eq(appointments.createdByUserId, employeeId)
+      eq(appointments.performedByEmployeeId, employeeId)
     ));
   }
 
@@ -574,7 +574,7 @@ export async function getCoveredByMonthlyCount(customerId: number, employeeId: n
   if (!isPrimary) {
     conditions.push(or(
       eq(appointments.assignedEmployeeId, employeeId),
-      eq(appointments.createdByUserId, employeeId)
+      eq(appointments.performedByEmployeeId, employeeId)
     ));
   }
 
