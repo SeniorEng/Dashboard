@@ -1120,7 +1120,7 @@ function buildPdfData(invoice: Invoice, lineItems: InvoiceLineItem[], companySet
     versichertennummer: invoice.versichertennummer ?? null,
     pflegegrad: invoice.pflegegrad ?? null,
     customerName: invoice.customerName || invoice.recipientName,
-    customerAddress: invoice.recipientAddress || "",
+    customerAddress: invoice.recipientAddress || null,
     customerGeburtsdatum: null,
     lineItems: lineItems.map((item: InvoiceLineItem) => ({
       appointmentId: item.appointmentId ?? null,
@@ -1145,57 +1145,7 @@ function buildPdfData(invoice: Invoice, lineItems: InvoiceLineItem[], companySet
   };
 }
 
-router.get("/:id/pdf", asyncHandler("PDF konnte nicht generiert werden", async (req, res) => {
-  const id = requireIntParam(req.params.id, res);
-  if (id === null) return;
-  const invoice = await storage.getInvoice(id);
-  if (!invoice) throw notFound("Rechnung nicht gefunden");
-  
-  const lineItems = await storage.getInvoiceLineItems(id);
-  const companySettings = await getCachedCompanySettings();
-  const { generateInvoiceHtml, generatePdf } = await import("../lib/pdf-generator");
-  
-  const pdfData = buildPdfData(invoice, lineItems, companySettings);
-
-  const customerForInv = await db.select({ geburtsdatum: customersTable.geburtsdatum })
-    .from(customersTable)
-    .where(eq(customersTable.id, invoice.customerId))
-    .limit(1);
-  if (customerForInv.length > 0 && customerForInv[0].geburtsdatum) {
-    pdfData.customerGeburtsdatum = customerForInv[0].geburtsdatum;
-  }
-
-  const html = generateInvoiceHtml(pdfData);
-  const { buffer } = await generatePdf(html);
-  
-  const { embedZugferdXml } = await import("../lib/zugferd");
-  const zugferdBuffer = await embedZugferdXml(buffer, pdfData);
-  
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename="${invoice.invoiceNumber}.pdf"`);
-  res.send(zugferdBuffer);
-}));
-
-router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nicht generiert werden", async (req, res) => {
-  const id = requireIntParam(req.params.id, res);
-  if (id === null) return;
-  const invoice = await storage.getInvoice(id);
-  if (!invoice) throw notFound("Rechnung nicht gefunden");
-  
-  const lineItems = await storage.getInvoiceLineItems(id);
-  const companySettings = await getCachedCompanySettings();
-  const { generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
-  
-  const pdfData = buildPdfData(invoice, lineItems, companySettings);
-
-  const customerForLN = await db.select({ geburtsdatum: customersTable.geburtsdatum })
-    .from(customersTable)
-    .where(eq(customersTable.id, invoice.customerId))
-    .limit(1);
-  if (customerForLN.length > 0 && customerForLN[0].geburtsdatum) {
-    pdfData.customerGeburtsdatum = customerForLN[0].geburtsdatum;
-  }
-
+async function enrichPdfDataWithSignatures(pdfData: InvoicePdfData, invoice: Invoice): Promise<void> {
   const serviceRecords = await db.select({
     id: monthlyServiceRecords.id,
     employeeSignatureData: monthlyServiceRecords.employeeSignatureData,
@@ -1221,7 +1171,7 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
   if (signedRecords.length > 0) {
     const recordIds = signedRecords.map(r => r.id);
     const employeeIds = Array.from(new Set(signedRecords.map(r => r.employeeId)));
-    
+
     const [employeeRows, recordAppointments, empRoles] = await Promise.all([
       db.select({ id: users.id, displayName: users.displayName })
         .from(users)
@@ -1236,7 +1186,7 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
         .from(userRoles)
         .where(inArray(userRoles.userId, employeeIds)),
     ]);
-    
+
     const employeeMap = new Map(employeeRows.map(e => [e.id, e.displayName]));
 
     const qualMap = new Map<string, string>();
@@ -1275,7 +1225,7 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
   }
 
   if (!pdfData.employeeQualifications || pdfData.employeeQualifications.size === 0) {
-    const employeeNamesFromItems = Array.from(new Set(lineItems.map(i => i.employeeName).filter(Boolean))) as string[];
+    const employeeNamesFromItems = Array.from(new Set(pdfData.lineItems.map(i => i.employeeName).filter(Boolean))) as string[];
     if (employeeNamesFromItems.length > 0) {
       const empRows = await db.select({ id: users.id, displayName: users.displayName })
         .from(users)
@@ -1299,6 +1249,81 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
       }
     }
   }
+}
+
+router.get("/:id/pdf", asyncHandler("PDF konnte nicht generiert werden", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+  const invoice = await storage.getInvoice(id);
+  if (!invoice) throw notFound("Rechnung nicht gefunden");
+  
+  const lineItems = await storage.getInvoiceLineItems(id);
+  const companySettings = await getCachedCompanySettings();
+  const { generateInvoiceHtml, generatePdf } = await import("../lib/pdf-generator");
+  
+  const pdfData = buildPdfData(invoice, lineItems, companySettings);
+
+  const customerForInv = await db.select({ geburtsdatum: customersTable.geburtsdatum })
+    .from(customersTable)
+    .where(eq(customersTable.id, invoice.customerId))
+    .limit(1);
+  if (customerForInv.length > 0 && customerForInv[0].geburtsdatum) {
+    pdfData.customerGeburtsdatum = customerForInv[0].geburtsdatum;
+  }
+
+  const html = generateInvoiceHtml(pdfData);
+  const { buffer } = await generatePdf(html);
+  
+  const { embedZugferdXml } = await import("../lib/zugferd");
+  const zugferdBuffer = await embedZugferdXml(buffer, pdfData);
+
+  if (invoice.billingType === "pflegekasse_privat") {
+    const { generateLeistungsnachweisHtml } = await import("../lib/pdf-generator");
+    await enrichPdfDataWithSignatures(pdfData, invoice);
+    const lnHtml = generateLeistungsnachweisHtml(pdfData);
+    const { buffer: lnPdf } = await generatePdf(lnHtml);
+
+    const { PDFDocument } = await import("pdf-lib");
+    const merged = await PDFDocument.create();
+    const invoiceDoc = await PDFDocument.load(zugferdBuffer);
+    const lnDoc = await PDFDocument.load(lnPdf);
+    const invoicePages = await merged.copyPages(invoiceDoc, invoiceDoc.getPageIndices());
+    invoicePages.forEach(p => merged.addPage(p));
+    const lnPages = await merged.copyPages(lnDoc, lnDoc.getPageIndices());
+    lnPages.forEach(p => merged.addPage(p));
+    const mergedBytes = await merged.save();
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${invoice.invoiceNumber}.pdf"`);
+    res.send(Buffer.from(mergedBytes));
+  } else {
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${invoice.invoiceNumber}.pdf"`);
+    res.send(zugferdBuffer);
+  }
+}));
+
+router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nicht generiert werden", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+  const invoice = await storage.getInvoice(id);
+  if (!invoice) throw notFound("Rechnung nicht gefunden");
+  
+  const lineItems = await storage.getInvoiceLineItems(id);
+  const companySettings = await getCachedCompanySettings();
+  const { generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
+  
+  const pdfData = buildPdfData(invoice, lineItems, companySettings);
+
+  const customerForLN = await db.select({ geburtsdatum: customersTable.geburtsdatum })
+    .from(customersTable)
+    .where(eq(customersTable.id, invoice.customerId))
+    .limit(1);
+  if (customerForLN.length > 0 && customerForLN[0].geburtsdatum) {
+    pdfData.customerGeburtsdatum = customerForLN[0].geburtsdatum;
+  }
+
+  await enrichPdfDataWithSignatures(pdfData, invoice);
 
   const html = generateLeistungsnachweisHtml(pdfData);
   const { buffer } = await generatePdf(html);

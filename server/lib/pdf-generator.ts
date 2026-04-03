@@ -233,7 +233,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     </div>
   </div>
 
-  ${data.billingType !== "selbstzahler" ? `
+  ${data.billingType === "pflegekasse_gesetzlich" ? `
   <div style="display: flex; gap: 30px; margin-bottom: 20px;">
     <div class="recipient" style="flex: 1; margin-bottom: 0;">
       <div class="recipient-label">Rechnungsempfänger:</div>
@@ -247,8 +247,21 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
       ${data.customerGeburtsdatum ? `<br>Geb.: ${formatDate(data.customerGeburtsdatum)}` : ""}
       ${data.versichertennummer ? `<br>Vers.-Nr.: ${escapeHtml(data.versichertennummer)}` : ""}
       ${data.pflegegrad ? `<br>Pflegegrad: ${data.pflegegrad}` : ""}
-      ${data.insuranceProviderName && data.billingType === "pflegekasse_privat" ? `<br>Pflegekasse: ${escapeHtml(data.insuranceProviderName)}${data.insuranceIkNummer ? ` (IK: ${escapeHtml(data.insuranceIkNummer)})` : ""}` : ""}
     </div>
+  </div>
+  ` : data.billingType === "pflegekasse_privat" ? `
+  <div class="recipient">
+    <div class="recipient-label">Rechnungsempfänger:</div>
+    <strong>${escapeHtml(data.recipientName)}</strong>
+    ${data.recipientAddress ? `<br>${escapeHtml(data.recipientAddress).replace(/\n/g, "<br>")}` : ""}
+    ${data.customerGeburtsdatum ? `<br>Geb.: ${formatDate(data.customerGeburtsdatum)}` : ""}
+  </div>
+  <div class="insurance-ref" style="margin-bottom: 20px;">
+    <div style="font-weight: 600; margin-bottom: 4px;">Versicherungsdaten (zur Vorlage bei Ihrer Pflegekasse):</div>
+    ${data.insuranceProviderName ? `Pflegekasse: <strong>${escapeHtml(data.insuranceProviderName)}</strong>` : ""}
+    ${data.insuranceIkNummer ? `<br>IK-Nr.: ${escapeHtml(data.insuranceIkNummer)}` : ""}
+    ${data.versichertennummer ? `<br>Vers.-Nr.: ${escapeHtml(data.versichertennummer)}` : ""}
+    ${data.pflegegrad ? `<br>Pflegegrad: ${data.pflegegrad}` : ""}
   </div>
   ` : `
   <div class="recipient">
@@ -267,7 +280,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     </table>
   </div>
 
-  <p>Für die im Zeitraum <strong>${periodLabel}</strong> erbrachten Leistungen${data.billingType !== "selbstzahler" ? " gemäß § 45b Abs. 1 Satz 3 Nr. 4 SGB XI (Angebote zur Unterstützung im Alltag gem. § 45a SGB XI)" : ""} berechnen wir:</p>
+  <p>Für die im Zeitraum <strong>${periodLabel}</strong> erbrachten Leistungen${data.billingType === "pflegekasse_gesetzlich" || data.billingType === "pflegekasse_privat" ? " gemäß § 45b Abs. 1 Satz 3 Nr. 4 SGB XI (Angebote zur Unterstützung im Alltag gem. § 45a SGB XI)" : ""} berechnen wir:</p>
 
   <table class="items">
     <thead>
@@ -293,7 +306,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
 
   ${billingNote ? `<div class="note">${billingNote}</div>` : ""}
 
-  ${data.billingType === "selbstzahler" ? `
+  ${data.billingType === "selbstzahler" || data.billingType === "pflegekasse_privat" ? `
   <div style="margin-top: 20px; font-size: 9pt;">
     <p>Bitte überweisen Sie den Betrag innerhalb von 14 Tagen auf folgendes Konto:</p>
     <table style="margin-top: 5px;">
@@ -301,6 +314,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
       <tr><td style="color: #1f2937; padding-right: 10px;">BIC:</td><td style="color: #111827;">${escapeHtml(data.bic)}</td></tr>
       <tr><td style="color: #1f2937; padding-right: 10px;">Bank:</td><td style="color: #111827;">${escapeHtml(data.bankName)}</td></tr>
     </table>
+    ${data.billingType === "pflegekasse_privat" ? `<p style="margin-top: 8px; color: #4b5563;">Diese Rechnung können Sie zusammen mit dem beigefügten Leistungsnachweis bei Ihrer privaten Pflegekasse zur Erstattung einreichen.</p>` : ""}
   </div>
   ` : `
   <div style="margin-top: 20px; font-size: 9pt;">
