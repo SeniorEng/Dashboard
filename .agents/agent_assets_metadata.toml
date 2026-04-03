@@ -60,3 +60,15 @@ id = "UfIbBVdjAVyIJKr3bM22A"
 uri = "file://Leistungsnachweis_RE-2026-0003.pdf"
 type = "pdf"
 title = "Leistungsnachweis RE-2026-0003"
+
+[[outputs]]
+id = "iSgP0pjumI6Z7CBXe_PsK"
+uri = "file://Rechnung_RE-2026-0004_Privat.pdf"
+type = "pdf"
+title = "Rechnung RE-2026-0004 — Günter Hofmann (privat versichert, mit ZUGFeRD)"
+
+[[outputs]]
+id = "Nd_Ju1BhGJ2T_j4FWYUGe"
+uri = "file://Leistungsnachweis_RE-2026-0004_Privat.pdf"
+type = "pdf"
+title = "Leistungsnachweis RE-2026-0004 — Günter Hofmann (privat versichert)"
