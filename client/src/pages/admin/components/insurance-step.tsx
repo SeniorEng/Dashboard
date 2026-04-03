@@ -104,6 +104,7 @@ export function InsuranceStep({
       stadt: newProvider.stadt?.trim() || undefined,
       telefon: newProvider.telefon?.trim() || undefined,
       email: newProvider.email?.trim() || undefined,
+      emailVerhinderungspflege: newProvider.emailVerhinderungspflege?.trim() || undefined,
     };
 
     createProviderMutation.mutate(payload, {

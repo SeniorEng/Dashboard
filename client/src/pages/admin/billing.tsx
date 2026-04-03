@@ -124,6 +124,24 @@ interface DeliveryRecord {
   errorMessage: string | null;
 }
 
+interface GenerateResponse {
+  splitInvoices?: boolean;
+  invoices?: { id: number }[];
+  message?: string;
+}
+
+interface SendResponse {
+  message: string;
+  invoice?: InvoiceItem;
+  results?: { invoiceId: number; status: string; recipientEmail: string; customerCopy?: boolean }[];
+}
+
+interface BatchSendResponse {
+  message: string;
+  summary: { sent: number; errors: number; skipped: number; total: number };
+  results: { invoiceId: number; invoiceNumber: string; status: string; error?: string; recipientEmail?: string }[];
+}
+
 function formatAmount(cents: number): string {
   return (cents / 100).toFixed(2).replace(".", ",") + " €";
 }
@@ -207,9 +225,9 @@ export default function AdminBilling() {
       });
       return unwrapResult(result);
     },
-    onSuccess: (data: any) => {
+    onSuccess: (data: GenerateResponse) => {
       if (data?.splitInvoices) {
-        toast({ title: `${data.invoices.length} Rechnungen erstellt`, description: data.message });
+        toast({ title: `${data.invoices?.length || 0} Rechnungen erstellt`, description: data.message });
       } else {
         toast({ title: "Rechnung erstellt" });
       }
@@ -244,7 +262,7 @@ export default function AdminBilling() {
       const result = await api.post(`/billing/${invoiceId}/send`, {});
       return unwrapResult(result);
     },
-    onSuccess: (data: any) => {
+    onSuccess: (data: SendResponse) => {
       toast({ title: "Rechnung versendet", description: data.message || "E-Mail wurde erfolgreich gesendet" });
       queryClient.invalidateQueries({ queryKey: ["billing-invoices"] });
       queryClient.invalidateQueries({ queryKey: ["billing-delivery-history"] });
@@ -262,7 +280,7 @@ export default function AdminBilling() {
       const result = await api.post("/billing/send-batch", { invoiceIds });
       return unwrapResult(result);
     },
-    onSuccess: (data: any) => {
+    onSuccess: (data: BatchSendResponse) => {
       const { summary } = data;
       toast({
         title: `Stapelversand abgeschlossen`,
@@ -610,7 +628,7 @@ export default function AdminBilling() {
                                       }>
                                         {d.status === "sent" ? "Gesendet" : d.status === "pending" ? "Ausstehend" : "Fehler"}
                                       </Badge>
-                                      {d.documentFileNames?.startsWith("Kopie:") && (
+                                      {d.documentFileNames?.includes("Kopie:") && (
                                         <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">Kundenkopie</Badge>
                                       )}
                                     </div>
