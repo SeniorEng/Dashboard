@@ -10,7 +10,7 @@ import {
 } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { computeDataHash } from "../services/signature-integrity";
-import { eq, sql as sqlBuilder, ne, and, or, inArray, isNull } from "drizzle-orm";
+import { eq, sql as sqlBuilder, ne, and, or, inArray, isNull, type SQLWrapper } from "drizzle-orm";
 import { db } from "../lib/db";
 import { appointmentWithCustomerSelectFields, mapAppointmentRow } from "./appointment-helpers";
 import { getAssignedCustomerIds, getPrimaryCustomerIds } from "./customers-storage";
@@ -20,7 +20,7 @@ export async function getServiceRecordsForEmployee(employeeId: number, year?: nu
   const primaryCustomerIds = await getPrimaryCustomerIds(employeeId);
   const primarySet = new Set(primaryCustomerIds);
 
-  let baseConditions: any[] = [isNull(monthlyServiceRecords.deletedAt)];
+  const baseConditions: SQLWrapper[] = [isNull(monthlyServiceRecords.deletedAt)];
   if (year !== undefined) {
     baseConditions.push(eq(monthlyServiceRecords.year, year));
   }
@@ -38,7 +38,7 @@ export async function getServiceRecordsForEmployee(employeeId: number, year?: nu
     if (assignedCustomerIds.length === 0) return [];
     const backupCustomerIds = assignedCustomerIds.filter(id => !primarySet.has(id));
 
-    const orConditions: any[] = [];
+    const orConditions: SQLWrapper[] = [];
     if (primaryCustomerIds.length > 0) {
       orConditions.push(inArray(monthlyServiceRecords.customerId, primaryCustomerIds));
     }
@@ -47,11 +47,11 @@ export async function getServiceRecordsForEmployee(employeeId: number, year?: nu
         and(
           eq(monthlyServiceRecords.employeeId, employeeId),
           inArray(monthlyServiceRecords.customerId, backupCustomerIds),
-        )
+        )!
       );
     }
     if (orConditions.length > 0) {
-      baseConditions.push(or(...orConditions));
+      baseConditions.push(or(...orConditions)!);
     } else {
       return [];
     }
@@ -77,7 +77,7 @@ export async function getServiceRecord(id: number): Promise<MonthlyServiceRecord
 }
 
 export async function getServiceRecordByPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<MonthlyServiceRecord | undefined> {
-  const conditions: any[] = [
+  const conditions: SQLWrapper[] = [
     eq(monthlyServiceRecords.customerId, customerId),
     eq(monthlyServiceRecords.year, year),
     eq(monthlyServiceRecords.month, month),
@@ -198,7 +198,7 @@ export async function getDocumentedAppointmentsForPeriod(customerId: number, emp
   const endYear = month === 12 ? year + 1 : year;
   const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
 
-  const conditions: any[] = [
+  const conditions: SQLWrapper[] = [
     eq(appointments.customerId, customerId),
     eq(appointments.status, 'completed'),
     sqlBuilder`${appointments.date} >= ${startDate}`,
@@ -228,7 +228,7 @@ export async function getUndocumentedAppointmentsForPeriod(customerId: number, e
   const endYear = month === 12 ? year + 1 : year;
   const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
 
-  const conditions: any[] = [
+  const conditions: SQLWrapper[] = [
     eq(appointments.customerId, customerId),
     ne(appointments.status, 'completed'),
     ne(appointments.status, 'cancelled'),
@@ -262,12 +262,12 @@ export async function getPendingServiceRecords(employeeId: number): Promise<Mont
   const primarySet = new Set(primaryCustomerIds);
   const backupCustomerIds = assignedCustomerIds.filter(id => !primarySet.has(id));
 
-  const conditions: any[] = [
+  const conditions: SQLWrapper[] = [
     ne(monthlyServiceRecords.status, 'completed'),
     isNull(monthlyServiceRecords.deletedAt),
   ];
 
-  const orConditions: any[] = [];
+  const orConditions: SQLWrapper[] = [];
   if (primaryCustomerIds.length > 0) {
     orConditions.push(inArray(monthlyServiceRecords.customerId, primaryCustomerIds));
   }
@@ -276,11 +276,11 @@ export async function getPendingServiceRecords(employeeId: number): Promise<Mont
       and(
         eq(monthlyServiceRecords.employeeId, employeeId),
         inArray(monthlyServiceRecords.customerId, backupCustomerIds),
-      )
+      )!
     );
   }
   if (orConditions.length > 0) {
-    conditions.push(or(...orConditions));
+    conditions.push(or(...orConditions)!);
   } else {
     return [];
   }
@@ -498,7 +498,7 @@ export async function getAppointmentCountsForPeriod(customerId: number, employee
   const endYear = month === 12 ? year + 1 : year;
   const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
 
-  const conditions: any[] = [
+  const conditions: SQLWrapper[] = [
     eq(appointments.customerId, customerId),
     ne(appointments.status, 'cancelled'),
     sqlBuilder`${appointments.date} >= ${startDate}`,
@@ -531,7 +531,7 @@ export async function getCoveredBySingleCount(customerId: number, employeeId: nu
   const endYear = month === 12 ? year + 1 : year;
   const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
 
-  const conditions: any[] = [
+  const conditions: SQLWrapper[] = [
     eq(monthlyServiceRecords.recordType, "single"),
     eq(appointments.customerId, customerId),
     sqlBuilder`${appointments.date} >= ${startDate}`,
@@ -563,7 +563,7 @@ export async function getCoveredByMonthlyCount(customerId: number, employeeId: n
   const endYear = month === 12 ? year + 1 : year;
   const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
 
-  const conditions: any[] = [
+  const conditions: SQLWrapper[] = [
     eq(monthlyServiceRecords.recordType, "monthly"),
     eq(appointments.customerId, customerId),
     sqlBuilder`${appointments.date} >= ${startDate}`,
