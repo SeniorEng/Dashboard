@@ -160,10 +160,10 @@ function TimeEntryFormContent({
           <Input
             type="number"
             min="0"
-            step="1"
+            step="0.1"
             placeholder="0"
             value={formState.kilometers ?? ""}
-            onChange={(e) => onFieldChange("kilometers", e.target.value ? parseInt(e.target.value) : null)}
+            onChange={(e) => onFieldChange("kilometers", e.target.value ? parseFloat(e.target.value) : null)}
             className="text-base"
             data-testid={`${prefix}input-kilometers`}
           />
