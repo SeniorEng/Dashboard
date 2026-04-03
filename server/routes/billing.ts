@@ -21,14 +21,16 @@ import {
   customerServicePrices,
   budgetTransactions,
 } from "@shared/schema";
-import type { Invoice, InvoiceLineItem, CompanySettings } from "@shared/schema";
-import { eq, and, gte, lte, isNull, inArray, ne, notInArray, or } from "drizzle-orm";
+import type { Invoice, InvoiceLineItem, CompanySettings, InsertDocumentDelivery } from "@shared/schema";
+import { documentDeliveries } from "@shared/schema";
+import { eq, and, gte, lte, isNull, inArray, ne, notInArray, or, desc } from "drizzle-orm";
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
 import { formatDateForDisplay, formatDateISO, todayISO } from "@shared/utils/datetime";
 import { storage } from "../storage";
 import { db } from "../lib/db";
 import { auditService } from "../services/audit";
+import { deliveryStorage } from "../storage/deliveries";
 import type { InvoicePdfData } from "../lib/pdf-generator";
 import { getCachedCompanySettings } from "../services/cache";
 
@@ -415,6 +417,18 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
 
       await storage.updateInvoiceStatus(invoiceId, "versendet", req.user!.id);
 
+      const fileNames = `${invoice.invoiceNumber}.pdf, LN-${invoice.invoiceNumber}.pdf`;
+      await deliveryStorage.createDelivery({
+        customerId: invoice.customerId,
+        deliveryMethod: "email",
+        status: "sent",
+        recipientEmail,
+        recipientName: prov[0].name,
+        documentFileNames: fileNames,
+        sentAt: new Date(),
+        createdByUserId: req.user!.id,
+      });
+
       await auditService.log(req.user!.id, "invoice_sent", "invoice", invoiceId, {
         invoiceNumber: invoice.invoiceNumber, recipientEmail, customerId: invoice.customerId,
         insuranceProviderId: prov[0].id, hasParagraph39, batchSend: true,
@@ -444,15 +458,27 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
                 { filename: `LN-${invoice.invoiceNumber}.pdf`, content: lnPdf, contentType: "application/pdf" },
               ],
             });
-            await auditService.log(req.user!.id, "invoice_customer_copy_sent", "invoice", invoiceId, {
-              invoiceNumber: invoice.invoiceNumber, recipientEmail: cust[0].email, deliveryMethod: "email",
-            }, req.ip);
+            await deliveryStorage.createDelivery({
+              customerId: invoice.customerId,
+              deliveryMethod: "email",
+              status: "sent",
+              recipientEmail: cust[0].email,
+              recipientName: customerFullName,
+              documentFileNames: `Kopie: ${fileNames}`,
+              sentAt: new Date(),
+              createdByUserId: req.user!.id,
+            });
           } else if (deliveryMethod === "post") {
-            await auditService.log(req.user!.id, "invoice_customer_copy_post_pending", "invoice", invoiceId, {
-              invoiceNumber: invoice.invoiceNumber, deliveryMethod: "post",
-              customerName: customerFullName,
-              customerAddress: [cust[0].strasse, cust[0].nr, cust[0].plz, cust[0].stadt].filter(Boolean).join(", "),
-            }, req.ip);
+            const customerAddress = [cust[0].strasse, cust[0].nr, cust[0].plz, cust[0].stadt].filter(Boolean).join(", ");
+            await deliveryStorage.createDelivery({
+              customerId: invoice.customerId,
+              deliveryMethod: "post",
+              status: "pending",
+              recipientName: customerFullName,
+              recipientAddress: customerAddress,
+              documentFileNames: `Kopie: ${fileNames}`,
+              createdByUserId: req.user!.id,
+            });
           }
         } catch (copyErr: unknown) {
           console.error("Kundenkopie fehlgeschlagen:", copyErr instanceof Error ? copyErr.message : copyErr);
@@ -473,6 +499,21 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
     results,
     summary: { sent: sentCount, errors: errorCount, skipped: skippedCount, total: invoiceIds.length },
   });
+}));
+
+router.get("/deliveries/:invoiceId", asyncHandler("Versandhistorie konnte nicht geladen werden", async (req, res) => {
+  const invoiceId = requireIntParam(req.params.invoiceId, res);
+  if (invoiceId === null) return;
+  const invoice = await storage.getInvoice(invoiceId);
+  if (!invoice) throw notFound("Rechnung nicht gefunden");
+  const deliveries = await db.select()
+    .from(documentDeliveries)
+    .where(eq(documentDeliveries.customerId, invoice.customerId))
+    .orderBy(desc(documentDeliveries.createdAt));
+  const invoiceDeliveries = deliveries.filter(d =>
+    d.documentFileNames?.includes(invoice.invoiceNumber)
+  );
+  res.json(invoiceDeliveries);
 }));
 
 router.get("/:id", asyncHandler("Rechnung konnte nicht geladen werden", async (req, res) => {
@@ -1350,6 +1391,18 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
 
   const updated = await storage.updateInvoiceStatus(id, "versendet", req.user!.id);
 
+  const fileNames = `${invoice.invoiceNumber}.pdf, LN-${invoice.invoiceNumber}.pdf`;
+  await deliveryStorage.createDelivery({
+    customerId: invoice.customerId,
+    deliveryMethod: "email",
+    status: "sent",
+    recipientEmail,
+    recipientName: ins.name,
+    documentFileNames: fileNames,
+    sentAt: new Date(),
+    createdByUserId: req.user!.id,
+  });
+
   await auditService.log(req.user!.id, "invoice_sent", "invoice", id, {
     invoiceNumber: invoice.invoiceNumber,
     recipientEmail,
@@ -1389,15 +1442,27 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
 
         results.push({ invoiceId: id, status: "sent", recipientEmail: cust.email, customerCopy: true });
 
-        await auditService.log(req.user!.id, "invoice_customer_copy_sent", "invoice", id, {
-          invoiceNumber: invoice.invoiceNumber, recipientEmail: cust.email, deliveryMethod: "email",
-        }, req.ip);
+        await deliveryStorage.createDelivery({
+          customerId: invoice.customerId,
+          deliveryMethod: "email",
+          status: "sent",
+          recipientEmail: cust.email,
+          recipientName: customerFullName,
+          documentFileNames: `Kopie: ${fileNames}`,
+          sentAt: new Date(),
+          createdByUserId: req.user!.id,
+        });
       } else if (deliveryMethod === "post") {
-        await auditService.log(req.user!.id, "invoice_customer_copy_post_pending", "invoice", id, {
-          invoiceNumber: invoice.invoiceNumber, deliveryMethod: "post",
-          customerName: customerFullName,
-          customerAddress: [cust.strasse, cust.nr, cust.plz, cust.stadt].filter(Boolean).join(", "),
-        }, req.ip);
+        const customerAddress = [cust.strasse, cust.nr, cust.plz, cust.stadt].filter(Boolean).join(", ");
+        await deliveryStorage.createDelivery({
+          customerId: invoice.customerId,
+          deliveryMethod: "post",
+          status: "pending",
+          recipientName: customerFullName,
+          recipientAddress: customerAddress,
+          documentFileNames: `Kopie: ${fileNames}`,
+          createdByUserId: req.user!.id,
+        });
         results.push({ invoiceId: id, status: "post_pending", recipientEmail: "", customerCopy: true });
       }
     } catch (copyError: unknown) {

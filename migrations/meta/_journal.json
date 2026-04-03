@@ -64,6 +64,13 @@
       "when": 1775260800000,
       "tag": "0008_contact_telefon_to_mobilnummer",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1775250982637,
+      "tag": "0009_living_bulldozer",
+      "breakpoints": true
     }
   ]
 }

@@ -38,6 +38,9 @@ import {
   FileText,
   FileCheck2,
   Receipt,
+  Mail,
+  Clock,
+  MapPin,
 } from "lucide-react";
 
 const MONTH_NAMES = [
@@ -108,6 +111,19 @@ interface InvoiceDetail extends InvoiceItem {
   lineItems: InvoiceLineItem[];
 }
 
+interface DeliveryRecord {
+  id: number;
+  deliveryMethod: string;
+  status: string;
+  recipientEmail: string | null;
+  recipientName: string | null;
+  recipientAddress: string | null;
+  documentFileNames: string | null;
+  sentAt: string | null;
+  createdAt: string;
+  errorMessage: string | null;
+}
+
 function formatAmount(cents: number): string {
   return (cents / 100).toFixed(2).replace(".", ",") + " €";
 }
@@ -171,6 +187,16 @@ export default function AdminBilling() {
     enabled: !!expandedInvoiceId,
   });
 
+  const { data: deliveryHistory } = useQuery({
+    queryKey: ["billing-delivery-history", expandedInvoiceId],
+    queryFn: async ({ signal }) => {
+      if (!expandedInvoiceId) return [];
+      const result = await api.get<DeliveryRecord[]>(`/billing/deliveries/${expandedInvoiceId}`, signal);
+      return unwrapResult(result);
+    },
+    enabled: !!expandedInvoiceId,
+  });
+
   const generateMutation = useMutation({
     mutationFn: async (data: { customerId: number; billingMonth: number; billingYear: number }) => {
       const customer = customers?.find((c) => c.id === data.customerId);
@@ -221,6 +247,7 @@ export default function AdminBilling() {
     onSuccess: (data: any) => {
       toast({ title: "Rechnung versendet", description: data.message || "E-Mail wurde erfolgreich gesendet" });
       queryClient.invalidateQueries({ queryKey: ["billing-invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["billing-delivery-history"] });
       setSendingInvoiceId(null);
     },
     onError: (error: Error) => {
@@ -242,6 +269,7 @@ export default function AdminBilling() {
         description: `${summary.sent} versendet, ${summary.errors} Fehler, ${summary.skipped} übersprungen`,
       });
       queryClient.invalidateQueries({ queryKey: ["billing-invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["billing-delivery-history"] });
       setBatchSending(false);
     },
     onError: (error: Error) => {
@@ -554,6 +582,50 @@ export default function AdminBilling() {
                           </div>
                         ) : (
                           <p className="text-gray-500 text-sm">Keine Positionen vorhanden.</p>
+                        )}
+
+                        {deliveryHistory && deliveryHistory.length > 0 && (
+                          <div className="mt-4 pt-4 border-t" data-testid={`delivery-history-${invoice.id}`}>
+                            <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+                              <Clock className={iconSize.sm} />
+                              Versandhistorie
+                            </h4>
+                            <div className="space-y-2">
+                              {deliveryHistory.map((d) => (
+                                <div key={d.id} className="flex items-start gap-3 text-sm bg-gray-50 rounded px-3 py-2" data-testid={`delivery-record-${d.id}`}>
+                                  {d.deliveryMethod === "email" ? (
+                                    <Mail className={`${iconSize.sm} text-blue-500 mt-0.5 flex-shrink-0`} />
+                                  ) : (
+                                    <MapPin className={`${iconSize.sm} text-orange-500 mt-0.5 flex-shrink-0`} />
+                                  )}
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="font-medium">
+                                        {d.recipientName || "Unbekannt"}
+                                      </span>
+                                      <Badge variant="outline" className={
+                                        d.status === "sent" ? "bg-green-50 text-green-700 border-green-200" :
+                                        d.status === "pending" ? "bg-amber-50 text-amber-700 border-amber-200" :
+                                        "bg-red-50 text-red-700 border-red-200"
+                                      }>
+                                        {d.status === "sent" ? "Gesendet" : d.status === "pending" ? "Ausstehend" : "Fehler"}
+                                      </Badge>
+                                      {d.documentFileNames?.startsWith("Kopie:") && (
+                                        <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">Kundenkopie</Badge>
+                                      )}
+                                    </div>
+                                    <div className="text-gray-500 text-xs mt-0.5">
+                                      {d.recipientEmail && <span>{d.recipientEmail}</span>}
+                                      {d.recipientAddress && <span>{d.recipientAddress}</span>}
+                                      {d.sentAt && <span> · {new Date(d.sentAt).toLocaleString("de-DE")}</span>}
+                                      {!d.sentAt && d.createdAt && <span> · {new Date(d.createdAt).toLocaleString("de-DE")}</span>}
+                                    </div>
+                                    {d.errorMessage && <div className="text-red-600 text-xs mt-1">{d.errorMessage}</div>}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
                         )}
                       </CardContent>
                     </Card>
