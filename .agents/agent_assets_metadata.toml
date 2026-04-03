@@ -48,3 +48,15 @@ id = "R5yyjZwWu3KW0jv2F3eNa"
 uri = "file://Rechnung-aktuell.pdf"
 type = "pdf"
 title = "Rechnung – Anfahrt + Fahrten für/mit Kunde"
+
+[[outputs]]
+id = "1K-1t3iKlhP0c11j2x9BV"
+uri = "file://Rechnung_RE-2026-0003.pdf"
+type = "pdf"
+title = "Rechnung RE-2026-0003 (mit ZUGFeRD)"
+
+[[outputs]]
+id = "UfIbBVdjAVyIJKr3bM22A"
+uri = "file://Leistungsnachweis_RE-2026-0003.pdf"
+type = "pdf"
+title = "Leistungsnachweis RE-2026-0003"
