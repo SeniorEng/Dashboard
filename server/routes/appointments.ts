@@ -527,7 +527,8 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     if (budgetSummary.availableAfterPlannedCents < 0) {
       _warning = "Achtung: Das Budget dieses Kunden reicht möglicherweise nicht für alle geplanten Termine.";
     }
-  } catch {
+  } catch (err) {
+    console.warn("[appointments] Budget-Warnung fehlgeschlagen:", err);
   }
 
   res.status(201).json(_warning ? { ...appointment, _warning } : appointment);

@@ -11,7 +11,7 @@ import {
   employeeTimeEntries,
   customerAssignmentHistory,
 } from "@shared/schema";
-import { timeToMinutes, addDays as addDaysShared, minutesToTimeDisplay } from "@shared/utils/datetime";
+import { timeToMinutes, addDays as addDaysShared, minutesToTimeDisplay, todayISO } from "@shared/utils/datetime";
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
 import { auditService } from "../../services/audit";
@@ -504,7 +504,7 @@ router.get("/employees/:id/handover-preview", asyncHandler("Übergabe-Vorschau k
     return;
   }
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = todayISO();
 
   const [primaryCustomers, backupCustomers, backup2Customers, futureAppointments] = await Promise.all([
     db.select({ id: customers.id, name: customers.name, vorname: customers.vorname, nachname: customers.nachname })
@@ -572,7 +572,7 @@ router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durc
     return;
   }
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = todayISO();
   const changedByUserId = req.user?.id ?? null;
 
   const counts = await db.transaction(async (tx) => {

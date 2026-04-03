@@ -679,8 +679,8 @@ function TransactionList({
                     <p className="text-xs text-gray-500 mt-1">
                       {tx.hauswirtschaftMinutes ? `HW: ${tx.hauswirtschaftMinutes}min ` : ""}
                       {tx.alltagsbegleitungMinutes ? `AB: ${tx.alltagsbegleitungMinutes}min ` : ""}
-                      {tx.travelKilometers ? `Anfahrt: ${(tx.travelKilometers / 10).toFixed(1).replace(".", ",")}km ` : ""}
-                      {tx.customerKilometers ? `Kunde: ${(tx.customerKilometers / 10).toFixed(1).replace(".", ",")}km` : ""}
+                      {tx.travelKilometers ? `Anfahrt: ${Number(tx.travelKilometers).toFixed(1).replace(".", ",")}km ` : ""}
+                      {tx.customerKilometers ? `Kunde: ${Number(tx.customerKilometers).toFixed(1).replace(".", ",")}km` : ""}
                     </p>
                   )}
                 </div>
@@ -689,11 +689,12 @@ function TransactionList({
                     <button
                       type="button"
                       onClick={() => { setRebookTx(tx); setTargetBudgetType(""); }}
-                      className="p-1.5 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600"
+                      className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600"
+                      aria-label="Umbuchen"
                       title="Umbuchen"
                       data-testid={`btn-rebook-${tx.id}`}
                     >
-                      <ArrowRightLeft className="h-3.5 w-3.5" />
+                      <ArrowRightLeft className="h-4 w-4" />
                     </button>
                   )}
                   <span className={`font-medium ${tx.amountCents < 0 ? "text-red-600" : "text-green-600"}`}>

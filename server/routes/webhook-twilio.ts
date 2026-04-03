@@ -100,11 +100,14 @@ router.post("/status", async (req: Request, res: Response) => {
       const statusText = statusMap[CallStatus] || CallStatus;
       const durationText = CallDuration ? ` (Dauer: ${CallDuration}s)` : "";
 
-      await prospectStorage.addNote({
-        prospectId,
-        noteText: `Anruf-Status: ${statusText}${durationText}`,
-        noteType: "anruf",
-      });
+      await Promise.race([
+        prospectStorage.addNote({
+          prospectId,
+          noteText: `Anruf-Status: ${statusText}${durationText}`,
+          noteType: "anruf",
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 5000)),
+      ]);
     }
 
     res.status(200).send("OK");

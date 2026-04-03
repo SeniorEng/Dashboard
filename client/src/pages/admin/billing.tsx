@@ -179,8 +179,12 @@ export default function AdminBilling() {
       });
       return unwrapResult(result);
     },
-    onSuccess: () => {
-      toast({ title: "Rechnung erstellt" });
+    onSuccess: (data: any) => {
+      if (data?.splitInvoices) {
+        toast({ title: `${data.invoices.length} Rechnungen erstellt`, description: data.message });
+      } else {
+        toast({ title: "Rechnung erstellt" });
+      }
       queryClient.invalidateQueries({ queryKey: ["billing-invoices"] });
       setDialogOpen(false);
       setSelectedCustomerId("");

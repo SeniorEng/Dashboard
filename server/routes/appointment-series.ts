@@ -176,7 +176,9 @@ router.post("/", asyncHandler("Serie konnte nicht erstellt werden", async (req, 
     if (budgetSummary.availableAfterPlannedCents < 0) {
       _budgetWarning = "Achtung: Das Budget dieses Kunden reicht möglicherweise nicht für alle geplanten Termine.";
     }
-  } catch {}
+  } catch (err) {
+    console.warn("[appointment-series] Budget-Warnung fehlgeschlagen:", err);
+  }
 
   res.status(201).json({
     series: result.series,
@@ -584,7 +586,9 @@ router.post("/:id/extend", asyncHandler("Serie konnte nicht verlängert werden",
     if (budgetSummary.availableAfterPlannedCents < 0) {
       _budgetWarning = "Achtung: Das Budget dieses Kunden reicht möglicherweise nicht für alle geplanten Termine.";
     }
-  } catch {}
+  } catch (err) {
+    console.warn("[appointment-series] Budget-Warnung fehlgeschlagen:", err);
+  }
 
   res.json({
     createdAppointments: createdCount!,

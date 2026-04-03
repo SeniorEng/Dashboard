@@ -113,7 +113,8 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
             const overEuro = ((summary.currentMonthUsedCents - summary.monthlyLimitCents) / 100).toFixed(2).replace(".", ",");
             budgetWarning = `Monatslimit überschritten — ${overEuro} € über dem Limit.`;
           }
-        } catch {
+        } catch (warnErr) {
+          console.warn("[appointment-documentation] Budget-Limit-Prüfung fehlgeschlagen:", warnErr);
         }
       } catch (budgetError: unknown) {
         const errorMessage = budgetError instanceof Error ? budgetError.message : "Budget-Abbuchung fehlgeschlagen";

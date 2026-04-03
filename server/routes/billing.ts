@@ -221,7 +221,7 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
       if (!kmSvc) continue;
       const kmCustomerPrice = getCustomerPrice(kmSvc.id, apptDate);
       const pricePerKm = kmCustomerPrice ?? kmSvc.defaultPriceCents ?? 35;
-      const kmRounded = Math.round(kmEntry.km);
+      const kmDisplay = Math.round(kmEntry.km * 10) / 10;
       const kmTotalCents = Math.round(kmEntry.km * pricePerKm);
       const kmVatBasisPoints = isVatExempt ? 0 : (kmSvc.vatRate || 0);
       const kmVatCents = Math.round(kmTotalCents * kmVatBasisPoints / 10000);
@@ -233,7 +233,7 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
         serviceCode: kmEntry.code,
         startTime: appt.actualStart || appt.scheduledStart,
         endTime: appt.actualEnd || appt.scheduledEnd,
-        durationMinutes: kmRounded,
+        durationMinutes: kmDisplay,
         unitPriceCents: pricePerKm,
         totalCents: kmTotalCents,
         employeeName,
@@ -392,7 +392,7 @@ function splitLineItemsByBudget(
       let privateShare: number;
 
       if (isLast) {
-        kasseShare = kasseRemaining;
+        kasseShare = Math.max(0, kasseRemaining);
         privateShare = item.totalCents - kasseShare;
       } else {
         kasseShare = Math.round(item.totalCents * kasseRatio);
@@ -499,6 +499,30 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
 
       const createdInvoices: Invoice[] = [];
 
+      const splitResult = await db.transaction(async (tx) => {
+        const txStorage = {
+          async createInvoice(invoiceData: Record<string, unknown>, items: Record<string, unknown>[], userId: number): Promise<Invoice> {
+            const { invoices, invoiceLineItems } = await import("@shared/schema");
+            const invoiceValues = { ...invoiceData, createdByUserId: userId } as typeof invoices.$inferInsert;
+            const [invoice] = await tx.insert(invoices).values(invoiceValues).returning();
+            if (items.length > 0) {
+              await tx.insert(invoiceLineItems).values(
+                items.map((item) => ({ ...item, invoiceId: invoice.id } as typeof invoiceLineItems.$inferInsert))
+              );
+            }
+            return invoice;
+          },
+          async getNextInvoiceNumber(year: number): Promise<string> {
+            const { invoices: invoicesTable } = await import("@shared/schema");
+            const { sql: sqlTag } = await import("drizzle-orm");
+            const result = await tx.select({
+              maxNum: sqlTag<string>`MAX(SUBSTRING(${invoicesTable.invoiceNumber} FROM 'RE-\\d{4}-(\\d+)'))`,
+            }).from(invoicesTable).where(sqlTag`${invoicesTable.invoiceNumber} LIKE ${'RE-' + year + '-%'}`);
+            const maxNum = parseInt(result[0]?.maxNum || "0", 10);
+            return `RE-${year}-${String(maxNum + 1).padStart(4, "0")}`;
+          },
+        };
+
       if (kasseItems.length > 0) {
         const kasseNetCents = kasseItems.reduce((sum, i) => sum + i.totalCents, 0);
         let kasseRecipientName = "";
@@ -535,7 +559,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
           }
         }
 
-        const kasseInvoiceNumber = await storage.getNextInvoiceNumber(billingYear);
+        const kasseInvoiceNumber = await txStorage.getNextInvoiceNumber(billingYear);
         const kasseInvoiceData = {
           invoiceNumber: kasseInvoiceNumber,
           customerId,
@@ -558,7 +582,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
           notes: "Kassenanteil — Leistungen im Rahmen des verfügbaren Budgets",
         };
 
-        const kasseInvoice = await storage.createInvoice(kasseInvoiceData, kasseItems as Record<string, unknown>[], req.user!.id);
+        const kasseInvoice = await txStorage.createInvoice(kasseInvoiceData, kasseItems as Record<string, unknown>[], req.user!.id);
         createdInvoices.push(kasseInvoice);
 
         await auditService.log(req.user!.id, "invoice_created", "invoice", kasseInvoice.id, {
@@ -586,7 +610,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
           versichertennummer = insuranceInfo.versichertennummer;
         }
 
-        const privateInvoiceNumber = await storage.getNextInvoiceNumber(billingYear);
+        const privateInvoiceNumber = await txStorage.getNextInvoiceNumber(billingYear);
         const privateInvoiceData = {
           invoiceNumber: privateInvoiceNumber,
           customerId,
@@ -609,7 +633,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
           notes: "Privatzahlung — Budget-Überschreitung gem. Vereinbarung",
         };
 
-        const privateInvoice = await storage.createInvoice(privateInvoiceData, privateItems as Record<string, unknown>[], req.user!.id);
+        const privateInvoice = await txStorage.createInvoice(privateInvoiceData, privateItems as Record<string, unknown>[], req.user!.id);
         createdInvoices.push(privateInvoice);
 
         await auditService.log(req.user!.id, "invoice_created", "invoice", privateInvoice.id, {
@@ -625,13 +649,16 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
         }, req.ip);
       }
 
-      if (createdInvoices.length === 1) {
-        res.json(createdInvoices[0]);
+        return createdInvoices;
+      });
+
+      if (splitResult.length === 1) {
+        res.json(splitResult[0]);
       } else {
         res.json({
           splitInvoices: true,
-          invoices: createdInvoices,
-          message: `${createdInvoices.length} Rechnungen erstellt: Kassenanteil und Privatanteil (Budget-Überschreitung).`,
+          invoices: splitResult,
+          message: `${splitResult.length} Rechnungen erstellt: Kassenanteil und Privatanteil (Budget-Überschreitung).`,
         });
       }
       return;

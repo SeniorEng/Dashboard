@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { formatDateForDisplay } from "@shared/utils/datetime";
+import { formatDateForDisplay, todayISO } from "@shared/utils/datetime";
 import { DEACTIVATION_REASON_SELECT_OPTIONS } from "@shared/domain/customers";
 import { SectionCard } from "@/components/patterns/section-card";
 import { StatusBadge } from "@/components/patterns/status-badge";
@@ -99,7 +99,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
     if (contract.status === "terminated") return "terminated";
     if (contract.status === "paused") return "paused";
     if (contract.contractEnd) {
-      const today = new Date().toISOString().split("T")[0];
+      const today = todayISO();
       if (contract.contractEnd < today) return "auslaufend";
     }
     return "active";

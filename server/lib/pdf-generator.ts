@@ -177,7 +177,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     <tr>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${formatDate(item.appointmentDate)}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${item.startTime ? item.startTime.slice(0, 5) : ""}-${item.endTime ? item.endTime.slice(0, 5) : ""}</td>
-      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${item.serviceDescription}</td>
+      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(item.serviceDescription)}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${quantityDisplay}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(item.unitPriceCents)}${unitLabel}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right; font-weight: ${isStorno ? 'bold; color: #dc2626' : '500'};">${formatCents(item.totalCents)}</td>
@@ -218,11 +218,11 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
 <body>
   <div class="header">
     <div>
-      <div class="company-name">${data.companyName || "Firma"}</div>
+      <div class="company-name">${escapeHtml(data.companyName || "Firma")}</div>
       <div class="company-info">
-        ${data.companyAddress || ""}<br>
-        ${data.companyPhone ? `Tel.: ${formatPhoneForDisplay(data.companyPhone)}` : ""}${data.companyEmail ? ` | ${data.companyEmail}` : ""}
-        ${data.companyWebsite ? `<br>${data.companyWebsite}` : ""}
+        ${escapeHtml(data.companyAddress || "")}<br>
+        ${data.companyPhone ? `Tel.: ${formatPhoneForDisplay(data.companyPhone)}` : ""}${data.companyEmail ? ` | ${escapeHtml(data.companyEmail)}` : ""}
+        ${data.companyWebsite ? `<br>${escapeHtml(data.companyWebsite)}` : ""}
       </div>
     </div>
     <div style="text-align: right;">
@@ -297,32 +297,32 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
   <div style="margin-top: 20px; font-size: 9pt;">
     <p>Bitte überweisen Sie den Betrag innerhalb von 14 Tagen auf folgendes Konto:</p>
     <table style="margin-top: 5px;">
-      <tr><td style="color: #1f2937; padding-right: 10px;">IBAN:</td><td style="color: #111827;"><strong>${data.iban}</strong></td></tr>
-      <tr><td style="color: #1f2937; padding-right: 10px;">BIC:</td><td style="color: #111827;">${data.bic}</td></tr>
-      <tr><td style="color: #1f2937; padding-right: 10px;">Bank:</td><td style="color: #111827;">${data.bankName}</td></tr>
+      <tr><td style="color: #1f2937; padding-right: 10px;">IBAN:</td><td style="color: #111827;"><strong>${escapeHtml(data.iban)}</strong></td></tr>
+      <tr><td style="color: #1f2937; padding-right: 10px;">BIC:</td><td style="color: #111827;">${escapeHtml(data.bic)}</td></tr>
+      <tr><td style="color: #1f2937; padding-right: 10px;">Bank:</td><td style="color: #111827;">${escapeHtml(data.bankName)}</td></tr>
     </table>
   </div>
   ` : `
   <div style="margin-top: 20px; font-size: 9pt;">
-    <p>Bankverbindung: ${data.bankName} | IBAN: ${data.iban} | BIC: ${data.bic}</p>
+    <p>Bankverbindung: ${escapeHtml(data.bankName)} | IBAN: ${escapeHtml(data.iban)} | BIC: ${escapeHtml(data.bic)}</p>
   </div>
   `}
 
-  ${data.notes ? `<div style="margin-top: 15px; font-size: 9pt; color: #1f2937;"><strong>Hinweis:</strong> ${data.notes}</div>` : ""}
+  ${data.notes ? `<div style="margin-top: 15px; font-size: 9pt; color: #1f2937;"><strong>Hinweis:</strong> ${escapeHtml(data.notes)}</div>` : ""}
 
   <div class="footer">
     <div class="footer-grid">
       <div class="footer-col">
-        ${data.companyName || ""}<br>
-        ${data.geschaeftsfuehrer ? `Geschäftsführer: ${data.geschaeftsfuehrer}` : ""}
+        ${escapeHtml(data.companyName || "")}<br>
+        ${data.geschaeftsfuehrer ? `Geschäftsführer: ${escapeHtml(data.geschaeftsfuehrer)}` : ""}
       </div>
       <div class="footer-col" style="text-align: center;">
         ${data.companyPhone ? `Tel.: ${formatPhoneForDisplay(data.companyPhone)}` : ""}<br>
-        ${data.companyEmail || ""}
+        ${escapeHtml(data.companyEmail || "")}
       </div>
       <div class="footer-col" style="text-align: right;">
-        ${data.iban ? `IBAN: ${data.iban}` : ""}<br>
-        ${data.bic ? `BIC: ${data.bic}` : ""}
+        ${data.iban ? `IBAN: ${escapeHtml(data.iban)}` : ""}<br>
+        ${data.bic ? `BIC: ${escapeHtml(data.bic)}` : ""}
       </div>
     </div>
   </div>

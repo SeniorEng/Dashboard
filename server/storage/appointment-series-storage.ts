@@ -8,6 +8,7 @@ import {
 } from "@shared/schema";
 import { eq, and, isNull, gte, ne, inArray, desc, sql } from "drizzle-orm";
 import { db, type DbOrTx } from "../lib/db";
+import { todayISO } from "@shared/utils/datetime";
 
 export async function createSeries(data: InsertAppointmentSeries, tx?: DbOrTx): Promise<AppointmentSeries> {
   const client = tx || db;
@@ -58,7 +59,7 @@ export async function getAllActiveSeries(): Promise<(SeriesWithCustomerName & { 
     .where(ne(appointmentSeries.status, "ended"))
     .orderBy(customers.name, appointmentSeries.startDate);
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = todayISO();
   const results = [];
   for (const r of rows) {
     const futureCount = await db.select({ id: appointments.id })
@@ -162,7 +163,7 @@ export async function countSeriesAppointments(seriesId: number): Promise<{ total
       ne(appointments.status, "cancelled"),
     ));
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = todayISO();
   return {
     total: all.length,
     future: all.filter(a => a.date >= today).length,
