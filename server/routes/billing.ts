@@ -1319,16 +1319,14 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
   const lnHtml = generateLeistungsnachweisHtml(pdfData);
   const { buffer: lnPdf } = await generatePdf(lnHtml);
 
+  const { sendEmail, buildEmailLayout } = await import("../services/email-service");
+  const companyName = companySettings.companyName || "SeniorenEngel";
+
   const monthName = MONTH_NAMES_DE[(invoice.billingMonth - 1)] || String(invoice.billingMonth);
   const customerFullName = [cust.vorname, cust.nachname].filter(Boolean).join(" ") || cust.name;
   const versNr = insHistory[0].versichertennummer || invoice.versichertennummer || "";
 
   const subject = `Rechnung ${invoice.invoiceNumber} — ${customerFullName}${versNr ? ` (${versNr})` : ""} — ${monthName} ${invoice.billingYear} — ${companyName}`;
-
-  const { sendEmail } = await import("../services/email-service");
-  const { buildEmailLayout } = await import("../services/email-service");
-
-  const companyName = companySettings.companyName || "SeniorenEngel";
   const bodyContent = `
     <p>Sehr geehrte Damen und Herren,</p>
     <p>anbei erhalten Sie die Rechnung <strong>${invoice.invoiceNumber}</strong> sowie den zugehörigen Leistungsnachweis

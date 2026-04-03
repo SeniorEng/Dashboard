@@ -237,6 +237,7 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
     haustierDetails: data.haustierVorhanden ? (data.haustierDetails || null) : null,
     personenbefoerderungGewuenscht: data.personenbefoerderungGewuenscht || false,
     documentDeliveryMethod: data.documentDeliveryMethod || "email",
+    receivesMonthlyInvoice: data.receivesMonthlyInvoice ?? false,
     billingType: data.billingType,
     createdByUserId: userId,
   };
