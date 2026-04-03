@@ -457,7 +457,17 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
         const deliveryMethod = cust[0].documentDeliveryMethod || "email";
         const copyFileNames = `[${invoice.invoiceNumber}] Kopie: ${invoice.invoiceNumber}.pdf, LN-${invoice.invoiceNumber}.pdf`;
         try {
-          if (deliveryMethod === "email" && cust[0].email) {
+          if (deliveryMethod === "email" && !cust[0].email) {
+            await deliveryStorage.createDelivery({
+              customerId: invoice.customerId,
+              deliveryMethod: "email",
+              status: "error",
+              recipientName: customerFullName,
+              documentFileNames: copyFileNames,
+              errorMessage: "Keine E-Mail-Adresse beim Kunden hinterlegt",
+              createdByUserId: req.user!.id,
+            });
+          } else if (deliveryMethod === "email" && cust[0].email) {
             const customerSubject = `Rechnungskopie ${invoice.invoiceNumber} — ${monthName} ${invoice.billingYear}`;
             const customerBody = `
               <p>Sehr geehrte/r ${cust[0].vorname || ""} ${cust[0].nachname || ""},</p>
@@ -1466,7 +1476,18 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
     const custDeliveryMethod = cust.documentDeliveryMethod || "email";
     const copyFileNames = `[${invoice.invoiceNumber}] Kopie: ${invoice.invoiceNumber}.pdf, LN-${invoice.invoiceNumber}.pdf`;
     try {
-      if (custDeliveryMethod === "email" && cust.email) {
+      if (custDeliveryMethod === "email" && !cust.email) {
+        await deliveryStorage.createDelivery({
+          customerId: invoice.customerId,
+          deliveryMethod: "email",
+          status: "error",
+          recipientName: customerFullName,
+          documentFileNames: copyFileNames,
+          errorMessage: "Keine E-Mail-Adresse beim Kunden hinterlegt",
+          createdByUserId: req.user!.id,
+        });
+        results.push({ invoiceId: id, status: "error", recipientEmail: "", customerCopy: true });
+      } else if (custDeliveryMethod === "email" && cust.email) {
         const customerSubject = `Rechnungskopie ${invoice.invoiceNumber} — ${monthName} ${invoice.billingYear}`;
         const customerBody = `
           <p>Sehr geehrte/r ${cust.vorname || ""} ${cust.nachname || ""},</p>
