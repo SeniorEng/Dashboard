@@ -368,7 +368,7 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
       if (appointmentIds.length > 0) {
         const txns = await db.select({ budgetType: budgetTransactions.budgetType })
           .from(budgetTransactions)
-          .where(and(inArray(budgetTransactions.appointmentId, appointmentIds), eq(budgetTransactions.transactionType, "usage")));
+          .where(and(inArray(budgetTransactions.appointmentId, appointmentIds), eq(budgetTransactions.transactionType, "consumption")));
         hasParagraph39 = txns.some(t => t.budgetType === "ersatzpflege_39_42a");
       }
 
@@ -392,7 +392,7 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
       const customerFullName = [cust[0].vorname, cust[0].nachname].filter(Boolean).join(" ") || cust[0].name;
       const versNr = insHist[0].versichertennummer || invoice.versichertennummer || "";
 
-      const subject = `Rechnung ${invoice.invoiceNumber} — ${customerFullName}${versNr ? ` (${versNr})` : ""} — ${monthName} ${invoice.billingYear}`;
+      const subject = `Rechnung ${invoice.invoiceNumber} — ${customerFullName}${versNr ? ` (${versNr})` : ""} — ${monthName} ${invoice.billingYear} — ${companyName}`;
       const bodyContent = `
         <p>Sehr geehrte Damen und Herren,</p>
         <p>anbei erhalten Sie die Rechnung <strong>${invoice.invoiceNumber}</strong> sowie den zugehörigen Leistungsnachweis
@@ -422,26 +422,38 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
 
       results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "sent", recipientEmail });
 
-      if (cust[0].receivesMonthlyInvoice && cust[0].email) {
+      if (cust[0].receivesMonthlyInvoice) {
+        const deliveryMethod = cust[0].documentDeliveryMethod || "email";
         try {
-          const customerSubject = `Rechnungskopie ${invoice.invoiceNumber} — ${monthName} ${invoice.billingYear}`;
-          const customerBody = `
-            <p>Sehr geehrte/r ${cust[0].vorname || ""} ${cust[0].nachname || ""},</p>
-            <p>anbei erhalten Sie eine Kopie der Rechnung <strong>${invoice.invoiceNumber}</strong>
-            für den Leistungszeitraum <strong>${monthName} ${invoice.billingYear}</strong>,
-            die an Ihre Pflegekasse gesendet wurde.</p>
-            <p>Mit freundlichen Grüßen<br/>${companyName}</p>
-          `;
-          const customerHtml = buildEmailLayout(companyName, companySettings.logoUrl, customerBody);
-          await sendEmail(companySettings, {
-            to: cust[0].email,
-            subject: customerSubject,
-            html: customerHtml,
-            attachments: [
-              { filename: `${invoice.invoiceNumber}.pdf`, content: zugferdBuffer, contentType: "application/pdf" },
-              { filename: `LN-${invoice.invoiceNumber}.pdf`, content: lnPdf, contentType: "application/pdf" },
-            ],
-          });
+          if (deliveryMethod === "email" && cust[0].email) {
+            const customerSubject = `Rechnungskopie ${invoice.invoiceNumber} — ${monthName} ${invoice.billingYear}`;
+            const customerBody = `
+              <p>Sehr geehrte/r ${cust[0].vorname || ""} ${cust[0].nachname || ""},</p>
+              <p>anbei erhalten Sie eine Kopie der Rechnung <strong>${invoice.invoiceNumber}</strong>
+              für den Leistungszeitraum <strong>${monthName} ${invoice.billingYear}</strong>,
+              die an Ihre Pflegekasse gesendet wurde.</p>
+              <p>Mit freundlichen Grüßen<br/>${companyName}</p>
+            `;
+            const customerHtml = buildEmailLayout(companyName, companySettings.logoUrl, customerBody);
+            await sendEmail(companySettings, {
+              to: cust[0].email,
+              subject: customerSubject,
+              html: customerHtml,
+              attachments: [
+                { filename: `${invoice.invoiceNumber}.pdf`, content: zugferdBuffer, contentType: "application/pdf" },
+                { filename: `LN-${invoice.invoiceNumber}.pdf`, content: lnPdf, contentType: "application/pdf" },
+              ],
+            });
+            await auditService.log(req.user!.id, "invoice_customer_copy_sent", "invoice", invoiceId, {
+              invoiceNumber: invoice.invoiceNumber, recipientEmail: cust[0].email, deliveryMethod: "email",
+            }, req.ip);
+          } else if (deliveryMethod === "post") {
+            await auditService.log(req.user!.id, "invoice_customer_copy_post_pending", "invoice", invoiceId, {
+              invoiceNumber: invoice.invoiceNumber, deliveryMethod: "post",
+              customerName: customerFullName,
+              customerAddress: [cust[0].strasse, cust[0].nr, cust[0].plz, cust[0].stadt].filter(Boolean).join(", "),
+            }, req.ip);
+          }
         } catch (copyErr: unknown) {
           console.error("Kundenkopie fehlgeschlagen:", copyErr instanceof Error ? copyErr.message : copyErr);
         }
@@ -1270,7 +1282,7 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
         .from(budgetTransactions)
         .where(and(
           inArray(budgetTransactions.appointmentId, appointmentIds),
-          eq(budgetTransactions.transactionType, "usage"),
+          eq(budgetTransactions.transactionType, "consumption"),
         ));
       hasParagraph39 = txns.some(t => t.budgetType === "ersatzpflege_39_42a");
     }
@@ -1311,7 +1323,7 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
   const customerFullName = [cust.vorname, cust.nachname].filter(Boolean).join(" ") || cust.name;
   const versNr = insHistory[0].versichertennummer || invoice.versichertennummer || "";
 
-  const subject = `Rechnung ${invoice.invoiceNumber} — ${customerFullName}${versNr ? ` (${versNr})` : ""} — ${monthName} ${invoice.billingYear}`;
+  const subject = `Rechnung ${invoice.invoiceNumber} — ${customerFullName}${versNr ? ` (${versNr})` : ""} — ${monthName} ${invoice.billingYear} — ${companyName}`;
 
   const { sendEmail } = await import("../services/email-service");
   const { buildEmailLayout } = await import("../services/email-service");
@@ -1353,32 +1365,46 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
     { invoiceId: id, status: "sent", recipientEmail },
   ];
 
-  if (cust.receivesMonthlyInvoice && cust.email) {
+  if (cust.receivesMonthlyInvoice) {
+    const deliveryMethod = cust.documentDeliveryMethod || "email";
     try {
-      const customerSubject = `Rechnungskopie ${invoice.invoiceNumber} — ${monthName} ${invoice.billingYear}`;
-      const customerBody = `
-        <p>Sehr geehrte/r ${cust.vorname || ""} ${cust.nachname || ""},</p>
-        <p>anbei erhalten Sie eine Kopie der Rechnung <strong>${invoice.invoiceNumber}</strong> 
-        für den Leistungszeitraum <strong>${monthName} ${invoice.billingYear}</strong>, 
-        die an Ihre Pflegekasse gesendet wurde.</p>
-        <p>Mit freundlichen Grüßen<br/>${companyName}</p>
-      `;
-      const customerHtml = buildEmailLayout(companyName, companySettings.logoUrl, customerBody);
+      if (deliveryMethod === "email" && cust.email) {
+        const customerSubject = `Rechnungskopie ${invoice.invoiceNumber} — ${monthName} ${invoice.billingYear}`;
+        const customerBody = `
+          <p>Sehr geehrte/r ${cust.vorname || ""} ${cust.nachname || ""},</p>
+          <p>anbei erhalten Sie eine Kopie der Rechnung <strong>${invoice.invoiceNumber}</strong> 
+          für den Leistungszeitraum <strong>${monthName} ${invoice.billingYear}</strong>, 
+          die an Ihre Pflegekasse gesendet wurde.</p>
+          <p>Mit freundlichen Grüßen<br/>${companyName}</p>
+        `;
+        const customerHtml = buildEmailLayout(companyName, companySettings.logoUrl, customerBody);
 
-      await sendEmail(companySettings, {
-        to: cust.email,
-        subject: customerSubject,
-        html: customerHtml,
-        attachments: [
-          { filename: `${invoice.invoiceNumber}.pdf`, content: zugferdBuffer, contentType: "application/pdf" },
-          { filename: `LN-${invoice.invoiceNumber}.pdf`, content: lnPdf, contentType: "application/pdf" },
-        ],
-      });
+        await sendEmail(companySettings, {
+          to: cust.email,
+          subject: customerSubject,
+          html: customerHtml,
+          attachments: [
+            { filename: `${invoice.invoiceNumber}.pdf`, content: zugferdBuffer, contentType: "application/pdf" },
+            { filename: `LN-${invoice.invoiceNumber}.pdf`, content: lnPdf, contentType: "application/pdf" },
+          ],
+        });
 
-      results.push({ invoiceId: id, status: "sent", recipientEmail: cust.email, customerCopy: true });
+        results.push({ invoiceId: id, status: "sent", recipientEmail: cust.email, customerCopy: true });
+
+        await auditService.log(req.user!.id, "invoice_customer_copy_sent", "invoice", id, {
+          invoiceNumber: invoice.invoiceNumber, recipientEmail: cust.email, deliveryMethod: "email",
+        }, req.ip);
+      } else if (deliveryMethod === "post") {
+        await auditService.log(req.user!.id, "invoice_customer_copy_post_pending", "invoice", id, {
+          invoiceNumber: invoice.invoiceNumber, deliveryMethod: "post",
+          customerName: customerFullName,
+          customerAddress: [cust.strasse, cust.nr, cust.plz, cust.stadt].filter(Boolean).join(", "),
+        }, req.ip);
+        results.push({ invoiceId: id, status: "post_pending", recipientEmail: "", customerCopy: true });
+      }
     } catch (copyError: unknown) {
       console.error("Kundenkopie konnte nicht gesendet werden:", copyError instanceof Error ? copyError.message : copyError);
-      results.push({ invoiceId: id, status: "error", recipientEmail: cust.email, customerCopy: true });
+      results.push({ invoiceId: id, status: "error", recipientEmail: cust.email || "", customerCopy: true });
     }
   }
 

@@ -172,6 +172,7 @@ const simpleCreateCustomerSchema = z.object({
   haustierDetails: z.string().max(500, "Maximal 500 Zeichen erlaubt").optional().nullable(),
   personenbefoerderungGewuenscht: z.boolean().optional(),
   documentDeliveryMethod: z.enum(["email", "post"]).optional(),
+  receivesMonthlyInvoice: z.boolean().optional(),
   insurance: z.object({
     providerId: z.number(),
     versichertennummer: versichertennummerSchema,
@@ -417,6 +418,7 @@ const updateCustomerSchema = z.object({
   haustierDetails: z.string().max(500, "Maximal 500 Zeichen erlaubt").nullable().optional(),
   personenbefoerderungGewuenscht: z.boolean().optional(),
   documentDeliveryMethod: z.enum(["email", "post"]).optional(),
+  receivesMonthlyInvoice: z.boolean().optional(),
   acceptsPrivatePayment: z.boolean().optional(),
   inaktivAb: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat (YYYY-MM-DD erwartet)").nullable().optional(),
   deactivationReason: z.string().nullable().optional(),
