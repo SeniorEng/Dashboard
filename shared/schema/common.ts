@@ -56,7 +56,8 @@ export const optionalGermanPhoneSchema = z.union([
   z.literal(""),
   z.string(),
 ]).transform((value, ctx) => {
-  if (value === null || value === undefined || value === "") return null;
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
   
   const trimmed = value.trim();
   if (trimmed === "") return null;

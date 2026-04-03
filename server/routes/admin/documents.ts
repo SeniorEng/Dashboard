@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
 import crypto from "crypto";
+import { optionalGermanPhoneSchema } from "@shared/schema/common";
 import { documentStorage } from "../../storage/documents";
 import { insertDocumentTypeSchema, updateDocumentTypeSchema, insertEmployeeDocumentSchema, insertCustomerDocumentSchema, insertDocumentTemplateSchema, updateDocumentTemplateSchema, insertDocumentTypeTriggerSchema } from "@shared/schema";
 import { asyncHandler } from "../../lib/errors";
@@ -265,8 +266,8 @@ const renderPreviewSchema = z.object({
     nachname: z.string(),
     geburtsdatum: z.string().optional(),
     email: z.string().optional(),
-    telefon: z.string().optional(),
-    festnetz: z.string().optional(),
+    telefon: optionalGermanPhoneSchema,
+    festnetz: optionalGermanPhoneSchema,
     strasse: z.string().optional(),
     nr: z.string().optional(),
     plz: z.string().optional(),
@@ -287,7 +288,7 @@ const renderPreviewSchema = z.object({
       vorname: z.string().optional(),
       nachname: z.string().optional(),
       contactType: z.string().optional(),
-      telefon: z.string().optional(),
+      telefon: optionalGermanPhoneSchema,
       email: z.string().optional(),
       isPrimary: z.boolean().optional(),
     })).optional(),

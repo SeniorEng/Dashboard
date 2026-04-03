@@ -8,13 +8,14 @@ import { documentStorage } from "../storage/documents";
 import { usersCache, birthdaysCache } from "../services/cache";
 import { sanitizeUser } from "../utils/sanitize-user";
 import { geocodeEmployee } from "../services/geocoding";
+import { optionalGermanPhoneSchema } from "@shared/schema/common";
 
 const router = Router();
 
 router.use(requireAuth);
 
 const updateProfileSchema = z.object({
-  telefon: z.string().optional(),
+  telefon: optionalGermanPhoneSchema,
   strasse: z.string().optional(),
   hausnummer: z.string().optional(),
   plz: z.string().optional(),
@@ -22,7 +23,7 @@ const updateProfileSchema = z.object({
   email: z.string().email("Ungültige E-Mail-Adresse").optional(),
   haustierAkzeptiert: z.boolean().optional(),
   notfallkontaktName: z.string().optional(),
-  notfallkontaktTelefon: z.string().optional(),
+  notfallkontaktTelefon: optionalGermanPhoneSchema,
   notfallkontaktBeziehung: z.string().optional(),
 });
 

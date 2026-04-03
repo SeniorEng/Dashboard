@@ -11,7 +11,7 @@ import {
   customers,
   type InsertCustomer,
 } from "@shared/schema";
-import { internationalEmailSchema } from "@shared/schema/common";
+import { internationalEmailSchema, optionalGermanPhoneSchema } from "@shared/schema/common";
 import { asyncHandler } from "../../lib/errors";
 import { z } from "zod";
 import { db } from "../../lib/db";
@@ -159,8 +159,8 @@ const simpleCreateCustomerSchema = z.object({
   nachname: z.string().min(1, "Nachname ist erforderlich"),
   geburtsdatum: z.string().optional().nullable(),
   email: internationalEmailSchema.optional().nullable(),
-  telefon: z.string().optional().nullable(),
-  festnetz: z.string().optional().nullable(),
+  telefon: optionalGermanPhoneSchema,
+  festnetz: optionalGermanPhoneSchema,
   strasse: z.string().min(1, "Straße ist erforderlich"),
   nr: z.string().min(1, "Hausnummer ist erforderlich"),
   plz: z.string().regex(/^\d{5}$/, "Ungültige PLZ (5 Stellen erwartet)"),
@@ -182,8 +182,8 @@ const simpleCreateCustomerSchema = z.object({
     isPrimary: z.boolean(),
     vorname: z.string(),
     nachname: z.string(),
-    festnetz: z.string().optional(),
-    mobilnummer: z.string().optional(),
+    festnetz: optionalGermanPhoneSchema,
+    mobilnummer: optionalGermanPhoneSchema,
     email: z.string().optional(),
   })).optional(),
   budgets: z.object({
@@ -402,8 +402,8 @@ const updateCustomerSchema = z.object({
   billingType: z.enum(["pflegekasse_gesetzlich", "pflegekasse_privat", "selbstzahler"]).optional(),
   geburtsdatum: z.string().nullable().optional(),
   email: internationalEmailSchema.nullable().optional(),
-  festnetz: z.string().nullable().optional(),
-  telefon: z.string().nullable().optional(),
+  festnetz: optionalGermanPhoneSchema,
+  telefon: optionalGermanPhoneSchema,
   strasse: z.string().min(1, "Straße ist erforderlich").optional(),
   nr: z.string().min(1, "Hausnummer ist erforderlich").optional(),
   plz: z.string().regex(/^\d{5}$/, "Ungültige PLZ (5 Stellen erwartet)").optional(),

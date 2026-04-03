@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -443,9 +443,13 @@ export default function AdminCustomers() {
                             <Phone className={iconSize.xs} />
                             <span>
                               {[
-                                customer.telefon ? formatPhoneForDisplay(customer.telefon) : null,
-                                customer.festnetz ? formatPhoneForDisplay(customer.festnetz) : null,
-                              ].filter(Boolean).join(" · ")}
+                                customer.telefon ? <a key="tel" href={`tel:${customer.telefon}`} className="text-primary hover:underline">{formatPhoneForDisplay(customer.telefon)}</a> : null,
+                                customer.festnetz ? <a key="fest" href={`tel:${customer.festnetz}`} className="text-primary hover:underline">{formatPhoneForDisplay(customer.festnetz)}</a> : null,
+                              ].filter(Boolean).reduce<ReactNode[]>((acc, el, i) => {
+                                if (i > 0) acc.push(" · ");
+                                acc.push(el);
+                                return acc;
+                              }, [])}
                             </span>
                           </div>
                         )}

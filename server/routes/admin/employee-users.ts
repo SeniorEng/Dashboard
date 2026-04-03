@@ -16,6 +16,7 @@ import {
   passwordResetTokens,
 } from "@shared/schema";
 import { validateGeburtsdatum } from "@shared/utils/datetime";
+import { optionalGermanPhoneSchema } from "@shared/schema/common";
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
 import { auditService } from "../../services/audit";
@@ -177,7 +178,7 @@ const updateUserSchema = z.object({
   email: z.string().email("Ungültige E-Mail-Adresse").optional(),
   vorname: z.string().min(1, "Vorname ist erforderlich").optional(),
   nachname: z.string().min(1, "Nachname ist erforderlich").optional(),
-  telefon: z.string().optional(),
+  telefon: optionalGermanPhoneSchema,
   strasse: z.string().optional(),
   hausnummer: z.string().optional(),
   plz: z.string().optional(),
@@ -198,7 +199,7 @@ const updateUserSchema = z.object({
   lbnr: z.string().nullable().optional(),
   personalnummer: z.string().nullable().optional(),
   notfallkontaktName: z.string().optional(),
-  notfallkontaktTelefon: z.string().optional(),
+  notfallkontaktTelefon: optionalGermanPhoneSchema,
   notfallkontaktBeziehung: z.string().optional(),
   roles: z.array(z.enum(EMPLOYEE_ROLES)).optional(),
 });

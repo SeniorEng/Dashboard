@@ -55,7 +55,7 @@ export interface CreateUserData {
   password: string;
   vorname: string;
   nachname: string;
-  telefon?: string;
+  telefon?: string | null;
   strasse?: string;
   hausnummer?: string;
   plz?: string;
@@ -390,7 +390,7 @@ export class AuthService {
       email?: string;
       vorname?: string;
       nachname?: string;
-      telefon?: string;
+      telefon?: string | null;
       strasse?: string;
       hausnummer?: string;
       plz?: string;
@@ -410,7 +410,7 @@ export class AuthService {
       lbnr?: string | null;
       personalnummer?: string | null;
       notfallkontaktName?: string;
-      notfallkontaktTelefon?: string;
+      notfallkontaktTelefon?: string | null;
       notfallkontaktBeziehung?: string;
     }
   ): Promise<UserWithRoles | null> {

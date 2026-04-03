@@ -9,7 +9,7 @@ import {
   customers, prospects, appointments, prospectOffers, prospectNotes,
   versichertennummerSchema,
 } from "@shared/schema";
-import { internationalEmailSchema } from "@shared/schema/common";
+import { internationalEmailSchema, optionalGermanPhoneSchema } from "@shared/schema/common";
 import { isPflegekasseCustomer } from "@shared/domain/customers";
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
@@ -300,8 +300,8 @@ const convertProspectSchema = z.object({
   nachname: z.string().min(1),
   geburtsdatum: z.string().optional().nullable(),
   email: internationalEmailSchema.optional().nullable(),
-  telefon: z.string().optional().nullable(),
-  festnetz: z.string().optional().nullable(),
+  telefon: optionalGermanPhoneSchema,
+  festnetz: optionalGermanPhoneSchema,
   strasse: z.string().min(1),
   nr: z.string().min(1),
   plz: z.string().regex(/^\d{5}$/),
@@ -324,9 +324,9 @@ const convertProspectSchema = z.object({
     isPrimary: z.boolean(),
     vorname: z.string(),
     nachname: z.string(),
-    telefon: z.string().optional(),
-    festnetz: z.string().optional(),
-    mobilnummer: z.string().optional(),
+    telefon: optionalGermanPhoneSchema,
+    festnetz: optionalGermanPhoneSchema,
+    mobilnummer: optionalGermanPhoneSchema,
     email: z.string().optional(),
   })).optional(),
   budgets: z.object({

@@ -1003,9 +1003,9 @@ export default function AdminProspects() {
                     </div>
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                       {prospect.telefon && (
-                        <span className="flex items-center gap-1">
+                        <a href={`tel:${prospect.telefon}`} className="flex items-center gap-1 text-primary hover:underline" data-testid="link-prospect-phone-mobile">
                           <Phone className="h-3 w-3" /> {formatPhoneForDisplay(prospect.telefon)}
-                        </span>
+                        </a>
                       )}
                       {prospect.stadt && (
                         <a

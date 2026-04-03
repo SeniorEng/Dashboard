@@ -270,7 +270,7 @@ function PersonalDataSection({ profile }: { profile: ProfileData }) {
           <InfoRow
             icon={<Phone className="h-4 w-4" />}
             label="Telefon"
-            value={profile.telefon ? formatPhoneForDisplay(profile.telefon) : "—"}
+            value={profile.telefon ? <a href={`tel:${profile.telefon}`} className="text-primary hover:underline">{formatPhoneForDisplay(profile.telefon)}</a> : "—"}
             testId="text-profile-telefon"
           />
           <InfoRow
@@ -415,7 +415,7 @@ function EmergencyContactSection({ profile }: { profile: ProfileData }) {
           <InfoRow
             icon={<Phone className="h-4 w-4" />}
             label="Telefon"
-            value={profile.notfallkontaktTelefon ? formatPhoneForDisplay(profile.notfallkontaktTelefon) : "—"}
+            value={profile.notfallkontaktTelefon ? <a href={`tel:${profile.notfallkontaktTelefon}`} className="text-primary hover:underline">{formatPhoneForDisplay(profile.notfallkontaktTelefon)}</a> : "—"}
             testId="text-emergency-phone"
           />
           <InfoRow icon={<Heart className="h-4 w-4" />} label="Beziehung" value={profile.notfallkontaktBeziehung || "—"} testId="text-emergency-relation" />
@@ -953,7 +953,7 @@ function InfoRow({
 }: {
   icon: React.ReactNode;
   label: string;
-  value: string;
+  value: React.ReactNode;
   testId: string;
 }) {
   return (

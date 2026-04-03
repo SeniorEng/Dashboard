@@ -661,7 +661,7 @@ export default function AdminUsers() {
                                 <>
                                   <span className="text-gray-500">·</span>
                                   <span className="text-sm text-gray-500">
-                                    {user.telefon ? formatPhoneForDisplay(user.telefon) : '–'}
+                                    {user.telefon ? <a href={`tel:${user.telefon}`} className="text-primary hover:underline">{formatPhoneForDisplay(user.telefon)}</a> : '–'}
                                   </span>
                                 </>
                               )}

@@ -1,6 +1,6 @@
 import { pgTable, text, integer, serial, date, boolean, unique, index, real } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import { timestamp } from "./common";
+import { timestamp, optionalGermanPhoneSchema } from "./common";
 
 // ============================================
 // USER & AUTHENTICATION TABLES
@@ -187,7 +187,7 @@ export const insertUserSchema = z.object({
   password: z.string().min(8, "Passwort muss mindestens 8 Zeichen haben").regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d\w\W]{8,}$/, "Passwort muss Groß-/Kleinbuchstaben und eine Zahl enthalten"),
   vorname: z.string().min(1, "Vorname ist erforderlich"),
   nachname: z.string().min(1, "Nachname ist erforderlich"),
-  telefon: z.string().optional(),
+  telefon: optionalGermanPhoneSchema,
   strasse: z.string().optional(),
   hausnummer: z.string().optional(),
   plz: z.string().optional(),
