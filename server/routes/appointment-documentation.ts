@@ -8,7 +8,7 @@ import { computeDataHash } from "../services/signature-integrity";
 import { asyncHandler, badRequest, notFound, forbidden, AppError, ErrorMessages } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { requireAuth } from "../middleware/auth";
-import { checkCustomerAccess } from "./appointments";
+import { checkAppointmentWriteAccess } from "./appointments";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { db } from "../lib/db";
 import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
@@ -25,7 +25,7 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
     throw notFound(ErrorMessages.appointmentNotFound);
   }
 
-  if (!await checkCustomerAccess(req.user!, appointment.customerId, res)) return;
+  if (!await checkAppointmentWriteAccess(req.user!, appointment, res)) return;
 
   const isLocked = await storage.isAppointmentLocked(id);
   if (isLocked) {

@@ -93,6 +93,15 @@ export async function checkCustomerAccess(user: { id: number; isAdmin: boolean }
   return true;
 }
 
+export async function checkAppointmentWriteAccess(user: { id: number; isAdmin: boolean }, appointment: { assignedEmployeeId: number | null; customerId: number | null }, res: Response): Promise<boolean> {
+  if (user.isAdmin) return true;
+  if (appointment.assignedEmployeeId !== user.id) {
+    sendForbidden(res, "ACCESS_DENIED", "Nur der zugewiesene Mitarbeiter darf diesen Termin bearbeiten.");
+    return false;
+  }
+  return true;
+}
+
 router.use(requireAuth);
 
 router.get("/active-employees", asyncHandler("Mitarbeiter konnten nicht geladen werden", async (_req, res) => {
@@ -637,7 +646,7 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
     return sendNotFound(res, ErrorMessages.appointmentNotFound);
   }
   
-  if (!await checkCustomerAccess(req.user!, existingAppointment.customerId, res)) return;
+  if (!await checkAppointmentWriteAccess(req.user!, existingAppointment, res)) return;
   
   const isLocked = await storage.isAppointmentLocked(id);
   if (isLocked) {
@@ -782,7 +791,7 @@ router.post("/:id/start", asyncHandler("Fehler beim Starten des Besuchs", async 
     return sendNotFound(res, ErrorMessages.appointmentNotFound);
   }
   
-  if (!await checkCustomerAccess(req.user!, appointment.customerId, res)) return;
+  if (!await checkAppointmentWriteAccess(req.user!, appointment, res)) return;
   
   const isLocked = await storage.isAppointmentLocked(id);
   if (isLocked) {
@@ -817,7 +826,7 @@ router.post("/:id/end", asyncHandler("Fehler beim Beenden des Besuchs", async (r
     return sendNotFound(res, ErrorMessages.appointmentNotFound);
   }
   
-  if (!await checkCustomerAccess(req.user!, appointment.customerId, res)) return;
+  if (!await checkAppointmentWriteAccess(req.user!, appointment, res)) return;
   
   const isLocked = await storage.isAppointmentLocked(id);
   if (isLocked) {
@@ -963,7 +972,7 @@ router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins
     return sendNotFound(res, ErrorMessages.appointmentNotFound);
   }
 
-  if (!await checkCustomerAccess(req.user!, appointment.customerId, res)) return;
+  if (!await checkAppointmentWriteAccess(req.user!, appointment, res)) return;
 
   if (appointment.status !== "completed") {
     return sendForbidden(res, "INVALID_STATUS", "Nur abgeschlossene Termine können zur Korrektur geöffnet werden.");
@@ -1038,7 +1047,7 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
     return sendNotFound(res, ErrorMessages.appointmentNotFound);
   }
   
-  if (!await checkCustomerAccess(req.user!, appointment.customerId, res)) return;
+  if (!await checkAppointmentWriteAccess(req.user!, appointment, res)) return;
 
   const isAdmin = req.user!.isAdmin;
   const isCompleted = appointment.status === "completed";
