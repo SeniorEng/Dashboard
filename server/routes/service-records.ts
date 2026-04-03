@@ -8,6 +8,7 @@ import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
 import { db } from "../lib/db";
 import { eq, and, isNull } from "drizzle-orm";
+import { getPrimaryCustomerIds } from "../storage/customers-storage";
 
 const router = Router();
 
@@ -117,13 +118,16 @@ router.get("/check-period", requireAuth, asyncHandler("Periodendaten konnten nic
       message: "Sie haben keinen Zugriff auf diesen Kunden" 
     });
   }
+
+  const primaryIds = await getPrimaryCustomerIds(effectiveUserId);
+  const isPrimary = primaryIds.includes(customerId);
   
   const [existingRecord, counts, customerData, coveredBySingleCount, coveredByMonthlyCount] = await Promise.all([
-    storage.getServiceRecordByPeriod(customerId, effectiveUserId, year, month),
-    storage.getAppointmentCountsForPeriod(customerId, effectiveUserId, year, month),
+    storage.getServiceRecordByPeriod(customerId, effectiveUserId, year, month, isPrimary),
+    storage.getAppointmentCountsForPeriod(customerId, effectiveUserId, year, month, isPrimary),
     storage.getCustomer(customerId),
-    storage.getCoveredBySingleCount(customerId, effectiveUserId, year, month),
-    storage.getCoveredByMonthlyCount(customerId, effectiveUserId, year, month),
+    storage.getCoveredBySingleCount(customerId, effectiveUserId, year, month, isPrimary),
+    storage.getCoveredByMonthlyCount(customerId, effectiveUserId, year, month, isPrimary),
   ]);
 
   const coveredCount = coveredBySingleCount + coveredByMonthlyCount;
@@ -238,8 +242,11 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
       message: "Sie haben keinen Zugriff auf diesen Kunden" 
     });
   }
+
+  const primaryIds = await getPrimaryCustomerIds(effectiveEmployeeId);
+  const isPrimary = primaryIds.includes(customerId);
   
-  const undocumentedAppointments = await storage.getUndocumentedAppointmentsForPeriod(customerId, effectiveEmployeeId, year, month);
+  const undocumentedAppointments = await storage.getUndocumentedAppointmentsForPeriod(customerId, effectiveEmployeeId, year, month, isPrimary);
   if (undocumentedAppointments.length > 0) {
     return res.status(400).json({ 
       message: `Es gibt noch ${undocumentedAppointments.length} nicht dokumentierte Termine in diesem Monat. Bitte dokumentieren Sie alle Termine, bevor Sie den Leistungsnachweis erstellen.`,
@@ -247,7 +254,7 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
     });
   }
   
-  const documentedAppointments = await storage.getDocumentedAppointmentsForPeriod(customerId, effectiveEmployeeId, year, month);
+  const documentedAppointments = await storage.getDocumentedAppointmentsForPeriod(customerId, effectiveEmployeeId, year, month, isPrimary);
   if (documentedAppointments.length === 0) {
     return res.status(400).json({ 
       message: "Es gibt keine dokumentierten Termine in diesem Monat." 
