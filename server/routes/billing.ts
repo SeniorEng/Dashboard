@@ -19,6 +19,7 @@ import {
   monthlyServiceRecords,
   serviceRecordAppointments,
   customerServicePrices,
+  budgetTransactions,
 } from "@shared/schema";
 import type { Invoice, InvoiceLineItem, CompanySettings } from "@shared/schema";
 import { eq, and, gte, lte, isNull, inArray, ne, notInArray, or } from "drizzle-orm";
@@ -309,6 +310,133 @@ router.get("/:id", asyncHandler("Rechnung konnte nicht geladen werden", async (r
   res.json({ ...invoice, lineItems });
 }));
 
+async function getBudgetSplitForAppointments(customerId: number, apptIds: number[]) {
+  if (apptIds.length === 0) return new Map<number, { kasseCents: number; privateCents: number }>();
+
+  const txns = await db.select({
+    appointmentId: budgetTransactions.appointmentId,
+    budgetType: budgetTransactions.budgetType,
+    transactionType: budgetTransactions.transactionType,
+    amountCents: budgetTransactions.amountCents,
+  })
+  .from(budgetTransactions)
+  .where(and(
+    eq(budgetTransactions.customerId, customerId),
+    inArray(budgetTransactions.appointmentId, apptIds),
+    eq(budgetTransactions.transactionType, "consumption")
+  ));
+
+  const splitMap = new Map<number, { kasseCents: number; privateCents: number }>();
+
+  for (const txn of txns) {
+    if (!txn.appointmentId) continue;
+    const existing = splitMap.get(txn.appointmentId) || { kasseCents: 0, privateCents: 0 };
+    const absCents = Math.abs(txn.amountCents);
+    if (txn.budgetType === "private") {
+      existing.privateCents += absCents;
+    } else {
+      existing.kasseCents += absCents;
+    }
+    splitMap.set(txn.appointmentId, existing);
+  }
+
+  return splitMap;
+}
+
+function splitLineItemsByBudget(
+  lineItems: BuildLineItem[],
+  budgetSplit: Map<number, { kasseCents: number; privateCents: number }>
+): { kasseItems: BuildLineItem[]; privateItems: BuildLineItem[] } {
+  const kasseItems: BuildLineItem[] = [];
+  const privateItems: BuildLineItem[] = [];
+
+  const apptGroups = new Map<number, BuildLineItem[]>();
+  for (const item of lineItems) {
+    const apptId = item.appointmentId;
+    const existing = apptGroups.get(apptId) || [];
+    existing.push(item);
+    apptGroups.set(apptId, existing);
+  }
+
+  for (const [apptId, items] of apptGroups) {
+    const split = budgetSplit.get(apptId);
+    if (!split) {
+      kasseItems.push(...items);
+      continue;
+    }
+
+    if (split.privateCents === 0) {
+      kasseItems.push(...items);
+      continue;
+    }
+
+    if (split.kasseCents === 0) {
+      privateItems.push(...items);
+      continue;
+    }
+
+    const totalApptCents = items.reduce((sum, i) => sum + i.totalCents, 0);
+    if (totalApptCents <= 0) {
+      kasseItems.push(...items);
+      continue;
+    }
+
+    const kasseRatio = split.kasseCents / (split.kasseCents + split.privateCents);
+
+    let kasseRemaining = split.kasseCents;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const isLast = i === items.length - 1;
+
+      let kasseShare: number;
+      let privateShare: number;
+
+      if (isLast) {
+        kasseShare = kasseRemaining;
+        privateShare = item.totalCents - kasseShare;
+      } else {
+        kasseShare = Math.round(item.totalCents * kasseRatio);
+        privateShare = item.totalCents - kasseShare;
+        kasseRemaining -= kasseShare;
+      }
+
+      if (kasseShare > 0) {
+        kasseItems.push({ ...item, totalCents: kasseShare });
+      }
+      if (privateShare > 0) {
+        privateItems.push({ ...item, totalCents: privateShare });
+      }
+    }
+  }
+
+  return { kasseItems, privateItems };
+}
+
+async function getInsuranceData(customerId: number) {
+  const insuranceData = await db.select({
+    providerName: insuranceProviders.name,
+    ikNummer: insuranceProviders.ikNummer,
+    versichertennummer: customerInsuranceHistory.versichertennummer,
+    empfaenger: insuranceProviders.empfaenger,
+    empfaengerZeile2: insuranceProviders.empfaengerZeile2,
+    anschrift: insuranceProviders.anschrift,
+    plzOrt: insuranceProviders.plzOrt,
+    strasse: insuranceProviders.strasse,
+    hausnummer: insuranceProviders.hausnummer,
+    plz: insuranceProviders.plz,
+    stadt: insuranceProviders.stadt,
+  })
+  .from(customerInsuranceHistory)
+  .innerJoin(insuranceProviders, eq(customerInsuranceHistory.insuranceProviderId, insuranceProviders.id))
+  .where(and(
+    eq(customerInsuranceHistory.customerId, customerId),
+    isNull(customerInsuranceHistory.validTo)
+  ))
+  .limit(1);
+
+  return insuranceData.length > 0 ? insuranceData[0] : null;
+}
+
 router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", async (req, res) => {
   const parsed = createInvoiceSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -351,6 +479,165 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
   }
 
   const billingType = customer.billingType || "selbstzahler";
+  const customerName = customer.vorname && customer.nachname
+    ? `${customer.vorname} ${customer.nachname}`
+    : customer.name || "Unbekannt";
+  const customerAddress = [customer.strasse, customer.nr].filter(Boolean).join(" ") +
+    (customer.plz || customer.stadt ? `\n${customer.plz || ""} ${customer.stadt || ""}` : "");
+
+  const insuranceInfo = await getInsuranceData(customerId);
+  const needsBudgetSplit = (billingType === "pflegekasse_gesetzlich" || billingType === "pflegekasse_privat")
+    && customer.acceptsPrivatePayment;
+
+  if (needsBudgetSplit) {
+    const budgetSplit = await getBudgetSplitForAppointments(customerId, apptIds);
+    const hasPrivate = Array.from(budgetSplit.values()).some(s => s.privateCents > 0);
+
+    if (hasPrivate) {
+      const { lineItems: allLineItems } = await buildLineItemsFromAppointments(apptIds, customerId, billingType);
+      const { kasseItems, privateItems } = splitLineItemsByBudget(allLineItems, budgetSplit);
+
+      const createdInvoices: Invoice[] = [];
+
+      if (kasseItems.length > 0) {
+        const kasseNetCents = kasseItems.reduce((sum, i) => sum + i.totalCents, 0);
+        let kasseRecipientName = "";
+        let kasseRecipientAddress = "";
+        let insuranceProviderName = "";
+        let insuranceIkNummer = "";
+        let versichertennummer = "";
+
+        if (billingType === "pflegekasse_gesetzlich" && insuranceInfo) {
+          kasseRecipientName = insuranceInfo.empfaenger || insuranceInfo.providerName;
+          insuranceProviderName = insuranceInfo.providerName;
+          insuranceIkNummer = insuranceInfo.ikNummer;
+          versichertennummer = insuranceInfo.versichertennummer;
+          const addrParts: string[] = [];
+          if (insuranceInfo.empfaengerZeile2) addrParts.push(insuranceInfo.empfaengerZeile2);
+          if (insuranceInfo.anschrift) {
+            addrParts.push(insuranceInfo.anschrift);
+          } else if (insuranceInfo.strasse) {
+            addrParts.push([insuranceInfo.strasse, insuranceInfo.hausnummer].filter(Boolean).join(" "));
+          }
+          if (insuranceInfo.plzOrt) {
+            addrParts.push(insuranceInfo.plzOrt);
+          } else if (insuranceInfo.plz || insuranceInfo.stadt) {
+            addrParts.push([insuranceInfo.plz, insuranceInfo.stadt].filter(Boolean).join(" "));
+          }
+          kasseRecipientAddress = addrParts.join("\n");
+        } else {
+          kasseRecipientName = customerName;
+          kasseRecipientAddress = customerAddress;
+          if (insuranceInfo) {
+            insuranceProviderName = insuranceInfo.providerName;
+            insuranceIkNummer = insuranceInfo.ikNummer;
+            versichertennummer = insuranceInfo.versichertennummer;
+          }
+        }
+
+        const kasseInvoiceNumber = await storage.getNextInvoiceNumber(billingYear);
+        const kasseInvoiceData = {
+          invoiceNumber: kasseInvoiceNumber,
+          customerId,
+          billingType,
+          invoiceType: isNachberechnung ? "nachberechnung" as const : "rechnung" as const,
+          billingMonth,
+          billingYear,
+          recipientName: kasseRecipientName,
+          recipientAddress: kasseRecipientAddress,
+          customerName,
+          insuranceProviderName: insuranceProviderName || null,
+          insuranceIkNummer: insuranceIkNummer || null,
+          versichertennummer: versichertennummer || null,
+          pflegegrad: customer.pflegegrad || null,
+          netAmountCents: kasseNetCents,
+          vatAmountCents: 0,
+          grossAmountCents: kasseNetCents,
+          vatRate: 0,
+          status: "entwurf",
+          notes: "Kassenanteil — Leistungen im Rahmen des verfügbaren Budgets",
+        };
+
+        const kasseInvoice = await storage.createInvoice(kasseInvoiceData, kasseItems as Record<string, unknown>[], req.user!.id);
+        createdInvoices.push(kasseInvoice);
+
+        await auditService.log(req.user!.id, "invoice_created", "invoice", kasseInvoice.id, {
+          invoiceNumber: kasseInvoiceNumber,
+          customerId,
+          billingType,
+          invoiceType: isNachberechnung ? "nachberechnung" : "rechnung",
+          billingMonth,
+          billingYear,
+          grossAmountCents: kasseNetCents,
+          lineItemCount: kasseItems.length,
+          splitType: "kasse",
+        }, req.ip);
+      }
+
+      if (privateItems.length > 0) {
+        const privateNetCents = privateItems.reduce((sum, i) => sum + i.totalCents, 0);
+        const privateVatCents = Math.round(privateNetCents * 1900 / 10000);
+        let insuranceProviderName = "";
+        let insuranceIkNummer = "";
+        let versichertennummer = "";
+        if (insuranceInfo) {
+          insuranceProviderName = insuranceInfo.providerName;
+          insuranceIkNummer = insuranceInfo.ikNummer;
+          versichertennummer = insuranceInfo.versichertennummer;
+        }
+
+        const privateInvoiceNumber = await storage.getNextInvoiceNumber(billingYear);
+        const privateInvoiceData = {
+          invoiceNumber: privateInvoiceNumber,
+          customerId,
+          billingType: "selbstzahler",
+          invoiceType: isNachberechnung ? "nachberechnung" as const : "rechnung" as const,
+          billingMonth,
+          billingYear,
+          recipientName: customerName,
+          recipientAddress: customerAddress,
+          customerName,
+          insuranceProviderName: insuranceProviderName || null,
+          insuranceIkNummer: insuranceIkNummer || null,
+          versichertennummer: versichertennummer || null,
+          pflegegrad: customer.pflegegrad || null,
+          netAmountCents: privateNetCents,
+          vatAmountCents: privateVatCents,
+          grossAmountCents: privateNetCents + privateVatCents,
+          vatRate: 1900,
+          status: "entwurf",
+          notes: "Privatzahlung — Budget-Überschreitung gem. Vereinbarung",
+        };
+
+        const privateInvoice = await storage.createInvoice(privateInvoiceData, privateItems as Record<string, unknown>[], req.user!.id);
+        createdInvoices.push(privateInvoice);
+
+        await auditService.log(req.user!.id, "invoice_created", "invoice", privateInvoice.id, {
+          invoiceNumber: privateInvoiceNumber,
+          customerId,
+          billingType: "selbstzahler",
+          invoiceType: isNachberechnung ? "nachberechnung" : "rechnung",
+          billingMonth,
+          billingYear,
+          grossAmountCents: privateNetCents + privateVatCents,
+          lineItemCount: privateItems.length,
+          splitType: "privat",
+        }, req.ip);
+      }
+
+      if (createdInvoices.length === 1) {
+        res.json(createdInvoices[0]);
+      } else {
+        res.json({
+          splitInvoices: true,
+          invoices: createdInvoices,
+          message: `${createdInvoices.length} Rechnungen erstellt: Kassenanteil und Privatanteil (Budget-Überschreitung).`,
+        });
+      }
+      return;
+    }
+  }
+
   const { lineItems, totalNetCents, totalVatCents } = await buildLineItemsFromAppointments(apptIds, customerId, billingType);
   let recipientName = "";
   let recipientAddress = "";
@@ -358,36 +645,9 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
   let insuranceIkNummer = "";
   let versichertennummer = "";
 
-  const customerName = customer.vorname && customer.nachname
-    ? `${customer.vorname} ${customer.nachname}`
-    : customer.name || "Unbekannt";
-  const customerAddress = [customer.strasse, customer.nr].filter(Boolean).join(" ") +
-    (customer.plz || customer.stadt ? `\n${customer.plz || ""} ${customer.stadt || ""}` : "");
-
   if (billingType === "pflegekasse_gesetzlich") {
-    const insuranceData = await db.select({
-      providerName: insuranceProviders.name,
-      ikNummer: insuranceProviders.ikNummer,
-      versichertennummer: customerInsuranceHistory.versichertennummer,
-      empfaenger: insuranceProviders.empfaenger,
-      empfaengerZeile2: insuranceProviders.empfaengerZeile2,
-      anschrift: insuranceProviders.anschrift,
-      plzOrt: insuranceProviders.plzOrt,
-      strasse: insuranceProviders.strasse,
-      hausnummer: insuranceProviders.hausnummer,
-      plz: insuranceProviders.plz,
-      stadt: insuranceProviders.stadt,
-    })
-    .from(customerInsuranceHistory)
-    .innerJoin(insuranceProviders, eq(customerInsuranceHistory.insuranceProviderId, insuranceProviders.id))
-    .where(and(
-      eq(customerInsuranceHistory.customerId, customerId),
-      isNull(customerInsuranceHistory.validTo)
-    ))
-    .limit(1);
-
-    if (insuranceData.length > 0) {
-      const ins = insuranceData[0];
+    if (insuranceInfo) {
+      const ins = insuranceInfo;
       recipientName = ins.empfaenger || ins.providerName;
       insuranceProviderName = ins.providerName;
       insuranceIkNummer = ins.ikNummer;
@@ -412,25 +672,10 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
     recipientName = customerName;
     recipientAddress = customerAddress;
 
-    if (billingType === "pflegekasse_privat") {
-      const insuranceData = await db.select({
-        providerName: insuranceProviders.name,
-        ikNummer: insuranceProviders.ikNummer,
-        versichertennummer: customerInsuranceHistory.versichertennummer,
-      })
-      .from(customerInsuranceHistory)
-      .innerJoin(insuranceProviders, eq(customerInsuranceHistory.insuranceProviderId, insuranceProviders.id))
-      .where(and(
-        eq(customerInsuranceHistory.customerId, customerId),
-        isNull(customerInsuranceHistory.validTo)
-      ))
-      .limit(1);
-
-      if (insuranceData.length > 0) {
-        insuranceProviderName = insuranceData[0].providerName;
-        insuranceIkNummer = insuranceData[0].ikNummer;
-        versichertennummer = insuranceData[0].versichertennummer;
-      }
+    if (billingType === "pflegekasse_privat" && insuranceInfo) {
+      insuranceProviderName = insuranceInfo.providerName;
+      insuranceIkNummer = insuranceInfo.ikNummer;
+      versichertennummer = insuranceInfo.versichertennummer;
     }
   }
 

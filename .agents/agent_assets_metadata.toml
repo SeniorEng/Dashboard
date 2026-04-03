@@ -84,3 +84,27 @@ id = "4tQ1Xz_yCl__q0ZYSg3JL"
 uri = "file://Leistungsnachweis_RE-2026-0005_Budget-Ueberschreitung.pdf"
 type = "pdf"
 title = "Leistungsnachweis RE-2026-0005 (Maria Testkundin, April 2026)"
+
+[[outputs]]
+id = "WECoYLxJwGh8Vf9ogjK1W"
+uri = "file://Kassenrechnung_RE-2026-0007.pdf"
+type = "pdf"
+title = "Kassenrechnung RE-2026-0007 — AOK (150,00€, USt-frei)"
+
+[[outputs]]
+id = "vdlFXL34tnV1cJ4y0gEgG"
+uri = "file://LN_Kassenrechnung_RE-2026-0007.pdf"
+type = "pdf"
+title = "Leistungsnachweis zur Kassenrechnung RE-2026-0007"
+
+[[outputs]]
+id = "q-za5CV-v44Yuls8Ft7ie"
+uri = "file://Privatrechnung_RE-2026-0008.pdf"
+type = "pdf"
+title = "Privatrechnung RE-2026-0008 — Maria Testkundin (494,35€ + 93,93€ USt = 588,28€)"
+
+[[outputs]]
+id = "8lNbbsTHiujP7eehxIVxN"
+uri = "file://LN_Privatrechnung_RE-2026-0008.pdf"
+type = "pdf"
+title = "Leistungsnachweis zur Privatrechnung RE-2026-0008"
