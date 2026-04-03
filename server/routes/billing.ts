@@ -405,39 +405,57 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
       `;
       const html = buildEmailLayout(companyName, companySettings.logoUrl, bodyContent);
 
-      await sendEmail(companySettings, {
-        to: recipientEmail,
-        subject,
-        html,
-        attachments: [
-          { filename: `${invoice.invoiceNumber}.pdf`, content: zugferdBuffer, contentType: "application/pdf" },
-          { filename: `LN-${invoice.invoiceNumber}.pdf`, content: lnPdf, contentType: "application/pdf" },
-        ],
-      });
+      const fileNames = `[${invoice.invoiceNumber}] ${invoice.invoiceNumber}.pdf, LN-${invoice.invoiceNumber}.pdf`;
 
-      await storage.updateInvoiceStatus(invoiceId, "versendet", req.user!.id);
+      try {
+        await sendEmail(companySettings, {
+          to: recipientEmail,
+          subject,
+          html,
+          attachments: [
+            { filename: `${invoice.invoiceNumber}.pdf`, content: zugferdBuffer, contentType: "application/pdf" },
+            { filename: `LN-${invoice.invoiceNumber}.pdf`, content: lnPdf, contentType: "application/pdf" },
+          ],
+        });
 
-      const fileNames = `${invoice.invoiceNumber}.pdf, LN-${invoice.invoiceNumber}.pdf`;
-      await deliveryStorage.createDelivery({
-        customerId: invoice.customerId,
-        deliveryMethod: "email",
-        status: "sent",
-        recipientEmail,
-        recipientName: prov[0].name,
-        documentFileNames: fileNames,
-        sentAt: new Date(),
-        createdByUserId: req.user!.id,
-      });
+        await storage.updateInvoiceStatus(invoiceId, "versendet", req.user!.id);
+
+        await deliveryStorage.createDelivery({
+          customerId: invoice.customerId,
+          deliveryMethod: "email",
+          status: "sent",
+          recipientEmail,
+          recipientName: prov[0].name,
+          documentFileNames: fileNames,
+          sentAt: new Date(),
+          createdByUserId: req.user!.id,
+        });
+
+        results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "sent", recipientEmail });
+      } catch (sendErr: unknown) {
+        const errMsg = sendErr instanceof Error ? sendErr.message : "Unbekannter Fehler";
+        await deliveryStorage.createDelivery({
+          customerId: invoice.customerId,
+          deliveryMethod: "email",
+          status: "error",
+          recipientEmail,
+          recipientName: prov[0].name,
+          documentFileNames: fileNames,
+          errorMessage: errMsg,
+          createdByUserId: req.user!.id,
+        });
+        results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "error", error: errMsg });
+        continue;
+      }
 
       await auditService.log(req.user!.id, "invoice_sent", "invoice", invoiceId, {
         invoiceNumber: invoice.invoiceNumber, recipientEmail, customerId: invoice.customerId,
         insuranceProviderId: prov[0].id, hasParagraph39, batchSend: true,
       }, req.ip);
 
-      results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "sent", recipientEmail });
-
       if (cust[0].receivesMonthlyInvoice) {
         const deliveryMethod = cust[0].documentDeliveryMethod || "email";
+        const copyFileNames = `[${invoice.invoiceNumber}] Kopie: ${invoice.invoiceNumber}.pdf, LN-${invoice.invoiceNumber}.pdf`;
         try {
           if (deliveryMethod === "email" && cust[0].email) {
             const customerSubject = `Rechnungskopie ${invoice.invoiceNumber} — ${monthName} ${invoice.billingYear}`;
@@ -464,7 +482,7 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
               status: "sent",
               recipientEmail: cust[0].email,
               recipientName: customerFullName,
-              documentFileNames: `Kopie: ${fileNames}`,
+              documentFileNames: copyFileNames,
               sentAt: new Date(),
               createdByUserId: req.user!.id,
             });
@@ -476,12 +494,23 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
               status: "pending",
               recipientName: customerFullName,
               recipientAddress: customerAddress,
-              documentFileNames: `Kopie: ${fileNames}`,
+              documentFileNames: copyFileNames,
               createdByUserId: req.user!.id,
             });
           }
         } catch (copyErr: unknown) {
-          console.error("Kundenkopie fehlgeschlagen:", copyErr instanceof Error ? copyErr.message : copyErr);
+          const copyErrMsg = copyErr instanceof Error ? copyErr.message : "Unbekannter Fehler";
+          console.error("Kundenkopie fehlgeschlagen:", copyErrMsg);
+          await deliveryStorage.createDelivery({
+            customerId: invoice.customerId,
+            deliveryMethod: deliveryMethod,
+            status: "error",
+            recipientEmail: cust[0].email || null,
+            recipientName: customerFullName,
+            documentFileNames: copyFileNames,
+            errorMessage: copyErrMsg,
+            createdByUserId: req.user!.id,
+          }).catch(() => {});
         }
       }
     } catch (error: unknown) {
@@ -506,12 +535,13 @@ router.get("/deliveries/:invoiceId", asyncHandler("Versandhistorie konnte nicht 
   if (invoiceId === null) return;
   const invoice = await storage.getInvoice(invoiceId);
   if (!invoice) throw notFound("Rechnung nicht gefunden");
+  const prefix = `[${invoice.invoiceNumber}]`;
   const deliveries = await db.select()
     .from(documentDeliveries)
     .where(eq(documentDeliveries.customerId, invoice.customerId))
     .orderBy(desc(documentDeliveries.createdAt));
   const invoiceDeliveries = deliveries.filter(d =>
-    d.documentFileNames?.includes(invoice.invoiceNumber)
+    d.documentFileNames?.startsWith(prefix)
   );
   res.json(invoiceDeliveries);
 }));
@@ -1379,19 +1409,35 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
 
   const html = buildEmailLayout(companyName, companySettings.logoUrl, bodyContent);
 
-  await sendEmail(companySettings, {
-    to: recipientEmail,
-    subject,
-    html,
-    attachments: [
-      { filename: `${invoice.invoiceNumber}.pdf`, content: zugferdBuffer, contentType: "application/pdf" },
-      { filename: `LN-${invoice.invoiceNumber}.pdf`, content: lnPdf, contentType: "application/pdf" },
-    ],
-  });
+  const fileNames = `[${invoice.invoiceNumber}] ${invoice.invoiceNumber}.pdf, LN-${invoice.invoiceNumber}.pdf`;
+
+  try {
+    await sendEmail(companySettings, {
+      to: recipientEmail,
+      subject,
+      html,
+      attachments: [
+        { filename: `${invoice.invoiceNumber}.pdf`, content: zugferdBuffer, contentType: "application/pdf" },
+        { filename: `LN-${invoice.invoiceNumber}.pdf`, content: lnPdf, contentType: "application/pdf" },
+      ],
+    });
+  } catch (sendErr: unknown) {
+    const errMsg = sendErr instanceof Error ? sendErr.message : "Unbekannter Fehler";
+    await deliveryStorage.createDelivery({
+      customerId: invoice.customerId,
+      deliveryMethod: "email",
+      status: "error",
+      recipientEmail,
+      recipientName: ins.name,
+      documentFileNames: fileNames,
+      errorMessage: errMsg,
+      createdByUserId: req.user!.id,
+    });
+    throw sendErr;
+  }
 
   const updated = await storage.updateInvoiceStatus(id, "versendet", req.user!.id);
 
-  const fileNames = `${invoice.invoiceNumber}.pdf, LN-${invoice.invoiceNumber}.pdf`;
   await deliveryStorage.createDelivery({
     customerId: invoice.customerId,
     deliveryMethod: "email",
@@ -1417,9 +1463,10 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
   ];
 
   if (cust.receivesMonthlyInvoice) {
-    const deliveryMethod = cust.documentDeliveryMethod || "email";
+    const custDeliveryMethod = cust.documentDeliveryMethod || "email";
+    const copyFileNames = `[${invoice.invoiceNumber}] Kopie: ${invoice.invoiceNumber}.pdf, LN-${invoice.invoiceNumber}.pdf`;
     try {
-      if (deliveryMethod === "email" && cust.email) {
+      if (custDeliveryMethod === "email" && cust.email) {
         const customerSubject = `Rechnungskopie ${invoice.invoiceNumber} — ${monthName} ${invoice.billingYear}`;
         const customerBody = `
           <p>Sehr geehrte/r ${cust.vorname || ""} ${cust.nachname || ""},</p>
@@ -1448,11 +1495,11 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
           status: "sent",
           recipientEmail: cust.email,
           recipientName: customerFullName,
-          documentFileNames: `Kopie: ${fileNames}`,
+          documentFileNames: copyFileNames,
           sentAt: new Date(),
           createdByUserId: req.user!.id,
         });
-      } else if (deliveryMethod === "post") {
+      } else if (custDeliveryMethod === "post") {
         const customerAddress = [cust.strasse, cust.nr, cust.plz, cust.stadt].filter(Boolean).join(", ");
         await deliveryStorage.createDelivery({
           customerId: invoice.customerId,
@@ -1460,13 +1507,24 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
           status: "pending",
           recipientName: customerFullName,
           recipientAddress: customerAddress,
-          documentFileNames: `Kopie: ${fileNames}`,
+          documentFileNames: copyFileNames,
           createdByUserId: req.user!.id,
         });
         results.push({ invoiceId: id, status: "post_pending", recipientEmail: "", customerCopy: true });
       }
     } catch (copyError: unknown) {
-      console.error("Kundenkopie konnte nicht gesendet werden:", copyError instanceof Error ? copyError.message : copyError);
+      const copyErrMsg = copyError instanceof Error ? copyError.message : "Unbekannter Fehler";
+      console.error("Kundenkopie konnte nicht gesendet werden:", copyErrMsg);
+      await deliveryStorage.createDelivery({
+        customerId: invoice.customerId,
+        deliveryMethod: custDeliveryMethod,
+        status: "error",
+        recipientEmail: cust.email || null,
+        recipientName: customerFullName,
+        documentFileNames: copyFileNames,
+        errorMessage: copyErrMsg,
+        createdByUserId: req.user!.id,
+      }).catch(() => {});
       results.push({ invoiceId: id, status: "error", recipientEmail: cust.email || "", customerCopy: true });
     }
   }
