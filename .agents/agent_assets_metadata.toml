@@ -72,3 +72,15 @@ id = "Nd_Ju1BhGJ2T_j4FWYUGe"
 uri = "file://Leistungsnachweis_RE-2026-0004_Privat.pdf"
 type = "pdf"
 title = "Leistungsnachweis RE-2026-0004 — Günter Hofmann (privat versichert)"
+
+[[outputs]]
+id = "tnr86SbN3gm2s6NHwqkAb"
+uri = "file://Rechnung_RE-2026-0005_Budget-Ueberschreitung.pdf"
+type = "pdf"
+title = "Rechnung RE-2026-0005 (Maria Testkundin, April 2026)"
+
+[[outputs]]
+id = "4tQ1Xz_yCl__q0ZYSg3JL"
+uri = "file://Leistungsnachweis_RE-2026-0005_Budget-Ueberschreitung.pdf"
+type = "pdf"
+title = "Leistungsnachweis RE-2026-0005 (Maria Testkundin, April 2026)"
