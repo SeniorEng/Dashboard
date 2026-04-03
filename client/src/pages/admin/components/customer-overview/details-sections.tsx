@@ -153,9 +153,11 @@ export function SpecialFeaturesSection({ customer, customerId, editingSection, s
 export function DocumentDeliverySection({ customer, customerId, editingSection, setEditingSection, saving, setSaving, invalidateCustomer }: SectionProps) {
   const { toast } = useToast();
   const [documentDeliveryMethod, setDocumentDeliveryMethod] = useState<"email" | "post">("email");
+  const [receivesMonthlyInvoice, setReceivesMonthlyInvoice] = useState(false);
 
   const initDocumentDelivery = () => {
     setDocumentDeliveryMethod((customer.documentDeliveryMethod as "email" | "post") || "email");
+    setReceivesMonthlyInvoice(customer.receivesMonthlyInvoice ?? false);
   };
 
   const handleSaveDocumentDelivery = async () => {
@@ -163,6 +165,7 @@ export function DocumentDeliverySection({ customer, customerId, editingSection, 
     try {
       const result = await api.patch(`/admin/customers/${customerId}`, {
         documentDeliveryMethod,
+        receivesMonthlyInvoice,
       });
       unwrapResult(result);
       toast({ title: "Versandart gespeichert" });
@@ -230,12 +233,37 @@ export function DocumentDeliverySection({ customer, customerId, editingSection, 
               </div>
             </button>
           </div>
+          <div className="border-t pt-3">
+            <div className="flex items-center gap-3">
+              <Switch
+                id="receivesMonthlyInvoice"
+                checked={receivesMonthlyInvoice}
+                onCheckedChange={setReceivesMonthlyInvoice}
+                data-testid="switch-receives-monthly-invoice"
+              />
+              <div>
+                <Label htmlFor="receivesMonthlyInvoice" className="cursor-pointer text-sm">
+                  Monatliche Rechnungskopie an Kunden
+                </Label>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Kunde erhält eine Kopie der Pflegekassen-Rechnung
+                </p>
+              </div>
+            </div>
+          </div>
           <SaveCancelButtons onSave={handleSaveDocumentDelivery} testIdPrefix="versandart" saving={saving} onCancel={() => setEditingSection(null)} />
         </div>
       ) : (
-        <p className="text-gray-700" data-testid="text-delivery-method">
-          {customer.documentDeliveryMethod === "post" ? "Per Deutsche Post (gedruckt)" : "Per E-Mail (digital)"}
-        </p>
+        <div className="space-y-2">
+          <p className="text-gray-700" data-testid="text-delivery-method">
+            {customer.documentDeliveryMethod === "post" ? "Per Deutsche Post (gedruckt)" : "Per E-Mail (digital)"}
+          </p>
+          {customer.receivesMonthlyInvoice && (
+            <p className="text-xs text-teal-700 bg-teal-50 px-2 py-1 rounded inline-block" data-testid="text-receives-invoice-copy">
+              Erhält monatliche Rechnungskopie
+            </p>
+          )}
+        </div>
       )}
     </SectionCard>
   );

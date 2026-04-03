@@ -58,6 +58,7 @@ const EMPTY_FORM: InsuranceProviderFormData = {
   telefon: "",
   fax: "",
   email: "",
+  emailVerhinderungspflege: "",
   kimAdresse: "",
   ansprechpartner: "",
   datenannahmeIk: "",
@@ -118,6 +119,7 @@ export default function AdminInsuranceProviders() {
       telefon: provider.telefon || "",
       fax: provider.fax || "",
       email: provider.email || "",
+      emailVerhinderungspflege: provider.emailVerhinderungspflege || "",
       kimAdresse: provider.kimAdresse || "",
       ansprechpartner: provider.ansprechpartner || "",
       datenannahmeIk: provider.datenannahmeIk || "",
@@ -169,6 +171,7 @@ export default function AdminInsuranceProviders() {
       telefon: normalizedTelefon,
       fax: form.fax?.trim() || null,
       email: form.email?.trim() || null,
+      emailVerhinderungspflege: form.emailVerhinderungspflege?.trim() || null,
       kimAdresse: form.kimAdresse?.trim() || null,
       ansprechpartner: form.ansprechpartner?.trim() || null,
       datenannahmeIk: form.datenannahmeIk?.trim() || null,
@@ -497,7 +500,7 @@ export default function AdminInsuranceProviders() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="email">E-Mail</Label>
+                  <Label htmlFor="email">E-Mail (§45b / §36)</Label>
                   <Input
                     id="email"
                     type="email"
@@ -506,6 +509,19 @@ export default function AdminInsuranceProviders() {
                     placeholder="kontakt@pflegekasse.de"
                     data-testid="input-provider-email"
                   />
+                  <p className="text-xs text-gray-500">Für Rechnungen nach §45b Entlastungsbetrag und §36 Pflegesachleistungen</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="emailVerhinderungspflege">E-Mail §39 Verhinderungspflege</Label>
+                  <Input
+                    id="emailVerhinderungspflege"
+                    type="email"
+                    value={form.emailVerhinderungspflege || ""}
+                    onChange={(e) => handleChange("emailVerhinderungspflege", e.target.value)}
+                    placeholder="verhinderungspflege@pflegekasse.de"
+                    data-testid="input-provider-email-verhinderungspflege"
+                  />
+                  <p className="text-xs text-gray-500">Falls abweichend — sonst wird die Standard-E-Mail verwendet</p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="ansprechpartner">Ansprechpartner</Label>

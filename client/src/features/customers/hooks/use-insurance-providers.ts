@@ -21,6 +21,7 @@ export interface InsuranceProviderFormData {
   telefon?: string | null;
   fax?: string | null;
   email?: string | null;
+  emailVerhinderungspflege?: string | null;
   kimAdresse?: string | null;
   ansprechpartner?: string | null;
   datenannahmeIk?: string | null;

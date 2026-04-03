@@ -132,6 +132,8 @@ export default function AdminBilling() {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<number | null>(null);
   const [stornoTarget, setStornoTarget] = useState<InvoiceItem | null>(null);
+  const [sendingInvoiceId, setSendingInvoiceId] = useState<number | null>(null);
+  const [batchSending, setBatchSending] = useState(false);
 
   const currentYear = today.getFullYear();
   const years = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
@@ -210,6 +212,56 @@ export default function AdminBilling() {
     },
   });
 
+  const sendInvoiceMutation = useMutation({
+    mutationFn: async (invoiceId: number) => {
+      setSendingInvoiceId(invoiceId);
+      const result = await api.post(`/billing/${invoiceId}/send`, {});
+      return unwrapResult(result);
+    },
+    onSuccess: (data: any) => {
+      toast({ title: "Rechnung versendet", description: data.message || "E-Mail wurde erfolgreich gesendet" });
+      queryClient.invalidateQueries({ queryKey: ["billing-invoices"] });
+      setSendingInvoiceId(null);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Versand fehlgeschlagen", description: error.message, variant: "destructive" });
+      setSendingInvoiceId(null);
+    },
+  });
+
+  const batchSendMutation = useMutation({
+    mutationFn: async (invoiceIds: number[]) => {
+      setBatchSending(true);
+      const result = await api.post("/billing/send-batch", { invoiceIds });
+      return unwrapResult(result);
+    },
+    onSuccess: (data: any) => {
+      const { summary } = data;
+      toast({
+        title: `Stapelversand abgeschlossen`,
+        description: `${summary.sent} versendet, ${summary.errors} Fehler, ${summary.skipped} übersprungen`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["billing-invoices"] });
+      setBatchSending(false);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Stapelversand fehlgeschlagen", description: error.message, variant: "destructive" });
+      setBatchSending(false);
+    },
+  });
+
+  const draftPflegekasseInvoices = invoices?.filter(
+    (inv) => inv.status === "entwurf" && inv.billingType === "pflegekasse_gesetzlich"
+  ) || [];
+
+  const handleBatchSend = () => {
+    if (draftPflegekasseInvoices.length === 0) {
+      toast({ title: "Keine Rechnungen zum Versenden", description: "Es gibt keine Entwurfs-Rechnungen an Pflegekassen.", variant: "destructive" });
+      return;
+    }
+    batchSendMutation.mutate(draftPflegekasseInvoices.map((inv) => inv.id));
+  };
+
   const handleGenerate = () => {
     if (!selectedCustomerId) {
       toast({ title: "Bitte Kunden auswählen", variant: "destructive" });
@@ -287,7 +339,28 @@ export default function AdminBilling() {
                   </Select>
                 </div>
 
-                <div className="flex justify-end">
+                <div className="flex justify-end gap-2">
+                  {draftPflegekasseInvoices.length > 0 && (
+                    <Button
+                      variant="outline"
+                      className="text-blue-600 border-blue-200 hover:bg-blue-50"
+                      onClick={handleBatchSend}
+                      disabled={batchSending}
+                      data-testid="button-batch-send"
+                    >
+                      {batchSending ? (
+                        <>
+                          <Loader2 className={`${iconSize.sm} mr-1 animate-spin`} />
+                          Versende...
+                        </>
+                      ) : (
+                        <>
+                          <Send className={`${iconSize.sm} mr-1`} />
+                          Alle an Pflegekassen senden ({draftPflegekasseInvoices.length})
+                        </>
+                      )}
+                    </Button>
+                  )}
                   <Button
                     onClick={() => setDialogOpen(true)}
                     className="bg-teal-600 hover:bg-teal-700 text-white"
@@ -361,7 +434,30 @@ export default function AdminBilling() {
                             <Eye className={iconSize.sm} />
                           </Button>
 
-                          {invoice.status === "entwurf" && (
+                          {invoice.status === "entwurf" && invoice.billingType === "pflegekasse_gesetzlich" && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                              onClick={() => sendInvoiceMutation.mutate(invoice.id)}
+                              disabled={sendingInvoiceId === invoice.id || sendInvoiceMutation.isPending}
+                              data-testid={`button-send-pflegekasse-${invoice.id}`}
+                            >
+                              {sendingInvoiceId === invoice.id ? (
+                                <>
+                                  <Loader2 className={`${iconSize.sm} mr-1 animate-spin`} />
+                                  Sende...
+                                </>
+                              ) : (
+                                <>
+                                  <Send className={`${iconSize.sm} mr-1`} />
+                                  An Kasse senden
+                                </>
+                              )}
+                            </Button>
+                          )}
+
+                          {invoice.status === "entwurf" && invoice.billingType !== "pflegekasse_gesetzlich" && (
                             <Button
                               variant="ghost"
                               size="sm"

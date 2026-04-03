@@ -1,6 +1,7 @@
-import { Mail, Truck, AlertCircle, Check } from "lucide-react";
+import { Mail, Truck, AlertCircle, Check, Receipt } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import type { CustomerFormData } from "./customer-types";
 
 interface DeliveryStepProps {
@@ -68,6 +69,25 @@ export function DeliveryStep({ formData, onChange }: DeliveryStepProps) {
             </button>
           );
         })}
+      </div>
+
+      <div className="border-t pt-4">
+        <div className="flex items-center gap-3">
+          <Switch
+            id="receivesMonthlyInvoice"
+            checked={formData.receivesMonthlyInvoice}
+            onCheckedChange={(checked) => onChange("receivesMonthlyInvoice", checked)}
+            data-testid="switch-receives-monthly-invoice"
+          />
+          <div>
+            <Label htmlFor="receivesMonthlyInvoice" className="cursor-pointer">
+              Monatliche Rechnungskopie an Kunden
+            </Label>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Der Kunde erhält eine Kopie der Rechnung, die an die Pflegekasse gesendet wird
+            </p>
+          </div>
+        </div>
       </div>
 
       {isEmailSelected && (

@@ -37,6 +37,7 @@ const EMPTY_PROVIDER: InsuranceProviderFormData = {
   stadt: "",
   telefon: "",
   email: "",
+  emailVerhinderungspflege: "",
   emailInvoiceEnabled: false,
   zahlungsbedingungen: "30_tage",
   zahlungsart: "ueberweisung",
@@ -321,7 +322,7 @@ export function InsuranceStep({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="newProviderEmail">E-Mail</Label>
+                  <Label htmlFor="newProviderEmail">E-Mail (§45b / §36)</Label>
                   <Input
                     id="newProviderEmail"
                     type="email"
@@ -330,6 +331,19 @@ export function InsuranceStep({
                     placeholder="kontakt@pflegekasse.de"
                     data-testid="input-new-provider-email"
                   />
+                  <p className="text-xs text-gray-500">Für Rechnungen nach §45b und §36</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="newProviderEmailVP">E-Mail §39 Verhinderungspflege</Label>
+                  <Input
+                    id="newProviderEmailVP"
+                    type="email"
+                    value={newProvider.emailVerhinderungspflege || ""}
+                    onChange={(e) => handleNewProviderChange("emailVerhinderungspflege", e.target.value)}
+                    placeholder="verhinderungspflege@pflegekasse.de"
+                    data-testid="input-new-provider-email-verhinderungspflege"
+                  />
+                  <p className="text-xs text-gray-500">Falls abweichend — sonst wird die Standard-E-Mail verwendet</p>
                 </div>
               </div>
             </div>

@@ -55,6 +55,7 @@ export interface CustomerFormData {
   contractHours: string;
   contractPeriod: "weekly" | "monthly";
   documentDeliveryMethod: "email" | "post";
+  receivesMonthlyInvoice: boolean;
   acceptsPrivatePayment: boolean;
   vorjahrVerbraucht45b: string;
   uebertrag45b: string;

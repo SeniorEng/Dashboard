@@ -301,6 +301,168 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
   res.json(eligibleCustomers);
 }));
 
+router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (req, res) => {
+  const parsed = z.object({
+    invoiceIds: z.array(z.number().int().positive()).min(1).max(50),
+  }).safeParse(req.body);
+
+  if (!parsed.success) {
+    throw badRequest(fromError(parsed.error).toString());
+  }
+
+  const { invoiceIds } = parsed.data;
+  const results: { invoiceId: number; invoiceNumber: string; status: string; error?: string; recipientEmail?: string }[] = [];
+
+  const companySettings = await getCachedCompanySettings();
+  if (!companySettings) throw badRequest("Firmendaten nicht konfiguriert.");
+
+  const { generateInvoiceHtml, generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
+  const { embedZugferdXml } = await import("../lib/zugferd");
+  const { sendEmail, buildEmailLayout } = await import("../services/email-service");
+  const companyName = companySettings.companyName || "SeniorenEngel";
+
+  for (const invoiceId of invoiceIds) {
+    try {
+      const invoice = await storage.getInvoice(invoiceId);
+      if (!invoice) {
+        results.push({ invoiceId, invoiceNumber: "", status: "error", error: "Rechnung nicht gefunden" });
+        continue;
+      }
+      if (invoice.status !== "entwurf") {
+        results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "skipped", error: `Status: ${invoice.status}` });
+        continue;
+      }
+      if (invoice.billingType !== "pflegekasse_gesetzlich") {
+        results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "skipped", error: "Nicht an Pflegekasse" });
+        continue;
+      }
+
+      const cust = await db.select().from(customersTable).where(eq(customersTable.id, invoice.customerId)).limit(1);
+      if (!cust.length) {
+        results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "error", error: "Kunde nicht gefunden" });
+        continue;
+      }
+
+      const insHist = await db.select({
+        providerId: customerInsuranceHistory.insuranceProviderId,
+        versichertennummer: customerInsuranceHistory.versichertennummer,
+      })
+        .from(customerInsuranceHistory)
+        .where(and(eq(customerInsuranceHistory.customerId, invoice.customerId), isNull(customerInsuranceHistory.validTo)))
+        .limit(1);
+
+      if (!insHist.length) {
+        results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "error", error: "Keine Pflegekassenzuordnung" });
+        continue;
+      }
+
+      const prov = await db.select().from(insuranceProviders).where(eq(insuranceProviders.id, insHist[0].providerId)).limit(1);
+      if (!prov.length || !prov[0].emailInvoiceEnabled) {
+        results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "error", error: "E-Mail-Versand nicht aktiviert" });
+        continue;
+      }
+
+      const lineItems = await storage.getInvoiceLineItems(invoiceId);
+      let hasParagraph39 = false;
+      const appointmentIds = lineItems.map(li => li.appointmentId).filter(Boolean) as number[];
+      if (appointmentIds.length > 0) {
+        const txns = await db.select({ budgetType: budgetTransactions.budgetType })
+          .from(budgetTransactions)
+          .where(and(inArray(budgetTransactions.appointmentId, appointmentIds), eq(budgetTransactions.transactionType, "usage")));
+        hasParagraph39 = txns.some(t => t.budgetType === "ersatzpflege_39_42a");
+      }
+
+      const recipientEmail = hasParagraph39 ? (prov[0].emailVerhinderungspflege || prov[0].email) : prov[0].email;
+      if (!recipientEmail) {
+        results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "error", error: "Keine E-Mail bei Pflegekasse" });
+        continue;
+      }
+
+      const pdfData = buildPdfData(invoice, lineItems, companySettings);
+      if (cust[0].geburtsdatum) pdfData.customerGeburtsdatum = cust[0].geburtsdatum;
+
+      const invoiceHtml = generateInvoiceHtml(pdfData);
+      const { buffer: invoicePdf } = await generatePdf(invoiceHtml);
+      const zugferdBuffer = await embedZugferdXml(invoicePdf, pdfData);
+
+      const lnHtml = generateLeistungsnachweisHtml(pdfData);
+      const { buffer: lnPdf } = await generatePdf(lnHtml);
+
+      const monthName = MONTH_NAMES_DE[(invoice.billingMonth - 1)] || String(invoice.billingMonth);
+      const customerFullName = [cust[0].vorname, cust[0].nachname].filter(Boolean).join(" ") || cust[0].name;
+      const versNr = insHist[0].versichertennummer || invoice.versichertennummer || "";
+
+      const subject = `Rechnung ${invoice.invoiceNumber} — ${customerFullName}${versNr ? ` (${versNr})` : ""} — ${monthName} ${invoice.billingYear}`;
+      const bodyContent = `
+        <p>Sehr geehrte Damen und Herren,</p>
+        <p>anbei erhalten Sie die Rechnung <strong>${invoice.invoiceNumber}</strong> sowie den zugehörigen Leistungsnachweis
+        für <strong>${customerFullName}</strong>${versNr ? ` (Versichertennr. ${versNr})` : ""}
+        für den Leistungszeitraum <strong>${monthName} ${invoice.billingYear}</strong>.</p>
+        <p>Bei Rückfragen stehen wir Ihnen gerne zur Verfügung.</p>
+        <p>Mit freundlichen Grüßen<br/>${companyName}</p>
+      `;
+      const html = buildEmailLayout(companyName, companySettings.logoUrl, bodyContent);
+
+      await sendEmail(companySettings, {
+        to: recipientEmail,
+        subject,
+        html,
+        attachments: [
+          { filename: `${invoice.invoiceNumber}.pdf`, content: zugferdBuffer, contentType: "application/pdf" },
+          { filename: `LN-${invoice.invoiceNumber}.pdf`, content: lnPdf, contentType: "application/pdf" },
+        ],
+      });
+
+      await storage.updateInvoiceStatus(invoiceId, "versendet", req.user!.id);
+
+      await auditService.log(req.user!.id, "invoice_sent", "invoice", invoiceId, {
+        invoiceNumber: invoice.invoiceNumber, recipientEmail, customerId: invoice.customerId,
+        insuranceProviderId: prov[0].id, hasParagraph39, batchSend: true,
+      }, req.ip);
+
+      results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "sent", recipientEmail });
+
+      if (cust[0].receivesMonthlyInvoice && cust[0].email) {
+        try {
+          const customerSubject = `Rechnungskopie ${invoice.invoiceNumber} — ${monthName} ${invoice.billingYear}`;
+          const customerBody = `
+            <p>Sehr geehrte/r ${cust[0].vorname || ""} ${cust[0].nachname || ""},</p>
+            <p>anbei erhalten Sie eine Kopie der Rechnung <strong>${invoice.invoiceNumber}</strong>
+            für den Leistungszeitraum <strong>${monthName} ${invoice.billingYear}</strong>,
+            die an Ihre Pflegekasse gesendet wurde.</p>
+            <p>Mit freundlichen Grüßen<br/>${companyName}</p>
+          `;
+          const customerHtml = buildEmailLayout(companyName, companySettings.logoUrl, customerBody);
+          await sendEmail(companySettings, {
+            to: cust[0].email,
+            subject: customerSubject,
+            html: customerHtml,
+            attachments: [
+              { filename: `${invoice.invoiceNumber}.pdf`, content: zugferdBuffer, contentType: "application/pdf" },
+              { filename: `LN-${invoice.invoiceNumber}.pdf`, content: lnPdf, contentType: "application/pdf" },
+            ],
+          });
+        } catch (copyErr: unknown) {
+          console.error("Kundenkopie fehlgeschlagen:", copyErr instanceof Error ? copyErr.message : copyErr);
+        }
+      }
+    } catch (error: unknown) {
+      const inv = await storage.getInvoice(invoiceId).catch(() => null);
+      results.push({ invoiceId, invoiceNumber: inv?.invoiceNumber || "", status: "error", error: error instanceof Error ? error.message : "Unbekannter Fehler" });
+    }
+  }
+
+  const sentCount = results.filter(r => r.status === "sent").length;
+  const errorCount = results.filter(r => r.status === "error").length;
+  const skippedCount = results.filter(r => r.status === "skipped").length;
+
+  res.json({
+    message: `${sentCount} versendet, ${errorCount} Fehler, ${skippedCount} übersprungen`,
+    results,
+    summary: { sent: sentCount, errors: errorCount, skipped: skippedCount, total: invoiceIds.length },
+  });
+}));
+
 router.get("/:id", asyncHandler("Rechnung konnte nicht geladen werden", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
@@ -1051,6 +1213,180 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `inline; filename="LN-${invoice.invoiceNumber}.pdf"`);
   res.send(buffer);
+}));
+
+const MONTH_NAMES_DE = [
+  "Januar", "Februar", "März", "April", "Mai", "Juni",
+  "Juli", "August", "September", "Oktober", "November", "Dezember",
+];
+
+router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
+  const invoice = await storage.getInvoice(id);
+  if (!invoice) throw notFound("Rechnung nicht gefunden");
+
+  if (invoice.status !== "entwurf") {
+    throw badRequest(`Rechnung hat Status "${invoice.status}" — nur Entwürfe können versendet werden.`);
+  }
+
+  if (invoice.billingType !== "pflegekasse_gesetzlich") {
+    throw badRequest("Nur Rechnungen an gesetzliche Pflegekassen können über diese Funktion versendet werden.");
+  }
+
+  const customer = await db.select().from(customersTable).where(eq(customersTable.id, invoice.customerId)).limit(1);
+  if (!customer.length) throw notFound("Kunde nicht gefunden");
+  const cust = customer[0];
+
+  const insHistory = await db.select({
+    providerId: customerInsuranceHistory.insuranceProviderId,
+    versichertennummer: customerInsuranceHistory.versichertennummer,
+  })
+    .from(customerInsuranceHistory)
+    .where(and(
+      eq(customerInsuranceHistory.customerId, invoice.customerId),
+      isNull(customerInsuranceHistory.validTo),
+    ))
+    .limit(1);
+
+  if (!insHistory.length) throw badRequest("Keine aktive Pflegekassenzuordnung für diesen Kunden.");
+
+  const provider = await db.select().from(insuranceProviders).where(eq(insuranceProviders.id, insHistory[0].providerId)).limit(1);
+  if (!provider.length) throw notFound("Pflegekasse nicht gefunden");
+  const ins = provider[0];
+
+  if (!ins.emailInvoiceEnabled) {
+    throw badRequest("E-Mail-Versand ist für diese Pflegekasse nicht aktiviert.");
+  }
+
+  const lineItems = await storage.getInvoiceLineItems(id);
+
+  let hasParagraph39 = false;
+  if (lineItems.length > 0) {
+    const appointmentIds = lineItems.map(li => li.appointmentId).filter(Boolean) as number[];
+    if (appointmentIds.length > 0) {
+      const txns = await db.select({ budgetType: budgetTransactions.budgetType })
+        .from(budgetTransactions)
+        .where(and(
+          inArray(budgetTransactions.appointmentId, appointmentIds),
+          eq(budgetTransactions.transactionType, "usage"),
+        ));
+      hasParagraph39 = txns.some(t => t.budgetType === "ersatzpflege_39_42a");
+    }
+  }
+
+  const recipientEmail = hasParagraph39
+    ? (ins.emailVerhinderungspflege || ins.email)
+    : ins.email;
+
+  if (!recipientEmail) {
+    throw badRequest("Keine E-Mail-Adresse bei der Pflegekasse hinterlegt.");
+  }
+
+  const companySettings = await getCachedCompanySettings();
+  if (!companySettings) throw badRequest("Firmendaten nicht konfiguriert.");
+
+  const { generateInvoiceHtml, generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
+  const pdfData = buildPdfData(invoice, lineItems, companySettings);
+
+  const customerForPdf = await db.select({ geburtsdatum: customersTable.geburtsdatum })
+    .from(customersTable)
+    .where(eq(customersTable.id, invoice.customerId))
+    .limit(1);
+  if (customerForPdf.length > 0 && customerForPdf[0].geburtsdatum) {
+    pdfData.customerGeburtsdatum = customerForPdf[0].geburtsdatum;
+  }
+
+  const invoiceHtml = generateInvoiceHtml(pdfData);
+  const { buffer: invoicePdf } = await generatePdf(invoiceHtml);
+
+  const { embedZugferdXml } = await import("../lib/zugferd");
+  const zugferdBuffer = await embedZugferdXml(invoicePdf, pdfData);
+
+  const lnHtml = generateLeistungsnachweisHtml(pdfData);
+  const { buffer: lnPdf } = await generatePdf(lnHtml);
+
+  const monthName = MONTH_NAMES_DE[(invoice.billingMonth - 1)] || String(invoice.billingMonth);
+  const customerFullName = [cust.vorname, cust.nachname].filter(Boolean).join(" ") || cust.name;
+  const versNr = insHistory[0].versichertennummer || invoice.versichertennummer || "";
+
+  const subject = `Rechnung ${invoice.invoiceNumber} — ${customerFullName}${versNr ? ` (${versNr})` : ""} — ${monthName} ${invoice.billingYear}`;
+
+  const { sendEmail } = await import("../services/email-service");
+  const { buildEmailLayout } = await import("../services/email-service");
+
+  const companyName = companySettings.companyName || "SeniorenEngel";
+  const bodyContent = `
+    <p>Sehr geehrte Damen und Herren,</p>
+    <p>anbei erhalten Sie die Rechnung <strong>${invoice.invoiceNumber}</strong> sowie den zugehörigen Leistungsnachweis
+    für <strong>${customerFullName}</strong>${versNr ? ` (Versichertennr. ${versNr})` : ""} 
+    für den Leistungszeitraum <strong>${monthName} ${invoice.billingYear}</strong>.</p>
+    <p>Bei Rückfragen stehen wir Ihnen gerne zur Verfügung.</p>
+    <p>Mit freundlichen Grüßen<br/>${companyName}</p>
+  `;
+
+  const html = buildEmailLayout(companyName, companySettings.logoUrl, bodyContent);
+
+  await sendEmail(companySettings, {
+    to: recipientEmail,
+    subject,
+    html,
+    attachments: [
+      { filename: `${invoice.invoiceNumber}.pdf`, content: zugferdBuffer, contentType: "application/pdf" },
+      { filename: `LN-${invoice.invoiceNumber}.pdf`, content: lnPdf, contentType: "application/pdf" },
+    ],
+  });
+
+  const updated = await storage.updateInvoiceStatus(id, "versendet", req.user!.id);
+
+  await auditService.log(req.user!.id, "invoice_sent", "invoice", id, {
+    invoiceNumber: invoice.invoiceNumber,
+    recipientEmail,
+    customerId: invoice.customerId,
+    insuranceProviderId: ins.id,
+    insuranceProviderName: ins.name,
+    hasParagraph39,
+  }, req.ip);
+
+  const results: { invoiceId: number; status: string; recipientEmail: string; customerCopy?: boolean }[] = [
+    { invoiceId: id, status: "sent", recipientEmail },
+  ];
+
+  if (cust.receivesMonthlyInvoice && cust.email) {
+    try {
+      const customerSubject = `Rechnungskopie ${invoice.invoiceNumber} — ${monthName} ${invoice.billingYear}`;
+      const customerBody = `
+        <p>Sehr geehrte/r ${cust.vorname || ""} ${cust.nachname || ""},</p>
+        <p>anbei erhalten Sie eine Kopie der Rechnung <strong>${invoice.invoiceNumber}</strong> 
+        für den Leistungszeitraum <strong>${monthName} ${invoice.billingYear}</strong>, 
+        die an Ihre Pflegekasse gesendet wurde.</p>
+        <p>Mit freundlichen Grüßen<br/>${companyName}</p>
+      `;
+      const customerHtml = buildEmailLayout(companyName, companySettings.logoUrl, customerBody);
+
+      await sendEmail(companySettings, {
+        to: cust.email,
+        subject: customerSubject,
+        html: customerHtml,
+        attachments: [
+          { filename: `${invoice.invoiceNumber}.pdf`, content: zugferdBuffer, contentType: "application/pdf" },
+          { filename: `LN-${invoice.invoiceNumber}.pdf`, content: lnPdf, contentType: "application/pdf" },
+        ],
+      });
+
+      results.push({ invoiceId: id, status: "sent", recipientEmail: cust.email, customerCopy: true });
+    } catch (copyError: unknown) {
+      console.error("Kundenkopie konnte nicht gesendet werden:", copyError instanceof Error ? copyError.message : copyError);
+      results.push({ invoiceId: id, status: "error", recipientEmail: cust.email, customerCopy: true });
+    }
+  }
+
+  res.json({
+    message: "Rechnung erfolgreich versendet",
+    invoice: updated,
+    results,
+  });
 }));
 
 export default router;

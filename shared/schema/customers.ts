@@ -46,6 +46,7 @@ export const customers = pgTable("customers", {
   acceptsPrivatePayment: boolean("accepts_private_payment").notNull().default(false),
   // Deactivation tracking
   documentDeliveryMethod: text("document_delivery_method").notNull().default("email"),
+  receivesMonthlyInvoice: boolean("receives_monthly_invoice").notNull().default(false),
   deactivationReason: text("deactivation_reason"),
   deactivationNote: text("deactivation_note"),
   mergedIntoCustomerId: integer("merged_into_customer_id").references((): AnyPgColumn => customers.id),
