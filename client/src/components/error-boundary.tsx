@@ -5,6 +5,7 @@ import { AlertTriangle } from "lucide-react";
 interface Props {
   children: ReactNode;
   fallback?: ReactNode;
+  pageName?: string;
 }
 
 interface State {
@@ -60,6 +61,55 @@ export class ErrorBoundary extends Component<Props, State> {
           </p>
           <Button onClick={this.handleReset} variant="outline">
             Erneut versuchen
+          </Button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+export class PageErrorBoundary extends Component<Props, State> {
+  constructor(props: Props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error): State {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("[PageErrorBoundary]", this.props.pageName || "", error?.message || String(error), error?.stack, errorInfo?.componentStack);
+
+    if (isChunkLoadError(error)) {
+      window.location.reload();
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center p-8 text-center bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
+          <div className="w-20 h-20 bg-destructive/10 rounded-full flex items-center justify-center mb-6">
+            <AlertTriangle className="w-10 h-10 text-destructive" />
+          </div>
+          <h2 className="text-xl font-semibold text-foreground mb-2" data-testid="text-page-error-title">
+            {this.props.pageName
+              ? `Fehler beim Laden: ${this.props.pageName}`
+              : "Seite konnte nicht geladen werden"}
+          </h2>
+          <p className="text-muted-foreground text-sm mb-6 max-w-md" data-testid="text-page-error-description">
+            Es ist ein unerwarteter Fehler aufgetreten. Bitte laden Sie die Seite neu.
+          </p>
+          <Button
+            onClick={() => window.location.reload()}
+            variant="default"
+            size="lg"
+            data-testid="button-page-reload"
+          >
+            Seite neu laden
           </Button>
         </div>
       );

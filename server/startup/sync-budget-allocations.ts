@@ -1,6 +1,7 @@
 import { db } from "../lib/db";
 import { sql } from "drizzle-orm";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { log } from "../lib/log";
 
 export async function syncAllBudgetAllocations(): Promise<number> {
   const result = await db.execute(sql`
@@ -18,7 +19,7 @@ export async function syncAllBudgetAllocations(): Promise<number> {
       await budgetLedgerStorage.syncBudgetAllocations(row.customer_id);
       synced++;
     } catch (err) {
-      console.error(`[budget-sync] Fehler bei Kunde ${row.customer_id}:`, err);
+      log(`Budget-Sync Fehler bei Kunde ${row.customer_id}: ${err}`, "startup");
     }
   }
 

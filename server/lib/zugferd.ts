@@ -315,7 +315,7 @@ export async function embedZugferdXml(
 
     const validationErrors = validateZugferdData(zugferdData, data);
     if (validationErrors.length > 0) {
-      console.warn("[ZUGFeRD] Validierungsfehler, verwende Standard-PDF:", validationErrors.join("; "));
+      log(`Validierungsfehler, verwende Standard-PDF: ${validationErrors.join("; ")}`, "ZUGFeRD");
       return pdfBuffer;
     }
 
@@ -328,7 +328,7 @@ export async function embedZugferdXml(
       usedStrictMode = true;
       log("XSD-Validierung (strict) erfolgreich", "ZUGFeRD");
     } catch (strictErr) {
-      console.warn("[ZUGFeRD] XSD-Validierung nicht verfügbar (Java/xsd-schema-validator fehlt), verwende Strukturvalidierung");
+      log("XSD-Validierung nicht verfügbar (Java/xsd-schema-validator fehlt), verwende Strukturvalidierung", "ZUGFeRD");
       const invoicer = zugferd({ profile: BASIC, strict: false });
       invoice = invoicer.create(zugferdData);
     }
@@ -336,7 +336,7 @@ export async function embedZugferdXml(
     const xml = await invoice.toXML();
     const xmlErrors = validateXmlStructure(xml);
     if (xmlErrors.length > 0) {
-      console.warn("[ZUGFeRD] XML-Strukturfehler, verwende Standard-PDF:", xmlErrors.join("; "));
+      log(`XML-Strukturfehler, verwende Standard-PDF: ${xmlErrors.join("; ")}`, "ZUGFeRD");
       return pdfBuffer;
     }
 
@@ -355,13 +355,13 @@ export async function embedZugferdXml(
     log(`PDF eingebettet für ${data.invoiceNumber} | strict=${usedStrictMode} | PDF/A-Marker=${hasPdfA} | XML=${hasXml}`, "ZUGFeRD");
 
     if (!hasPdfA || !hasXml) {
-      console.warn(`[ZUGFeRD] Konformitätsprüfung fehlgeschlagen (PDF/A=${hasPdfA}, XML=${hasXml}), verwende Standard-PDF`);
+      log(`Konformitätsprüfung fehlgeschlagen (PDF/A=${hasPdfA}, XML=${hasXml}), verwende Standard-PDF`, "ZUGFeRD");
       return pdfBuffer;
     }
 
     return pdfResult;
   } catch (err) {
-    console.error("[ZUGFeRD] Fehler beim Einbetten der XML-Daten, verwende Standard-PDF:", err);
+    log(`Fehler beim Einbetten der XML-Daten, verwende Standard-PDF: ${err}`, "ZUGFeRD");
     return pdfBuffer;
   }
 }
@@ -374,7 +374,7 @@ export async function generateZugferdXml(data: InvoicePdfData): Promise<string |
 
     const validationErrors = validateZugferdData(zugferdData, data);
     if (validationErrors.length > 0) {
-      console.warn("[ZUGFeRD] Validierungsfehler:", validationErrors.join("; "));
+      log(`Validierungsfehler: ${validationErrors.join("; ")}`, "ZUGFeRD");
       return null;
     }
 
@@ -384,13 +384,13 @@ export async function generateZugferdXml(data: InvoicePdfData): Promise<string |
     const xml = await invoice.toXML();
     const xmlErrors = validateXmlStructure(xml);
     if (xmlErrors.length > 0) {
-      console.warn("[ZUGFeRD] XML-Strukturfehler:", xmlErrors.join("; "));
+      log(`XML-Strukturfehler: ${xmlErrors.join("; ")}`, "ZUGFeRD");
       return null;
     }
 
     return xml;
   } catch (err) {
-    console.error("[ZUGFeRD] Fehler beim Generieren der XML-Daten:", err);
+    log(`Fehler beim Generieren der XML-Daten: ${err}`, "ZUGFeRD");
     return null;
   }
 }

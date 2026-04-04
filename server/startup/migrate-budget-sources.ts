@@ -3,6 +3,13 @@ import { sql } from "drizzle-orm";
 import { log } from "../lib/log";
 
 export async function migrateBudgetSources(): Promise<void> {
+  const check = await db.execute(sql`
+    SELECT COUNT(*) as cnt FROM budget_allocations
+    WHERE source = 'monthly' AND deleted_at IS NULL
+  `);
+  const pending = Number((check.rows as Array<{ cnt: string }>)[0]?.cnt ?? 0);
+  if (pending === 0) return;
+
   await db.execute(sql`
     DELETE FROM budget_allocations
     WHERE source = 'monthly_auto'

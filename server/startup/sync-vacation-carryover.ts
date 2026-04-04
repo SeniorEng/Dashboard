@@ -3,6 +3,7 @@ import { eq, and, gte, lte, isNull, inArray } from "drizzle-orm";
 import { users, employeeVacationAllowance, employeeTimeEntries } from "@shared/schema";
 import { getVacationEntitlement, calculateCarryOverDays } from "@shared/domain/vacation";
 import { todayISO } from "@shared/utils/datetime";
+import { log } from "../lib/log";
 
 export async function syncVacationCarryover(): Promise<number> {
   const currentYear = new Date().getFullYear();
@@ -103,7 +104,7 @@ export async function syncVacationCarryover(): Promise<number> {
       }).onConflictDoNothing().returning();
       if (result.length > 0) synced++;
     } catch (err) {
-      console.error(`[vacation-sync] Fehler bei Mitarbeiter ${emp.id}:`, err);
+      log(`Urlaubsübertrag-Fehler bei Mitarbeiter ${emp.id}: ${err}`, "startup");
     }
   }
 

@@ -164,21 +164,21 @@ async function runStartupTasks() {
     try {
       await migrateBudgetSources();
     } catch (err) {
-      console.error("[startup] Budget-Source-Migration fehlgeschlagen:", err);
+      log(`Budget-Source-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
     const { seedWhatsAppRules } = await import("./startup/seed-whatsapp-rules");
     try {
       await seedWhatsAppRules();
     } catch (err) {
-      console.error("[startup] WhatsApp-Regeln-Seed fehlgeschlagen:", err);
+      log(`WhatsApp-Regeln-Seed fehlgeschlagen: ${err}`, "startup");
     }
 
     const { migrateErstberatungCustomers } = await import("./startup/migrate-erstberatung-customers");
     try {
       await migrateErstberatungCustomers();
     } catch (err) {
-      console.error("[startup] Erstberatung-Kunden-Migration fehlgeschlagen:", err);
+      log(`Erstberatung-Kunden-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
     const { syncAllBudgetAllocations } = await import("./startup/sync-budget-allocations");
@@ -186,7 +186,7 @@ async function runStartupTasks() {
       const synced = await syncAllBudgetAllocations();
       if (synced > 0) log(`Budget-Zuweisungen synchronisiert für ${synced} Kunden`, "startup");
     } catch (err) {
-      console.error("[startup] Budget-Sync fehlgeschlagen:", err);
+      log(`Budget-Sync fehlgeschlagen: ${err}`, "startup");
     }
 
     const { syncVacationCarryover } = await import("./startup/sync-vacation-carryover");
@@ -194,11 +194,11 @@ async function runStartupTasks() {
       const synced = await syncVacationCarryover();
       if (synced > 0) log(`Urlaubsübertrag synchronisiert für ${synced} Mitarbeiter`, "startup");
     } catch (err) {
-      console.error("[startup] Urlaubsübertrag-Sync fehlgeschlagen:", err);
+      log(`Urlaubsübertrag-Sync fehlgeschlagen: ${err}`, "startup");
     }
 
     const { geocodeAllMissing } = await import("./services/geocoding");
-    geocodeAllMissing().catch(err => console.error("[geocoding] Batch geocoding error:", err));
+    geocodeAllMissing().catch(err => log(`Batch-Geocoding-Fehler: ${err}`, "startup"));
 
     try {
       const superAdminEmail = process.env.SUPER_ADMIN_EMAIL;
@@ -214,12 +214,12 @@ async function runStartupTasks() {
         }
       }
     } catch (e) {
-      console.error("Fehler bei Superadmin-Promotion:", e);
+      log(`Fehler bei Superadmin-Promotion: ${e}`, "startup");
     }
 
     log("Alle Startup-Aufgaben abgeschlossen", "startup");
   } catch (err) {
-    console.error("[startup] Kritischer Fehler bei Startup-Aufgaben:", err);
+    log(`Kritischer Fehler bei Startup-Aufgaben: ${err}`, "startup");
   }
 
   const { authService } = await import("./services/auth");
