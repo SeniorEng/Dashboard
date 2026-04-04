@@ -66,6 +66,9 @@ export interface CustomerBudgetsInfo {
 
 export interface CustomerNeedsAssessmentInfo {
   id: number;
+  customerId: number;
+  createdByUserId: number | null;
+  createdAt: string | Date;
   assessmentDate: string;
   householdSize: number;
   pflegedienstBeauftragt: boolean;

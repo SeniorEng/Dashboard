@@ -60,53 +60,19 @@ function buildTimeEntryFilterConditions(filters?: TimeEntryFilters & { userId?: 
   return conditions;
 }
 
-import type { VacationSummary as SharedVacationSummary } from "@shared/api";
-export type VacationSummary = SharedVacationSummary;
-
-export interface AppointmentWithCustomerName extends Appointment {
-  customerName: string;
-}
+import type {
+  VacationSummary,
+  AppointmentWithCustomerName,
+  ServiceHoursSummary,
+  TravelSummary,
+  TimeEntrySummary,
+  TimeOverviewData,
+} from "@shared/api";
+export type { VacationSummary, AppointmentWithCustomerName, ServiceHoursSummary, TravelSummary, TimeEntrySummary, TimeOverviewData };
 
 export interface TimeOverviewFilters {
   year: number;
   month: number;
-}
-
-export interface ServiceHoursSummary {
-  hauswirtschaftMinutes: number;
-  alltagsbegleitungMinutes: number;
-  erstberatungMinutes: number;
-}
-
-export interface TravelSummary {
-  totalKilometers: number;
-  customerKilometers: number;
-  timeEntryKilometers: number;
-  totalMinutes: number;
-}
-
-export interface TimeEntrySummary {
-  urlaubDays: number;
-  krankheitDays: number;
-  pauseMinutes: number;
-  bueroarbeitMinutes: number;
-  vertriebMinutes: number;
-  schulungMinutes: number;
-  besprechungMinutes: number;
-  sonstigesMinutes: number;
-}
-
-export interface TimeOverviewData {
-  period: { year: number; month: number };
-  serviceHours: ServiceHoursSummary;
-  completedServiceHours: ServiceHoursSummary;
-  plannedServiceHours: ServiceHoursSummary;
-  travel: TravelSummary;
-  completedTravel: Pick<TravelSummary, 'totalKilometers' | 'customerKilometers' | 'totalMinutes'>;
-  plannedTravel: Pick<TravelSummary, 'totalKilometers' | 'customerKilometers' | 'totalMinutes'>;
-  timeEntries: TimeEntrySummary;
-  appointments: AppointmentWithCustomerName[];
-  otherEntries: EmployeeTimeEntry[];
 }
 
 import type { MissingBreakDay, OpenTasksSummary } from "@shared/types";

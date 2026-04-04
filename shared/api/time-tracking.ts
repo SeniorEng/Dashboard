@@ -1,3 +1,5 @@
+import type { Appointment, EmployeeTimeEntry } from "../schema";
+
 export type TimeEntryType =
   | "urlaub"
   | "krankheit"
@@ -63,31 +65,7 @@ export interface AppointmentServiceBreakdown {
   actualDurationMinutes: number | null;
 }
 
-export interface AppointmentWithCustomerName {
-  id: number;
-  customerId: number;
-  createdByUserId: number | null;
-  appointmentType: string;
-  serviceType: string | null;
-  date: string;
-  scheduledStart: string;
-  scheduledEnd: string | null;
-  durationPromised: number;
-  actualStart: string | null;
-  actualEnd: string | null;
-  status: string;
-  notes: string | null;
-  travelOriginType: string | null;
-  travelFromAppointmentId: number | null;
-  travelKilometers: number | null;
-  travelMinutes: number | null;
-  customerKilometers: number | null;
-  signatureData: string | null;
-  /** @deprecated Use services array instead */
-  servicesDone: string[] | null;
-  createdAt: string;
-  assignedEmployeeId: number | null;
-  performedByEmployeeId: number | null;
+export interface AppointmentWithCustomerName extends Appointment {
   customerName: string;
   services?: AppointmentServiceBreakdown[];
 }
@@ -101,6 +79,7 @@ export interface ServiceHoursSummary {
 export interface TravelSummary {
   totalKilometers: number;
   customerKilometers: number;
+  timeEntryKilometers: number;
   totalMinutes: number;
 }
 
@@ -118,10 +97,14 @@ export interface TimeEntrySummary {
 export interface TimeOverviewData {
   period: { year: number; month: number };
   serviceHours: ServiceHoursSummary;
+  completedServiceHours?: ServiceHoursSummary;
+  plannedServiceHours?: ServiceHoursSummary;
   travel: TravelSummary;
+  completedTravel?: Pick<TravelSummary, 'totalKilometers' | 'customerKilometers' | 'totalMinutes'>;
+  plannedTravel?: Pick<TravelSummary, 'totalKilometers' | 'customerKilometers' | 'totalMinutes'>;
   timeEntries: TimeEntrySummary;
   appointments: AppointmentWithCustomerName[];
-  otherEntries: TimeEntry[];
+  otherEntries: EmployeeTimeEntry[];
 }
 
 export interface TimesPageData {

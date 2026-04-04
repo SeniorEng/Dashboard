@@ -4,7 +4,7 @@ import { asyncHandler } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { insertTimeEntrySchema, updateTimeEntrySchema } from "@shared/schema";
-import type { TimesPageData } from "@shared/api";
+import type { TimesPageData, TimeOverviewData, VacationSummary } from "@shared/api";
 import { storage } from "../storage";
 import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
@@ -150,7 +150,7 @@ router.get("/vacation-summary/:year", asyncHandler("Urlaubsübersicht konnte nic
     return res.status(400).json({ error: "Ungültiges Jahr" });
   }
   
-  const summary = await timeTrackingStorage.getVacationSummary(userId, year);
+  const summary: VacationSummary = await timeTrackingStorage.getVacationSummary(userId, year);
   res.json(summary);
 }));
 
@@ -196,7 +196,7 @@ router.get("/page-data/:year/:month", asyncHandler("Zeitdaten konnten nicht gela
     timeTrackingStorage.getOpenTasks(userId),
   ]);
   
-  const pageData = { overview, vacationSummary, openTasks };
+  const pageData: TimesPageData = { overview, vacationSummary, openTasks };
   res.json(pageData);
 }));
 
@@ -219,7 +219,7 @@ router.get("/overview/:year/:month", asyncHandler("Zeitübersicht konnte nicht g
     return res.status(400).json({ error: "Ungültiger Monat" });
   }
   
-  const overview = await timeTrackingStorage.getTimeOverview(userId, { year, month });
+  const overview: TimeOverviewData = await timeTrackingStorage.getTimeOverview(userId, { year, month });
   res.json(overview);
 }));
 

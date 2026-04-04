@@ -149,7 +149,7 @@ router.get("/customers/:id/details", asyncHandler("Kunde konnte nicht geladen we
       notes: customer.contract.notes,
     } : null,
     activeContractCount: customer.contract ? 1 : 0,
-  };
+  } satisfies Omit<CustomerDetail, keyof typeof customer> & Record<string, unknown>;
   
   res.json(response);
 }));
