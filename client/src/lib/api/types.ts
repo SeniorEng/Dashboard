@@ -90,6 +90,7 @@ export interface CustomerListItem {
   backupEmployee2: { id: number; displayName: string } | null;
   matchedRole?: "primary" | "backup" | "backup2";
   hasActiveContract: boolean;
+  hasBetreuer: boolean;
   createdAt: string;
 }
 
@@ -144,8 +145,6 @@ export interface CustomerDetail extends Customer {
   backupEmployee: { id: number; displayName: string } | null;
   backupEmployee2: { id: number; displayName: string } | null;
   pricingHistory: CustomerPricingInfo[];
-  currentPricing: CustomerPricingInfo | null;
-  budgetSummary: BudgetSummaryInfo | null;
 }
 
 export interface CustomerNeedsAssessmentInfo {
@@ -229,6 +228,11 @@ export interface CreateCustomerRequest {
   vorerkrankungen?: string;
   haustierVorhanden?: boolean;
   haustierDetails?: string;
+  personenbefoerderungGewuenscht?: boolean;
+  acceptsPrivatePayment?: boolean;
+  documentDeliveryMethod?: "email" | "post";
+  receivesMonthlyInvoice?: boolean;
+  billingType?: string;
   insurance?: {
     providerId: number;
     versichertennummer: string;
@@ -397,6 +401,7 @@ export interface AppointmentWithCustomerName {
   travelMinutes: number | null;
   customerKilometers: number | null;
   signatureData: string | null;
+  /** @deprecated Use services array instead */
   servicesDone: string[] | null;
   createdAt: string;
   assignedEmployeeId: number | null;

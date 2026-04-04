@@ -171,6 +171,7 @@ const simpleCreateCustomerSchema = z.object({
   haustierVorhanden: z.boolean().optional(),
   haustierDetails: z.string().max(500, "Maximal 500 Zeichen erlaubt").optional().nullable(),
   personenbefoerderungGewuenscht: z.boolean().optional(),
+  acceptsPrivatePayment: z.boolean().optional(),
   documentDeliveryMethod: z.enum(["email", "post"]).optional(),
   receivesMonthlyInvoice: z.boolean().optional(),
   insurance: z.object({
@@ -186,6 +187,7 @@ const simpleCreateCustomerSchema = z.object({
     festnetz: optionalGermanPhoneSchema,
     mobilnummer: optionalGermanPhoneSchema,
     email: z.string().optional(),
+    notes: z.string().optional(),
   })).optional(),
   budgets: z.object({
     entlastungsbetrag45b: z.number(),
@@ -237,6 +239,7 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
     haustierDetails: data.haustierVorhanden ? (data.haustierDetails || null) : null,
     personenbefoerderungGewuenscht: data.personenbefoerderungGewuenscht || false,
     documentDeliveryMethod: data.documentDeliveryMethod || "email",
+    acceptsPrivatePayment: data.acceptsPrivatePayment ?? false,
     receivesMonthlyInvoice: data.receivesMonthlyInvoice ?? false,
     billingType: data.billingType,
     createdByUserId: userId,
@@ -285,6 +288,7 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
           festnetz: c.festnetz || null,
           mobilnummer: c.mobilnummer || null,
           email: c.email || null,
+          notes: c.notes || null,
           sortOrder: i,
         })
       ));

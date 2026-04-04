@@ -217,12 +217,7 @@ export default function AdminBilling() {
 
   const generateMutation = useMutation({
     mutationFn: async (data: { customerId: number; billingMonth: number; billingYear: number }) => {
-      const customer = customers?.find((c) => c.id === data.customerId);
-      const result = await api.post("/billing/generate", {
-        ...data,
-        billingType: customer?.billingType || "selbstzahler",
-        recipientName: customer ? getCustomerName(customer) : "Unbekannt",
-      });
+      const result = await api.post("/billing/generate", data);
       return unwrapResult(result);
     },
     onSuccess: (data: GenerateResponse) => {

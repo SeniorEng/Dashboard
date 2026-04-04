@@ -13,7 +13,7 @@ import type { BirthdayEntry } from "@shared/types";
 
 interface CardRecord {
   id: number;
-  personType: string;
+  personType: "customer" | "employee";
   personId: number;
   year: number;
   sent: boolean;
@@ -70,7 +70,7 @@ export default function AdminBirthdayCards() {
   });
 
   const toggleMutation = useMutation({
-    mutationFn: async (data: { personType: string; personId: number; year: number; sent: boolean }) => {
+    mutationFn: async (data: { personType: "customer" | "employee"; personId: number; year: number; sent: boolean }) => {
       const result = await api.post("/birthday-cards/toggle", data);
       return unwrapResult(result);
     },
