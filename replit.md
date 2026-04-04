@@ -154,7 +154,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Error handling**: All useMutation hooks have onError with German toast
 - **N+1 fixed**: upsertBudgetTypeSettings uses batch insert in transaction; billing batch creation uses getCustomersByIds
 - **Dead code removed**: Duplicate BillingType/BILLING_TYPES from shared/schema/billing.ts
-- **Dead code audit tooling**: Knip installed (`npx knip`) for comprehensive dead code detection (unused files, exports, dependencies). Config in `knip.json`. 14 unused UI component files and 8 unused npm dependencies removed after initial audit. Run periodically to keep codebase clean.
+- **Dead code audit (completed)**: 14 unused UI component files and 8 unused npm dependencies removed. `knip` dev tool removed after audit completion. Verified active: `node-zugferd` (dynamic import in `server/lib/zugferd.ts` for ZUGFeRD/XRechnung invoice generation), `tw-animate-css` (imported in `client/src/index.css` for Tailwind animation utilities).
 
 ## Integration Tests
 - **Test files**: `tests/appointments.test.ts`, `tests/auth.test.ts`, `tests/customers.test.ts`, `tests/services.test.ts`, `tests/time-entries.test.ts`, `tests/budget.test.ts`, `tests/budget-integration.test.ts` — 103 tests total, all passing.
