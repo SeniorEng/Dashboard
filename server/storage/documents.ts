@@ -130,6 +130,9 @@ export class DocumentStorage implements IDocumentStorage {
       reviewIntervalMonths: data.reviewIntervalMonths || null,
       reminderLeadTimeDays: data.reminderLeadTimeDays ?? 14,
       isActive: data.isActive ?? true,
+      inputMethod: data.inputMethod ?? "upload",
+      isMandatory: data.isMandatory ?? false,
+      renewalDays: data.renewalDays ?? null,
     }).returning();
     return result;
   }
