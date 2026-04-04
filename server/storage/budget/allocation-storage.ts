@@ -9,7 +9,7 @@ import {
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
 import { eq, and, sql, lte, gte, isNull, or, desc, asc, inArray } from "drizzle-orm";
-import { todayISO, parseLocalDate, firstDayOfMonth, lastDayOfMonth, lastDayOfYear, currentYearAndMonth } from "@shared/utils/datetime";
+import { todayISO, parseLocalDate, currentYearAndMonth } from "@shared/utils/datetime";
 import { BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
@@ -159,112 +159,36 @@ export async function getCustomerBudgetAmounts(customerId: number, _tx?: DbClien
   return { pflegesachleistungen36: 0, verhinderungspflege39: 0 };
 }
 
-async function ensureAllocationsGeneric(config: {
-  customerId: number;
-  budgetType: string;
-  frequency: 'monthly' | 'yearly';
-  source: string;
-  amountCents: number;
-  getExpiresAt: (year: number, month: number) => string | null;
-  getNotes: (year: number, month: number) => string;
-  startYear: number;
-  startMonth: number;
-  startDateStr?: string;
-  skipKeys?: Set<string>;
-  endYear?: number;
-  endMonth?: number;
-}, d: Pick<typeof db, 'select' | 'insert'>): Promise<BudgetAllocation[]> {
-  const { year: curYear, month: curMonth } = currentYearAndMonth();
-
-  const existingAllocations = await d.select()
-    .from(budgetAllocations)
-    .where(and(
-      eq(budgetAllocations.customerId, config.customerId),
-      eq(budgetAllocations.budgetType, config.budgetType),
-      eq(budgetAllocations.source, config.source),
-      isNull(budgetAllocations.deletedAt)
-    ));
-
-  const existingSet = new Set(
-    config.frequency === 'monthly'
-      ? existingAllocations.map(a => `${a.year}-${a.month}`)
-      : existingAllocations.map(a => `${a.year}`)
-  );
-
-  const created: BudgetAllocation[] = [];
-
-  let finalEndYear = curYear;
-  let finalEndMonth = curMonth;
-  if (config.endYear != null && config.endMonth != null) {
-    if (config.endYear < curYear || (config.endYear === curYear && config.endMonth < curMonth)) {
-      finalEndYear = config.endYear;
-      finalEndMonth = config.endMonth;
-    }
-  }
-
-  if (config.frequency === 'monthly') {
-    let year = config.startYear;
-    let month = config.startMonth;
-    while (year < finalEndYear || (year === finalEndYear && month <= finalEndMonth)) {
-      const key = `${year}-${month}`;
-      if (!existingSet.has(key) && !config.skipKeys?.has(key)) {
-        const result = await d.insert(budgetAllocations).values({
-          customerId: config.customerId,
-          budgetType: config.budgetType,
-          year,
-          month,
-          amountCents: config.amountCents,
-          source: config.source,
-          validFrom: firstDayOfMonth(year, month),
-          expiresAt: config.getExpiresAt(year, month),
-          notes: config.getNotes(year, month),
-        }).onConflictDoNothing().returning();
-        if (result[0]) created.push(result[0]);
-      }
-      month++;
-      if (month > 12) { month = 1; year++; }
-    }
-  } else {
-    for (let year = config.startYear; year <= finalEndYear; year++) {
-      if (!existingSet.has(`${year}`)) {
-        const validFrom = year === config.startYear
-          ? (config.startDateStr ?? firstDayOfMonth(config.startYear, config.startMonth))
-          : `${year}-01-01`;
-        const result = await d.insert(budgetAllocations).values({
-          customerId: config.customerId,
-          budgetType: config.budgetType,
-          year,
-          month: null,
-          amountCents: config.amountCents,
-          source: config.source,
-          validFrom,
-          expiresAt: config.getExpiresAt(year, 0),
-          notes: config.getNotes(year, 0),
-        }).onConflictDoNothing().returning();
-        if (result[0]) created.push(result[0]);
-      }
-    }
-  }
-
-  return created;
-}
-
-async function resolveStartDate(customerId: number, budgetType: string, d: Pick<typeof db, 'select'>, _preferences?: CustomerBudgetPreferences | undefined, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<string | null> {
-  const preferences = _preferences !== undefined ? _preferences : await getBudgetPreferences(customerId);
-  if (preferences?.budgetStartDate) return preferences.budgetStartDate;
-
-  const typeSettings = _typeSettings ?? await d.select()
-    .from(customerBudgetTypeSettings)
-    .where(eq(customerBudgetTypeSettings.customerId, customerId));
-  const enabled = typeSettings.find(s => s.budgetType === budgetType && s.enabled);
-  if (!enabled) return null;
-
-  const { year } = currentYearAndMonth();
-  return `${year}-01-01`;
-}
-
-export async function ensureMonthlyAllocations(customerId: number, _tx?: DbClient, _preferences?: CustomerBudgetPreferences | undefined, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<BudgetAllocation[]> {
+export async function calculateAllocatedCents(
+  customerId: number,
+  budgetType: string,
+  opts: { year?: number; asOfDate?: string },
+  _tx?: DbClient,
+  _preferences?: CustomerBudgetPreferences | undefined,
+  _typeSettings?: CustomerBudgetTypeSetting[]
+): Promise<number> {
   const d = _tx ?? db;
+  const typeSettings = _typeSettings ?? await getBudgetTypeSettings(customerId, _tx);
+  const preferences = _preferences !== undefined ? _preferences : await getBudgetPreferences(customerId, _tx);
+
+  if (budgetType === "entlastungsbetrag_45b") {
+    return calculateAllocated45b(customerId, opts, d, preferences, typeSettings);
+  } else if (budgetType === "umwandlung_45a") {
+    return calculateAllocated45a(customerId, opts, d, preferences, typeSettings);
+  } else if (budgetType === "ersatzpflege_39_42a") {
+    return calculateAllocated39_42a(customerId, opts, d, preferences, typeSettings);
+  }
+  return 0;
+}
+
+async function calculateAllocated45b(
+  customerId: number,
+  opts: { year?: number; asOfDate?: string },
+  d: Pick<typeof db, 'select'>,
+  preferences: CustomerBudgetPreferences | undefined,
+  typeSettings: CustomerBudgetTypeSetting[]
+): Promise<number> {
+  const { year: curYear, month: curMonth } = currentYearAndMonth();
 
   const existingAllocations = await d.select()
     .from(budgetAllocations)
@@ -274,7 +198,6 @@ export async function ensureMonthlyAllocations(customerId: number, _tx?: DbClien
       isNull(budgetAllocations.deletedAt)
     ));
 
-  const preferences = _preferences !== undefined ? _preferences : await getBudgetPreferences(customerId, _tx);
   let budgetStartDate = preferences?.budgetStartDate ?? null;
 
   if (!budgetStartDate) {
@@ -298,13 +221,9 @@ export async function ensureMonthlyAllocations(customerId: number, _tx?: DbClien
   }
 
   if (!budgetStartDate) {
-    const typeSettings = _typeSettings ?? await d.select()
-      .from(customerBudgetTypeSettings)
-      .where(eq(customerBudgetTypeSettings.customerId, customerId));
     const s45bEnabled = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
-    if (!s45bEnabled) return [];
-    const { year } = currentYearAndMonth();
-    budgetStartDate = `${year}-01-01`;
+    if (!s45bEnabled) return 0;
+    budgetStartDate = `${curYear}-01-01`;
   }
 
   const startDate = parseLocalDate(budgetStartDate);
@@ -331,21 +250,12 @@ export async function ensureMonthlyAllocations(customerId: number, _tx?: DbClien
     }
   }
 
-  const existingMonthlySet = new Set(
-    existingAllocations
-      .filter(a => a.source === "monthly_auto" || a.source === "monthly")
-      .map(a => `${a.year}-${a.month}`)
-  );
   const initialBalanceSet = new Set(
     initialBalanceMonths.map(ib => `${ib.year}-${ib.month}`)
   );
-  const skipKeys = new Set([...existingMonthlySet, ...initialBalanceSet]);
 
-  const monthlyAmount = await getMonthlyBudgetAmountCents(customerId, _tx, _typeSettings);
+  const monthlyAmount = await getMonthlyBudgetAmountCents(customerId, undefined, typeSettings);
 
-  const typeSettings = _typeSettings ?? await d.select()
-    .from(customerBudgetTypeSettings)
-    .where(eq(customerBudgetTypeSettings.customerId, customerId));
   const s45b = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
 
   if (s45b?.validFrom) {
@@ -358,42 +268,91 @@ export async function ensureMonthlyAllocations(customerId: number, _tx?: DbClien
     }
   }
 
-  let endYear: number | undefined;
-  let endMonth: number | undefined;
+  let endYear = curYear;
+  let endMonth = curMonth;
   if (s45b?.validTo) {
     const vtDate = parseLocalDate(s45b.validTo);
-    endYear = vtDate.getFullYear();
-    endMonth = vtDate.getMonth() + 1;
+    const vtYear = vtDate.getFullYear();
+    const vtMonth = vtDate.getMonth() + 1;
+    if (vtYear < curYear || (vtYear === curYear && vtMonth < curMonth)) {
+      endYear = vtYear;
+      endMonth = vtMonth;
+    }
   }
 
-  return ensureAllocationsGeneric({
-    customerId,
-    budgetType: "entlastungsbetrag_45b",
-    frequency: 'monthly',
-    source: "monthly_auto",
-    amountCents: monthlyAmount,
-    getExpiresAt: () => null,
-    getNotes: (y, m) => `Automatische Zuweisung ${String(m).padStart(2, '0')}/${y}`,
-    startYear: allocStartYear,
-    startMonth: allocStartMonth,
-    skipKeys,
-    endYear,
-    endMonth,
-  }, d);
+  if (opts.year != null) {
+    if (allocStartYear > opts.year) return sumInitialBalancesForYear(existingAllocations, opts.year);
+    if (endYear < opts.year) return sumInitialBalancesForYear(existingAllocations, opts.year);
+    const yearStart = opts.year === allocStartYear ? allocStartMonth : 1;
+    const yearEnd = opts.year === endYear ? endMonth : 12;
+    let calculatedCents = 0;
+    for (let m = yearStart; m <= yearEnd; m++) {
+      if (!initialBalanceSet.has(`${opts.year}-${m}`)) {
+        calculatedCents += monthlyAmount;
+      }
+    }
+    calculatedCents += sumInitialBalancesForYear(existingAllocations, opts.year);
+    return calculatedCents;
+  }
+
+  let totalCalculated = 0;
+  let y = allocStartYear, m = allocStartMonth;
+  while (y < endYear || (y === endYear && m <= endMonth)) {
+    if (!initialBalanceSet.has(`${y}-${m}`)) {
+      totalCalculated += monthlyAmount;
+    }
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+
+  const initialBalanceTotal = existingAllocations
+    .filter(a => a.source === "initial_balance")
+    .reduce((sum, a) => sum + a.amountCents, 0);
+
+  const carryoverTotal = existingAllocations
+    .filter(a => a.source === "carryover")
+    .reduce((sum, a) => sum + a.amountCents, 0);
+
+  return totalCalculated + initialBalanceTotal + carryoverTotal;
 }
 
-export async function ensureAllocations45a(customerId: number, _tx?: DbClient, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<BudgetAllocation[]> {
-  const d = _tx ?? db;
-  const startDateStr = await resolveStartDate(customerId, "umwandlung_45a", d, _preferences);
-  if (!startDateStr) return [];
+function sumInitialBalancesForYear(allocations: { source: string; year: number; amountCents: number }[], year: number): number {
+  return allocations
+    .filter(a => a.source === "initial_balance" && a.year === year)
+    .reduce((sum, a) => sum + a.amountCents, 0);
+}
 
-  const amounts = _amounts ?? await getCustomerBudgetAmounts(customerId, _tx);
-  if (!amounts.pflegesachleistungen36) return [];
+async function calculateAllocated45a(
+  customerId: number,
+  opts: { year?: number; asOfDate?: string },
+  d: Pick<typeof db, 'select'>,
+  preferences: CustomerBudgetPreferences | undefined,
+  typeSettings: CustomerBudgetTypeSetting[]
+): Promise<number> {
+  const { year: curYear, month: curMonth } = currentYearAndMonth();
 
-  const typeSettings = _typeSettings ?? await d.select()
-    .from(customerBudgetTypeSettings)
-    .where(eq(customerBudgetTypeSettings.customerId, customerId));
+  let startDateStr = preferences?.budgetStartDate ?? null;
+  if (!startDateStr) {
+    const enabled = typeSettings.find(s => s.budgetType === "umwandlung_45a" && s.enabled);
+    if (!enabled) return 0;
+    startDateStr = `${curYear}-01-01`;
+  }
+
+  const amounts = await getCustomerBudgetAmounts(customerId, undefined, typeSettings);
+  const monthlyAmount = amounts.pflegesachleistungen36;
+
   const s45a = typeSettings.find(s => s.budgetType === "umwandlung_45a" && s.enabled);
+
+  const initialBalances = await d.select()
+    .from(budgetAllocations)
+    .where(and(
+      eq(budgetAllocations.customerId, customerId),
+      eq(budgetAllocations.budgetType, "umwandlung_45a"),
+      eq(budgetAllocations.source, "initial_balance"),
+      isNull(budgetAllocations.deletedAt)
+    ));
+
+  if (!monthlyAmount && initialBalances.length === 0) return 0;
 
   const startDate = parseLocalDate(startDateStr);
   let startYear = startDate.getFullYear();
@@ -409,55 +368,98 @@ export async function ensureAllocations45a(customerId: number, _tx?: DbClient, _
     }
   }
 
-  let endYear: number | undefined;
-  let endMonth: number | undefined;
+  let endYear = curYear;
+  let endMonth = curMonth;
   if (s45a?.validTo) {
     const vtDate = parseLocalDate(s45a.validTo);
-    endYear = vtDate.getFullYear();
-    endMonth = vtDate.getMonth() + 1;
+    const vtYear = vtDate.getFullYear();
+    const vtMonth = vtDate.getMonth() + 1;
+    if (vtYear < curYear || (vtYear === curYear && vtMonth < curMonth)) {
+      endYear = vtYear;
+      endMonth = vtMonth;
+    }
   }
 
-  return ensureAllocationsGeneric({
-    customerId,
-    budgetType: "umwandlung_45a",
-    frequency: 'monthly',
-    source: "monthly_auto",
-    amountCents: amounts.pflegesachleistungen36,
-    getExpiresAt: (y, m) => lastDayOfMonth(y, m),
-    getNotes: (y, m) => `Automatische Zuweisung §45a ${String(m).padStart(2, '0')}/${y}`,
-    startYear,
-    startMonth,
-    endYear,
-    endMonth,
-  }, d);
+  if (opts.year != null) {
+    if (startYear > opts.year || endYear < opts.year) return 0;
+    const yearStartMonth = opts.year === startYear ? startMonth : 1;
+    const yearEndMonth = opts.year === endYear ? endMonth : 12;
+    const ibForYear = initialBalances
+      .filter(a => a.year === opts.year)
+      .reduce((sum, a) => sum + a.amountCents, 0);
+    return Math.max(0, yearEndMonth - yearStartMonth + 1) * monthlyAmount + ibForYear;
+  }
+
+  if (opts.asOfDate) {
+    const asOf = parseLocalDate(opts.asOfDate);
+    const asOfYear = asOf.getFullYear();
+    const asOfMonth = asOf.getMonth() + 1;
+    if (asOfYear === curYear && asOfMonth === curMonth) {
+      const ibForMonth = initialBalances
+        .filter(a => a.year === asOfYear && a.month === asOfMonth)
+        .reduce((sum, a) => sum + a.amountCents, 0);
+      return monthlyAmount + ibForMonth;
+    }
+  }
+
+  let count = 0;
+  let y = startYear, m = startMonth;
+  while (y < endYear || (y === endYear && m <= endMonth)) {
+    count++;
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+
+  const ibTotal = initialBalances.reduce((sum, a) => sum + a.amountCents, 0);
+  return count * monthlyAmount + ibTotal;
 }
 
-export async function ensureAllocations39_42a(customerId: number, _tx?: DbClient, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }): Promise<BudgetAllocation[]> {
-  const d = _tx ?? db;
-  const startDateStr = await resolveStartDate(customerId, "ersatzpflege_39_42a", d, _preferences);
-  if (!startDateStr) return [];
+async function calculateAllocated39_42a(
+  customerId: number,
+  opts: { year?: number; asOfDate?: string },
+  d: Pick<typeof db, 'select'>,
+  preferences: CustomerBudgetPreferences | undefined,
+  typeSettings: CustomerBudgetTypeSetting[]
+): Promise<number> {
+  const { year: curYear } = currentYearAndMonth();
 
-  const amounts = _amounts ?? await getCustomerBudgetAmounts(customerId, _tx);
-  if (!amounts.verhinderungspflege39) return [];
+  let startDateStr = preferences?.budgetStartDate ?? null;
+  if (!startDateStr) {
+    const enabled = typeSettings.find(s => s.budgetType === "ersatzpflege_39_42a" && s.enabled);
+    if (!enabled) return 0;
+    startDateStr = `${curYear}-01-01`;
+  }
+
+  const amounts = await getCustomerBudgetAmounts(customerId, undefined, typeSettings);
+  if (!amounts.verhinderungspflege39) return 0;
 
   const startDate = parseLocalDate(startDateStr);
-  return ensureAllocationsGeneric({
-    customerId,
-    budgetType: "ersatzpflege_39_42a",
-    frequency: 'yearly',
-    source: "yearly_auto",
-    amountCents: amounts.verhinderungspflege39,
-    getExpiresAt: (y) => lastDayOfYear(y),
-    getNotes: (y) => `Automatische Zuweisung §39/§42a ${y}`,
-    startYear: startDate.getFullYear(),
-    startMonth: startDate.getMonth() + 1,
-    startDateStr,
-  }, d);
+  const startYear = startDate.getFullYear();
+
+  if (opts.year != null) {
+    return opts.year >= startYear && opts.year <= curYear ? amounts.verhinderungspflege39 : 0;
+  }
+
+  return Math.max(0, curYear - startYear + 1) * amounts.verhinderungspflege39;
 }
 
 export async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Promise<BudgetAllocation[]> {
   const d = _tx ?? db;
   const { year: curYear } = currentYearAndMonth();
+
+  const carryoverAllocations = await d.select()
+    .from(budgetAllocations)
+    .where(and(
+      eq(budgetAllocations.customerId, customerId),
+      eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
+      eq(budgetAllocations.source, "carryover"),
+      isNull(budgetAllocations.deletedAt)
+    ));
+
+  const existingCarryoverYears = new Set(carryoverAllocations.map(a => a.year));
+
+  const preferences = await getBudgetPreferences(customerId, _tx);
+  const typeSettings = await getBudgetTypeSettings(customerId, _tx);
 
   const allAllocations = await d.select()
     .from(budgetAllocations)
@@ -467,15 +469,14 @@ export async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClien
       isNull(budgetAllocations.deletedAt)
     ));
 
-  if (allAllocations.length === 0) return [];
-
-  const existingCarryoverYears = new Set(
-    allAllocations
-      .filter(a => a.source === "carryover")
-      .map(a => a.year)
-  );
+  if (allAllocations.length === 0) {
+    const totalAllocatedCurrentYear = await calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { year: curYear }, _tx, preferences, typeSettings);
+    if (totalAllocatedCurrentYear === 0) return [];
+  }
 
   const yearSet = new Set(allAllocations.map(a => a.year));
+  const allocatedCurYear = await calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { year: curYear }, _tx, preferences, typeSettings);
+  if (allocatedCurYear > 0) yearSet.add(curYear);
   const years = Array.from(yearSet).sort((a, b) => a - b);
 
   const created: BudgetAllocation[] = [];
@@ -485,23 +486,13 @@ export async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClien
     const targetYear = year + 1;
     if (existingCarryoverYears.has(targetYear)) continue;
 
-    const yearAllocations = allAllocations.filter(a =>
-      a.year === year &&
-      a.source !== "carryover"
-    );
-    if (yearAllocations.length === 0) continue;
+    const yearAllocatedCents = await calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { year }, _tx, preferences, typeSettings);
 
-    const totalAllocated = yearAllocations.reduce((sum, a) => sum + a.amountCents, 0);
-
-    const yearAllocIds = yearAllocations.map(a => a.id);
-
-    const carryoverIntoThisYear = allAllocations.filter(a =>
-      a.year === year && a.source === "carryover"
-    );
+    const carryoverIntoThisYear = carryoverAllocations.filter(a => a.year === year);
     const totalCarryoverIn = carryoverIntoThisYear.reduce((sum, a) => sum + a.amountCents, 0);
-    const allAllocIds = [...yearAllocIds, ...carryoverIntoThisYear.map(a => a.id)];
 
-    if (allAllocIds.length === 0) continue;
+    const yearStart = `${year}-01-01`;
+    const yearEnd = `${year}-12-31`;
 
     const consumptionResult = await d.select({
       total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
@@ -510,8 +501,9 @@ export async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClien
       .where(and(
         eq(budgetTransactions.customerId, customerId),
         eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
-        inArray(budgetTransactions.allocationId, allAllocIds),
-        sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`
+        sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
+        gte(budgetTransactions.transactionDate, yearStart),
+        lte(budgetTransactions.transactionDate, yearEnd)
       ));
 
     const reversalResult = await d.select({
@@ -521,14 +513,15 @@ export async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClien
       .where(and(
         eq(budgetTransactions.customerId, customerId),
         eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
-        inArray(budgetTransactions.allocationId, allAllocIds),
-        eq(budgetTransactions.transactionType, "reversal")
+        eq(budgetTransactions.transactionType, "reversal"),
+        gte(budgetTransactions.transactionDate, yearStart),
+        lte(budgetTransactions.transactionDate, yearEnd)
       ));
 
     const totalConsumed = Number(consumptionResult[0]?.total ?? 0);
     const totalReversed = Number(reversalResult[0]?.total ?? 0);
     const netConsumed = Math.max(0, totalConsumed - totalReversed);
-    const totalPool = totalAllocated + totalCarryoverIn;
+    const totalPool = yearAllocatedCents + totalCarryoverIn;
     const unused = Math.max(0, totalPool - netConsumed);
 
     if (unused <= 0) continue;
@@ -626,91 +619,9 @@ export async function processExpiredCarryover(customerId: number, _tx?: DbClient
   return created;
 }
 
-function isAllocationOutOfRange(
-  alloc: { year: number | null; month: number | null },
-  setting: { validFrom: string | null; validTo: string | null }
-): boolean {
-  if (alloc.year == null) return false;
-  if (!setting.validFrom && !setting.validTo) return false;
-
-  if (alloc.month != null) {
-    const allocMonthStr = `${alloc.year}-${String(alloc.month).padStart(2, '0')}`;
-
-    if (setting.validFrom) {
-      const vfDate = parseLocalDate(setting.validFrom);
-      const vfMonthStr = `${vfDate.getFullYear()}-${String(vfDate.getMonth() + 1).padStart(2, '0')}`;
-      if (allocMonthStr < vfMonthStr) return true;
-    }
-
-    if (setting.validTo) {
-      const vtDate = parseLocalDate(setting.validTo);
-      const vtMonthStr = `${vtDate.getFullYear()}-${String(vtDate.getMonth() + 1).padStart(2, '0')}`;
-      if (allocMonthStr > vtMonthStr) return true;
-    }
-  } else {
-    if (setting.validFrom) {
-      const vfDate = parseLocalDate(setting.validFrom);
-      if (alloc.year < vfDate.getFullYear()) return true;
-    }
-    if (setting.validTo) {
-      const vtDate = parseLocalDate(setting.validTo);
-      if (alloc.year > vtDate.getFullYear()) return true;
-    }
-  }
-
-  return false;
-}
-
-async function softDeleteOutOfRangeAllocations(
-  customerId: number,
-  typeSettings: CustomerBudgetTypeSetting[],
-  d: Pick<typeof db, 'select' | 'update'>
-): Promise<void> {
-  for (const setting of typeSettings) {
-    if (!setting.enabled) continue;
-
-    const allAutoAllocations = await d.select()
-      .from(budgetAllocations)
-      .where(and(
-        eq(budgetAllocations.customerId, customerId),
-        eq(budgetAllocations.budgetType, setting.budgetType),
-        or(
-          eq(budgetAllocations.source, "monthly_auto"),
-          eq(budgetAllocations.source, "yearly_auto")
-        )
-      ));
-
-    for (const alloc of allAutoAllocations) {
-      const outOfRange = isAllocationOutOfRange(alloc, setting);
-
-      if (outOfRange && !alloc.deletedAt) {
-        await d.update(budgetAllocations)
-          .set({ deletedAt: new Date() })
-          .where(eq(budgetAllocations.id, alloc.id));
-      } else if (!outOfRange && alloc.deletedAt) {
-        await d.update(budgetAllocations)
-          .set({ deletedAt: null })
-          .where(eq(budgetAllocations.id, alloc.id));
-      }
-    }
-  }
-}
-
-export async function syncBudgetAllocations(customerId: number, _tx?: DbClient, _preferences?: CustomerBudgetPreferences | undefined, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<void> {
-  const d = _tx ?? db;
-  const [preferences, typeSettings] = await Promise.all([
-    _preferences !== undefined ? _preferences : getBudgetPreferences(customerId, _tx),
-    _typeSettings ?? getBudgetTypeSettings(customerId, _tx),
-  ]);
-  const amounts = await getCustomerBudgetAmounts(customerId, _tx, typeSettings);
-
-  await Promise.all([
-    ensureMonthlyAllocations(customerId, _tx, preferences, typeSettings),
-    ensureAllocations45a(customerId, _tx, preferences, amounts, typeSettings),
-    ensureAllocations39_42a(customerId, _tx, preferences, amounts),
-  ]);
+export async function syncCarryoverAndExpiry(customerId: number, _tx?: DbClient): Promise<void> {
   await ensureYearlyCarryover45b(customerId, _tx);
   await processExpiredCarryover(customerId, _tx);
-
-  await softDeleteOutOfRangeAllocations(customerId, typeSettings, d);
 }
+
+export { syncCarryoverAndExpiry as syncBudgetAllocations };

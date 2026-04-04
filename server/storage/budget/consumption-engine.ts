@@ -12,7 +12,7 @@ import type { DbClient, CascadeResult } from "./types";
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
 import { getTransactionByAppointmentId } from "./transaction-storage";
 import { getBudgetPreferences, getBudgetTypeSettings } from "./preferences-storage";
-import { syncBudgetAllocations } from "./allocation-storage";
+import { syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-storage";
 import { getAllBudgetSummaries, getTotalCarryoverCents } from "./summary-queries";
 
 export async function consumeFifo(
@@ -38,7 +38,7 @@ export async function consumeFifo(
   const d = _tx ?? db;
   const today = transactionDate;
 
-  const allocations = await d.select()
+  const specialAllocations = await d.select()
     .from(budgetAllocations)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
@@ -48,7 +48,8 @@ export async function consumeFifo(
       or(
         isNull(budgetAllocations.expiresAt),
         gte(budgetAllocations.expiresAt, today)
-      )
+      ),
+      sql`${budgetAllocations.source} IN ('carryover', 'initial_balance', 'manual_adjustment')`
     ))
     .orderBy(
       sql`CASE WHEN ${budgetAllocations.source} = 'carryover' THEN 0 ELSE 1 END`,
@@ -56,57 +57,106 @@ export async function consumeFifo(
       asc(budgetAllocations.id)
     );
 
-  if (allocations.length === 0) {
+  const totalAllocated = await calculateAllocatedCents(customerId, budgetType, { asOfDate: today }, _tx);
+  const manualAdjTotal = specialAllocations
+    .filter(a => a.source === "manual_adjustment")
+    .reduce((sum, a) => sum + a.amountCents, 0);
+  const effectiveAllocated = totalAllocated + manualAdjTotal;
+
+  if (effectiveAllocated <= 0 && specialAllocations.length === 0) {
     return { consumedCents: 0, transactions: [], remainingCents: amountCents };
   }
 
-  const allocationIds = allocations.map(a => a.id);
-  const consumptionByAllocation = allocationIds.length > 0
-    ? await d.select({
-        allocationId: budgetTransactions.allocationId,
-        total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-      })
-        .from(budgetTransactions)
-        .where(and(
-          inArray(budgetTransactions.allocationId, allocationIds),
-          sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`
-        ))
-        .groupBy(budgetTransactions.allocationId)
-    : [];
+  const allSpecialIds = specialAllocations.map(a => a.id);
+  let consumedBySpecial = new Map<number, number>();
+  let reversalBySpecial = new Map<number, number>();
 
-  const reversalByAllocation = allocationIds.length > 0
-    ? await d.select({
-        allocationId: budgetTransactions.allocationId,
-        total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-      })
-        .from(budgetTransactions)
-        .where(and(
-          inArray(budgetTransactions.allocationId, allocationIds),
-          eq(budgetTransactions.transactionType, "reversal")
-        ))
-        .groupBy(budgetTransactions.allocationId)
-    : [];
+  if (allSpecialIds.length > 0) {
+    const consumptionResult = await d.select({
+      allocationId: budgetTransactions.allocationId,
+      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+    })
+      .from(budgetTransactions)
+      .where(and(
+        inArray(budgetTransactions.allocationId, allSpecialIds),
+        sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`
+      ))
+      .groupBy(budgetTransactions.allocationId);
 
-  const consumedMap = new Map(consumptionByAllocation.map(c => [c.allocationId, Number(c.total)]));
-  const reversalMap = new Map(reversalByAllocation.map(r => [r.allocationId, Number(r.total)]));
+    const reversalResult = await d.select({
+      allocationId: budgetTransactions.allocationId,
+      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+    })
+      .from(budgetTransactions)
+      .where(and(
+        inArray(budgetTransactions.allocationId, allSpecialIds),
+        eq(budgetTransactions.transactionType, "reversal")
+      ))
+      .groupBy(budgetTransactions.allocationId);
 
-  const allocationConsumption = allocations.map(a => {
-    const consumed = consumedMap.get(a.id) ?? 0;
-    const reversed = reversalMap.get(a.id) ?? 0;
-    const netConsumed = Math.max(0, consumed - reversed);
-    return { allocation: a, consumed: netConsumed, available: Math.max(0, a.amountCents - netConsumed) };
-  });
+    consumedBySpecial = new Map(consumptionResult.map(c => [c.allocationId!, Number(c.total)]));
+    reversalBySpecial = new Map(reversalResult.map(r => [r.allocationId!, Number(r.total)]));
+  }
 
-  let remaining = amountCents;
-  let totalConsumed = 0;
+  const txDateFilters = [];
+  if (budgetType === "umwandlung_45a") {
+    const txDate = parseLocalDate(today);
+    const monthStart = `${txDate.getFullYear()}-${String(txDate.getMonth() + 1).padStart(2, '0')}-01`;
+    const daysInMonth = new Date(txDate.getFullYear(), txDate.getMonth() + 1, 0).getDate();
+    const monthEnd = `${txDate.getFullYear()}-${String(txDate.getMonth() + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
+    txDateFilters.push(gte(budgetTransactions.transactionDate, monthStart));
+    txDateFilters.push(lte(budgetTransactions.transactionDate, monthEnd));
+  } else if (budgetType === "ersatzpflege_39_42a") {
+    const txDate = parseLocalDate(today);
+    txDateFilters.push(gte(budgetTransactions.transactionDate, `${txDate.getFullYear()}-01-01`));
+    txDateFilters.push(lte(budgetTransactions.transactionDate, `${txDate.getFullYear()}-12-31`));
+  }
+
+  const totalConsumedResult = await d.select({
+    total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+  })
+    .from(budgetTransactions)
+    .where(and(
+      eq(budgetTransactions.customerId, customerId),
+      eq(budgetTransactions.budgetType, budgetType),
+      sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
+      ...txDateFilters
+    ));
+
+  const totalReversalsResult = await d.select({
+    total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+  })
+    .from(budgetTransactions)
+    .where(and(
+      eq(budgetTransactions.customerId, customerId),
+      eq(budgetTransactions.budgetType, budgetType),
+      eq(budgetTransactions.transactionType, "reversal"),
+      ...txDateFilters
+    ));
+
+  const totalNetConsumed = Math.max(0, Number(totalConsumedResult[0]?.total ?? 0) - Number(totalReversalsResult[0]?.total ?? 0));
+  const totalAvailable = Math.max(0, effectiveAllocated - totalNetConsumed);
+
+  if (totalAvailable <= 0) {
+    return { consumedCents: 0, transactions: [], remainingCents: amountCents };
+  }
+
+  let remaining = Math.min(amountCents, totalAvailable);
+  let totalConsumedAmount = 0;
   const transactions: BudgetTransaction[] = [];
   let isFirstTransaction = true;
 
-  for (const { allocation, available } of allocationConsumption) {
-    if (remaining <= 0 || available <= 0) continue;
+  for (const allocation of specialAllocations) {
+    if (remaining <= 0) break;
+
+    const consumed = consumedBySpecial.get(allocation.id) ?? 0;
+    const reversed = reversalBySpecial.get(allocation.id) ?? 0;
+    const netConsumed = Math.max(0, consumed - reversed);
+    const available = Math.max(0, allocation.amountCents - netConsumed);
+
+    if (available <= 0) continue;
 
     const consumeAmount = Math.min(remaining, available);
-
     const ratio = params && amountCents > 0 ? consumeAmount / amountCents : (isFirstTransaction ? 1 : 0);
 
     const txData: typeof budgetTransactions.$inferInsert = {
@@ -133,11 +183,41 @@ export async function consumeFifo(
     if (result[0]) transactions.push(result[0]);
 
     remaining -= consumeAmount;
-    totalConsumed += consumeAmount;
+    totalConsumedAmount += consumeAmount;
     isFirstTransaction = false;
   }
 
-  return { consumedCents: totalConsumed, transactions, remainingCents: remaining };
+  if (remaining > 0) {
+    const ratio = params && amountCents > 0 ? remaining / amountCents : (isFirstTransaction ? 1 : 0);
+
+    const txData: typeof budgetTransactions.$inferInsert = {
+      customerId,
+      budgetType,
+      transactionDate,
+      transactionType: "consumption",
+      amountCents: -remaining,
+      allocationId: null,
+      appointmentId: params?.appointmentId ?? null,
+      notes: params?.notes ?? null,
+      createdByUserId: params?.userId,
+      hauswirtschaftMinutes: params?.hauswirtschaftMinutes != null ? Math.round(params.hauswirtschaftMinutes * ratio) : null,
+      hauswirtschaftCents: params?.hauswirtschaftCents != null ? Math.round(params.hauswirtschaftCents * ratio) : null,
+      alltagsbegleitungMinutes: params?.alltagsbegleitungMinutes != null ? Math.round(params.alltagsbegleitungMinutes * ratio) : null,
+      alltagsbegleitungCents: params?.alltagsbegleitungCents != null ? Math.round(params.alltagsbegleitungCents * ratio) : null,
+      travelKilometers: params?.travelKilometers != null ? Math.round(params.travelKilometers * ratio) : null,
+      travelCents: params?.travelCents != null ? Math.round(params.travelCents * ratio) : null,
+      customerKilometers: params?.customerKilometers != null ? Math.round(params.customerKilometers * ratio) : null,
+      customerKilometersCents: params?.customerKilometersCents != null ? Math.round(params.customerKilometersCents * ratio) : null,
+    };
+
+    const result = await d.insert(budgetTransactions).values(txData).returning();
+    if (result[0]) transactions.push(result[0]);
+
+    totalConsumedAmount += remaining;
+    remaining = 0;
+  }
+
+  return { consumedCents: totalConsumedAmount, transactions, remainingCents: amountCents - totalConsumedAmount };
 }
 
 export async function createCascadeConsumption(params: {
@@ -166,7 +246,7 @@ export async function createCascadeConsumption(params: {
 
     const typeSettings = await getBudgetTypeSettings(params.customerId, tx);
 
-    await syncBudgetAllocations(params.customerId, tx, undefined, typeSettings);
+    await syncCarryoverAndExpiry(params.customerId, tx);
 
     const defaultPriority: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null }> = [
       { budgetType: "umwandlung_45a", enabled: true, priority: 1, monthlyLimitCents: null },

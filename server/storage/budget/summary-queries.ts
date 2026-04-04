@@ -9,7 +9,7 @@ import { todayISO, parseLocalDate, lastDayOfMonth } from "@shared/utils/datetime
 import { db } from "../../lib/db";
 import type { DbClient, BudgetSummary, Budget45aSummary, Budget39_42aSummary, AllBudgetSummaries } from "./types";
 import { getBudgetPreferences, getBudgetTypeSettings } from "./preferences-storage";
-import { getCustomerBudgetAmounts, syncBudgetAllocations } from "./allocation-storage";
+import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-storage";
 import { getPlannedCostCents } from "./appointment-cost-calculator";
 
 async function getEffectiveMonthlyLimitCents(customerId: number, _typeSettings?: CustomerBudgetTypeSetting[], _preferences?: CustomerBudgetPreferences | undefined): Promise<number | null> {
@@ -119,17 +119,10 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
     or(isNull(budgetAllocations.expiresAt), gte(budgetAllocations.expiresAt, today))
   );
 
-  const allocAllWhere = and(
-    eq(budgetAllocations.customerId, customerId),
-    eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
-    lte(budgetAllocations.validFrom, today),
-    isNull(budgetAllocations.deletedAt)
-  );
+  const [totalAllocatedCents, currentYearAllocatedCents, txResult, carryoverResult, currentMonthResult, currentMonthReversalResult] = await Promise.all([
+    calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { asOfDate: today }, undefined, preferences, typeSettings),
 
-  const [allocResult, txResult, currentYearResult, carryoverResult, currentMonthResult, currentMonthReversalResult] = await Promise.all([
-    db.select({
-      total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
-    }).from(budgetAllocations).where(allocAllWhere),
+    calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { year: currentYear }, undefined, preferences, typeSettings),
 
     db.select({
       transactionType: budgetTransactions.transactionType,
@@ -139,14 +132,6 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
       eq(budgetTransactions.customerId, customerId),
       eq(budgetTransactions.budgetType, "entlastungsbetrag_45b")
     )).groupBy(budgetTransactions.transactionType),
-
-    db.select({
-      total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
-    }).from(budgetAllocations).where(and(
-      allocValidWhere,
-      eq(budgetAllocations.year, currentYear),
-      sql`${budgetAllocations.source} != 'carryover'`
-    )),
 
     db.select({
       total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
@@ -178,8 +163,6 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
     )),
   ]);
 
-  const totalAllocatedCents = Number(allocResult[0]?.total ?? 0);
-
   const txMap = new Map<string, { absTotal: number; rawTotal: number }>();
   for (const row of txResult) {
     txMap.set(row.transactionType, { absTotal: Number(row.absTotal), rawTotal: Number(row.rawTotal) });
@@ -190,7 +173,6 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
   const reversalsCents = txMap.get("reversal")?.rawTotal ?? 0;
   const netUsedCents = consumptionCents + writeOffCents + manualAdjustmentCents - reversalsCents;
 
-  const currentYearAllocatedCents = Number(currentYearResult[0]?.total ?? 0);
   const carryoverCents = Number(carryoverResult[0]?.total ?? 0);
   const carryoverExpiresAt = carryoverCents > 0 ? (carryoverResult[0]?.expiresAt ?? null) : null;
   const currentMonthConsumption = Number(currentMonthResult[0]?.total ?? 0);
@@ -231,23 +213,14 @@ export async function getBudgetSummary45a(customerId: number, _preferences?: Cus
 
   const amounts = _amounts ?? await getCustomerBudgetAmounts(customerId);
   const typeSettings = _typeSettings ?? await getBudgetTypeSettings(customerId);
+  const preferences = _preferences !== undefined ? _preferences : await getBudgetPreferences(customerId);
   const s45a = typeSettings.find(s => s.budgetType === "umwandlung_45a" && s.enabled);
   const isCurrentlyActive = !s45a
     ? true
     : (!s45a.validFrom || today >= s45a.validFrom) && (!s45a.validTo || today <= s45a.validTo);
 
-  const [allocResult, txConsumptionResult, txReversalResult] = await Promise.all([
-    db.select({
-      total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
-    }).from(budgetAllocations).where(and(
-      eq(budgetAllocations.customerId, customerId),
-      eq(budgetAllocations.budgetType, "umwandlung_45a"),
-      eq(budgetAllocations.year, currentYear),
-      eq(budgetAllocations.month, currentMonth),
-      lte(budgetAllocations.validFrom, today),
-      isNull(budgetAllocations.deletedAt),
-      or(isNull(budgetAllocations.expiresAt), gte(budgetAllocations.expiresAt, today))
-    )),
+  const [currentMonthAllocatedCents, txConsumptionResult, txReversalResult] = await Promise.all([
+    calculateAllocatedCents(customerId, "umwandlung_45a", { asOfDate: today }, undefined, preferences, typeSettings),
 
     db.select({
       total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
@@ -270,7 +243,6 @@ export async function getBudgetSummary45a(customerId: number, _preferences?: Cus
     )),
   ]);
 
-  const currentMonthAllocatedCents = Number(allocResult[0]?.total ?? 0);
   const currentMonthUsedCents = Math.max(0, Number(txConsumptionResult[0]?.total ?? 0) - Number(txReversalResult[0]?.total ?? 0));
 
   return {
@@ -283,7 +255,7 @@ export async function getBudgetSummary45a(customerId: number, _preferences?: Cus
   };
 }
 
-export async function getBudgetSummary39_42a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }): Promise<Budget39_42aSummary> {
+export async function getBudgetSummary39_42a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<Budget39_42aSummary> {
   const today = todayISO();
   const todayDate = parseLocalDate(today);
   const currentYear = todayDate.getFullYear();
@@ -291,18 +263,11 @@ export async function getBudgetSummary39_42a(customerId: number, _preferences?: 
   const yearEnd = `${currentYear}-12-31`;
 
   const amounts = _amounts ?? await getCustomerBudgetAmounts(customerId);
+  const typeSettings = _typeSettings ?? await getBudgetTypeSettings(customerId);
+  const preferences = _preferences !== undefined ? _preferences : await getBudgetPreferences(customerId);
 
-  const [allocResult, txConsumptionResult, txReversalResult] = await Promise.all([
-    db.select({
-      total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
-    }).from(budgetAllocations).where(and(
-      eq(budgetAllocations.customerId, customerId),
-      eq(budgetAllocations.budgetType, "ersatzpflege_39_42a"),
-      eq(budgetAllocations.year, currentYear),
-      lte(budgetAllocations.validFrom, today),
-      isNull(budgetAllocations.deletedAt),
-      or(isNull(budgetAllocations.expiresAt), gte(budgetAllocations.expiresAt, today))
-    )),
+  const [currentYearAllocatedCents, txConsumptionResult, txReversalResult] = await Promise.all([
+    calculateAllocatedCents(customerId, "ersatzpflege_39_42a", { year: currentYear }, undefined, preferences, typeSettings),
 
     db.select({
       total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
@@ -325,7 +290,6 @@ export async function getBudgetSummary39_42a(customerId: number, _preferences?: 
     )),
   ]);
 
-  const currentYearAllocatedCents = Number(allocResult[0]?.total ?? 0);
   const currentYearUsedCents = Math.max(0, Number(txConsumptionResult[0]?.total ?? 0) - Number(txReversalResult[0]?.total ?? 0));
 
   return {
@@ -338,7 +302,7 @@ export async function getBudgetSummary39_42a(customerId: number, _preferences?: 
 }
 
 export async function getAllBudgetSummaries(customerId: number): Promise<AllBudgetSummaries> {
-  await syncBudgetAllocations(customerId);
+  await syncCarryoverAndExpiry(customerId);
 
   const [preferences, typeSettings] = await Promise.all([
     getBudgetPreferences(customerId),
@@ -355,7 +319,7 @@ export async function getAllBudgetSummaries(customerId: number): Promise<AllBudg
       ? getBudgetSummary45a(customerId, preferences, amounts, typeSettings)
       : { customerId, monthlyBudgetCents: 0, currentMonthAllocatedCents: 0, currentMonthUsedCents: 0, currentMonthAvailableCents: 0, isCurrentlyActive: false } as Budget45aSummary,
     is39Enabled
-      ? getBudgetSummary39_42a(customerId, preferences, amounts)
+      ? getBudgetSummary39_42a(customerId, preferences, amounts, typeSettings)
       : { customerId, yearlyBudgetCents: 0, currentYearAllocatedCents: 0, currentYearUsedCents: 0, currentYearAvailableCents: 0 } as Budget39_42aSummary,
   ]);
   return { entlastungsbetrag45b, umwandlung45a, ersatzpflege39_42a };
