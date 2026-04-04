@@ -342,8 +342,9 @@ async function calculateAllocated45b(
     if (m > 12) { m = 1; y++; }
   }
 
+  const ibDateLimit = opts.asOfDate ?? `${curYear}-12-31`;
   const initialBalanceTotal = existingAllocations
-    .filter(a => a.source === "initial_balance")
+    .filter(a => a.source === "initial_balance" && a.validFrom <= ibDateLimit)
     .reduce((sum, a) => sum + a.amountCents, 0);
 
   const carryoverTotal = existingAllocations
