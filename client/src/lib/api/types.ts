@@ -232,7 +232,7 @@ export interface CreateCustomerRequest {
   acceptsPrivatePayment?: boolean;
   documentDeliveryMethod?: "email" | "post";
   receivesMonthlyInvoice?: boolean;
-  billingType?: string;
+  billingType?: "pflegekasse_gesetzlich" | "pflegekasse_privat" | "selbstzahler";
   insurance?: {
     providerId: number;
     versichertennummer: string;
