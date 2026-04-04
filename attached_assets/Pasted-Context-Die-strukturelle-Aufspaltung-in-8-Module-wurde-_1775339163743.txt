@@ -1,0 +1,136 @@
+Context
+Die strukturelle Aufspaltung in 8 Module wurde bereits gemacht (Commit 1522a36). budget-ledger.ts ist jetzt eine 106-Zeilen-Facade. Aber die inhaltliche Komplexitaet steckt unveraendert in den Sub-Modulen -- insgesamt 2.251 Zeilen. Groesster Problembereich: allocation-storage.ts mit 716 Zeilen, wovon ~500 Zeilen Auto-Allokations-Materialisierung sind.
+
+Wo liegt die unnoetige Komplexitaet?
+1. Auto-Allokationen als DB-Zeilen (allocation-storage.ts, ~500 von 716 Zeilen)
+Fuer JEDEN Monat wird eine budget_allocations-Zeile erzeugt (source: "monthly_auto"). Das erfordert:
+
+ensureAllocationsGeneric (Z.162-250, 90 Zeilen) -- generische Insert-Schleife
+ensureMonthlyAllocations (Z.266-383, 118 Zeilen) -- §45b mit 4-stufiger Startdatum-Fallback-Kette, Initial-Balance-Erkennung, validFrom/validTo-Eingrenzung
+ensureAllocations45a (Z.385-433, 49 Zeilen) -- §45a Variante
+ensureAllocations39_42a (Z.435-456, 22 Zeilen) -- §39/42a Variante
+resolveStartDate (Z.252-264, 13 Zeilen) -- Startdatum-Fallback
+softDeleteOutOfRangeAllocations (Z.664-697, 34 Zeilen) -- Aufraeum-Logik fuer ungueltige Allokationen
+isAllocationOutOfRange (Z.629-662, 34 Zeilen) -- Validierung
+syncBudgetAllocations (Z.699-716, 18 Zeilen) -- Orchestrierung aller ensure*-Methoden
+
+Kernproblem: Diese Zeilen sind deterministisch -- der Monatsbetrag, das Startdatum, und der Budget-Typ reichen aus um den Gesamtbetrag zu BERECHNEN. Stattdessen wird er materialisiert, was Sync-Logik, Soft-Delete, N+1-Inserts und syncBudgetAllocations-Aufrufe bei jedem Request erzwingt.
+2. FIFO auf Allokations-Ebene (consumption-engine.ts, ~130 Zeilen)
+consumeFifo (Z.18-148) iteriert ueber alle Allokations-Zeilen und trackt Verbrauch pro Allokation. Das ist nur fuer Carryover relevant (hat Ablaufdatum). Regulaere Monatsbudgets verfallen nicht innerhalb des Jahres -- FIFO bringt dort keinen Mehrwert.
+3. getBudgetSummary mit 6 parallelen Queries (summary-queries.ts, ~120 Zeilen)
+getBudgetSummary (Z.106-230) laeuft 6 parallele DB-Queries:
+
+Summe aller Allokationen (die man berechnen koennte)
+Transaktionen gruppiert nach Typ
+Allokationen des aktuellen Jahres
+Carryover-Allokationen
+Verbrauch des aktuellen Monats
+Preferences
+
+Queries 1 und 3 waeren unnoetig wenn Allokationen berechnet statt abgefragt wuerden.
+4. ensureYearlyCarryover45b (allocation-storage.ts, ~95 Zeilen)
+Berechnet pro Jahr: totalAllocated - netConsumed = unused -> carryover. Richtige Logik, aber abhaengig davon dass alle monatlichen Allokations-Zeilen existieren. Mit berechneten Allokationen wuerde sich das vereinfachen.
+
+Vereinfachungsstrategie
+Schritt 1: calculateAllocatedCents() einfuehren
+Neue Funktion die den Gesamtbetrag fuer einen Budget-Typ berechnet statt aus DB-Zeilen zu summieren:
+typescriptexport async function calculateAllocatedCents(
+  customerId: number,
+  budgetType: string,
+  opts: { year?: number; month?: number; asOfDate?: string },
+  _tx?: DbClient
+): Promise<number> {
+  // 1. Lese: budgetStartDate, monthlyAmount, validFrom/validTo aus TypeSettings + Preferences (1-2 Queries)
+  // 2. Berechne: Anzahl gueltiger Monate × Monatsbetrag (fuer monthly) oder Jahresbetrag (fuer yearly)
+  // 3. Addiere Sonder-Allokationen (initial_balance, carryover, manual) aus DB
+  // Fertig -- kein ensure* noetig
+}
+Eliminiert: ensureAllocationsGeneric, ensureMonthlyAllocations, ensureAllocations45a, ensureAllocations39_42a, resolveStartDate, softDeleteOutOfRangeAllocations, isAllocationOutOfRange (~360 Zeilen)
+Schritt 2: syncBudgetAllocations -> syncCarryoverAndExpiry
+Reduziert auf:
+typescriptexport async function syncCarryoverAndExpiry(customerId: number, _tx?: DbClient): Promise<void> {
+  await ensureYearlyCarryover45b(customerId, _tx);
+  await processExpiredCarryover(customerId, _tx);
+}
+Alle 6+ Aufrufer (budget.ts, appointments.ts, appointment-series.ts, admin/customers.ts, startup/sync-budget-allocations.ts) werden umgestellt.
+Eliminiert: Die 3x parallelen ensure*-Aufrufe + softDeleteOutOfRangeAllocations
+Schritt 3: getBudgetSummary vereinfachen
+Statt 6 parallele Queries:
+typescriptexport async function getBudgetSummary(customerId: number, ...): Promise<BudgetSummary> {
+  await syncCarryoverAndExpiry(customerId);
+
+  const [totalAllocated, carryoverInfo, txTotals, preferences] = await Promise.all([
+    calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { asOfDate: today }),
+    // Carryover-Query (bleibt -- nur fuer source='carryover' Zeilen)
+    // Transaktions-Summen (bleibt -- eine Query mit groupBy)
+    // Preferences (bleibt)
+  ]);
+
+  // 4 statt 6 Queries, Summaries deutlich kuerzer
+}
+Aehnlich fuer getBudgetSummary45a und getBudgetSummary39_42a.
+Schritt 4: consumeFifo vereinfachen
+Aktuell iteriert FIFO ueber alle Allokations-Zeilen. Vereinfacht:
+
+Carryover-Allokationen zuerst (haben Ablaufdatum, FIFO bleibt noetig -- aber nur ueber wenige Zeilen)
+Regulaeres Budget: Direkt als Transaktion buchen, allocationId = null (kein FIFO noetig, berechnet statt materialisiert)
+
+Alternativ, konservativer: FIFO-Logik behalten aber nur ueber Sonder-Allokationen (carryover, initial_balance) laufen lassen, nicht ueber Dutzende monthly_auto-Zeilen.
+Schritt 5: ensureYearlyCarryover45b anpassen
+Statt ueber alle monatlichen Allokations-Zeilen zu iterieren:
+typescript// Alt: totalAllocated = SUM(allocation rows for year)
+// Neu: totalAllocated = calculateAllocatedCents(customerId, "45b", { year })
+// Dann: unused = totalAllocated - netConsumed (aus Transaktionen)
+Spart ~30 Zeilen und die Abhaengigkeit von materialisierten Allokationen.
+Schritt 6: Legacy-monthly_auto-Zeilen
+
+Bestehende monthly_auto Zeilen in der DB bleiben (keine destruktive Migration)
+Neue Logik ignoriert sie fuer Berechnungen
+Bestehende Transaktionen mit allocationId auf alte Allokationen bleiben valide
+Optional spaeter: Aufraeum-Migration die alte monthly_auto Zeilen soft-deleted
+
+
+Geschaetzte Auswirkung
+ModulVorherNachherEinsparungallocation-storage.ts716~250-466consumption-engine.ts486~400-86summary-queries.ts362~280-82Andere Module687~670-17Gesamt2.251~1.600~650 Zeilen (-29%)
+Wichtiger als Zeilenreduktion: syncBudgetAllocations wird trivial, kein N+1 Insert-Pattern mehr, kein Soft-Delete/Restore, keine 4-stufige Startdatum-Fallback-Kette.
+
+Inkrementelle PRs
+PRSchrittRisikoBeschreibungPR 11MittelcalculateAllocatedCents + Summaries umstellenPR 22-3MittelsyncCarryoverAndExpiry + getBudgetSummary vereinfachenPR 34-5MittelFIFO + Carryover auf berechnete Allokationen umstellenPR 46NiedrigDead-Code-Entfernung (alte ensure*-Funktionen)
+
+Verifizierung
+Nach jedem PR:
+
+tsc --noEmit -- keine Typfehler
+Regressions-Check: Budget-Summaries fuer 3-5 Testkunden vor/nach vergleichen (identische Werte)
+Budget-Routes testen: /summary, /overview, /allocations, /transactions
+Termin-Dokumentation testen (Consumption-Transaction)
+Termin-Reopening testen (Storno)
+Rebook testen
+Server-Startup pruefen (sync-budget-allocations.ts)
+
+
+Kritische Dateien
+Hauptaenderungen:
+
+server/storage/budget/allocation-storage.ts (716 Zeilen -- groesste Aenderung)
+server/storage/budget/summary-queries.ts (362 Zeilen)
+server/storage/budget/consumption-engine.ts (486 Zeilen)
+
+Konsumenten von syncBudgetAllocations (umbenennen zu syncCarryoverAndExpiry):
+
+server/routes/budget.ts
+server/routes/appointments.ts
+server/routes/appointment-series.ts
+server/routes/admin/customers.ts
+server/startup/sync-budget-allocations.ts
+server/storage/budget-ledger.ts (Facade)
+
+Schema (keine Aenderung):
+
+shared/schema/budget.ts, shared/domain/budgets.ts
+
+
+Quellen
+
+Stripe Ledger -- Salden berechnen, nicht speichern
+§45b SGB XI -- Gesetzestext Entlastungsbetrag
