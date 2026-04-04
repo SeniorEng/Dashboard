@@ -199,7 +199,7 @@ export async function importPflegekassen(): Promise<void> {
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
           if (!msg.includes("duplicate") && !msg.includes("unique")) {
-            console.error(`[startup] Pflegekasse ${kasse.ik} Import fehlgeschlagen:`, msg);
+            log(`Pflegekasse ${kasse.ik} Import fehlgeschlagen: ${msg}`, "startup");
           }
         }
       }
@@ -209,6 +209,6 @@ export async function importPflegekassen(): Promise<void> {
       log(`Pflegekassen-Import: ${created} neu erstellt, ${updated} aktualisiert (von ${kassen.length} in EDIFACT)`, "startup");
     }
   } catch (error) {
-    console.error("[startup] Pflegekassen-Import fehlgeschlagen:", error);
+    log(`Pflegekassen-Import fehlgeschlagen: ${error}`, "startup");
   }
 }

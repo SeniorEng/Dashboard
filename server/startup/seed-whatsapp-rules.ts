@@ -1,5 +1,6 @@
 import { db } from "../lib/db";
 import { whatsappNotificationRules } from "@shared/schema";
+import { sql } from "drizzle-orm";
 
 const DEFAULT_RULES = [
   { eventType: "appointment_created", description: "Neuer Termin zugewiesen", templateName: "termin_zugewiesen" },
@@ -12,6 +13,10 @@ const DEFAULT_RULES = [
 ] as const;
 
 export async function seedWhatsAppRules(): Promise<void> {
+  const existing = await db.execute(sql`SELECT COUNT(*)::int AS cnt FROM whatsapp_notification_rules`);
+  const count = (existing.rows as Array<{ cnt: number }>)[0]?.cnt ?? 0;
+  if (count >= DEFAULT_RULES.length) return;
+
   for (const rule of DEFAULT_RULES) {
     await db
       .insert(whatsappNotificationRules)
