@@ -5,7 +5,7 @@ description: Master orchestration skill that coordinates all audit agents. Defin
 
 # AI Development Team — Master Orchestration
 
-This skill defines how the virtual AI development team operates. It coordinates 10 specialized audit agents plus the Architect to ensure comprehensive code quality.
+This skill defines how the virtual AI development team operates. It coordinates 11 specialized audit agents plus the Architect to ensure comprehensive code quality.
 
 ## The Team Roster
 
@@ -74,7 +74,7 @@ Not all code changes carry equal risk. Allocate testing effort proportionally:
 | Medium feature (10-100 lines) | Code Quality + 1-2 relevant specialists + Architect |
 | Large feature (100+ lines) | Code Quality + Regression Guard + all relevant specialists + Architect |
 | Multi-file refactor (3+ files) | Code Quality + Regression Guard + Architect |
-| Pre-deployment | Full team audit (all 10 agents) |
+| Pre-deployment | Full team audit (all 11 agents) |
 
 ### Small Fix Shortcut
 
@@ -128,7 +128,7 @@ Not every audit needs to be exhaustive. Use time budgets to keep audits proporti
 | **Quick** | Small fix (< 10 lines, 1 file) | < 5 min | Code Quality (Cat 2, 7) + Architect |
 | **Standard** | Medium feature (10-100 lines) | ~15 min | Code Quality + 1-2 specialists (standard depth) + Architect |
 | **Thorough** | Large feature (100+ lines) | ~45 min | Code Quality + Regression Guard + all relevant specialists (standard depth) + Architect |
-| **Pre-deploy** | Before publishing to production | ~60 min | All 10 agents (full depth) + DevOps Category 6 checklist |
+| **Pre-deploy** | Before publishing to production | ~60 min | All 11 agents (full depth) + DevOps Category 6 checklist |
 
 ---
 
@@ -170,9 +170,9 @@ When agents give contradicting recommendations, resolve using this priority orde
 These are conceptual commands that trigger specific agent combinations:
 
 ### `/audit` — Full Team Audit
-Runs ALL 10 agents against the current codebase state (git diff).
+Runs ALL 11 agents against the current codebase state (git diff).
 **When**: Before deployment, after major milestones, monthly reviews.
-**Execution**: All 10 agents run as parallel subagents, each producing their audit report.
+**Execution**: All 11 agents run as parallel subagents, each producing their audit report.
 
 ### `/smoke` — Post-Deploy Quick Check
 Quick validation that critical functionality still works after deployment.
@@ -299,7 +299,7 @@ To extend the team with a new specialist:
 ┌─────────────────────────────────────────────────┐
 │         SPECIALIST AUDITS (parallel)             │
 │   Run based on risk level + change type          │
-│   HOCH: All 9 agents                             │
+│   HOCH: All 11 agents                            │
 │   MITTEL: Business + QA + Regression + relevant  │
 │   NIEDRIG: Code Quality + UI/UX                  │
 └────────────────────┬────────────────────────────┘
