@@ -597,15 +597,40 @@ export async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClien
       isNull(budgetAllocations.deletedAt)
     ));
 
-  if (allAllocations.length === 0) {
-    const totalAllocatedCurrentYear = await calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { year: curYear }, _tx, preferences, typeSettings);
-    if (totalAllocatedCurrentYear === 0) return [];
+  let eligibilityStartYear = curYear;
+
+  let budgetStartDate = preferences?.budgetStartDate ?? null;
+  if (!budgetStartDate) {
+    const ibEntries = allAllocations.filter(a => a.source === "initial_balance" && a.validFrom);
+    if (ibEntries.length > 0) {
+      budgetStartDate = ibEntries.reduce((min, a) => a.validFrom < min.validFrom ? a : min).validFrom;
+    }
+  }
+  if (!budgetStartDate) {
+    const otherEntries = allAllocations.filter(a =>
+      (a.source === "monthly_auto" || a.source === "monthly" || a.source === "carryover" || a.source === "computed") && a.validFrom
+    );
+    if (otherEntries.length > 0) {
+      budgetStartDate = otherEntries.reduce((min, a) => a.validFrom < min.validFrom ? a : min).validFrom;
+    }
+  }
+  if (!budgetStartDate) {
+    const s45bEnabled = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
+    if (!s45bEnabled) return [];
+    budgetStartDate = `${curYear}-01-01`;
+  }
+  eligibilityStartYear = parseLocalDate(budgetStartDate).getFullYear();
+
+  const s45bSetting = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
+  if (s45bSetting?.validFrom) {
+    const vfYear = parseLocalDate(s45bSetting.validFrom).getFullYear();
+    if (vfYear > eligibilityStartYear) eligibilityStartYear = vfYear;
   }
 
-  const yearSet = new Set(allAllocations.map(a => a.year));
-  const allocatedCurYear = await calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { year: curYear }, _tx, preferences, typeSettings);
-  if (allocatedCurYear > 0) yearSet.add(curYear);
-  const years = Array.from(yearSet).sort((a, b) => a - b);
+  const years: number[] = [];
+  for (let y = eligibilityStartYear; y <= curYear; y++) {
+    years.push(y);
+  }
 
   const created: BudgetAllocation[] = [];
 

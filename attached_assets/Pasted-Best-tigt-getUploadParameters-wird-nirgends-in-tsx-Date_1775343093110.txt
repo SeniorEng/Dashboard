@@ -1,0 +1,74 @@
+Bestätigt: getUploadParameters wird nirgends in .tsx-Dateien verwendet. Jetzt schreibe ich den finalen Plan.
+
+
+Datei erstellt, hat ein Tool verwendet
+Datei erstellt, hat ein Tool verwendet
+Write
+C:\Users\alrik\.claude\plans\tidy-twirling-snowglobe.md
+# Dead Code Cleanup Plan
+ 
+## Context
+Umfassende Analyse der gesamten App auf toten Code: ungenutzte Komponenten, Assets, Typen, Konstanten, npm-Pakete, und die `getUploadParameters`-Funktion samt `@uppy/core`-Dependency.
+ 
+**Korrektur:** Die Billing-Endpoints (GET/PATCH/POST) sind **alle aktiv** in `billing.tsx` -- die initiale Analyse war falsch. Kein Billing-Code wird entfernt.
+ 
+---
+ 
+## Phase 1: Dateien loeschen (Zero Risk)
+ 
+| Datei | Grund |
+|-------|-------|
+| `client/src/components/ui/skeleton.tsx` | `Skeleton` + `PageSkeleton` -- null Imports im gesamten Client |
+| `client/src/assets/logo-icon.jpg` | Null Referenzen im gesamten Repo |
+ 
+## Phase 2: Tote Typen & Konstanten entfernen (Sehr niedrig)
+ 
+**`shared/domain/appointments.ts`:**
+- Zeile 65: `type Pflegegrad = ...` loeschen (nie referenziert, `PFLEGEGRAD_OPTIONS` bleibt)
+- Zeile 68: `type DurationOption = ...` loeschen (nie referenziert, `DURATION_OPTIONS` bleibt)
+ 
+**`client/src/pages/admin/components/customer-types.ts`:**
+- Zeile 95: `const STEPS = ALL_STEPS;` loeschen (Alias, nie benutzt)
+- Zeilen 101-104: `const PERIOD_TYPES = [...]` loeschen (nie exportiert, nie benutzt)
+ 
+## Phase 3: @uppy/core + getUploadParameters entfernen (Niedrig)
+ 
+**`client/src/hooks/use-upload.ts`:**
+- `import type { UppyFile } from "@uppy/core"` entfernen (Zeile 2)
+- `getUploadParameters` Funktion entfernen (~Zeilen 130-170)
+- `getUploadParameters` aus dem Return-Objekt entfernen (~Zeile 170)
+ 
+**`package.json`:**
+- `"@uppy/core"` aus dependencies entfernen
+- `"bufferutil"` aus optionalDependencies entfernen (null Imports, optionaler ws-Addon)
+ 
+Danach `npm install` ausfuehren.
+ 
+## Phase 4: Startup-Migrationen (Entscheidung noetig)
+ 
+In `server/index.ts` (Zeilen 149-220) laufen One-Time-Migrationen bei jedem Serverstart:
+- `migrateBudgetSources()` -- migriert `source = 'monthly'` zu `'monthly_auto'`
+- `seedWhatsAppRules()` -- seeded initiale Regeln
+- `migrateErstberatungCustomers()` -- fuegt DB-Constraint hinzu
+ 
+Diese sind idempotent (no-op wenn schon gelaufen), kosten aber Startup-Zeit. **Frage: Sind diese in Produktion bereits gelaufen und koennen entfernt werden?**
+ 
+---
+ 
+## Verifizierung
+ 
+Nach jeder Phase:
+1. `npx tsc --noEmit` (TypeScript-Check)
+2. `npx vitest run` (Tests)
+3. Nach Phase 3: Dev-Server starten, WebSocket + Upload testen
+ 
+Jede Phase wird als separater Commit erstellt.
+ 
+## Zusammenfassung
+ 
+| Was | Dateien | Risiko |
+|-----|---------|--------|
+| skeleton.tsx + logo-icon.jpg loeschen | 2 geloescht | Null |
+| Tote Typen/Konstanten | 2 editiert | Sehr niedrig |
+| @uppy/core + bufferutil + getUploadParameters | 2 editiert + npm install | Niedrig |
+| Startup-Migrationen | User-Entscheidung | Mittel |
