@@ -8,10 +8,9 @@
  * - @shared/schema.ts      → Datenbank-Schemas, Drizzle-Typen, Zod-Validierung
  * - @shared/domain/*       → Business-Logik und Domain-Typen
  * - @shared/utils/*        → Utility-Funktionen (datetime, phone, etc.)
- * - @shared/types.ts       → API-Response-Typen und Re-Exports (diese Datei)
+ * - @shared/api/*          → API-Response-Typen
+ * - @shared/types.ts       → Re-Exports (diese Datei)
  */
-
-import type { Appointment, Customer } from "./schema";
 
 // ============================================
 // RE-EXPORTS FROM DOMAIN/APPOINTMENTS
@@ -57,71 +56,10 @@ export {
 } from "./domain/appointments";
 
 // ============================================
-// API RESPONSE TYPES
+// RE-EXPORTS FROM API TYPES
 // ============================================
 
-/**
- * Termin mit verknüpftem Kunden (für Listen-Anzeige)
- */
-export interface AppointmentWithCustomer extends Appointment {
-  customer: Customer | null;
-  assignedEmployeeName?: string | null;
-  isLocked?: boolean;
-  isMonthClosed?: boolean;
-}
-
-/**
- * Payload für Termin-Updates
- * @deprecated Verwende stattdessen die Zod-Schemas aus schema.ts
- */
-interface UpdateAppointmentPayload {
-  status?: "scheduled" | "in-progress" | "documenting" | "completed" | "cancelled";
-  actualStart?: string;
-  actualEnd?: string;
-  notes?: string;
-  servicesDone?: string[];
-  signatureData?: string;
-}
-
-// ============================================
-// PAGINATION
-// ============================================
-
-export interface PaginatedResult<T> {
-  data: T[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-
-// ============================================
-// LABOR LAW TYPES
-// ============================================
-
-export interface MissingBreakDay {
-  date: string;
-  totalWorkMinutes: number;
-  requiredBreakMinutes: number;
-  documentedBreakMinutes: number;
-}
-
-export interface OpenTasksSummary {
-  daysWithMissingBreaks: MissingBreakDay[];
-}
-
-// ============================================
-// BIRTHDAY TYPES
-// ============================================
-
-export interface BirthdayEntry {
-  id: number;
-  type: "employee" | "customer";
-  name: string;
-  geburtsdatum: string;
-  daysUntil: number;
-  age: number;
-  address?: string;
-  cardSent?: boolean;
-  cardSentAt?: string | null;
-}
-
+export type { AppointmentWithCustomer } from "./api/appointments";
+export type { PaginatedResult } from "./api/pagination";
+export type { MissingBreakDay, OpenTasksSummary } from "./api/labor-law";
+export type { BirthdayEntry } from "./api/birthdays";

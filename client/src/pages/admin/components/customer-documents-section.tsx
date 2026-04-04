@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -34,14 +34,15 @@ import {
   FolderOpen,
   History,
   Trash2,
+  Pen,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { useUpload } from "@/hooks/use-upload";
+import { useFileSelection } from "@/features/customers/hooks/use-file-selection";
 import { ReviewBadge, getReviewStatus } from "./review-badge";
 import { DigitalDocumentFlow } from "./digital-document-flow";
-import { Pen } from "lucide-react";
 
 interface DocumentTypeData {
   id: number;
@@ -110,10 +111,8 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
   const [documentDate, setDocumentDate] = useState("");
   const [expandedTypes, setExpandedTypes] = useState<Set<number>>(new Set());
   const [showArchive, setShowArchive] = useState<number | null>(null);
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
-  const [filePreviews, setFilePreviews] = useState<{ file: File; preview?: string }[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const { selectedFiles, filePreviews, cameraInputRef, addFiles, removeFile, clearAllFiles, openCamera, onCameraFileChange } = useFileSelection();
 
   const { data: groupedDocs, isLoading: docsLoading } = useQuery<GroupedDocData[]>({
     queryKey: ["admin", "customers", customerId, "documents", "grouped"],
@@ -138,43 +137,6 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
       return unwrapResult(result);
     },
   });
-
-  const addFiles = useCallback((newFiles: File[]) => {
-    setSelectedFiles(prev => [...prev, ...newFiles]);
-    const newPreviews = newFiles.map(file => {
-      const isImage = file.type.startsWith("image/");
-      return {
-        file,
-        preview: isImage ? URL.createObjectURL(file) : undefined,
-      };
-    });
-    setFilePreviews(prev => [...prev, ...newPreviews]);
-  }, []);
-
-  const removeFile = useCallback((index: number) => {
-    setFilePreviews(prev => {
-      const removed = prev[index];
-      if (removed?.preview) URL.revokeObjectURL(removed.preview);
-      return prev.filter((_, i) => i !== index);
-    });
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
-  }, []);
-
-  const clearAllFiles = useCallback(() => {
-    filePreviews.forEach(p => { if (p.preview) URL.revokeObjectURL(p.preview); });
-    setFilePreviews([]);
-    setSelectedFiles([]);
-  }, [filePreviews]);
-
-  const handleCameraCapture = useCallback(() => {
-    cameraInputRef.current?.click();
-  }, []);
-
-  const onCameraFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length > 0) addFiles(files);
-    e.target.value = "";
-  }, [addFiles]);
 
   const { uploadFile, isUploading } = useUpload({
     onError: (error) => {
@@ -399,7 +361,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
               <Button
                 type="button"
                 variant="outline"
-                onClick={handleCameraCapture}
+                onClick={openCamera}
                 className="flex items-center gap-2"
                 data-testid="button-camera-capture"
               >

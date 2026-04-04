@@ -36,4 +36,4 @@ export type {
   TimesPageData,
 } from "@shared/api";
 
-export type { AppointmentWithCustomer } from "@shared/types";
+export type { AppointmentWithCustomer } from "@shared/api";

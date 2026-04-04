@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -26,8 +26,10 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
-import { formatDateForDisplay, parseLocalDate } from "@shared/utils/datetime";
+import { formatDateForDisplay } from "@shared/utils/datetime";
 import { useUpload } from "@/hooks/use-upload";
+import { useFileSelection } from "../hooks/use-file-selection";
+import { ReviewBadge, getReviewStatus } from "./review-badge";
 import { DigitalDocumentFlow } from "./digital-document-flow";
 
 interface DocumentTypeWithTemplate {
@@ -70,40 +72,6 @@ interface GeneratedDocumentData {
   template: { name: string; slug: string; documentTypeId: number | null };
 }
 
-function getReviewStatus(reviewDueDate: string | null): "ok" | "warning" | "overdue" | "none" {
-  if (!reviewDueDate) return "none";
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const due = parseLocalDate(reviewDueDate);
-  const diffDays = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-  if (diffDays < 0) return "overdue";
-  if (diffDays <= 30) return "warning";
-  return "ok";
-}
-
-function ReviewBadge({ reviewDueDate }: { reviewDueDate: string | null }) {
-  const status = getReviewStatus(reviewDueDate);
-  if (status === "none") return null;
-
-  const styles = {
-    ok: "bg-green-100 text-green-700",
-    warning: "bg-amber-100 text-amber-700",
-    overdue: "bg-red-100 text-red-700",
-  };
-
-  const labels = {
-    ok: `Prüfung bis ${formatDateForDisplay(reviewDueDate!)}`,
-    warning: `Prüfung fällig: ${formatDateForDisplay(reviewDueDate!)}`,
-    overdue: `Überfällig: ${formatDateForDisplay(reviewDueDate!)}`,
-  };
-
-  return (
-    <span className={`text-xs px-2 py-0.5 rounded inline-flex items-center gap-1 ${styles[status]}`}>
-      {labels[status]}
-    </span>
-  );
-}
-
 export function CustomerDocumentsSection({ customerId, customerName }: { customerId: number; customerName: string }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -111,11 +79,9 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
   const [selectedTypeForUpload, setSelectedTypeForUpload] = useState<DocumentTypeWithTemplate | null>(null);
   const [digitalFlowSlug, setDigitalFlowSlug] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [filePreviews, setFilePreviews] = useState<{ file: File; preview?: string }[]>([]);
   const [expandedDocId, setExpandedDocId] = useState<number | null>(null);
   const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const { selectedFiles, filePreviews, cameraInputRef, addFiles, removeFile, clearAllFiles, onCameraFileChange } = useFileSelection();
 
   const { data: docTypes } = useQuery<DocumentTypeWithTemplate[]>({
     queryKey: ["customers", "document-types", "customer", "bestandskunde"],
@@ -192,30 +158,6 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
 
   const sortedGroups = Array.from(groupedByType.entries()).sort((a, b) => a[1].typeName.localeCompare(b[1].typeName));
   const hasAnyDocs = sortedGroups.length > 0 || orphanGenerated.length > 0;
-
-  const addFiles = useCallback((newFiles: File[]) => {
-    setSelectedFiles(prev => [...prev, ...newFiles]);
-    const newPreviews = newFiles.map(file => ({
-      file,
-      preview: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
-    }));
-    setFilePreviews(prev => [...prev, ...newPreviews]);
-  }, []);
-
-  const removeFile = useCallback((index: number) => {
-    setFilePreviews(prev => {
-      const removed = prev[index];
-      if (removed?.preview) URL.revokeObjectURL(removed.preview);
-      return prev.filter((_, i) => i !== index);
-    });
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
-  }, []);
-
-  const clearAllFiles = useCallback(() => {
-    filePreviews.forEach(p => { if (p.preview) URL.revokeObjectURL(p.preview); });
-    setFilePreviews([]);
-    setSelectedFiles([]);
-  }, [filePreviews]);
 
   const { uploadFile, isUploading } = useUpload({
     onError: (error) => {
@@ -300,11 +242,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
         type="file"
         accept="image/*"
         capture="environment"
-        onChange={(e) => {
-          const files = Array.from(e.target.files || []);
-          if (files.length > 0) addFiles(files);
-          e.target.value = "";
-        }}
+        onChange={onCameraFileChange}
         className="hidden"
         data-testid="input-camera-capture"
       />

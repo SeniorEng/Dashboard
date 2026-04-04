@@ -1,12 +1,14 @@
 import type { Appointment, Customer } from "../schema";
 
-export interface AppointmentWithCustomerResponse extends Appointment {
+export interface AppointmentWithCustomer extends Appointment {
   customer: Customer | null;
   assignedEmployeeName?: string | null;
   isLocked?: boolean;
   isMonthClosed?: boolean;
   lockedReason?: string;
 }
+
+export type AppointmentWithCustomerResponse = AppointmentWithCustomer;
 
 export interface AppointmentCountsResponse {
   [date: string]: number;

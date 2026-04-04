@@ -17,7 +17,7 @@ export interface TimeEntryFormData {
   endTime?: string | null;
   isFullDay?: boolean;
   excludeEntryId?: number;
-  targetUserId?: number;
+  targetUserId?: number | null;
 }
 
 interface ConflictCheckResult {
