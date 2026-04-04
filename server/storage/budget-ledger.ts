@@ -39,6 +39,7 @@ export interface BudgetSummary {
   currentYearAllocatedCents: number;
   monthlyLimitCents: number | null;
   currentMonthUsedCents: number;
+  isCurrentlyActive: boolean;
 }
 
 export interface Budget45aSummary {
@@ -47,6 +48,7 @@ export interface Budget45aSummary {
   currentMonthAllocatedCents: number;
   currentMonthUsedCents: number;
   currentMonthAvailableCents: number;
+  isCurrentlyActive: boolean;
 }
 
 export interface Budget39_42aSummary {
@@ -315,6 +317,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     startMonth: number;
     startDateStr?: string;
     skipKeys?: Set<string>;
+    endYear?: number;
+    endMonth?: number;
   }, d: Pick<typeof db, 'select' | 'insert'>): Promise<BudgetAllocation[]> {
     const { year: curYear, month: curMonth } = currentYearAndMonth();
 
@@ -335,10 +339,19 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
     const created: BudgetAllocation[] = [];
 
+    let finalEndYear = curYear;
+    let finalEndMonth = curMonth;
+    if (config.endYear != null && config.endMonth != null) {
+      if (config.endYear < curYear || (config.endYear === curYear && config.endMonth < curMonth)) {
+        finalEndYear = config.endYear;
+        finalEndMonth = config.endMonth;
+      }
+    }
+
     if (config.frequency === 'monthly') {
       let year = config.startYear;
       let month = config.startMonth;
-      while (year < curYear || (year === curYear && month <= curMonth)) {
+      while (year < finalEndYear || (year === finalEndYear && month <= finalEndMonth)) {
         const key = `${year}-${month}`;
         if (!existingSet.has(key) && !config.skipKeys?.has(key)) {
           const result = await d.insert(budgetAllocations).values({
@@ -358,7 +371,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
         if (month > 12) { month = 1; year++; }
       }
     } else {
-      for (let year = config.startYear; year <= curYear; year++) {
+      for (let year = config.startYear; year <= finalEndYear; year++) {
         if (!existingSet.has(`${year}`)) {
           const validFrom = year === config.startYear
             ? (config.startDateStr ?? firstDayOfMonth(config.startYear, config.startMonth))
@@ -476,6 +489,29 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
     const monthlyAmount = await this.getMonthlyBudgetAmountCents(customerId, _tx, _typeSettings);
 
+    const typeSettings = _typeSettings ?? await d.select()
+      .from(customerBudgetTypeSettings)
+      .where(eq(customerBudgetTypeSettings.customerId, customerId));
+    const s45b = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
+
+    if (s45b?.validFrom) {
+      const vfDate = parseLocalDate(s45b.validFrom);
+      const vfYear = vfDate.getFullYear();
+      const vfMonth = vfDate.getMonth() + 1;
+      if (vfYear > allocStartYear || (vfYear === allocStartYear && vfMonth > allocStartMonth)) {
+        allocStartYear = vfYear;
+        allocStartMonth = vfMonth;
+      }
+    }
+
+    let endYear: number | undefined;
+    let endMonth: number | undefined;
+    if (s45b?.validTo) {
+      const vtDate = parseLocalDate(s45b.validTo);
+      endYear = vtDate.getFullYear();
+      endMonth = vtDate.getMonth() + 1;
+    }
+
     return this.ensureAllocationsGeneric({
       customerId,
       budgetType: "entlastungsbetrag_45b",
@@ -487,10 +523,13 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       startYear: allocStartYear,
       startMonth: allocStartMonth,
       skipKeys,
+      endYear,
+      endMonth,
     }, d);
   }
 
   async syncBudgetAllocations(customerId: number, _tx?: DbClient, _preferences?: CustomerBudgetPreferences | undefined, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<void> {
+    const d = _tx ?? db;
     const [preferences, typeSettings] = await Promise.all([
       _preferences !== undefined ? _preferences : this.getBudgetPreferences(customerId, _tx),
       _typeSettings ?? this.getBudgetTypeSettings(customerId, _tx),
@@ -499,11 +538,83 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
 
     await Promise.all([
       this.ensureMonthlyAllocations(customerId, _tx, preferences, typeSettings),
-      this.ensureAllocations45a(customerId, _tx, preferences, amounts),
+      this.ensureAllocations45a(customerId, _tx, preferences, amounts, typeSettings),
       this.ensureAllocations39_42a(customerId, _tx, preferences, amounts),
     ]);
     await this.ensureYearlyCarryover45b(customerId, _tx);
     await this.processExpiredCarryover(customerId, _tx);
+
+    await this.softDeleteOutOfRangeAllocations(customerId, typeSettings, d);
+  }
+
+  private isAllocationOutOfRange(
+    alloc: { year: number | null; month: number | null },
+    setting: { validFrom: string | null; validTo: string | null }
+  ): boolean {
+    if (alloc.year == null) return false;
+    if (!setting.validFrom && !setting.validTo) return false;
+
+    if (alloc.month != null) {
+      const allocMonthStr = `${alloc.year}-${String(alloc.month).padStart(2, '0')}`;
+
+      if (setting.validFrom) {
+        const vfDate = parseLocalDate(setting.validFrom);
+        const vfMonthStr = `${vfDate.getFullYear()}-${String(vfDate.getMonth() + 1).padStart(2, '0')}`;
+        if (allocMonthStr < vfMonthStr) return true;
+      }
+
+      if (setting.validTo) {
+        const vtDate = parseLocalDate(setting.validTo);
+        const vtMonthStr = `${vtDate.getFullYear()}-${String(vtDate.getMonth() + 1).padStart(2, '0')}`;
+        if (allocMonthStr > vtMonthStr) return true;
+      }
+    } else {
+      if (setting.validFrom) {
+        const vfDate = parseLocalDate(setting.validFrom);
+        if (alloc.year < vfDate.getFullYear()) return true;
+      }
+      if (setting.validTo) {
+        const vtDate = parseLocalDate(setting.validTo);
+        if (alloc.year > vtDate.getFullYear()) return true;
+      }
+    }
+
+    return false;
+  }
+
+  private async softDeleteOutOfRangeAllocations(
+    customerId: number,
+    typeSettings: CustomerBudgetTypeSetting[],
+    d: Pick<typeof db, 'select' | 'update'>
+  ): Promise<void> {
+    for (const setting of typeSettings) {
+      if (!setting.enabled) continue;
+
+      const allAutoAllocations = await d.select()
+        .from(budgetAllocations)
+        .where(and(
+          eq(budgetAllocations.customerId, customerId),
+          eq(budgetAllocations.budgetType, setting.budgetType),
+          or(
+            eq(budgetAllocations.source, "monthly_auto"),
+            eq(budgetAllocations.source, "yearly_auto")
+          )
+        ));
+
+      for (const alloc of allAutoAllocations) {
+        const outOfRange = this.isAllocationOutOfRange(alloc, setting);
+
+        if (outOfRange && !alloc.deletedAt) {
+          await d.update(budgetAllocations)
+            .set({ deletedAt: new Date() })
+            .where(eq(budgetAllocations.id, alloc.id));
+        } else if (!outOfRange && alloc.deletedAt) {
+          await d.update(budgetAllocations)
+            .set({ deletedAt: null })
+            .where(eq(budgetAllocations.id, alloc.id));
+        }
+      }
+    }
   }
 
   async ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Promise<BudgetAllocation[]> {
@@ -705,18 +816,24 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     const availableCents = totalAllocatedCents - netUsedCents;
     const plannedCents = await this.getPlannedCostCents(customerId);
 
+    const s45b = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
+    const isCurrentlyActive = !s45b
+      ? true
+      : (!s45b.validFrom || today >= s45b.validFrom) && (!s45b.validTo || today <= s45b.validTo);
+
     return {
       customerId,
       totalAllocatedCents,
       totalUsedCents: netUsedCents,
-      availableCents,
-      plannedCents,
-      availableAfterPlannedCents: availableCents - plannedCents,
+      availableCents: isCurrentlyActive ? availableCents : 0,
+      plannedCents: isCurrentlyActive ? plannedCents : 0,
+      availableAfterPlannedCents: isCurrentlyActive ? availableCents - plannedCents : 0,
       carryoverCents,
       carryoverExpiresAt,
       currentYearAllocatedCents,
       monthlyLimitCents: await this.getEffectiveMonthlyLimitCents(customerId, typeSettings, preferences),
       currentMonthUsedCents,
+      isCurrentlyActive,
     };
   }
 
@@ -1140,7 +1257,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     return { pflegesachleistungen36: 0, verhinderungspflege39: 0 };
   }
 
-  async ensureAllocations45a(customerId: number, _tx?: DbClient, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }): Promise<BudgetAllocation[]> {
+  async ensureAllocations45a(customerId: number, _tx?: DbClient, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<BudgetAllocation[]> {
     const d = _tx ?? db;
     const startDateStr = await this.resolveStartDate(customerId, "umwandlung_45a", d, _preferences);
     if (!startDateStr) return [];
@@ -1148,7 +1265,33 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     const amounts = _amounts ?? await this.getCustomerBudgetAmounts(customerId, _tx);
     if (!amounts.pflegesachleistungen36) return [];
 
+    const typeSettings = _typeSettings ?? await d.select()
+      .from(customerBudgetTypeSettings)
+      .where(eq(customerBudgetTypeSettings.customerId, customerId));
+    const s45a = typeSettings.find(s => s.budgetType === "umwandlung_45a" && s.enabled);
+
     const startDate = parseLocalDate(startDateStr);
+    let startYear = startDate.getFullYear();
+    let startMonth = startDate.getMonth() + 1;
+
+    if (s45a?.validFrom) {
+      const vfDate = parseLocalDate(s45a.validFrom);
+      const vfYear = vfDate.getFullYear();
+      const vfMonth = vfDate.getMonth() + 1;
+      if (vfYear > startYear || (vfYear === startYear && vfMonth > startMonth)) {
+        startYear = vfYear;
+        startMonth = vfMonth;
+      }
+    }
+
+    let endYear: number | undefined;
+    let endMonth: number | undefined;
+    if (s45a?.validTo) {
+      const vtDate = parseLocalDate(s45a.validTo);
+      endYear = vtDate.getFullYear();
+      endMonth = vtDate.getMonth() + 1;
+    }
+
     return this.ensureAllocationsGeneric({
       customerId,
       budgetType: "umwandlung_45a",
@@ -1157,8 +1300,10 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       amountCents: amounts.pflegesachleistungen36,
       getExpiresAt: (y, m) => lastDayOfMonth(y, m),
       getNotes: (y, m) => `Automatische Zuweisung §45a ${String(m).padStart(2, '0')}/${y}`,
-      startYear: startDate.getFullYear(),
-      startMonth: startDate.getMonth() + 1,
+      startYear,
+      startMonth,
+      endYear,
+      endMonth,
     }, d);
   }
 
@@ -1185,7 +1330,7 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     }, d);
   }
 
-  async getBudgetSummary45a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }): Promise<Budget45aSummary> {
+  async getBudgetSummary45a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<Budget45aSummary> {
     const today = todayISO();
     const todayDate = parseLocalDate(today);
     const currentYear = todayDate.getFullYear();
@@ -1194,6 +1339,11 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     const currentMonthLastDay = lastDayOfMonth(currentYear, currentMonth);
 
     const amounts = _amounts ?? await this.getCustomerBudgetAmounts(customerId);
+    const typeSettings = _typeSettings ?? await this.getBudgetTypeSettings(customerId);
+    const s45a = typeSettings.find(s => s.budgetType === "umwandlung_45a" && s.enabled);
+    const isCurrentlyActive = !s45a
+      ? true
+      : (!s45a.validFrom || today >= s45a.validFrom) && (!s45a.validTo || today <= s45a.validTo);
 
     const [allocResult, txConsumptionResult, txReversalResult] = await Promise.all([
       db.select({
@@ -1237,7 +1387,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
       monthlyBudgetCents: amounts.pflegesachleistungen36,
       currentMonthAllocatedCents,
       currentMonthUsedCents,
-      currentMonthAvailableCents: currentMonthAllocatedCents - currentMonthUsedCents,
+      currentMonthAvailableCents: isCurrentlyActive ? currentMonthAllocatedCents - currentMonthUsedCents : 0,
+      isCurrentlyActive,
     };
   }
 
@@ -1310,8 +1461,8 @@ export class DatabaseBudgetLedgerStorage implements BudgetLedgerStorage {
     const [entlastungsbetrag45b, umwandlung45a, ersatzpflege39_42a] = await Promise.all([
       this.getBudgetSummary(customerId, preferences, typeSettings),
       is45aEnabled
-        ? this.getBudgetSummary45a(customerId, preferences, amounts)
-        : { customerId, monthlyBudgetCents: 0, currentMonthAllocatedCents: 0, currentMonthUsedCents: 0, currentMonthAvailableCents: 0 } as Budget45aSummary,
+        ? this.getBudgetSummary45a(customerId, preferences, amounts, typeSettings)
+        : { customerId, monthlyBudgetCents: 0, currentMonthAllocatedCents: 0, currentMonthUsedCents: 0, currentMonthAvailableCents: 0, isCurrentlyActive: false } as Budget45aSummary,
       is39Enabled
         ? this.getBudgetSummary39_42a(customerId, preferences, amounts)
         : { customerId, yearlyBudgetCents: 0, currentYearAllocatedCents: 0, currentYearUsedCents: 0, currentYearAvailableCents: 0 } as Budget39_42aSummary,

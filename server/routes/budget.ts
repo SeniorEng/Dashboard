@@ -249,12 +249,14 @@ router.get("/:customerId/overview", checkCustomerAccess, asyncHandler("Budget-Ü
       carryoverCents: s45b.carryoverCents,
       carryoverExpiresAt: s45b.carryoverExpiresAt,
       currentYearAllocatedCents: s45b.currentYearAllocatedCents,
+      isCurrentlyActive: s45b.isCurrentlyActive,
     },
     umwandlung45a: {
       monthlyBudgetCents: summaries.umwandlung45a.monthlyBudgetCents,
       currentMonthAllocatedCents: summaries.umwandlung45a.currentMonthAllocatedCents,
       currentMonthUsedCents: summaries.umwandlung45a.currentMonthUsedCents,
       currentMonthAvailableCents: summaries.umwandlung45a.currentMonthAvailableCents,
+      isCurrentlyActive: summaries.umwandlung45a.isCurrentlyActive,
       label: "§45a Umwandlungsanspruch",
     },
     ersatzpflege39_42a: {
@@ -454,6 +456,8 @@ router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
 
   const userId = req.user?.id;
   const saved = await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, result.data.settings);
+
+  await budgetLedgerStorage.syncBudgetAllocations(customerId);
 
   if (userId) {
     const ip = req.ip || req.socket.remoteAddress;

@@ -231,4 +231,5 @@ export interface BudgetSummary {
   currentYearAllocatedCents: number;
   monthlyLimitCents: number | null;
   currentMonthUsedCents: number;
+  isCurrentlyActive: boolean;
 }

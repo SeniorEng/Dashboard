@@ -29,12 +29,14 @@ interface BudgetOverview {
     carryoverCents: number;
     carryoverExpiresAt: string | null;
     currentYearAllocatedCents: number;
+    isCurrentlyActive: boolean;
   };
   umwandlung45a: {
     monthlyBudgetCents: number;
     currentMonthAllocatedCents: number;
     currentMonthUsedCents: number;
     currentMonthAvailableCents: number;
+    isCurrentlyActive: boolean;
     label: string;
   };
   ersatzpflege39_42a: {
@@ -166,9 +168,14 @@ export function BudgetLedgerSection({ customerId, customerName, onRefresh }: Bud
           : null;
 
         const wrapInactive = (content: React.ReactNode) => (
-          <div key={budgetType} className={!setting.isCurrentlyActive ? "opacity-50" : ""}>
+          <div key={budgetType} className={!setting.isCurrentlyActive ? "opacity-60 relative" : ""}>
             {!setting.isCurrentlyActive && (
-              <p className="text-xs text-amber-600 mb-1 font-medium">{inactiveLabel}</p>
+              <div className="flex items-center gap-2 mb-2">
+                <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-300" data-testid={`badge-inactive-${budgetType}`}>
+                  {setting.validFrom && today < setting.validFrom ? "Noch nicht aktiv" : "Abgelaufen"}
+                </Badge>
+                <span className="text-xs text-amber-600 font-medium">{inactiveLabel}</span>
+              </div>
             )}
             {content}
           </div>
