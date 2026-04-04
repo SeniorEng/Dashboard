@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 
 interface FilePreview {
   file: File;
@@ -45,6 +45,12 @@ export function useFileSelection() {
     if (files.length > 0) addFiles(files);
     e.target.value = "";
   }, [addFiles]);
+
+  useEffect(() => {
+    return () => {
+      filePreviews.forEach(p => { if (p.preview) URL.revokeObjectURL(p.preview); });
+    };
+  }, []);
 
   return {
     selectedFiles,
