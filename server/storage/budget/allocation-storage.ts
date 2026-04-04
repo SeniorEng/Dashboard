@@ -293,13 +293,25 @@ async function calculateAllocated45b(
     }
   }
 
-  let endYear = curYear;
-  let endMonth = curMonth;
+  let horizonYear = curYear;
+  let horizonMonth = curMonth;
+  if (opts.asOfDate) {
+    const asOf = parseLocalDate(opts.asOfDate);
+    const asOfYear = asOf.getFullYear();
+    const asOfMonth = asOf.getMonth() + 1;
+    if (asOfYear < curYear || (asOfYear === curYear && asOfMonth < curMonth)) {
+      horizonYear = asOfYear;
+      horizonMonth = asOfMonth;
+    }
+  }
+
+  let endYear = horizonYear;
+  let endMonth = horizonMonth;
   if (s45b?.validTo) {
     const vtDate = parseLocalDate(s45b.validTo);
     const vtYear = vtDate.getFullYear();
     const vtMonth = vtDate.getMonth() + 1;
-    if (vtYear < curYear || (vtYear === curYear && vtMonth < curMonth)) {
+    if (vtYear < endYear || (vtYear === endYear && vtMonth < endMonth)) {
       endYear = vtYear;
       endMonth = vtMonth;
     }
@@ -335,7 +347,9 @@ async function calculateAllocated45b(
     .reduce((sum, a) => sum + a.amountCents, 0);
 
   const carryoverTotal = existingAllocations
-    .filter(a => a.source === "carryover")
+    .filter(a => a.source === "carryover" &&
+      a.validFrom <= (opts.asOfDate ?? `${curYear}-12-31`) &&
+      (!a.expiresAt || a.expiresAt >= (opts.asOfDate ?? `${curYear}-01-01`)))
     .reduce((sum, a) => sum + a.amountCents, 0);
 
   return totalCalculated + initialBalanceTotal + carryoverTotal;
@@ -357,6 +371,35 @@ async function calculateAllocated45a(
   const { year: curYear, month: curMonth } = currentYearAndMonth();
 
   let startDateStr = preferences?.budgetStartDate ?? null;
+
+  const existingAllocations = await d.select()
+    .from(budgetAllocations)
+    .where(and(
+      eq(budgetAllocations.customerId, customerId),
+      eq(budgetAllocations.budgetType, "umwandlung_45a"),
+      isNull(budgetAllocations.deletedAt)
+    ));
+
+  if (!startDateStr) {
+    const ibEntries = existingAllocations.filter(a => a.source === "initial_balance" && a.validFrom);
+    if (ibEntries.length > 0) {
+      startDateStr = ibEntries.reduce((min, a) =>
+        a.validFrom < min.validFrom ? a : min
+      ).validFrom;
+    }
+  }
+
+  if (!startDateStr) {
+    const otherEntries = existingAllocations.filter(a =>
+      (a.source === "monthly_auto" || a.source === "monthly" || a.source === "carryover") && a.validFrom
+    );
+    if (otherEntries.length > 0) {
+      startDateStr = otherEntries.reduce((min, a) =>
+        a.validFrom < min.validFrom ? a : min
+      ).validFrom;
+    }
+  }
+
   if (!startDateStr) {
     const enabled = typeSettings.find(s => s.budgetType === "umwandlung_45a" && s.enabled);
     if (!enabled) return 0;
@@ -368,14 +411,7 @@ async function calculateAllocated45a(
 
   const s45a = typeSettings.find(s => s.budgetType === "umwandlung_45a" && s.enabled);
 
-  const initialBalances = await d.select()
-    .from(budgetAllocations)
-    .where(and(
-      eq(budgetAllocations.customerId, customerId),
-      eq(budgetAllocations.budgetType, "umwandlung_45a"),
-      eq(budgetAllocations.source, "initial_balance"),
-      isNull(budgetAllocations.deletedAt)
-    ));
+  const initialBalances = existingAllocations.filter(a => a.source === "initial_balance");
 
   if (!monthlyAmount && initialBalances.length === 0) return 0;
 
@@ -419,12 +455,13 @@ async function calculateAllocated45a(
     const asOf = parseLocalDate(opts.asOfDate);
     const asOfYear = asOf.getFullYear();
     const asOfMonth = asOf.getMonth() + 1;
-    if (asOfYear === curYear && asOfMonth === curMonth) {
-      const ibForMonth = initialBalances
-        .filter(a => a.year === asOfYear && a.month === asOfMonth)
-        .reduce((sum, a) => sum + a.amountCents, 0);
-      return monthlyAmount + ibForMonth;
-    }
+    const inRange = (asOfYear > startYear || (asOfYear === startYear && asOfMonth >= startMonth)) &&
+                    (asOfYear < endYear || (asOfYear === endYear && asOfMonth <= endMonth));
+    if (!inRange) return 0;
+    const ibForMonth = initialBalances
+      .filter(a => a.year === asOfYear && a.month === asOfMonth)
+      .reduce((sum, a) => sum + a.amountCents, 0);
+    return monthlyAmount + ibForMonth;
   }
 
   let count = 0;
@@ -449,6 +486,33 @@ async function calculateAllocated39_42a(
   const { year: curYear } = currentYearAndMonth();
 
   let startDateStr = preferences?.budgetStartDate ?? null;
+
+  if (!startDateStr) {
+    const existingAllocations = await d.select()
+      .from(budgetAllocations)
+      .where(and(
+        eq(budgetAllocations.customerId, customerId),
+        eq(budgetAllocations.budgetType, "ersatzpflege_39_42a"),
+        isNull(budgetAllocations.deletedAt)
+      ));
+    const initialBalances = existingAllocations.filter(a => a.source === "initial_balance" && a.validFrom);
+    if (initialBalances.length > 0) {
+      startDateStr = initialBalances.reduce((min, a) =>
+        a.validFrom < min.validFrom ? a : min
+      ).validFrom;
+    }
+    if (!startDateStr) {
+      const otherEntries = existingAllocations.filter(a =>
+        (a.source === "monthly_auto" || a.source === "monthly" || a.source === "carryover") && a.validFrom
+      );
+      if (otherEntries.length > 0) {
+        startDateStr = otherEntries.reduce((min, a) =>
+          a.validFrom < min.validFrom ? a : min
+        ).validFrom;
+      }
+    }
+  }
+
   if (!startDateStr) {
     const enabled = typeSettings.find(s => s.budgetType === "ersatzpflege_39_42a" && s.enabled);
     if (!enabled) return 0;
@@ -476,6 +540,11 @@ async function calculateAllocated39_42a(
 
   if (opts.year != null) {
     return opts.year >= startYear && opts.year <= endYear ? amounts.verhinderungspflege39 : 0;
+  }
+
+  if (opts.asOfDate) {
+    const asOfYear = parseLocalDate(opts.asOfDate).getFullYear();
+    return asOfYear >= startYear && asOfYear <= endYear ? amounts.verhinderungspflege39 : 0;
   }
 
   return Math.max(0, endYear - startYear + 1) * amounts.verhinderungspflege39;
