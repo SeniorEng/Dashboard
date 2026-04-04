@@ -1,0 +1,179 @@
+Wähle Text aus, um Kommentare für Claude zu hinterlassenContext
+server/storage/budget-ledger.ts hat 2.287 Zeilen und ~40 Methoden. Bevor wir die Datei einfach nur in Unter-Module splitten, stellt sich die Frage: Muss das ueberhaupt so komplex sein?
+
+Analyse: Wo liegt die unnoetige Komplexitaet?
+Problem 1: Auto-Allokationen als DB-Zeilen (~700 Zeilen, ~30% der Datei)
+Das System erzeugt fuer JEDEN Monat eine Allokations-Zeile in der DB:
+
+ensureMonthlyAllocations (Z.412-530) -- 120 Zeilen allein fuer §45b
+ensureAllocations45a (Z.1260-1308)
+ensureAllocations39_42a (Z.1310-1331)
+ensureAllocationsGeneric (Z.308-396) -- 90 Zeilen generische Factory
+syncBudgetAllocations (Z.531-549) -- Orchestrierung
+softDeleteOutOfRangeAllocations (Z.585-619) -- Aufraeum-Logik
+isAllocationOutOfRange (Z.550-584) -- Validierung
+ensureYearlyCarryover45b (Z.620-714) -- 95 Zeilen Carryover-Erzeugung
+resolveStartDate (Z.398-411) -- Startdatum-Fallback-Kette
+
+Das Grundproblem: Die monatlichen Allokationen sind deterministische Ableitungen aus wenigen Konfig-Werten (Startdatum, Monatsbetrag, Budget-Typ). Trotzdem werden sie als individuelle DB-Zeilen materialisiert und bei jedem Request via syncBudgetAllocations synchronisiert. Das erzeugt:
+
+N+1 Query-Patterns (Schleife mit INSERT pro Monat)
+Soft-Delete/Restore-Logik fuer "out of range" Allokationen
+Komplexe Startdatum-Ermittlung mit 4 Fallback-Stufen
+FIFO-Consumption-Tracking auf Allokations-Ebene (welche Allokation wurde verbraucht)
+
+Best Practice (Stripe Ledger-Ansatz): Salden werden BERECHNET, nicht gespeichert. Nur Ausnahmen (Carryover, Initial-Balance, manuelle Anpassungen) brauchen echte DB-Zeilen.
+Problem 2: FIFO-Consumption auf Allokations-Ebene (~200 Zeilen)
+consumeFifo (Z.1623-1748) verbraucht Budget aus der aeltesten Allokation zuerst. Das ist nur relevant wenn Allokationen unterschiedliche Ablaufdaten haben -- was nur fuer Carryover gilt (verfaellt am 30.06.).
+Fuer regulaere Monatsbudgets ist FIFO sinnlos: §45b verfaellt nicht innerhalb des Jahres. §45a verfaellt am Monatsende, §39/42a am Jahresende -- aber das laesst sich ueber Transaktions-Datum ableiten, nicht Allokations-ID.
+Problem 3: createConsumptionTransaction God-Method (Z.1106-1234, 130 Zeilen)
+Mischt: Kostenberechnung -> Kundendaten-Lookup -> Budget-Validierung ueber 3 Typen -> Cascade-Consumption -> Privatzahlung-Fallback -> Error-Formatting.
+Problem 4: Rebook-Logik liest Appointment-Tabellen (Z.2199-2260)
+rebookDisabledBudgetTransactions greift auf appointments, appointmentServices, services zu -- Tabellen die nichts mit dem Budget-Ledger zu tun haben. Das ist ein Architektur-Bruch.
+
+Zwei Optionen
+Option A: "Nur aufsplitten" (konservativ, geringes Risiko)
+Die aktuelle Logik bleibt, wird aber in 7 Module aufgeteilt. Loest das Organisationsproblem, aber nicht die inhaltliche Ueberkomplexitaet. ~2.287 Zeilen -> ~2.100 Zeilen (wenig Ersparnis).
+Option B: "Vereinfachen + aufsplitten" (empfohlen, mittleres Risiko)
+Kernidee: Regulaere Auto-Allokationen nicht mehr als DB-Zeilen materialisieren, sondern zur Laufzeit berechnen.
+Was sich aendert:
+
+totalAllocated wird berechnet statt aus DB summiert: Monate_seit_Start x Monatsbetrag
+Nur Sonder-Allokationen bleiben als DB-Zeilen: initial_balance, carryover, manual_adjustment
+FIFO vereinfacht sich: Verbrauche erst Carryover (aeltestes zuerst, weil Ablaufdatum), dann regulaeres Budget (abgeleitet)
+syncBudgetAllocations wird zu syncCarryover: Nur noch Carryover-Berechnung + Verfall, keine monatliche Zeilen-Erzeugung
+~700 Zeilen Allokations-Auto-Generierung entfallen
+
+Was gleich bleibt:
+
+budget_transactions Tabelle (append-only, Source of Truth fuer Verbrauch)
+Cascade-Logik (45a -> 45b -> 39/42a)
+budget_allocations Tabelle fuer Sonder-Eintraege
+Alle externen API-Vertraege
+
+Geschaetzte Reduktion: 2.287 -> ~1.400 Zeilen (bevor Aufspaltung), dann sauber in ~5 Module.
+
+Empfohlener Ansatz: Option B
+Phase 1: Abgeleitete Allokationen (die grosse Vereinfachung)
+Schritt 1a: Neue Funktion calculateAllocatedCents(budgetType, customerId, period)
+Berechnet zur Laufzeit was aktuell materialisiert wird:
+typescript// §45b: Monate zwischen Start und heute × Monatsbetrag
+function calculateAllocatedCents(customerId: number, budgetType: string, period: { year: number; month?: number }): Promise<number> {
+  // 1. Lese Startdatum + Monatsbetrag aus Preferences/TypeSettings (1 Query)
+  // 2. Berechne: min(Monate_seit_Start, Monate_bis_Ende_Period) × Monatsbetrag
+  // 3. Addiere Sonder-Allokationen (carryover, initial_balance, manual) aus DB
+  // FERTIG -- keine ensure*-Aufrufe noetig
+}
+Schritt 1b: getBudgetSummary vereinfachen
+Aktuell (Z.716-838, 120 Zeilen, 6 parallele Queries):
+1. ensureMonthlyAllocations() -- ENTFAELLT
+2. processExpiredCarryover() -- bleibt (fuer Carryover-Verfall)
+3. 6x DB-Queries fuer Allokationen/Transaktionen
+Neu (~50 Zeilen):
+1. calculateAllocatedCents() -- berechnet statt DB
+2. SUM(transactions) fuer Verbrauch -- 1 Query
+3. Carryover-Info aus budget_allocations WHERE source='carryover' -- 1 Query
+4. Preferences -- 1 Query (oder gecached)
+Schritt 1c: syncBudgetAllocations -> syncCarryoverAndExpiry
+Wird radikal vereinfacht:
+
+KEIN ensureMonthlyAllocations / ensureAllocations45a / ensureAllocations39_42a
+KEIN softDeleteOutOfRangeAllocations / isAllocationOutOfRange
+NUR: ensureYearlyCarryover45b + processExpiredCarryover
+Alle Aufrufer von syncBudgetAllocations werden auf syncCarryoverAndExpiry umgestellt
+
+Methoden die entfallen:
+
+ensureAllocationsGeneric (Z.308-396) -- 90 Zeilen
+resolveStartDate (Z.398-411) -- 14 Zeilen
+ensureMonthlyAllocations (Z.412-530) -- 120 Zeilen
+ensureAllocations45a (Z.1260-1308) -- 50 Zeilen
+ensureAllocations39_42a (Z.1310-1331) -- 22 Zeilen
+isAllocationOutOfRange (Z.550-584) -- 35 Zeilen
+softDeleteOutOfRangeAllocations (Z.585-619) -- 35 Zeilen
+getMonthlyBudgetAmountCents (Z.281-307) -- 27 Zeilen (Betrag kommt direkt aus Settings)
+
+Gesamt: ~393 Zeilen geloescht, ersetzt durch ~60 Zeilen calculateAllocatedCents.
+Schritt 1d: FIFO vereinfachen
+consumeFifo muss nur noch:
+
+Erst Carryover-Allokationen verbrauchen (haben Ablaufdatum -> aelteste zuerst)
+Fuer den Rest: regulaeres Budget direkt als Transaktion buchen (kein allocationId noetig)
+
+Spart ~50 Zeilen und die Notwendigkeit, FIFO ueber Dutzende monatliche Allokations-Zeilen zu laufen.
+Schritt 1e: Migration bestehender Daten
+
+monthly_auto Allokations-Zeilen bleiben in der DB (als historische Daten)
+Neue Summaries ignorieren sie und berechnen stattdessen
+Bestehende Transaktionen mit allocationId auf alte Allokationen bleiben valide
+KEIN destruktives Daten-Loeschen noetig
+
+Phase 2: Aufspaltung in Module
+Nach der Vereinfachung bleiben ~1.400 Zeilen. Aufspaltung in:
+server/storage/
+  budget-ledger.ts                  (~80 Zeilen, Facade)
+  budget/
+    types.ts                        (~80 Zeilen)
+    allocation-storage.ts           (~200 Zeilen) CRUD + calculateAllocatedCents + Carryover
+    transaction-storage.ts          (~100 Zeilen) CRUD + Storno
+    consumption-engine.ts           (~350 Zeilen) Cascade + FIFO + createConsumptionTransaction
+    summary-queries.ts              (~200 Zeilen) Summaries + getPlannedCostCents
+    preferences-storage.ts          (~80 Zeilen)  Preferences + Type-Settings
+    rebook-engine.ts                (~250 Zeilen) Rebook-Logik
+  appointment-cost-calculator.ts    (~70 Zeilen)  Pricing
+Phase 3: Interface aufraumen
+Bereinigtes Interface (20 extern genutzte Methoden):
+
+createBudgetAllocation, getBudgetAllocations, getInitialBalanceAllocations, upsertInitialBalanceAllocation
+syncCarryoverAndExpiry (statt syncBudgetAllocations)
+createBudgetTransaction, getBudgetTransactions, getTransactionsByAppointmentId (NEU!), reverseBudgetTransaction
+getBudgetSummary, getAllBudgetSummaries, getPlannedCostCents
+getBudgetPreferences, upsertBudgetPreferences, getBudgetTypeSettings, upsertBudgetTypeSettings
+calculateAppointmentCost, createConsumptionTransaction
+rebookSingleTransaction, getRebookPreview, rebookDisabledBudgetTransactions
+
+Entfernt (~20 interne Methoden -- alles was vorher drin war, siehe oben)
+
+Inkrementelle PRs
+PRPhaseRisikoBeschreibungPR 11a-1bMittelcalculateAllocatedCents + vereinfachte SummariesPR 21c-1dMittelsyncCarryoverAndExpiry + vereinfachtes FIFOPR 32NiedrigAufspaltung in Module (rein strukturell)PR 43NiedrigInterface aufraumen + Facade
+
+Technische Hinweise
+
+Keine DB-Migration noetig: Bestehende monthly_auto-Zeilen bleiben. Neue Logik berechnet statt liest.
+Transaktions-Kontext: _tx?: DbClient Pattern bleibt erhalten.
+Abhaengigkeits-Graph (keine Zyklen): facade -> [alle], consumption -> [allocation, transaction, summary, preferences, cost-calc], rebook -> [transaction, consumption, cost-calc]
+rebookDisabledBudgetTransactions liest appointments/services Tabellen -- einziger Architektur-Bruch, isoliert in rebook-engine.ts
+Sub-Module als Funktionen, nicht Klassen: Facade-Klasse nur fuer Interface-Kompatibilitaet.
+
+
+Verifizierung
+Nach jedem PR:
+
+tsc --noEmit -- keine Typfehler
+Budget-Routes testen: GET/POST auf /budget/:customerId/summary, /overview, /allocations, /transactions, /preferences, /type-settings, /initial-balances/:type
+Termin-Dokumentation (POST /:id/document -> Consumption-Transaction)
+Termin-Reopening (POST /:id/reopen -> Storno)
+Termin/Serien erstellen -> syncCarryoverAndExpiry + getBudgetSummary
+Rebook testen: POST /rebook, GET /rebook-preview, POST /rebook-disabled
+Server-Startup pruefen: sync-budget-allocations.ts
+Regressions-Check: Vergleiche Budget-Summaries vor/nach Migration fuer 3-5 Testkunden
+
+
+Kritische Dateien
+Hauptdatei: server/storage/budget-ledger.ts (2.287 Zeilen)
+Konsumenten:
+
+server/routes/budget.ts (28+ Aufrufe)
+server/routes/appointments.ts, appointment-series.ts, appointment-documentation.ts
+server/routes/admin/customers.ts, admin/customers/budgets.ts
+server/services/appointment-import.ts
+server/startup/sync-budget-allocations.ts
+
+Schema/Domain: shared/schema/budget.ts, shared/domain/budgets.ts, server/storage/service-catalog.ts
+
+Quellen
+
+Stripe Ledger: Tracking Money Movement -- Salden berechnen statt speichern
+Double-Entry Bookkeeping for Programmers -- Ledger als Design Pattern
+Building Your Own Ledger Database -- Immutability + Separation of Concerns
+§45b SGB XI -- Gesetzestext Entlastungsbetrag
