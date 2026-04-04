@@ -5,7 +5,7 @@ description: Master orchestration skill that coordinates all audit agents. Defin
 
 # AI Development Team — Master Orchestration
 
-This skill defines how the virtual AI development team operates. It coordinates 9 specialized audit agents plus the Architect to ensure comprehensive code quality.
+This skill defines how the virtual AI development team operates. It coordinates 10 specialized audit agents plus the Architect to ensure comprehensive code quality.
 
 ## The Team Roster
 
@@ -22,6 +22,7 @@ This skill defines how the virtual AI development team operates. It coordinates 
 | 🎨 | **UI/UX & A11y** | `.agents/skills/ui-ux-audit/` | Touch targets, feedback, skeleton loading, mobile, German wording, accessibility, PWA | UX Designer |
 | 🧪 | **QA & Testing** | `.agents/skills/qa-testing/` | Happy path, edge cases, regression, contract testing, smoke tests, proactive test recommendations | QA Tester |
 | 🚀 | **DevOps** | `.agents/skills/devops-release/` | Env vars, dependencies, build, logging, health checks, graceful shutdown, deployment | Release Manager |
+| 📐 | **API Contract** | `.agents/skills/api-contract-audit/` | Shared type coverage, backend annotations, frontend consumption, mutation generics, tsc baseline | API Type Specialist |
 
 ---
 
@@ -50,14 +51,15 @@ Not all code changes carry equal risk. Allocate testing effort proportionally:
 | What Changed | Agents to Run |
 |---|---|
 | Database schema, storage queries | Database + Code Quality + Regression Guard |
-| API routes, endpoints | Security + Error Handling + Business Logic + Code Quality + Regression Guard |
+| API routes, endpoints | Security + Error Handling + Business Logic + Code Quality + Regression Guard + API Contract |
 | Business workflows, status transitions | Business Logic + QA + Code Quality + Regression Guard |
 | Frontend components, pages | UI/UX + Performance + Code Quality |
 | Forms, user input handling | Security + UI/UX + QA + Code Quality |
-| Frontend mutations (useMutation) | Error Handling + Code Quality |
+| Frontend mutations (useMutation) | Error Handling + Code Quality + API Contract |
 | Authentication, authorization | Security + Regression Guard (permission regression) + Code Quality |
 | Dependencies (package.json) | DevOps + Security (supply chain) |
 | Build config, env vars | DevOps |
+| Shared API types (shared/api/) | API Contract + Regression Guard + Code Quality |
 | Shared modules (shared/, server/lib/) | Regression Guard + Code Quality + all affected specialists |
 | Schema migration (ALTER TABLE) | Database + Regression Guard (migration safety) + Code Quality |
 | Major feature (end-to-end) | ALL agents |
@@ -72,7 +74,7 @@ Not all code changes carry equal risk. Allocate testing effort proportionally:
 | Medium feature (10-100 lines) | Code Quality + 1-2 relevant specialists + Architect |
 | Large feature (100+ lines) | Code Quality + Regression Guard + all relevant specialists + Architect |
 | Multi-file refactor (3+ files) | Code Quality + Regression Guard + Architect |
-| Pre-deployment | Full team audit (all 9 agents) |
+| Pre-deployment | Full team audit (all 10 agents) |
 
 ### Small Fix Shortcut
 
@@ -87,11 +89,11 @@ Start: What did you change?
 │
 ├── Auth, sessions, permissions?     → Security + Regression Guard
 ├── Database schema or queries?      → Database + Regression Guard
-├── API routes or endpoints?         → Security + Error Handling + Business Logic + Regression Guard
+├── API routes or endpoints?         → Security + Error Handling + Business Logic + Regression Guard + API Contract
 ├── Business workflows or status?    → Business Logic + QA + Regression Guard
 ├── Frontend components or pages?    → UI/UX + Performance
 ├── Forms or user input?             → Security + UI/UX + QA
-├── Frontend mutations?              → Error Handling
+├── Frontend mutations?              → Error Handling + API Contract
 ├── Dependencies (package.json)?     → DevOps + Security (supply chain)
 ├── Build config or env vars?        → DevOps
 ├── Shared modules?                  → Regression Guard + ALL affected specialists
@@ -117,6 +119,7 @@ Not every audit needs to be exhaustive. Use time budgets to keep audits proporti
 | UI/UX | 3 min (Cat 1, 6) | 10 min (Cat 1-5) | 15 min (all 8 categories) |
 | QA | 5 min (Cat 1 only) | 15 min (Cat 1-5) | 20 min (all 9 categories) |
 | DevOps | 3 min (Cat 3, 4) | 10 min (Cat 1-5) | 15 min (all 7 categories) |
+| API Contract | 5 min (Cat 4, 5) | 10 min (Cat 1-5) | 15 min (all 6 categories) |
 
 ### Audit Profiles
 
@@ -125,7 +128,7 @@ Not every audit needs to be exhaustive. Use time budgets to keep audits proporti
 | **Quick** | Small fix (< 10 lines, 1 file) | < 5 min | Code Quality (Cat 2, 7) + Architect |
 | **Standard** | Medium feature (10-100 lines) | ~15 min | Code Quality + 1-2 specialists (standard depth) + Architect |
 | **Thorough** | Large feature (100+ lines) | ~45 min | Code Quality + Regression Guard + all relevant specialists (standard depth) + Architect |
-| **Pre-deploy** | Before publishing to production | ~60 min | All 9 agents (full depth) + DevOps Category 6 checklist |
+| **Pre-deploy** | Before publishing to production | ~60 min | All 10 agents (full depth) + DevOps Category 6 checklist |
 
 ---
 
@@ -167,9 +170,9 @@ When agents give contradicting recommendations, resolve using this priority orde
 These are conceptual commands that trigger specific agent combinations:
 
 ### `/audit` — Full Team Audit
-Runs ALL 9 agents against the current codebase state (git diff).
+Runs ALL 10 agents against the current codebase state (git diff).
 **When**: Before deployment, after major milestones, monthly reviews.
-**Execution**: All 9 agents run as parallel subagents, each producing their audit report.
+**Execution**: All 10 agents run as parallel subagents, each producing their audit report.
 
 ### `/smoke` — Post-Deploy Quick Check
 Quick validation that critical functionality still works after deployment.
@@ -230,8 +233,9 @@ When running a full team audit, the results are aggregated into a summary:
 | UI/UX | 6/8 | 2 | 0 | — |
 | QA Testing | 7/9 | 2 | 0 | — |
 | DevOps | 5/6 | 1 | 0 | — |
+| API Contract | 5/6 | 1 | 0 | — |
 
-### Overall: PASS (0 FAIL, 14 WARN)
+### Overall: PASS (0 FAIL, 15 WARN)
 
 ### Risk Assessment
 - HOCH-risk modules checked: [list]
