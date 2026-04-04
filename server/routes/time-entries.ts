@@ -4,6 +4,7 @@ import { asyncHandler } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { insertTimeEntrySchema, updateTimeEntrySchema } from "@shared/schema";
+import type { VacationSummary, TimeOverviewData, TimesPageData } from "@shared/api";
 import { storage } from "../storage";
 import { authService } from "../services/auth";
 import { auditService } from "../services/audit";

@@ -34,6 +34,7 @@ import { notificationService } from "../services/notification-service";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
 import type { Response } from "express";
+import type { CoverageCheckResponse } from "@shared/api";
 import appointmentDocumentationRouter from "./appointment-documentation";
 import { db } from "../lib/db";
 import { customerManagementStorage } from "../storage/customer-management";

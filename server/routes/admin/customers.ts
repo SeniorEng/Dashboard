@@ -11,6 +11,7 @@ import {
   customers,
   type InsertCustomer,
 } from "@shared/schema";
+import type { CustomerDetail } from "@shared/api";
 import { internationalEmailSchema, optionalGermanPhoneSchema } from "@shared/schema/common";
 import { asyncHandler } from "../../lib/errors";
 import { z } from "zod";

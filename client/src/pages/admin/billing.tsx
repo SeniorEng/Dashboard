@@ -27,6 +27,15 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
 import { iconSize, componentStyles } from "@/design-system";
+import type {
+  BillingCustomerItem,
+  InvoiceItem,
+  InvoiceDetail,
+  DeliveryRecord,
+  GenerateInvoiceResponse as GenerateResponse,
+  SendInvoiceResponse as SendResponse,
+  BatchSendInvoiceResponse as BatchSendResponse,
+} from "@shared/api";
 import {
   ArrowLeft,
   Plus,
@@ -74,74 +83,6 @@ const TYPE_COLORS: Record<string, string> = {
   nachberechnung: "bg-amber-50 text-amber-700 border-amber-200",
 };
 
-interface CustomerListItem {
-  id: number;
-  name: string;
-  vorname: string | null;
-  nachname: string | null;
-  billingType: string;
-  status: string;
-}
-
-interface InvoiceItem {
-  id: number;
-  invoiceNumber: string;
-  customerId: number;
-  billingType: string;
-  invoiceType: string;
-  billingMonth: number;
-  billingYear: number;
-  recipientName: string;
-  grossAmountCents: number;
-  status: string;
-}
-
-interface InvoiceLineItem {
-  id: number;
-  appointmentDate: string;
-  serviceDescription: string;
-  startTime: string | null;
-  endTime: string | null;
-  durationMinutes: number;
-  totalCents: number;
-  employeeName: string | null;
-}
-
-interface InvoiceDetail extends InvoiceItem {
-  lineItems: InvoiceLineItem[];
-}
-
-interface DeliveryRecord {
-  id: number;
-  deliveryMethod: string;
-  status: string;
-  recipientEmail: string | null;
-  recipientName: string | null;
-  recipientAddress: string | null;
-  documentFileNames: string | null;
-  sentAt: string | null;
-  createdAt: string;
-  errorMessage: string | null;
-}
-
-interface GenerateResponse {
-  splitInvoices?: boolean;
-  invoices?: { id: number }[];
-  message?: string;
-}
-
-interface SendResponse {
-  message: string;
-  invoice?: InvoiceItem;
-  results?: { invoiceId: number; status: string; recipientEmail: string; customerCopy?: boolean }[];
-}
-
-interface BatchSendResponse {
-  message: string;
-  summary: { sent: number; errors: number; skipped: number; total: number };
-  results: { invoiceId: number; invoiceNumber: string; status: string; error?: string; recipientEmail?: string }[];
-}
-
 function formatAmount(cents: number): string {
   return (cents / 100).toFixed(2).replace(".", ",") + " €";
 }
@@ -151,7 +92,7 @@ function formatDate(dateStr: string): string {
   return `${d}.${m}.${y}`;
 }
 
-function getCustomerName(c: CustomerListItem): string {
+function getCustomerName(c: BillingCustomerItem): string {
   return c.vorname && c.nachname ? `${c.vorname} ${c.nachname}` : c.name;
 }
 
@@ -190,7 +131,7 @@ export default function AdminBilling() {
       const params = new URLSearchParams();
       params.set("month", selectedMonth.toString());
       params.set("year", selectedYear.toString());
-      const result = await api.get<CustomerListItem[]>(`/billing/eligible-customers?${params.toString()}`, signal);
+      const result = await api.get<BillingCustomerItem[]>(`/billing/eligible-customers?${params.toString()}`, signal);
       return unwrapResult(result);
     },
   });

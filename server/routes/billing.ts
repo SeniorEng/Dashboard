@@ -22,6 +22,7 @@ import {
   budgetTransactions,
 } from "@shared/schema";
 import type { Invoice, InvoiceLineItem, CompanySettings, InsertDocumentDelivery } from "@shared/schema";
+import type { BillingCustomerItem, InvoiceItem } from "@shared/api";
 import { documentDeliveries } from "@shared/schema";
 import { eq, and, gte, lte, isNull, inArray, ne, notInArray, or, desc } from "drizzle-orm";
 import { z } from "zod";
