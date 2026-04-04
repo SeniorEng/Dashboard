@@ -599,36 +599,40 @@ export async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClien
     const carryoverIntoThisYear = carryoverAllocations.filter(a => a.year === year);
     const totalCarryoverIn = carryoverIntoThisYear.reduce((sum, a) => sum + a.amountCents, 0);
 
-    const yearStart = `${year}-01-01`;
-    const yearEnd = `${year}-12-31`;
+    const yearAllocationIds = allAllocations
+      .filter(a => a.year === year && a.source !== "carryover")
+      .map(a => a.id);
+    const carryoverIds = carryoverIntoThisYear.map(a => a.id);
+    const relevantIds = [...yearAllocationIds, ...carryoverIds];
 
-    const consumptionResult = await d.select({
-      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-    })
-      .from(budgetTransactions)
-      .where(and(
-        eq(budgetTransactions.customerId, customerId),
-        eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
-        sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
-        gte(budgetTransactions.transactionDate, yearStart),
-        lte(budgetTransactions.transactionDate, yearEnd)
-      ));
+    let netConsumed = 0;
+    if (relevantIds.length > 0) {
+      const consumptionResult = await d.select({
+        total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+      })
+        .from(budgetTransactions)
+        .where(and(
+          eq(budgetTransactions.customerId, customerId),
+          eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
+          sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
+          inArray(budgetTransactions.allocationId, relevantIds)
+        ));
 
-    const reversalResult = await d.select({
-      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-    })
-      .from(budgetTransactions)
-      .where(and(
-        eq(budgetTransactions.customerId, customerId),
-        eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
-        eq(budgetTransactions.transactionType, "reversal"),
-        gte(budgetTransactions.transactionDate, yearStart),
-        lte(budgetTransactions.transactionDate, yearEnd)
-      ));
+      const reversalResult = await d.select({
+        total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+      })
+        .from(budgetTransactions)
+        .where(and(
+          eq(budgetTransactions.customerId, customerId),
+          eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
+          eq(budgetTransactions.transactionType, "reversal"),
+          inArray(budgetTransactions.allocationId, relevantIds)
+        ));
 
-    const totalConsumed = Number(consumptionResult[0]?.total ?? 0);
-    const totalReversed = Number(reversalResult[0]?.total ?? 0);
-    const netConsumed = Math.max(0, totalConsumed - totalReversed);
+      const totalConsumed = Number(consumptionResult[0]?.total ?? 0);
+      const totalReversed = Number(reversalResult[0]?.total ?? 0);
+      netConsumed = Math.max(0, totalConsumed - totalReversed);
+    }
     const totalPool = yearAllocatedCents + totalCarryoverIn;
     const unused = Math.max(0, totalPool - netConsumed);
 
