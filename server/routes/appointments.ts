@@ -241,7 +241,7 @@ router.get("/coverage-check", asyncHandler("Fehler beim Laden der Terminabdeckun
     .filter(c => !nextCoveredIds.has(c.id) && hasActiveContractForMonth(c.id, nextMonthStart))
     .map(buildUncoveredEntry);
 
-  res.json({
+  const coverageResponse: CoverageCheckResponse = {
     currentMonth: {
       label: `${monthNames[currentMonth - 1]} ${currentYear}`,
       year: currentYear,
@@ -254,7 +254,9 @@ router.get("/coverage-check", asyncHandler("Fehler beim Laden der Terminabdeckun
       month: nextMonth,
       uncoveredCustomers: nextUncovered,
     },
-  });
+  };
+
+  res.json(coverageResponse);
 }));
 
 router.get("/", asyncHandler(ErrorMessages.fetchAppointmentsFailed, async (req, res) => {

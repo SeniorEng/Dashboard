@@ -290,7 +290,7 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
     return res.json([]);
   }
 
-  const eligibleCustomers = await db.select({
+  const eligibleCustomers: BillingCustomerItem[] = await db.select({
     id: customersTable.id,
     name: customersTable.name,
     vorname: customersTable.vorname,

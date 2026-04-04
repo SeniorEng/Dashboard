@@ -158,7 +158,7 @@ export default function AdminBilling() {
 
   const generateMutation = useMutation({
     mutationFn: async (data: { customerId: number; billingMonth: number; billingYear: number }) => {
-      const result = await api.post("/billing/generate", data);
+      const result = await api.post<GenerateResponse>("/billing/generate", data);
       return unwrapResult(result);
     },
     onSuccess: (data: GenerateResponse) => {
@@ -195,7 +195,7 @@ export default function AdminBilling() {
   const sendInvoiceMutation = useMutation({
     mutationFn: async (invoiceId: number) => {
       setSendingInvoiceId(invoiceId);
-      const result = await api.post(`/billing/${invoiceId}/send`, {});
+      const result = await api.post<SendResponse>(`/billing/${invoiceId}/send`, {});
       return unwrapResult(result);
     },
     onSuccess: (data: SendResponse) => {
@@ -213,7 +213,7 @@ export default function AdminBilling() {
   const batchSendMutation = useMutation({
     mutationFn: async (invoiceIds: number[]) => {
       setBatchSending(true);
-      const result = await api.post("/billing/send-batch", { invoiceIds });
+      const result = await api.post<BatchSendResponse>("/billing/send-batch", { invoiceIds });
       return unwrapResult(result);
     },
     onSuccess: (data: BatchSendResponse) => {

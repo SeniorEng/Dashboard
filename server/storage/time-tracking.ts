@@ -60,15 +60,8 @@ function buildTimeEntryFilterConditions(filters?: TimeEntryFilters & { userId?: 
   return conditions;
 }
 
-export interface VacationSummary {
-  year: number;
-  totalDays: number;
-  carryOverDays: number;
-  usedDays: number;
-  plannedDays: number;
-  remainingDays: number;
-  sickDays: number;
-}
+import type { VacationSummary as SharedVacationSummary } from "@shared/api";
+export type VacationSummary = SharedVacationSummary;
 
 export interface AppointmentWithCustomerName extends Appointment {
   customerName: string;
