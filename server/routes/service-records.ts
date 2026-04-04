@@ -1,13 +1,13 @@
 import { Router, Request, Response } from "express";
 import { storage } from "../storage";
 import { requireAuth, canAccessCustomer } from "../middleware/auth";
-import { insertServiceRecordSchema, insertSingleServiceRecordSchema, signServiceRecordSchema, serviceRecordAppointments, monthlyServiceRecords, appointments } from "@shared/schema";
-import { asyncHandler, sendForbidden, sendNotFound } from "../lib/errors";
+import { insertServiceRecordSchema, insertSingleServiceRecordSchema, signServiceRecordSchema, serviceRecordAppointments, monthlyServiceRecords, appointments, invoiceLineItems, invoices as invoicesTable } from "@shared/schema";
+import { asyncHandler, sendForbidden, sendNotFound, sendConflict } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
 import { db } from "../lib/db";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, ne, inArray } from "drizzle-orm";
 import { getPrimaryCustomerIds } from "../storage/customers-storage";
 
 const router = Router();
@@ -466,11 +466,7 @@ router.post("/:id/sign", requireAuth, asyncHandler("Unterschrift konnte nicht ge
   }
 }));
 
-router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht gelöscht werden", async (req, res) => {
-  if (!req.user?.isAdmin) {
-    return sendForbidden(res, "FORBIDDEN", "Nur Admins können Leistungsnachweise löschen.");
-  }
-
+router.get("/:id/check-invoiced", requireAuth, asyncHandler("Abrechnungsstatus konnte nicht geprüft werden", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
 
@@ -479,19 +475,111 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
     return sendNotFound(res, "Leistungsnachweis nicht gefunden.");
   }
 
-  await db.update(monthlyServiceRecords)
-    .set({ deletedAt: new Date() })
-    .where(eq(monthlyServiceRecords.id, id));
+  const hasAccess = await canAccessCustomer(
+    req.user!.id,
+    req.user!.isAdmin,
+    record.customerId,
+    (employeeId) => storage.getAssignedCustomerIds(employeeId)
+  );
+  if (!hasAccess) {
+    return sendForbidden(res, "FORBIDDEN", "Kein Zugriff auf diesen Leistungsnachweis.");
+  }
+
+  const linkedAppointments = await db.select({ appointmentId: serviceRecordAppointments.appointmentId })
+    .from(serviceRecordAppointments)
+    .where(eq(serviceRecordAppointments.serviceRecordId, id));
+  const linkedAppointmentIds = linkedAppointments.map(r => r.appointmentId);
+
+  let isInvoiced = false;
+  if (linkedAppointmentIds.length > 0) {
+    const invoicedRows = await db.select({ appointmentId: invoiceLineItems.appointmentId })
+      .from(invoiceLineItems)
+      .innerJoin(invoicesTable, eq(invoiceLineItems.invoiceId, invoicesTable.id))
+      .where(and(
+        inArray(invoiceLineItems.appointmentId, linkedAppointmentIds),
+        ne(invoicesTable.status, "storniert"),
+        ne(invoicesTable.invoiceType, "stornorechnung")
+      ));
+    isInvoiced = invoicedRows.length > 0;
+  }
+
+  res.json({ isInvoiced });
+}));
+
+router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht gelöscht werden", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
+  const record = await storage.getServiceRecord(id);
+  if (!record) {
+    return sendNotFound(res, "Leistungsnachweis nicht gefunden.");
+  }
+
+  const isOwner = record.employeeId === req.user!.id;
+  if (!req.user!.isAdmin && !isOwner) {
+    return sendForbidden(res, "FORBIDDEN", "Sie können nur Ihre eigenen Leistungsnachweise löschen.");
+  }
+
+  let linkedAppointmentIds: number[];
+  try {
+    linkedAppointmentIds = await db.transaction(async (tx) => {
+    const linkedAppointments = await tx.select({ appointmentId: serviceRecordAppointments.appointmentId })
+      .from(serviceRecordAppointments)
+      .where(eq(serviceRecordAppointments.serviceRecordId, id));
+    const aptIds = linkedAppointments.map(r => r.appointmentId);
+
+    if (aptIds.length > 0) {
+      const invoicedRows = await tx.select({ appointmentId: invoiceLineItems.appointmentId })
+        .from(invoiceLineItems)
+        .innerJoin(invoicesTable, eq(invoiceLineItems.invoiceId, invoicesTable.id))
+        .where(and(
+          inArray(invoiceLineItems.appointmentId, aptIds),
+          ne(invoicesTable.status, "storniert"),
+          ne(invoicesTable.invoiceType, "stornorechnung")
+        ));
+      if (invoicedRows.length > 0) {
+        throw new Error("INVOICED");
+      }
+    }
+
+    await tx.delete(serviceRecordAppointments)
+      .where(eq(serviceRecordAppointments.serviceRecordId, id));
+
+    if (aptIds.length > 0) {
+      await tx.update(appointments)
+        .set({ status: "documenting" })
+        .where(inArray(appointments.id, aptIds));
+    }
+
+    await tx.delete(monthlyServiceRecords)
+      .where(eq(monthlyServiceRecords.id, id));
+
+    return aptIds;
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "INVOICED") {
+      return sendConflict(res, "INVOICED", "Dieser Leistungsnachweis kann nicht gelöscht werden, da Termine bereits abgerechnet wurden.");
+    }
+    throw error;
+  }
 
   await auditService.log(
-    req.user.id,
+    req.user!.id,
     "service_record_deleted",
     "service_record",
     id,
-    { customerId: record.customerId, employeeId: record.employeeId, year: record.year, month: record.month, status: record.status }
+    {
+      customerId: record.customerId,
+      employeeId: record.employeeId,
+      year: record.year,
+      month: record.month,
+      status: record.status,
+      affectedAppointmentIds: linkedAppointmentIds,
+      deletedBy: req.user!.id,
+    }
   );
 
-  res.json({ success: true, message: "Leistungsnachweis gelöscht" });
+  res.json({ success: true, message: "Leistungsnachweis gelöscht. Die zugehörigen Termine stehen wieder zur Bearbeitung bereit." });
 }));
 
 export default router;

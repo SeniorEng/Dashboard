@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useRoute, Link } from "wouter";
+import { useRoute, Link, useLocation } from "wouter";
 import { formatKm } from "@/lib/utils";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
@@ -9,13 +9,19 @@ import { SignaturePad, SignatureDisplay, type SignatureMetadata } from "@/compon
 import { ErrorState } from "@/components/patterns/error-state";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { 
   ArrowLeft, Loader2, Calendar, Clock, MapPin, User,
-  FileText, Check, AlertTriangle, Car
+  FileText, Check, AlertTriangle, Car, Trash2
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { formatDateForDisplay, formatTimeHHMM } from "@shared/utils/datetime";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { api, unwrapResult } from "@/lib/api/client";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import type { MonthlyServiceRecord, Customer } from "@shared/schema";
@@ -29,6 +35,8 @@ const MONTH_NAMES = [
 
 export default function ServiceRecordDetailPage() {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const [, navigate] = useLocation();
   const [, params] = useRoute("/service-records/:id");
   const recordId = params?.id ? parseInt(params.id, 10) : null;
   const queryClient = useQueryClient();
@@ -98,6 +106,15 @@ export default function ServiceRecordDetailPage() {
     },
   });
 
+  const { data: invoicedCheck, isLoading: invoicedCheckLoading } = useQuery<{ isInvoiced: boolean }>({
+    queryKey: ["/api/service-records", recordId, "check-invoiced"],
+    queryFn: async () => {
+      const result = await api.get<{ isInvoiced: boolean }>(`/service-records/${recordId}/check-invoiced`);
+      return unwrapResult(result);
+    },
+    enabled: !!recordId,
+  });
+
   const signMutation = useMutation({
     mutationFn: async ({ signatureData, signerType, signingLocation }: { signatureData: string; signerType: "employee" | "customer"; signingLocation?: string | null }) => {
       const result = await api.post<MonthlyServiceRecord>(`/service-records/${recordId}/sign`, { signatureData, signerType, signingLocation });
@@ -118,6 +135,28 @@ export default function ServiceRecordDetailPage() {
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      const result = await api.delete(`/service-records/${recordId}`);
+      if (!result.success) {
+        throw new Error(result.error.message);
+      }
+      return result.data;
+    },
+    onSuccess: () => {
+      invalidateRelated(queryClient, "service-records");
+      invalidateRelated(queryClient, "appointments");
+      toast({
+        title: "Leistungsnachweis gelöscht",
+        description: "Die zugehörigen Termine stehen wieder zur Bearbeitung bereit und können nach Korrektur in einen neuen Leistungsnachweis aufgenommen werden.",
+      });
+      navigate("/service-records");
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Löschen fehlgeschlagen", description: error.message });
     },
   });
 
@@ -161,6 +200,9 @@ export default function ServiceRecordDetailPage() {
     signMutation.mutate({ signatureData, signerType: "customer", signingLocation: formatLocation(metadata) });
   };
 
+  const isInvoiced = invoicedCheck?.isInvoiced ?? false;
+  const canDelete = (user?.isAdmin || record.employeeId === user?.id) && !isInvoiced && !invoicedCheckLoading;
+
   const totalMinutes = appointments.reduce((sum, apt) => {
     const aptServices = allAppointmentServices[apt.id] || [];
     return sum + aptServices.reduce((s, svc) => s + (svc.actualDurationMinutes || 0), 0);
@@ -188,16 +230,65 @@ export default function ServiceRecordDetailPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 mb-6">
-          <StatusBadge type="record" value={record.status} />
-          {record.recordType === "single" ? (
-            <Badge className="text-xs bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-100" data-testid="badge-record-type-single">
-              Einzeltermin
-            </Badge>
-          ) : (
-            <Badge variant="secondary" className="text-xs" data-testid="badge-record-type-monthly">
-              Monatlich
-            </Badge>
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2">
+            <StatusBadge type="record" value={record.status} />
+            {record.recordType === "single" ? (
+              <Badge className="text-xs bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-100" data-testid="badge-record-type-single">
+                Einzeltermin
+              </Badge>
+            ) : (
+              <Badge variant="secondary" className="text-xs" data-testid="badge-record-type-monthly">
+                Monatlich
+              </Badge>
+            )}
+          </div>
+
+          {(user?.isAdmin || record.employeeId === user?.id) && (
+            canDelete ? (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    disabled={deleteMutation.isPending}
+                    data-testid="button-delete-record"
+                  >
+                    {deleteMutation.isPending ? (
+                      <Loader2 className={`${iconSize.sm} animate-spin mr-1`} />
+                    ) : (
+                      <Trash2 className={`${iconSize.sm} mr-1`} />
+                    )}
+                    Löschen
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Leistungsnachweis löschen?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Der Leistungsnachweis für {customerName} ({periodLabel}) wird unwiderruflich gelöscht.
+                      Die {appointments.length} zugehörigen Termine werden auf den Status „Dokumentation" zurückgesetzt
+                      und können anschließend korrigiert und in einen neuen Leistungsnachweis aufgenommen werden.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel data-testid="button-cancel-delete">Abbrechen</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => deleteMutation.mutate()}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      data-testid="button-confirm-delete"
+                    >
+                      Endgültig löschen
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            ) : isInvoiced ? (
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground" data-testid="text-invoiced-hint">
+                <AlertTriangle className={iconSize.xs} />
+                <span>Bereits abgerechnet – Löschen nicht möglich</span>
+              </div>
+            ) : null
           )}
         </div>
 
