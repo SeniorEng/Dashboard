@@ -171,7 +171,7 @@ router.post("/", asyncHandler("Serie konnte nicht erstellt werden", async (req, 
 
   let _budgetWarning: string | undefined;
   try {
-    await budgetLedgerStorage.syncBudgetAllocations(input.customerId);
+    await budgetLedgerStorage.syncCarryoverAndExpiry(input.customerId);
     const budgetSummary = await budgetLedgerStorage.getBudgetSummary(input.customerId);
     if (budgetSummary.availableAfterPlannedCents < 0) {
       _budgetWarning = "Achtung: Das Budget dieses Kunden reicht möglicherweise nicht für alle geplanten Termine.";
@@ -581,7 +581,7 @@ router.post("/:id/extend", asyncHandler("Serie konnte nicht verlängert werden",
   });
 
   try {
-    await budgetLedgerStorage.syncBudgetAllocations(series.customerId);
+    await budgetLedgerStorage.syncCarryoverAndExpiry(series.customerId);
     const budgetSummary = await budgetLedgerStorage.getBudgetSummary(series.customerId);
     if (budgetSummary.availableAfterPlannedCents < 0) {
       _budgetWarning = "Achtung: Das Budget dieses Kunden reicht möglicherweise nicht für alle geplanten Termine.";

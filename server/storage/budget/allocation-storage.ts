@@ -732,4 +732,3 @@ export async function syncCarryoverAndExpiry(customerId: number, _tx?: DbClient)
   await processExpiredCarryover(customerId, _tx);
 }
 
-export { syncCarryoverAndExpiry as syncBudgetAllocations };

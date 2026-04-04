@@ -323,7 +323,7 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
 
       if (typeSettings.length > 0) {
         try {
-          await budgetLedgerStorage.syncBudgetAllocations(customer.id);
+          await budgetLedgerStorage.syncCarryoverAndExpiry(customer.id);
         } catch (err) {
           console.error(`[POST /customers] Budget-Sync fehlgeschlagen für Kunde ${customer.id}:`, err);
         }

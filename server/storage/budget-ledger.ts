@@ -31,7 +31,6 @@ export interface BudgetLedgerStorage {
   reverseBudgetTransaction(transactionId: number, userId?: number, txClient?: DbClient): Promise<BudgetTransaction | undefined>;
 
   syncCarryoverAndExpiry(customerId: number, _tx?: DbClient): Promise<void>;
-  syncBudgetAllocations(customerId: number, _tx?: DbClient): Promise<void>;
   getBudgetSummary(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<BudgetSummary>;
   getAllBudgetSummaries(customerId: number): Promise<AllBudgetSummaries>;
   getPlannedCostCents(customerId: number): Promise<number>;
@@ -85,7 +84,6 @@ export const budgetLedgerStorage: BudgetLedgerStorage = {
   reverseBudgetTransaction: transaction.reverseBudgetTransaction,
 
   syncCarryoverAndExpiry: allocation.syncCarryoverAndExpiry,
-  syncBudgetAllocations: allocation.syncBudgetAllocations,
   getBudgetSummary: summary.getBudgetSummary,
   getAllBudgetSummaries: summary.getAllBudgetSummaries,
   getPlannedCostCents: pricing.getPlannedCostCents,

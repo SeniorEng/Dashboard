@@ -25,7 +25,7 @@ const checkCustomerAccess = requireCustomerAccess(
 router.get("/:customerId/summary", checkCustomerAccess, asyncHandler("Budget-Übersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
   const customerId = requireIntParam(req.params.customerId, res);
   if (customerId === null) return;
-  await budgetLedgerStorage.syncBudgetAllocations(customerId);
+  await budgetLedgerStorage.syncCarryoverAndExpiry(customerId);
   const summary = await budgetLedgerStorage.getBudgetSummary(customerId);
   res.json(summary);
 }));
@@ -457,7 +457,7 @@ router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
   const userId = req.user?.id;
   const saved = await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, result.data.settings);
 
-  await budgetLedgerStorage.syncBudgetAllocations(customerId);
+  await budgetLedgerStorage.syncCarryoverAndExpiry(customerId);
 
   if (userId) {
     const ip = req.ip || req.socket.remoteAddress;

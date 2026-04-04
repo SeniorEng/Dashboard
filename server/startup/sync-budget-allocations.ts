@@ -16,7 +16,7 @@ export async function syncAllBudgetAllocations(): Promise<number> {
   let synced = 0;
   for (const row of result.rows as Array<{ customer_id: number }>) {
     try {
-      await budgetLedgerStorage.syncBudgetAllocations(row.customer_id);
+      await budgetLedgerStorage.syncCarryoverAndExpiry(row.customer_id);
       synced++;
     } catch (err) {
       log(`Budget-Sync Fehler bei Kunde ${row.customer_id}: ${err}`, "startup");
