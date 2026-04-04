@@ -22,6 +22,7 @@ const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
     ["appointments"],
     ["appointment-counts"],
     ["appointment-coverage"],
+    ["/api/appointments"],
     ["search"],
   ],
   "time-entries": [
@@ -39,6 +40,7 @@ const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
     ["/api/service-records/pending"],
     ["/api/service-records/overview"],
     ["service-record"],
+    ["service-records"],
   ],
   customers: [
     ["customers"],
