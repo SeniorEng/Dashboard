@@ -15,54 +15,6 @@ import { getBudgetPreferences, getBudgetTypeSettings } from "./preferences-stora
 import { syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-storage";
 import { getAllBudgetSummaries, getTotalCarryoverCents } from "./summary-queries";
 
-async function findOrCreatePeriodAllocation(
-  d: DbClient,
-  customerId: number,
-  budgetType: string,
-  transactionDate: string,
-  calculatedAmountCents: number
-): Promise<{ id: number }> {
-  const txDate = parseLocalDate(transactionDate);
-  const year = txDate.getFullYear();
-  const month = txDate.getMonth() + 1;
-
-  const isMonthly = budgetType === "umwandlung_45a";
-  const periodMonth = isMonthly ? month : 1;
-  const validFrom = isMonthly
-    ? `${year}-${String(periodMonth).padStart(2, "0")}-01`
-    : `${year}-01-01`;
-
-  const existing = await d.select({ id: budgetAllocations.id })
-    .from(budgetAllocations)
-    .where(and(
-      eq(budgetAllocations.customerId, customerId),
-      eq(budgetAllocations.budgetType, budgetType),
-      eq(budgetAllocations.source, "computed"),
-      eq(budgetAllocations.year, year),
-      isMonthly ? eq(budgetAllocations.month, month) : sql`true`,
-      isNull(budgetAllocations.deletedAt)
-    ))
-    .limit(1);
-
-  if (existing.length > 0) {
-    return existing[0];
-  }
-
-  const [created] = await d.insert(budgetAllocations)
-    .values({
-      customerId,
-      budgetType,
-      year,
-      month: isMonthly ? month : null,
-      amountCents: calculatedAmountCents,
-      validFrom,
-      source: "computed",
-    })
-    .returning({ id: budgetAllocations.id });
-
-  return created;
-}
-
 export async function consumeFifo(
   customerId: number,
   budgetType: string,
@@ -234,15 +186,13 @@ export async function consumeFifo(
   if (remaining > 0) {
     const ratio = params && amountCents > 0 ? remaining / amountCents : (isFirstTransaction ? 1 : 0);
 
-    const periodAllocation = await findOrCreatePeriodAllocation(d, customerId, budgetType, transactionDate, totalAllocated);
-
     const txData: typeof budgetTransactions.$inferInsert = {
       customerId,
       budgetType,
       transactionDate,
       transactionType: "consumption",
       amountCents: -remaining,
-      allocationId: periodAllocation.id,
+      allocationId: null,
       appointmentId: params?.appointmentId ?? null,
       notes: params?.notes ?? null,
       createdByUserId: params?.userId,
