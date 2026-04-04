@@ -188,5 +188,6 @@ function mapProspectAsCustomer(p: ProspectRow): AppointmentWithCustomer["custome
     anonymizedAt: null,
     latitude: null,
     longitude: null,
+    receivesMonthlyInvoice: false,
   };
 }

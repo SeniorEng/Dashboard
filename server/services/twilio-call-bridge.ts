@@ -3,6 +3,7 @@ import { storage } from "../storage";
 import { prospectStorage } from "../storage/prospects";
 import { validateGermanPhone } from "@shared/utils/phone";
 import { withTimeout } from "../lib/with-timeout";
+import { log } from "../lib/log";
 
 interface CallBridgeParams {
   prospectId: number;
@@ -48,14 +49,14 @@ export async function initiateLeadCallBridge(params: CallBridgeParams & { throwO
 
   const config = await getTwilioConfig();
   if (!config) {
-    console.log("[twilio-bridge] Bridge not configured or disabled, skipping call");
+    log("Bridge not configured or disabled, skipping call", "twilio-bridge");
     return;
   }
 
   const phoneResult = validateGermanPhone(leadPhone);
   if (!phoneResult.valid) {
     const errorMsg = `Telefonnummer ungültig (${leadPhone})`;
-    console.log(`[twilio-bridge] Invalid lead phone for prospect ${prospectId}: ${phoneResult.error}`);
+    log(`Invalid lead phone for prospect ${prospectId}: ${phoneResult.error}`, "twilio-bridge");
     await safeAddNote(prospectId, `Automatischer Anruf nicht möglich: ${errorMsg}`, "notiz");
     if (throwOnError) throw new Error(errorMsg);
     return;
@@ -83,7 +84,7 @@ export async function initiateLeadCallBridge(params: CallBridgeParams & { throwO
       statusCallbackMethod: "POST",
     });
 
-    console.log(`[twilio-bridge] Call initiated for prospect ${prospectId}: SID=${call.sid}`);
+    log(`Call initiated for prospect ${prospectId}: SID=${call.sid}`, "twilio-bridge");
 
     await safeAddNote(prospectId, `Automatischer Anruf gestartet (${leadName}, Tel: ${phoneResult.formatted})`, "anruf");
   } catch (err) {

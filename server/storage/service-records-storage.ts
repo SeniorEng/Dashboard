@@ -209,7 +209,7 @@ export async function getDocumentedAppointmentsForPeriod(customerId: number, emp
     conditions.push(or(
       eq(appointments.assignedEmployeeId, employeeId),
       eq(appointments.performedByEmployeeId, employeeId)
-    ));
+    )!);
   }
 
   const rows = await db.select(appointmentWithCustomerSelectFields)
@@ -240,7 +240,7 @@ export async function getUndocumentedAppointmentsForPeriod(customerId: number, e
     conditions.push(or(
       eq(appointments.assignedEmployeeId, employeeId),
       eq(appointments.performedByEmployeeId, employeeId)
-    ));
+    )!);
   }
 
   const rows = await db.select(appointmentWithCustomerSelectFields)
@@ -509,7 +509,7 @@ export async function getAppointmentCountsForPeriod(customerId: number, employee
     conditions.push(or(
       eq(appointments.assignedEmployeeId, employeeId),
       eq(appointments.performedByEmployeeId, employeeId)
-    ));
+    )!);
   }
 
   const result = await db.select({
@@ -543,7 +543,7 @@ export async function getCoveredBySingleCount(customerId: number, employeeId: nu
     conditions.push(or(
       eq(appointments.assignedEmployeeId, employeeId),
       eq(appointments.performedByEmployeeId, employeeId)
-    ));
+    )!);
   }
 
   const result = await db.select({
@@ -575,7 +575,7 @@ export async function getCoveredByMonthlyCount(customerId: number, employeeId: n
     conditions.push(or(
       eq(appointments.assignedEmployeeId, employeeId),
       eq(appointments.performedByEmployeeId, employeeId)
-    ));
+    )!);
   }
 
   const result = await db.select({

@@ -4,6 +4,7 @@ import { sendEmail, buildEmailLayout } from "./email-service";
 import { ObjectStorageService } from "../replit_integrations/object_storage/objectStorage";
 import { withTimeout } from "../lib/with-timeout";
 import { resolveLogoToDataUrl } from "./logo-resolver";
+import { log } from "../lib/log";
 
 interface LeadAutoReplyParams {
   prospectId: number;
@@ -108,23 +109,23 @@ export async function sendLeadAutoReply(params: LeadAutoReplyParams): Promise<vo
 
   const settings = await getCompanySettingsWithRetry();
   if (!settings) {
-    console.log("[lead-auto-reply] No company settings found after retries, skipping");
+    log("No company settings found after retries, skipping", "lead-auto-reply");
     await safeAddNote(prospectId, "Automatische Antwort-E-Mail konnte nicht gesendet werden: DB-Lookup fehlgeschlagen nach 3 Versuchen");
     return;
   }
 
   if (!settings.leadAutoReplyEnabled) {
-    console.log("[lead-auto-reply] Auto-reply disabled, skipping");
+    log("Auto-reply disabled, skipping", "lead-auto-reply");
     return;
   }
 
   if (!settings.leadAutoReplySubject || !settings.leadAutoReplyBody) {
-    console.log("[lead-auto-reply] Auto-reply subject or body not configured, skipping");
+    log("Auto-reply subject or body not configured, skipping", "lead-auto-reply");
     return;
   }
 
   if (!settings.smtpHost || !settings.smtpUser) {
-    console.log("[lead-auto-reply] SMTP not configured, skipping auto-reply");
+    log("SMTP not configured, skipping auto-reply", "lead-auto-reply");
     await safeAddNote(prospectId, "Automatische Antwort-E-Mail konnte nicht gesendet werden: SMTP nicht konfiguriert");
     return;
   }
@@ -170,7 +171,7 @@ export async function sendLeadAutoReply(params: LeadAutoReplyParams): Promise<vo
     try {
       const result = await sendEmail(settings, emailPayload);
 
-      console.log(`[lead-auto-reply] Sent auto-reply to ${leadEmail} for prospect ${prospectId}, messageId=${result.messageId}`);
+      log(`Sent auto-reply to ${leadEmail} for prospect ${prospectId}, messageId=${result.messageId}`, "lead-auto-reply");
 
       const attachmentNote = attachments.length > 0
         ? ` (mit Anhang: ${settings.leadAutoReplyAttachmentName || "Information.pdf"})`

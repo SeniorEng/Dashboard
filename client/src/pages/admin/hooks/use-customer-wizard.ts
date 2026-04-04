@@ -343,7 +343,7 @@ export function useCustomerWizard() {
     const isPflegekasse = isPflegekasseCustomer(formData.billingType);
 
     const payload = {
-      billingType: formData.billingType,
+      billingType: formData.billingType || undefined,
       vorname: formData.vorname.trim(),
       nachname: formData.nachname.trim(),
       strasse: formData.strasse.trim(),

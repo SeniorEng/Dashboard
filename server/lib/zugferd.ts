@@ -1,4 +1,5 @@
 import type { InvoicePdfData } from "./pdf-generator";
+import { log } from "./log";
 
 interface ZugferdInvoice {
   toXML(): Promise<string>;
@@ -325,7 +326,7 @@ export async function embedZugferdXml(
       invoice = strictInvoicer.create(zugferdData);
       await invoice.toXML();
       usedStrictMode = true;
-      console.log("[ZUGFeRD] XSD-Validierung (strict) erfolgreich");
+      log("XSD-Validierung (strict) erfolgreich", "ZUGFeRD");
     } catch (strictErr) {
       console.warn("[ZUGFeRD] XSD-Validierung nicht verfügbar (Java/xsd-schema-validator fehlt), verwende Strukturvalidierung");
       const invoicer = zugferd({ profile: BASIC, strict: false });
@@ -351,8 +352,7 @@ export async function embedZugferdXml(
     const pdfStr = pdfResult.toString("latin1");
     const hasPdfA = pdfStr.includes("pdfaid") || pdfStr.includes("PDF/A");
     const hasXml = pdfResult.includes(Buffer.from("factur-x.xml"));
-    console.log(`[ZUGFeRD] PDF eingebettet für ${data.invoiceNumber} | ` +
-      `strict=${usedStrictMode} | PDF/A-Marker=${hasPdfA} | XML=${hasXml}`);
+    log(`PDF eingebettet für ${data.invoiceNumber} | strict=${usedStrictMode} | PDF/A-Marker=${hasPdfA} | XML=${hasXml}`, "ZUGFeRD");
 
     if (!hasPdfA || !hasXml) {
       console.warn(`[ZUGFeRD] Konformitätsprüfung fehlgeschlagen (PDF/A=${hasPdfA}, XML=${hasXml}), verwende Standard-PDF`);

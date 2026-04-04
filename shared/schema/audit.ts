@@ -46,6 +46,7 @@ export const AUDIT_ACTIONS = [
   "employee_handover",
   "budget_rebook",
   "budget_rebook_single",
+  "invoice_sent",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];

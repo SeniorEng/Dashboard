@@ -4,6 +4,7 @@ import { db } from "../lib/db";
 import { initiateLeadCallBridge } from "./twilio-call-bridge";
 import { prospectStorage } from "../storage/prospects";
 import { withTimeout } from "../lib/with-timeout";
+import { log } from "../lib/log";
 
 const DELAY_MINUTES = 10;
 const MONDAY_CALL_HOUR = 9;
@@ -110,12 +111,12 @@ export async function scheduleLeadCall(params: {
       status: "pending",
       reason: schedule.reason,
     });
-    console.log(`[call-scheduler] Weekend call scheduled for prospect ${params.prospectId} at ${schedule.callAt.toISOString()}`);
+    log(`Weekend call scheduled for prospect ${params.prospectId} at ${schedule.callAt.toISOString()}`, "call-scheduler");
     return;
   }
 
   const delayMs = schedule.callAt.getTime() - now.getTime();
-  console.log(`[call-scheduler] Call for prospect ${params.prospectId} delayed by ${Math.round(delayMs / 1000)}s via setTimeout (until ${schedule.callAt.toISOString()})`);
+  log(`Call for prospect ${params.prospectId} delayed by ${Math.round(delayMs / 1000)}s via setTimeout (until ${schedule.callAt.toISOString()})`, "call-scheduler");
 
   setTimeout(() => {
     initiateLeadCallBridge({
@@ -154,7 +155,7 @@ async function processPendingCalls(): Promise<void> {
       RETURNING *
     `);
 
-    const rows = claimedResult.rows as ScheduledCallRow[];
+    const rows = (claimedResult.rows as unknown) as ScheduledCallRow[];
 
     for (const call of rows) {
       try {
@@ -175,7 +176,7 @@ async function processPendingCalls(): Promise<void> {
           })
           .where(eq(scheduledCalls.id, call.id));
 
-        console.log(`[call-scheduler] Executed scheduled call ${call.id} for prospect ${call.prospect_id}`);
+        log(`Executed scheduled call ${call.id} for prospect ${call.prospect_id}`, "call-scheduler");
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         const newAttempts = (call.attempts ?? 0) + 1;
@@ -207,14 +208,14 @@ let pollInterval: ReturnType<typeof setInterval> | null = null;
 export function startCallSchedulerPoller(): void {
   if (pollInterval) return;
   pollInterval = setInterval(processPendingCalls, POLL_INTERVAL_MS);
-  console.log(`[call-scheduler] Poller started (every ${POLL_INTERVAL_MS / 1000}s)`);
+  log(`Poller started (every ${POLL_INTERVAL_MS / 1000}s)`, "call-scheduler");
 }
 
 export function stopCallSchedulerPoller(): void {
   if (pollInterval) {
     clearInterval(pollInterval);
     pollInterval = null;
-    console.log("[call-scheduler] Poller stopped");
+    log("Poller stopped", "call-scheduler");
   }
 }
 
