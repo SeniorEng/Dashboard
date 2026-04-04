@@ -171,14 +171,39 @@ export async function calculateAllocatedCents(
   const typeSettings = _typeSettings ?? await getBudgetTypeSettings(customerId, _tx);
   const preferences = _preferences !== undefined ? _preferences : await getBudgetPreferences(customerId, _tx);
 
+  let calculated = 0;
   if (budgetType === "entlastungsbetrag_45b") {
-    return calculateAllocated45b(customerId, opts, d, preferences, typeSettings);
+    calculated = await calculateAllocated45b(customerId, opts, d, preferences, typeSettings);
   } else if (budgetType === "umwandlung_45a") {
-    return calculateAllocated45a(customerId, opts, d, preferences, typeSettings);
+    calculated = await calculateAllocated45a(customerId, opts, d, preferences, typeSettings);
   } else if (budgetType === "ersatzpflege_39_42a") {
-    return calculateAllocated39_42a(customerId, opts, d, preferences, typeSettings);
+    calculated = await calculateAllocated39_42a(customerId, opts, d, preferences, typeSettings);
   }
-  return 0;
+
+  const manualAdjustments = await d.select()
+    .from(budgetAllocations)
+    .where(and(
+      eq(budgetAllocations.customerId, customerId),
+      eq(budgetAllocations.budgetType, budgetType),
+      eq(budgetAllocations.source, "manual_adjustment"),
+      isNull(budgetAllocations.deletedAt)
+    ));
+
+  if (manualAdjustments.length > 0) {
+    if (opts.year != null) {
+      calculated += manualAdjustments
+        .filter(a => a.year === opts.year)
+        .reduce((sum, a) => sum + a.amountCents, 0);
+    } else if (opts.asOfDate) {
+      calculated += manualAdjustments
+        .filter(a => a.validFrom <= opts.asOfDate! && (!a.expiresAt || a.expiresAt >= opts.asOfDate!))
+        .reduce((sum, a) => sum + a.amountCents, 0);
+    } else {
+      calculated += manualAdjustments.reduce((sum, a) => sum + a.amountCents, 0);
+    }
+  }
+
+  return calculated;
 }
 
 async function calculateAllocated45b(
@@ -433,14 +458,27 @@ async function calculateAllocated39_42a(
   const amounts = await getCustomerBudgetAmounts(customerId, undefined, typeSettings);
   if (!amounts.verhinderungspflege39) return 0;
 
-  const startDate = parseLocalDate(startDateStr);
-  const startYear = startDate.getFullYear();
+  const s39 = typeSettings.find(s => s.budgetType === "ersatzpflege_39_42a" && s.enabled);
 
-  if (opts.year != null) {
-    return opts.year >= startYear && opts.year <= curYear ? amounts.verhinderungspflege39 : 0;
+  const startDate = parseLocalDate(startDateStr);
+  let startYear = startDate.getFullYear();
+
+  if (s39?.validFrom) {
+    const vfYear = parseLocalDate(s39.validFrom).getFullYear();
+    if (vfYear > startYear) startYear = vfYear;
   }
 
-  return Math.max(0, curYear - startYear + 1) * amounts.verhinderungspflege39;
+  let endYear = curYear;
+  if (s39?.validTo) {
+    const vtYear = parseLocalDate(s39.validTo).getFullYear();
+    if (vtYear < curYear) endYear = vtYear;
+  }
+
+  if (opts.year != null) {
+    return opts.year >= startYear && opts.year <= endYear ? amounts.verhinderungspflege39 : 0;
+  }
+
+  return Math.max(0, endYear - startYear + 1) * amounts.verhinderungspflege39;
 }
 
 export async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Promise<BudgetAllocation[]> {

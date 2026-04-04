@@ -58,12 +58,8 @@ export async function consumeFifo(
     );
 
   const totalAllocated = await calculateAllocatedCents(customerId, budgetType, { asOfDate: today }, _tx);
-  const manualAdjTotal = specialAllocations
-    .filter(a => a.source === "manual_adjustment")
-    .reduce((sum, a) => sum + a.amountCents, 0);
-  const effectiveAllocated = totalAllocated + manualAdjTotal;
 
-  if (effectiveAllocated <= 0 && specialAllocations.length === 0) {
+  if (totalAllocated <= 0 && specialAllocations.length === 0) {
     return { consumedCents: 0, transactions: [], remainingCents: amountCents };
   }
 
@@ -135,7 +131,7 @@ export async function consumeFifo(
     ));
 
   const totalNetConsumed = Math.max(0, Number(totalConsumedResult[0]?.total ?? 0) - Number(totalReversalsResult[0]?.total ?? 0));
-  const totalAvailable = Math.max(0, effectiveAllocated - totalNetConsumed);
+  const totalAvailable = Math.max(0, totalAllocated - totalNetConsumed);
 
   if (totalAvailable <= 0) {
     return { consumedCents: 0, transactions: [], remainingCents: amountCents };
