@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -262,8 +263,7 @@ export default function ProspectConvert() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["prospects"] });
-      queryClient.invalidateQueries({ queryKey: ["prospect-stats"] });
+      invalidateRelated(queryClient, "prospects", "customers");
       toast({ title: "Vertrag abgeschlossen", description: "Der Interessent wurde erfolgreich zum Kunden konvertiert." });
       setLocation("/admin/prospects");
     },
@@ -316,8 +316,7 @@ export default function ProspectConvert() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["prospects"] });
-      queryClient.invalidateQueries({ queryKey: ["prospect-stats"] });
+      invalidateRelated(queryClient, "prospects");
       queryClient.invalidateQueries({ queryKey: ["prospect-offer", prospectId] });
       toast({ title: "Angebot gespeichert", description: "Das Angebot wurde für den Interessenten gespeichert." });
       setLocation("/admin/prospects");

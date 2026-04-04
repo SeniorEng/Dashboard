@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { useToast } from "@/hooks/use-toast";
 import type { Prospect, ProspectNote, InsertProspect, UpdateProspect, InsertProspectNote } from "@shared/schema";
 
@@ -51,8 +52,7 @@ export function useCreateProspect() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["prospects"] });
-      queryClient.invalidateQueries({ queryKey: ["prospect-stats"] });
+      invalidateRelated(queryClient, "prospects");
       toast({ title: "Interessent erstellt", description: "Der Interessent wurde erfolgreich angelegt." });
     },
     onError: (error: Error) => {
@@ -71,11 +71,8 @@ export function useUpdateProspect({ adminEndpoint = false }: { adminEndpoint?: b
       const result = await api.patch<Prospect>(endpoint, data);
       return unwrapResult(result);
     },
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["prospects"] });
-      queryClient.invalidateQueries({ queryKey: ["prospect", variables.id] });
-      queryClient.invalidateQueries({ queryKey: ["prospect-stats"] });
-      queryClient.invalidateQueries({ queryKey: ["prospect-appointment-data"] });
+    onSuccess: () => {
+      invalidateRelated(queryClient, "prospects");
       toast({ title: "Gespeichert", description: "Die Änderungen wurden gespeichert." });
     },
     onError: (error: Error) => {
@@ -93,8 +90,8 @@ export function useAddProspectNote() {
       const result = await api.post<ProspectNote>(`/admin/prospects/${prospectId}/notes`, data);
       return unwrapResult(result);
     },
-    onSuccess: (_, vars) => {
-      queryClient.invalidateQueries({ queryKey: ["prospect", vars.prospectId] });
+    onSuccess: () => {
+      invalidateRelated(queryClient, "prospects");
       toast({ title: "Notiz hinzugefügt" });
     },
     onError: (error: Error) => {
@@ -112,9 +109,8 @@ export function useReparseProspect() {
       const result = await api.post<ProspectWithNotes>(`/admin/prospects/${id}/reparse`, {});
       return unwrapResult(result);
     },
-    onSuccess: (_, id) => {
-      queryClient.invalidateQueries({ queryKey: ["prospect", id] });
-      queryClient.invalidateQueries({ queryKey: ["prospects"] });
+    onSuccess: () => {
+      invalidateRelated(queryClient, "prospects");
       toast({ title: "Neu geparst", description: "Die Daten wurden aus der E-Mail aktualisiert." });
     },
     onError: (error: Error) => {
@@ -133,8 +129,7 @@ export function useDeleteProspect() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["prospects"] });
-      queryClient.invalidateQueries({ queryKey: ["prospect-stats"] });
+      invalidateRelated(queryClient, "prospects");
       toast({ title: "Gelöscht", description: "Der Interessent wurde entfernt." });
     },
     onError: (error: Error) => {
@@ -153,9 +148,7 @@ export function useQualifyProspect() {
       return unwrapResult(result);
     },
     onSuccess: (_, vars) => {
-      queryClient.invalidateQueries({ queryKey: ["prospect", vars.id] });
-      queryClient.invalidateQueries({ queryKey: ["prospects"] });
-      queryClient.invalidateQueries({ queryKey: ["prospect-stats"] });
+      invalidateRelated(queryClient, "prospects");
       toast({ title: vars.action === "qualify" ? "Qualifiziert" : "Disqualifiziert" });
     },
     onError: (error: Error) => {
@@ -193,11 +186,8 @@ export function useDeclineProspectOffer() {
       const result = await api.patch<Prospect>(`/admin/prospects/${prospectId}`, { status: "absage" });
       return unwrapResult(result);
     },
-    onSuccess: (_, vars) => {
-      queryClient.invalidateQueries({ queryKey: ["prospect", vars.prospectId] });
-      queryClient.invalidateQueries({ queryKey: ["prospects"] });
-      queryClient.invalidateQueries({ queryKey: ["prospect-stats"] });
-      queryClient.invalidateQueries({ queryKey: ["prospect-offer", vars.prospectId] });
+    onSuccess: () => {
+      invalidateRelated(queryClient, "prospects");
       toast({ title: "Angebot abgelehnt" });
     },
     onError: (error: Error) => {

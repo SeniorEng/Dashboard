@@ -10,7 +10,12 @@ type Domain =
   | "auth"
   | "prospects"
   | "tasks"
-  | "appointment-series";
+  | "appointment-series"
+  | "employee-documents"
+  | "employee-proofs"
+  | "customer-service-prices"
+  | "customer-insurance"
+  | "customer-documents";
 
 const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
   appointments: [
@@ -25,6 +30,7 @@ const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
     ["month-closing"],
     ["month-closing-readiness"],
     ["month-closing-preview"],
+    ["admin-month-closing-readiness"],
     ["open-tasks"],
   ],
   "service-records": [
@@ -36,6 +42,8 @@ const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
   ],
   customers: [
     ["customers"],
+    ["customer"],
+    ["customer-details"],
     ["search"],
   ],
   budget: [
@@ -49,16 +57,40 @@ const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
   ],
   auth: [
     ["auth", "me"],
+    ["admin", "my-permissions"],
   ],
   prospects: [
     ["prospects"],
+    ["prospect"],
     ["prospect-stats"],
+    ["prospect-offer"],
+    ["prospect-appointment-data"],
   ],
   tasks: [
     ["tasks"],
   ],
   "appointment-series": [
     ["appointment-series"],
+  ],
+  "employee-documents": [
+    ["admin", "employees"],
+    ["admin", "document-types"],
+  ],
+  "employee-proofs": [
+    ["admin", "employee-proofs"],
+    ["admin", "employee-document-requirements"],
+  ],
+  "customer-service-prices": [
+    ["customer-service-prices"],
+    ["customer-service-prices-future"],
+    ["customer-service-prices-all"],
+  ],
+  "customer-insurance": [
+    ["customer-insurance-history"],
+  ],
+  "customer-documents": [
+    ["admin", "customers"],
+    ["customers"],
   ],
 };
 
@@ -73,6 +105,11 @@ const RELATED_DOMAINS: Record<Domain, Domain[]> = {
   prospects: [],
   tasks: [],
   "appointment-series": ["appointments"],
+  "employee-documents": ["employee-proofs"],
+  "employee-proofs": ["employee-documents"],
+  "customer-service-prices": [],
+  "customer-insurance": ["customers"],
+  "customer-documents": [],
 };
 
 export function invalidateRelated(

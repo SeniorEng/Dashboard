@@ -124,7 +124,7 @@ export function useAssignCustomer() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: customerKeys.lists() });
+      invalidateRelated(queryClient, "customers");
       toast({ title: "Zuordnung gespeichert" });
     },
     onError: (error: Error) => {

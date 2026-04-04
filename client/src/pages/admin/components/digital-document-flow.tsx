@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { iconSize } from "@/design-system";
 import { SignaturePad, type SignatureMetadata } from "@/components/ui/signature-pad";
 import { DocumentPreview } from "@/features/documents/document-preview";
@@ -103,12 +104,10 @@ export function DigitalDocumentFlow({
       setGeneratedDoc(result);
       setStep("done");
       if (customerId) {
-        queryClient.invalidateQueries({ queryKey: ["admin", "customers", customerId, "documents"] });
-        queryClient.invalidateQueries({ queryKey: ["admin", "customers", customerId, "generated-documents"] });
+        invalidateRelated(queryClient, "customer-documents");
       }
       if (employeeId) {
-        queryClient.invalidateQueries({ queryKey: ["admin", "employees", employeeId, "documents"] });
-        queryClient.invalidateQueries({ queryKey: ["admin", "employees", employeeId, "generated-documents"] });
+        invalidateRelated(queryClient, "employee-documents");
       }
       const msg = result.signingLink
         ? "Das PDF wurde erstellt. Ein Unterschrifts-Link wurde generiert."

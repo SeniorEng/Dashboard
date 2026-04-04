@@ -57,7 +57,6 @@ export default function AppointmentDetail() {
     },
     onSuccess: () => {
       invalidateRelated(queryClient, "appointments");
-      queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}`] });
       toast({ title: "Dokumentation zur Korrektur geöffnet" });
       setShowReopenDialog(false);
       setLocation(`/document-appointment/${id}`);
@@ -80,8 +79,7 @@ export default function AppointmentDetail() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      invalidateRelated(queryClient, "appointments");
-      queryClient.invalidateQueries({ queryKey: ["appointment-series"] });
+      invalidateRelated(queryClient, "appointments", "appointment-series");
       toast({ title: "Serientermine abgesagt" });
       setShowSeriesDeleteDialog(false);
       setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");
@@ -110,7 +108,6 @@ export default function AppointmentDetail() {
     },
     onSuccess: (data) => {
       invalidateRelated(queryClient, "service-records");
-      queryClient.invalidateQueries({ queryKey: [`/api/service-records/for-appointment/${id}`] });
       toast({ title: "Leistungsnachweis erstellt" });
       setLocation(`/service-records/${data.id}`);
     },

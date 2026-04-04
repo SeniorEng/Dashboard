@@ -4,6 +4,7 @@ import { formatCurrency } from "@shared/utils/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, unwrapResult } from "@/lib/api";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Pencil, Check, X, RotateCcw, Calendar, ChevronDown, ChevronUp } from "lucide-react";
 import { parseLocalDate } from "@shared/utils/datetime";
@@ -107,9 +108,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["customer-service-prices", customerId] });
-      queryClient.invalidateQueries({ queryKey: ["customer-service-prices-future", customerId] });
-      queryClient.invalidateQueries({ queryKey: ["customer-service-prices-all", customerId] });
+      invalidateRelated(queryClient, "customer-service-prices");
       setEditingServiceId(null);
       setEditPrice("");
       setEditValidFrom("");
@@ -126,9 +125,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["customer-service-prices", customerId] });
-      queryClient.invalidateQueries({ queryKey: ["customer-service-prices-future", customerId] });
-      queryClient.invalidateQueries({ queryKey: ["customer-service-prices-all", customerId] });
+      invalidateRelated(queryClient, "customer-service-prices");
       toast({ title: "Kundenpreis zurückgesetzt auf Katalogpreis" });
     },
     onError: (error: Error) => {

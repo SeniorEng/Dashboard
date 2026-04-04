@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { useToast } from "@/hooks/use-toast";
 
 export interface User {
@@ -101,8 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     mutationFn: ({ email, password }: { email: string; password: string }) =>
       loginRequest(email, password),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
-      queryClient.invalidateQueries({ queryKey: ["admin", "my-permissions"] });
+      invalidateRelated(queryClient, "auth");
     },
     onError: (error: Error) => {
       toast({

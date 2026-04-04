@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { useToast } from "@/hooks/use-toast";
 import type { Notification } from "@shared/schema";
 
@@ -36,7 +37,7 @@ export function useMarkAsRead() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      invalidateRelated(queryClient, "notifications");
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
@@ -54,7 +55,7 @@ export function useMarkAllAsRead() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      invalidateRelated(queryClient, "notifications");
       toast({ title: "Erledigt", description: "Alle Benachrichtigungen als gelesen markiert" });
     },
     onError: (error: Error) => {

@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import logo from "@assets/Logo-04_250x250_1764898165379.jpg";
 import { useAuth } from "@/hooks/use-auth";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { useToast } from "@/hooks/use-toast";
 import {
   DropdownMenu,
@@ -277,7 +278,7 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+      invalidateRelated(queryClient, "auth");
       window.dispatchEvent(new Event("restart-onboarding"));
     },
     onError: (error: Error) => {

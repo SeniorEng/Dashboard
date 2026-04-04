@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -93,8 +94,7 @@ export function DigitalDocumentFlow({
     onSuccess: (result) => {
       setGeneratedDoc(result);
       setStep("done");
-      queryClient.invalidateQueries({ queryKey: ["customers", customerId, "documents"] });
-      queryClient.invalidateQueries({ queryKey: ["customers", customerId, "generated-documents"] });
+      invalidateRelated(queryClient, "customer-documents");
       toast({ title: "Dokument erstellt", description: "Das PDF wurde erfolgreich generiert und gespeichert." });
     },
     onError: (error: Error) => {

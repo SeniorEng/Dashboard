@@ -82,8 +82,7 @@ export function CustomerInsuranceTab({ customerId, currentInsurance }: CustomerI
       return unwrapResult(result);
     },
     onSuccess: () => {
-      invalidateRelated(queryClient, "customers");
-      queryClient.invalidateQueries({ queryKey: ["customer-insurance-history", customerId] });
+      invalidateRelated(queryClient, "customer-insurance", "customers");
       toast({ title: currentInsurance ? "Pflegekasse gewechselt" : "Pflegekasse hinzugefügt" });
       setDialogOpen(false);
       resetForm();

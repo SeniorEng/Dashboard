@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { useToast } from "@/hooks/use-toast";
 import {
   Calendar,
@@ -94,7 +95,7 @@ export function OnboardingDialog({ open, onComplete }: { open: boolean; onComple
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+      invalidateRelated(queryClient, "auth");
       onComplete();
     },
     onError: (error: Error) => {

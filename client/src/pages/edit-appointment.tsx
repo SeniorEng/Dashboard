@@ -211,7 +211,6 @@ export default function EditAppointment() {
     },
     onSuccess: () => {
       invalidateRelated(queryClient, "appointments");
-      queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}/services`] });
       toast({ title: "Termin aktualisiert", description: "Die Änderungen wurden gespeichert." });
       setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");
     },
@@ -226,8 +225,7 @@ export default function EditAppointment() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["prospects"] });
-      queryClient.invalidateQueries({ queryKey: ["prospect-appointment-data"] });
+      invalidateRelated(queryClient, "prospects");
     },
   });
 
@@ -242,9 +240,7 @@ export default function EditAppointment() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      invalidateRelated(queryClient, "appointments");
-      queryClient.invalidateQueries({ queryKey: ["appointment-series"] });
-      queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}/services`] });
+      invalidateRelated(queryClient, "appointments", "appointment-series");
       toast({ title: "Serientermine aktualisiert" });
       setShowSeriesEditDialog(false);
       setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");

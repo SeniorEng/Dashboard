@@ -99,8 +99,7 @@ export function useCreateAppointmentSeries() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      invalidateRelated(queryClient, "appointments");
-      queryClient.invalidateQueries({ queryKey: [SERIES_QUERY_KEY] });
+      invalidateRelated(queryClient, "appointments", "appointment-series");
     },
   });
 }
@@ -122,8 +121,7 @@ export function useUpdateSeriesAppointment(seriesId: number) {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      invalidateRelated(queryClient, "appointments");
-      queryClient.invalidateQueries({ queryKey: [SERIES_QUERY_KEY] });
+      invalidateRelated(queryClient, "appointments", "appointment-series");
       toast({ title: "Erfolg", description: "Serientermine wurden aktualisiert" });
     },
     onError: (error: Error) => {
@@ -145,8 +143,7 @@ export function useDeleteSeriesAppointment(seriesId: number) {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      invalidateRelated(queryClient, "appointments");
-      queryClient.invalidateQueries({ queryKey: [SERIES_QUERY_KEY] });
+      invalidateRelated(queryClient, "appointments", "appointment-series");
       toast({ title: "Erfolg", description: "Serientermine wurden abgesagt" });
     },
     onError: (error: Error) => {
@@ -164,8 +161,7 @@ export function useExtendSeries() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      invalidateRelated(queryClient, "appointments");
-      queryClient.invalidateQueries({ queryKey: [SERIES_QUERY_KEY] });
+      invalidateRelated(queryClient, "appointments", "appointment-series");
       toast({ title: "Erfolg", description: "Serie wurde verlängert" });
     },
     onError: (error: Error) => {
@@ -183,8 +179,7 @@ export function useShortenSeries() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      invalidateRelated(queryClient, "appointments");
-      queryClient.invalidateQueries({ queryKey: [SERIES_QUERY_KEY] });
+      invalidateRelated(queryClient, "appointments", "appointment-series");
       toast({ title: "Erfolg", description: "Serie wurde verkürzt" });
     },
     onError: (error: Error) => {
@@ -202,8 +197,7 @@ export function useEndSeries() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      invalidateRelated(queryClient, "appointments");
-      queryClient.invalidateQueries({ queryKey: [SERIES_QUERY_KEY] });
+      invalidateRelated(queryClient, "appointments", "appointment-series");
       toast({ title: "Erfolg", description: "Serie wurde beendet" });
     },
     onError: (error: Error) => {

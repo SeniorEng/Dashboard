@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@/hooks/use-upload";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { iconSize } from "@/design-system";
 import {
@@ -135,8 +136,7 @@ export function EmployeeDocumentRequirementsSection({ employeeId }: { employeeId
       }));
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "employee-proofs", employeeId] });
-      queryClient.invalidateQueries({ queryKey: ["admin", "employees", employeeId, "documents"] });
+      invalidateRelated(queryClient, "employee-proofs", "employee-documents");
       toast({ title: "Nachweis hochgeladen" });
     },
     onError: (error: Error) => {

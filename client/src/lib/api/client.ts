@@ -268,6 +268,39 @@ export const api = {
   post: <T, B = unknown>(endpoint: string, body: B, signal?: AbortSignal) =>
     apiRequest<T, B>(endpoint, { method: 'POST', body, signal }),
 
+  postFormData: async <T>(endpoint: string, formData: FormData, signal?: AbortSignal): Promise<ApiResult<T>> => {
+    const csrfToken = await ensureCsrfToken();
+    const headers: Record<string, string> = {};
+    if (csrfToken) headers[CSRF_HEADER_NAME] = csrfToken;
+
+    try {
+      const response = await fetch(`/api${endpoint}`, {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+        signal,
+        headers,
+      });
+
+      if (!response.ok) {
+        const error = await parseErrorResponse(response);
+        return { success: false, error };
+      }
+
+      if (response.status === 204) {
+        return { success: true, data: undefined as T };
+      }
+
+      const data = await response.json();
+      return { success: true, data };
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        return { success: false, error: { code: 'ABORTED', message: 'Anfrage wurde abgebrochen' } };
+      }
+      return { success: false, error: { code: 'NETWORK_ERROR', message: 'Netzwerkfehler: Bitte prüfen Sie Ihre Internetverbindung' } };
+    }
+  },
+
   put: <T, B = unknown>(endpoint: string, body: B, signal?: AbortSignal) =>
     apiRequest<T, B>(endpoint, { method: 'PUT', body, signal }),
 

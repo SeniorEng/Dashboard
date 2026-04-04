@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Upload, CheckCircle, AlertTriangle, XCircle, FileSpreadsheet } from "lucide-react";
 import { Link } from "wouter";
+import { api, unwrapResult } from "@/lib/api/client";
 
 interface MatchedRow {
   rowIndex: number;
@@ -66,21 +67,6 @@ export default function ImportAppointmentsPage() {
   const [rowActions, setRowActions] = useState<Map<number, RowAction>>(new Map());
   const [employeeOverrides, setEmployeeOverrides] = useState<Map<number, number>>(new Map());
 
-  const getCsrfToken = useCallback((): string | null => {
-    const cookies = document.cookie.split(";");
-    for (const cookie of cookies) {
-      const trimmed = cookie.trim();
-      const eqIndex = trimmed.indexOf("=");
-      if (eqIndex === -1) continue;
-      const name = trimmed.substring(0, eqIndex);
-      const value = trimmed.substring(eqIndex + 1);
-      if (name === "careconnect_csrf" && value) {
-        return decodeURIComponent(value);
-      }
-    }
-    return null;
-  }, []);
-
   const loadPreview = useCallback(async () => {
     if (!file) return;
     setLoading(true);
@@ -92,23 +78,9 @@ export default function ImportAppointmentsPage() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const csrfToken = getCsrfToken();
-      const headers: Record<string, string> = {};
-      if (csrfToken) headers["x-csrf-token"] = csrfToken;
-
-      const res = await fetch("/api/admin/import-appointments/preview", {
-        method: "POST",
-        body: formData,
-        credentials: "include",
-        headers,
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.message || data.error || `HTTP ${res.status}`);
-      }
-
-      const data: PreviewResponse = await res.json();
+      const data = unwrapResult(
+        await api.postFormData<PreviewResponse>("/admin/import-appointments/preview", formData)
+      );
       setPreview(data);
 
       const defaultActions = new Map<number, RowAction>();
@@ -123,20 +95,16 @@ export default function ImportAppointmentsPage() {
       }
       setRowActions(defaultActions);
 
-      const empRes = await fetch("/api/admin/import-appointments/employees", {
-        credentials: "include",
-        headers,
-      });
-      if (empRes.ok) {
-        const empData: Employee[] = await empRes.json();
-        setEmployees(empData);
+      const empResult = await api.get<Employee[]>("/admin/import-appointments/employees");
+      if (empResult.success) {
+        setEmployees(empResult.data);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [file, getCsrfToken]);
+  }, [file]);
 
   const executeImport = useCallback(async () => {
     if (!preview) return;
@@ -151,23 +119,9 @@ export default function ImportAppointmentsPage() {
         employeeIdOverride: employeeOverrides.get(row.rowIndex),
       }));
 
-      const csrfToken = getCsrfToken();
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (csrfToken) headers["x-csrf-token"] = csrfToken;
-
-      const res = await fetch("/api/admin/import-appointments/execute", {
-        method: "POST",
-        body: JSON.stringify({ rows: preview.rows, actions }),
-        credentials: "include",
-        headers,
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.message || data.error || `HTTP ${res.status}`);
-      }
-
-      const result: ImportResult = await res.json();
+      const result = unwrapResult(
+        await api.post<ImportResult>("/admin/import-appointments/execute", { rows: preview.rows, actions })
+      );
       setImportResult(result);
       setProgress(100);
     } catch (err) {
@@ -175,36 +129,23 @@ export default function ImportAppointmentsPage() {
     } finally {
       setImporting(false);
     }
-  }, [preview, rowActions, employeeOverrides, getCsrfToken]);
+  }, [preview, rowActions, employeeOverrides]);
 
   const createServiceRecords = useCallback(async () => {
     setCreatingRecords(true);
     setError(null);
 
     try {
-      const csrfToken = getCsrfToken();
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (csrfToken) headers["x-csrf-token"] = csrfToken;
-
-      const res = await fetch("/api/admin/import-appointments/create-service-records", {
-        method: "POST",
-        credentials: "include",
-        headers,
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.message || data.error || `HTTP ${res.status}`);
-      }
-
-      const result = await res.json();
+      const result = unwrapResult(
+        await api.post<{ created: number; errors: { key: string; error: string }[] }>("/admin/import-appointments/create-service-records", {})
+      );
       setServiceRecordResult(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setCreatingRecords(false);
     }
-  }, [getCsrfToken]);
+  }, []);
 
   const setAllActions = (action: RowAction, filter?: "new" | "duplicate") => {
     if (!preview) return;

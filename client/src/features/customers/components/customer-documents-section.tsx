@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import {
   Sheet,
   SheetContent,
@@ -190,7 +191,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
       });
     }
 
-    queryClient.invalidateQueries({ queryKey: ["customers", customerId, "documents"] });
+    invalidateRelated(queryClient, "customer-documents");
     const count = selectedFiles.length;
     setSelectedTypeForUpload(null);
     setNotes("");

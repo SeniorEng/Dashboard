@@ -89,13 +89,10 @@ export function useCustomerDetailForm(
     plzTimeoutRef.current = setTimeout(async () => {
       setPlzLoading(true);
       try {
-        const res = await fetch(`/api/public/plz/${plz}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.results?.length === 1) {
-            lastAutoFilledStadt.current = data.results[0];
-            setContactForm(f => ({ ...f, stadt: data.results[0] }));
-          }
+        const result = await api.get<{ results: string[] }>(`/public/plz/${plz}`);
+        if (result.success && result.data.results?.length === 1) {
+          lastAutoFilledStadt.current = result.data.results[0];
+          setContactForm(f => ({ ...f, stadt: result.data.results[0] }));
         }
       } catch {}
       setPlzLoading(false);
@@ -146,7 +143,6 @@ export function useCustomerDetailForm(
     },
     onSuccess: () => {
       invalidateRelated(queryClient, "customers");
-      queryClient.invalidateQueries({ queryKey: ["customer", customerId] });
       setEditingSection(null);
       toast({ title: "Kundendaten aktualisiert" });
     },
@@ -162,7 +158,6 @@ export function useCustomerDetailForm(
     },
     onSuccess: () => {
       invalidateRelated(queryClient, "customers");
-      queryClient.invalidateQueries({ queryKey: ["customer", customerId] });
       setEditingSection(null);
       toast({ title: "Pflegegrad aktualisiert" });
     },
@@ -177,7 +172,7 @@ export function useCustomerDetailForm(
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["customer-details", customerId] });
+      invalidateRelated(queryClient, "customers");
       setEditingSection(null);
       toast({ title: "Vereinbarte Leistungen aktualisiert" });
     },
@@ -240,7 +235,7 @@ export function useCustomerDetailForm(
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["customer-details", customerId] });
+      invalidateRelated(queryClient, "customers");
       setShowAddContact(false);
       setEmergencyContactForm(emptyContactForm);
       toast({ title: "Notfallkontakt hinzugefügt" });
@@ -256,7 +251,7 @@ export function useCustomerDetailForm(
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["customer-details", customerId] });
+      invalidateRelated(queryClient, "customers");
       setEditingContactId(null);
       setEmergencyContactForm(emptyContactForm);
       toast({ title: "Notfallkontakt aktualisiert" });
@@ -272,7 +267,7 @@ export function useCustomerDetailForm(
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["customer-details", customerId] });
+      invalidateRelated(queryClient, "customers");
       toast({ title: "Notfallkontakt entfernt" });
     },
     onError: (error: Error) => {

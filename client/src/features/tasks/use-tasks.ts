@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { useToast } from "@/hooks/use-toast";
 import type { Task } from "@shared/schema";
 
@@ -42,7 +43,7 @@ export function useCreateTask() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      invalidateRelated(queryClient, "tasks");
       toast({ title: "Erfolg", description: "Aufgabe wurde erstellt" });
     },
     onError: (error: Error) => {
@@ -70,7 +71,7 @@ export function useUpdateTask() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      invalidateRelated(queryClient, "tasks");
       toast({ title: "Erfolg", description: "Aufgabe wurde aktualisiert" });
     },
     onError: (error: Error) => {
@@ -89,7 +90,7 @@ export function useDeleteTask() {
       unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      invalidateRelated(queryClient, "tasks");
       toast({ title: "Erfolg", description: "Aufgabe wurde gelöscht" });
     },
     onError: (error: Error) => {
@@ -109,7 +110,7 @@ export function useToggleTaskStatus() {
       return unwrapResult(result);
     },
     onSuccess: (_, { currentStatus }) => {
-      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      invalidateRelated(queryClient, "tasks");
       const message = currentStatus === "completed" ? "Aufgabe wurde wieder geöffnet" : "Aufgabe wurde erledigt";
       toast({ title: "Erfolg", description: message });
     },

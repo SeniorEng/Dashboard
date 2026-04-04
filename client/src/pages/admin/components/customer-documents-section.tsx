@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { iconSize } from "@/design-system";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import {
   Select,
   SelectContent,
@@ -160,7 +161,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "customers", customerId, "documents"] });
+      invalidateRelated(queryClient, "customer-documents");
       toast({ title: "Dokument gelöscht" });
     },
     onError: (error: Error) => {
@@ -174,7 +175,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "customers", customerId, "documents"] });
+      invalidateRelated(queryClient, "customer-documents");
       toast({ title: "Upload gelöscht" });
     },
     onError: (error: Error) => {
@@ -214,7 +215,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
       });
     }
 
-    queryClient.invalidateQueries({ queryKey: ["admin", "customers", customerId, "documents"] });
+    invalidateRelated(queryClient, "customer-documents");
     const count = selectedFiles.length;
     setIsUploadOpen(false);
     setSelectedDocTypeId("");
@@ -662,7 +663,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
         targetType="customer"
         context="bestandskunde"
         onComplete={() => {
-          queryClient.invalidateQueries({ queryKey: ["admin", "customers", customerId, "documents"] });
+          invalidateRelated(queryClient, "customer-documents");
         }}
       />
 

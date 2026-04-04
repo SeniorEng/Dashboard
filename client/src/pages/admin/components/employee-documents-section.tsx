@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { useUpload } from "@/hooks/use-upload";
 import { ReviewBadge, getReviewStatus } from "./review-badge";
@@ -198,7 +199,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "employees", employeeId, "documents"] });
+      invalidateRelated(queryClient, "employee-documents");
       toast({ title: "Dokument gelöscht" });
     },
     onError: (error: Error) => {
@@ -212,7 +213,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
       return unwrapResult(result);
     },
     onSuccess: (_data, _batchId) => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "employees", employeeId, "documents"] });
+      invalidateRelated(queryClient, "employee-documents");
       toast({ title: "Upload gelöscht" });
     },
     onError: (error: Error) => {
@@ -252,7 +253,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
       });
     }
 
-    queryClient.invalidateQueries({ queryKey: ["admin", "employees", employeeId, "documents"] });
+    invalidateRelated(queryClient, "employee-documents");
     setIsUploadOpen(false);
     setSelectedDocTypeId("");
     setBatchLabel("");
@@ -700,7 +701,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
         targetType="employee"
         context="bestandskunde"
         onComplete={() => {
-          queryClient.invalidateQueries({ queryKey: ["admin", "employees", employeeId, "documents"] });
+          invalidateRelated(queryClient, "employee-documents");
         }}
       />
 

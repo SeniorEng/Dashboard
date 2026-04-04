@@ -105,7 +105,6 @@ export function useAdminCloseMonth() {
     },
     onSuccess: () => {
       invalidateRelated(queryClient, "time-entries");
-      queryClient.invalidateQueries({ queryKey: ["admin-month-closing-readiness"] });
     },
     onError: (error: Error) => {
       console.error("[MonthClosing] Abschluss fehlgeschlagen:", error.message);
@@ -126,7 +125,6 @@ export function useAdminReopenMonth() {
     },
     onSuccess: () => {
       invalidateRelated(queryClient, "time-entries");
-      queryClient.invalidateQueries({ queryKey: ["admin-month-closing-readiness"] });
     },
     onError: (error: Error) => {
       console.error("[MonthClosing] Wiedereröffnung fehlgeschlagen:", error.message);
@@ -147,7 +145,6 @@ export function useAdminBatchCloseMonth() {
     },
     onSuccess: () => {
       invalidateRelated(queryClient, "time-entries");
-      queryClient.invalidateQueries({ queryKey: ["admin-month-closing-readiness"] });
     },
     onError: (error: Error) => {
       console.error("[MonthClosing] Batch-Abschluss fehlgeschlagen:", error.message);
