@@ -520,8 +520,19 @@ async function calculateAllocated39_42a(
     startDateStr = `${curYear}-01-01`;
   }
 
+  const initialBalances = await d.select()
+    .from(budgetAllocations)
+    .where(and(
+      eq(budgetAllocations.customerId, customerId),
+      eq(budgetAllocations.budgetType, "ersatzpflege_39_42a"),
+      eq(budgetAllocations.source, "initial_balance"),
+      isNull(budgetAllocations.deletedAt)
+    ));
+
   const amounts = await getCustomerBudgetAmounts(customerId, undefined, typeSettings);
-  if (!amounts.verhinderungspflege39) return 0;
+  const yearlyLimitCents = amounts.verhinderungspflege39;
+
+  if (!yearlyLimitCents && initialBalances.length === 0) return 0;
 
   const s39 = typeSettings.find(s => s.budgetType === "ersatzpflege_39_42a" && s.enabled);
 
@@ -540,15 +551,24 @@ async function calculateAllocated39_42a(
   }
 
   if (opts.year != null) {
-    return opts.year >= startYear && opts.year <= endYear ? amounts.verhinderungspflege39 : 0;
+    const ibForYear = initialBalances
+      .filter(a => a.year === opts.year)
+      .reduce((sum, a) => sum + a.amountCents, 0);
+    const yearlyAlloc = opts.year >= startYear && opts.year <= endYear ? yearlyLimitCents : 0;
+    return yearlyAlloc + ibForYear;
   }
 
   if (opts.asOfDate) {
     const asOfYear = parseLocalDate(opts.asOfDate).getFullYear();
-    return asOfYear >= startYear && asOfYear <= endYear ? amounts.verhinderungspflege39 : 0;
+    const ibForYear = initialBalances
+      .filter(a => a.year === asOfYear)
+      .reduce((sum, a) => sum + a.amountCents, 0);
+    const yearlyAlloc = asOfYear >= startYear && asOfYear <= endYear ? yearlyLimitCents : 0;
+    return yearlyAlloc + ibForYear;
   }
 
-  return Math.max(0, endYear - startYear + 1) * amounts.verhinderungspflege39;
+  const ibTotal = initialBalances.reduce((sum, a) => sum + a.amountCents, 0);
+  return Math.max(0, endYear - startYear + 1) * yearlyLimitCents + ibTotal;
 }
 
 export async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Promise<BudgetAllocation[]> {
