@@ -10,9 +10,13 @@ import {
 } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { computeDataHash } from "../services/signature-integrity";
-import { eq, sql as sqlBuilder, ne, and, or, inArray, isNull, type SQLWrapper } from "drizzle-orm";
+import { eq, sql as sqlBuilder, ne, and, or, inArray, isNull, type SQL, type SQLWrapper } from "drizzle-orm";
 import { db } from "../lib/db";
 import { appointmentWithCustomerSelectFields, mapAppointmentRow } from "./appointment-helpers";
+
+function employeeFilter(employeeId: number): SQL {
+  return sqlBuilder`(${appointments.assignedEmployeeId} = ${employeeId} OR ${appointments.performedByEmployeeId} = ${employeeId})`;
+}
 import { getAssignedCustomerIds, getPrimaryCustomerIds } from "./customers-storage";
 import type { ServiceRecordOverviewItem } from "../storage";
 
@@ -43,15 +47,15 @@ export async function getServiceRecordsForEmployee(employeeId: number, year?: nu
       orConditions.push(inArray(monthlyServiceRecords.customerId, primaryCustomerIds));
     }
     if (backupCustomerIds.length > 0) {
-      orConditions.push(
-        and(
-          eq(monthlyServiceRecords.employeeId, employeeId),
-          inArray(monthlyServiceRecords.customerId, backupCustomerIds),
-        )!
+      const backupCondition = and(
+        eq(monthlyServiceRecords.employeeId, employeeId),
+        inArray(monthlyServiceRecords.customerId, backupCustomerIds),
       );
+      if (backupCondition) orConditions.push(backupCondition);
     }
     if (orConditions.length > 0) {
-      baseConditions.push(or(...orConditions)!);
+      const combined = or(...orConditions);
+      if (combined) baseConditions.push(combined);
     } else {
       return [];
     }
@@ -206,10 +210,7 @@ export async function getDocumentedAppointmentsForPeriod(customerId: number, emp
     isNull(appointments.deletedAt),
   ];
   if (!isPrimary) {
-    conditions.push(or(
-      eq(appointments.assignedEmployeeId, employeeId),
-      eq(appointments.performedByEmployeeId, employeeId)
-    )!);
+    conditions.push(employeeFilter(employeeId));
   }
 
   const rows = await db.select(appointmentWithCustomerSelectFields)
@@ -237,10 +238,7 @@ export async function getUndocumentedAppointmentsForPeriod(customerId: number, e
     isNull(appointments.deletedAt),
   ];
   if (!isPrimary) {
-    conditions.push(or(
-      eq(appointments.assignedEmployeeId, employeeId),
-      eq(appointments.performedByEmployeeId, employeeId)
-    )!);
+    conditions.push(employeeFilter(employeeId));
   }
 
   const rows = await db.select(appointmentWithCustomerSelectFields)
@@ -272,15 +270,15 @@ export async function getPendingServiceRecords(employeeId: number): Promise<Mont
     orConditions.push(inArray(monthlyServiceRecords.customerId, primaryCustomerIds));
   }
   if (backupCustomerIds.length > 0) {
-    orConditions.push(
-      and(
-        eq(monthlyServiceRecords.employeeId, employeeId),
-        inArray(monthlyServiceRecords.customerId, backupCustomerIds),
-      )!
+    const backupCondition = and(
+      eq(monthlyServiceRecords.employeeId, employeeId),
+      inArray(monthlyServiceRecords.customerId, backupCustomerIds),
     );
+    if (backupCondition) orConditions.push(backupCondition);
   }
   if (orConditions.length > 0) {
-    conditions.push(or(...orConditions)!);
+    const combined = or(...orConditions);
+    if (combined) conditions.push(combined);
   } else {
     return [];
   }
@@ -506,10 +504,7 @@ export async function getAppointmentCountsForPeriod(customerId: number, employee
     isNull(appointments.deletedAt),
   ];
   if (!isPrimary) {
-    conditions.push(or(
-      eq(appointments.assignedEmployeeId, employeeId),
-      eq(appointments.performedByEmployeeId, employeeId)
-    )!);
+    conditions.push(employeeFilter(employeeId));
   }
 
   const result = await db.select({
@@ -540,10 +535,7 @@ export async function getCoveredBySingleCount(customerId: number, employeeId: nu
     isNull(appointments.deletedAt),
   ];
   if (!isPrimary) {
-    conditions.push(or(
-      eq(appointments.assignedEmployeeId, employeeId),
-      eq(appointments.performedByEmployeeId, employeeId)
-    )!);
+    conditions.push(employeeFilter(employeeId));
   }
 
   const result = await db.select({
@@ -572,10 +564,7 @@ export async function getCoveredByMonthlyCount(customerId: number, employeeId: n
     isNull(appointments.deletedAt),
   ];
   if (!isPrimary) {
-    conditions.push(or(
-      eq(appointments.assignedEmployeeId, employeeId),
-      eq(appointments.performedByEmployeeId, employeeId)
-    )!);
+    conditions.push(employeeFilter(employeeId));
   }
 
   const result = await db.select({

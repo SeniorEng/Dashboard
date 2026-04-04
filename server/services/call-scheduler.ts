@@ -17,21 +17,6 @@ interface CallScheduleResult {
   reason: string;
 }
 
-interface ScheduledCallRow {
-  id: number;
-  prospect_id: number;
-  lead_name: string;
-  lead_phone: string;
-  quelle: string | null;
-  scheduled_at: Date;
-  status: string;
-  reason: string | null;
-  attempts: number;
-  last_error: string | null;
-  created_at: Date;
-  executed_at: Date | null;
-}
-
 function getBerlinTime(date: Date): { day: number; hour: number } {
   const berlinStr = date.toLocaleString("en-US", { timeZone: "Europe/Berlin", weekday: "short", hour: "numeric", hour12: false });
   const parts = berlinStr.split(", ");
@@ -144,25 +129,31 @@ async function processPendingCalls(): Promise<void> {
         AND scheduled_at <= ${staleThreshold}
     `);
 
-    const claimedResult = await db.execute(sql`
-      UPDATE scheduled_calls
-      SET status = 'processing'
-      WHERE id IN (
-        SELECT id FROM scheduled_calls
-        WHERE status = 'pending' AND scheduled_at <= ${now}
-        FOR UPDATE SKIP LOCKED
-      )
-      RETURNING *
-    `);
+    const pendingCalls = await db
+      .select()
+      .from(scheduledCalls)
+      .where(and(
+        eq(scheduledCalls.status, "pending"),
+        lte(scheduledCalls.scheduledAt, now)
+      ));
 
-    const rows = (claimedResult.rows as unknown) as ScheduledCallRow[];
+    for (const call of pendingCalls) {
+      const claimed = await db
+        .update(scheduledCalls)
+        .set({ status: "processing" })
+        .where(and(
+          eq(scheduledCalls.id, call.id),
+          eq(scheduledCalls.status, "pending")
+        ))
+        .returning();
 
-    for (const call of rows) {
+      if (claimed.length === 0) continue;
+
       try {
         await initiateLeadCallBridge({
-          prospectId: call.prospect_id,
-          leadName: call.lead_name,
-          leadPhone: call.lead_phone,
+          prospectId: call.prospectId,
+          leadName: call.leadName,
+          leadPhone: call.leadPhone,
           quelle: call.quelle || "unbekannt",
           throwOnError: true,
         });
@@ -176,7 +167,7 @@ async function processPendingCalls(): Promise<void> {
           })
           .where(eq(scheduledCalls.id, call.id));
 
-        log(`Executed scheduled call ${call.id} for prospect ${call.prospect_id}`, "call-scheduler");
+        log(`Executed scheduled call ${call.id} for prospect ${call.prospectId}`, "call-scheduler");
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         const newAttempts = (call.attempts ?? 0) + 1;
@@ -194,7 +185,7 @@ async function processPendingCalls(): Promise<void> {
         console.error(`[call-scheduler] Failed to execute scheduled call ${call.id} (attempt ${newAttempts}):`, errorMsg);
 
         if (newStatus === "failed") {
-          await safeAddNote(call.prospect_id, `Geplanter Anruf endgültig fehlgeschlagen nach ${newAttempts} Versuchen: ${errorMsg}`);
+          await safeAddNote(call.prospectId, `Geplanter Anruf endgültig fehlgeschlagen nach ${newAttempts} Versuchen: ${errorMsg}`);
         }
       }
     }
