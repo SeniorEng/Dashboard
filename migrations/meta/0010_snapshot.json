@@ -75,8 +75,8 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "admin_permission_unique": {
-          "name": "admin_permission_unique",
+        "admin_permissions_user_id_permission_key_key": {
+          "name": "admin_permissions_user_id_permission_key_key",
           "nullsNotDistinct": false,
           "columns": [
             "user_id",
@@ -6092,8 +6092,8 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "document_signing_tokens_token_hash_unique": {
-          "name": "document_signing_tokens_token_hash_unique",
+        "document_signing_tokens_token_hash_key": {
+          "name": "document_signing_tokens_token_hash_key",
           "nullsNotDistinct": false,
           "columns": [
             "token_hash"
@@ -6383,8 +6383,8 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "document_templates_slug_unique": {
-          "name": "document_templates_slug_unique",
+        "document_templates_slug_key": {
+          "name": "document_templates_slug_key",
           "nullsNotDistinct": false,
           "columns": [
             "slug"
@@ -8408,8 +8408,8 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "invoices_invoice_number_unique": {
-          "name": "invoices_invoice_number_unique",
+        "invoices_invoice_number_key": {
+          "name": "invoices_invoice_number_key",
           "nullsNotDistinct": false,
           "columns": [
             "invoice_number"
