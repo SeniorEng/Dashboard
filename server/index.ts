@@ -151,6 +151,13 @@ function isNeonDriverBug(message: string): boolean {
 
 async function runStartupTasks() {
   try {
+    const { fixInvoiceLineItemTypes } = await import("./startup/fix-invoice-line-item-types");
+    try {
+      await fixInvoiceLineItemTypes();
+    } catch (err) {
+      log(`invoice_line_items Typ-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { serviceCatalogStorage } = await import("./storage/service-catalog");
     await serviceCatalogStorage.ensureSystemServices();
 
