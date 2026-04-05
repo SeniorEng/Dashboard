@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
-import { asyncHandler } from "../lib/errors";
+import { asyncHandler, executeUserUpdate } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { authService } from "../services/auth";
 import { documentStorage } from "../storage/documents";
@@ -44,27 +44,8 @@ router.patch("/", asyncHandler("Profil konnte nicht aktualisiert werden", async 
     return;
   }
 
-  let updatedUser;
-  try {
-    updatedUser = await authService.updateUser(req.user!.id, result.data);
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("bereits verwendet")) {
-      res.status(409).json({
-        error: "CONFLICT",
-        message: error.message,
-      });
-      return;
-    }
-    throw error;
-  }
-
-  if (!updatedUser) {
-    res.status(404).json({
-      error: "NOT_FOUND",
-      message: "Benutzer nicht gefunden",
-    });
-    return;
-  }
+  const updatedUser = await executeUserUpdate(res, req.user!.id, result.data, authService.updateUser.bind(authService));
+  if (!updatedUser) return;
 
   const addressFields = ["strasse", "hausnummer", "plz", "stadt"] as const;
   const addressChanged = addressFields.some(f => (f in result.data));

@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
 import { generatePdfFromHtml } from "./pdf-generator";
 import { renderTemplate, buildPlaceholders, wrapInPrintableHtml } from "./template-engine";
@@ -6,6 +7,7 @@ import { computeDataHash } from "./signature-integrity";
 import { todayISO, formatDateForDisplay } from "@shared/utils/datetime";
 import type { DocumentTemplate } from "@shared/schema";
 import { parseObjectPath, getPrivateDir } from "../lib/object-storage-helpers";
+import type { Request, Response } from "express";
 
 function buildAuditStamp(options: {
   signingIp?: string | null;
@@ -236,4 +238,41 @@ export async function getDocumentPdfBuffer(objectPath: string): Promise<Buffer> 
 
   const [contents] = await file.download();
   return Buffer.from(contents);
+}
+
+export function generateSigningToken(): string {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+export function hashToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+export async function createSigningLinkAndRespond(
+  req: Request,
+  res: Response,
+  result: { generatedDocId: number; fileName: string; objectPath: string; integrityHash: string },
+  signingStatus: string,
+  deferEmployeeSignature: boolean,
+): Promise<void> {
+  let signingLink: string | null = null;
+
+  if (deferEmployeeSignature) {
+    const rawToken = generateSigningToken();
+    const tokenHash = hashToken(rawToken);
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+    await documentStorage.createSigningToken(result.generatedDocId, tokenHash, expiresAt);
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    signingLink = `${baseUrl}/unterschreiben/${rawToken}`;
+  }
+
+  res.status(201).json({
+    id: result.generatedDocId,
+    fileName: result.fileName,
+    objectPath: result.objectPath,
+    integrityHash: result.integrityHash,
+    signingStatus,
+    signingLink,
+  });
 }

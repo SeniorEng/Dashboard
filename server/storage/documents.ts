@@ -30,6 +30,26 @@ import {
 } from "@shared/schema";
 import { db } from "../lib/db";
 
+function buildDocumentInsertValues(
+  data: { documentTypeId: number; fileName: string; objectPath: string; notes?: string | null },
+  uploadedByUserId: number,
+  reviewDueDate: string | null,
+  options?: { batchId?: string; batchLabel?: string; documentDate?: string },
+) {
+  return {
+    documentTypeId: data.documentTypeId,
+    fileName: data.fileName,
+    objectPath: data.objectPath,
+    uploadedByUserId,
+    reviewDueDate,
+    isCurrent: true,
+    notes: data.notes || null,
+    documentDate: options?.documentDate || null,
+    ...(options?.batchId ? { batchId: options.batchId } : {}),
+    ...(options?.batchLabel !== undefined ? { batchLabel: options.batchLabel || null } : {}),
+  };
+}
+
 const proofBaseSelect = {
   id: employeeDocumentProofs.id,
   employeeId: employeeDocumentProofs.employeeId,
@@ -195,16 +215,7 @@ export class DocumentStorage implements IDocumentStorage {
 
       const [result] = await tx.insert(employeeDocuments).values({
         employeeId: data.employeeId,
-        documentTypeId: data.documentTypeId,
-        fileName: data.fileName,
-        objectPath: data.objectPath,
-        uploadedByUserId,
-        reviewDueDate,
-        isCurrent: true,
-        notes: data.notes || null,
-        documentDate: options?.documentDate || null,
-        ...(options?.batchId ? { batchId: options.batchId } : {}),
-        ...(options?.batchLabel !== undefined ? { batchLabel: options.batchLabel || null } : {}),
+        ...buildDocumentInsertValues(data, uploadedByUserId, reviewDueDate, options),
       }).returning();
 
       return result;
@@ -344,16 +355,7 @@ export class DocumentStorage implements IDocumentStorage {
 
       const [result] = await tx.insert(customerDocuments).values({
         customerId: data.customerId,
-        documentTypeId: data.documentTypeId,
-        fileName: data.fileName,
-        objectPath: data.objectPath,
-        uploadedByUserId,
-        reviewDueDate,
-        isCurrent: true,
-        notes: data.notes || null,
-        documentDate: options?.documentDate || null,
-        ...(options?.batchId ? { batchId: options.batchId } : {}),
-        ...(options?.batchLabel !== undefined ? { batchLabel: options.batchLabel || null } : {}),
+        ...buildDocumentInsertValues(data, uploadedByUserId, reviewDueDate, options),
       }).returning();
 
       return result;

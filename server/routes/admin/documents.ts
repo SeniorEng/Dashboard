@@ -7,7 +7,7 @@ import { insertDocumentTypeSchema, updateDocumentTypeSchema, insertEmployeeDocum
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
 import { renderTemplateForCustomer, renderTemplateFromFormData, wrapInPrintableHtml, getPlaceholderCatalog, type WizardFormData } from "../../services/template-engine";
-import { generateAndStorePdf, getDocumentPdfBuffer } from "../../services/document-pdf";
+import { generateAndStorePdf, getDocumentPdfBuffer, createSigningLinkAndRespond } from "../../services/document-pdf";
 import { evaluateTriggersForCustomer, evaluateTriggersForEmployee } from "../../services/document-trigger-engine";
 
 const router = Router();
@@ -373,13 +373,6 @@ const generateDocumentSchema = z.object({
   signingLocation: z.string().nullable().optional(),
 });
 
-function generateSigningToken(): string {
-  return crypto.randomBytes(32).toString("hex");
-}
-
-function hashToken(token: string): string {
-  return crypto.createHash("sha256").update(token).digest("hex");
-}
 
 router.post("/documents/generate-pdf", asyncHandler("PDF konnte nicht erstellt werden", async (req: Request, res: Response) => {
   const parsed = generateDocumentSchema.safeParse(req.body);
@@ -417,28 +410,7 @@ router.post("/documents/generate-pdf", asyncHandler("PDF konnte nicht erstellt w
     signingLocation,
   });
 
-  let signingLink: string | null = null;
-
-  if (deferEmployeeSignature) {
-    const rawToken = generateSigningToken();
-    const tokenHash = hashToken(rawToken);
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
-
-    await documentStorage.createSigningToken(result.generatedDocId, tokenHash, expiresAt);
-
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-    signingLink = `${baseUrl}/unterschreiben/${rawToken}`;
-  }
-
-  res.status(201).json({
-    id: result.generatedDocId,
-    fileName: result.fileName,
-    objectPath: result.objectPath,
-    integrityHash: result.integrityHash,
-    signingStatus,
-    signingLink,
-  });
+  await createSigningLinkAndRespond(req, res, result, signingStatus, deferEmployeeSignature);
 }));
 
 router.get("/generated-documents/:id/download", asyncHandler("PDF konnte nicht heruntergeladen werden", async (req: Request, res: Response) => {

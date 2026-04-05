@@ -5,7 +5,7 @@ import { birthdaysCache } from "../../services/cache";
 import { auditService } from "../../services/audit";
 import { geocodeCustomer } from "../../services/geocoding";
 import { validateGeburtsdatum } from "@shared/utils/datetime";
-import { createCustomerRelatedData } from "../../lib/customer-creation-helpers";
+import { createCustomerRelatedData, buildCustomerInsertData } from "../../lib/customer-creation-helpers";
 import { 
   versichertennummerSchema,
   customers,
@@ -222,30 +222,7 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
 
   const userId = req.user!.id;
 
-  const customerData: InsertCustomer = {
-    name: `${data.nachname}, ${data.vorname}`,
-    vorname: data.vorname,
-    nachname: data.nachname,
-    email: data.email || null,
-    telefon: data.telefon || null,
-    festnetz: data.festnetz || null,
-    address: `${data.strasse} ${data.nr}, ${data.plz} ${data.stadt}`,
-    strasse: data.strasse,
-    nr: data.nr,
-    plz: data.plz,
-    stadt: data.stadt,
-    pflegegrad: data.pflegegrad || null,
-    geburtsdatum: data.geburtsdatum || null,
-    vorerkrankungen: data.vorerkrankungen || null,
-    haustierVorhanden: data.haustierVorhanden || false,
-    haustierDetails: data.haustierVorhanden ? (data.haustierDetails || null) : null,
-    personenbefoerderungGewuenscht: data.personenbefoerderungGewuenscht || false,
-    documentDeliveryMethod: data.documentDeliveryMethod || "email",
-    acceptsPrivatePayment: data.acceptsPrivatePayment ?? false,
-    receivesMonthlyInvoice: data.receivesMonthlyInvoice ?? false,
-    billingType: data.billingType,
-    createdByUserId: userId,
-  };
+  const customerData = buildCustomerInsertData(data, userId);
 
   const customer = await customerManagementStorage.createCustomerDirect(customerData);
 

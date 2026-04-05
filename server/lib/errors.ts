@@ -169,6 +169,29 @@ export function sendConflict(res: Response, error: string, message: string): voi
   });
 }
 
+export async function executeUserUpdate<TData, TResult>(
+  res: Response,
+  userId: number,
+  data: TData,
+  updateFn: (id: number, data: TData) => Promise<TResult | undefined>,
+): Promise<TResult | null> {
+  let updatedUser: TResult | undefined;
+  try {
+    updatedUser = await updateFn(userId, data);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("bereits verwendet")) {
+      res.status(409).json({ error: "CONFLICT", message: error.message });
+      return null;
+    }
+    throw error;
+  }
+  if (!updatedUser) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Benutzer nicht gefunden" });
+    return null;
+  }
+  return updatedUser;
+}
+
 export function sendBadRequest(res: Response, message: string): void {
   res.status(400).json({
     code: ErrorCodes.INVALID_REQUEST,

@@ -1,9 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
-import crypto from "crypto";
 import { documentStorage } from "../../storage/documents";
 import { renderTemplateForCustomer, wrapInPrintableHtml, extractInputPlaceholders } from "../../services/template-engine";
-import { generateAndStorePdf, getDocumentPdfBuffer } from "../../services/document-pdf";
+import { generateAndStorePdf, getDocumentPdfBuffer, createSigningLinkAndRespond } from "../../services/document-pdf";
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam, requireCustomerAccess } from "../../lib/params";
 
@@ -170,26 +169,7 @@ router.post("/:id/documents/generate-pdf", asyncHandler("PDF konnte nicht erstel
     signingLocation,
   });
 
-  let signingLink: string | null = null;
-
-  if (deferEmployeeSignature) {
-    const rawToken = crypto.randomBytes(32).toString("hex");
-    const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
-    await documentStorage.createSigningToken(result.generatedDocId, tokenHash, expiresAt);
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-    signingLink = `${baseUrl}/unterschreiben/${rawToken}`;
-  }
-
-  res.status(201).json({
-    id: result.generatedDocId,
-    fileName: result.fileName,
-    objectPath: result.objectPath,
-    integrityHash: result.integrityHash,
-    signingStatus,
-    signingLink,
-  });
+  await createSigningLinkAndRespond(req, res, result, signingStatus, deferEmployeeSignature);
 }));
 
 router.get("/:id/generated-documents", asyncHandler("Generierte Dokumente konnten nicht geladen werden", async (req, res) => {

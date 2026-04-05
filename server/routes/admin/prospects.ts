@@ -18,7 +18,7 @@ import { authService } from "../../services/auth";
 import { geocodeCustomer } from "../../services/geocoding";
 import { birthdaysCache, customerIdsCache } from "../../services/cache";
 import { validateGeburtsdatum } from "@shared/utils/datetime";
-import { createCustomerRelatedData } from "../../lib/customer-creation-helpers";
+import { createCustomerRelatedData, buildCustomerInsertData } from "../../lib/customer-creation-helpers";
 import { db } from "../../lib/db";
 import { eq, and, isNull } from "drizzle-orm";
 
@@ -323,32 +323,12 @@ router.post("/prospects/:id/convert", asyncHandler("Konvertierung fehlgeschlagen
 
   const result = await db.transaction(async (tx) => {
     const [customer] = await tx.insert(customers).values({
-      name: `${data.nachname}, ${data.vorname}`,
-      vorname: data.vorname,
-      nachname: data.nachname,
-      email: data.email || null,
-      telefon: data.telefon || null,
-      festnetz: data.festnetz || null,
-      address: `${data.strasse} ${data.nr}, ${data.plz} ${data.stadt}`,
-      strasse: data.strasse,
-      nr: data.nr,
-      plz: data.plz,
-      stadt: data.stadt,
-      pflegegrad: data.pflegegrad || null,
-      geburtsdatum: data.geburtsdatum || null,
-      vorerkrankungen: data.vorerkrankungen || null,
-      haustierVorhanden: data.haustierVorhanden || false,
-      haustierDetails: data.haustierVorhanden ? (data.haustierDetails || null) : null,
-      personenbefoerderungGewuenscht: data.personenbefoerderungGewuenscht || false,
-      acceptsPrivatePayment: data.acceptsPrivatePayment ?? false,
-      documentDeliveryMethod: data.documentDeliveryMethod || "email",
-      billingType: data.billingType,
+      ...buildCustomerInsertData(data, userId),
       status: "aktiv",
       primaryEmployeeId: data.primaryEmployeeId ?? null,
       backupEmployeeId: data.backupEmployeeId ?? null,
       backupEmployeeId2: data.backupEmployeeId2 ?? null,
       convertedFromProspectId: id,
-      createdByUserId: userId,
     }).returning();
 
     await tx.update(appointments)

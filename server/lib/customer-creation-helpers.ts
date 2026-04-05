@@ -1,6 +1,56 @@
 import { customerManagementStorage } from "../storage/customer-management";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
 import { parseLocalDate, todayISO } from "@shared/utils/datetime";
+import type { InsertCustomer } from "@shared/schema";
+
+interface CustomerBaseFields {
+  vorname: string;
+  nachname: string;
+  email?: string | null;
+  telefon?: string | null;
+  festnetz?: string | null;
+  strasse: string;
+  nr: string;
+  plz: string;
+  stadt: string;
+  pflegegrad?: number | null;
+  geburtsdatum?: string | null;
+  vorerkrankungen?: string | null;
+  haustierVorhanden?: boolean;
+  haustierDetails?: string | null;
+  personenbefoerderungGewuenscht?: boolean;
+  acceptsPrivatePayment?: boolean;
+  receivesMonthlyInvoice?: boolean;
+  documentDeliveryMethod?: string;
+  billingType: string;
+}
+
+export function buildCustomerInsertData(data: CustomerBaseFields, createdByUserId: number): InsertCustomer {
+  return {
+    name: `${data.nachname}, ${data.vorname}`,
+    vorname: data.vorname,
+    nachname: data.nachname,
+    email: data.email || null,
+    telefon: data.telefon || null,
+    festnetz: data.festnetz || null,
+    address: `${data.strasse} ${data.nr}, ${data.plz} ${data.stadt}`,
+    strasse: data.strasse,
+    nr: data.nr,
+    plz: data.plz,
+    stadt: data.stadt,
+    pflegegrad: data.pflegegrad || null,
+    geburtsdatum: data.geburtsdatum || null,
+    vorerkrankungen: data.vorerkrankungen || null,
+    haustierVorhanden: data.haustierVorhanden || false,
+    haustierDetails: data.haustierVorhanden ? (data.haustierDetails || null) : null,
+    personenbefoerderungGewuenscht: data.personenbefoerderungGewuenscht || false,
+    documentDeliveryMethod: (data.documentDeliveryMethod as "email" | "post") || "email",
+    acceptsPrivatePayment: data.acceptsPrivatePayment ?? false,
+    receivesMonthlyInvoice: data.receivesMonthlyInvoice ?? false,
+    billingType: data.billingType,
+    createdByUserId,
+  };
+}
 
 interface InsuranceInput {
   providerId: number;

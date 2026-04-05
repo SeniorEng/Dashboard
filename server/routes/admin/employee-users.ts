@@ -18,7 +18,7 @@ import {
 } from "@shared/schema";
 import { validateGeburtsdatum } from "@shared/utils/datetime";
 import { optionalGermanPhoneSchema } from "@shared/schema/common";
-import { asyncHandler } from "../../lib/errors";
+import { asyncHandler, executeUserUpdate } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
 import { auditService } from "../../services/audit";
 import { geocodeEmployee } from "../../services/geocoding";
@@ -258,27 +258,8 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
 
   const { roles, carryOverDays, ...userUpdates } = result.data;
 
-  let updatedUser;
-  try {
-    updatedUser = await authService.updateUser(id, userUpdates);
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("bereits verwendet")) {
-      res.status(409).json({
-        error: "CONFLICT",
-        message: error.message,
-      });
-      return;
-    }
-    throw error;
-  }
-
-  if (!updatedUser) {
-    res.status(404).json({
-      error: "NOT_FOUND",
-      message: "Benutzer nicht gefunden",
-    });
-    return;
-  }
+  const updatedUser = await executeUserUpdate(res, id, userUpdates, authService.updateUser.bind(authService));
+  if (!updatedUser) return;
 
   if (roles !== undefined) {
     await authService.setUserRoles(id, roles);
