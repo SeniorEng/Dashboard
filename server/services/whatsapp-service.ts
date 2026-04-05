@@ -1,5 +1,6 @@
 import { db } from "../lib/db";
-import { companySettings, whatsappMessageLog, type InsertWhatsAppMessageLog, type CompanySettings } from "@shared/schema";
+import { whatsappMessageLog, type InsertWhatsAppMessageLog, type CompanySettings } from "@shared/schema";
+import { storage } from "../storage";
 
 const META_API_VERSION = "v21.0";
 const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`;
@@ -200,10 +201,7 @@ export class WhatsAppService {
   }
 
   private async getConfig(): Promise<CompanySettings | null> {
-    const rows = await db.select().from(companySettings).limit(1);
-    if (rows.length === 0) return null;
-
-    const settings = rows[0];
+    const settings = await storage.getCompanySettings();
     if (
       !settings.whatsappEnabled ||
       !settings.whatsappAccessToken ||

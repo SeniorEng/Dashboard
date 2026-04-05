@@ -16,6 +16,38 @@ import {
 import type { AppointmentWithCustomer } from "@shared/types";
 import { eq } from "drizzle-orm";
 import { db } from "./lib/db";
+import { encryptSecret, decryptSecret, isEncryptionConfigured } from "./lib/crypto";
+
+const SENSITIVE_COMPANY_FIELDS = [
+  "smtpPass", "epostPassword", "epostSecret",
+  "qontoSecretKey", "whatsappAccessToken", "twilioAuthToken",
+] as const;
+
+function decryptCompanySecrets<T extends Record<string, unknown>>(settings: T): T {
+  if (!isEncryptionConfigured()) return settings;
+  const result = { ...settings };
+  for (const field of SENSITIVE_COMPANY_FIELDS) {
+    const val = result[field];
+    if (typeof val === "string" && val) {
+      (result as Record<string, unknown>)[field] = decryptSecret(val);
+    }
+  }
+  return result;
+}
+
+function encryptCompanySecrets<T extends Record<string, unknown>>(data: T): T {
+  if (!isEncryptionConfigured()) return data;
+  const result = { ...data };
+  for (const field of SENSITIVE_COMPANY_FIELDS) {
+    if (field in result) {
+      const val = result[field];
+      if (typeof val === "string" && val) {
+        (result as Record<string, unknown>)[field] = encryptSecret(val);
+      }
+    }
+  }
+  return result;
+}
 
 import * as customersStorage from "./storage/customers-storage";
 import * as appointmentsStorage from "./storage/appointments-storage";
@@ -267,9 +299,10 @@ export class DatabaseStorage implements IStorage {
     }
     const { companySettings } = await import("@shared/schema");
     const existing = await db.select().from(companySettings).limit(1);
-    const result = existing.length > 0
+    const raw = existing.length > 0
       ? existing[0]
       : (await db.insert(companySettings).values({}).returning())[0];
+    const result = decryptCompanySecrets(raw);
     this.companySettingsCache = {
       data: result,
       expiresAt: Date.now() + DatabaseStorage.COMPANY_SETTINGS_TTL_MS,
@@ -280,25 +313,28 @@ export class DatabaseStorage implements IStorage {
   async updateCompanySettings(data: Partial<CompanySettings>, userId: number): Promise<CompanySettings> {
     this.companySettingsCache = null;
     const { companySettings } = await import("@shared/schema");
+    const encryptedData = encryptCompanySecrets(data);
     const existing = await db.select().from(companySettings).limit(1);
     if (existing.length === 0) {
-      const [created] = await db.insert(companySettings).values({ ...data, updatedByUserId: userId }).returning();
+      const [created] = await db.insert(companySettings).values({ ...encryptedData, updatedByUserId: userId }).returning();
+      const decrypted = decryptCompanySecrets(created);
       this.companySettingsCache = {
-        data: created,
+        data: decrypted,
         expiresAt: Date.now() + DatabaseStorage.COMPANY_SETTINGS_TTL_MS,
       };
-      return created;
+      return decrypted;
     }
     const { eq } = await import("drizzle-orm");
     const [updated] = await db.update(companySettings)
-      .set({ ...data, updatedAt: new Date(), updatedByUserId: userId })
+      .set({ ...encryptedData, updatedAt: new Date(), updatedByUserId: userId })
       .where(eq(companySettings.id, existing[0].id))
       .returning();
+    const decrypted = decryptCompanySecrets(updated);
     this.companySettingsCache = {
-      data: updated,
+      data: decrypted,
       expiresAt: Date.now() + DatabaseStorage.COMPANY_SETTINGS_TTL_MS,
     };
-    return updated;
+    return decrypted;
   }
 }
 

@@ -62,6 +62,7 @@ integrations = ["javascript_object_storage:2.0.0"]
 
 [userenv.shared]
 SUPER_ADMIN_EMAIL = "alrikdegenkolb@seniorenengel-alltagsbegleitung.de"
+ENCRYPTION_KEY = "16cd865645bc85fca814fa59a9d1e9c4734a9420cf65f8769a70e0eedfd866a1"
 
 [postMerge]
 path = "scripts/post-merge.sh"

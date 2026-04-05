@@ -160,6 +160,13 @@ async function runStartupTasks() {
     const { backfillAppointmentServices } = await import("./startup/backfill-appointment-services");
     await backfillAppointmentServices();
 
+    const { encryptExistingSecrets } = await import("./startup/encrypt-company-secrets");
+    try {
+      await encryptExistingSecrets();
+    } catch (err) {
+      log(`Secrets-Verschlüsselung fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { importPflegekassen } = await import("./startup/import-pflegekassen");
     await importPflegekassen();
 
