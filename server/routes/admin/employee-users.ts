@@ -7,6 +7,7 @@ import { log } from "../../lib/log";
 import { sanitizeUser } from "../../utils/sanitize-user";
 import { 
   insertUserSchema, 
+  adminResetPasswordSchema,
   EMPLOYEE_ROLES,
   EMPLOYMENT_TYPES,
   EMPLOYMENT_STATUSES,
@@ -324,23 +325,16 @@ router.post("/users/:id/reset-password", asyncHandler("Passwort konnte nicht zur
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
 
-  const { newPassword } = req.body;
-  if (!newPassword || newPassword.length < 8) {
+  const parsed = adminResetPasswordSchema.safeParse(req.body);
+  if (!parsed.success) {
     res.status(400).json({
       error: "VALIDATION_ERROR",
-      message: "Passwort muss mindestens 8 Zeichen haben",
-    });
-    return;
-  }
-  if (!/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
-    res.status(400).json({
-      error: "VALIDATION_ERROR",
-      message: "Passwort muss mindestens einen Großbuchstaben, einen Kleinbuchstaben und eine Ziffer enthalten",
+      message: parsed.error.errors[0]?.message ?? "Ungültige Eingabe",
     });
     return;
   }
 
-  const success = await authService.adminResetPassword(id, newPassword);
+  const success = await authService.adminResetPassword(id, parsed.data.newPassword);
   if (!success) {
     res.status(404).json({
       error: "NOT_FOUND",

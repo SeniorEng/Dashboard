@@ -165,7 +165,20 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
   const summary45a = summaries.umwandlung45a;
   const summary39_42a = summaries.ersatzpflege39_42a;
 
-  const totalAvailable = summary45a.currentMonthAvailableCents + summary45b.availableCents + summary39_42a.currentYearAvailableCents;
+  const typeSettings = await budgetLedgerStorage.getBudgetTypeSettings(customerId);
+  const enabledMap: Record<string, boolean> = {
+    entlastungsbetrag_45b: true,
+    umwandlung_45a: false,
+    ersatzpflege_39_42a: false,
+  };
+  for (const s of typeSettings) {
+    enabledMap[s.budgetType] = s.enabled;
+  }
+
+  const totalAvailable =
+    (enabledMap.entlastungsbetrag_45b ? summary45b.availableCents : 0) +
+    (enabledMap.umwandlung_45a ? summary45a.currentMonthAvailableCents : 0) +
+    (enabledMap.ersatzpflege_39_42a ? summary39_42a.currentYearAvailableCents : 0);
 
   let warning: string | null = null;
   let isHardBlock = false;
@@ -197,7 +210,10 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     }
 
     const monthlyRemaining45b = Math.max(0, summary45b.monthlyLimitCents - appointmentMonthUsedCents);
-    const effectiveAvailable = summary45a.currentMonthAvailableCents + monthlyRemaining45b + summary39_42a.currentYearAvailableCents;
+    const effectiveAvailable =
+      (enabledMap.entlastungsbetrag_45b ? monthlyRemaining45b : 0) +
+      (enabledMap.umwandlung_45a ? summary45a.currentMonthAvailableCents : 0) +
+      (enabledMap.ersatzpflege_39_42a ? summary39_42a.currentYearAvailableCents : 0);
     if (totalCostCents > effectiveAvailable) {
       const remainingEuro = (monthlyRemaining45b / 100).toFixed(2).replace(".", ",");
       warning = `Monatslimit fast erreicht — noch ${remainingEuro} € verfügbar.`;

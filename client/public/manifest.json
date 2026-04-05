@@ -1,15 +1,23 @@
 {
-  "name": "CareConnect",
+  "name": "CareConnect – Seniorenengel",
   "short_name": "CareConnect",
+  "description": "Pflegemanagement-App für ambulante Pflegedienste",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f5e6d3",
   "theme_color": "#7c6f5b",
+  "orientation": "any",
   "icons": [
     {
       "src": "/favicon.png",
-      "sizes": "any",
+      "sizes": "64x64",
       "type": "image/png"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "64x64",
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ]
 }

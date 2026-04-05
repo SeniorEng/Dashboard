@@ -443,7 +443,7 @@ export class AuthService {
 
     for (const field of nullableStringFields) {
       if (updates[field] !== undefined) {
-        dbUpdates[field] = updates[field] || null;
+        dbUpdates[field] = updates[field] ?? null;
       }
     }
 

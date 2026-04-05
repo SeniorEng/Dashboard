@@ -221,6 +221,10 @@ export const passwordResetSchema = z.object({
   newPassword: z.string().min(8, "Passwort muss mindestens 8 Zeichen haben").regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d\w\W]{8,}$/, "Passwort muss Groß-/Kleinbuchstaben und eine Zahl enthalten"),
 });
 
+export const adminResetPasswordSchema = z.object({
+  newPassword: z.string().min(8, "Passwort muss mindestens 8 Zeichen haben").regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d\w\W]{8,}$/, "Passwort muss Groß-/Kleinbuchstaben und eine Zahl enthalten"),
+});
+
 export type User = typeof users.$inferSelect;
 export type SafeUser = Omit<User, "passwordHash">;
 export type InsertUser = z.infer<typeof insertUserSchema>;

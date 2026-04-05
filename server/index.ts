@@ -1,3 +1,6 @@
+import { installGermanZodErrors } from "@shared/utils/zod-german";
+installGermanZodErrors();
+
 import express from "express";
 import cookieParser from "cookie-parser";
 import compression from "compression";

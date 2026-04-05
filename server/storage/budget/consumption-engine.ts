@@ -245,9 +245,9 @@ export async function createCascadeConsumption(params: {
     await syncCarryoverAndExpiry(params.customerId, tx);
 
     const defaultPriority: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null }> = [
-      { budgetType: "umwandlung_45a", enabled: true, priority: 1, monthlyLimitCents: null },
-      { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 2, monthlyLimitCents: null },
-      { budgetType: "ersatzpflege_39_42a", enabled: true, priority: 3, monthlyLimitCents: null },
+      { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null },
+      { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null },
+      { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, monthlyLimitCents: null },
     ];
 
     let priorityOrder: Array<{ budgetType: string; enabled: boolean; monthlyLimitCents: number | null; yearlyLimitCents: number | null; validFrom: string | null; validTo: string | null }>;
