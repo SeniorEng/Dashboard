@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, date, time, index, unique, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, index, unique, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp } from "./common";
 import { customers } from "./customers";
@@ -68,11 +68,11 @@ export const invoiceLineItems = pgTable("invoice_line_items", {
   id: serial("id").primaryKey(),
   invoiceId: integer("invoice_id").notNull().references(() => invoices.id, { onDelete: "cascade" }),
   appointmentId: integer("appointment_id").references(() => appointments.id),
-  appointmentDate: date("appointment_date", { mode: "string" }).notNull(),
+  appointmentDate: text("appointment_date").notNull(),
   serviceDescription: text("service_description").notNull(),
   serviceCode: text("service_code"),
-  startTime: time("start_time"),
-  endTime: time("end_time"),
+  startTime: text("start_time"),
+  endTime: text("end_time"),
   durationMinutes: integer("duration_minutes").notNull(),
   unitPriceCents: integer("unit_price_cents").notNull(),
   totalCents: integer("total_cents").notNull(),
