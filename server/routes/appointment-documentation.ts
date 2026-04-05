@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { storage } from "../storage";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
-import { documentKundenterminSchema } from "@shared/schema";
+import { documentAppointmentSchema } from "@shared/schema";
 import { appointmentService } from "../services/appointments";
 import { auditService } from "../services/audit";
 import { computeDataHash } from "../services/signature-integrity";
@@ -43,7 +43,7 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
     throw forbidden("SIGNATURE_LOCKED", "Dieser Termin hat bereits eine gesperrte Unterschrift. Bitte wenden Sie sich an einen Administrator zur Stornierung.");
   }
 
-  const validatedData = documentKundenterminSchema.parse(req.body);
+  const validatedData = documentAppointmentSchema.parse(req.body);
 
   const docServiceIds = validatedData.services.map(s => s.serviceId);
   const validServices = await storage.getServicesByIds(docServiceIds);

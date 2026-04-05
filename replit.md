@@ -24,7 +24,7 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
   - **Speicherung**: Immer E.164 (`+4917632238795`) via `normalizePhone()`.
   - **Anzeige**: Immer `formatPhoneForDisplay()` verwenden — zeigt deutsches Nationalformat (z.B. `0176 32238795`) oder internationales Format für Nicht-DE-Nummern. Niemals rohe E.164-Werte im UI anzeigen.
   - **Eingabefelder**: `formatPhoneAsYouType()` für Live-Formatierung während der Eingabe.
-  - **Validierung**: `validateGermanPhone()` vor dem Speichern aufrufen.
+  - **Validierung**: `validateDachPhone()` vor dem Speichern aufrufen.
   - **tel:-Links**: `href="tel:${rawE164}"` mit dem rohen E.164-Wert, aber Anzeigetext immer via `formatPhoneForDisplay()`.
 - **Adressformatierung** (zentral in `@shared/utils/format`):
   - **Anzeige**: Immer `formatAddress()` verwenden. Akzeptiert Objekte mit `strasse`, `nr`/`hausnummer`, `plz`, `stadt` und fällt auf das `address`-Feld zurück. Ausgabe: `"Strasse Nr, PLZ Stadt"`.

@@ -1,7 +1,7 @@
 import twilio from "twilio";
 import { storage } from "../storage";
 import { prospectStorage } from "../storage/prospects";
-import { validateGermanPhone } from "@shared/utils/phone";
+import { validateDachPhone } from "@shared/utils/phone";
 import { withTimeout } from "../lib/with-timeout";
 import { log } from "../lib/log";
 
@@ -53,7 +53,7 @@ export async function initiateLeadCallBridge(params: CallBridgeParams & { throwO
     return;
   }
 
-  const phoneResult = validateGermanPhone(leadPhone);
+  const phoneResult = validateDachPhone(leadPhone);
   if (!phoneResult.valid) {
     const errorMsg = `Telefonnummer ungültig (${leadPhone})`;
     log(`Invalid lead phone for prospect ${prospectId}: ${phoneResult.error}`, "twilio-bridge");

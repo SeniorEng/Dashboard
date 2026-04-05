@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
-import { formatPhoneForDisplay, validateGermanPhone, formatPhoneAsYouType } from "@shared/utils/phone";
+import { formatPhoneForDisplay, validateDachPhone, formatPhoneAsYouType } from "@shared/utils/phone";
 import { todayISO } from "@shared/utils/datetime";
 import type { Customer, CustomerContact } from "@shared/schema";
 
@@ -61,7 +61,7 @@ export function useCustomerDetailForm(
 
   const validatePhone = useCallback((value: string, field: string): string | null => {
     if (!value || value.trim() === "") return null;
-    const result = validateGermanPhone(value);
+    const result = validateDachPhone(value);
     return result.valid ? null : result.error;
   }, []);
 

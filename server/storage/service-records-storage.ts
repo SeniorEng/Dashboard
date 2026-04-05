@@ -11,7 +11,7 @@ import {
 import type { AppointmentWithCustomer } from "@shared/types";
 import { computeDataHash } from "../services/signature-integrity";
 import { eq, sql as sqlBuilder, ne, and, or, inArray, isNull, type SQL, type SQLWrapper } from "drizzle-orm";
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 import { appointmentWithCustomerSelectFields, mapAppointmentRow } from "./appointment-helpers";
 
 function employeeFilter(employeeId: number): SQL {
@@ -97,7 +97,7 @@ export async function getServiceRecordByPeriod(customerId: number, employeeId: n
   return result[0];
 }
 
-export async function createServiceRecord(record: InsertServiceRecord, txClient?: typeof db): Promise<MonthlyServiceRecord> {
+export async function createServiceRecord(record: InsertServiceRecord, txClient?: DbOrTx): Promise<MonthlyServiceRecord> {
   const executor = txClient ?? db;
   const result = await executor.insert(monthlyServiceRecords)
     .values({
@@ -184,7 +184,7 @@ export async function getAppointmentsForServiceRecord(serviceRecordId: number): 
   return rows.map(mapAppointmentRow);
 }
 
-export async function addAppointmentsToServiceRecord(serviceRecordId: number, appointmentIds: number[], txClient?: typeof db): Promise<void> {
+export async function addAppointmentsToServiceRecord(serviceRecordId: number, appointmentIds: number[], txClient?: DbOrTx): Promise<void> {
   if (appointmentIds.length === 0) return;
   const executor = txClient ?? db;
 

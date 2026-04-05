@@ -72,4 +72,4 @@ export const AVAILABLE_ROLES = [
   "kinderbetreuung",
 ];
 
-export { formatPhoneForDisplay, validateGermanPhone } from "@shared/utils/phone";
+export { formatPhoneForDisplay, validateDachPhone } from "@shared/utils/phone";

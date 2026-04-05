@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { formatAddress } from "@shared/utils/format";
-import { formatPhoneForDisplay, validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
+import { formatPhoneForDisplay, validateDachPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
 import { BILLING_TYPE_SELECT_OPTIONS } from "@shared/domain/customers";
 import { SectionCard } from "@/components/patterns/section-card";
 import { Input } from "@/components/ui/input";
@@ -55,7 +55,7 @@ export function ContactSection({ customer, customerId, editingSection, setEditin
     const formatted = formatPhoneAsYouType(value);
     setStammdaten((prev) => ({ ...prev, [field]: formatted }));
     if (formatted.length > 3) {
-      const validation = validateGermanPhone(formatted);
+      const validation = validateDachPhone(formatted);
       setPhoneErrors((prev) => ({
         ...prev,
         [field]: validation.valid ? null : "Ungültige Telefonnummer",

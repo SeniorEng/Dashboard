@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { Link } from "wouter";
-import { formatPhoneAsYouType, validateGermanPhone } from "@shared/utils/phone";
+import { formatPhoneAsYouType, validateDachPhone } from "@shared/utils/phone";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -152,7 +152,7 @@ export default function AdminInsuranceProviders() {
     let normalizedTelefon: string | null = null;
     const rawTelefon = form.telefon?.trim();
     if (rawTelefon) {
-      const phoneResult = validateGermanPhone(rawTelefon);
+      const phoneResult = validateDachPhone(rawTelefon);
       if (!phoneResult.valid) {
         toast({ title: "Ungültige Telefonnummer", description: phoneResult.error, variant: "destructive" });
         return null;

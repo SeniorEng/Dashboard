@@ -11,7 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useUpload } from "@/hooks/use-upload";
-import { formatPhoneForDisplay, validateGermanPhone } from "@shared/utils/phone";
+import { formatPhoneForDisplay, validateDachPhone } from "@shared/utils/phone";
 import { formatAddress } from "@shared/utils/format";
 import {
   User as UserIcon,
@@ -122,7 +122,7 @@ function PersonalDataSection({ profile }: { profile: ProfileData }) {
       const updates: Record<string, string> = {};
       if (data.telefon !== (profile.telefon || "")) {
         if (data.telefon) {
-          const phoneResult = validateGermanPhone(data.telefon);
+          const phoneResult = validateDachPhone(data.telefon);
           if (!phoneResult.valid) {
             throw new Error(!phoneResult.valid ? phoneResult.error : "Ungültige Telefonnummer");
           }
@@ -323,7 +323,7 @@ function EmergencyContactSection({ profile }: { profile: ProfileData }) {
     mutationFn: async (data: typeof form) => {
       const updates: Record<string, string> = {};
       if (data.notfallkontaktTelefon && data.notfallkontaktTelefon.trim()) {
-        const phoneResult = validateGermanPhone(data.notfallkontaktTelefon);
+        const phoneResult = validateDachPhone(data.notfallkontaktTelefon);
         if (!phoneResult.valid) {
           throw new Error(!phoneResult.valid ? phoneResult.error : "Ungültige Telefonnummer für Notfallkontakt");
         }
@@ -523,7 +523,7 @@ function WhatsAppSection() {
     mutationFn: async () => {
       let normalizedNumber: string | null = null;
       if (whatsappNumber.trim()) {
-        const phoneResult = validateGermanPhone(whatsappNumber);
+        const phoneResult = validateDachPhone(whatsappNumber);
         if (!phoneResult.valid) {
           throw new Error(phoneResult.error);
         }

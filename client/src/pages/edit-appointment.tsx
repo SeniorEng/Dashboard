@@ -30,7 +30,7 @@ import { useAdminEmployees } from "@/features/appointments/hooks/use-active-empl
 import { EmployeeAvailability } from "@/features/appointments/components/employee-availability";
 import { addMinutesToTime, timeToMinutes, minutesToTimeDisplay, formatDurationDisplay } from "@shared/utils/datetime";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS, formatDuration } from "@shared/types";
-import { validateGermanPhone, formatPhoneAsYouType } from "@shared/utils/phone";
+import { validateDachPhone, formatPhoneAsYouType } from "@shared/utils/phone";
 import type { Service } from "@shared/schema";
 
 export default function EditAppointment() {

@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
 import type { SystemSettings, CompanySettings } from "@shared/schema";
-import { formatPhoneAsYouType, validateGermanPhone } from "@shared/utils/phone";
+import { formatPhoneAsYouType, validateDachPhone } from "@shared/utils/phone";
 import { isValidPhoneNumber } from "libphonenumber-js/min";
 import { emptyCompanyForm } from "./settings/types";
 import { LogoUploadCard } from "./settings/logo-upload";
@@ -180,7 +180,7 @@ export default function AdminSettings() {
 
   const validateCompanyPhone = () => {
     if (companyForm.telefon && companyForm.telefon.trim()) {
-      const result = validateGermanPhone(companyForm.telefon);
+      const result = validateDachPhone(companyForm.telefon);
       if (!result.valid) {
         toast({ title: "Ungültige Telefonnummer", description: result.error, variant: "destructive" });
         return false;

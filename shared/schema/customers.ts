@@ -289,14 +289,4 @@ export const insertNeedsAssessmentSchema = z.object({
 export type CustomerNeedsAssessment = typeof customerNeedsAssessments.$inferSelect;
 export type InsertNeedsAssessment = z.infer<typeof insertNeedsAssessmentSchema>;
 
-// Customer Pricing schemas
-export const insertCustomerPricingSchema = z.object({
-  customerId: z.number(),
-  hauswirtschaftRateCents: z.number().min(0, "Betrag darf nicht negativ sein").nullable().optional(),
-  alltagsbegleitungRateCents: z.number().min(0, "Betrag darf nicht negativ sein").nullable().optional(),
-  kilometerRateCents: z.number().min(0, "Betrag darf nicht negativ sein").nullable().optional(),
-  validFrom: z.string(), // ISO date string
-});
-
 export type CustomerPricing = typeof customerPricingHistory.$inferSelect;
-export type InsertCustomerPricing = z.infer<typeof insertCustomerPricingSchema>;

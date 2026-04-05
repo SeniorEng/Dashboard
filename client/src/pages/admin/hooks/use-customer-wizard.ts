@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { useInsuranceProviders, useCreateCustomer } from "@/features/customers";
 import { api } from "@/lib/api";
-import { validateGermanPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
+import { validateDachPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";
 import { CustomerFormData, ContactFormData, BudgetTypeSettingForm, getStepsForBillingType, DEFAULT_BUDGETS, EMPTY_CONTACT, MAX_CONTACTS } from "../components/customer-types";
 import { BUDGET_45A_MAX_BY_PFLEGEGRAD, BUDGET_TYPES, type BudgetType } from "@shared/domain/budgets";
@@ -208,7 +208,7 @@ export function useCustomerWizard() {
         return { ...prev, contacts: newContacts };
       });
       if (value.trim()) {
-        const validation = validateGermanPhone(value);
+        const validation = validateDachPhone(value);
         setPhoneErrors((prev) => ({ ...prev, [`contact_${index}_${field}`]: validation.valid ? null : validation.error || "Ungültige Telefonnummer" }));
       } else {
         setPhoneErrors((prev) => ({ ...prev, [`contact_${index}_${field}`]: null }));
@@ -256,20 +256,20 @@ export function useCustomerWizard() {
     
     const phoneValidationErrors: string[] = [];
     if (formData.telefon.trim()) {
-      const result = validateGermanPhone(formData.telefon);
+      const result = validateDachPhone(formData.telefon);
       if (!result.valid) phoneValidationErrors.push(`Mobiltelefon: ${result.error}`);
     }
     if (formData.festnetz.trim()) {
-      const result = validateGermanPhone(formData.festnetz);
+      const result = validateDachPhone(formData.festnetz);
       if (!result.valid) phoneValidationErrors.push(`Festnetz: ${result.error}`);
     }
     formData.contacts.forEach((contact, index) => {
       if (contact.festnetz?.trim()) {
-        const result = validateGermanPhone(contact.festnetz);
+        const result = validateDachPhone(contact.festnetz);
         if (!result.valid) phoneValidationErrors.push(`Kontakt ${index + 1} Festnetz: ${result.error}`);
       }
       if (contact.mobilnummer?.trim()) {
-        const result = validateGermanPhone(contact.mobilnummer);
+        const result = validateDachPhone(contact.mobilnummer);
         if (!result.valid) phoneValidationErrors.push(`Kontakt ${index + 1} Mobilnummer: ${result.error}`);
       }
     });
@@ -503,7 +503,7 @@ export function useCustomerWizard() {
       const formatted = formatPhoneAsYouType(value);
       setFormData((prev) => ({ ...prev, [field]: formatted }));
       if (value.trim()) {
-        const validation = validateGermanPhone(value);
+        const validation = validateDachPhone(value);
         setPhoneErrors((prev) => ({ ...prev, [field]: validation.valid ? null : validation.error || "Ungültige Telefonnummer" }));
       } else {
         setPhoneErrors((prev) => ({ ...prev, [field]: null }));

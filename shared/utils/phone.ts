@@ -65,8 +65,6 @@ export function validateDachPhone(input: string): PhoneValidationResult {
   }
 }
 
-/** @deprecated Use validateDachPhone instead */
-export const validateGermanPhone = validateDachPhone;
 
 export function normalizePhone(input: string): string | null {
   const result = validateDachPhone(input);

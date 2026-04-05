@@ -21,7 +21,7 @@ import {
   ROLE_LABELS,
   AVAILABLE_ROLES,
   formatPhoneForDisplay,
-  validateGermanPhone,
+  validateDachPhone,
 } from "./user-types";
 import { calculateVacationEntitlementByWorkDays } from "@shared/domain/vacation";
 import { useAuth } from "@/hooks/use-auth";
@@ -100,7 +100,7 @@ export function UserForm({
       setTelefonError("");
       return;
     }
-    const result = validateGermanPhone(telefon);
+    const result = validateDachPhone(telefon);
     if (result.valid) {
       setTelefon(result.formatted);
       setTelefonError("");
@@ -114,7 +114,7 @@ export function UserForm({
     
     let normalizedTelefon: string | undefined = undefined;
     if (telefon.trim()) {
-      const result = validateGermanPhone(telefon);
+      const result = validateDachPhone(telefon);
       if (!result.valid) {
         setTelefonError(result.error);
         return;

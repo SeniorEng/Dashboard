@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api";
-import { formatPhoneForDisplay, formatPhoneAsYouType, validateGermanPhone, normalizePhone } from "@shared/utils/phone";
+import { formatPhoneForDisplay, formatPhoneAsYouType, validateDachPhone, normalizePhone } from "@shared/utils/phone";
 import { CONTACT_TYPE_SELECT_OPTIONS, CONTACT_TYPE_LABELS } from "@shared/domain/customers";
 import type { CustomerContactItem } from "@/lib/api/types";
 
@@ -101,7 +101,7 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
       const formatted = formatPhoneAsYouType(value);
       setForm(prev => ({ ...prev, [field]: formatted }));
       if (value.trim()) {
-        const validation = validateGermanPhone(value);
+        const validation = validateDachPhone(value);
         setPhoneError(validation.valid ? null : validation.error || "Ungültige Telefonnummer");
       } else {
         setPhoneError(null);
@@ -212,14 +212,14 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
       return;
     }
     if (form.festnetz.trim()) {
-      const validation = validateGermanPhone(form.festnetz);
+      const validation = validateDachPhone(form.festnetz);
       if (!validation.valid) {
         setPhoneError(validation.error || "Ungültige Festnetznummer");
         return;
       }
     }
     if (form.mobilnummer.trim()) {
-      const validation = validateGermanPhone(form.mobilnummer);
+      const validation = validateDachPhone(form.mobilnummer);
       if (!validation.valid) {
         setPhoneError(validation.error || "Ungültige Mobilnummer");
         return;

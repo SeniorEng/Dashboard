@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "wouter";
-import { formatPhoneAsYouType, validateGermanPhone } from "@shared/utils/phone";
+import { formatPhoneAsYouType, validateDachPhone } from "@shared/utils/phone";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -132,7 +132,7 @@ function ConfigTab() {
 
   const testMutation = useMutation({
     mutationFn: async () => {
-      const phoneResult = validateGermanPhone(testPhone);
+      const phoneResult = validateDachPhone(testPhone);
       if (!phoneResult.valid) {
         throw new Error(phoneResult.error);
       }

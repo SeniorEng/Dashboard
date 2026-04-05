@@ -222,8 +222,6 @@ export const documentAppointmentSchema = z.object({
   { message: "Fahrzeit ist erforderlich wenn Sie von einem anderen Termin kommen", path: ["travelMinutes"] }
 );
 
-// Alias for backward compatibility
-export const documentKundenterminSchema = documentAppointmentSchema;
 
 
 export type DocumentAppointment = z.infer<typeof documentAppointmentSchema>;
