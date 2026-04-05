@@ -1,9 +1,15 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
+import { execSync } from "child_process";
 import { rm, readFile, writeFile } from "fs/promises";
 
-// server deps to bundle to reduce openat(2) syscalls
-// which helps cold start times
+async function runDbMigrations() {
+  console.log("running pre-push DB migrations...");
+  execSync("tsx script/pre-push-migrations.ts", { stdio: "inherit" });
+  console.log("running drizzle-kit push...");
+  execSync("npx drizzle-kit push --force", { stdio: "inherit" });
+}
+
 const allowlist = [
   "@google/generative-ai",
   "axios",
@@ -28,6 +34,8 @@ const allowlist = [
 ];
 
 async function buildAll() {
+  await runDbMigrations();
+
   await rm("dist", { recursive: true, force: true });
 
   const buildTimestamp = new Date().toISOString();
