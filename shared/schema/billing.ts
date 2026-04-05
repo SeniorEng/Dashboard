@@ -26,7 +26,7 @@ export const INVOICE_TYPE_LABELS: Record<InvoiceType, string> = {
 
 export const invoices = pgTable("invoices", {
   id: serial("id").primaryKey(),
-  invoiceNumber: text("invoice_number").notNull().unique(),
+  invoiceNumber: text("invoice_number").notNull(),
   customerId: integer("customer_id").notNull().references(() => customers.id),
   billingType: text("billing_type").notNull(),
   invoiceType: text("invoice_type").notNull(),
@@ -56,6 +56,7 @@ export const invoices = pgTable("invoices", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
 }, (table) => [
+  unique("invoices_invoice_number_key").on(table.invoiceNumber),
   index("invoices_customer_id_idx").on(table.customerId),
   index("invoices_billing_period_idx").on(table.billingYear, table.billingMonth),
   index("invoices_status_idx").on(table.status),

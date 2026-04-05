@@ -126,7 +126,7 @@ export const adminPermissions = pgTable("admin_permissions", {
   granted: boolean("granted").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [
-  unique("admin_permission_unique").on(table.userId, table.permissionKey),
+  unique("admin_permissions_user_id_permission_key_key").on(table.userId, table.permissionKey),
   index("admin_permissions_user_idx").on(table.userId),
 ]);
 

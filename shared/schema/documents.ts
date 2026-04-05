@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, boolean, date, index, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, boolean, date, index, uniqueIndex, unique, uuid } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp } from "./common";
 import { users } from "./users";
@@ -86,7 +86,7 @@ export const customerDocuments = pgTable("customer_documents", {
 
 export const documentTemplates = pgTable("document_templates", {
   id: serial("id").primaryKey(),
-  slug: text("slug").notNull().unique(),
+  slug: text("slug").notNull(),
   name: text("name").notNull(),
   description: text("description"),
   htmlContent: text("html_content").notNull(),
@@ -101,6 +101,7 @@ export const documentTemplates = pgTable("document_templates", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [
+  unique("document_templates_slug_key").on(table.slug),
   index("document_templates_type_idx").on(table.documentTypeId),
   index("document_templates_context_idx").on(table.context),
   index("document_templates_target_idx").on(table.targetType),
@@ -203,11 +204,12 @@ export const generatedDocuments = pgTable("generated_documents", {
 export const documentSigningTokens = pgTable("document_signing_tokens", {
   id: serial("id").primaryKey(),
   documentId: integer("document_id").notNull().references(() => generatedDocuments.id, { onDelete: "cascade" }),
-  tokenHash: text("token_hash").notNull().unique(),
+  tokenHash: text("token_hash").notNull(),
   expiresAt: timestamp("expires_at").notNull(),
   usedAt: timestamp("used_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [
+  unique("document_signing_tokens_token_hash_key").on(table.tokenHash),
   index("signing_tokens_document_idx").on(table.documentId),
   index("signing_tokens_hash_idx").on(table.tokenHash),
 ]);
