@@ -29,7 +29,7 @@ export function MonthClosingSection({ year, month }: MonthClosingSectionProps) {
           {isClosed ? (
             <Lock className={`${iconSize.sm} text-green-600`} />
           ) : (
-            <Unlock className={`${iconSize.sm} text-gray-400`} />
+            <Unlock className={`${iconSize.sm} text-gray-500`} />
           )}
           <CardTitle className="text-sm font-medium text-gray-600">
             Monatsabschluss {monthName} {year}

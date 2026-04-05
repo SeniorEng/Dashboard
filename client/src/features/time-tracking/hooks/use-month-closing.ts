@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api/client";
 import { invalidateRelated } from "@/lib/query-invalidation";
+import { useToast } from "@/hooks/use-toast";
 
 export interface MonthClosingStatus {
   id: number;
@@ -94,6 +95,7 @@ export function useAdminMonthClosingReadiness(year: number, month: number) {
 
 export function useAdminCloseMonth() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   return useMutation({
     mutationFn: async ({ userId, year, month }: { userId: number; year: number; month: number }) => {
@@ -107,13 +109,14 @@ export function useAdminCloseMonth() {
       invalidateRelated(queryClient, "time-entries");
     },
     onError: (error: Error) => {
-      console.error("[MonthClosing] Abschluss fehlgeschlagen:", error.message);
+      toast({ title: "Fehler", description: error.message || "Monatsabschluss fehlgeschlagen", variant: "destructive" });
     },
   });
 }
 
 export function useAdminReopenMonth() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   return useMutation({
     mutationFn: async ({ userId, year, month }: { userId: number; year: number; month: number }) => {
@@ -127,13 +130,14 @@ export function useAdminReopenMonth() {
       invalidateRelated(queryClient, "time-entries");
     },
     onError: (error: Error) => {
-      console.error("[MonthClosing] Wiedereröffnung fehlgeschlagen:", error.message);
+      toast({ title: "Fehler", description: error.message || "Monat konnte nicht wiedereröffnet werden", variant: "destructive" });
     },
   });
 }
 
 export function useAdminBatchCloseMonth() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   return useMutation({
     mutationFn: async ({ year, month }: { year: number; month: number }) => {
@@ -147,7 +151,7 @@ export function useAdminBatchCloseMonth() {
       invalidateRelated(queryClient, "time-entries");
     },
     onError: (error: Error) => {
-      console.error("[MonthClosing] Batch-Abschluss fehlgeschlagen:", error.message);
+      toast({ title: "Fehler", description: error.message || "Batch-Abschluss fehlgeschlagen", variant: "destructive" });
     },
   });
 }

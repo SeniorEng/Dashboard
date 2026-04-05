@@ -153,10 +153,10 @@ export function KundenTab({ selectedYear, selectedMonth }: KundenTabProps) {
   const deltaIcon = (delta: number) => {
     if (delta > 0) return <ArrowUpRight className="h-3.5 w-3.5 text-green-600" />;
     if (delta < 0) return <ArrowDownRight className="h-3.5 w-3.5 text-red-500" />;
-    return <Minus className="h-3.5 w-3.5 text-gray-400" />;
+    return <Minus className="h-3.5 w-3.5 text-gray-500" />;
   };
 
-  const deltaColor = (delta: number) => delta > 0 ? "text-green-600" : delta < 0 ? "text-red-500" : "text-gray-400";
+  const deltaColor = (delta: number) => delta > 0 ? "text-green-600" : delta < 0 ? "text-red-500" : "text-gray-500";
 
   const deltaText = (delta: number, suffix = "") => {
     if (delta === 0) return "±0" + suffix;

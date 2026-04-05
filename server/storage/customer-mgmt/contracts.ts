@@ -95,8 +95,9 @@ export async function updateCustomerContract(contractId: number, data: Partial<{
   hoursPerPeriod: number;
   periodType: string;
   status: string;
-}>): Promise<CustomerContract | undefined> {
-  const result = await db.update(customerContracts)
+}>, tx?: Pick<typeof db, 'update'>): Promise<CustomerContract | undefined> {
+  const executor = tx ?? db;
+  const result = await executor.update(customerContracts)
     .set(data)
     .where(eq(customerContracts.id, contractId))
     .returning();

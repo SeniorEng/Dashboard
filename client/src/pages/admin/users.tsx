@@ -286,7 +286,7 @@ function HandoverDialog({ user, allUsers, onClose }: { user: UserData; allUsers:
           <div className="space-y-4">
             {totalAffected === 0 ? (
               <div className="text-center py-6 text-gray-500" data-testid="text-handover-empty">
-                <Users className={`${iconSize.lg} mx-auto mb-2 text-gray-400`} />
+                <Users className={`${iconSize.lg} mx-auto mb-2 text-gray-500`} />
                 <p>Keine Kunden oder Termine zum Übergeben gefunden.</p>
               </div>
             ) : (
@@ -349,7 +349,7 @@ function HandoverDialog({ user, allUsers, onClose }: { user: UserData; allUsers:
                       {preview.futureAppointments.map((apt) => (
                         <div key={apt.id} className="text-xs text-gray-600 flex justify-between" data-testid={`text-handover-appointment-${apt.id}`}>
                           <span>{apt.customerVorname} {apt.customerNachname}</span>
-                          <span className="text-gray-400">
+                          <span className="text-gray-500">
                             {new Date(apt.date + "T00:00:00").toLocaleDateString("de-DE")} {apt.startTime}–{apt.endTime}
                           </span>
                         </div>
@@ -712,7 +712,7 @@ export default function AdminUsers() {
                                   <span className="inline-flex items-center gap-1 cursor-default">
                                     <Users className="h-3 w-3" />
                                     <span className="font-medium" data-testid={`workload-total-${user.id}`}>{totalCustomers} Kunden</span>
-                                    <span className="text-gray-400">
+                                    <span className="text-gray-500">
                                       (<span className="text-teal-700" data-testid={`workload-hv-${user.id}`}>{wl.primaryCount} HV</span>
                                       {" · "}
                                       <span className="text-blue-600" data-testid={`workload-v1-${user.id}`}>{wl.backupCount} V1</span>
@@ -725,10 +725,10 @@ export default function AdminUsers() {
                                     <Calendar className="h-3 w-3" />
                                     <span>Ø</span>
                                     <span className="font-medium" data-testid={`workload-hw-hours-${user.id}`}>{hwHours}h</span>
-                                    <span className="text-gray-400">HW</span>
-                                    <span className="text-gray-400">·</span>
+                                    <span className="text-gray-500">HW</span>
+                                    <span className="text-gray-500">·</span>
                                     <span className="font-medium" data-testid={`workload-all-hours-${user.id}`}>{allHours}h</span>
-                                    <span className="text-gray-400">ALL</span>
+                                    <span className="text-gray-500">ALL</span>
                                   </span>
                                 </div>
                               );
@@ -743,7 +743,7 @@ export default function AdminUsers() {
                                     <span className={`font-medium ${vac.remainingDays <= 0 ? 'text-red-600' : vac.remainingDays <= 3 ? 'text-amber-600' : 'text-teal-700'}`} data-testid={`vacation-remaining-${user.id}`}>
                                       {vac.remainingDays} Tage übrig
                                     </span>
-                                    <span className="text-gray-400">
+                                    <span className="text-gray-500">
                                       (von {totalAvailable}{vac.carryOverDays > 0 ? ` inkl. ${vac.carryOverDays} Übertrag` : ''})
                                     </span>
                                   </span>

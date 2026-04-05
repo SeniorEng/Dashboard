@@ -115,24 +115,30 @@ router.patch("/customers/:id/contract", asyncHandler("Vertrag konnte nicht aktua
   }
 
   const validatedData = updateContractSchema.parse(req.body);
-  const result = await customerManagementStorage.updateCustomerContract(latestContract.id, validatedData);
+
+  const result = await db.transaction(async (tx) => {
+    const updated = await customerManagementStorage.updateCustomerContract(latestContract.id, validatedData, tx);
+
+    if (!updated) {
+      return null;
+    }
+
+    if (validatedData.contractEnd !== undefined) {
+      const newContractEnd = validatedData.contractEnd;
+      await tx.update(customers)
+        .set({
+          inaktivAb: newContractEnd || null,
+          updatedAt: new Date(),
+        })
+        .where(eq(customers.id, id));
+    }
+
+    return updated;
+  });
 
   if (!result) {
     res.status(404).json({ error: "NOT_FOUND", message: "Vertrag nicht gefunden" });
     return;
-  }
-
-  if (validatedData.contractEnd !== undefined) {
-    const newContractEnd = validatedData.contractEnd;
-    if (newContractEnd) {
-      await db.update(customers)
-        .set({ inaktivAb: newContractEnd, updatedAt: new Date() })
-        .where(eq(customers.id, id));
-    } else {
-      await db.update(customers)
-        .set({ inaktivAb: null, updatedAt: new Date() })
-        .where(eq(customers.id, id));
-    }
   }
 
   res.json(result);

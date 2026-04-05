@@ -12,6 +12,7 @@ import { BUDGET_TYPE_LABELS, type BudgetType, BUDGET_45B_MAX_MONTHLY_CENTS, BUDG
 import { api, unwrapResult } from "@/lib/api/client";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import { formatCurrency } from "@shared/utils/format";
+import { todayISO } from "@shared/utils/datetime";
 
 interface BudgetTypeSetting {
   id: number | null;
@@ -336,7 +337,7 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
                       />
                     </div>
                   </div>
-                  {dateValues[setting.budgetType]?.validTo && dateValues[setting.budgetType].validTo < new Date().toISOString().slice(0, 10) && (
+                  {dateValues[setting.budgetType]?.validTo && dateValues[setting.budgetType].validTo < todayISO() && (
                     <p className="text-[11px] text-amber-600 mt-0.5">Dieser Topf ist abgelaufen</p>
                   )}
 
@@ -388,7 +389,7 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
       )}
 
       {hasChanges ? (
-        <p className="text-xs text-gray-400 text-center">Bitte erst Einstellungen speichern, um Umbuchungen vorzunehmen.</p>
+        <p className="text-xs text-gray-500 text-center">Bitte erst Einstellungen speichern, um Umbuchungen vorzunehmen.</p>
       ) : (
         <RebookSection customerId={customerId} />
       )}

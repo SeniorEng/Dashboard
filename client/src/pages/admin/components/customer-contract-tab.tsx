@@ -517,7 +517,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
                     {check.met ? (
                       <CheckCircle2 className={`${iconSize.sm} text-green-600 shrink-0 mt-0.5`} />
                     ) : (
-                      <XCircle className={`${iconSize.sm} text-gray-400 shrink-0 mt-0.5`} />
+                      <XCircle className={`${iconSize.sm} text-gray-500 shrink-0 mt-0.5`} />
                     )}
                     <div>
                       <span className="font-medium">{check.label}</span>

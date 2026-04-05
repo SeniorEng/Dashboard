@@ -552,7 +552,7 @@ export default function AdminCustomers() {
                           <div className="text-sm text-gray-600 space-y-0.5">
                             {customer.primaryEmployee && (
                               <div data-testid={`text-primary-${customer.id}`}>
-                                <span className="text-gray-400 text-xs">HV</span>{" "}
+                                <span className="text-gray-500 text-xs">HV</span>{" "}
                                 {customer.primaryEmployee.displayName}
                               </div>
                             )}
@@ -574,7 +574,7 @@ export default function AdminCustomers() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 text-gray-400 hover:text-gray-600"
+                            className="h-7 w-7 text-gray-500 hover:text-gray-600"
                             onClick={(e) => startEditing(customer, e)}
                             data-testid={`button-edit-assign-${customer.id}`}
                           >
@@ -590,7 +590,7 @@ export default function AdminCustomers() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 text-gray-400 hover:text-gray-600"
+                            className="h-7 w-7 text-gray-500 hover:text-gray-600"
                             onClick={(e) => startEditing(customer, e)}
                             data-testid={`button-edit-assign-${customer.id}`}
                           >

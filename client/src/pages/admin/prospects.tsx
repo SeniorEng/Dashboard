@@ -592,7 +592,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                           ) : prospect.geoQualified === false ? (
                             <XCircle className="h-4 w-4 text-red-500" />
                           ) : (
-                            <Clock className="h-4 w-4 text-gray-400" />
+                            <Clock className="h-4 w-4 text-gray-500" />
                           )}
                           <span>Geo-Check {prospect.geoQualified === true ? "bestanden" : prospect.geoQualified === false ? "nicht bestanden" : "ausstehend"}</span>
                         </div>
@@ -600,7 +600,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                           {prospect.pflegegrad ? (
                             <CheckCircle2 className="h-4 w-4 text-green-600" />
                           ) : (
-                            <Clock className="h-4 w-4 text-gray-400" />
+                            <Clock className="h-4 w-4 text-gray-500" />
                           )}
                           <span>Pflegegrad {prospect.pflegegrad ? `${prospect.pflegegrad} bestätigt` : "nicht bestätigt"}</span>
                         </div>

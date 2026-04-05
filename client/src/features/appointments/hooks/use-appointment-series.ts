@@ -83,16 +83,21 @@ export interface SeriesCreateResponse {
 }
 
 export function usePreviewAppointmentSeries() {
+  const { toast } = useToast();
   return useMutation({
     mutationFn: async (data: SeriesCreateInput): Promise<SeriesPreviewResponse> => {
       const result = await api.post<SeriesPreviewResponse>("/appointment-series/preview", data);
       return unwrapResult(result);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message || "Serienvorschau konnte nicht geladen werden", variant: "destructive" });
     },
   });
 }
 
 export function useCreateAppointmentSeries() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   return useMutation({
     mutationFn: async (data: SeriesCreateInput): Promise<SeriesCreateResponse> => {
       const result = await api.post<SeriesCreateResponse>("/appointment-series", data);
@@ -100,6 +105,9 @@ export function useCreateAppointmentSeries() {
     },
     onSuccess: () => {
       invalidateRelated(queryClient, "appointments", "appointment-series");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message || "Terminserie konnte nicht erstellt werden", variant: "destructive" });
     },
   });
 }

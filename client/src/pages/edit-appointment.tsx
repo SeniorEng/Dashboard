@@ -227,6 +227,9 @@ export default function EditAppointment() {
     onSuccess: () => {
       invalidateRelated(queryClient, "prospects");
     },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message || "Interessentendaten konnten nicht aktualisiert werden", variant: "destructive" });
+    },
   });
 
   const seriesUpdateMutation = useMutation({

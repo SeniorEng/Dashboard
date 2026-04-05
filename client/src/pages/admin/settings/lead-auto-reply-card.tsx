@@ -215,7 +215,7 @@ export function LeadAutoReplyCard({ companyForm, companyData, updateField }: Lea
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 bg-gray-50 border border-dashed border-gray-300 rounded-lg px-3 py-2 flex-1">
-                    <Paperclip className="h-4 w-4 text-gray-400" />
+                    <Paperclip className="h-4 w-4 text-gray-500" />
                     <span className="text-sm text-gray-500">Kein Anhang hochgeladen</span>
                   </div>
                 )}

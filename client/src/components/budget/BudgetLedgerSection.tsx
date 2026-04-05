@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import { formatCurrency } from "@shared/utils/format";
-import { formatDateForDisplay, parseLocalDate } from "@shared/utils/datetime";
+import { formatDateForDisplay, parseLocalDate, todayISO } from "@shared/utils/datetime";
 import { SectionCard } from "@/components/patterns/section-card";
 
 interface BudgetOverview {
@@ -120,7 +120,7 @@ export function BudgetLedgerSection({ customerId, customerName, onRefresh }: Bud
     staleTime: 30000,
   });
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayISO();
   const enabledTypes = (typeSettings || [])
     .filter(s => s.enabled)
     .sort((a, b) => a.priority - b.priority)
@@ -619,7 +619,7 @@ function TransactionList({
   });
 
   const getEligibleTargetPots = (refDate?: string) => {
-    const checkDate = refDate ?? new Date().toISOString().slice(0, 10);
+    const checkDate = refDate ?? todayISO();
     return Object.entries(BUDGET_TYPE_LABELS)
       .filter(([key]) => key !== budgetType)
       .filter(([key]) => {
@@ -696,7 +696,7 @@ function TransactionList({
                     <button
                       type="button"
                       onClick={() => { setRebookTx(tx); setTargetBudgetType(""); }}
-                      className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600"
+                      className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded hover:bg-gray-200 text-gray-500 hover:text-gray-600"
                       aria-label="Umbuchen"
                       title="Umbuchen"
                       data-testid={`btn-rebook-${tx.id}`}

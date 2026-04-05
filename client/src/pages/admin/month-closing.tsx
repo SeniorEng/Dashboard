@@ -77,7 +77,7 @@ function EmployeeRow({
         onClick={() => hasBlockers && setExpanded(!expanded)}
       >
         <div className="flex items-center gap-3 min-w-0">
-          <Users className={`${iconSize.sm} text-gray-400 shrink-0`} />
+          <Users className={`${iconSize.sm} text-gray-500 shrink-0`} />
           <span className="font-medium text-sm truncate" data-testid={`text-employee-name-${emp.userId}`}>{emp.displayName}</span>
           <EmployeeStatusLabel emp={emp} />
           {hasBlockers && (
@@ -114,7 +114,7 @@ function EmployeeRow({
             </Button>
           )}
           {hasBlockers && (
-            <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${expanded ? "rotate-180" : ""}`} />
+            <ChevronDown className={`h-4 w-4 text-gray-500 transition-transform ${expanded ? "rotate-180" : ""}`} />
           )}
         </div>
       </div>
@@ -351,7 +351,7 @@ export default function AdminMonthClosing() {
       ) : (
         <div className="flex flex-col gap-2" data-testid="employee-list">
           {isRefetching && (
-            <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
+            <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
               <Loader2 className="h-3 w-3 animate-spin" />
               Aktualisiere...
             </div>

@@ -54,11 +54,16 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
   if (!tx) throw notFound("Transaktion nicht gefunden");
 
   const { invoiceId } = matchSchema.parse(req.body);
-  const updated = await qontoStorage.updateTransactionMatch(id, invoiceId, "manual");
 
-  await db.update(invoices)
-    .set({ status: "bezahlt", paidAt: tx.emittedAt })
-    .where(and(eq(invoices.id, invoiceId), eq(invoices.status, "versendet")));
+  const updated = await db.transaction(async (dbTx) => {
+    const matched = await qontoStorage.updateTransactionMatch(id, invoiceId, "manual", dbTx);
+
+    await dbTx.update(invoices)
+      .set({ status: "bezahlt", paidAt: tx.emittedAt })
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.status, "versendet")));
+
+    return matched;
+  });
 
   res.json(updated);
 }));
@@ -70,13 +75,16 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
   const tx = await qontoStorage.getTransaction(id);
   if (!tx) throw notFound("Transaktion nicht gefunden");
 
-  if (tx.matchedInvoiceId) {
-    await db.update(invoices)
-      .set({ status: "versendet", paidAt: null })
-      .where(eq(invoices.id, tx.matchedInvoiceId));
-  }
+  const updated = await db.transaction(async (dbTx) => {
+    if (tx.matchedInvoiceId) {
+      await dbTx.update(invoices)
+        .set({ status: "versendet", paidAt: null })
+        .where(eq(invoices.id, tx.matchedInvoiceId));
+    }
 
-  const updated = await qontoStorage.updateTransactionMatch(id, null, null);
+    return await qontoStorage.updateTransactionMatch(id, null, null, dbTx);
+  });
+
   res.json(updated);
 }));
 

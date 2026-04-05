@@ -426,7 +426,7 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
                       </a>
                     )}
                     {contact.notes && (
-                      <p className="text-xs text-gray-400 mt-1 italic" data-testid={`contact-notes-${contact.id}`}>
+                      <p className="text-xs text-gray-500 mt-1 italic" data-testid={`contact-notes-${contact.id}`}>
                         {contact.notes}
                       </p>
                     )}

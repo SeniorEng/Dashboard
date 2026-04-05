@@ -100,9 +100,11 @@ class QontoStorage {
   async updateTransactionMatch(
     id: number,
     matchedInvoiceId: number | null,
-    confidence: string | null
+    confidence: string | null,
+    tx?: Pick<typeof db, 'update'>
   ): Promise<QontoTransaction | undefined> {
-    const [updated] = await db.update(qontoTransactions)
+    const executor = tx ?? db;
+    const [updated] = await executor.update(qontoTransactions)
       .set({ matchedInvoiceId, matchConfidence: confidence })
       .where(eq(qontoTransactions.id, id))
       .returning();
