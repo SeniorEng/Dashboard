@@ -5,19 +5,7 @@ import { documentStorage } from "../storage/documents";
 import { computeDataHash } from "./signature-integrity";
 import { todayISO, formatDateForDisplay } from "@shared/utils/datetime";
 import type { DocumentTemplate } from "@shared/schema";
-
-function parseObjectPath(path: string): { bucketName: string; objectName: string } {
-  if (!path.startsWith("/")) path = `/${path}`;
-  const parts = path.split("/");
-  if (parts.length < 3) throw new Error("Invalid path");
-  return { bucketName: parts[1], objectName: parts.slice(2).join("/") };
-}
-
-function getPrivateDir(): string {
-  const dir = process.env.PRIVATE_OBJECT_DIR || "";
-  if (!dir) throw new Error("PRIVATE_OBJECT_DIR not set");
-  return dir;
-}
+import { parseObjectPath, getPrivateDir } from "../lib/object-storage-helpers";
 
 function buildAuditStamp(options: {
   signingIp?: string | null;

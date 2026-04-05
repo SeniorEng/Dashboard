@@ -198,7 +198,14 @@ export async function addAppointmentsToServiceRecord(serviceRecordId: number, ap
     .onConflictDoNothing();
 }
 
-export async function getDocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<AppointmentWithCustomer[]> {
+function getAppointmentsForPeriodBase(
+  customerId: number,
+  employeeId: number,
+  year: number,
+  month: number,
+  statusConditions: SQLWrapper[],
+  isPrimary?: boolean,
+): Promise<AppointmentWithCustomer[]> {
   const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
   const endMonth = month === 12 ? 1 : month + 1;
   const endYear = month === 12 ? year + 1 : year;
@@ -206,7 +213,7 @@ export async function getDocumentedAppointmentsForPeriod(customerId: number, emp
 
   const conditions: SQLWrapper[] = [
     eq(appointments.customerId, customerId),
-    eq(appointments.status, 'completed'),
+    ...statusConditions,
     sqlBuilder`${appointments.date} >= ${startDate}`,
     sqlBuilder`${appointments.date} < ${endDate}`,
     isNull(appointments.deletedAt),
@@ -215,42 +222,21 @@ export async function getDocumentedAppointmentsForPeriod(customerId: number, emp
     conditions.push(employeeFilter(employeeId));
   }
 
-  const rows = await db.select(appointmentWithCustomerSelectFields)
+  return db.select(appointmentWithCustomerSelectFields)
     .from(appointments)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
     .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(and(...conditions))
-    .orderBy(appointments.date, appointments.scheduledStart);
-
-  return rows.map(mapAppointmentRow);
+    .orderBy(appointments.date, appointments.scheduledStart)
+    .then(rows => rows.map(mapAppointmentRow));
 }
 
-export async function getUndocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<AppointmentWithCustomer[]> {
-  const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-  const endMonth = month === 12 ? 1 : month + 1;
-  const endYear = month === 12 ? year + 1 : year;
-  const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
+export function getDocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<AppointmentWithCustomer[]> {
+  return getAppointmentsForPeriodBase(customerId, employeeId, year, month, [eq(appointments.status, 'completed')], isPrimary);
+}
 
-  const conditions: SQLWrapper[] = [
-    eq(appointments.customerId, customerId),
-    ne(appointments.status, 'completed'),
-    ne(appointments.status, 'cancelled'),
-    sqlBuilder`${appointments.date} >= ${startDate}`,
-    sqlBuilder`${appointments.date} < ${endDate}`,
-    isNull(appointments.deletedAt),
-  ];
-  if (!isPrimary) {
-    conditions.push(employeeFilter(employeeId));
-  }
-
-  const rows = await db.select(appointmentWithCustomerSelectFields)
-    .from(appointments)
-    .leftJoin(customers, eq(appointments.customerId, customers.id))
-    .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
-    .where(and(...conditions))
-    .orderBy(appointments.date, appointments.scheduledStart);
-
-  return rows.map(mapAppointmentRow);
+export function getUndocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<AppointmentWithCustomer[]> {
+  return getAppointmentsForPeriodBase(customerId, employeeId, year, month, [ne(appointments.status, 'completed'), ne(appointments.status, 'cancelled')], isPrimary);
 }
 
 export async function getPendingServiceRecords(employeeId: number): Promise<MonthlyServiceRecord[]> {
@@ -522,14 +508,14 @@ export async function getAppointmentCountsForPeriod(customerId: number, employee
   };
 }
 
-export async function getCoveredBySingleCount(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<number> {
+async function getCoveredByRecordTypeCount(recordType: "single" | "monthly", customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<number> {
   const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
   const endMonth = month === 12 ? 1 : month + 1;
   const endYear = month === 12 ? year + 1 : year;
   const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
 
   const conditions: SQLWrapper[] = [
-    eq(monthlyServiceRecords.recordType, "single"),
+    eq(monthlyServiceRecords.recordType, recordType),
     eq(appointments.customerId, customerId),
     sqlBuilder`${appointments.date} >= ${startDate}`,
     sqlBuilder`${appointments.date} < ${endDate}`,
@@ -551,31 +537,10 @@ export async function getCoveredBySingleCount(customerId: number, employeeId: nu
   return result[0]?.count ?? 0;
 }
 
-export async function getCoveredByMonthlyCount(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<number> {
-  const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-  const endMonth = month === 12 ? 1 : month + 1;
-  const endYear = month === 12 ? year + 1 : year;
-  const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
+export function getCoveredBySingleCount(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<number> {
+  return getCoveredByRecordTypeCount("single", customerId, employeeId, year, month, isPrimary);
+}
 
-  const conditions: SQLWrapper[] = [
-    eq(monthlyServiceRecords.recordType, "monthly"),
-    eq(appointments.customerId, customerId),
-    sqlBuilder`${appointments.date} >= ${startDate}`,
-    sqlBuilder`${appointments.date} < ${endDate}`,
-    isNull(monthlyServiceRecords.deletedAt),
-    isNull(appointments.deletedAt),
-  ];
-  if (!isPrimary) {
-    conditions.push(employeeFilter(employeeId));
-  }
-
-  const result = await db.select({
-    count: sqlBuilder<number>`COUNT(DISTINCT ${serviceRecordAppointments.appointmentId})::int`,
-  })
-    .from(serviceRecordAppointments)
-    .innerJoin(monthlyServiceRecords, eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id))
-    .innerJoin(appointments, eq(serviceRecordAppointments.appointmentId, appointments.id))
-    .where(and(...conditions));
-
-  return result[0]?.count ?? 0;
+export function getCoveredByMonthlyCount(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<number> {
+  return getCoveredByRecordTypeCount("monthly", customerId, employeeId, year, month, isPrimary);
 }

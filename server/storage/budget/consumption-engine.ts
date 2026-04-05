@@ -15,24 +15,56 @@ import { getBudgetPreferences, getBudgetTypeSettings } from "./preferences-stora
 import { syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-storage";
 import { getAllBudgetSummaries, getTotalCarryoverCents } from "./summary-queries";
 
+type ConsumptionParams = {
+  appointmentId?: number;
+  notes?: string;
+  userId?: number;
+  hauswirtschaftMinutes?: number;
+  hauswirtschaftCents?: number;
+  alltagsbegleitungMinutes?: number;
+  alltagsbegleitungCents?: number;
+  travelKilometers?: number;
+  travelCents?: number;
+  customerKilometers?: number;
+  customerKilometersCents?: number;
+};
+
+function buildConsumptionTxData(
+  customerId: number,
+  budgetType: string,
+  transactionDate: string,
+  amountCents: number,
+  allocationId: number | null,
+  ratio: number,
+  params?: ConsumptionParams,
+): typeof budgetTransactions.$inferInsert {
+  return {
+    customerId,
+    budgetType,
+    transactionDate,
+    transactionType: "consumption",
+    amountCents,
+    allocationId,
+    appointmentId: params?.appointmentId ?? null,
+    notes: params?.notes ?? null,
+    createdByUserId: params?.userId,
+    hauswirtschaftMinutes: params?.hauswirtschaftMinutes != null ? Math.round(params.hauswirtschaftMinutes * ratio) : null,
+    hauswirtschaftCents: params?.hauswirtschaftCents != null ? Math.round(params.hauswirtschaftCents * ratio) : null,
+    alltagsbegleitungMinutes: params?.alltagsbegleitungMinutes != null ? Math.round(params.alltagsbegleitungMinutes * ratio) : null,
+    alltagsbegleitungCents: params?.alltagsbegleitungCents != null ? Math.round(params.alltagsbegleitungCents * ratio) : null,
+    travelKilometers: params?.travelKilometers != null ? Math.round(params.travelKilometers * ratio) : null,
+    travelCents: params?.travelCents != null ? Math.round(params.travelCents * ratio) : null,
+    customerKilometers: params?.customerKilometers != null ? Math.round(params.customerKilometers * ratio) : null,
+    customerKilometersCents: params?.customerKilometersCents != null ? Math.round(params.customerKilometersCents * ratio) : null,
+  };
+}
+
 export async function consumeFifo(
   customerId: number,
   budgetType: string,
   amountCents: number,
   transactionDate: string,
-  params?: {
-    appointmentId?: number;
-    notes?: string;
-    userId?: number;
-    hauswirtschaftMinutes?: number;
-    hauswirtschaftCents?: number;
-    alltagsbegleitungMinutes?: number;
-    alltagsbegleitungCents?: number;
-    travelKilometers?: number;
-    travelCents?: number;
-    customerKilometers?: number;
-    customerKilometersCents?: number;
-  },
+  params?: ConsumptionParams,
   _tx?: DbClient
 ): Promise<{ consumedCents: number; transactions: BudgetTransaction[]; remainingCents: number }> {
   const d = _tx ?? db;
@@ -155,25 +187,7 @@ export async function consumeFifo(
     const consumeAmount = Math.min(remaining, available);
     const ratio = params && amountCents > 0 ? consumeAmount / amountCents : (isFirstTransaction ? 1 : 0);
 
-    const txData: typeof budgetTransactions.$inferInsert = {
-      customerId,
-      budgetType,
-      transactionDate,
-      transactionType: "consumption",
-      amountCents: -consumeAmount,
-      allocationId: allocation.id,
-      appointmentId: params?.appointmentId ?? null,
-      notes: params?.notes ?? null,
-      createdByUserId: params?.userId,
-      hauswirtschaftMinutes: params?.hauswirtschaftMinutes != null ? Math.round(params.hauswirtschaftMinutes * ratio) : null,
-      hauswirtschaftCents: params?.hauswirtschaftCents != null ? Math.round(params.hauswirtschaftCents * ratio) : null,
-      alltagsbegleitungMinutes: params?.alltagsbegleitungMinutes != null ? Math.round(params.alltagsbegleitungMinutes * ratio) : null,
-      alltagsbegleitungCents: params?.alltagsbegleitungCents != null ? Math.round(params.alltagsbegleitungCents * ratio) : null,
-      travelKilometers: params?.travelKilometers != null ? Math.round(params.travelKilometers * ratio) : null,
-      travelCents: params?.travelCents != null ? Math.round(params.travelCents * ratio) : null,
-      customerKilometers: params?.customerKilometers != null ? Math.round(params.customerKilometers * ratio) : null,
-      customerKilometersCents: params?.customerKilometersCents != null ? Math.round(params.customerKilometersCents * ratio) : null,
-    };
+    const txData = buildConsumptionTxData(customerId, budgetType, transactionDate, -consumeAmount, allocation.id, ratio, params);
 
     const result = await d.insert(budgetTransactions).values(txData).returning();
     if (result[0]) transactions.push(result[0]);
@@ -186,25 +200,7 @@ export async function consumeFifo(
   if (remaining > 0) {
     const ratio = params && amountCents > 0 ? remaining / amountCents : (isFirstTransaction ? 1 : 0);
 
-    const txData: typeof budgetTransactions.$inferInsert = {
-      customerId,
-      budgetType,
-      transactionDate,
-      transactionType: "consumption",
-      amountCents: -remaining,
-      allocationId: null,
-      appointmentId: params?.appointmentId ?? null,
-      notes: params?.notes ?? null,
-      createdByUserId: params?.userId,
-      hauswirtschaftMinutes: params?.hauswirtschaftMinutes != null ? Math.round(params.hauswirtschaftMinutes * ratio) : null,
-      hauswirtschaftCents: params?.hauswirtschaftCents != null ? Math.round(params.hauswirtschaftCents * ratio) : null,
-      alltagsbegleitungMinutes: params?.alltagsbegleitungMinutes != null ? Math.round(params.alltagsbegleitungMinutes * ratio) : null,
-      alltagsbegleitungCents: params?.alltagsbegleitungCents != null ? Math.round(params.alltagsbegleitungCents * ratio) : null,
-      travelKilometers: params?.travelKilometers != null ? Math.round(params.travelKilometers * ratio) : null,
-      travelCents: params?.travelCents != null ? Math.round(params.travelCents * ratio) : null,
-      customerKilometers: params?.customerKilometers != null ? Math.round(params.customerKilometers * ratio) : null,
-      customerKilometersCents: params?.customerKilometersCents != null ? Math.round(params.customerKilometersCents * ratio) : null,
-    };
+    const txData = buildConsumptionTxData(customerId, budgetType, transactionDate, -remaining, null, ratio, params);
 
     const result = await d.insert(budgetTransactions).values(txData).returning();
     if (result[0]) transactions.push(result[0]);

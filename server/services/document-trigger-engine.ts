@@ -69,10 +69,13 @@ async function getTemplateForDocumentType(documentTypeId: number): Promise<{ id:
   return template ?? null;
 }
 
-export async function evaluateTriggersForCustomer(customerData: CustomerTriggerData): Promise<DocumentRequirement[]> {
-  const triggers = await documentStorage.getActiveTriggersForEntityType("customer");
+async function evaluateTriggersForEntityType(
+  entityType: "customer" | "employee",
+  entityData: Record<string, unknown>,
+): Promise<DocumentRequirement[]> {
+  const triggers = await documentStorage.getActiveTriggersForEntityType(entityType);
 
-  const mandatoryTypes = await documentStorage.getDocumentTypes(true, "customer");
+  const mandatoryTypes = await documentStorage.getDocumentTypes(true, entityType);
   const mandatoryRequirements: DocumentRequirement[] = [];
   for (const dt of mandatoryTypes) {
     if (dt.isMandatory) {
@@ -86,7 +89,6 @@ export async function evaluateTriggersForCustomer(customerData: CustomerTriggerD
     }
   }
 
-  const entityData: Record<string, unknown> = { ...customerData };
   const triggerRequirements: DocumentRequirement[] = [];
   const seenTypeIds = new Set(mandatoryRequirements.map((r) => r.documentType.id));
 
@@ -107,44 +109,12 @@ export async function evaluateTriggersForCustomer(customerData: CustomerTriggerD
   return [...mandatoryRequirements, ...triggerRequirements];
 }
 
+export async function evaluateTriggersForCustomer(customerData: CustomerTriggerData): Promise<DocumentRequirement[]> {
+  return evaluateTriggersForEntityType("customer", { ...customerData });
+}
+
 export async function evaluateTriggersForEmployee(employeeData: EmployeeTriggerData): Promise<DocumentRequirement[]> {
-  const triggers = await documentStorage.getActiveTriggersForEntityType("employee");
-
-  const mandatoryTypes = await documentStorage.getDocumentTypes(true, "employee");
-  const mandatoryRequirements: DocumentRequirement[] = [];
-  for (const dt of mandatoryTypes) {
-    if (dt.isMandatory) {
-      const template = await getTemplateForDocumentType(dt.id);
-      mandatoryRequirements.push({
-        documentType: dt,
-        requirement: "pflicht",
-        triggeredBy: "Immer verpflichtend",
-        template,
-      });
-    }
-  }
-
-  const entityData: Record<string, unknown> = {
-    ...employeeData,
-  };
-  const triggerRequirements: DocumentRequirement[] = [];
-  const seenTypeIds = new Set(mandatoryRequirements.map((r) => r.documentType.id));
-
-  for (const trigger of triggers) {
-    if (seenTypeIds.has(trigger.documentType.id)) continue;
-    if (evaluateTrigger(trigger, entityData)) {
-      seenTypeIds.add(trigger.documentType.id);
-      const template = await getTemplateForDocumentType(trigger.documentType.id);
-      triggerRequirements.push({
-        documentType: trigger.documentType,
-        requirement: trigger.requirement as "pflicht" | "optional",
-        triggeredBy: formatTriggerDescription(trigger),
-        template,
-      });
-    }
-  }
-
-  return [...mandatoryRequirements, ...triggerRequirements];
+  return evaluateTriggersForEntityType("employee", { ...employeeData });
 }
 
 function formatTriggerDescription(trigger: DocumentTypeTrigger): string {

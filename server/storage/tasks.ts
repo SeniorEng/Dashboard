@@ -55,11 +55,8 @@ async function enrichTasksWithRelations(taskRows: Task[]): Promise<TaskWithRelat
   });
 }
 
-export async function getTasksForUser(userId: number, includeCompleted: boolean = false): Promise<TaskWithRelations[]> {
-  const conditions = [eq(tasks.assignedToUserId, userId), isNull(tasks.deletedAt)];
-  if (!includeCompleted) {
-    conditions.push(ne(tasks.status, "completed"));
-  }
+async function queryTasks(extraConditions: ReturnType<typeof eq>[] = []): Promise<TaskWithRelations[]> {
+  const conditions = [isNull(tasks.deletedAt), ...extraConditions];
 
   const result = await db
     .select()
@@ -74,23 +71,16 @@ export async function getTasksForUser(userId: number, includeCompleted: boolean 
   return enrichTasksWithRelations(result);
 }
 
+export async function getTasksForUser(userId: number, includeCompleted: boolean = false): Promise<TaskWithRelations[]> {
+  const extra: ReturnType<typeof eq>[] = [eq(tasks.assignedToUserId, userId)];
+  if (!includeCompleted) extra.push(ne(tasks.status, "completed"));
+  return queryTasks(extra);
+}
+
 export async function getAllTasks(includeCompleted: boolean = false): Promise<TaskWithRelations[]> {
-  const conditions = [isNull(tasks.deletedAt)];
-  if (!includeCompleted) {
-    conditions.push(ne(tasks.status, "completed"));
-  }
-
-  const result = await db
-    .select()
-    .from(tasks)
-    .where(and(...conditions))
-    .orderBy(
-      asc(tasks.status),
-      asc(sqlBuilder`CASE WHEN ${tasks.priority} = 'high' THEN 1 WHEN ${tasks.priority} = 'medium' THEN 2 ELSE 3 END`),
-      asc(tasks.dueDate)
-    );
-
-  return enrichTasksWithRelations(result);
+  const extra: ReturnType<typeof eq>[] = [];
+  if (!includeCompleted) extra.push(ne(tasks.status, "completed"));
+  return queryTasks(extra);
 }
 
 export async function getTaskById(id: number): Promise<TaskWithRelations | null> {

@@ -8,6 +8,60 @@ export interface TemplatePlaceholders {
   [key: string]: string;
 }
 
+const COMPANY_PLACEHOLDER_DEFAULTS: Record<string, string> = {
+  company_name: "",
+  company_strasse: "",
+  company_plz: "",
+  company_stadt: "",
+  company_address: "",
+  company_telefon: "",
+  company_email: "",
+  company_website: "",
+  company_ik_nummer: "",
+  company_steuernummer: "",
+  company_ust_id: "",
+  company_geschaeftsfuehrer: "",
+  company_iban: "",
+  company_bic: "",
+  company_bank_name: "",
+  company_logo: "",
+  company_logo_url: "",
+  customer_signature: "",
+  employee_signature: "",
+};
+
+async function applyCompanySettings(placeholders: TemplatePlaceholders): Promise<void> {
+  try {
+    const companySettings = await storage.getCompanySettings();
+    if (companySettings) {
+      placeholders.company_name = companySettings.companyName || "";
+      placeholders.company_strasse = [companySettings.strasse, companySettings.hausnummer].filter(Boolean).join(" ");
+      placeholders.company_plz = companySettings.plz || "";
+      placeholders.company_stadt = companySettings.stadt || "";
+      placeholders.company_address = [
+        companySettings.strasse ? `${companySettings.strasse} ${companySettings.hausnummer || ""}`.trim() : "",
+        [companySettings.plz, companySettings.stadt].filter(Boolean).join(" "),
+      ].filter(Boolean).join(", ");
+      placeholders.company_telefon = companySettings.telefon || "";
+      placeholders.company_email = companySettings.email || "";
+      placeholders.company_website = companySettings.website || "";
+      placeholders.company_ik_nummer = companySettings.ikNummer || "";
+      placeholders.company_steuernummer = companySettings.steuernummer || "";
+      placeholders.company_ust_id = companySettings.ustId || "";
+      placeholders.company_geschaeftsfuehrer = companySettings.geschaeftsfuehrer || "";
+      placeholders.company_iban = companySettings.iban || "";
+      placeholders.company_bic = companySettings.bic || "";
+      placeholders.company_bank_name = companySettings.bankName || "";
+      const pdfLogo = companySettings.pdfLogoUrl || companySettings.logoUrl;
+      if (pdfLogo) {
+        placeholders.company_logo_url = pdfLogo;
+        placeholders.company_logo = `<img src="${pdfLogo}" alt="Firmenlogo" style="max-height:80px;" />`;
+      }
+    }
+  } catch (_e) {
+  }
+}
+
 const PLACEHOLDER_CATALOG: Record<string, { label: string; source: string }> = {
   customer_name: { label: "Kundenname (Vor- und Nachname)", source: "customer" },
   customer_vorname: { label: "Vorname", source: "customer" },
@@ -195,25 +249,7 @@ export async function buildPlaceholdersFromFormData(
     mandatsreferenz: `SE-NEU-${today.getFullYear()}`,
     current_date: todayDE,
     heute: todayDE,
-    company_name: "",
-    company_strasse: "",
-    company_plz: "",
-    company_stadt: "",
-    company_address: "",
-    company_telefon: "",
-    company_email: "",
-    company_website: "",
-    company_ik_nummer: "",
-    company_steuernummer: "",
-    company_ust_id: "",
-    company_geschaeftsfuehrer: "",
-    company_iban: "",
-    company_bic: "",
-    company_bank_name: "",
-    company_logo: "",
-    company_logo_url: "",
-    customer_signature: "",
-    employee_signature: "",
+    ...COMPANY_PLACEHOLDER_DEFAULTS,
   };
 
   const primaryContact = formData.contacts?.find(c => c.isPrimary) || formData.contacts?.[0];
@@ -225,35 +261,7 @@ export async function buildPlaceholdersFromFormData(
     placeholders.kontaktperson_typ = (primaryContact.contactType ? CONTACT_TYPE_LABELS[primaryContact.contactType] : undefined) ?? primaryContact.contactType ?? "";
   }
 
-  try {
-    const companySettings = await storage.getCompanySettings();
-    if (companySettings) {
-      placeholders.company_name = companySettings.companyName || "";
-      placeholders.company_strasse = [companySettings.strasse, companySettings.hausnummer].filter(Boolean).join(" ");
-      placeholders.company_plz = companySettings.plz || "";
-      placeholders.company_stadt = companySettings.stadt || "";
-      placeholders.company_address = [
-        companySettings.strasse ? `${companySettings.strasse} ${companySettings.hausnummer || ""}`.trim() : "",
-        [companySettings.plz, companySettings.stadt].filter(Boolean).join(" "),
-      ].filter(Boolean).join(", ");
-      placeholders.company_telefon = companySettings.telefon || "";
-      placeholders.company_email = companySettings.email || "";
-      placeholders.company_website = companySettings.website || "";
-      placeholders.company_ik_nummer = companySettings.ikNummer || "";
-      placeholders.company_steuernummer = companySettings.steuernummer || "";
-      placeholders.company_ust_id = companySettings.ustId || "";
-      placeholders.company_geschaeftsfuehrer = companySettings.geschaeftsfuehrer || "";
-      placeholders.company_iban = companySettings.iban || "";
-      placeholders.company_bic = companySettings.bic || "";
-      placeholders.company_bank_name = companySettings.bankName || "";
-      const pdfLogo = companySettings.pdfLogoUrl || companySettings.logoUrl;
-      if (pdfLogo) {
-        placeholders.company_logo_url = pdfLogo;
-        placeholders.company_logo = `<img src="${pdfLogo}" alt="Firmenlogo" style="max-height:80px;" />`;
-      }
-    }
-  } catch (_e) {
-  }
+  await applyCompanySettings(placeholders);
 
   if (formData.insuranceProviderId) {
     try {
@@ -351,56 +359,10 @@ export async function buildPlaceholders(
     mandatsreferenz: `SE-${customerId}-${today.getFullYear()}`,
     current_date: todayDE,
     heute: todayDE,
-    company_name: "",
-    company_strasse: "",
-    company_plz: "",
-    company_stadt: "",
-    company_address: "",
-    company_telefon: "",
-    company_email: "",
-    company_website: "",
-    company_ik_nummer: "",
-    company_steuernummer: "",
-    company_ust_id: "",
-    company_geschaeftsfuehrer: "",
-    company_iban: "",
-    company_bic: "",
-    company_bank_name: "",
-    company_logo: "",
-    company_logo_url: "",
-    customer_signature: "",
-    employee_signature: "",
+    ...COMPANY_PLACEHOLDER_DEFAULTS,
   };
 
-  try {
-    const companySettings = await storage.getCompanySettings();
-    if (companySettings) {
-      placeholders.company_name = companySettings.companyName || "";
-      placeholders.company_strasse = [companySettings.strasse, companySettings.hausnummer].filter(Boolean).join(" ");
-      placeholders.company_plz = companySettings.plz || "";
-      placeholders.company_stadt = companySettings.stadt || "";
-      placeholders.company_address = [
-        companySettings.strasse ? `${companySettings.strasse} ${companySettings.hausnummer || ""}`.trim() : "",
-        [companySettings.plz, companySettings.stadt].filter(Boolean).join(" "),
-      ].filter(Boolean).join(", ");
-      placeholders.company_telefon = companySettings.telefon || "";
-      placeholders.company_email = companySettings.email || "";
-      placeholders.company_website = companySettings.website || "";
-      placeholders.company_ik_nummer = companySettings.ikNummer || "";
-      placeholders.company_steuernummer = companySettings.steuernummer || "";
-      placeholders.company_ust_id = companySettings.ustId || "";
-      placeholders.company_geschaeftsfuehrer = companySettings.geschaeftsfuehrer || "";
-      placeholders.company_iban = companySettings.iban || "";
-      placeholders.company_bic = companySettings.bic || "";
-      placeholders.company_bank_name = companySettings.bankName || "";
-      const pdfLogo = companySettings.pdfLogoUrl || companySettings.logoUrl;
-      if (pdfLogo) {
-        placeholders.company_logo_url = pdfLogo;
-        placeholders.company_logo = `<img src="${pdfLogo}" alt="Firmenlogo" style="max-height:80px;" />`;
-      }
-    }
-  } catch (_e) {
-  }
+  await applyCompanySettings(placeholders);
 
   try {
     const insurance = await getCustomerCurrentInsurance(customerId);

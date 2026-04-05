@@ -1,12 +1,11 @@
 import { Router } from "express";
 import { z } from "zod";
 import crypto from "crypto";
-import { storage } from "../../storage";
 import { documentStorage } from "../../storage/documents";
 import { renderTemplateForCustomer, wrapInPrintableHtml, extractInputPlaceholders } from "../../services/template-engine";
 import { generateAndStorePdf, getDocumentPdfBuffer } from "../../services/document-pdf";
 import { asyncHandler } from "../../lib/errors";
-import { requireIntParam } from "../../lib/params";
+import { requireIntParam, requireCustomerAccess } from "../../lib/params";
 
 const router = Router();
 
@@ -22,7 +21,6 @@ router.get("/document-types/customer", asyncHandler("Dokumententypen konnten nic
 }));
 
 router.get("/generated-documents/:docId/download", asyncHandler("PDF konnte nicht heruntergeladen werden", async (req, res) => {
-  const user = req.user!;
   const docId = requireIntParam(req.params.docId, res);
   if (docId === null) return;
 
@@ -32,11 +30,8 @@ router.get("/generated-documents/:docId/download", asyncHandler("PDF konnte nich
     return;
   }
 
-  if (doc.customerId && !user.isAdmin) {
-    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-    if (!assignedCustomerIds.includes(doc.customerId)) {
-      return res.status(403).json({ error: "Zugriff verweigert" });
-    }
+  if (doc.customerId) {
+    if (!await requireCustomerAccess(req, res, doc.customerId)) return;
   }
 
   const pdfBuffer = await getDocumentPdfBuffer(doc.objectPath);
@@ -54,33 +49,19 @@ router.get("/document-requirements/:billingType", asyncHandler("Dokumentenanford
 }));
 
 router.get("/:id/documents", asyncHandler("Kundendokumente konnten nicht geladen werden", async (req, res) => {
-  const user = req.user!;
   const customerId = requireIntParam(req.params.id, res);
   if (customerId === null) return;
-
-  if (!user.isAdmin) {
-    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-    if (!assignedCustomerIds.includes(customerId)) {
-      return res.status(403).json({ error: "Zugriff verweigert" });
-    }
-  }
+  if (!await requireCustomerAccess(req, res, customerId)) return;
 
   const docs = await documentStorage.getCurrentCustomerDocuments(customerId);
   res.json(docs);
 }));
 
 router.get("/:id/documents/:documentTypeId/history", asyncHandler("Dokumentenhistorie konnte nicht geladen werden", async (req, res) => {
-  const user = req.user!;
   const customerId = requireIntParam(req.params.id, res);
   const documentTypeId = requireIntParam(req.params.documentTypeId, res);
   if (customerId === null || documentTypeId === null) return;
-
-  if (!user.isAdmin) {
-    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-    if (!assignedCustomerIds.includes(customerId)) {
-      return res.status(403).json({ error: "Zugriff verweigert" });
-    }
-  }
+  if (!await requireCustomerAccess(req, res, customerId)) return;
 
   const docs = await documentStorage.getCustomerDocumentHistory(customerId, documentTypeId);
   res.json(docs);
@@ -90,13 +71,7 @@ router.post("/:id/documents", asyncHandler("Kundendokument konnte nicht hochgela
   const user = req.user!;
   const customerId = requireIntParam(req.params.id, res);
   if (customerId === null) return;
-
-  if (!user.isAdmin) {
-    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-    if (!assignedCustomerIds.includes(customerId)) {
-      return res.status(403).json({ error: "Zugriff verweigert" });
-    }
-  }
+  if (!await requireCustomerAccess(req, res, customerId)) return;
 
   const { insertCustomerDocumentSchema } = await import("@shared/schema");
   const data = { ...req.body, customerId };
@@ -112,16 +87,9 @@ router.post("/:id/documents", asyncHandler("Kundendokument konnte nicht hochgela
 }));
 
 router.get("/:id/document-templates", asyncHandler("Vorlagen konnten nicht geladen werden", async (req, res) => {
-  const user = req.user!;
   const customerId = requireIntParam(req.params.id, res);
   if (customerId === null) return;
-
-  if (!user.isAdmin) {
-    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-    if (!assignedCustomerIds.includes(customerId)) {
-      return res.status(403).json({ error: "Zugriff verweigert" });
-    }
-  }
+  if (!await requireCustomerAccess(req, res, customerId)) return;
 
   const templates = await documentStorage.getTemplatesByContext("bestandskunde", "customer");
   const templatesWithInputFields = templates.map(t => ({
@@ -137,16 +105,9 @@ const renderSchema = z.object({
 });
 
 router.post("/:id/document-templates/render", asyncHandler("Vorlage konnte nicht gerendert werden", async (req, res) => {
-  const user = req.user!;
   const customerId = requireIntParam(req.params.id, res);
   if (customerId === null) return;
-
-  if (!user.isAdmin) {
-    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-    if (!assignedCustomerIds.includes(customerId)) {
-      return res.status(403).json({ error: "Zugriff verweigert" });
-    }
-  }
+  if (!await requireCustomerAccess(req, res, customerId)) return;
 
   const parsed = renderSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -178,13 +139,7 @@ router.post("/:id/documents/generate-pdf", asyncHandler("PDF konnte nicht erstel
   const user = req.user!;
   const customerId = requireIntParam(req.params.id, res);
   if (customerId === null) return;
-
-  if (!user.isAdmin) {
-    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-    if (!assignedCustomerIds.includes(customerId)) {
-      return res.status(403).json({ error: "Zugriff verweigert" });
-    }
-  }
+  if (!await requireCustomerAccess(req, res, customerId)) return;
 
   const parsed = generatePdfSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -238,16 +193,9 @@ router.post("/:id/documents/generate-pdf", asyncHandler("PDF konnte nicht erstel
 }));
 
 router.get("/:id/generated-documents", asyncHandler("Generierte Dokumente konnten nicht geladen werden", async (req, res) => {
-  const user = req.user!;
   const customerId = requireIntParam(req.params.id, res);
   if (customerId === null) return;
-
-  if (!user.isAdmin) {
-    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-    if (!assignedCustomerIds.includes(customerId)) {
-      return res.status(403).json({ error: "Zugriff verweigert" });
-    }
-  }
+  if (!await requireCustomerAccess(req, res, customerId)) return;
 
   const docs = await documentStorage.getGeneratedDocuments(customerId);
   res.json(docs);

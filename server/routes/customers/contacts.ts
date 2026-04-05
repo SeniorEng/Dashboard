@@ -1,9 +1,8 @@
 import { Router } from "express";
 import { insertCustomerContactSchema } from "@shared/schema";
-import { storage } from "../../storage";
 import { customerManagementStorage } from "../../storage/customer-management";
 import { asyncHandler } from "../../lib/errors";
-import { requireIntParam } from "../../lib/params";
+import { requireIntParam, requireCustomerAccess } from "../../lib/params";
 import { auditService } from "../../services/audit";
 
 const router = Router();
@@ -13,14 +12,9 @@ const employeeContactUpdateSchema = insertCustomerContactSchema
   .partial();
 
 router.get("/:id/contacts", asyncHandler("Kontakte konnten nicht geladen werden", async (req, res) => {
-  const user = req.user!;
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
-
-  if (!user.isAdmin) {
-    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-    if (!assignedCustomerIds.includes(id)) { res.status(403).json({ error: "Zugriff verweigert" }); return; }
-  }
+  if (!await requireCustomerAccess(req, res, id)) return;
 
   const contacts = await customerManagementStorage.getCustomerContacts(id);
   res.json(contacts);
@@ -30,11 +24,7 @@ router.post("/:id/contacts", asyncHandler("Kontakt konnte nicht hinzugefügt wer
   const user = req.user!;
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
-
-  if (!user.isAdmin) {
-    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-    if (!assignedCustomerIds.includes(id)) { res.status(403).json({ error: "Zugriff verweigert" }); return; }
-  }
+  if (!await requireCustomerAccess(req, res, id)) return;
 
   const validatedData = insertCustomerContactSchema.parse({ ...req.body, customerId: id });
   const contact = await customerManagementStorage.addCustomerContact(validatedData);
@@ -54,11 +44,7 @@ router.patch("/:id/contacts/:contactId", asyncHandler("Kontakt konnte nicht aktu
   if (customerId === null) return;
   const contactId = requireIntParam(req.params.contactId, res);
   if (contactId === null) return;
-
-  if (!user.isAdmin) {
-    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-    if (!assignedCustomerIds.includes(customerId)) { res.status(403).json({ error: "Zugriff verweigert" }); return; }
-  }
+  if (!await requireCustomerAccess(req, res, customerId)) return;
 
   const result = employeeContactUpdateSchema.safeParse(req.body);
   if (!result.success) {
@@ -84,11 +70,7 @@ router.delete("/:id/contacts/:contactId", asyncHandler("Kontakt konnte nicht gel
   if (customerId === null) return;
   const contactId = requireIntParam(req.params.contactId, res);
   if (contactId === null) return;
-
-  if (!user.isAdmin) {
-    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-    if (!assignedCustomerIds.includes(customerId)) { res.status(403).json({ error: "Zugriff verweigert" }); return; }
-  }
+  if (!await requireCustomerAccess(req, res, customerId)) return;
 
   const deleted = await customerManagementStorage.deleteCustomerContact(contactId);
   if (!deleted) { res.status(404).json({ error: "NOT_FOUND", message: "Kontakt nicht gefunden" }); return; }

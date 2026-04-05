@@ -71,6 +71,38 @@ function minutesToHHMM(mins: number): string {
   return minutesToTimeDisplay(((mins % 1440) + 1440) % 1440);
 }
 
+function collectBlockedSlots(
+  dayAppointments: { scheduledStart: string | null; scheduledEnd: string | null; durationMinutes: number | null }[],
+  dayTimeEntries: { startTime: string | null; endTime: string | null }[],
+  dayBlockers: { startTime: string | null; endTime: string | null }[],
+): { start: number; end: number }[] {
+  const blockedSlots: { start: number; end: number }[] = [];
+  for (const appt of dayAppointments) {
+    if (appt.scheduledStart) {
+      const s = timeToMinutes(appt.scheduledStart);
+      const e = appt.scheduledEnd ? timeToMinutes(appt.scheduledEnd) : s + (appt.durationMinutes || 60);
+      blockedSlots.push({ start: s, end: e });
+    }
+  }
+  for (const te of dayTimeEntries) {
+    if (te.startTime && te.endTime) {
+      blockedSlots.push({
+        start: timeToMinutes(te.startTime.slice(0, 5)),
+        end: timeToMinutes(te.endTime.slice(0, 5)),
+      });
+    }
+  }
+  for (const blocker of dayBlockers) {
+    if (blocker.startTime && blocker.endTime) {
+      blockedSlots.push({
+        start: timeToMinutes(blocker.startTime.slice(0, 5)),
+        end: timeToMinutes(blocker.endTime.slice(0, 5)),
+      });
+    }
+  }
+  return blockedSlots;
+}
+
 function addDaysISO(dateStr: string, days: number): string {
   return addDaysShared(dateStr, days);
 }
@@ -252,30 +284,7 @@ router.get("/employees/weekly-availability", asyncHandler("Wochen-Verfügbarkeit
 
       const hasFullDayBlocker = dayBlockers.some(b => b.isFullDay);
 
-      const blockedSlots: { start: number; end: number }[] = [];
-      for (const appt of dayAppointments) {
-        if (appt.scheduledStart) {
-          const s = timeToMinutes(appt.scheduledStart);
-          const e = appt.scheduledEnd ? timeToMinutes(appt.scheduledEnd) : s + (appt.durationMinutes || 60);
-          blockedSlots.push({ start: s, end: e });
-        }
-      }
-      for (const te of dayTimeEntries) {
-        if (te.startTime && te.endTime) {
-          blockedSlots.push({
-            start: timeToMinutes(te.startTime.slice(0, 5)),
-            end: timeToMinutes(te.endTime.slice(0, 5)),
-          });
-        }
-      }
-      for (const blocker of dayBlockers) {
-        if (blocker.startTime && blocker.endTime) {
-          blockedSlots.push({
-            start: timeToMinutes(blocker.startTime.slice(0, 5)),
-            end: timeToMinutes(blocker.endTime.slice(0, 5)),
-          });
-        }
-      }
+      const blockedSlots = collectBlockedSlots(dayAppointments, dayTimeEntries, dayBlockers);
 
       const freeSlots = (absence || hasFullDayBlocker) ? [] : computeFreeSlots(dayAvail, blockedSlots);
 
@@ -432,30 +441,7 @@ router.get("/employees/availability", asyncHandler("Verfügbarkeiten konnten nic
 
     const hasFullDayBlocker = dayBlockers.some(b => b.isFullDay);
 
-    const blockedSlots: { start: number; end: number }[] = [];
-    for (const appt of existingAppointments) {
-      if (appt.scheduledStart) {
-        const s = timeToMinutes(appt.scheduledStart);
-        const e = appt.scheduledEnd ? timeToMinutes(appt.scheduledEnd) : s + (appt.durationMinutes || 60);
-        blockedSlots.push({ start: s, end: e });
-      }
-    }
-    for (const te of dayTimeEntries) {
-      if (te.startTime && te.endTime) {
-        blockedSlots.push({
-          start: timeToMinutes(te.startTime.slice(0, 5)),
-          end: timeToMinutes(te.endTime.slice(0, 5)),
-        });
-      }
-    }
-    for (const blocker of dayBlockers) {
-      if (blocker.startTime && blocker.endTime) {
-        blockedSlots.push({
-          start: timeToMinutes(blocker.startTime.slice(0, 5)),
-          end: timeToMinutes(blocker.endTime.slice(0, 5)),
-        });
-      }
-    }
+    const blockedSlots = collectBlockedSlots(existingAppointments, dayTimeEntries, dayBlockers);
 
     const freeSlots = (absence || hasFullDayBlocker) ? [] : computeFreeSlots(availability, blockedSlots);
 

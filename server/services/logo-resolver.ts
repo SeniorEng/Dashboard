@@ -1,15 +1,5 @@
 import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
-
-function parseObjectPath(path: string): { bucketName: string; objectName: string } {
-  if (!path.startsWith("/")) path = `/${path}`;
-  const parts = path.split("/");
-  if (parts.length < 3) throw new Error("Invalid path");
-  return { bucketName: parts[1], objectName: parts.slice(2).join("/") };
-}
-
-function getPrivateDir(): string {
-  return process.env.PRIVATE_OBJECT_DIR || "";
-}
+import { parseObjectPath, getPrivateDir } from "../lib/object-storage-helpers";
 
 let cachedDataUrl: string | null = null;
 let cachedPath: string | null = null;

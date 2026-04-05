@@ -10,6 +10,23 @@ import { getCachedCompanySettings, companySettingsCache } from "../../services/c
 
 const router = Router();
 
+function sendDeliveryResult(res: Response, result: { status: string; deliveryId?: number; error?: string }, extra?: Record<string, unknown>) {
+  if (result.status === "error") {
+    res.status(502).json({
+      code: "DELIVERY_ERROR",
+      message: result.error || "Versand fehlgeschlagen — bitte prüfen Sie die Versandeinstellungen",
+      deliveryId: result.deliveryId,
+    });
+    return;
+  }
+  res.json({
+    message: "Dokumente erfolgreich versendet",
+    deliveryId: result.deliveryId,
+    status: result.status,
+    ...extra,
+  });
+}
+
 const deliverSchema = z.object({
   customerId: z.number(),
   generatedDocumentIds: z.array(z.number()).min(1),
@@ -28,20 +45,7 @@ router.post("/document-delivery/send", asyncHandler("Versand fehlgeschlagen", as
     userId: req.user!.id,
   });
 
-  if (result.status === "error") {
-    res.status(502).json({
-      code: "DELIVERY_ERROR",
-      message: result.error || "Versand fehlgeschlagen — bitte prüfen Sie die Versandeinstellungen",
-      deliveryId: result.deliveryId,
-    });
-    return;
-  }
-
-  res.json({
-    message: "Dokumente erfolgreich versendet",
-    deliveryId: result.deliveryId,
-    status: result.status,
-  });
+  sendDeliveryResult(res, result);
 }));
 
 router.get("/document-delivery/customer/:customerId", asyncHandler("Versandprotokoll konnte nicht geladen werden", async (req: Request, res: Response) => {
@@ -95,21 +99,7 @@ router.post("/document-delivery/send-for-customer/:customerId", asyncHandler("Ve
     userId: req.user!.id,
   });
 
-  if (result.status === "error") {
-    res.status(502).json({
-      code: "DELIVERY_ERROR",
-      message: result.error || "Versand fehlgeschlagen — bitte prüfen Sie die Versandeinstellungen",
-      deliveryId: result.deliveryId,
-    });
-    return;
-  }
-
-  res.json({
-    message: "Dokumente erfolgreich versendet",
-    deliveryId: result.deliveryId,
-    status: result.status,
-    method: deliveryMethod,
-  });
+  sendDeliveryResult(res, result, { method: deliveryMethod });
 }));
 
 router.post("/document-delivery/test-smtp", asyncHandler("SMTP-Test fehlgeschlagen", async (_req: Request, res: Response) => {

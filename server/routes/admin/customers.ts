@@ -2,10 +2,10 @@ import { Router, Request, Response } from "express";
 import { storage } from "../../storage";
 import { customerManagementStorage } from "../../storage/customer-management";
 import { birthdaysCache } from "../../services/cache";
-import { budgetLedgerStorage } from "../../storage/budget-ledger";
 import { auditService } from "../../services/audit";
 import { geocodeCustomer } from "../../services/geocoding";
-import { parseLocalDate, todayISO, validateGeburtsdatum } from "@shared/utils/datetime";
+import { validateGeburtsdatum } from "@shared/utils/datetime";
+import { createCustomerRelatedData } from "../../lib/customer-creation-helpers";
 import { 
   versichertennummerSchema,
   customers,
@@ -249,146 +249,18 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
 
   const customer = await customerManagementStorage.createCustomerDirect(customerData);
 
-  const warnings: string[] = [];
-
-  if (data.pflegegrad && data.pflegegradSeit) {
-    try {
-      await customerManagementStorage.addCareLevelHistory({
-        customerId: customer.id,
-        pflegegrad: data.pflegegrad,
-        validFrom: data.pflegegradSeit,
-      }, userId);
-    } catch (err) {
-      console.error(`[POST /customers] Pflegegrad-Historie fehlgeschlagen für Kunde ${customer.id}:`, err);
-      warnings.push("Pflegegrad-Historie konnte nicht gespeichert werden");
-    }
-  }
-
-  if (data.insurance) {
-    try {
-      await customerManagementStorage.addCustomerInsurance({
-        customerId: customer.id,
-        insuranceProviderId: data.insurance.providerId,
-        versichertennummer: data.insurance.versichertennummer,
-        validFrom: data.insurance.validFrom,
-      }, userId);
-    } catch (err) {
-      console.error(`[POST /customers] Versicherung fehlgeschlagen für Kunde ${customer.id}:`, err);
-      warnings.push("Versicherung konnte nicht gespeichert werden");
-    }
-  }
-
-  if (data.contacts && data.contacts.length > 0) {
-    try {
-      await Promise.all(data.contacts.map((c, i) =>
-        customerManagementStorage.addCustomerContact({
-          customerId: customer.id,
-          contactType: c.contactType as "familie" | "angehoerige" | "nachbar" | "hausarzt" | "betreuer" | "sonstige",
-          isPrimary: c.isPrimary,
-          vorname: c.vorname,
-          nachname: c.nachname,
-          festnetz: c.festnetz || null,
-          mobilnummer: c.mobilnummer || null,
-          email: c.email || null,
-          notes: c.notes || null,
-          sortOrder: i,
-        })
-      ));
-    } catch (err) {
-      console.error(`[POST /customers] Kontakte fehlgeschlagen für Kunde ${customer.id}:`, err);
-      warnings.push("Kontakte konnten nicht gespeichert werden");
-    }
-  }
-
-  if (data.budgets) {
-    try {
-      const typeSettings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null }> = [];
-      if (data.budgets.entlastungsbetrag45b > 0) {
-        typeSettings.push({ budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: data.budgets.entlastungsbetrag45b });
-      }
-      if (data.budgets.pflegesachleistungen36 > 0) {
-        typeSettings.push({ budgetType: "umwandlung_45a", enabled: true, priority: 2, monthlyLimitCents: data.budgets.pflegesachleistungen36 });
-      }
-      if (data.budgets.verhinderungspflege39 > 0) {
-        typeSettings.push({ budgetType: "ersatzpflege_39_42a", enabled: true, priority: 3, yearlyLimitCents: data.budgets.verhinderungspflege39 });
-      }
-      if (typeSettings.length > 0) {
-        try {
-          await budgetLedgerStorage.upsertBudgetTypeSettings(customer.id, typeSettings);
-        } catch (err) {
-          console.error(`[POST /customers] Budget-Type-Settings fehlgeschlagen für Kunde ${customer.id}:`, err);
-          warnings.push("Budget-Einstellungen konnten nicht gespeichert werden");
-        }
-      }
-
-      if (typeSettings.length > 0) {
-        try {
-          await budgetLedgerStorage.syncCarryoverAndExpiry(customer.id);
-        } catch (err) {
-          console.error(`[POST /customers] Budget-Sync fehlgeschlagen für Kunde ${customer.id}:`, err);
-        }
-      }
-
-      if (data.budgets.carryoverAmountCents && data.budgets.carryoverAmountCents > 0) {
-        try {
-          const validFrom = data.budgets.validFrom || todayISO();
-          const validFromDate = parseLocalDate(validFrom);
-          const currentYear = validFromDate.getFullYear();
-          await budgetLedgerStorage.createBudgetAllocation({
-            customerId: customer.id,
-            budgetType: "entlastungsbetrag_45b",
-            year: currentYear - 1,
-            month: null,
-            amountCents: data.budgets.carryoverAmountCents,
-            source: "carryover",
-            validFrom,
-            expiresAt: `${currentYear}-06-30`,
-            notes: `Übertrag aus ${currentYear - 1}`,
-          }, userId);
-        } catch (err) {
-          console.error(`[POST /customers] Carryover-Allocation fehlgeschlagen für Kunde ${customer.id}:`, err);
-          warnings.push("Übertrag aus Vorjahr konnte nicht gespeichert werden");
-        }
-      }
-    } catch (err) {
-      console.error(`[POST /customers] Budgets fehlgeschlagen für Kunde ${customer.id}:`, err);
-      warnings.push("Budgets konnten nicht gespeichert werden");
-    }
-  }
-
-  if (data.contract) {
-    try {
-      const hauswirtschaftRate = data.contract.rates?.find(r => r.serviceCategory === "hauswirtschaft");
-      const alltagsbegleitungRate = data.contract.rates?.find(r => r.serviceCategory === "alltagsbegleitung");
-      const kilometerRate = data.contract.rates?.find(r => r.serviceCategory === "kilometer");
-      const contract = await customerManagementStorage.createCustomerContract({
-        customerId: customer.id,
-        contractStart: data.contract.contractStart,
-        contractDate: data.contract.contractDate || null,
-        vereinbarteLeistungen: data.contract.vereinbarteLeistungen || null,
-        hoursPerPeriod: data.contract.hoursPerPeriod,
-        periodType: data.contract.periodType as "week" | "month" | "year",
-        hauswirtschaftRateCents: hauswirtschaftRate?.hourlyRateCents || 0,
-        alltagsbegleitungRateCents: alltagsbegleitungRate?.hourlyRateCents || 0,
-        kilometerRateCents: kilometerRate?.hourlyRateCents || 0,
-        status: "active",
-      }, userId);
-
-      if (data.contract.rates && data.contract.rates.length > 0) {
-        await Promise.all(data.contract.rates.map(rate =>
-          customerManagementStorage.addContractRate({
-            contractId: contract.id,
-            serviceCategory: rate.serviceCategory as "hauswirtschaft" | "alltagsbegleitung" | "erstberatung",
-            hourlyRateCents: rate.hourlyRateCents,
-            validFrom: data.contract!.contractStart,
-          }, userId)
-        ));
-      }
-    } catch (err) {
-      console.error(`[POST /customers] Vertrag fehlgeschlagen für Kunde ${customer.id}:`, err);
-      warnings.push("Vertrag konnte nicht erstellt werden");
-    }
-  }
+  const warnings = await createCustomerRelatedData({
+    customerId: customer.id,
+    userId,
+    logPrefix: "POST /customers",
+    pflegegrad: data.pflegegrad,
+    pflegegradSeit: data.pflegegradSeit,
+    insurance: data.insurance,
+    contacts: data.contacts,
+    budgets: data.budgets,
+    contract: data.contract,
+    useLedgerBudgets: true,
+  });
 
   birthdaysCache.invalidateAll();
 

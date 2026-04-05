@@ -30,6 +30,27 @@ import {
 } from "@shared/schema";
 import { db } from "../lib/db";
 
+const proofBaseSelect = {
+  id: employeeDocumentProofs.id,
+  employeeId: employeeDocumentProofs.employeeId,
+  qualificationId: employeeDocumentProofs.qualificationId,
+  documentTypeId: employeeDocumentProofs.documentTypeId,
+  status: employeeDocumentProofs.status,
+  fileName: employeeDocumentProofs.fileName,
+  objectPath: employeeDocumentProofs.objectPath,
+  uploadedAt: employeeDocumentProofs.uploadedAt,
+  reviewedAt: employeeDocumentProofs.reviewedAt,
+  reviewedByUserId: employeeDocumentProofs.reviewedByUserId,
+  rejectionReason: employeeDocumentProofs.rejectionReason,
+  createdAt: employeeDocumentProofs.createdAt,
+  updatedAt: employeeDocumentProofs.updatedAt,
+  deletedAt: employeeDocumentProofs.deletedAt,
+  documentType: {
+    id: documentTypes.id,
+    name: documentTypes.name,
+  },
+};
+
 export interface DocumentBatch {
   batchId: string;
   batchLabel: string | null;
@@ -746,26 +767,7 @@ export class DocumentStorage implements IDocumentStorage {
   }
   async getEmployeeProofs(employeeId: number) {
     const results = await db
-      .select({
-        id: employeeDocumentProofs.id,
-        employeeId: employeeDocumentProofs.employeeId,
-        qualificationId: employeeDocumentProofs.qualificationId,
-        documentTypeId: employeeDocumentProofs.documentTypeId,
-        status: employeeDocumentProofs.status,
-        fileName: employeeDocumentProofs.fileName,
-        objectPath: employeeDocumentProofs.objectPath,
-        uploadedAt: employeeDocumentProofs.uploadedAt,
-        reviewedAt: employeeDocumentProofs.reviewedAt,
-        reviewedByUserId: employeeDocumentProofs.reviewedByUserId,
-        rejectionReason: employeeDocumentProofs.rejectionReason,
-        createdAt: employeeDocumentProofs.createdAt,
-        updatedAt: employeeDocumentProofs.updatedAt,
-        deletedAt: employeeDocumentProofs.deletedAt,
-        documentType: {
-          id: documentTypes.id,
-          name: documentTypes.name,
-        },
-      })
+      .select(proofBaseSelect)
       .from(employeeDocumentProofs)
       .innerJoin(documentTypes, eq(employeeDocumentProofs.documentTypeId, documentTypes.id))
       .where(and(eq(employeeDocumentProofs.employeeId, employeeId), isNull(employeeDocumentProofs.deletedAt)))
@@ -824,24 +826,7 @@ export class DocumentStorage implements IDocumentStorage {
   async getPendingReviewProofs() {
     const results = await db
       .select({
-        id: employeeDocumentProofs.id,
-        employeeId: employeeDocumentProofs.employeeId,
-        qualificationId: employeeDocumentProofs.qualificationId,
-        documentTypeId: employeeDocumentProofs.documentTypeId,
-        status: employeeDocumentProofs.status,
-        fileName: employeeDocumentProofs.fileName,
-        objectPath: employeeDocumentProofs.objectPath,
-        uploadedAt: employeeDocumentProofs.uploadedAt,
-        reviewedAt: employeeDocumentProofs.reviewedAt,
-        reviewedByUserId: employeeDocumentProofs.reviewedByUserId,
-        rejectionReason: employeeDocumentProofs.rejectionReason,
-        createdAt: employeeDocumentProofs.createdAt,
-        updatedAt: employeeDocumentProofs.updatedAt,
-        deletedAt: employeeDocumentProofs.deletedAt,
-        documentType: {
-          id: documentTypes.id,
-          name: documentTypes.name,
-        },
+        ...proofBaseSelect,
         employee: {
           id: users.id,
           displayName: users.displayName,

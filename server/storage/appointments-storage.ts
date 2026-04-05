@@ -31,11 +31,7 @@ export async function getAppointmentsByDate(date: string): Promise<Appointment[]
   return await db.select().from(appointments).where(and(eq(appointments.date, date), isNull(appointments.deletedAt), ne(appointments.status, "cancelled")));
 }
 
-export async function getAppointmentCountsByDates(dates: string[], customerIds?: number[], employeeId?: number, assignedOnly?: boolean): Promise<Record<string, number>> {
-  if (dates.length === 0) return {};
-
-  const conditions = [inArray(appointments.date, dates), isNull(appointments.deletedAt), ne(appointments.status, "cancelled")];
-
+function applyVisibilityFilters(conditions: ReturnType<typeof and>[], customerIds?: number[], employeeId?: number, assignedOnly?: boolean) {
   const employeeCondition = employeeId
     ? assignedOnly
       ? eq(appointments.assignedEmployeeId, employeeId)
@@ -54,6 +50,13 @@ export async function getAppointmentCountsByDates(dates: string[], customerIds?:
   } else if (employeeCondition) {
     conditions.push(employeeCondition);
   }
+}
+
+export async function getAppointmentCountsByDates(dates: string[], customerIds?: number[], employeeId?: number, assignedOnly?: boolean): Promise<Record<string, number>> {
+  if (dates.length === 0) return {};
+
+  const conditions = [inArray(appointments.date, dates), isNull(appointments.deletedAt), ne(appointments.status, "cancelled")];
+  applyVisibilityFilters(conditions, customerIds, employeeId, assignedOnly);
 
   const results = await db
     .select({
@@ -106,24 +109,7 @@ export async function getAppointmentsWithCustomers(date?: string, customerIds?: 
     conditions.push(eq(appointments.date, date));
   }
 
-  const employeeCondition = employeeId
-    ? assignedOnly
-      ? eq(appointments.assignedEmployeeId, employeeId)
-      : or(
-          eq(appointments.assignedEmployeeId, employeeId),
-          eq(appointments.performedByEmployeeId, employeeId)
-        )!
-    : undefined;
-
-  if (assignedOnly && employeeCondition) {
-    conditions.push(employeeCondition);
-  } else if (customerIds && customerIds.length > 0 && employeeCondition) {
-    conditions.push(or(inArray(appointments.customerId, customerIds), employeeCondition)!);
-  } else if (customerIds && customerIds.length > 0) {
-    conditions.push(inArray(appointments.customerId, customerIds));
-  } else if (employeeCondition) {
-    conditions.push(employeeCondition);
-  }
+  applyVisibilityFilters(conditions, customerIds, employeeId, assignedOnly);
 
   const query = db
     .select(appointmentWithCustomerSelectFields)

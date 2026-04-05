@@ -12,6 +12,25 @@ import { getPrimaryCustomerIds } from "../storage/customers-storage";
 
 const router = Router();
 
+async function requireServiceRecordAccess(req: Request, res: Response, id: number) {
+  const record = await storage.getServiceRecord(id);
+  if (!record) {
+    res.status(404).json({ message: "Leistungsnachweis nicht gefunden" });
+    return null;
+  }
+  const hasAccess = await canAccessCustomer(
+    req.user!.id,
+    req.user!.isAdmin,
+    record.customerId,
+    (employeeId) => storage.getAssignedCustomerIds(employeeId)
+  );
+  if (!hasAccess) {
+    res.status(403).json({ error: "FORBIDDEN", message: "Sie haben keinen Zugriff auf diesen Leistungsnachweis" });
+    return null;
+  }
+  return record;
+}
+
 router.get("/", requireAuth, asyncHandler("Leistungsnachweise konnten nicht geladen werden", async (req, res) => {
   const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : null;
   const effectiveUserId = (req.user!.isAdmin && viewAsEmployeeId) ? viewAsEmployeeId : req.user!.id;
@@ -169,23 +188,8 @@ router.get("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht gel
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
   
-  const record = await storage.getServiceRecord(id);
-  if (!record) {
-    return res.status(404).json({ message: "Leistungsnachweis nicht gefunden" });
-  }
-  
-  const hasAccess = await canAccessCustomer(
-    req.user!.id,
-    req.user!.isAdmin,
-    record.customerId,
-    (employeeId) => storage.getAssignedCustomerIds(employeeId)
-  );
-  if (!hasAccess) {
-    return res.status(403).json({ 
-      error: "FORBIDDEN",
-      message: "Sie haben keinen Zugriff auf diesen Leistungsnachweis" 
-    });
-  }
+  const record = await requireServiceRecordAccess(req, res, id);
+  if (!record) return;
   
   res.json(record);
 }));
@@ -194,23 +198,8 @@ router.get("/:id/appointments", requireAuth, asyncHandler("Termine konnten nicht
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
   
-  const record = await storage.getServiceRecord(id);
-  if (!record) {
-    return res.status(404).json({ message: "Leistungsnachweis nicht gefunden" });
-  }
-  
-  const hasAccess = await canAccessCustomer(
-    req.user!.id,
-    req.user!.isAdmin,
-    record.customerId,
-    (employeeId) => storage.getAssignedCustomerIds(employeeId)
-  );
-  if (!hasAccess) {
-    return res.status(403).json({ 
-      error: "FORBIDDEN",
-      message: "Sie haben keinen Zugriff auf diese Termine" 
-    });
-  }
+  const record = await requireServiceRecordAccess(req, res, id);
+  if (!record) return;
   
   const appointments = await storage.getAppointmentsForServiceRecord(id);
   res.json(appointments);

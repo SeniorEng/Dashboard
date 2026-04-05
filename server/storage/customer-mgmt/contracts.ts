@@ -13,6 +13,19 @@ import { eq, and, isNull } from "drizzle-orm";
 import { todayISO } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
 
+async function fetchContractWithRates(contractResult: CustomerContract[]): Promise<(CustomerContract & { rates: CustomerContractRate[] }) | undefined> {
+  if (contractResult.length === 0) return undefined;
+  const contract = contractResult[0];
+  const rates = await db
+    .select()
+    .from(customerContractRates)
+    .where(and(
+      eq(customerContractRates.contractId, contract.id),
+      isNull(customerContractRates.validTo)
+    ));
+  return { ...contract, rates };
+}
+
 export async function getCustomerCurrentContract(customerId: number): Promise<(CustomerContract & { rates: CustomerContractRate[] }) | undefined> {
   const contractResult = await db
     .select()
@@ -22,19 +35,7 @@ export async function getCustomerCurrentContract(customerId: number): Promise<(C
       eq(customerContracts.status, "active")
     ))
     .limit(1);
-  
-  if (contractResult.length === 0) return undefined;
-  
-  const contract = contractResult[0];
-  const rates = await db
-    .select()
-    .from(customerContractRates)
-    .where(and(
-      eq(customerContractRates.contractId, contract.id),
-      isNull(customerContractRates.validTo)
-    ));
-  
-  return { ...contract, rates };
+  return fetchContractWithRates(contractResult);
 }
 
 export async function getCustomerLatestContract(customerId: number): Promise<(CustomerContract & { rates: CustomerContractRate[] }) | undefined> {
@@ -44,19 +45,7 @@ export async function getCustomerLatestContract(customerId: number): Promise<(Cu
     .where(eq(customerContracts.customerId, customerId))
     .orderBy(customerContracts.id)
     .limit(1);
-  
-  if (contractResult.length === 0) return undefined;
-  
-  const contract = contractResult[0];
-  const rates = await db
-    .select()
-    .from(customerContractRates)
-    .where(and(
-      eq(customerContractRates.contractId, contract.id),
-      isNull(customerContractRates.validTo)
-    ));
-  
-  return { ...contract, rates };
+  return fetchContractWithRates(contractResult);
 }
 
 export async function createCustomerContract(data: InsertCustomerContract, userId?: number): Promise<CustomerContract> {

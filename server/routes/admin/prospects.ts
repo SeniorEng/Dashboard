@@ -1,15 +1,14 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { prospectStorage } from "../../storage/prospects";
-import { customerManagementStorage } from "../../storage/customer-management";
 import {
   insertProspectSchema, updateProspectSchema, insertProspectNoteSchema,
   qualifyProspectSchema, insertProspectOfferSchema,
   PROSPECT_STATUSES,
   customers, prospects, appointments, prospectOffers, prospectNotes,
-  versichertennummerSchema,
 } from "@shared/schema";
-import { internationalEmailSchema, optionalGermanPhoneSchema } from "@shared/schema/common";
+import { optionalGermanPhoneSchema } from "@shared/schema/common";
+import { convertProspectSchema } from "../../lib/conversion-schemas";
 import { isPflegekasseCustomer } from "@shared/domain/customers";
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
@@ -18,7 +17,8 @@ import { auditService } from "../../services/audit";
 import { authService } from "../../services/auth";
 import { geocodeCustomer } from "../../services/geocoding";
 import { birthdaysCache, customerIdsCache } from "../../services/cache";
-import { todayISO, validateGeburtsdatum } from "@shared/utils/datetime";
+import { validateGeburtsdatum } from "@shared/utils/datetime";
+import { createCustomerRelatedData } from "../../lib/customer-creation-helpers";
 import { db } from "../../lib/db";
 import { eq, and, isNull } from "drizzle-orm";
 
@@ -294,62 +294,6 @@ router.get("/prospects/:id/offer", asyncHandler("Angebot konnte nicht geladen we
   res.json(offer || null);
 }));
 
-const convertProspectSchema = z.object({
-  billingType: z.enum(["pflegekasse_gesetzlich", "pflegekasse_privat", "selbstzahler"]),
-  vorname: z.string().min(1),
-  nachname: z.string().min(1),
-  geburtsdatum: z.string().optional().nullable(),
-  email: internationalEmailSchema.optional().nullable(),
-  telefon: optionalGermanPhoneSchema,
-  festnetz: optionalGermanPhoneSchema,
-  strasse: z.string().min(1),
-  nr: z.string().min(1),
-  plz: z.string().regex(/^\d{5}$/),
-  stadt: z.string().min(1),
-  pflegegrad: z.number().min(1).max(5).optional(),
-  pflegegradSeit: z.string().optional(),
-  vorerkrankungen: z.string().max(2000).optional().nullable(),
-  haustierVorhanden: z.boolean().optional(),
-  haustierDetails: z.string().max(500).optional().nullable(),
-  personenbefoerderungGewuenscht: z.boolean().optional(),
-  acceptsPrivatePayment: z.boolean().optional(),
-  documentDeliveryMethod: z.enum(["email", "post"]).optional(),
-  insurance: z.object({
-    providerId: z.number(),
-    versichertennummer: versichertennummerSchema,
-    validFrom: z.string(),
-  }).optional(),
-  contacts: z.array(z.object({
-    contactType: z.string(),
-    isPrimary: z.boolean(),
-    vorname: z.string(),
-    nachname: z.string(),
-    telefon: optionalGermanPhoneSchema,
-    festnetz: optionalGermanPhoneSchema,
-    mobilnummer: optionalGermanPhoneSchema,
-    email: z.string().optional(),
-  })).optional(),
-  budgets: z.object({
-    entlastungsbetrag45b: z.number(),
-    verhinderungspflege39: z.number(),
-    pflegesachleistungen36: z.number(),
-    validFrom: z.string(),
-  }).optional(),
-  contract: z.object({
-    contractStart: z.string(),
-    contractDate: z.string().optional(),
-    vereinbarteLeistungen: z.string().optional(),
-    hoursPerPeriod: z.number(),
-    periodType: z.string(),
-    rates: z.array(z.object({
-      serviceCategory: z.string(),
-      hourlyRateCents: z.number(),
-    })).optional(),
-  }).optional(),
-  primaryEmployeeId: z.number().nullable().optional(),
-  backupEmployeeId: z.number().nullable().optional(),
-  backupEmployeeId2: z.number().nullable().optional(),
-});
 
 router.post("/prospects/:id/convert", asyncHandler("Konvertierung fehlgeschlagen", async (req: Request, res: Response) => {
   const id = requireIntParam(req.params.id, res);
@@ -442,92 +386,19 @@ router.post("/prospects/:id/convert", asyncHandler("Konvertierung fehlgeschlagen
 
   customerIdsCache.invalidateAll();
 
-  if (data.pflegegrad && data.pflegegradSeit) {
-    try {
-      await customerManagementStorage.addCareLevelHistory({
-        customerId: result.id,
-        pflegegrad: data.pflegegrad,
-        validFrom: data.pflegegradSeit,
-      }, userId);
-    } catch (err) {
-      console.error(`[POST /prospects/:id/convert] Pflegegrad-Historie fehlgeschlagen:`, err);
-      warnings.push("Pflegegrad-Historie konnte nicht gespeichert werden");
-    }
-  }
-
-  if (data.insurance && isPflegekasseCustomer(data.billingType)) {
-    try {
-      await customerManagementStorage.addCustomerInsurance({
-        customerId: result.id,
-        insuranceProviderId: data.insurance.providerId,
-        versichertennummer: data.insurance.versichertennummer,
-        validFrom: data.insurance.validFrom,
-      }, userId);
-    } catch (err) {
-      console.error(`[POST /prospects/:id/convert] Versicherung fehlgeschlagen:`, err);
-      warnings.push("Versicherung konnte nicht gespeichert werden");
-    }
-  }
-
-  if (data.contacts) {
-    for (let i = 0; i < data.contacts.length; i++) {
-      const c = data.contacts[i];
-      try {
-        await customerManagementStorage.addCustomerContact({
-          customerId: result.id,
-          contactType: c.contactType as "familie" | "angehoerige" | "nachbar" | "hausarzt" | "betreuer" | "sonstige",
-          isPrimary: c.isPrimary,
-          vorname: c.vorname,
-          nachname: c.nachname,
-          festnetz: c.festnetz || null,
-          mobilnummer: c.mobilnummer || null,
-          email: c.email || null,
-          sortOrder: i,
-        });
-      } catch (err) {
-        console.error(`[POST /prospects/:id/convert] Kontakt ${i} fehlgeschlagen:`, err);
-        warnings.push(`Kontakt "${c.vorname} ${c.nachname}" konnte nicht gespeichert werden`);
-      }
-    }
-  }
-
-  if (data.budgets && isPflegekasseCustomer(data.billingType)) {
-    try {
-      await customerManagementStorage.addCustomerBudget({
-        customerId: result.id,
-        entlastungsbetrag45b: data.budgets.entlastungsbetrag45b,
-        verhinderungspflege39: data.budgets.verhinderungspflege39,
-        pflegesachleistungen36: data.budgets.pflegesachleistungen36,
-        validFrom: data.budgets.validFrom,
-      }, userId);
-    } catch (err) {
-      console.error(`[POST /prospects/:id/convert] Budgets fehlgeschlagen:`, err);
-      warnings.push("Budgets konnten nicht gespeichert werden");
-    }
-  }
-
-  if (data.contract) {
-    try {
-      const hauswirtschaftRate = data.contract.rates?.find(r => r.serviceCategory === "hauswirtschaft");
-      const alltagsbegleitungRate = data.contract.rates?.find(r => r.serviceCategory === "alltagsbegleitung");
-      const kilometerRate = data.contract.rates?.find(r => r.serviceCategory === "kilometer");
-      await customerManagementStorage.createCustomerContract({
-        customerId: result.id,
-        contractStart: data.contract.contractStart,
-        contractDate: data.contract.contractDate || null,
-        vereinbarteLeistungen: data.contract.vereinbarteLeistungen || null,
-        hoursPerPeriod: data.contract.hoursPerPeriod,
-        periodType: data.contract.periodType as "week" | "month" | "year",
-        hauswirtschaftRateCents: hauswirtschaftRate?.hourlyRateCents || 0,
-        alltagsbegleitungRateCents: alltagsbegleitungRate?.hourlyRateCents || 0,
-        kilometerRateCents: kilometerRate?.hourlyRateCents || 0,
-        status: "active",
-      }, userId);
-    } catch (err) {
-      console.error(`[POST /prospects/:id/convert] Vertrag fehlgeschlagen:`, err);
-      warnings.push("Vertrag konnte nicht erstellt werden");
-    }
-  }
+  const relatedWarnings = await createCustomerRelatedData({
+    customerId: result.id,
+    userId,
+    logPrefix: "POST /prospects/:id/convert",
+    pflegegrad: data.pflegegrad,
+    pflegegradSeit: data.pflegegradSeit,
+    insurance: data.insurance && isPflegekasseCustomer(data.billingType) ? data.insurance : undefined,
+    contacts: data.contacts,
+    budgets: data.budgets && isPflegekasseCustomer(data.billingType) ? data.budgets : undefined,
+    contract: data.contract,
+    useLedgerBudgets: false,
+  });
+  warnings.push(...relatedWarnings);
 
   if (data.primaryEmployeeId !== undefined || data.backupEmployeeId !== undefined || data.backupEmployeeId2 !== undefined) {
     const empIds = [data.primaryEmployeeId, data.backupEmployeeId, data.backupEmployeeId2].filter((id): id is number => id != null);

@@ -13,25 +13,32 @@ function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
-router.get("/sign/:token", asyncHandler("Unterschrifts-Link konnte nicht geladen werden", async (req: Request, res: Response) => {
+async function validateSigningToken(req: Request, res: Response): Promise<NonNullable<Awaited<ReturnType<typeof documentStorage.getSigningTokenByHash>>> | null> {
   const rawToken = req.params.token;
   const tokenHash = hashToken(rawToken);
 
   const tokenData = await documentStorage.getSigningTokenByHash(tokenHash);
   if (!tokenData) {
     res.status(404).json({ error: "NOT_FOUND", message: "Dieser Unterschrifts-Link ist ungültig." });
-    return;
+    return null;
   }
 
   if (tokenData.usedAt) {
     res.status(410).json({ error: "ALREADY_USED", message: "Dieses Dokument wurde bereits unterschrieben." });
-    return;
+    return null;
   }
 
   if (new Date() > tokenData.expiresAt) {
     res.status(410).json({ error: "EXPIRED", message: "Dieser Unterschrifts-Link ist abgelaufen. Bitte wenden Sie sich an Ihren Arbeitgeber." });
-    return;
+    return null;
   }
+
+  return tokenData;
+}
+
+router.get("/sign/:token", asyncHandler("Unterschrifts-Link konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const tokenData = await validateSigningToken(req, res);
+  if (!tokenData) return;
 
   const doc = tokenData.document;
 
@@ -52,24 +59,8 @@ const signDocumentSchema = z.object({
 });
 
 router.post("/sign/:token", asyncHandler("Unterschrift konnte nicht gespeichert werden", async (req: Request, res: Response) => {
-  const rawToken = req.params.token;
-  const tokenHash = hashToken(rawToken);
-
-  const tokenData = await documentStorage.getSigningTokenByHash(tokenHash);
-  if (!tokenData) {
-    res.status(404).json({ error: "NOT_FOUND", message: "Dieser Unterschrifts-Link ist ungültig." });
-    return;
-  }
-
-  if (tokenData.usedAt) {
-    res.status(410).json({ error: "ALREADY_USED", message: "Dieses Dokument wurde bereits unterschrieben." });
-    return;
-  }
-
-  if (new Date() > tokenData.expiresAt) {
-    res.status(410).json({ error: "EXPIRED", message: "Dieser Unterschrifts-Link ist abgelaufen." });
-    return;
-  }
+  const tokenData = await validateSigningToken(req, res);
+  if (!tokenData) return;
 
   const parsed = signDocumentSchema.safeParse(req.body);
   if (!parsed.success) {

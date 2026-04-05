@@ -10,6 +10,43 @@ import { eq, and, isNull, desc, count } from "drizzle-orm";
 import { todayISO } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
 
+const insuranceHistoryWithProviderSelect = {
+  id: customerInsuranceHistory.id,
+  customerId: customerInsuranceHistory.customerId,
+  insuranceProviderId: customerInsuranceHistory.insuranceProviderId,
+  versichertennummer: customerInsuranceHistory.versichertennummer,
+  validFrom: customerInsuranceHistory.validFrom,
+  validTo: customerInsuranceHistory.validTo,
+  notes: customerInsuranceHistory.notes,
+  createdAt: customerInsuranceHistory.createdAt,
+  createdByUserId: customerInsuranceHistory.createdByUserId,
+  provider: {
+    id: insuranceProviders.id,
+    name: insuranceProviders.name,
+    ikNummer: insuranceProviders.ikNummer,
+    strasse: insuranceProviders.strasse,
+    hausnummer: insuranceProviders.hausnummer,
+    plz: insuranceProviders.plz,
+    stadt: insuranceProviders.stadt,
+    telefon: insuranceProviders.telefon,
+    email: insuranceProviders.email,
+    fax: insuranceProviders.fax,
+    kimAdresse: insuranceProviders.kimAdresse,
+    ansprechpartner: insuranceProviders.ansprechpartner,
+    datenannahmeIk: insuranceProviders.datenannahmeIk,
+    empfaenger: insuranceProviders.empfaenger,
+    empfaengerZeile2: insuranceProviders.empfaengerZeile2,
+    emailInvoiceEnabled: insuranceProviders.emailInvoiceEnabled,
+    emailVerhinderungspflege: insuranceProviders.emailVerhinderungspflege,
+    zahlungsbedingungen: insuranceProviders.zahlungsbedingungen,
+    zahlungsart: insuranceProviders.zahlungsart,
+    isActive: insuranceProviders.isActive,
+    anschrift: insuranceProviders.anschrift,
+    plzOrt: insuranceProviders.plzOrt,
+    createdAt: insuranceProviders.createdAt,
+  },
+};
+
 export async function getInsuranceProviders(activeOnly = true): Promise<InsuranceProvider[]> {
   if (activeOnly) {
     return await db.select().from(insuranceProviders).where(eq(insuranceProviders.isActive, true));
@@ -50,42 +87,7 @@ export async function getActiveCustomerCountForProvider(providerId: number): Pro
 
 export async function getCustomerCurrentInsurance(customerId: number): Promise<(CustomerInsuranceHistory & { provider: InsuranceProvider }) | undefined> {
   const result = await db
-    .select({
-      id: customerInsuranceHistory.id,
-      customerId: customerInsuranceHistory.customerId,
-      insuranceProviderId: customerInsuranceHistory.insuranceProviderId,
-      versichertennummer: customerInsuranceHistory.versichertennummer,
-      validFrom: customerInsuranceHistory.validFrom,
-      validTo: customerInsuranceHistory.validTo,
-      notes: customerInsuranceHistory.notes,
-      createdAt: customerInsuranceHistory.createdAt,
-      createdByUserId: customerInsuranceHistory.createdByUserId,
-      provider: {
-        id: insuranceProviders.id,
-        name: insuranceProviders.name,
-        ikNummer: insuranceProviders.ikNummer,
-        strasse: insuranceProviders.strasse,
-        hausnummer: insuranceProviders.hausnummer,
-        plz: insuranceProviders.plz,
-        stadt: insuranceProviders.stadt,
-        telefon: insuranceProviders.telefon,
-        email: insuranceProviders.email,
-        fax: insuranceProviders.fax,
-        kimAdresse: insuranceProviders.kimAdresse,
-        ansprechpartner: insuranceProviders.ansprechpartner,
-        datenannahmeIk: insuranceProviders.datenannahmeIk,
-        empfaenger: insuranceProviders.empfaenger,
-        empfaengerZeile2: insuranceProviders.empfaengerZeile2,
-        emailInvoiceEnabled: insuranceProviders.emailInvoiceEnabled,
-        emailVerhinderungspflege: insuranceProviders.emailVerhinderungspflege,
-        zahlungsbedingungen: insuranceProviders.zahlungsbedingungen,
-        zahlungsart: insuranceProviders.zahlungsart,
-        isActive: insuranceProviders.isActive,
-        anschrift: insuranceProviders.anschrift,
-        plzOrt: insuranceProviders.plzOrt,
-        createdAt: insuranceProviders.createdAt,
-      },
-    })
+    .select(insuranceHistoryWithProviderSelect)
     .from(customerInsuranceHistory)
     .innerJoin(insuranceProviders, eq(customerInsuranceHistory.insuranceProviderId, insuranceProviders.id))
     .where(and(
@@ -100,42 +102,7 @@ export async function getCustomerCurrentInsurance(customerId: number): Promise<(
 
 export async function getCustomerInsuranceHistory(customerId: number): Promise<(CustomerInsuranceHistory & { provider: InsuranceProvider })[]> {
   const result = await db
-    .select({
-      id: customerInsuranceHistory.id,
-      customerId: customerInsuranceHistory.customerId,
-      insuranceProviderId: customerInsuranceHistory.insuranceProviderId,
-      versichertennummer: customerInsuranceHistory.versichertennummer,
-      validFrom: customerInsuranceHistory.validFrom,
-      validTo: customerInsuranceHistory.validTo,
-      notes: customerInsuranceHistory.notes,
-      createdAt: customerInsuranceHistory.createdAt,
-      createdByUserId: customerInsuranceHistory.createdByUserId,
-      provider: {
-        id: insuranceProviders.id,
-        name: insuranceProviders.name,
-        ikNummer: insuranceProviders.ikNummer,
-        strasse: insuranceProviders.strasse,
-        hausnummer: insuranceProviders.hausnummer,
-        plz: insuranceProviders.plz,
-        stadt: insuranceProviders.stadt,
-        telefon: insuranceProviders.telefon,
-        email: insuranceProviders.email,
-        fax: insuranceProviders.fax,
-        kimAdresse: insuranceProviders.kimAdresse,
-        ansprechpartner: insuranceProviders.ansprechpartner,
-        datenannahmeIk: insuranceProviders.datenannahmeIk,
-        empfaenger: insuranceProviders.empfaenger,
-        empfaengerZeile2: insuranceProviders.empfaengerZeile2,
-        emailInvoiceEnabled: insuranceProviders.emailInvoiceEnabled,
-        emailVerhinderungspflege: insuranceProviders.emailVerhinderungspflege,
-        zahlungsbedingungen: insuranceProviders.zahlungsbedingungen,
-        zahlungsart: insuranceProviders.zahlungsart,
-        isActive: insuranceProviders.isActive,
-        anschrift: insuranceProviders.anschrift,
-        plzOrt: insuranceProviders.plzOrt,
-        createdAt: insuranceProviders.createdAt,
-      },
-    })
+    .select(insuranceHistoryWithProviderSelect)
     .from(customerInsuranceHistory)
     .innerJoin(insuranceProviders, eq(customerInsuranceHistory.insuranceProviderId, insuranceProviders.id))
     .where(eq(customerInsuranceHistory.customerId, customerId))
