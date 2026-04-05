@@ -92,16 +92,9 @@ export function getStepsForBillingType(billingType: BillingType | ""): StepConfi
   return ALL_STEPS.filter((s) => s.id !== "insurance" && s.id !== "budgets");
 }
 
-const STEPS = ALL_STEPS;
-
 export const PFLEGEGRAD_OPTIONS = PFLEGEGRAD_SELECT_OPTIONS;
 
 export const CONTACT_TYPES = CONTACT_TYPE_SELECT_OPTIONS;
-
-const PERIOD_TYPES = [
-  { value: "weekly", label: "Pro Woche" },
-  { value: "monthly", label: "Pro Monat" },
-];
 
 export const DEFAULT_BUDGETS = {
   entlastungsbetrag45b: 131,

@@ -1,5 +1,4 @@
 import { useState, useCallback } from "react";
-import type { UppyFile } from "@uppy/core";
 import { api, unwrapResult } from "@/lib/api/client";
 
 interface UploadMetadata {
@@ -129,45 +128,8 @@ export function useUpload(options: UseUploadOptions = {}) {
     [requestUploadUrl, uploadToPresignedUrl, options]
   );
 
-  /**
-   * Get upload parameters for Uppy's AWS S3 plugin.
-   *
-   * IMPORTANT: This function receives the UppyFile object from Uppy.
-   * Use file.name, file.size, file.type to request per-file presigned URLs.
-   *
-   * Use this with the ObjectUploader component:
-   * ```tsx
-   * <ObjectUploader onGetUploadParameters={getUploadParameters}>
-   *   Upload
-   * </ObjectUploader>
-   * ```
-   */
-  const getUploadParameters = useCallback(
-    async (
-      file: UppyFile<Record<string, unknown>, Record<string, unknown>>
-    ): Promise<{
-      method: "PUT";
-      url: string;
-      headers?: Record<string, string>;
-    }> => {
-      const result = await api.post("/uploads/request-url", {
-        name: file.name,
-        size: file.size,
-        contentType: file.type || "application/octet-stream",
-      });
-      const data = unwrapResult(result) as UploadResponse;
-      return {
-        method: "PUT",
-        url: data.uploadURL,
-        headers: { "Content-Type": file.type || "application/octet-stream" },
-      };
-    },
-    []
-  );
-
   return {
     uploadFile,
-    getUploadParameters,
     isUploading,
     error,
     progress,
