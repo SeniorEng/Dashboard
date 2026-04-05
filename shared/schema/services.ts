@@ -46,6 +46,7 @@ export const customerServicePrices = pgTable("customer_service_prices", {
   priceCents: integer("price_cents").notNull(),
   validFrom: timestamp("valid_from").notNull().defaultNow(),
   validTo: timestamp("valid_to"),
+  deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [
   index("csp_customer_service_idx").on(table.customerId, table.serviceId),

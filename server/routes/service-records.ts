@@ -271,24 +271,29 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
     });
   }
   
-  const record = await storage.createServiceRecord({
-    customerId,
-    employeeId: effectiveEmployeeId,
-    year,
-    month,
-    recordType: "monthly",
-  });
-  
   const appointmentIds = remainingAppointments.map(apt => apt.id);
-  await storage.addAppointmentsToServiceRecord(record.id, appointmentIds);
 
-  const ip = req.ip || req.socket.remoteAddress;
-  await auditService.serviceRecordCreated(
-    userId,
-    record.id,
-    { customerId, year, month, appointmentCount: appointmentIds.length },
-    ip
-  );
+  const record = await db.transaction(async (tx) => {
+    const rec = await storage.createServiceRecord({
+      customerId,
+      employeeId: effectiveEmployeeId,
+      year,
+      month,
+      recordType: "monthly",
+    }, tx);
+
+    await storage.addAppointmentsToServiceRecord(rec.id, appointmentIds, tx);
+
+    const ip = req.ip || req.socket.remoteAddress;
+    await auditService.serviceRecordCreated(
+      userId,
+      rec.id,
+      { customerId, year, month, appointmentCount: appointmentIds.length },
+      ip
+    );
+
+    return rec;
+  });
 
   res.status(201).json(record);
 }));
@@ -352,23 +357,27 @@ router.post("/single", requireAuth, asyncHandler("Einzeltermin-Leistungsnachweis
   
   const appointmentEmployeeId = appointment.performedByEmployeeId || appointment.assignedEmployeeId || userId;
   
-  const record = await storage.createServiceRecord({
-    customerId,
-    employeeId: appointmentEmployeeId,
-    year,
-    month,
-    recordType: "single",
-  });
-  
-  await storage.addAppointmentsToServiceRecord(record.id, [appointmentId]);
+  const record = await db.transaction(async (tx) => {
+    const rec = await storage.createServiceRecord({
+      customerId,
+      employeeId: appointmentEmployeeId,
+      year,
+      month,
+      recordType: "single",
+    }, tx);
 
-  const ip = req.ip || req.socket.remoteAddress;
-  await auditService.serviceRecordCreated(
-    userId,
-    record.id,
-    { customerId, year, month, appointmentCount: 1, recordType: "single", appointmentId },
-    ip
-  );
+    await storage.addAppointmentsToServiceRecord(rec.id, [appointmentId], tx);
+
+    const ip = req.ip || req.socket.remoteAddress;
+    await auditService.serviceRecordCreated(
+      userId,
+      rec.id,
+      { customerId, year, month, appointmentCount: 1, recordType: "single", appointmentId },
+      ip
+    );
+
+    return rec;
+  });
 
   res.status(201).json(record);
 }));
@@ -551,7 +560,8 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
         .where(inArray(appointments.id, aptIds));
     }
 
-    await tx.delete(monthlyServiceRecords)
+    await tx.update(monthlyServiceRecords)
+      .set({ deletedAt: new Date() })
       .where(eq(monthlyServiceRecords.id, id));
 
     return aptIds;

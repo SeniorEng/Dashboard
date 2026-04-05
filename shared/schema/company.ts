@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, boolean, real } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, boolean, real, index } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp, optionalGermanPhoneSchema, optionalInternationalPhoneSchema } from "./common";
 import { users } from "./users";
@@ -146,7 +146,11 @@ export const documentDeliveries = pgTable("document_deliveries", {
   deliveredAt: timestamp("delivered_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
-});
+}, (table) => [
+  index("doc_deliveries_customer_idx").on(table.customerId),
+  index("doc_deliveries_document_idx").on(table.generatedDocumentId),
+  index("doc_deliveries_status_idx").on(table.status),
+]);
 
 export type DocumentDelivery = typeof documentDeliveries.$inferSelect;
 export type InsertDocumentDelivery = typeof documentDeliveries.$inferInsert;

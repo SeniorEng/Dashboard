@@ -71,6 +71,13 @@
       "when": 1775250982637,
       "tag": "0009_living_bulldozer",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1775369966314,
+      "tag": "0010_demonic_proemial_gods",
+      "breakpoints": true
     }
   ]
 }

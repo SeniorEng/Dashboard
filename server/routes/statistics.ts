@@ -328,6 +328,7 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
           COALESCE(
             (SELECT csp.price_cents FROM customer_service_prices csp
              WHERE csp.customer_id = a.customer_id AND csp.service_id = s.id
+               AND csp.deleted_at IS NULL
                AND csp.valid_from::date <= a.date::date AND (csp.valid_to IS NULL OR csp.valid_to::date >= a.date::date)
              ORDER BY csp.valid_from DESC LIMIT 1),
             s.default_price_cents
@@ -354,6 +355,7 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
           COALESCE(
             (SELECT csp.price_cents FROM customer_service_prices csp
              WHERE csp.customer_id = a.customer_id AND csp.service_id = s.id
+               AND csp.deleted_at IS NULL
                AND csp.valid_from::date <= a.date::date AND (csp.valid_to IS NULL OR csp.valid_to::date >= a.date::date)
              ORDER BY csp.valid_from DESC LIMIT 1),
             s.default_price_cents

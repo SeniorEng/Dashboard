@@ -126,6 +126,23 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
       }
     }
 
+    const ip = req.ip || req.socket.remoteAddress;
+    await auditService.documentationSubmitted(
+      req.user!.id,
+      id,
+      { customerId: appointment.customerId!, hasSignature, performedByEmployeeId: (updateData as Record<string, unknown>).performedByEmployeeId as number | null },
+      ip
+    );
+    if (hasSignature) {
+      const sigHash = (updateData as Record<string, unknown>).signatureHash as string;
+      await auditService.signatureAdded(
+        req.user!.id,
+        id,
+        { customerId: appointment.customerId!, signatureHash: sigHash },
+        ip
+      );
+    }
+
     return result;
   }).catch((err) => {
     if (err instanceof AppError) throw err;
@@ -138,23 +155,6 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
     }
     throw err;
   });
-
-  const ip = req.ip || req.socket.remoteAddress;
-  await auditService.documentationSubmitted(
-    req.user!.id,
-    id,
-    { customerId: appointment.customerId!, hasSignature, performedByEmployeeId: (updateData as Record<string, unknown>).performedByEmployeeId as number | null },
-    ip
-  );
-  if (hasSignature) {
-    const sigHash = (updateData as Record<string, unknown>).signatureHash as string;
-    await auditService.signatureAdded(
-      req.user!.id,
-      id,
-      { customerId: appointment.customerId!, signatureHash: sigHash },
-      ip
-    );
-  }
 
   if (appointment.date) {
     const employeeId = updatedAppointment?.performedByEmployeeId || appointment.assignedEmployeeId;

@@ -97,8 +97,9 @@ export async function getServiceRecordByPeriod(customerId: number, employeeId: n
   return result[0];
 }
 
-export async function createServiceRecord(record: InsertServiceRecord): Promise<MonthlyServiceRecord> {
-  const result = await db.insert(monthlyServiceRecords)
+export async function createServiceRecord(record: InsertServiceRecord, txClient?: typeof db): Promise<MonthlyServiceRecord> {
+  const executor = txClient ?? db;
+  const result = await executor.insert(monthlyServiceRecords)
     .values({
       customerId: record.customerId,
       employeeId: record.employeeId,
@@ -183,15 +184,16 @@ export async function getAppointmentsForServiceRecord(serviceRecordId: number): 
   return rows.map(mapAppointmentRow);
 }
 
-export async function addAppointmentsToServiceRecord(serviceRecordId: number, appointmentIds: number[]): Promise<void> {
+export async function addAppointmentsToServiceRecord(serviceRecordId: number, appointmentIds: number[], txClient?: typeof db): Promise<void> {
   if (appointmentIds.length === 0) return;
+  const executor = txClient ?? db;
 
   const values = appointmentIds.map(appointmentId => ({
     serviceRecordId,
     appointmentId,
   }));
 
-  await db.insert(serviceRecordAppointments)
+  await executor.insert(serviceRecordAppointments)
     .values(values)
     .onConflictDoNothing();
 }

@@ -32,6 +32,7 @@ export async function calculateAppointmentCost(params: {
     FROM customer_service_prices csp
     INNER JOIN services s ON s.id = csp.service_id
     WHERE csp.customer_id = ${params.customerId}
+      AND csp.deleted_at IS NULL
       AND csp.valid_from::date <= ${params.date}::date
       AND (csp.valid_to IS NULL OR csp.valid_to::date >= ${params.date}::date)
   `);

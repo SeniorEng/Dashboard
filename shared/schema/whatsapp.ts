@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, boolean, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, boolean, uniqueIndex, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { timestamp } from "./common";
@@ -87,7 +87,10 @@ export const whatsappMessageLog = pgTable("whatsapp_message_log", {
   errorMessage: text("error_message"),
   metaMessageId: text("meta_message_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (table) => [
+  index("whatsapp_log_user_idx").on(table.userId),
+  index("whatsapp_log_created_idx").on(table.createdAt),
+]);
 
 export const insertWhatsAppMessageLogSchema = createInsertSchema(whatsappMessageLog).omit({
   id: true,

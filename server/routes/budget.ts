@@ -83,6 +83,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
         SELECT service_id AS "serviceId", price_cents AS "priceCents"
         FROM customer_service_prices
         WHERE customer_id = ${customerId}
+          AND deleted_at IS NULL
           AND valid_from::date <= ${date}::date
           AND (valid_to IS NULL OR valid_to::date >= ${date}::date)
       `);

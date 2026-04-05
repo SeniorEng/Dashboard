@@ -526,6 +526,10 @@ export async function createConsumptionTransaction(params: {
     if (cascadeResult.outstandingCents > 0) {
       if (acceptsPrivatePayment) {
         const privateRatio = costs.totalCents > 0 ? cascadeResult.outstandingCents / costs.totalCents : 1;
+        const hwCents = Math.round(costs.hauswirtschaftCents * privateRatio);
+        const abCents = Math.round(costs.alltagsbegleitungCents * privateRatio);
+        const tvCents = Math.round(costs.travelCents * privateRatio);
+        const ckCents = cascadeResult.outstandingCents - hwCents - abCents - tvCents;
         const [privateTransaction] = await tx.insert(budgetTransactions).values({
           customerId: params.customerId,
           budgetType: "private",
@@ -534,13 +538,13 @@ export async function createConsumptionTransaction(params: {
           amountCents: -cascadeResult.outstandingCents,
           appointmentId: params.appointmentId,
           hauswirtschaftMinutes: Math.round(params.hauswirtschaftMinutes * privateRatio),
-          hauswirtschaftCents: Math.round(costs.hauswirtschaftCents * privateRatio),
+          hauswirtschaftCents: hwCents,
           alltagsbegleitungMinutes: Math.round(params.alltagsbegleitungMinutes * privateRatio),
-          alltagsbegleitungCents: Math.round(costs.alltagsbegleitungCents * privateRatio),
+          alltagsbegleitungCents: abCents,
           travelKilometers: Math.round(params.travelKilometers * privateRatio * 10) / 10,
-          travelCents: Math.round(costs.travelCents * privateRatio),
+          travelCents: tvCents,
           customerKilometers: Math.round(params.customerKilometers * privateRatio * 10) / 10,
-          customerKilometersCents: Math.round(costs.customerKilometersCents * privateRatio),
+          customerKilometersCents: ckCents,
           createdByUserId: params.userId,
           notes: `Privatzahlung: ${(cascadeResult.outstandingCents / 100).toFixed(2)} €`,
         }).returning();

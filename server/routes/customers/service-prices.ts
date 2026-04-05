@@ -23,6 +23,7 @@ router.get("/:id/service-prices", requireAdmin, asyncHandler("Kundenpreise konnt
     FROM customer_service_prices csp
     JOIN services s ON s.id = csp.service_id
     WHERE csp.customer_id = ${customerId}
+      AND csp.deleted_at IS NULL
       AND csp.valid_from::date <= ${targetDate}::date
       AND (csp.valid_to IS NULL OR csp.valid_to::date >= ${targetDate}::date)
     ORDER BY s.sort_order
@@ -41,6 +42,7 @@ router.get("/:id/service-prices/all", requireAdmin, asyncHandler("Preishistorie 
     FROM customer_service_prices csp
     JOIN services s ON s.id = csp.service_id
     WHERE csp.customer_id = ${customerId}
+      AND csp.deleted_at IS NULL
     ORDER BY s.sort_order, csp.valid_from DESC
   `);
   res.json(result.rows);
@@ -58,6 +60,7 @@ router.get("/:id/service-prices/future", requireAdmin, asyncHandler("Zukünftige
     FROM customer_service_prices csp
     JOIN services s ON s.id = csp.service_id
     WHERE csp.customer_id = ${customerId}
+      AND csp.deleted_at IS NULL
       AND csp.valid_from::date > ${today}::date
     ORDER BY csp.valid_from, s.sort_order
   `);
@@ -87,9 +90,9 @@ router.post("/:id/service-prices", requireAdmin, asyncHandler("Kundenpreis konnt
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(sql`
-      DELETE FROM customer_service_prices
+      UPDATE customer_service_prices SET deleted_at = NOW()
       WHERE customer_id = ${customerId} AND service_id = ${serviceId}
-        AND valid_from::date = ${newValidFromDate}::date
+        AND valid_from::date = ${newValidFromDate}::date AND deleted_at IS NULL
     `);
 
     await tx.execute(sql`
@@ -98,12 +101,14 @@ router.post("/:id/service-prices", requireAdmin, asyncHandler("Kundenpreis konnt
       WHERE customer_id = ${customerId} AND service_id = ${serviceId}
         AND valid_from::date < ${newValidFromDate}::date
         AND (valid_to IS NULL OR valid_to::date >= ${newValidFromDate}::date)
+        AND deleted_at IS NULL
     `);
 
     const futureRecords = await tx.execute(sql`
       SELECT id, valid_from FROM customer_service_prices
       WHERE customer_id = ${customerId} AND service_id = ${serviceId}
         AND valid_from::date > ${newValidFromDate}::date
+        AND deleted_at IS NULL
       ORDER BY valid_from ASC LIMIT 1
     `);
 
@@ -137,7 +142,7 @@ router.delete("/:id/service-prices/:priceId", requireAdmin, asyncHandler("Kunden
   await db.transaction(async (tx) => {
     const record = await tx.execute(sql`
       SELECT id, customer_id, service_id, valid_from, valid_to FROM customer_service_prices
-      WHERE id = ${priceId} AND customer_id = ${customerId}
+      WHERE id = ${priceId} AND customer_id = ${customerId} AND deleted_at IS NULL
     `);
     if (record.rows.length === 0) {
       return;
@@ -149,12 +154,13 @@ router.delete("/:id/service-prices/:priceId", requireAdmin, asyncHandler("Kunden
       : String(vf).substring(0, 10);
 
     if (recordValidFrom > today) {
-      await tx.execute(sql`DELETE FROM customer_service_prices WHERE id = ${priceId}`);
+      await tx.execute(sql`UPDATE customer_service_prices SET deleted_at = NOW() WHERE id = ${priceId}`);
 
       const previousRecord = await tx.execute(sql`
         SELECT id FROM customer_service_prices
         WHERE customer_id = ${customerId} AND service_id = ${row.service_id}
           AND valid_to IS NOT NULL AND valid_to::date = ${addDays(recordValidFrom, -1)}::date
+          AND deleted_at IS NULL
         ORDER BY valid_from DESC LIMIT 1
       `);
       if (previousRecord.rows.length > 0) {
@@ -162,6 +168,7 @@ router.delete("/:id/service-prices/:priceId", requireAdmin, asyncHandler("Kunden
           SELECT valid_from FROM customer_service_prices
           WHERE customer_id = ${customerId} AND service_id = ${row.service_id}
             AND valid_from::date > ${recordValidFrom}::date
+            AND deleted_at IS NULL
           ORDER BY valid_from ASC LIMIT 1
         `);
         if (nextFuture.rows.length > 0) {

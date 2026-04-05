@@ -90,6 +90,7 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
         FROM customer_service_prices csp
         WHERE csp.customer_id = fa.customer_id
           AND csp.service_id = s.id
+          AND csp.deleted_at IS NULL
           AND csp.valid_from::date <= fa.appt_date
           AND (csp.valid_to IS NULL OR csp.valid_to::date >= fa.appt_date)
         ORDER BY csp.valid_from DESC
@@ -132,6 +133,7 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
         FROM customer_service_prices csp
         JOIN services sp ON sp.id = csp.service_id AND sp.code = 'travel_km'
         WHERE csp.customer_id = fa.customer_id
+          AND csp.deleted_at IS NULL
           AND csp.valid_from::date <= fa.appt_date
           AND (csp.valid_to IS NULL OR csp.valid_to::date >= fa.appt_date)
         ORDER BY csp.valid_from DESC
@@ -142,6 +144,7 @@ router.get("/profitability", asyncHandler("Deckungsbeitrag konnte nicht berechne
         FROM customer_service_prices csp
         JOIN services sp ON sp.id = csp.service_id AND sp.code = 'customer_km'
         WHERE csp.customer_id = fa.customer_id
+          AND csp.deleted_at IS NULL
           AND csp.valid_from::date <= fa.appt_date
           AND (csp.valid_to IS NULL OR csp.valid_to::date >= fa.appt_date)
         ORDER BY csp.valid_from DESC

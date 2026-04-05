@@ -51,7 +51,9 @@ export const insuranceProviders = pgTable("insurance_providers", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   anschrift: text("anschrift"),
   plzOrt: text("plz_ort"),
-});
+}, (table) => [
+  index("insurance_providers_active_idx").on(table.isActive),
+]);
 
 // Customer insurance history (tracks changes over time)
 export const customerInsuranceHistory = pgTable("customer_insurance_history", {
