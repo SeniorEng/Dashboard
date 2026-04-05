@@ -53,7 +53,7 @@ export interface SearchOptions {
 
 export interface IStorage {
   // Customers
-  getCustomers(): Promise<Customer[]>;
+  getCustomers(options?: { status?: string; search?: string }): Promise<Customer[]>;
   getCustomersByIds(ids: number[]): Promise<Customer[]>;
   getCustomersForEmployee(employeeId: number): Promise<(Customer & { isCurrentlyAssigned: boolean })[]>;
   getCustomer(id: number): Promise<Customer | undefined>;

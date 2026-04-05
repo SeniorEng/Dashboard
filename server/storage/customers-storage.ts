@@ -13,8 +13,27 @@ import { db } from "../lib/db";
 import { appointmentWithCustomerSelectFields, mapAppointmentRow } from "./appointment-helpers";
 import type { SearchOptions } from "../storage";
 
-export async function getCustomers(): Promise<Customer[]> {
-  return await db.select().from(customers).where(isNull(customers.deletedAt));
+export async function getCustomers(options?: { status?: string; search?: string }): Promise<Customer[]> {
+  const conditions = [isNull(customers.deletedAt)];
+
+  if (options?.status) {
+    conditions.push(eq(customers.status, options.status));
+  }
+
+  if (options?.search) {
+    const term = `%${options.search}%`;
+    conditions.push(
+      or(
+        ilike(customers.name, term),
+        ilike(customers.vorname, term),
+        ilike(customers.nachname, term),
+        ilike(customers.strasse, term),
+        ilike(customers.stadt, term),
+      )!
+    );
+  }
+
+  return await db.select().from(customers).where(and(...conditions)).orderBy(customers.name);
 }
 
 export async function getCustomer(id: number): Promise<Customer | undefined> {

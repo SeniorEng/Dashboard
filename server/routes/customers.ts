@@ -37,10 +37,8 @@ router.get("/", asyncHandler("Kunden konnten nicht geladen werden", async (req, 
   const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : undefined;
   
   if (user.isAdmin && !viewAsEmployeeId) {
-    let allCustomers = await storage.getCustomers();
-    if (statusFilter) {
-      allCustomers = allCustomers.filter(c => c.status === statusFilter);
-    }
+    const searchFilter = req.query.search as string | undefined;
+    const allCustomers = await storage.getCustomers({ status: statusFilter, search: searchFilter });
     res.json(allCustomers);
     return;
   }
