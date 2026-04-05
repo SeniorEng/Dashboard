@@ -32,7 +32,7 @@ interface VacationSummary {
 
 describe("Zeiterfassung (Time Entries) CRUD", () => {
   let testEntryId: number;
-  const testDate = getFutureDate(10);
+  const testDate = getFutureDate(400);
 
   beforeAll(async () => {
     await getAuthCookie();
@@ -103,7 +103,7 @@ describe("Zeiterfassung (Time Entries) CRUD", () => {
     });
 
     it("sollte Mehrtages-Urlaub erstellen können", async () => {
-      const startDate = getFutureDate(400);
+      const startDate = getFutureDate(450);
       const endDateObj = new Date(startDate + "T00:00:00");
       endDateObj.setDate(endDateObj.getDate() + 2);
       if (endDateObj.getDay() === 0) endDateObj.setDate(endDateObj.getDate() + 1);
@@ -166,7 +166,6 @@ describe("Zeiterfassung (Time Entries) CRUD", () => {
 
     it("sollte einen einzelnen Eintrag abrufen können", async () => {
       const { status, data } = await apiGet<TimeEntry>(`/api/time-entries/${testEntryId}`);
-
       expect(status).toBe(200);
       expect(data.id).toBe(testEntryId);
     });
