@@ -164,8 +164,9 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Dead code audit (completed)**: 14 unused UI component files and 8 unused npm dependencies removed. `knip` dev tool removed after audit completion. Verified active: `node-zugferd` (dynamic import in `server/lib/zugferd.ts` for ZUGFeRD/XRechnung invoice generation), `tw-animate-css` (imported in `client/src/index.css` for Tailwind animation utilities).
 
 ## Integration Tests
-- **Test files**: `tests/appointments.test.ts`, `tests/auth.test.ts`, `tests/customers.test.ts`, `tests/services.test.ts`, `tests/time-entries.test.ts`, `tests/budget.test.ts`, `tests/budget-integration.test.ts` — 103 tests total, all passing.
-- **Budget Integration Tests** (`tests/budget-integration.test.ts`): 29 tests across 10 groups (INT-1 through INT-10) covering §45b/§45a/§39-42a allocation, cascade consumption, manual adjustments, cost estimation, double-booking protection, deactivation, and initial balances.
+- **20 test files, ~460 tests** covering all major API domains. Full coverage matrix in `tests/README.md`.
+- **Core domains** (11 files): auth, customers, appointments, appointment-series, time-entries, budget, budget-e2e, erstberatung, service-records, services, private-billing-e2e.
+- **Extended domains** (9 files, added Task #77): month-closing, notifications, profile, tasks-app, company-settings, search, documents, public-signing, statistics.
 - **Bug-Fix (08.03.2026): Initial-Budget Route Typo**: `customer-new.tsx` called `/api/budgets/` (Plural) statt `/api/budget/` (Singular) — Carryover/Startwert ging bei Kundenanlage verloren. SPA-Fallback antwortete mit 200+HTML statt 404, `api.post()` wirft bei HTTP-Fehlern keine Exception (gibt `{success:false}`), Fehler wurde still geschluckt. Fix: URL korrigiert + `result.success`-Check hinzugefügt.
 - **Test Utilities** (`tests/test-utils.ts`): Shared auth/API helpers. `loadServiceIds()` dynamically looks up service IDs by code (not hardcoded).
 - **Run command**: `TEST_USER_PASSWORD="$TEST_USER_PASSWORD_INTERNAL" TEST_USER_EMAIL="e2e-test@seniorenengel.test" npx vitest run --reporter=verbose`
