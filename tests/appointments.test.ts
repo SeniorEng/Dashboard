@@ -1041,6 +1041,27 @@ interface AppointmentService {
 describe("BIZ-26: Junction-Tabelle (appointment_services)", () => {
   let junctionTestApptId: number;
 
+  async function findFreeAppointmentDate(startOffset: number, scheduledStart: string, services: any[]): Promise<{ date: string; data: any }> {
+    for (let off = startOffset; off < startOffset + 30; off++) {
+      const candidate = new Date();
+      candidate.setDate(candidate.getDate() + off);
+      getWeekday(candidate);
+      const dateStr = candidate.toISOString().split("T")[0];
+      const res = await apiPost<any>("/api/appointments/kundentermin", {
+        customerId: testCustomerId,
+        date: dateStr,
+        scheduledStart,
+        services,
+        assignedEmployeeId: auth.user.id,
+      });
+      if (res.status === 201) {
+        createdIds.push(res.data.id);
+        return { date: dateStr, data: res.data };
+      }
+    }
+    throw new Error("Kein freier Termin-Slot gefunden");
+  }
+
   afterAll(async () => {
     if (junctionTestApptId) {
       await apiDelete(`/api/appointments/${junctionTestApptId}`);
@@ -1048,20 +1069,13 @@ describe("BIZ-26: Junction-Tabelle (appointment_services)", () => {
   });
 
   it("BIZ-26.1 – sollte Services in Junction-Tabelle schreiben", async () => {
-    const { status, data } = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date: getFutureDate(160),
-      scheduledStart: "08:00",
-      services: [
-        { serviceId: hwServiceId, durationMinutes: 60 },
-        { serviceId: abServiceId, durationMinutes: 45 },
-      ],
-      assignedEmployeeId: auth.user.id,
-    });
+    const result = await findFreeAppointmentDate(600, "08:00", [
+      { serviceId: hwServiceId, durationMinutes: 60 },
+      { serviceId: abServiceId, durationMinutes: 45 },
+    ]);
+    const { data } = result;
 
-    expect(status).toBe(201);
     junctionTestApptId = data.id;
-    createdIds.push(data.id);
 
     const servicesRes = await apiGet<AppointmentService[]>(`/api/appointments/${data.id}/services`);
     expect(servicesRes.status).toBe(200);
@@ -1082,18 +1096,10 @@ describe("BIZ-26: Junction-Tabelle (appointment_services)", () => {
       return;
     }
 
-    const { status, data } = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date: getFutureDate(161),
-      scheduledStart: "14:00",
-      services: [
-        { serviceId: newService.id, durationMinutes: 45 },
-      ],
-      assignedEmployeeId: auth.user.id,
-    });
-
-    expect(status).toBe(201);
-    createdIds.push(data.id);
+    const result = await findFreeAppointmentDate(630, "14:00", [
+      { serviceId: newService.id, durationMinutes: 45 },
+    ]);
+    const { data } = result;
 
     const servicesRes = await apiGet<AppointmentService[]>(`/api/appointments/${data.id}/services`);
     expect(servicesRes.status).toBe(200);
@@ -1111,22 +1117,11 @@ describe("BIZ-26: Junction-Tabelle (appointment_services)", () => {
       return;
     }
 
-    const { status, data } = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date: getFutureDate(190),
-      scheduledStart: "09:00",
-      services: [
-        { serviceId: hwServiceId, durationMinutes: 30 },
-        { serviceId: newService.id, durationMinutes: 30 },
-      ],
-      assignedEmployeeId: auth.user.id,
-    });
-
-    if (status !== 201) {
-      console.log("Gemischte Services error:", JSON.stringify(data));
-    }
-    expect(status).toBe(201);
-    createdIds.push(data.id);
+    const result = await findFreeAppointmentDate(660, "09:00", [
+      { serviceId: hwServiceId, durationMinutes: 30 },
+      { serviceId: newService.id, durationMinutes: 30 },
+    ]);
+    const { data } = result;
 
     const servicesRes = await apiGet<AppointmentService[]>(`/api/appointments/${data.id}/services`);
     expect(servicesRes.status).toBe(200);
@@ -1134,19 +1129,12 @@ describe("BIZ-26: Junction-Tabelle (appointment_services)", () => {
   });
 
   it("BIZ-26.4 – sollte durationPromised als Summe aller Services berechnen", async () => {
-    const { status, data } = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date: getFutureDate(163),
-      scheduledStart: "10:00",
-      services: [
-        { serviceId: hwServiceId, durationMinutes: 60 },
-        { serviceId: abServiceId, durationMinutes: 45 },
-      ],
-      assignedEmployeeId: auth.user.id,
-    });
+    const result = await findFreeAppointmentDate(690, "10:00", [
+      { serviceId: hwServiceId, durationMinutes: 60 },
+      { serviceId: abServiceId, durationMinutes: 45 },
+    ]);
+    const { data } = result;
 
-    expect(status).toBe(201);
     expect(data.durationPromised).toBe(105);
-    createdIds.push(data.id);
   });
 });

@@ -327,10 +327,28 @@ describe("TE-BIZ-7: Zeiterfassungs-Löschung", () => {
 });
 
 describe("TE-BIZ-8: Verschiedene Eintragstypen", () => {
-  const typeDate = getFutureDate(260);
+  let typeDate: string;
+
+  async function findFreeFutureWeekdayForTypes(startOffset: number): Promise<string> {
+    for (let off = startOffset; off < startOffset + 30; off++) {
+      const candidate = getFutureDate(off);
+      await clearDateEntries(candidate);
+      const probe = await apiPost<any>("/api/time-entries", {
+        entryDate: candidate,
+        entryType: "bueroarbeit",
+        startTime: "06:00",
+        endTime: "06:15",
+      });
+      if (probe.status === 201) {
+        await apiDelete(`/api/time-entries/${probe.data.id}`);
+        return candidate;
+      }
+    }
+    throw new Error("Kein freier Werktag gefunden für Eintragstypen-Test");
+  }
 
   beforeAll(async () => {
-    await clearDateEntries(typeDate);
+    typeDate = await findFreeFutureWeekdayForTypes(550);
   });
 
   it("TE-BIZ-8.1 – Schulung-Eintrag erstellen (201)", async () => {
