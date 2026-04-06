@@ -4,10 +4,14 @@ import {
   apiPost,
   apiPatch,
   apiDelete,
+  apiPostAs,
   getAuthCookie,
+  loginAs,
   uniqueId,
   getPastDate,
 } from "./test-utils";
+
+type AuthCookie = Awaited<ReturnType<typeof getAuthCookie>>;
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let hwServiceId: number;
@@ -87,6 +91,29 @@ async function documentAppointment(
     console.error(`Document ${apptId} failed:`, JSON.stringify(docRes.data));
   }
   expect(docRes.status, `Dokumentation für Termin ${apptId} muss erfolgreich sein`).toBe(200);
+}
+
+async function documentAppointmentAs(
+  asAuth: AuthCookie,
+  apptId: number,
+  time: string,
+  serviceId: number,
+  actualMinutes: number,
+  details: string,
+  travelKm = 0,
+  customerKm = 0,
+): Promise<void> {
+  const docRes = await apiPostAs<any>(asAuth, `/api/appointments/${apptId}/document`, {
+    actualStart: time,
+    travelOriginType: "home",
+    travelKilometers: travelKm,
+    customerKilometers: customerKm,
+    services: [{ serviceId, actualDurationMinutes: actualMinutes, details }],
+  });
+  if (docRes.status !== 200) {
+    console.error(`Document ${apptId} as other user failed:`, JSON.stringify(docRes.data));
+  }
+  expect(docRes.status, `Dokumentation für Termin ${apptId} als Mitarbeiter muss erfolgreich sein`).toBe(200);
 }
 
 async function createServiceRecord(customerId: number, year: number, month: number): Promise<number> {
@@ -362,11 +389,15 @@ describe("SZ: Selbstzahler – Vollständiger Abrechnungs-Flow", () => {
 
     expect(lineItems.length).toBeGreaterThanOrEqual(3);
 
+    const defaultHwPriceSz = allBillableServices.find(s => s.code === "hauswirtschaft")!.defaultPriceCents;
+    const defaultAbPriceSz = allBillableServices.find(s => s.code === "alltagsbegleitung")!.defaultPriceCents;
+    const defaultTravelKmPrice = allBillableServices.find(s => s.code === "travel_km")?.defaultPriceCents;
+    const defaultCustKmPrice = allBillableServices.find(s => s.code === "customer_km")?.defaultPriceCents;
+
     const hwItem = lineItems.find((li: any) => li.serviceCode === "hauswirtschaft");
     expect(hwItem, "Hauswirtschaft-Position muss vorhanden sein").toBeDefined();
     expect(hwItem.durationMinutes).toBe(60);
-    expect(hwItem.unitPriceCents).toBeGreaterThan(0);
-    expect(hwItem.totalCents).toBeGreaterThan(0);
+    expect(hwItem.unitPriceCents, `HW-Preis muss Systemstandard ${defaultHwPriceSz} sein`).toBe(defaultHwPriceSz);
     expect(hwItem.employeeName).toBeTruthy();
     expect(hwItem.serviceDetails).toBe("SZ-Test Hauswirtschaft");
     expect(hwItem.appointmentDate).toBe(szAppt.date);
@@ -377,6 +408,7 @@ describe("SZ: Selbstzahler – Vollständiger Abrechnungs-Flow", () => {
     if (new Date(szAppt.date).getMonth() === new Date(szAppt2.date).getMonth()) {
       expect(abItem, "Alltagsbegleitung-Position muss vorhanden sein").toBeDefined();
       expect(abItem.durationMinutes).toBe(45);
+      expect(abItem.unitPriceCents, `AB-Preis muss Systemstandard ${defaultAbPriceSz} sein`).toBe(defaultAbPriceSz);
       expect(abItem.serviceDetails).toBe("SZ-Test Alltagsbegleitung");
       const expectedAbTotal = Math.round((45 / 60) * abItem.unitPriceCents);
       expect(abItem.totalCents).toBe(expectedAbTotal);
@@ -385,12 +417,17 @@ describe("SZ: Selbstzahler – Vollständiger Abrechnungs-Flow", () => {
     const travelKmItem = lineItems.find((li: any) => li.serviceCode === "travel_km");
     expect(travelKmItem, "Anfahrt-km-Position muss vorhanden sein").toBeDefined();
     expect(travelKmItem.durationMinutes).toBe(12);
-    expect(travelKmItem.unitPriceCents).toBeGreaterThan(0);
+    if (defaultTravelKmPrice !== undefined) {
+      expect(travelKmItem.unitPriceCents, `Anfahrt-km Preis muss Systemstandard ${defaultTravelKmPrice} sein`).toBe(defaultTravelKmPrice);
+    }
     expect(travelKmItem.employeeName).toBeTruthy();
 
     const customerKmItem = lineItems.find((li: any) => li.serviceCode === "customer_km");
     expect(customerKmItem, "Kunden-km-Position muss vorhanden sein").toBeDefined();
     expect(customerKmItem.durationMinutes).toBe(5);
+    if (defaultCustKmPrice !== undefined) {
+      expect(customerKmItem.unitPriceCents, `Kunden-km Preis muss Systemstandard ${defaultCustKmPrice} sein`).toBe(defaultCustKmPrice);
+    }
 
     const nonKmLineItems = lineItems.filter((li: any) => !["travel_km", "customer_km"].includes(li.serviceCode));
     const serviceCodes = [...new Set(nonKmLineItems.map((li: any) => li.serviceCode))];
@@ -534,36 +571,63 @@ describe("ME: Multi-Employee – Verschiedene Mitarbeiter in Rechnungspositionen
   let meAppt1: { id: number; date: string; time: string };
   let meAppt2: { id: number; date: string; time: string };
   let meInvoiceId: number;
+  let employee2Auth: AuthCookie;
+  let employee2Id: number;
+  const employee2Email = `testma-me-${Date.now()}@test.local`;
+  const employee2Password = "TestPasswort123!";
+  let cleanupEmployee2Id: number | null = null;
 
-  it("ME-1 – Selbstzahler-Kunde erstellen", async () => {
-    const res = await apiPost<any>("/api/admin/customers", szCustomerPayload({
+  it("ME-1 – Zweiten Mitarbeiter erstellen und Kunden mit beiden Mitarbeitern anlegen", async () => {
+    const createUserRes = await apiPost<any>("/api/admin/users", {
+      email: employee2Email,
+      password: employee2Password,
+      vorname: "Zweiter",
+      nachname: "Mitarbeiter-ME",
+      geburtsdatum: "1992-03-10",
+      eintrittsdatum: "2024-01-01",
+      isAdmin: false,
+      telefon: "+4917600088888",
+    });
+    expect(createUserRes.status, "Zweiter Mitarbeiter muss erstellt werden").toBe(201);
+    employee2Id = createUserRes.data.id;
+    cleanupEmployee2Id = employee2Id;
+
+    employee2Auth = await loginAs(employee2Email, employee2Password);
+    expect(employee2Auth, "Login als zweiter Mitarbeiter muss funktionieren").toBeTruthy();
+    expect(employee2Auth.user.id).toBe(employee2Id);
+
+    const custRes = await apiPost<any>("/api/admin/customers", szCustomerPayload({
       nachname: "ME-Multi-" + uniqueId(),
     }));
-    expect(res.status).toBe(201);
-    meCustomerId = res.data.id;
+    expect(custRes.status).toBe(201);
+    meCustomerId = custRes.data.id;
     cleanupCustomerIds.push(meCustomerId);
 
-    await apiPatch<any>(`/api/admin/customers/${meCustomerId}/assign`, {
+    const assignRes = await apiPatch<any>(`/api/admin/customers/${meCustomerId}/assign`, {
       primaryEmployeeId: auth.user.id,
-      backupEmployeeId: null,
+      backupEmployeeId: employee2Id,
       backupEmployeeId2: null,
     });
+    expect(assignRes.status).toBe(200);
   });
 
-  it("ME-2 – Zwei Termine an verschiedenen Tagen erstellen und dokumentieren", async () => {
+  it("ME-2 – Termin 1 von Mitarbeiter 1, Termin 2 von Mitarbeiter 2 dokumentieren", async () => {
     expect(meCustomerId).toBeDefined();
+    expect(employee2Auth).toBeTruthy();
 
     meAppt1 = await findFreeSlotAndCreate(
       meCustomerId, hwServiceId, 45,
       [4, 20], ["05:00", "05:30", "06:00", "21:00", "21:30"],
+      auth.user.id,
     );
-    await documentAppointment(meAppt1.id, meAppt1.time, hwServiceId, 45, "ME-Termin-1", 3, 0);
+    await documentAppointment(meAppt1.id, meAppt1.time, hwServiceId, 45, "ME-Termin-1-MA1", 3, 0);
 
     meAppt2 = await findFreeSlotAndCreate(
       meCustomerId, abServiceId, 60,
       [4, 30], ["04:00", "04:30", "22:00", "22:30"],
+      employee2Id,
     );
-    await documentAppointment(meAppt2.id, meAppt2.time, abServiceId, 60, "ME-Termin-2", 0, 0);
+    await documentAppointmentAs(employee2Auth, meAppt2.id, meAppt2.time, abServiceId, 60, "ME-Termin-2-MA2", 0, 0);
   });
 
   it("ME-3 – Leistungsnachweis erstellen und Rechnung generieren", async () => {
@@ -589,7 +653,7 @@ describe("ME: Multi-Employee – Verschiedene Mitarbeiter in Rechnungspositionen
     meInvoiceId = invoice.id;
   });
 
-  it("ME-4 – Rechnungspositionen enthalten Mitarbeiternamen und verschiedene Services", async () => {
+  it("ME-4 – Rechnungspositionen enthalten UNTERSCHIEDLICHE Mitarbeiternamen pro Termin", async () => {
     expect(meInvoiceId).toBeDefined();
     const detail = await getInvoiceWithLineItems(meInvoiceId);
     const lineItems = detail.lineItems;
@@ -602,15 +666,27 @@ describe("ME: Multi-Employee – Verschiedene Mitarbeiter in Rechnungspositionen
       expect(li.totalCents, `Position ${li.serviceCode} muss Betrag haben`).toBeGreaterThan(0);
     }
 
-    const serviceCodes = [...new Set(lineItems.map((li: any) => li.serviceCode).filter((c: string) => c !== "travel_km"))];
-    expect(serviceCodes.length, "Mindestens 2 verschiedene Service-Typen").toBeGreaterThanOrEqual(2);
-
     const hwItems = lineItems.filter((li: any) => li.serviceCode === "hauswirtschaft");
     const abItems = lineItems.filter((li: any) => li.serviceCode === "alltagsbegleitung");
 
     if (new Date(meAppt1.date).getMonth() === new Date(meAppt2.date).getMonth()) {
-      expect(hwItems.length).toBeGreaterThanOrEqual(1);
-      expect(abItems.length).toBeGreaterThanOrEqual(1);
+      expect(hwItems.length, "HW-Position von MA1 muss vorhanden sein").toBeGreaterThanOrEqual(1);
+      expect(abItems.length, "AB-Position von MA2 muss vorhanden sein").toBeGreaterThanOrEqual(1);
+
+      const hwEmployeeNames = hwItems.map((li: any) => li.employeeName);
+      const abEmployeeNames = abItems.map((li: any) => li.employeeName);
+
+      expect(
+        hwEmployeeNames[0],
+        "HW muss vom ersten Mitarbeiter dokumentiert sein",
+      ).not.toBe(abEmployeeNames[0]);
+    }
+
+    const serviceCodes = [...new Set(lineItems.map((li: any) => li.serviceCode).filter((c: string) => !["travel_km", "customer_km"].includes(c)))];
+    expect(serviceCodes.length, "Mindestens 2 verschiedene Service-Typen").toBeGreaterThanOrEqual(2);
+
+    if (cleanupEmployee2Id) {
+      await apiPost(`/api/admin/users/${cleanupEmployee2Id}/deactivate`, {});
     }
   });
 });
@@ -755,7 +831,7 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("CP-9 – Kundenpreis löschen setzt validTo und Rechnung nutzt Standardpreis", async () => {
+  it("CP-9 – Kundenpreis löschen setzt validTo und kein aktiver Preis verbleibt", async () => {
     expect(cpPriceId).toBeDefined();
     const deleteRes = await apiDelete(`/api/customers/${cpCustomerId}/service-prices/${cpPriceId}`);
     expect(deleteRes.status).toBe(200);
@@ -772,13 +848,39 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
       (p: any) => p.serviceId === hwServiceId && !p.validTo,
     );
     expect(activeHwPrice, "Nach Löschung darf kein aktiver (ohne validTo) Kundenpreis existieren").toBeUndefined();
+  });
 
-    const closedHwPrice = (activePrices.data as any[]).find(
-      (p: any) => p.serviceId === hwServiceId && p.validTo,
+  it("CP-10 – Nach Löschung: Termin VOR validFrom nutzt Standardpreis (Fallback-Beweis)", async () => {
+    expect(cpCustomerId).toBeDefined();
+    expect(defaultHwPrice).toBeGreaterThan(0);
+
+    const cpApptPostDelete = await findFreeSlotAndCreate(
+      cpCustomerId, hwServiceId, 60,
+      [35, 60], ["11:00", "11:30", "12:00", "12:30"],
     );
-    if (closedHwPrice) {
-      expect(closedHwPrice.validTo, "Gelöschter Preis muss validTo haben").toBeTruthy();
-    }
+    const apptDateStr = cpApptPostDelete.date;
+    expect(
+      apptDateStr < cpValidFrom,
+      `Termin (${apptDateStr}) muss VOR validFrom (${cpValidFrom}) liegen, um Fallback zu prüfen`,
+    ).toBe(true);
+    await documentAppointment(cpApptPostDelete.id, cpApptPostDelete.time, hwServiceId, 60, "CP-Fallback-Default", 0, 0);
+
+    const apptDate = new Date(cpApptPostDelete.date);
+    const srId = await createServiceRecord(cpCustomerId, apptDate.getFullYear(), apptDate.getMonth() + 1);
+    await signServiceRecord(srId);
+    const invData = await generateInvoice(cpCustomerId, apptDate.getFullYear(), apptDate.getMonth() + 1);
+    const inv = Array.isArray(invData) ? invData[0] : invData;
+
+    const detail = await getInvoiceWithLineItems(inv.id);
+    const hwItem = detail.lineItems.find(
+      (li: any) => li.serviceCode === "hauswirtschaft" && li.serviceDetails === "CP-Fallback-Default",
+    );
+    expect(hwItem, "HW-Position muss vorhanden sein").toBeDefined();
+    expect(
+      hwItem.unitPriceCents,
+      `Termin vor validFrom muss Standardpreis ${defaultHwPrice} nutzen, nicht Kundenpreis 5500`,
+    ).toBe(defaultHwPrice);
+    expect(hwItem.unitPriceCents).not.toBe(5500);
   });
 });
 
