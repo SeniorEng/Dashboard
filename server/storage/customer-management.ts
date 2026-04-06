@@ -46,7 +46,7 @@ import * as contractsModule from "./customer-mgmt/contracts";
 export interface CustomerListFilters {
   search?: string;
   pflegegrad?: number;
-  responsibleEmployeeId?: number;
+  responsibleEmployeeId?: number | "unassigned";
   hasActiveContract?: boolean;
   status?: string;
   billingType?: string;
@@ -150,7 +150,11 @@ export class CustomerManagementStorage {
       baseConditions.push(eq(customers.pflegegrad, filters.pflegegrad));
     }
     
-    if (filters?.responsibleEmployeeId) {
+    if (filters?.responsibleEmployeeId === "unassigned") {
+      baseConditions.push(isNull(customers.primaryEmployeeId));
+      baseConditions.push(isNull(customers.backupEmployeeId));
+      baseConditions.push(isNull(customers.backupEmployeeId2));
+    } else if (filters?.responsibleEmployeeId) {
       baseConditions.push(
         or(
           eq(customers.primaryEmployeeId, filters.responsibleEmployeeId),
@@ -304,7 +308,7 @@ export class CustomerManagementStorage {
     const responsibleId = filters?.responsibleEmployeeId;
     const data: CustomerListItem[] = result.map((r) => {
       let matchedRole: "primary" | "backup" | "backup2" | undefined;
-      if (responsibleId) {
+      if (responsibleId && responsibleId !== "unassigned") {
         if (r.primaryEmployeeId === responsibleId) matchedRole = "primary";
         else if (r.backupEmployeeId === responsibleId) matchedRole = "backup";
         else if (r.backupEmployeeId2 === responsibleId) matchedRole = "backup2";
@@ -340,6 +344,22 @@ export class CustomerManagementStorage {
     });
 
     return { data, total, limit, offset };
+  }
+
+  async getUnassignedActiveCustomerCount(): Promise<number> {
+    const result = await db
+      .select({ count: count() })
+      .from(customers)
+      .where(
+        and(
+          isNull(customers.deletedAt),
+          eq(customers.status, "aktiv"),
+          isNull(customers.primaryEmployeeId),
+          isNull(customers.backupEmployeeId),
+          isNull(customers.backupEmployeeId2),
+        )
+      );
+    return Number(result[0]?.count ?? 0);
   }
 
   async getCustomerWithDetails(customerId: number): Promise<CustomerWithDetails | undefined> {

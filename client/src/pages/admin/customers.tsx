@@ -13,7 +13,7 @@ import { SectionCard } from "@/components/patterns/section-card";
 import { DataList, DataListItem } from "@/components/patterns/data-list";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { StatusBadge } from "@/components/patterns/status-badge";
-import { useCustomers, useEmployees, useInsuranceProviders, useAssignCustomer } from "@/features/customers";
+import { useCustomers, useEmployees, useInsuranceProviders, useAssignCustomer, useUnassignedCustomerCount } from "@/features/customers";
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, getPflegegradColors, componentStyles } from "@/design-system";
 import { isChild } from "@shared/utils/datetime";
@@ -32,6 +32,8 @@ import {
   Pencil,
   Check,
   X,
+  UserX,
+  CheckCircle2,
 } from "lucide-react";
 import { PFLEGEGRAD_SELECT_OPTIONS, BILLING_TYPE_SELECT_OPTIONS } from "@shared/domain/customers";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
@@ -75,9 +77,12 @@ export default function AdminCustomers() {
   const { data: employees } = useEmployees();
   const { data: insuranceProviders } = useInsuranceProviders();
   const assignCustomer = useAssignCustomer();
+  const { data: unassignedData } = useUnassignedCustomerCount();
+  const unassignedCount = unassignedData?.count ?? 0;
 
   const employeeFilterOptions = useMemo(() => [
     { value: "all", label: "Alle Mitarbeiter" },
+    { value: "unassigned", label: "Nicht zugewiesen" },
     ...(employees?.map((emp) => ({
       value: emp.id.toString(),
       label: emp.displayName,
@@ -227,6 +232,47 @@ export default function AdminCustomers() {
               </Link>
             }
           />
+
+          <button
+            onClick={() => {
+              if (unassignedCount > 0) {
+                setEmployeeFilter("unassigned");
+                setCurrentPage(1);
+              }
+            }}
+            className={`w-full mb-4 flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              unassignedCount > 0
+                ? employeeFilter === "unassigned"
+                  ? "bg-amber-100 border border-amber-400 text-amber-800"
+                  : "bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 cursor-pointer"
+                : "bg-emerald-50 border border-emerald-200 text-emerald-700"
+            }`}
+            data-testid="banner-unassigned-customers"
+            disabled={unassignedCount === 0}
+          >
+            {unassignedCount > 0 ? (
+              <>
+                <UserX className={iconSize.sm} />
+                <span>
+                  {unassignedCount} {unassignedCount === 1 ? "Kunde" : "Kunden"} ohne Mitarbeiter-Zuweisung
+                </span>
+                {employeeFilter === "unassigned" && (
+                  <Badge
+                    className="ml-auto bg-amber-200 text-amber-800 hover:bg-amber-300 cursor-pointer"
+                    onClick={(e) => { e.stopPropagation(); setEmployeeFilter(""); setCurrentPage(1); }}
+                    data-testid="badge-clear-unassigned-filter"
+                  >
+                    Filter aufheben
+                  </Badge>
+                )}
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className={iconSize.sm} />
+                <span>Alle Kunden sind zugewiesen</span>
+              </>
+            )}
+          </button>
 
           <div className="flex gap-1 mb-4 bg-white rounded-lg p-1 border" data-testid="status-filter">
             {[

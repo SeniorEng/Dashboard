@@ -110,6 +110,20 @@ export function useCreateCustomer() {
   });
 }
 
+export function useUnassignedCustomerCount() {
+  return useQuery({
+    queryKey: [...customerKeys.all, "unassigned-count"] as const,
+    queryFn: async ({ signal }) => {
+      const result = await api.get<{ count: number }>(
+        "/admin/customers/unassigned-count",
+        signal
+      );
+      return unwrapResult(result);
+    },
+    staleTime: 30000,
+  });
+}
+
 export function useAssignCustomer() {
   const queryClient = useQueryClient();
   const { toast } = useToast();

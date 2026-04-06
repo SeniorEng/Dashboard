@@ -81,10 +81,16 @@ router.get("/customers", asyncHandler("Kunden konnten nicht geladen werden", asy
     ? (sortOrder as "asc" | "desc")
     : undefined;
 
+  const resolvedEmployeeId = (responsibleEmployeeId as string) === "unassigned"
+    ? "unassigned" as const
+    : responsibleEmployeeId
+      ? parseInt(responsibleEmployeeId as string)
+      : (primaryEmployeeId ? parseInt(primaryEmployeeId as string) : undefined);
+
   const filters = {
     search: search as string | undefined,
     pflegegrad: pflegegrad ? parseInt(pflegegrad as string) : undefined,
-    responsibleEmployeeId: responsibleEmployeeId ? parseInt(responsibleEmployeeId as string) : (primaryEmployeeId ? parseInt(primaryEmployeeId as string) : undefined),
+    responsibleEmployeeId: resolvedEmployeeId,
     status: status as string | undefined,
     billingType: billingType as string | undefined,
     insuranceProviderId: insuranceProviderId ? parseInt(insuranceProviderId as string) : undefined,
@@ -105,6 +111,11 @@ router.get("/customers", asyncHandler("Kunden konnten nicht geladen werden", asy
     page: pageNum,
     totalPages: Math.ceil(result.total / result.limit),
   });
+}));
+
+router.get("/customers/unassigned-count", asyncHandler("Zählung konnte nicht geladen werden", async (_req: Request, res: Response) => {
+  const count = await customerManagementStorage.getUnassignedActiveCustomerCount();
+  res.json({ count });
 }));
 
 router.get("/customers/:id/details", asyncHandler("Kunde konnte nicht geladen werden", async (req: Request, res: Response) => {
