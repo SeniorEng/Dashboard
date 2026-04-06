@@ -102,14 +102,25 @@ async function createServiceRecord(customerId: number, year: number, month: numb
 }
 
 async function signServiceRecord(recordId: number): Promise<void> {
-  const signRes = await apiPost<any>(`/api/service-records/${recordId}/sign`, {
+  const empSignRes = await apiPost<any>(`/api/service-records/${recordId}/sign`, {
     signerType: "employee",
     signatureData: "data:image/png;base64,iVBORw0KGgo=",
   });
-  if (signRes.status !== 200) {
-    console.error(`Sign failed:`, JSON.stringify(signRes.data));
+  if (empSignRes.status !== 200) {
+    console.error(`Employee sign failed:`, JSON.stringify(empSignRes.data));
   }
-  expect(signRes.status, "Mitarbeiter-Unterschrift muss erfolgreich sein").toBe(200);
+  expect(empSignRes.status, "Mitarbeiter-Unterschrift muss erfolgreich sein").toBe(200);
+  expect(empSignRes.data.status).toBe("employee_signed");
+
+  const custSignRes = await apiPost<any>(`/api/service-records/${recordId}/sign`, {
+    signerType: "customer",
+    signatureData: "data:image/png;base64,iVBORw0KGgo=",
+  });
+  if (custSignRes.status !== 200) {
+    console.error(`Customer sign failed:`, JSON.stringify(custSignRes.data));
+  }
+  expect(custSignRes.status, "Kunden-Unterschrift muss erfolgreich sein").toBe(200);
+  expect(custSignRes.data.status).toBe("completed");
 }
 
 async function generateInvoice(customerId: number, year: number, month: number): Promise<any> {
@@ -275,7 +286,7 @@ describe("SZ: Selbstzahler – Vollständiger Abrechnungs-Flow", () => {
     expect(fetchRes.data.customerKilometers).toBe(5);
   });
 
-  it("SZ-4 – Leistungsnachweis erstellen und unterschreiben", async () => {
+  it("SZ-4 – Leistungsnachweis erstellen und unterschreiben (pending → employee_signed → completed)", async () => {
     expect(szAppt).toBeDefined();
     const apptDate = new Date(szAppt.date);
     szServiceRecordId = await createServiceRecord(
@@ -285,10 +296,13 @@ describe("SZ: Selbstzahler – Vollständiger Abrechnungs-Flow", () => {
     );
     expect(szServiceRecordId).toBeDefined();
 
+    const pendingRes = await apiGet<any>(`/api/service-records/${szServiceRecordId}`);
+    expect(pendingRes.data.status).toBe("pending");
+
     await signServiceRecord(szServiceRecordId);
 
-    const fetchRes = await apiGet<any>(`/api/service-records/${szServiceRecordId}`);
-    expect(fetchRes.data.status).toBe("employee_signed");
+    const completedRes = await apiGet<any>(`/api/service-records/${szServiceRecordId}`);
+    expect(completedRes.data.status).toBe("completed");
   });
 
   it("SZ-5 – Rechnung generieren und MwSt 19% prüfen", async () => {
@@ -395,7 +409,7 @@ describe("PV: Privatversicherte – Vollständiger Abrechnungs-Flow", () => {
     await documentAppointment(pvAppt.id, pvAppt.time, abServiceId, 90, "PV-Test Alltagsbegleitung", 8, 0);
   });
 
-  it("PV-4 – Leistungsnachweis erstellen und unterschreiben", async () => {
+  it("PV-4 – Leistungsnachweis erstellen und unterschreiben (pending → employee_signed → completed)", async () => {
     expect(pvAppt).toBeDefined();
     const apptDate = new Date(pvAppt.date);
     pvServiceRecordId = await createServiceRecord(
@@ -403,7 +417,14 @@ describe("PV: Privatversicherte – Vollständiger Abrechnungs-Flow", () => {
       apptDate.getFullYear(),
       apptDate.getMonth() + 1,
     );
+
+    const pendingRes = await apiGet<any>(`/api/service-records/${pvServiceRecordId}`);
+    expect(pendingRes.data.status).toBe("pending");
+
     await signServiceRecord(pvServiceRecordId);
+
+    const completedRes = await apiGet<any>(`/api/service-records/${pvServiceRecordId}`);
+    expect(completedRes.data.status).toBe("completed");
   });
 
   it("PV-5 – Rechnung generieren und MwSt 0% prüfen (pflegekasse_privat)", async () => {
@@ -459,6 +480,10 @@ describe("PV: Privatversicherte – Vollständiger Abrechnungs-Flow", () => {
     const invoiceDetail = await getInvoiceWithLineItems(pvInvoiceId);
     expect(invoiceDetail.customerName).toBeTruthy();
     expect(invoiceDetail.recipientName).toBeTruthy();
+    expect(invoiceDetail.insuranceProviderName, "Versicherungsname muss vorhanden sein").toBeTruthy();
+    expect(invoiceDetail.versichertennummer, "Versichertennummer muss vorhanden sein").toBeTruthy();
+    expect(invoiceDetail.insuranceIkNummer, "IK-Nummer muss vorhanden sein").toBeTruthy();
+    expect(invoiceDetail.pflegegrad, "Pflegegrad muss vorhanden sein").toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -617,8 +642,9 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
 
     cpApptAfter = await findFreeSlotAndCreate(
       cpCustomerId, hwServiceId, 60,
-      [1, 3], ["03:00", "03:30", "23:00", "23:30"],
+      [0, 0], ["03:00", "03:30", "04:00", "23:00", "23:30"],
     );
+    expect(cpApptAfter.date).toBe(new Date().toISOString().split("T")[0]);
     await documentAppointment(cpApptAfter.id, cpApptAfter.time, hwServiceId, 60, "CP-NachPreis", 0, 0);
   });
 
@@ -635,29 +661,32 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
       await signServiceRecord(srId);
     }
 
-    const afterDate = new Date(cpApptAfter.date);
-    const invoiceData = await generateInvoice(
-      cpCustomerId,
-      afterDate.getFullYear(),
-      afterDate.getMonth() + 1,
-    );
-    const invoice = Array.isArray(invoiceData) ? invoiceData[0] : invoiceData;
-    cpInvoiceId = invoice.id;
+    const allInvoiceIds: number[] = [];
+    for (const m of months) {
+      const [year, month] = m.split("-").map(Number);
+      const invoiceData = await generateInvoice(cpCustomerId, year, month);
+      const invs = Array.isArray(invoiceData) ? invoiceData : [invoiceData];
+      for (const inv of invs) allInvoiceIds.push(inv.id);
+    }
 
-    const detail = await getInvoiceWithLineItems(cpInvoiceId);
-    const hwItems = detail.lineItems.filter((li: any) => li.serviceCode === "hauswirtschaft");
-    expect(hwItems.length).toBeGreaterThanOrEqual(1);
+    const allLineItems: any[] = [];
+    for (const invId of allInvoiceIds) {
+      const detail = await getInvoiceWithLineItems(invId);
+      allLineItems.push(...detail.lineItems);
+    }
+
+    const hwItems = allLineItems.filter((li: any) => li.serviceCode === "hauswirtschaft");
+    expect(hwItems.length).toBeGreaterThanOrEqual(2);
 
     const today = new Date().toISOString().split("T")[0];
     const afterItem = hwItems.find((li: any) => li.appointmentDate >= today);
     const beforeItem = hwItems.find((li: any) => li.appointmentDate < today);
 
-    if (afterItem) {
-      expect(afterItem.unitPriceCents, "Termin nach validFrom muss Kundenpreis nutzen").toBe(5500);
-    }
-    if (beforeItem) {
-      expect(beforeItem.unitPriceCents, "Termin vor validFrom muss Standardpreis nutzen").toBe(defaultHwPrice);
-    }
+    expect(afterItem, "Termin ab heute (nach validFrom) muss vorhanden sein").toBeDefined();
+    expect(afterItem!.unitPriceCents, "Termin nach validFrom muss Kundenpreis 5500 nutzen").toBe(5500);
+
+    expect(beforeItem, "Termin vor validFrom muss vorhanden sein").toBeDefined();
+    expect(beforeItem!.unitPriceCents, "Termin vor validFrom muss Standardpreis nutzen").toBe(defaultHwPrice);
   });
 
   it("CP-7 – validFrom in der Vergangenheit wird abgelehnt", async () => {
