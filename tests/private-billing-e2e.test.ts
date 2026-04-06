@@ -12,7 +12,10 @@ import {
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let hwServiceId: number;
 let abServiceId: number;
+let travelKmServiceId: number;
+let customerKmServiceId: number;
 let insuranceProviderId: number;
+let allBillableServices: { id: number; code: string; name: string; unitType: string; defaultPriceCents: number }[];
 
 const cleanupCustomerIds: number[] = [];
 const cleanupApptIds: number[] = [];
@@ -220,6 +223,20 @@ beforeAll(async () => {
   const servicesRes = await apiGet<any[]>("/api/services/all");
   hwServiceId = servicesRes.data.find((s: any) => s.code === "hauswirtschaft")!.id;
   abServiceId = servicesRes.data.find((s: any) => s.code === "alltagsbegleitung")!.id;
+  const travelKm = servicesRes.data.find((s: any) => s.code === "travel_km");
+  const customerKm = servicesRes.data.find((s: any) => s.code === "customer_km");
+  travelKmServiceId = travelKm?.id;
+  customerKmServiceId = customerKm?.id;
+
+  allBillableServices = servicesRes.data
+    .filter((s: any) => s.isBillable && s.isActive)
+    .map((s: any) => ({
+      id: s.id,
+      code: s.code,
+      name: s.name,
+      unitType: s.unitType,
+      defaultPriceCents: s.defaultPriceCents,
+    }));
 
   const provRes = await apiGet<any[]>("/api/admin/insurance-providers");
   expect(provRes.status).toBe(200);
@@ -975,5 +992,253 @@ describe("XV: Cross-Validation – Abrechnungstyp-übergreifende Prüfungen", ()
     expect(uniqueApptIds.length).toBe(appointmentIds.length);
 
     expect(nonKmItems.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+
+describe("IP: Individuelle Preise – Zwei Kunden mit verschiedenen Preisen für alle Services", () => {
+  const kundeAPreise: Record<string, number> = {
+    hauswirtschaft: 3200,
+    alltagsbegleitung: 4500,
+    travel_km: 45,
+    customer_km: 50,
+  };
+  const kundeBPreise: Record<string, number> = {
+    hauswirtschaft: 3800,
+    alltagsbegleitung: 5200,
+    travel_km: 30,
+    customer_km: 40,
+  };
+
+  let kundeAId: number;
+  let kundeBId: number;
+  let kundeAInvoiceId: number;
+  let kundeBInvoiceId: number;
+
+  async function setCustomPricesForCustomer(
+    customerId: number,
+    preise: Record<string, number>,
+  ): Promise<void> {
+    const today = new Date().toISOString().split("T")[0];
+    for (const [code, priceCents] of Object.entries(preise)) {
+      const svc = allBillableServices.find(s => s.code === code);
+      if (!svc) continue;
+      const res = await apiPost<any>(`/api/customers/${customerId}/service-prices`, {
+        serviceId: svc.id,
+        priceCents,
+        validFrom: today,
+      });
+      if (res.status === 200 && res.data?.id) {
+        cleanupCustomerPriceIds.push({ customerId, priceId: res.data.id });
+      }
+      expect(res.status, `Kundenpreis für ${code} (${priceCents}ct) muss gesetzt werden`).toBe(200);
+    }
+  }
+
+  async function createCustomerWithPricesAndInvoice(
+    nachname: string,
+    preise: Record<string, number>,
+    hwSlots: string[],
+    abSlots: string[],
+  ): Promise<{ customerId: number; invoiceId: number }> {
+    const custRes = await apiPost<any>("/api/admin/customers", szCustomerPayload({ nachname }));
+    expect(custRes.status).toBe(201);
+    const customerId = custRes.data.id;
+    cleanupCustomerIds.push(customerId);
+
+    await apiPatch<any>(`/api/admin/customers/${customerId}/assign`, {
+      primaryEmployeeId: auth.user.id,
+      backupEmployeeId: null,
+      backupEmployeeId2: null,
+    });
+
+    await setCustomPricesForCustomer(customerId, preise);
+
+    const hwAppt = await findFreeSlotAndCreate(
+      customerId, hwServiceId, 60,
+      [0, 0], hwSlots,
+    );
+    await documentAppointment(hwAppt.id, hwAppt.time, hwServiceId, 60, `IP-HW-${nachname}`, 10, 5);
+
+    const abAppt = await findFreeSlotAndCreate(
+      customerId, abServiceId, 90,
+      [0, 0], abSlots,
+    );
+    await documentAppointment(abAppt.id, abAppt.time, abServiceId, 90, `IP-AB-${nachname}`, 0, 0);
+
+    const apptDate = new Date(hwAppt.date);
+    const srId = await createServiceRecord(customerId, apptDate.getFullYear(), apptDate.getMonth() + 1);
+    await signServiceRecord(srId);
+    const invData = await generateInvoice(customerId, apptDate.getFullYear(), apptDate.getMonth() + 1);
+    const inv = Array.isArray(invData) ? invData[0] : invData;
+    return { customerId, invoiceId: inv.id };
+  }
+
+  it("IP-1 – Kunde A: Individualpreise für alle Services setzen, Termine erstellen, Rechnung generieren", async () => {
+    const result = await createCustomerWithPricesAndInvoice(
+      "IP-KundeA-" + uniqueId(), kundeAPreise,
+      ["03:00", "03:30", "04:00", "04:30"],
+      ["05:00", "05:30", "06:00", "06:30"],
+    );
+    kundeAId = result.customerId;
+    kundeAInvoiceId = result.invoiceId;
+    expect(kundeAInvoiceId).toBeDefined();
+  });
+
+  it("IP-2 – Kunde B: Andere Individualpreise für alle Services setzen, Termine erstellen, Rechnung generieren", async () => {
+    const result = await createCustomerWithPricesAndInvoice(
+      "IP-KundeB-" + uniqueId(), kundeBPreise,
+      ["07:00", "07:30", "08:00", "08:30"],
+      ["09:00", "09:30", "10:00", "10:30"],
+    );
+    kundeBId = result.customerId;
+    kundeBInvoiceId = result.invoiceId;
+    expect(kundeBInvoiceId).toBeDefined();
+  });
+
+  it("IP-3 – Kunde A: Hauswirtschaft nutzt 3200ct/h (nicht System-Standard)", async () => {
+    expect(kundeAInvoiceId).toBeDefined();
+    const detail = await getInvoiceWithLineItems(kundeAInvoiceId);
+    const hwItem = detail.lineItems.find((li: any) => li.serviceCode === "hauswirtschaft");
+    expect(hwItem, "HW-Position für Kunde A muss vorhanden sein").toBeDefined();
+    expect(hwItem.unitPriceCents, "Kunde A: HW-Preis muss 3200 sein").toBe(3200);
+    const expectedTotal = Math.round((60 / 60) * 3200);
+    expect(hwItem.totalCents).toBe(expectedTotal);
+  });
+
+  it("IP-4 – Kunde A: Alltagsbegleitung nutzt 4500ct/h (nicht System-Standard)", async () => {
+    expect(kundeAInvoiceId).toBeDefined();
+    const detail = await getInvoiceWithLineItems(kundeAInvoiceId);
+    const abItem = detail.lineItems.find((li: any) => li.serviceCode === "alltagsbegleitung");
+    expect(abItem, "AB-Position für Kunde A muss vorhanden sein").toBeDefined();
+    expect(abItem.unitPriceCents, "Kunde A: AB-Preis muss 4500 sein").toBe(4500);
+    const expectedTotal = Math.round((90 / 60) * 4500);
+    expect(abItem.totalCents).toBe(expectedTotal);
+  });
+
+  it("IP-5 – Kunde A: Anfahrt-km nutzt 45ct/km (nicht System-Standard)", async () => {
+    expect(kundeAInvoiceId).toBeDefined();
+    const detail = await getInvoiceWithLineItems(kundeAInvoiceId);
+    const travelItem = detail.lineItems.find((li: any) => li.serviceCode === "travel_km");
+    expect(travelItem, "Anfahrt-km-Position für Kunde A muss vorhanden sein").toBeDefined();
+    expect(travelItem.unitPriceCents, "Kunde A: Anfahrt-km Preis muss 45 sein").toBe(45);
+    const expectedKmTotal = Math.round(10 * 45);
+    expect(travelItem.totalCents).toBe(expectedKmTotal);
+  });
+
+  it("IP-6 – Kunde A: Kunden-km nutzt 50ct/km (nicht System-Standard)", async () => {
+    expect(kundeAInvoiceId).toBeDefined();
+    const detail = await getInvoiceWithLineItems(kundeAInvoiceId);
+    const custKmItem = detail.lineItems.find((li: any) => li.serviceCode === "customer_km");
+    expect(custKmItem, "Kunden-km-Position für Kunde A muss vorhanden sein").toBeDefined();
+    expect(custKmItem.unitPriceCents, "Kunde A: Kunden-km Preis muss 50 sein").toBe(50);
+    const expectedKmTotal = Math.round(5 * 50);
+    expect(custKmItem.totalCents).toBe(expectedKmTotal);
+  });
+
+  it("IP-7 – Kunde B: Hauswirtschaft nutzt 3800ct/h (≠ Kunde A, ≠ System-Standard)", async () => {
+    expect(kundeBInvoiceId).toBeDefined();
+    const detail = await getInvoiceWithLineItems(kundeBInvoiceId);
+    const hwItem = detail.lineItems.find((li: any) => li.serviceCode === "hauswirtschaft");
+    expect(hwItem, "HW-Position für Kunde B muss vorhanden sein").toBeDefined();
+    expect(hwItem.unitPriceCents, "Kunde B: HW-Preis muss 3800 sein").toBe(3800);
+    expect(hwItem.unitPriceCents).not.toBe(kundeAPreise.hauswirtschaft);
+    const expectedTotal = Math.round((60 / 60) * 3800);
+    expect(hwItem.totalCents).toBe(expectedTotal);
+  });
+
+  it("IP-8 – Kunde B: Alltagsbegleitung nutzt 5200ct/h (≠ Kunde A, ≠ System-Standard)", async () => {
+    expect(kundeBInvoiceId).toBeDefined();
+    const detail = await getInvoiceWithLineItems(kundeBInvoiceId);
+    const abItem = detail.lineItems.find((li: any) => li.serviceCode === "alltagsbegleitung");
+    expect(abItem, "AB-Position für Kunde B muss vorhanden sein").toBeDefined();
+    expect(abItem.unitPriceCents, "Kunde B: AB-Preis muss 5200 sein").toBe(5200);
+    expect(abItem.unitPriceCents).not.toBe(kundeAPreise.alltagsbegleitung);
+    const expectedTotal = Math.round((90 / 60) * 5200);
+    expect(abItem.totalCents).toBe(expectedTotal);
+  });
+
+  it("IP-9 – Kunde B: Anfahrt-km nutzt 30ct/km (≠ Kunde A, ≠ System-Standard)", async () => {
+    expect(kundeBInvoiceId).toBeDefined();
+    const detail = await getInvoiceWithLineItems(kundeBInvoiceId);
+    const travelItem = detail.lineItems.find((li: any) => li.serviceCode === "travel_km");
+    expect(travelItem, "Anfahrt-km-Position für Kunde B muss vorhanden sein").toBeDefined();
+    expect(travelItem.unitPriceCents, "Kunde B: Anfahrt-km Preis muss 30 sein").toBe(30);
+    expect(travelItem.unitPriceCents).not.toBe(kundeAPreise.travel_km);
+    const expectedKmTotal = Math.round(10 * 30);
+    expect(travelItem.totalCents).toBe(expectedKmTotal);
+  });
+
+  it("IP-10 – Kunde B: Kunden-km nutzt 40ct/km (≠ Kunde A, ≠ System-Standard)", async () => {
+    expect(kundeBInvoiceId).toBeDefined();
+    const detail = await getInvoiceWithLineItems(kundeBInvoiceId);
+    const custKmItem = detail.lineItems.find((li: any) => li.serviceCode === "customer_km");
+    expect(custKmItem, "Kunden-km-Position für Kunde B muss vorhanden sein").toBeDefined();
+    expect(custKmItem.unitPriceCents, "Kunde B: Kunden-km Preis muss 40 sein").toBe(40);
+    expect(custKmItem.unitPriceCents).not.toBe(kundeAPreise.customer_km);
+    const expectedKmTotal = Math.round(5 * 40);
+    expect(custKmItem.totalCents).toBe(expectedKmTotal);
+  });
+
+  it("IP-11 – Gesamtbeträge: Kunde A ≠ Kunde B bei gleicher Leistung", async () => {
+    expect(kundeAInvoiceId).toBeDefined();
+    expect(kundeBInvoiceId).toBeDefined();
+
+    const detailA = await getInvoiceWithLineItems(kundeAInvoiceId);
+    const detailB = await getInvoiceWithLineItems(kundeBInvoiceId);
+
+    expect(detailA.netAmountCents).not.toBe(detailB.netAmountCents);
+
+    const hwA = detailA.lineItems.find((li: any) => li.serviceCode === "hauswirtschaft");
+    const hwB = detailB.lineItems.find((li: any) => li.serviceCode === "hauswirtschaft");
+    expect(hwA.unitPriceCents).toBe(kundeAPreise.hauswirtschaft);
+    expect(hwB.unitPriceCents).toBe(kundeBPreise.hauswirtschaft);
+    expect(hwA.unitPriceCents).not.toBe(hwB.unitPriceCents);
+
+    const abA = detailA.lineItems.find((li: any) => li.serviceCode === "alltagsbegleitung");
+    const abB = detailB.lineItems.find((li: any) => li.serviceCode === "alltagsbegleitung");
+    expect(abA.unitPriceCents).toBe(kundeAPreise.alltagsbegleitung);
+    expect(abB.unitPriceCents).toBe(kundeBPreise.alltagsbegleitung);
+
+    const travelA = detailA.lineItems.find((li: any) => li.serviceCode === "travel_km");
+    const travelB = detailB.lineItems.find((li: any) => li.serviceCode === "travel_km");
+    expect(travelA.unitPriceCents).toBe(kundeAPreise.travel_km);
+    expect(travelB.unitPriceCents).toBe(kundeBPreise.travel_km);
+
+    const kmA = detailA.lineItems.find((li: any) => li.serviceCode === "customer_km");
+    const kmB = detailB.lineItems.find((li: any) => li.serviceCode === "customer_km");
+    expect(kmA.unitPriceCents).toBe(kundeAPreise.customer_km);
+    expect(kmB.unitPriceCents).toBe(kundeBPreise.customer_km);
+  });
+
+  it("IP-12 – Keine der Positionen nutzt den System-Standardpreis", async () => {
+    expect(kundeAInvoiceId).toBeDefined();
+    expect(kundeBInvoiceId).toBeDefined();
+
+    const detailA = await getInvoiceWithLineItems(kundeAInvoiceId);
+    const detailB = await getInvoiceWithLineItems(kundeBInvoiceId);
+
+    for (const [label, detail, preise] of [
+      ["Kunde A", detailA, kundeAPreise],
+      ["Kunde B", detailB, kundeBPreise],
+    ] as const) {
+      for (const li of detail.lineItems) {
+        const svc = allBillableServices.find(s => s.code === li.serviceCode);
+        if (!svc) continue;
+        const expectedCustomPrice = preise[li.serviceCode as keyof typeof preise];
+        if (expectedCustomPrice !== undefined) {
+          expect(
+            li.unitPriceCents,
+            `${label}: ${li.serviceCode} muss Individualpreis ${expectedCustomPrice} nutzen, nicht Systempreis ${svc.defaultPriceCents}`,
+          ).toBe(expectedCustomPrice);
+          if (expectedCustomPrice !== svc.defaultPriceCents) {
+            expect(
+              li.unitPriceCents,
+              `${label}: ${li.serviceCode} darf NICHT den Systempreis ${svc.defaultPriceCents} nutzen`,
+            ).not.toBe(svc.defaultPriceCents);
+          }
+        }
+      }
+    }
   });
 });
