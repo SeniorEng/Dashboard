@@ -299,9 +299,10 @@ export async function createTestCustomer(overrides: Record<string, unknown> = {}
   return res.data;
 }
 
-export async function assignEmployeeToCustomer(customerId: number, employeeId: number): Promise<void> {
+export async function assignEmployeeToCustomer(customerId: number, employeeId?: number): Promise<void> {
+  const eid = employeeId ?? (await getAuthCookie()).user.id;
   const res = await apiPatch<any>(`/api/admin/customers/${customerId}/assign`, {
-    primaryEmployeeId: employeeId,
+    primaryEmployeeId: eid,
     backupEmployeeId: null,
     backupEmployeeId2: null,
   });
