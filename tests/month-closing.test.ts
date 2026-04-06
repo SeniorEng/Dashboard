@@ -111,3 +111,33 @@ describe("MC-7: Vorschau Auto-Pausen", () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe("MC-8: Monatsabschluss-Lebenszyklus (Close → Reopen)", () => {
+  const testYear = currentYear + 4;
+  const testMonth = 6;
+
+  it("MC-8.1 – Readiness vor Zeiteinträgen: hasTimeEntries=false", async () => {
+    const res = await apiGet<any>(`/api/time-entries/month-closing/${testYear}/${testMonth}/readiness`);
+    expect(res.status).toBe(200);
+    expect(res.data.hasTimeEntries).toBe(false);
+  });
+
+  it("MC-8.2 – Close ohne Zeiteinträge wird abgelehnt", async () => {
+    const res = await apiPost<any>("/api/time-entries/admin/close-month", {
+      year: testYear,
+      month: testMonth,
+      userId: auth.user.id,
+    });
+    expect(res.status).toBe(400);
+    expect(res.data.message).toContain("keine Zeiteinträge");
+  });
+
+  it("MC-8.3 – Batch-Close ohne bereite Mitarbeiter wird abgelehnt", async () => {
+    const res = await apiPost<any>("/api/time-entries/admin/batch-close-month", {
+      year: testYear,
+      month: testMonth,
+    });
+    expect(res.status).toBe(400);
+    expect(res.data.message).toContain("Keine Mitarbeiter");
+  });
+});

@@ -44,3 +44,19 @@ describe("SIGN-2: Öffentliche Unterschrift – Speichern", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("SIGN-3: Token-Fehlermeldungen", () => {
+  it("SIGN-3.1 – Fehlermeldung bei ungültigem GET-Token ist deutsch", async () => {
+    const res = await publicGet<any>("/api/public/sign/token-does-not-exist-abc");
+    expect(res.status).toBe(404);
+    expect(res.data.message).toContain("ungültig");
+  });
+
+  it("SIGN-3.2 – Fehlermeldung bei ungültigem POST-Token ist deutsch", async () => {
+    const res = await publicPost<any>("/api/public/sign/token-does-not-exist-abc", {
+      signatureData: "data:image/png;base64,iVBOR",
+    });
+    expect(res.status).toBe(404);
+    expect(res.data.message).toContain("ungültig");
+  });
+});

@@ -745,3 +745,36 @@ describe("BB-18: FIFO-Verbrauch – Carryover vor regulärer Allokation", () => 
     }
   });
 });
+
+describe("BUD-EDGE: Budget-Grenzfälle", () => {
+  let edgeCustomerId: number;
+
+  beforeAll(async () => {
+    const suffix = Date.now();
+    const createRes = await apiPost<any>("/api/admin/customers", {
+      vorname: "BudgetEdge",
+      nachname: `Test-${suffix}`,
+      geburtsdatum: "1945-06-15",
+      strasse: "Teststr.",
+      nr: "1",
+      plz: "12345",
+      stadt: "Berlin",
+      pflegegrad: 1,
+      billingType: "pflegekasse_gesetzlich",
+    });
+    expect(createRes.status).toBe(201);
+    edgeCustomerId = createRes.data.id;
+  });
+
+  it("BUD-EDGE-1 – Budgetstatus für Kunde ohne Pflegegrad", async () => {
+    const res = await apiGet<any>(`/api/budget/${edgeCustomerId}/status?year=${new Date().getFullYear()}`);
+    expect(res.status).toBe(200);
+  });
+
+  it("BUD-EDGE-2 – Kostenschätzung mit 0 Minuten liefert Ergebnis", async () => {
+    const year = new Date().getFullYear();
+    const month = new Date().getMonth() + 1;
+    const res = await apiGet<any>(`/api/budget/${edgeCustomerId}/cost-estimate?year=${year}&month=${month}&minutes=0`);
+    expect(res.status).toBe(200);
+  });
+});

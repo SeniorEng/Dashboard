@@ -3,15 +3,10 @@ import {
   apiGet,
   apiPatch,
   getAuthCookie,
-  loginAs,
-  apiGetAs,
-  apiPatchAs,
 } from "./test-utils";
 
-let auth: Awaited<ReturnType<typeof getAuthCookie>>;
-
 beforeAll(async () => {
-  auth = await getAuthCookie();
+  await getAuthCookie();
 });
 
 describe("PROF-1: Profil laden", () => {

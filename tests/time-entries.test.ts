@@ -892,3 +892,20 @@ describe("TE-BIZ-19: CRUD-Ergänzungen (PUT, Urlaub, Offene Aufgaben)", () => {
     expect(Array.isArray(data.daysWithMissingBreaks)).toBe(true);
   });
 });
+
+describe("TE-EDGE: Zeiterfassung Grenzfälle", () => {
+  it("TE-EDGE-1 – Monatsabschluss blockiert bei offenen Zeiteinträgen", async () => {
+    const farYear = new Date().getFullYear() + 6;
+    const readiness = await apiGet<any>(`/api/time-entries/month-closing/${farYear}/3/readiness`);
+    expect(readiness.status).toBe(200);
+    expect(readiness.data.hasTimeEntries).toBe(false);
+
+    const closeRes = await apiPost<any>("/api/time-entries/admin/close-month", {
+      year: farYear,
+      month: 3,
+      userId: (await getAuthCookie()).user.id,
+    });
+    expect(closeRes.status).toBe(400);
+    expect(closeRes.data.message).toContain("keine Zeiteinträge");
+  });
+});
