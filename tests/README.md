@@ -24,9 +24,9 @@ TEST_USER_PASSWORD='dein_passwort' npx vitest
 
 | Datei | Bereich |
 |-------|---------|
-| `customers-business.test.ts` | Kunden CRUD, Validierung, Pflege, Deaktivierung |
-| `appointments-business.test.ts` | Termine, Status-Workflow, Dokumentation, Junction-Tabelle |
-| `time-entries-business.test.ts` | Zeiterfassung, Konflikte, ArbZG-Pausen, Urlaub |
+| `customers.test.ts` | Kunden CRUD, Validierung, Pflege, Deaktivierung |
+| `appointments.test.ts` | Termine, Status-Workflow, Dokumentation, Junction-Tabelle |
+| `time-entries.test.ts` | Zeiterfassung, Konflikte, ArbZG-Pausen, Urlaub |
 | `budget.test.ts` | Budget-Pools, Zuweisungen, Kostenschätzung |
 | `budget-e2e.test.ts` | Budget End-to-End: Dokumentation → Buchung → Storno |
 | `erstberatung.test.ts` | Erstberatung, Prospects, Prospect-Erstberatung |
