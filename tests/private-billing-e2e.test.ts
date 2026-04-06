@@ -396,6 +396,7 @@ describe("SZ: Selbstzahler – Vollständiger Abrechnungs-Flow", () => {
 
     const hwItem = lineItems.find((li: any) => li.serviceCode === "hauswirtschaft");
     expect(hwItem, "Hauswirtschaft-Position muss vorhanden sein").toBeDefined();
+    expect(hwItem.appointmentId, "HW-Position muss appointmentId haben").toBe(szAppt.id);
     expect(hwItem.durationMinutes).toBe(60);
     expect(hwItem.unitPriceCents, `HW-Preis muss Systemstandard ${defaultHwPriceSz} sein`).toBe(defaultHwPriceSz);
     expect(hwItem.employeeName).toBeTruthy();
@@ -407,15 +408,18 @@ describe("SZ: Selbstzahler – Vollständiger Abrechnungs-Flow", () => {
     const abItem = lineItems.find((li: any) => li.serviceCode === "alltagsbegleitung");
     if (new Date(szAppt.date).getMonth() === new Date(szAppt2.date).getMonth()) {
       expect(abItem, "Alltagsbegleitung-Position muss vorhanden sein").toBeDefined();
+      expect(abItem.appointmentId, "AB-Position muss appointmentId haben").toBe(szAppt2.id);
       expect(abItem.durationMinutes).toBe(45);
       expect(abItem.unitPriceCents, `AB-Preis muss Systemstandard ${defaultAbPriceSz} sein`).toBe(defaultAbPriceSz);
       expect(abItem.serviceDetails).toBe("SZ-Test Alltagsbegleitung");
+      expect(abItem.appointmentDate).toBe(szAppt2.date);
       const expectedAbTotal = Math.round((45 / 60) * abItem.unitPriceCents);
       expect(abItem.totalCents).toBe(expectedAbTotal);
     }
 
     const travelKmItem = lineItems.find((li: any) => li.serviceCode === "travel_km");
     expect(travelKmItem, "Anfahrt-km-Position muss vorhanden sein").toBeDefined();
+    expect(travelKmItem.appointmentId, "Anfahrt-km-Position muss zum HW-Termin gehören").toBe(szAppt.id);
     expect(travelKmItem.durationMinutes).toBe(12);
     if (defaultTravelKmPrice !== undefined) {
       expect(travelKmItem.unitPriceCents, `Anfahrt-km Preis muss Systemstandard ${defaultTravelKmPrice} sein`).toBe(defaultTravelKmPrice);
@@ -424,6 +428,7 @@ describe("SZ: Selbstzahler – Vollständiger Abrechnungs-Flow", () => {
 
     const customerKmItem = lineItems.find((li: any) => li.serviceCode === "customer_km");
     expect(customerKmItem, "Kunden-km-Position muss vorhanden sein").toBeDefined();
+    expect(customerKmItem.appointmentId, "Kunden-km-Position muss zum HW-Termin gehören").toBe(szAppt.id);
     expect(customerKmItem.durationMinutes).toBe(5);
     if (defaultCustKmPrice !== undefined) {
       expect(customerKmItem.unitPriceCents, `Kunden-km Preis muss Systemstandard ${defaultCustKmPrice} sein`).toBe(defaultCustKmPrice);
@@ -653,7 +658,7 @@ describe("ME: Multi-Employee – Verschiedene Mitarbeiter in Rechnungspositionen
     meInvoiceId = invoice.id;
   });
 
-  it("ME-4 – Rechnungspositionen enthalten UNTERSCHIEDLICHE Mitarbeiternamen pro Termin", async () => {
+  it("ME-4 – Rechnungspositionen enthalten UNTERSCHIEDLICHE Mitarbeiternamen pro Termin mit appointmentId-Zuordnung", async () => {
     expect(meInvoiceId).toBeDefined();
     const detail = await getInvoiceWithLineItems(meInvoiceId);
     const lineItems = detail.lineItems;
@@ -663,23 +668,29 @@ describe("ME: Multi-Employee – Verschiedene Mitarbeiter in Rechnungspositionen
     for (const li of lineItems) {
       expect(li.employeeName, `Position ${li.serviceCode} muss Mitarbeiternamen haben`).toBeTruthy();
       expect(li.appointmentDate, `Position ${li.serviceCode} muss Termindatum haben`).toBeTruthy();
+      expect(li.appointmentId, `Position ${li.serviceCode} muss appointmentId haben`).toBeTruthy();
       expect(li.totalCents, `Position ${li.serviceCode} muss Betrag haben`).toBeGreaterThan(0);
     }
 
-    const hwItems = lineItems.filter((li: any) => li.serviceCode === "hauswirtschaft");
-    const abItems = lineItems.filter((li: any) => li.serviceCode === "alltagsbegleitung");
-
     if (new Date(meAppt1.date).getMonth() === new Date(meAppt2.date).getMonth()) {
-      expect(hwItems.length, "HW-Position von MA1 muss vorhanden sein").toBeGreaterThanOrEqual(1);
-      expect(abItems.length, "AB-Position von MA2 muss vorhanden sein").toBeGreaterThanOrEqual(1);
+      const hwItemMA1 = lineItems.find(
+        (li: any) => li.serviceCode === "hauswirtschaft" && li.appointmentId === meAppt1.id,
+      );
+      expect(hwItemMA1, `HW-Position mit appointmentId=${meAppt1.id} von MA1 muss existieren`).toBeDefined();
+      expect(hwItemMA1.appointmentDate).toBe(meAppt1.date);
+      expect(hwItemMA1.serviceDetails).toBe("ME-Termin-1-MA1");
 
-      const hwEmployeeNames = hwItems.map((li: any) => li.employeeName);
-      const abEmployeeNames = abItems.map((li: any) => li.employeeName);
+      const abItemMA2 = lineItems.find(
+        (li: any) => li.serviceCode === "alltagsbegleitung" && li.appointmentId === meAppt2.id,
+      );
+      expect(abItemMA2, `AB-Position mit appointmentId=${meAppt2.id} von MA2 muss existieren`).toBeDefined();
+      expect(abItemMA2.appointmentDate).toBe(meAppt2.date);
+      expect(abItemMA2.serviceDetails).toBe("ME-Termin-2-MA2");
 
       expect(
-        hwEmployeeNames[0],
-        "HW muss vom ersten Mitarbeiter dokumentiert sein",
-      ).not.toBe(abEmployeeNames[0]);
+        hwItemMA1.employeeName,
+        `MA1 (${hwItemMA1.employeeName}) ≠ MA2 (${abItemMA2.employeeName})`,
+      ).not.toBe(abItemMA2.employeeName);
     }
 
     const serviceCodes = [...new Set(lineItems.map((li: any) => li.serviceCode).filter((c: string) => !["travel_km", "customer_km"].includes(c)))];
@@ -850,9 +861,15 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
     expect(activeHwPrice, "Nach Löschung darf kein aktiver (ohne validTo) Kundenpreis existieren").toBeUndefined();
   });
 
-  it("CP-10 – Nach Löschung: Termin VOR validFrom nutzt Standardpreis (Fallback-Beweis)", async () => {
+  it("CP-10 – Preis-Löschung: Termin außerhalb gültiger Preis-Range nutzt Standardpreis", async () => {
     expect(cpCustomerId).toBeDefined();
     expect(defaultHwPrice).toBeGreaterThan(0);
+
+    const activePricesRes = await apiGet<any[]>(`/api/customers/${cpCustomerId}/service-prices`);
+    const activeHwPrices = (activePricesRes.data as any[]).filter(
+      (p: any) => p.serviceId === hwServiceId && !p.validTo,
+    );
+    expect(activeHwPrices.length, "Kein aktiver Kundenpreis nach Löschung in CP-9").toBe(0);
 
     const cpApptPostDelete = await findFreeSlotAndCreate(
       cpCustomerId, hwServiceId, 60,
@@ -861,7 +878,7 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
     const apptDateStr = cpApptPostDelete.date;
     expect(
       apptDateStr < cpValidFrom,
-      `Termin (${apptDateStr}) muss VOR validFrom (${cpValidFrom}) liegen, um Fallback zu prüfen`,
+      `Termin (${apptDateStr}) muss VOR validFrom (${cpValidFrom}) liegen, damit kein Kundenpreis greift`,
     ).toBe(true);
     await documentAppointment(cpApptPostDelete.id, cpApptPostDelete.time, hwServiceId, 60, "CP-Fallback-Default", 0, 0);
 
@@ -878,7 +895,7 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
     expect(hwItem, "HW-Position muss vorhanden sein").toBeDefined();
     expect(
       hwItem.unitPriceCents,
-      `Termin vor validFrom muss Standardpreis ${defaultHwPrice} nutzen, nicht Kundenpreis 5500`,
+      `Termin außerhalb Kundenpreis-Range muss Standardpreis ${defaultHwPrice} nutzen, nicht 5500`,
     ).toBe(defaultHwPrice);
     expect(hwItem.unitPriceCents).not.toBe(5500);
   });
@@ -1094,6 +1111,122 @@ describe("XV: Cross-Validation – Abrechnungstyp-übergreifende Prüfungen", ()
     expect(uniqueApptIds.length).toBe(appointmentIds.length);
 
     expect(nonKmItems.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("XV-7 – Dokumentierte Termine = Abrechnungspositionen (Aggregate über alle Rechnungen)", async () => {
+    const xvPayload = szCustomerPayload({ nachname: "XV-Agg-" + uniqueId() });
+    const custRes = await apiPost<any>("/api/admin/customers", xvPayload);
+    expect(custRes.status).toBe(201);
+    const custId = custRes.data.id;
+    cleanupCustomerIds.push(custId);
+
+    await apiPatch<any>(`/api/admin/customers/${custId}/assign`, {
+      primaryEmployeeId: auth.user.id,
+      backupEmployeeId: null,
+      backupEmployeeId2: null,
+    });
+
+    const documentedApptIds: number[] = [];
+
+    const appt1 = await findFreeSlotAndCreate(custId, hwServiceId, 30, [3, 20], ["14:00", "14:30", "15:00"]);
+    await documentAppointment(appt1.id, appt1.time, hwServiceId, 30, "XV-Agg-1", 5, 0);
+    documentedApptIds.push(appt1.id);
+
+    const appt2 = await findFreeSlotAndCreate(custId, abServiceId, 45, [3, 20], ["16:00", "16:30", "17:00"]);
+    await documentAppointment(appt2.id, appt2.time, abServiceId, 45, "XV-Agg-2", 0, 3);
+    documentedApptIds.push(appt2.id);
+
+    const appt3 = await findFreeSlotAndCreate(custId, hwServiceId, 60, [3, 20], ["18:00", "18:30", "19:00"]);
+    await documentAppointment(appt3.id, appt3.time, hwServiceId, 60, "XV-Agg-3", 0, 0);
+    documentedApptIds.push(appt3.id);
+
+    const allDates = [appt1, appt2, appt3].map(a => new Date(a.date));
+    const months = [...new Set(allDates.map(d => `${d.getFullYear()}-${d.getMonth() + 1}`))];
+
+    for (const m of months) {
+      const [year, month] = m.split("-").map(Number);
+      const srId = await createServiceRecord(custId, year, month);
+      await signServiceRecord(srId);
+    }
+
+    const allInvoiceIds: number[] = [];
+    for (const m of months) {
+      const [year, month] = m.split("-").map(Number);
+      const invData = await generateInvoice(custId, year, month);
+      const invs = Array.isArray(invData) ? invData : [invData];
+      for (const inv of invs) allInvoiceIds.push(inv.id);
+    }
+
+    const allLineItems: any[] = [];
+    for (const invId of allInvoiceIds) {
+      const detail = await getInvoiceWithLineItems(invId);
+      allLineItems.push(...detail.lineItems);
+    }
+
+    const nonKmItems = allLineItems.filter((li: any) => !["travel_km", "customer_km"].includes(li.serviceCode));
+    const billedApptIds = [...new Set(nonKmItems.map((li: any) => li.appointmentId).filter(Boolean))];
+
+    expect(billedApptIds.length, "Anzahl abgerechneter Termine muss Anzahl dokumentierter Termine entsprechen").toBe(documentedApptIds.length);
+
+    for (const docId of documentedApptIds) {
+      expect(
+        billedApptIds.includes(docId),
+        `Dokumentierter Termin ${docId} muss in Rechnungspositionen erscheinen`,
+      ).toBe(true);
+    }
+  });
+
+  it("XV-8 – Keine appointmentId erscheint in mehreren nicht-stornierten Rechnungen", async () => {
+    const xvPayload = szCustomerPayload({ nachname: "XV-NoCross-" + uniqueId() });
+    const custRes = await apiPost<any>("/api/admin/customers", xvPayload);
+    expect(custRes.status).toBe(201);
+    const custId = custRes.data.id;
+    cleanupCustomerIds.push(custId);
+
+    await apiPatch<any>(`/api/admin/customers/${custId}/assign`, {
+      primaryEmployeeId: auth.user.id,
+      backupEmployeeId: null,
+      backupEmployeeId2: null,
+    });
+
+    const apptA = await findFreeSlotAndCreate(custId, hwServiceId, 30, [5, 30], ["13:00", "13:30"]);
+    await documentAppointment(apptA.id, apptA.time, hwServiceId, 30, "XV-Cross-A", 0, 0);
+
+    const apptB = await findFreeSlotAndCreate(custId, abServiceId, 30, [5, 30], ["15:00", "15:30"]);
+    await documentAppointment(apptB.id, apptB.time, abServiceId, 30, "XV-Cross-B", 0, 0);
+
+    const allDates = [apptA, apptB].map(a => new Date(a.date));
+    const months = [...new Set(allDates.map(d => `${d.getFullYear()}-${d.getMonth() + 1}`))];
+
+    const invoiceIds: number[] = [];
+    for (const m of months) {
+      const [year, month] = m.split("-").map(Number);
+      const srId = await createServiceRecord(custId, year, month);
+      await signServiceRecord(srId);
+      const invData = await generateInvoice(custId, year, month);
+      const invs = Array.isArray(invData) ? invData : [invData];
+      for (const inv of invs) invoiceIds.push(inv.id);
+    }
+
+    const apptIdToInvoices = new Map<number, number[]>();
+    for (const invId of invoiceIds) {
+      const detail = await getInvoiceWithLineItems(invId);
+      if (detail.status === "storniert") continue;
+      for (const li of detail.lineItems) {
+        if (li.appointmentId && !["travel_km", "customer_km"].includes(li.serviceCode)) {
+          const existing = apptIdToInvoices.get(li.appointmentId) || [];
+          existing.push(invId);
+          apptIdToInvoices.set(li.appointmentId, existing);
+        }
+      }
+    }
+
+    for (const [apptId, invIds] of apptIdToInvoices.entries()) {
+      expect(
+        invIds.length,
+        `Termin ${apptId} darf nur in 1 nicht-stornierten Rechnung erscheinen, gefunden in: ${invIds.join(", ")}`,
+      ).toBe(1);
+    }
   });
 });
 
