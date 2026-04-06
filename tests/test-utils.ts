@@ -280,6 +280,77 @@ export function uniqueId(): string {
   return `test_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
+export async function createTestCustomer(overrides: Record<string, unknown> = {}): Promise<{ id: number; [key: string]: unknown }> {
+  const payload = {
+    vorname: "Test",
+    nachname: `Auto_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+    geburtsdatum: "1940-01-15",
+    strasse: "Teststraße",
+    nr: "1",
+    plz: "10115",
+    stadt: "Berlin",
+    telefon: "+4917600000000",
+    pflegegrad: 3,
+    pflegegradSeit: "2024-01-01",
+    ...overrides,
+  };
+  const res = await apiPost<any>("/api/admin/customers", payload);
+  if (res.status !== 201) throw new Error(`createTestCustomer failed: ${res.status} ${JSON.stringify(res.data)}`);
+  return res.data;
+}
+
+export async function assignEmployeeToCustomer(customerId: number, employeeId: number): Promise<void> {
+  const res = await apiPatch<any>(`/api/admin/customers/${customerId}/assign`, {
+    primaryEmployeeId: employeeId,
+    backupEmployeeId: null,
+    backupEmployeeId2: null,
+  });
+  if (res.status !== 200) throw new Error(`assignEmployeeToCustomer failed: ${res.status}`);
+}
+
+export async function createAndDocumentAppointment(
+  customerId: number,
+  serviceId: number,
+  options: { date?: string; startTime?: string; durationMinutes?: number; assignedEmployeeId?: number } = {}
+): Promise<{ appointmentId: number; documentationId: number }> {
+  const auth = await getAuthCookie();
+  const date = options.date || getFutureDate(7);
+  const startTime = options.startTime || "09:00";
+  const duration = options.durationMinutes || 60;
+  const employeeId = options.assignedEmployeeId || auth.user.id;
+
+  const apptRes = await apiPost<any>("/api/appointments/kundentermin", {
+    customerId,
+    date,
+    scheduledStart: startTime,
+    services: [{ serviceId, durationMinutes: duration }],
+    assignedEmployeeId: employeeId,
+  });
+  if (apptRes.status !== 201) throw new Error(`createAndDocumentAppointment: appointment failed: ${apptRes.status} ${JSON.stringify(apptRes.data)}`);
+
+  const docRes = await apiPost<any>(`/api/appointments/${apptRes.data.id}/document`, {
+    actualStart: startTime,
+    travelOriginType: "home",
+    travelKilometers: 5,
+    services: [{ serviceId, actualDurationMinutes: duration, details: "Auto-Test" }],
+  });
+  if (docRes.status !== 200 && docRes.status !== 201) throw new Error(`createAndDocumentAppointment: documentation failed: ${docRes.status} ${JSON.stringify(docRes.data)}`);
+
+  return { appointmentId: apptRes.data.id, documentationId: docRes.data?.id };
+}
+
+export async function createSignedServiceRecord(
+  customerId: number,
+  appointmentIds: number[]
+): Promise<{ id: number; [key: string]: unknown }> {
+  const res = await apiPost<any>("/api/service-records", {
+    customerId,
+    appointmentIds,
+  });
+  if (res.status !== 201 && res.status !== 200) throw new Error(`createSignedServiceRecord failed: ${res.status} ${JSON.stringify(res.data)}`);
+  return res.data;
+}
+
 const cleanupQueue: Array<() => Promise<void>> = [];
 
 export function trackCleanup(fn: () => Promise<void>): void {

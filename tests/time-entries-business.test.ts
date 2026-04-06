@@ -3,6 +3,7 @@ import {
   apiGet,
   apiPost,
   apiDelete,
+  apiPut,
   apiPutAs,
   apiDeleteAs,
   getAuthCookie,
@@ -806,5 +807,88 @@ describe("TE-BIZ-18: Nicht-Admin Einschränkungen für vergangene Urlaub/Krankhe
 
     const delRes = await apiDeleteAs(nonAdminAuth!, `/api/time-entries/${createRes.data.id}`);
     expect(delRes.status).toBe(403);
+  });
+});
+
+describe("TE-BIZ-19: CRUD-Ergänzungen (PUT, Urlaub, Offene Aufgaben)", () => {
+  let editEntryId: number;
+  const editDate = getFutureDate(400);
+
+  beforeAll(async () => {
+    await getAuthCookie();
+    const d = new Date(editDate);
+    const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
+    if (existing.status === 200 && Array.isArray(existing.data)) {
+      for (const entry of existing.data) {
+        if (entry.entryDate === editDate) {
+          await apiDelete(`/api/time-entries/${entry.id}`);
+        }
+      }
+    }
+  });
+
+  afterAll(async () => {
+    if (editEntryId) {
+      await apiDelete(`/api/time-entries/${editEntryId}`);
+    }
+  });
+
+  it("TE-BIZ-19.1 – PUT bearbeitet Zeiteintrag", async () => {
+    const createRes = await apiPost<any>("/api/time-entries", {
+      entryDate: editDate,
+      entryType: "bueroarbeit",
+      startTime: "09:00",
+      endTime: "12:00",
+      isFullDay: false,
+      notes: "Test-Büroarbeit",
+    });
+    expect(createRes.status).toBe(201);
+    editEntryId = createRes.data.id;
+
+    const { status, data } = await apiPut<any>(`/api/time-entries/${editEntryId}`, {
+      notes: "Aktualisierte Notiz",
+      endTime: "13:00",
+    });
+
+    expect(status).toBe(200);
+    expect(data.notes).toBe("Aktualisierte Notiz");
+    expect(data.endTime).toBe("13:00:00");
+  });
+
+  it("TE-BIZ-19.2 – PUT prüft Zeitkonflikte bei Bearbeitung", async () => {
+    const conflictEntry = await apiPost<any>("/api/time-entries", {
+      entryDate: editDate,
+      entryType: "bueroarbeit",
+      startTime: "14:00",
+      endTime: "15:00",
+      isFullDay: false,
+    });
+
+    const { status } = await apiPut(`/api/time-entries/${conflictEntry.data.id}`, {
+      startTime: "09:30",
+      endTime: "10:30",
+    });
+
+    expect(status).toBe(400);
+    await apiDelete(`/api/time-entries/${conflictEntry.data.id}`);
+  });
+
+  it("TE-BIZ-19.3 – Urlaubsübersicht enthält year-Feld", async () => {
+    const year = new Date().getFullYear();
+    const { status, data } = await apiGet<any>(`/api/time-entries/vacation-summary/${year}`);
+
+    expect(status).toBe(200);
+    expect(data.year).toBe(year);
+    expect(typeof data.totalDays).toBe("number");
+    expect(typeof data.usedDays).toBe("number");
+    expect(typeof data.remainingDays).toBe("number");
+  });
+
+  it("TE-BIZ-19.4 – Offene Aufgaben enthalten daysWithMissingBreaks", async () => {
+    const { status, data } = await apiGet<any>("/api/time-entries/open-tasks");
+
+    expect(status).toBe(200);
+    expect(data).toHaveProperty("daysWithMissingBreaks");
+    expect(Array.isArray(data.daysWithMissingBreaks)).toBe(true);
   });
 });

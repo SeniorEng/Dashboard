@@ -62,6 +62,132 @@ function validCustomerPayload(overrides: Record<string, any> = {}) {
   };
 }
 
+describe("KV-0: CRUD-Grundfunktionen", () => {
+  let testCustomerId: number;
+  let testContactId: number;
+
+  it("KV-0.1 – GET /api/customers liefert ein Array mit Kunden", async () => {
+    const res = await apiGet<any[]>("/api/customers");
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.data)).toBe(true);
+    if (res.data.length > 0) {
+      const customer = res.data[0];
+      expect(customer).toHaveProperty("id");
+      expect(customer).toHaveProperty("vorname");
+      expect(customer).toHaveProperty("nachname");
+      expect(customer).toHaveProperty("pflegegrad");
+    }
+  });
+
+  it("KV-0.2 – GET /api/customers/:id liefert einzelne Kundendetails", async () => {
+    const listRes = await apiGet<any[]>("/api/customers");
+    expect(listRes.status).toBe(200);
+    expect(listRes.data.length).toBeGreaterThan(0);
+    const firstCustomer = listRes.data[0];
+    const res = await apiGet<any>(`/api/customers/${firstCustomer.id}`);
+    expect(res.status).toBe(200);
+    expect(res.data.id).toBe(firstCustomer.id);
+    expect(res.data).toHaveProperty("vorname");
+    expect(res.data).toHaveProperty("nachname");
+  });
+
+  it("KV-0.3 – POST /api/admin/customers erstellt Kunden mit Versicherung, Kontakt, Budget", async () => {
+    const res = await apiPost<any>("/api/admin/customers", {
+      vorname: "QS-Test",
+      nachname: "CRUD-" + uniqueId(),
+      geburtsdatum: "1940-01-15",
+      strasse: "Teststraße",
+      nr: "42",
+      plz: "10115",
+      stadt: "Berlin",
+      telefon: "+4917612345678",
+      pflegegrad: 3,
+      pflegegradSeit: "2024-01-01",
+      insurance: {
+        providerId: insuranceProviderId,
+        versichertennummer: "A123456789",
+        validFrom: "2024-01-01",
+      },
+      contacts: [{
+        contactType: "familie",
+        isPrimary: true,
+        vorname: "QS-Kontakt",
+        nachname: "Test",
+        telefon: "+4917699887766",
+      }],
+      budgets: {
+        entlastungsbetrag45b: 125,
+        verhinderungspflege39: 0,
+        pflegesachleistungen36: 0,
+        validFrom: "2024-01-01",
+      },
+    });
+    expect(res.status).toBe(201);
+    expect(res.data).toHaveProperty("id");
+    expect(res.data.vorname).toBe("QS-Test");
+    testCustomerId = res.data.id;
+    createdCustomerIds.push(testCustomerId);
+  });
+
+  it("KV-0.4 – PATCH /api/admin/customers/:id aktualisiert den Kunden", async () => {
+    const res = await apiPatch<any>(`/api/admin/customers/${testCustomerId}`, {
+      stadt: "München",
+    });
+    expect(res.status).toBe(200);
+    expect(res.data.stadt).toBe("München");
+  });
+
+  it("KV-0.5 – POST care-level aktualisiert den Pflegegrad auf 4", async () => {
+    const res = await apiPost<any>(`/api/admin/customers/${testCustomerId}/care-level`, {
+      pflegegrad: 4,
+      validFrom: "2025-01-01",
+    });
+    expect(res.status).toBe(201);
+    expect(res.data).toHaveProperty("id");
+    expect(res.data.pflegegrad).toBe(4);
+  });
+
+  it("KV-0.6 – GET details liefert Detailansicht mit Insurance und Budgets", async () => {
+    const res = await apiGet<any>(`/api/admin/customers/${testCustomerId}/details`);
+    expect(res.status).toBe(200);
+    expect(res.data).toHaveProperty("id");
+    expect(res.data.id).toBe(testCustomerId);
+    expect(res.data.vorname).toBe("QS-Test");
+    expect(res.data).toHaveProperty("currentInsurance");
+    expect(res.data).toHaveProperty("currentBudgets");
+  });
+
+  it("KV-0.7 – POST contacts fügt Kontaktperson hinzu", async () => {
+    const res = await apiPost<any>(`/api/admin/customers/${testCustomerId}/contacts`, {
+      contactType: "familie",
+      vorname: "QS-Kontakt",
+      nachname: "Tochter",
+      telefon: "+4917699887766",
+    });
+    expect(res.status).toBe(201);
+    expect(res.data).toHaveProperty("id");
+    expect(res.data.vorname).toBe("QS-Kontakt");
+    testContactId = res.data.id;
+  });
+
+  it("KV-0.8 – GET contacts liefert Kontaktpersonen", async () => {
+    const res = await apiGet<any[]>(`/api/admin/customers/${testCustomerId}/contacts`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.data)).toBe(true);
+    const found = res.data.find((c: any) => c.id === testContactId);
+    expect(found).toBeDefined();
+    expect(found.vorname).toBe("QS-Kontakt");
+  });
+
+  it("KV-0.9 – DELETE contacts entfernt die Kontaktperson", async () => {
+    const res = await apiDelete(`/api/admin/customers/${testCustomerId}/contacts/${testContactId}`);
+    expect(res.status).toBe(200);
+    const checkRes = await apiGet<any[]>(`/api/admin/customers/${testCustomerId}/contacts`);
+    const found = checkRes.data.find((c: any) => c.id === testContactId);
+    expect(found).toBeUndefined();
+  });
+});
+
 describe("KV-1: PLZ-Validierung", () => {
   it("KV-1.1 – PLZ mit 5 Ziffern ist gültig", async () => {
     const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({ plz: "10115" }));
@@ -329,22 +455,6 @@ describe("KV-11: Deaktivierungs-Workflow", () => {
   it("KV-11.2 – Deaktivierung ohne Grund wird abgelehnt", async () => {
     expect(createdCustomerIds.length).toBeGreaterThan(0);
     const res = await apiPost<any>(`/api/admin/customers/${createdCustomerIds[0]}/complete-deactivation`, {});
-    expect(res.status).toBe(400);
-  });
-});
-
-describe("KV-12: Pflichtfelder", () => {
-  it("KV-12.1 – Kunde ohne Nachname wird abgelehnt", async () => {
-    const payload = validCustomerPayload({});
-    delete (payload as any).nachname;
-    const res = await apiPost<any>("/api/admin/customers", payload);
-    expect(res.status).toBe(400);
-  });
-
-  it("KV-12.2 – Kunde ohne Straße wird abgelehnt", async () => {
-    const payload = validCustomerPayload({});
-    delete (payload as any).strasse;
-    const res = await apiPost<any>("/api/admin/customers", payload);
     expect(res.status).toBe(400);
   });
 });

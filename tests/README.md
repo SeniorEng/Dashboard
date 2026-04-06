@@ -1,6 +1,6 @@
 # API Integrationstests
 
-Diese Tests prüfen die Kern-Funktionalität der Termin- und Zeiterfassungs-APIs.
+Diese Tests prüfen die Kern-Funktionalität der CareConnect-APIs.
 
 ## Voraussetzungen
 
@@ -20,21 +20,21 @@ TEST_USER_EMAIL='andere@email.de' TEST_USER_PASSWORD='passwort' npx vitest run
 TEST_USER_PASSWORD='dein_passwort' npx vitest
 ```
 
-## Getestete Bereiche
+## Testdateien (11 Dateien, ~390 Tests)
 
-### Termine (appointments.test.ts)
-- Kundentermin erstellen, bearbeiten, löschen
-- Überlappungsprüfung
-- Status-Workflow: geplant → gestartet → beendet → dokumentiert
-- Dokumentation mit Budget-Buchung
-- Erstberatung mit Kundenerstellung
-
-### Zeiterfassung (time-entries.test.ts)
-- Zeiteinträge erstellen, bearbeiten, löschen
-- Mehrtages-Urlaub/Krankheit
-- Zeitkonflikt-Erkennung
-- Urlaubsübersicht
-- Pausenprüfung nach §4 ArbZG
+| Datei | Bereich |
+|-------|---------|
+| `customers-business.test.ts` | Kunden CRUD, Validierung, Pflege, Deaktivierung |
+| `appointments-business.test.ts` | Termine, Status-Workflow, Dokumentation, Junction-Tabelle |
+| `time-entries-business.test.ts` | Zeiterfassung, Konflikte, ArbZG-Pausen, Urlaub |
+| `budget.test.ts` | Budget-Pools, Zuweisungen, Kostenschätzung |
+| `budget-e2e.test.ts` | Budget End-to-End: Dokumentation → Buchung → Storno |
+| `erstberatung.test.ts` | Erstberatung, Prospects, Prospect-Erstberatung |
+| `service-records.test.ts` | Leistungsnachweise, Signatur, PDF |
+| `appointment-series.test.ts` | Terminserie erstellen, bearbeiten, löschen |
+| `services.test.ts` | Dienstleistungen CRUD, Kundenpreise |
+| `auth.test.ts` | Login, Session, CSRF |
+| `private-billing-e2e.test.ts` | Privatrechnung End-to-End |
 
 ## Hinweise
 

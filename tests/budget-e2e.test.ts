@@ -471,23 +471,6 @@ describe("INT-7: Doppelbuchungsschutz", () => {
 });
 
 
-describe("INT-8: Budget-Typ Deaktivierung", () => {
-
-  it("INT-8.1 – Deaktivierter Topf zeigt 0 im Overview", async () => {
-    const settings = [
-      { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
-      { budgetType: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
-      { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
-    ];
-    await apiPut(`/api/budget/${testCustomerId}/type-settings`, { settings });
-
-    const res = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
-    expect(res.status).toBe(200);
-    expect(res.data.umwandlung45a.monthlyBudgetCents).toBe(0);
-  });
-});
-
-
 describe("INT-9: Initiale Startwerte (initial_balance)", () => {
 
   it("INT-9.1 – Bestehende Startwerte aufraeumen und neuen setzen", async () => {

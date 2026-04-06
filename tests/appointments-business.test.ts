@@ -1026,3 +1026,127 @@ describe("BIZ-25: PATCH Mitarbeiter-Wechsel Überlappungsprüfung", () => {
     await apiDelete(`/api/appointments/${slot1.id}`);
   });
 });
+
+interface AppointmentService {
+  id: number;
+  serviceId: number;
+  plannedDurationMinutes: number;
+  actualDurationMinutes: number | null;
+  details: string | null;
+  serviceName: string;
+  serviceCode: string | null;
+  serviceUnitType: string;
+}
+
+describe("BIZ-26: Junction-Tabelle (appointment_services)", () => {
+  let junctionTestApptId: number;
+
+  afterAll(async () => {
+    if (junctionTestApptId) {
+      await apiDelete(`/api/appointments/${junctionTestApptId}`);
+    }
+  });
+
+  it("BIZ-26.1 – sollte Services in Junction-Tabelle schreiben", async () => {
+    const { status, data } = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date: getFutureDate(160),
+      scheduledStart: "08:00",
+      services: [
+        { serviceId: hwServiceId, durationMinutes: 60 },
+        { serviceId: abServiceId, durationMinutes: 45 },
+      ],
+      assignedEmployeeId: auth.user.id,
+    });
+
+    expect(status).toBe(201);
+    junctionTestApptId = data.id;
+    createdIds.push(data.id);
+
+    const servicesRes = await apiGet<AppointmentService[]>(`/api/appointments/${data.id}/services`);
+    expect(servicesRes.status).toBe(200);
+    expect(servicesRes.data).toHaveLength(2);
+
+    const hwService = servicesRes.data.find((s) => s.serviceCode === "hauswirtschaft");
+    const abService = servicesRes.data.find((s) => s.serviceCode === "alltagsbegleitung");
+    expect(hwService?.plannedDurationMinutes).toBe(60);
+    expect(abService?.plannedDurationMinutes).toBe(45);
+  });
+
+  it("BIZ-26.2 – sollte Termin mit nur neuen Services erstellen", async () => {
+    const allServices = await apiGet<{ id: number; code: string | null; name: string }[]>("/api/services/all");
+    const newService = allServices.data.find((s) => s.code !== "hauswirtschaft" && s.code !== "alltagsbegleitung" && s.code !== "erstberatung" && s.code !== "kilometer");
+
+    if (!newService) {
+      console.log("Kein neuer Service zum Testen vorhanden - Test übersprungen");
+      return;
+    }
+
+    const { status, data } = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date: getFutureDate(161),
+      scheduledStart: "14:00",
+      services: [
+        { serviceId: newService.id, durationMinutes: 45 },
+      ],
+      assignedEmployeeId: auth.user.id,
+    });
+
+    expect(status).toBe(201);
+    createdIds.push(data.id);
+
+    const servicesRes = await apiGet<AppointmentService[]>(`/api/appointments/${data.id}/services`);
+    expect(servicesRes.status).toBe(200);
+    expect(servicesRes.data).toHaveLength(1);
+    expect(servicesRes.data[0].serviceId).toBe(newService.id);
+    expect(servicesRes.data[0].plannedDurationMinutes).toBe(45);
+  });
+
+  it("BIZ-26.3 – sollte gemischte Services korrekt aufteilen", async () => {
+    const allServices = await apiGet<{ id: number; code: string | null; name: string }[]>("/api/services/all");
+    const newService = allServices.data.find((s) => s.code !== "hauswirtschaft" && s.code !== "alltagsbegleitung" && s.code !== "erstberatung" && s.code !== "kilometer");
+
+    if (!newService) {
+      console.log("Kein neuer Service zum Testen vorhanden - Test übersprungen");
+      return;
+    }
+
+    const { status, data } = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date: getFutureDate(190),
+      scheduledStart: "09:00",
+      services: [
+        { serviceId: hwServiceId, durationMinutes: 30 },
+        { serviceId: newService.id, durationMinutes: 30 },
+      ],
+      assignedEmployeeId: auth.user.id,
+    });
+
+    if (status !== 201) {
+      console.log("Gemischte Services error:", JSON.stringify(data));
+    }
+    expect(status).toBe(201);
+    createdIds.push(data.id);
+
+    const servicesRes = await apiGet<AppointmentService[]>(`/api/appointments/${data.id}/services`);
+    expect(servicesRes.status).toBe(200);
+    expect(servicesRes.data).toHaveLength(2);
+  });
+
+  it("BIZ-26.4 – sollte durationPromised als Summe aller Services berechnen", async () => {
+    const { status, data } = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date: getFutureDate(163),
+      scheduledStart: "10:00",
+      services: [
+        { serviceId: hwServiceId, durationMinutes: 60 },
+        { serviceId: abServiceId, durationMinutes: 45 },
+      ],
+      assignedEmployeeId: auth.user.id,
+    });
+
+    expect(status).toBe(201);
+    expect(data.durationPromised).toBe(105);
+    createdIds.push(data.id);
+  });
+});
