@@ -13,7 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, BookOpen, Bell, CalendarPlus, UserPlus, WifiOff, Eye, ChevronDown } from "lucide-react";
+import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, BookOpen, Bell, CalendarPlus, UserPlus, WifiOff, Eye, ChevronDown, HelpCircle } from "lucide-react";
 import { type LayoutVariant, layoutVariants, colors } from "@/design-system";
 import { useUnreadCount } from "@/features/notifications/use-notifications";
 import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
@@ -368,6 +368,10 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
                 <DropdownMenuItem onClick={() => navigate("/profile")} data-testid="menu-profile">
                   <Settings className="mr-2 h-4 w-4" />
                   Mein Profil
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate("/help")} data-testid="menu-help">
+                  <HelpCircle className="mr-2 h-4 w-4" />
+                  Hilfe
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => resetOnboarding.mutate()}
