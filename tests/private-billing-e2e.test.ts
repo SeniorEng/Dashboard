@@ -249,6 +249,7 @@ afterAll(async () => {
 describe("SZ: Selbstzahler – Vollständiger Abrechnungs-Flow", () => {
   let szCustomerId: number;
   let szAppt: { id: number; date: string; time: string };
+  let szAppt2: { id: number; date: string; time: string };
   let szServiceRecordId: number;
   let szInvoiceId: number;
 
@@ -270,39 +271,48 @@ describe("SZ: Selbstzahler – Vollständiger Abrechnungs-Flow", () => {
     expect(res.status).toBe(200);
   });
 
-  it("SZ-3 – Termin erstellen und dokumentieren (mit Fahrtkilometern)", async () => {
+  it("SZ-3 – Termine erstellen und dokumentieren (HW + AB, verschiedene Tage, mit Fahrtkilometern)", async () => {
     expect(szCustomerId).toBeDefined();
     szAppt = await findFreeSlotAndCreate(
       szCustomerId, hwServiceId, 60,
-      [3, 30], ["06:00", "06:30", "07:00", "19:00", "19:30", "20:00"],
+      [3, 20], ["06:00", "06:30", "07:00", "19:00", "19:30", "20:00"],
     );
     expect(szAppt.id).toBeDefined();
-
     await documentAppointment(szAppt.id, szAppt.time, hwServiceId, 60, "SZ-Test Hauswirtschaft", 12, 5);
 
     const fetchRes = await apiGet<any>(`/api/appointments/${szAppt.id}`);
     expect(fetchRes.data.status).toBe("completed");
     expect(fetchRes.data.travelKilometers).toBe(12);
     expect(fetchRes.data.customerKilometers).toBe(5);
+
+    szAppt2 = await findFreeSlotAndCreate(
+      szCustomerId, abServiceId, 45,
+      [3, 30], ["05:00", "05:30", "20:30", "21:00"],
+    );
+    expect(szAppt2.id).toBeDefined();
+    await documentAppointment(szAppt2.id, szAppt2.time, abServiceId, 45, "SZ-Test Alltagsbegleitung", 0, 0);
   });
 
   it("SZ-4 – Leistungsnachweis erstellen und unterschreiben (pending → employee_signed → completed)", async () => {
     expect(szAppt).toBeDefined();
-    const apptDate = new Date(szAppt.date);
-    szServiceRecordId = await createServiceRecord(
-      szCustomerId,
-      apptDate.getFullYear(),
-      apptDate.getMonth() + 1,
-    );
-    expect(szServiceRecordId).toBeDefined();
+    expect(szAppt2).toBeDefined();
 
-    const pendingRes = await apiGet<any>(`/api/service-records/${szServiceRecordId}`);
-    expect(pendingRes.data.status).toBe("pending");
+    const dates = [new Date(szAppt.date), new Date(szAppt2.date)];
+    const months = [...new Set(dates.map(d => `${d.getFullYear()}-${d.getMonth() + 1}`))];
 
-    await signServiceRecord(szServiceRecordId);
+    for (const m of months) {
+      const [year, month] = m.split("-").map(Number);
+      const srId = await createServiceRecord(szCustomerId, year, month);
+      if (!szServiceRecordId) szServiceRecordId = srId;
 
-    const completedRes = await apiGet<any>(`/api/service-records/${szServiceRecordId}`);
-    expect(completedRes.data.status).toBe("completed");
+      const pendingRes = await apiGet<any>(`/api/service-records/${srId}`);
+      expect(pendingRes.data.status).toBe("pending");
+
+      await signServiceRecord(srId);
+
+      const completedRes = await apiGet<any>(`/api/service-records/${srId}`);
+      expect(completedRes.data.status).toBe("completed");
+    }
   });
 
   it("SZ-5 – Rechnung generieren und MwSt 19% prüfen", async () => {
@@ -328,24 +338,32 @@ describe("SZ: Selbstzahler – Vollständiger Abrechnungs-Flow", () => {
     expect(detail.grossAmountCents).toBe(detail.netAmountCents + detail.vatAmountCents);
   });
 
-  it("SZ-6 – Rechnungspositionen prüfen (Dienstleistung + km + Mitarbeiter)", async () => {
+  it("SZ-6 – Rechnungspositionen prüfen (HW + AB + km + Mitarbeiter)", async () => {
     expect(szInvoiceId).toBeDefined();
     const invoiceDetail = await getInvoiceWithLineItems(szInvoiceId);
     const lineItems = invoiceDetail.lineItems;
 
-    expect(lineItems.length).toBeGreaterThanOrEqual(2);
+    expect(lineItems.length).toBeGreaterThanOrEqual(3);
 
-    const serviceItem = lineItems.find((li: any) => li.serviceCode === "hauswirtschaft");
-    expect(serviceItem, "Hauswirtschaft-Position muss vorhanden sein").toBeDefined();
-    expect(serviceItem.durationMinutes).toBe(60);
-    expect(serviceItem.unitPriceCents).toBeGreaterThan(0);
-    expect(serviceItem.totalCents).toBeGreaterThan(0);
-    expect(serviceItem.employeeName).toBeTruthy();
-    expect(serviceItem.serviceDetails).toBe("SZ-Test Hauswirtschaft");
-    expect(serviceItem.appointmentDate).toBe(szAppt.date);
+    const hwItem = lineItems.find((li: any) => li.serviceCode === "hauswirtschaft");
+    expect(hwItem, "Hauswirtschaft-Position muss vorhanden sein").toBeDefined();
+    expect(hwItem.durationMinutes).toBe(60);
+    expect(hwItem.unitPriceCents).toBeGreaterThan(0);
+    expect(hwItem.totalCents).toBeGreaterThan(0);
+    expect(hwItem.employeeName).toBeTruthy();
+    expect(hwItem.serviceDetails).toBe("SZ-Test Hauswirtschaft");
+    expect(hwItem.appointmentDate).toBe(szAppt.date);
+    const expectedHwTotal = Math.round((60 / 60) * hwItem.unitPriceCents);
+    expect(hwItem.totalCents).toBe(expectedHwTotal);
 
-    const expectedTotal = Math.round((60 / 60) * serviceItem.unitPriceCents);
-    expect(serviceItem.totalCents).toBe(expectedTotal);
+    const abItem = lineItems.find((li: any) => li.serviceCode === "alltagsbegleitung");
+    if (new Date(szAppt.date).getMonth() === new Date(szAppt2.date).getMonth()) {
+      expect(abItem, "Alltagsbegleitung-Position muss vorhanden sein").toBeDefined();
+      expect(abItem.durationMinutes).toBe(45);
+      expect(abItem.serviceDetails).toBe("SZ-Test Alltagsbegleitung");
+      const expectedAbTotal = Math.round((45 / 60) * abItem.unitPriceCents);
+      expect(abItem.totalCents).toBe(expectedAbTotal);
+    }
 
     const travelKmItem = lineItems.find((li: any) => li.serviceCode === "travel_km");
     expect(travelKmItem, "Anfahrt-km-Position muss vorhanden sein").toBeDefined();
@@ -356,6 +374,12 @@ describe("SZ: Selbstzahler – Vollständiger Abrechnungs-Flow", () => {
     const customerKmItem = lineItems.find((li: any) => li.serviceCode === "customer_km");
     expect(customerKmItem, "Kunden-km-Position muss vorhanden sein").toBeDefined();
     expect(customerKmItem.durationMinutes).toBe(5);
+
+    const nonKmLineItems = lineItems.filter((li: any) => !["travel_km", "customer_km"].includes(li.serviceCode));
+    const serviceCodes = [...new Set(nonKmLineItems.map((li: any) => li.serviceCode))];
+    if (new Date(szAppt.date).getMonth() === new Date(szAppt2.date).getMonth()) {
+      expect(serviceCodes.length, "Mindestens 2 verschiedene Service-Typen").toBeGreaterThanOrEqual(2);
+    }
   });
 
   it("SZ-7 – Keine Budget-Transaktionen für Selbstzahler", async () => {
@@ -582,6 +606,7 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
   let cpPriceId: number;
   let cpInvoiceId: number;
   let defaultHwPrice: number;
+  let cpValidFrom: string;
 
   it("CP-1 – Selbstzahler-Kunde erstellen", async () => {
     const res = await apiPost<any>("/api/admin/customers", szCustomerPayload({
@@ -604,12 +629,12 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
 
   it("CP-2 – Kundenspezifischen Preis ab heute setzen", async () => {
     expect(cpCustomerId).toBeDefined();
-    const today = new Date().toISOString().split("T")[0];
+    cpValidFrom = new Date().toISOString().split("T")[0];
 
     const res = await apiPost<any>(`/api/customers/${cpCustomerId}/service-prices`, {
       serviceId: hwServiceId,
       priceCents: 5500,
-      validFrom: today,
+      validFrom: cpValidFrom,
     });
     expect(res.status).toBe(200);
     expect(res.data).toHaveProperty("id");
@@ -639,12 +664,16 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
 
   it("CP-5 – Termin NACH Gültigkeitsdatum nutzt Kundenpreis", async () => {
     expect(cpCustomerId).toBeDefined();
+    expect(cpValidFrom).toBeDefined();
 
     cpApptAfter = await findFreeSlotAndCreate(
       cpCustomerId, hwServiceId, 60,
       [0, 0], ["03:00", "03:30", "04:00", "23:00", "23:30"],
     );
-    expect(cpApptAfter.date).toBe(new Date().toISOString().split("T")[0]);
+    expect(
+      cpApptAfter.date >= cpValidFrom,
+      `Termin (${cpApptAfter.date}) muss >= validFrom (${cpValidFrom}) sein`,
+    ).toBe(true);
     await documentAppointment(cpApptAfter.id, cpApptAfter.time, hwServiceId, 60, "CP-NachPreis", 0, 0);
   });
 
@@ -678,9 +707,8 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
     const hwItems = allLineItems.filter((li: any) => li.serviceCode === "hauswirtschaft");
     expect(hwItems.length).toBeGreaterThanOrEqual(2);
 
-    const today = new Date().toISOString().split("T")[0];
-    const afterItem = hwItems.find((li: any) => li.appointmentDate >= today);
-    const beforeItem = hwItems.find((li: any) => li.appointmentDate < today);
+    const afterItem = hwItems.find((li: any) => li.appointmentDate >= cpValidFrom);
+    const beforeItem = hwItems.find((li: any) => li.appointmentDate < cpValidFrom);
 
     expect(afterItem, "Termin ab heute (nach validFrom) muss vorhanden sein").toBeDefined();
     expect(afterItem!.unitPriceCents, "Termin nach validFrom muss Kundenpreis 5500 nutzen").toBe(5500);
@@ -710,7 +738,7 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("CP-9 – Kundenpreis löschen setzt validTo", async () => {
+  it("CP-9 – Kundenpreis löschen setzt validTo und Rechnung nutzt Standardpreis", async () => {
     expect(cpPriceId).toBeDefined();
     const deleteRes = await apiDelete(`/api/customers/${cpCustomerId}/service-prices/${cpPriceId}`);
     expect(deleteRes.status).toBe(200);
@@ -720,6 +748,19 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
     const deletedPrice = allPricesRes.data.find((p: any) => p.id === cpPriceId);
     if (deletedPrice) {
       expect(deletedPrice.validTo).toBeTruthy();
+    }
+
+    const activePrices = await apiGet<any[]>(`/api/customers/${cpCustomerId}/service-prices`);
+    const activeHwPrice = (activePrices.data as any[]).find(
+      (p: any) => p.serviceId === hwServiceId && !p.validTo,
+    );
+    expect(activeHwPrice, "Nach Löschung darf kein aktiver (ohne validTo) Kundenpreis existieren").toBeUndefined();
+
+    const closedHwPrice = (activePrices.data as any[]).find(
+      (p: any) => p.serviceId === hwServiceId && p.validTo,
+    );
+    if (closedHwPrice) {
+      expect(closedHwPrice.validTo, "Gelöschter Preis muss validTo haben").toBeTruthy();
     }
   });
 });
@@ -899,5 +940,40 @@ describe("XV: Cross-Validation – Abrechnungstyp-übergreifende Prüfungen", ()
       billingYear: apptDate.getFullYear(),
     });
     expect(dupRes.status).toBe(400);
+  });
+
+  it("XV-6 – Keine doppelte Abrechnung: appointmentId ist pro Rechnung eindeutig", async () => {
+    const szPayload = szCustomerPayload({ nachname: "XV-NoDup-" + uniqueId() });
+    const custRes = await apiPost<any>("/api/admin/customers", szPayload);
+    expect(custRes.status).toBe(201);
+    const custId = custRes.data.id;
+    cleanupCustomerIds.push(custId);
+
+    await apiPatch<any>(`/api/admin/customers/${custId}/assign`, {
+      primaryEmployeeId: auth.user.id,
+      backupEmployeeId: null,
+      backupEmployeeId2: null,
+    });
+
+    const appt1 = await findFreeSlotAndCreate(custId, hwServiceId, 30, [3, 20], ["00:00", "00:30"]);
+    await documentAppointment(appt1.id, appt1.time, hwServiceId, 30, "XV-NoDup-1", 0, 0);
+
+    const appt2 = await findFreeSlotAndCreate(custId, abServiceId, 30, [3, 20], ["01:00", "01:30"]);
+    await documentAppointment(appt2.id, appt2.time, abServiceId, 30, "XV-NoDup-2", 0, 0);
+
+    const apptDate = new Date(appt1.date);
+    const srId = await createServiceRecord(custId, apptDate.getFullYear(), apptDate.getMonth() + 1);
+    await signServiceRecord(srId);
+    const invData = await generateInvoice(custId, apptDate.getFullYear(), apptDate.getMonth() + 1);
+    const inv = Array.isArray(invData) ? invData[0] : invData;
+
+    const detail = await getInvoiceWithLineItems(inv.id);
+    const nonKmItems = detail.lineItems.filter((li: any) => !["travel_km", "customer_km"].includes(li.serviceCode));
+
+    const appointmentIds = nonKmItems.map((li: any) => li.appointmentId).filter(Boolean);
+    const uniqueApptIds = [...new Set(appointmentIds)];
+    expect(uniqueApptIds.length).toBe(appointmentIds.length);
+
+    expect(nonKmItems.length).toBeGreaterThanOrEqual(2);
   });
 });
