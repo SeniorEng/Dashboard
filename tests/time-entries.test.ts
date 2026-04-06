@@ -274,13 +274,26 @@ describe("TE-BIZ-5: Mehrtägiger Urlaub überspringt Wochenenden", () => {
 });
 
 describe("TE-BIZ-6: Krankheitseintrag", () => {
-  const sickDate = getFutureDate(250);
-
-  beforeAll(async () => {
-    await clearDateEntries(sickDate);
-  });
+  async function findFreeFutureWeekday(startOffset: number): Promise<string> {
+    for (let off = startOffset; off < startOffset + 30; off++) {
+      const candidate = getFutureDate(off);
+      await clearDateEntries(candidate);
+      const probe = await apiPost<any>("/api/time-entries", {
+        entryDate: candidate,
+        entryType: "bueroarbeit",
+        startTime: "06:00",
+        endTime: "06:15",
+      });
+      if (probe.status === 201) {
+        await apiDelete(`/api/time-entries/${probe.data.id}`);
+        return candidate;
+      }
+    }
+    throw new Error("Kein freier Werktag gefunden für Krankheitstest");
+  }
 
   it("TE-BIZ-6.1 – Krankheitseintrag erstellen (201)", async () => {
+    const sickDate = await findFreeFutureWeekday(500);
     const res = await apiPost<any>("/api/time-entries", {
       entryDate: sickDate,
       entryType: "krankheit",

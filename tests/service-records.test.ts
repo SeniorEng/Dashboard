@@ -513,6 +513,7 @@ describe("LN-13: Monatlicher LN – Positive Erstellung mit dokumentierten Termi
       [2, 60]
     );
     expect(apptId, "Termin muss erstellt und dokumentiert werden").toBeTruthy();
+    cleanupApptIds.push(apptId!);
 
     const now = new Date();
     const year = now.getFullYear();
@@ -526,13 +527,14 @@ describe("LN-13: Monatlicher LN – Positive Erstellung mit dokumentierten Termi
 
     const createRes = await apiPost<any>("/api/service-records", {
       customerId: testCustomerId,
+      employeeId: auth.user.id,
       year,
       month,
     });
 
     if (checkRes.data.canCreateRecord === true && checkRes.data.uncoveredDocumentedCount > 0) {
       expect(createRes.status, "LN-Erstellung muss 201 liefern wenn canCreateRecord=true und uncovered>0").toBe(201);
-      expect(createRes.data.type).toBe("monthly");
+      expect(createRes.data.recordType).toBe("monthly");
       expect(createRes.data.status).toBe("pending");
     } else if (checkRes.data.canCreateRecord === false) {
       expect([400, 409]).toContain(createRes.status);
