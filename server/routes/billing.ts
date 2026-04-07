@@ -322,7 +322,9 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
   const { generateInvoiceHtml, generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
   const { embedZugferdXml } = await import("../lib/zugferd");
   const { sendEmail, buildEmailLayout } = await import("../services/email-service");
+  const { resolveLogoToDataUrl } = await import("../services/logo-resolver");
   const companyName = companySettings.companyName || "SeniorenEngel";
+  const resolvedLogo = await resolveLogoToDataUrl(companySettings.logoUrl);
 
   for (const invoiceId of invoiceIds) {
     try {
@@ -404,7 +406,7 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
         <p>Bei Rückfragen stehen wir Ihnen gerne zur Verfügung.</p>
         <p>Mit freundlichen Grüßen<br/>${companyName}</p>
       `;
-      const html = buildEmailLayout(companyName, companySettings.logoUrl, bodyContent);
+      const html = buildEmailLayout(companyName, resolvedLogo, bodyContent);
 
       const fileNames = `[${invoice.invoiceNumber}] ${invoice.invoiceNumber}.pdf, LN-${invoice.invoiceNumber}.pdf`;
 
@@ -477,7 +479,7 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
               die an Ihre Pflegekasse gesendet wurde.</p>
               <p>Mit freundlichen Grüßen<br/>${companyName}</p>
             `;
-            const customerHtml = buildEmailLayout(companyName, companySettings.logoUrl, customerBody);
+            const customerHtml = buildEmailLayout(companyName, resolvedLogo, customerBody);
             await sendEmail(companySettings, {
               to: cust[0].email,
               subject: customerSubject,
@@ -1427,7 +1429,9 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
   const { buffer: lnPdf } = await generatePdf(lnHtml);
 
   const { sendEmail, buildEmailLayout } = await import("../services/email-service");
+  const { resolveLogoToDataUrl } = await import("../services/logo-resolver");
   const companyName = companySettings.companyName || "SeniorenEngel";
+  const resolvedLogo = await resolveLogoToDataUrl(companySettings.logoUrl);
 
   const monthName = MONTH_NAMES_DE[(invoice.billingMonth - 1)] || String(invoice.billingMonth);
   const customerFullName = [cust.vorname, cust.nachname].filter(Boolean).join(" ") || cust.name;
@@ -1443,7 +1447,7 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
     <p>Mit freundlichen Grüßen<br/>${companyName}</p>
   `;
 
-  const html = buildEmailLayout(companyName, companySettings.logoUrl, bodyContent);
+  const html = buildEmailLayout(companyName, resolvedLogo, bodyContent);
 
   const fileNames = `[${invoice.invoiceNumber}] ${invoice.invoiceNumber}.pdf, LN-${invoice.invoiceNumber}.pdf`;
 
@@ -1522,7 +1526,7 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
           die an Ihre Pflegekasse gesendet wurde.</p>
           <p>Mit freundlichen Grüßen<br/>${companyName}</p>
         `;
-        const customerHtml = buildEmailLayout(companyName, companySettings.logoUrl, customerBody);
+        const customerHtml = buildEmailLayout(companyName, resolvedLogo, customerBody);
 
         await sendEmail(companySettings, {
           to: cust.email,
