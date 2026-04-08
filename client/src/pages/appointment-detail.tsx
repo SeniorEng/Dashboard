@@ -348,9 +348,57 @@ export default function AppointmentDetail() {
           <div className="flex items-center justify-between py-2 border-b border-border/50">
             <span className="text-muted-foreground">Art</span>
             <span className="font-medium">
-              {isErstberatung ? "Erstberatung" : "Kundentermin"}
+              {isErstberatung ? "Erstberatung" : appointment.isFahrtdienst ? (
+                <span className="flex items-center gap-1.5">
+                  <Car className="h-3.5 w-3.5 text-primary" />
+                  Fahrtdienst
+                </span>
+              ) : "Kundentermin"}
             </span>
           </div>
+
+          {appointment.isFahrtdienst && appointment.doctorAppointmentTime && (
+            <div className="py-2 border-b border-border/50 space-y-1.5" data-testid="panel-fahrtdienst-detail">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground text-sm flex items-center gap-1">
+                  <Car className="h-3.5 w-3.5" /> Abholzeit
+                </span>
+                <span className="font-medium text-primary">
+                  {formatTimeSlot(appointment.scheduledStart)} Uhr
+                </span>
+              </div>
+              {appointment.estimatedTravelMinutes != null && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Fahrtzeit</span>
+                  <span>~{appointment.estimatedTravelMinutes} Min.</span>
+                </div>
+              )}
+              {appointment.travelBufferMinutes != null && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Puffer</span>
+                  <span>+{appointment.travelBufferMinutes} Min.</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground text-sm">Arzt-Termin</span>
+                <span className="font-medium">
+                  {formatTimeSlot(appointment.doctorAppointmentTime)} Uhr
+                </span>
+              </div>
+              {appointment.doctorName && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Arzt/Praxis</span>
+                  <span>{appointment.doctorName}</span>
+                </div>
+              )}
+              {appointment.doctorStrasse && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Adresse</span>
+                  <span>{appointment.doctorStrasse}, {appointment.doctorPlz} {appointment.doctorStadt}</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {(hasAnyService || (isCompleted && hasAnyDocumentedService)) && (
             <>

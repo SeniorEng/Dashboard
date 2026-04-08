@@ -121,6 +121,51 @@ router.use("/whatsapp", whatsappRouter);
 router.use("/prospects", prospectsRouter);
 router.use("/appointment-series", appointmentSeriesRouter);
 
+router.get("/travel-time", requireAuth, asyncHandler("Fahrtzeit konnte nicht berechnet werden", async (req, res) => {
+  const fromLat = parseFloat(req.query.fromLat as string);
+  const fromLng = parseFloat(req.query.fromLng as string);
+  const doctorAppointmentTime = req.query.doctorAppointmentTime as string;
+
+  if (isNaN(fromLat) || isNaN(fromLng)) {
+    return res.status(400).json({ error: "Ungültige Kundenkoordinaten" });
+  }
+  if (!doctorAppointmentTime || !/^\d{2}:\d{2}$/.test(doctorAppointmentTime)) {
+    return res.status(400).json({ error: "Ungültige Arzt-Terminzeit (HH:MM erwartet)" });
+  }
+
+  const { calculateTravelTimeFromCoords, calculateTravelTime } = await import("../services/travel-time");
+
+  const toLat = parseFloat(req.query.toLat as string);
+  const toLng = parseFloat(req.query.toLng as string);
+
+  if (!isNaN(toLat) && !isNaN(toLng)) {
+    const result = await calculateTravelTimeFromCoords({
+      fromLat, fromLng, toLat, toLng, doctorAppointmentTime,
+    });
+    if (!result) {
+      return res.status(422).json({ error: "Fahrtzeit konnte nicht berechnet werden" });
+    }
+    return res.json(result);
+  }
+
+  const toStrasse = req.query.toStrasse as string;
+  const toPlz = req.query.toPlz as string;
+  const toStadt = req.query.toStadt as string;
+
+  if (!toStrasse || !toPlz || !toStadt) {
+    return res.status(400).json({ error: "Arzt-Adresse (Straße, PLZ, Ort) ist erforderlich" });
+  }
+
+  const result = await calculateTravelTime({
+    fromLat, fromLng, toStrasse, toPlz, toStadt, doctorAppointmentTime,
+  });
+  if (!result) {
+    return res.status(422).json({ error: "Fahrtzeit konnte nicht berechnet werden. Bitte prüfen Sie die Adressen." });
+  }
+
+  res.json(result);
+}));
+
 router.get("/address-search", asyncHandler("Adresssuche fehlgeschlagen", async (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
   if (q.length < 3) {

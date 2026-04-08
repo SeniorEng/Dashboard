@@ -23,7 +23,7 @@ import { ChevronLeft, Loader2, Calendar, Clock, User, Plus, Users, AlertTriangle
 import { WEEKDAYS, type Weekday } from "@shared/schema/appointments";
 import { WEEKDAY_LABELS, formatWeekdays } from "@/features/appointments/hooks/use-appointment-series";
 import { iconSize, componentStyles } from "@/design-system";
-import { useNewAppointmentForm, ServiceSelector, AppointmentSummary } from "@/features/appointments";
+import { useNewAppointmentForm, ServiceSelector, AppointmentSummary, FahrtdienstPanel } from "@/features/appointments";
 import { EmployeeAvailability } from "@/features/appointments/components/employee-availability";
 import { AddressFields } from "@/pages/admin/components/address-fields";
 import { isDachPhone } from "@shared/schema/common";
@@ -260,6 +260,16 @@ export default function NewAppointment() {
                 onChange={form.setKtServices}
                 error={form.errors.ktServices}
               />
+
+              {form.hasAlltagsbegleitung && (
+                <FahrtdienstPanel
+                  fahrtdienst={form.fahrtdienst}
+                  onChange={form.setFahrtdienst}
+                  customerLat={form.selectedCustomer?.latitude}
+                  customerLng={form.selectedCustomer?.longitude}
+                  onPickupTimeCalculated={form.handlePickupTimeCalculated}
+                />
+              )}
 
               {form.ktSummary.hasServices && (
                 <AppointmentSummary

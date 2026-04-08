@@ -116,6 +116,16 @@ export const appointments = pgTable("appointments", {
   signatureHash: text("signature_hash"),
   signedAt: timestamp("signed_at"),
   signedByUserId: integer("signed_by_user_id").references(() => users.id),
+  isFahrtdienst: boolean("is_fahrtdienst").notNull().default(false),
+  doctorName: text("doctor_name"),
+  doctorAppointmentTime: time("doctor_appointment_time"),
+  doctorStrasse: text("doctor_strasse"),
+  doctorPlz: text("doctor_plz"),
+  doctorStadt: text("doctor_stadt"),
+  doctorLatitude: real("doctor_latitude"),
+  doctorLongitude: real("doctor_longitude"),
+  estimatedTravelMinutes: integer("estimated_travel_minutes"),
+  travelBufferMinutes: integer("travel_buffer_minutes"),
   seriesId: integer("series_id").references(() => appointmentSeries.id, { onDelete: "set null" }),
   isSeriesException: boolean("is_series_exception").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -169,6 +179,21 @@ export const appointmentServiceEntrySchema = z.object({
 export type AppointmentServiceEntry = z.infer<typeof appointmentServiceEntrySchema>;
 
 // Schema for Kundentermin appointment (supports dynamic services array)
+export const fahrtdienstSchema = z.object({
+  isFahrtdienst: z.literal(true),
+  doctorAppointmentTime: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Ungültiges Zeitformat (HH:MM erwartet)"),
+  doctorStrasse: z.string().min(1, "Arzt-Adresse (Straße) ist erforderlich"),
+  doctorPlz: z.string().regex(/^\d{5}$/, "PLZ muss 5 Ziffern haben"),
+  doctorStadt: z.string().min(1, "Arzt-Adresse (Ort) ist erforderlich"),
+  doctorName: z.string().max(200).optional(),
+  doctorLatitude: z.number().optional(),
+  doctorLongitude: z.number().optional(),
+  estimatedTravelMinutes: z.number().int().min(0).optional(),
+  travelBufferMinutes: z.number().int().min(0).optional(),
+});
+
+export type FahrtdienstData = z.infer<typeof fahrtdienstSchema>;
+
 export const insertKundenterminSchema = z.object({
   customerId: z.number(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat (YYYY-MM-DD erwartet)"),
@@ -176,6 +201,16 @@ export const insertKundenterminSchema = z.object({
   services: z.array(appointmentServiceEntrySchema).min(1, "Mindestens ein Service muss ausgewählt werden"),
   notes: z.string().max(255, "Maximal 255 Zeichen").optional(),
   assignedEmployeeId: z.number().nullable().optional(),
+  isFahrtdienst: z.boolean().optional().default(false),
+  doctorAppointmentTime: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Ungültiges Zeitformat").optional(),
+  doctorStrasse: z.string().max(200).optional(),
+  doctorPlz: z.string().regex(/^\d{5}$/, "PLZ muss 5 Ziffern haben").optional(),
+  doctorStadt: z.string().max(200).optional(),
+  doctorName: z.string().max(200).optional(),
+  doctorLatitude: z.number().optional(),
+  doctorLongitude: z.number().optional(),
+  estimatedTravelMinutes: z.number().int().min(0).optional(),
+  travelBufferMinutes: z.number().int().min(0).optional(),
 });
 
 // Schema for Erstberatung appointment linked to prospect

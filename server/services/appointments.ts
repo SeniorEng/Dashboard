@@ -67,6 +67,16 @@ export interface KundenterminInput {
   services: Array<{ serviceId: number; durationMinutes: number; serviceCode?: string | null }>;
   notes?: string;
   assignedEmployeeId?: number | null;
+  isFahrtdienst?: boolean;
+  doctorName?: string;
+  doctorAppointmentTime?: string;
+  doctorStrasse?: string;
+  doctorPlz?: string;
+  doctorStadt?: string;
+  doctorLatitude?: number;
+  doctorLongitude?: number;
+  estimatedTravelMinutes?: number;
+  travelBufferMinutes?: number;
 }
 
 export class AppointmentService {
@@ -327,6 +337,16 @@ export class AppointmentService {
       notes: input.notes || null,
       status: "scheduled",
       assignedEmployeeId: input.assignedEmployeeId ?? null,
+      isFahrtdienst: input.isFahrtdienst ?? false,
+      doctorName: input.doctorName ?? null,
+      doctorAppointmentTime: input.doctorAppointmentTime ?? null,
+      doctorStrasse: input.doctorStrasse ?? null,
+      doctorPlz: input.doctorPlz ?? null,
+      doctorStadt: input.doctorStadt ?? null,
+      doctorLatitude: input.doctorLatitude ?? null,
+      doctorLongitude: input.doctorLongitude ?? null,
+      estimatedTravelMinutes: input.estimatedTravelMinutes ?? null,
+      travelBufferMinutes: input.travelBufferMinutes ?? null,
     };
     
     const serviceEntries = input.services.map(s => ({

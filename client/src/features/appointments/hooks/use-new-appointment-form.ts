@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -14,6 +14,7 @@ import type { Weekday, SeriesFrequency } from "@shared/schema/appointments";
 import { isDachPhone } from "@shared/schema/common";
 import type { Service } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
+import type { FahrtdienstState } from "../components/fahrtdienst-panel";
 
 export function useNewAppointmentForm() {
   const [, setLocation] = useLocation();
@@ -43,6 +44,35 @@ export function useNewAppointmentForm() {
   const [showSeriesConflictDialog, setShowSeriesConflictDialog] = useState(false);
   const [seriesConflictInfo, setSeriesConflictInfo] = useState<{ totalDates: number; validDates: number } | null>(null);
   const [pendingSeriesInput, setPendingSeriesInput] = useState<SeriesCreateInput | null>(null);
+
+  const [fahrtdienst, setFahrtdienst] = useState<FahrtdienstState>({
+    enabled: false,
+    doctorName: "",
+    doctorAppointmentTime: "",
+    doctorStrasse: "",
+    doctorPlz: "",
+    doctorStadt: "",
+  });
+  const [fahrtdienstTravelData, setFahrtdienstTravelData] = useState<{
+    pickupTime: string;
+    travelMinutes: number;
+    bufferMinutes: number;
+    distanceKm: number;
+    doctorLat?: number;
+    doctorLng?: number;
+  } | null>(null);
+
+  const handlePickupTimeCalculated = useCallback((
+    pickupTime: string,
+    travelMinutes: number,
+    bufferMinutes: number,
+    distanceKm: number,
+    doctorLat?: number,
+    doctorLng?: number,
+  ) => {
+    setFahrtdienstTravelData({ pickupTime, travelMinutes, bufferMinutes, distanceKm, doctorLat, doctorLng });
+    setKtTime(pickupTime);
+  }, []);
 
   const { data: catalogServices = [] } = useQuery<Service[]>({
     queryKey: ["/api/services"],
@@ -280,6 +310,27 @@ export function useNewAppointmentForm() {
     staleTime: 30_000,
   });
 
+  const hasAlltagsbegleitung = useMemo(() => {
+    return ktServices.some(s => {
+      const catalog = catalogServices.find(c => c.id === s.serviceId);
+      return catalog?.lohnartKategorie === "alltagsbegleitung";
+    });
+  }, [ktServices, catalogServices]);
+
+  useEffect(() => {
+    if (!hasAlltagsbegleitung && fahrtdienst.enabled) {
+      setFahrtdienst({
+        enabled: false,
+        doctorName: "",
+        doctorAppointmentTime: "",
+        doctorStrasse: "",
+        doctorPlz: "",
+        doctorStadt: "",
+      });
+      setFahrtdienstTravelData(null);
+    }
+  }, [hasAlltagsbegleitung]);
+
   const ktSummary = useMemo(() => {
     const servicesList = ktServices.map(s => {
       const catalog = catalogServices.find(c => c.id === s.serviceId);
@@ -458,14 +509,31 @@ export function useNewAppointmentForm() {
       return;
     }
 
-    createKundenterminMutation.mutate({
+    const mutationData: Record<string, unknown> = {
       customerId: parseInt(ktCustomerId),
       date: ktDate,
       scheduledStart: ktTime,
       services: ktServices,
       notes: ktNotes || undefined,
       assignedEmployeeId: isAdmin && ktAssignedEmployeeId ? parseInt(ktAssignedEmployeeId) : undefined,
-    }, {
+    };
+
+    if (hasAlltagsbegleitung && fahrtdienst.enabled && fahrtdienst.doctorAppointmentTime && fahrtdienst.doctorStrasse) {
+      mutationData.isFahrtdienst = true;
+      mutationData.doctorName = fahrtdienst.doctorName || undefined;
+      mutationData.doctorAppointmentTime = fahrtdienst.doctorAppointmentTime;
+      mutationData.doctorStrasse = fahrtdienst.doctorStrasse;
+      mutationData.doctorPlz = fahrtdienst.doctorPlz;
+      mutationData.doctorStadt = fahrtdienst.doctorStadt;
+      if (fahrtdienstTravelData) {
+        mutationData.estimatedTravelMinutes = fahrtdienstTravelData.travelMinutes;
+        mutationData.travelBufferMinutes = fahrtdienstTravelData.bufferMinutes;
+        mutationData.doctorLatitude = fahrtdienstTravelData.doctorLat;
+        mutationData.doctorLongitude = fahrtdienstTravelData.doctorLng;
+      }
+    }
+
+    createKundenterminMutation.mutate(mutationData as any, {
       onSuccess: (data: any) => {
         toast({ title: "Termin erstellt", description: "Der Kundentermin wurde erfolgreich angelegt." });
         if (data?._warning) {
@@ -692,6 +760,12 @@ export function useNewAppointmentForm() {
 
     handleKundenterminSubmit,
     handleErstberatungSubmit,
+
+    fahrtdienst,
+    setFahrtdienst,
+    hasAlltagsbegleitung,
+    selectedCustomer,
+    handlePickupTimeCalculated,
 
     seriesEnabled,
     setSeriesEnabled,

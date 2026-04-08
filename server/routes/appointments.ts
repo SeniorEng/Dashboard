@@ -478,6 +478,16 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     ...validatedData,
     services: servicesWithCodes,
     assignedEmployeeId,
+    isFahrtdienst: validatedData.isFahrtdienst ?? false,
+    doctorName: validatedData.doctorName,
+    doctorAppointmentTime: validatedData.doctorAppointmentTime,
+    doctorStrasse: validatedData.doctorStrasse,
+    doctorPlz: validatedData.doctorPlz,
+    doctorStadt: validatedData.doctorStadt,
+    doctorLatitude: validatedData.doctorLatitude,
+    doctorLongitude: validatedData.doctorLongitude,
+    estimatedTravelMinutes: validatedData.estimatedTravelMinutes,
+    travelBufferMinutes: validatedData.travelBufferMinutes,
   });
   
   const overlapResult = await appointmentService.checkOverlap(
