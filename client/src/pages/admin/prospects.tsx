@@ -250,10 +250,11 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
   const reparseMutation = useReparseProspect();
   const declineOfferMutation = useDeclineProspectOffer();
   const { data: openOffer } = useProspectOffer(prospect?.status === "angebot_gemacht" ? prospectId : null);
-  const { data: appointmentData } = useProspectAppointmentData(prospect?.status === "erstberatung_vereinbart" ? prospectId : null);
+  const { data: appointmentData, isLoading: isAppointmentDataLoading } = useProspectAppointmentData(prospect?.status === "erstberatung_vereinbart" ? prospectId : null);
   const hasActiveErstberatung = appointmentData?.appointments?.some(
-    (a) => a.appointmentType?.toLowerCase() === "erstberatung" && a.status !== "cancelled"
+    (a) => a.appointmentType?.trim().toLowerCase() === "erstberatung" && a.status !== "cancelled"
   ) ?? false;
+  const canReplanErstberatung = prospect?.status === "erstberatung_vereinbart" && !isAppointmentDataLoading && !hasActiveErstberatung;
   const [, navigate] = useLocation();
   const [noteText, setNoteText] = useState("");
   const [noteType, setNoteType] = useState<ProspectNoteType>("notiz");
@@ -676,7 +677,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                         </Button>
                       </div>
 
-                      {(prospect.status === "qualifiziert" || (prospect.status === "erstberatung_vereinbart" && !hasActiveErstberatung)) && (
+                      {(prospect.status === "qualifiziert" || canReplanErstberatung) && (
                         <Button
                           className="w-full"
                           onClick={handleConvertToErstberatung}

@@ -1106,11 +1106,11 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
     ip
   );
 
-  if (appointment.appointmentType?.toLowerCase() === "erstberatung" && appointment.prospectId) {
+  if (appointment.appointmentType?.trim().toLowerCase() === "erstberatung" && appointment.prospectId) {
     const prospectData = await prospectStorage.getAppointmentData(appointment.prospectId);
     if (prospectData && prospectData.prospect.status === "erstberatung_vereinbart") {
       const hasOtherActiveErstberatung = prospectData.appointments.some(
-        (a) => a.appointmentType?.toLowerCase() === "erstberatung" && a.status !== "cancelled"
+        (a) => a.appointmentType?.trim().toLowerCase() === "erstberatung" && a.status !== "cancelled"
       );
       if (!hasOtherActiveErstberatung) {
         await db.update(prospects)
