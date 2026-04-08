@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { Car, Clock, MapPin, Building2, Loader2, AlertTriangle, Home } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -19,6 +20,7 @@ export interface FahrtdienstState {
   doctorName: string;
   doctorAppointmentTime: string;
   doctorStrasse: string;
+  doctorNr: string;
   doctorPlz: string;
   doctorStadt: string;
 }
@@ -30,6 +32,8 @@ interface FahrtdienstPanelProps {
   customerLng?: number | null;
   onPickupTimeCalculated?: (pickupTime: string, travelMinutes: number, bufferMinutes: number, distanceKm: number, doctorLat?: number, doctorLng?: number) => void;
   errors?: Record<string, string>;
+  isGeocodingCustomer?: boolean;
+  geocodingError?: string | null;
 }
 
 export function FahrtdienstPanel({
@@ -39,6 +43,8 @@ export function FahrtdienstPanel({
   customerLng,
   onPickupTimeCalculated,
   errors,
+  isGeocodingCustomer,
+  geocodingError,
 }: FahrtdienstPanelProps) {
   const [debouncedParams, setDebouncedParams] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -67,6 +73,9 @@ export function FahrtdienstPanel({
         toStadt: fahrtdienst.doctorStadt,
         doctorAppointmentTime: fahrtdienst.doctorAppointmentTime,
       });
+      if (fahrtdienst.doctorNr) {
+        params.set("toNr", fahrtdienst.doctorNr);
+      }
       setDebouncedParams(params.toString());
     }, 800);
 
@@ -78,6 +87,7 @@ export function FahrtdienstPanel({
     customerLat,
     customerLng,
     fahrtdienst.doctorStrasse,
+    fahrtdienst.doctorNr,
     fahrtdienst.doctorPlz,
     fahrtdienst.doctorStadt,
     fahrtdienst.doctorAppointmentTime,
@@ -108,6 +118,16 @@ export function FahrtdienstPanel({
   const updateField = (field: keyof FahrtdienstState, value: string | boolean) => {
     onChange({ ...fahrtdienst, [field]: value });
   };
+
+  const handleAddressSelect = useCallback((address: { strasse: string; hausnummer: string; plz: string; stadt: string }) => {
+    onChange({
+      ...fahrtdienst,
+      doctorStrasse: address.strasse,
+      doctorNr: address.hausnummer,
+      doctorPlz: address.plz,
+      doctorStadt: address.stadt,
+    });
+  }, [fahrtdienst, onChange]);
 
   if (!fahrtdienst.enabled) {
     return (
@@ -184,12 +204,14 @@ export function FahrtdienstPanel({
           <Label>
             <MapPin className={`${iconSize.sm} inline mr-1`} /> Arzt-Adresse *
           </Label>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             <div className="col-span-3">
-              <Input
-                placeholder="Straße"
+              <AddressAutocomplete
+                id="fd-doctor-strasse"
                 value={fahrtdienst.doctorStrasse}
-                onChange={(e) => updateField("doctorStrasse", e.target.value)}
+                onChange={(val) => updateField("doctorStrasse", val)}
+                onAddressSelect={handleAddressSelect}
+                placeholder="Straße"
                 data-testid="input-doctor-strasse"
               />
               {errors?.doctorStrasse && (
@@ -198,10 +220,22 @@ export function FahrtdienstPanel({
             </div>
             <div>
               <Input
+                placeholder="Nr."
+                value={fahrtdienst.doctorNr}
+                onChange={(e) => updateField("doctorNr", e.target.value)}
+                maxLength={20}
+                data-testid="input-doctor-nr"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <Input
                 placeholder="PLZ"
                 value={fahrtdienst.doctorPlz}
                 onChange={(e) => updateField("doctorPlz", e.target.value.replace(/\D/g, "").slice(0, 5))}
                 maxLength={5}
+                inputMode="numeric"
                 data-testid="input-doctor-plz"
               />
               {errors?.doctorPlz && (
@@ -222,7 +256,21 @@ export function FahrtdienstPanel({
           </div>
         </div>
 
-        {!customerLat && !customerLng && fahrtdienst.doctorStrasse && (
+        {isGeocodingCustomer && (
+          <div className="flex items-center gap-2 text-muted-foreground text-sm" data-testid="geocoding-customer-loading">
+            <Loader2 className={`${iconSize.sm} animate-spin`} />
+            <span>Kundenadresse wird geprüft...</span>
+          </div>
+        )}
+
+        {geocodingError && (
+          <div className="flex items-center gap-2 text-amber-600 text-sm" data-testid="geocoding-customer-error">
+            <AlertTriangle className={iconSize.sm} />
+            <span>{geocodingError}</span>
+          </div>
+        )}
+
+        {!isGeocodingCustomer && !geocodingError && !customerLat && !customerLng && fahrtdienst.doctorStrasse && (
           <div className="flex items-center gap-2 text-amber-600 text-sm" data-testid="warning-no-customer-coords">
             <AlertTriangle className={iconSize.sm} />
             <span>Kundenadresse hat keine Koordinaten — Fahrtzeit kann nicht berechnet werden.</span>

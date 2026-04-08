@@ -265,10 +265,12 @@ export default function NewAppointment() {
                 <FahrtdienstPanel
                   fahrtdienst={form.fahrtdienst}
                   onChange={form.setFahrtdienst}
-                  customerLat={form.selectedCustomer?.latitude}
-                  customerLng={form.selectedCustomer?.longitude}
+                  customerLat={form.effectiveCustomerLat}
+                  customerLng={form.effectiveCustomerLng}
                   onPickupTimeCalculated={form.handlePickupTimeCalculated}
                   errors={form.errors}
+                  isGeocodingCustomer={form.isGeocodingCustomer}
+                  geocodingError={form.geocodingError}
                 />
               )}
 

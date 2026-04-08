@@ -81,11 +81,12 @@ export async function calculateTravelTime(params: {
   fromLat: number;
   fromLng: number;
   toStrasse: string;
+  toNr?: string;
   toPlz: string;
   toStadt: string;
   doctorAppointmentTime: string;
 }): Promise<TravelTimeResult | null> {
-  const geocoded = await geocodeAddress(params.toStrasse, null, params.toPlz, params.toStadt);
+  const geocoded = await geocodeAddress(params.toStrasse, params.toNr || null, params.toPlz, params.toStadt);
   if (!geocoded) return null;
 
   const route = await getOsrmRoute(

@@ -394,7 +394,7 @@ export default function AppointmentDetail() {
               {appointment.doctorStrasse && (
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Adresse</span>
-                  <span>{appointment.doctorStrasse}, {appointment.doctorPlz} {appointment.doctorStadt}</span>
+                  <span>{[appointment.doctorStrasse, appointment.doctorNr].filter(Boolean).join(" ")}, {appointment.doctorPlz} {appointment.doctorStadt}</span>
                 </div>
               )}
             </div>

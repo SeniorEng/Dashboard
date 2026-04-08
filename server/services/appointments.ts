@@ -71,6 +71,7 @@ export interface KundenterminInput {
   doctorName?: string;
   doctorAppointmentTime?: string;
   doctorStrasse?: string;
+  doctorNr?: string;
   doctorPlz?: string;
   doctorStadt?: string;
   doctorLatitude?: number;
@@ -341,6 +342,7 @@ export class AppointmentService {
       doctorName: input.doctorName ?? null,
       doctorAppointmentTime: input.doctorAppointmentTime ?? null,
       doctorStrasse: input.doctorStrasse ?? null,
+      doctorNr: input.doctorNr ?? null,
       doctorPlz: input.doctorPlz ?? null,
       doctorStadt: input.doctorStadt ?? null,
       doctorLatitude: input.doctorLatitude ?? null,

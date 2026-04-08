@@ -50,6 +50,7 @@ export function useNewAppointmentForm() {
     doctorName: "",
     doctorAppointmentTime: "",
     doctorStrasse: "",
+    doctorNr: "",
     doctorPlz: "",
     doctorStadt: "",
   });
@@ -61,6 +62,10 @@ export function useNewAppointmentForm() {
     doctorLat?: number;
     doctorLng?: number;
   } | null>(null);
+
+  const [isGeocodingCustomer, setIsGeocodingCustomer] = useState(false);
+  const [geocodingError, setGeocodingError] = useState<string | null>(null);
+  const [geocodedCoords, setGeocodedCoords] = useState<{ customerId: string; lat: number; lng: number } | null>(null);
 
   const handlePickupTimeCalculated = useCallback((
     pickupTime: string,
@@ -324,6 +329,7 @@ export function useNewAppointmentForm() {
         doctorName: "",
         doctorAppointmentTime: "",
         doctorStrasse: "",
+        doctorNr: "",
         doctorPlz: "",
         doctorStadt: "",
       });
@@ -529,6 +535,7 @@ export function useNewAppointmentForm() {
       mutationData.doctorName = fahrtdienst.doctorName || undefined;
       mutationData.doctorAppointmentTime = fahrtdienst.doctorAppointmentTime;
       mutationData.doctorStrasse = fahrtdienst.doctorStrasse;
+      mutationData.doctorNr = fahrtdienst.doctorNr || undefined;
       mutationData.doctorPlz = fahrtdienst.doctorPlz;
       mutationData.doctorStadt = fahrtdienst.doctorStadt;
       if (fahrtdienstTravelData) {
@@ -658,6 +665,43 @@ export function useNewAppointmentForm() {
     }
   }, [selectedCustomer, ktCustomerId]);
 
+  useEffect(() => {
+    if (!ktCustomerId || !fahrtdienst.enabled) {
+      setGeocodingError(null);
+      setIsGeocodingCustomer(false);
+      return;
+    }
+    if (!selectedCustomer) return;
+
+    if (geocodedCoords && geocodedCoords.customerId === ktCustomerId) return;
+
+    if (selectedCustomer.latitude && selectedCustomer.longitude) return;
+
+    let cancelled = false;
+    setIsGeocodingCustomer(true);
+    setGeocodingError(null);
+
+    api.post<{ latitude: number; longitude: number }>(`/customers/${ktCustomerId}/geocode`, {})
+      .then((result) => {
+        if (cancelled) return;
+        const data = unwrapResult(result);
+        setGeocodedCoords({ customerId: ktCustomerId, lat: data.latitude, lng: data.longitude });
+        queryClient.invalidateQueries({ queryKey: ["customers"] });
+      })
+      .catch((err: Error) => {
+        if (cancelled) return;
+        setGeocodingError(err.message || "Kundenadresse konnte nicht aufgelöst werden");
+      })
+      .finally(() => {
+        if (!cancelled) setIsGeocodingCustomer(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [ktCustomerId, fahrtdienst.enabled, selectedCustomer, geocodedCoords, queryClient]);
+
+  const effectiveCustomerLat = selectedCustomer?.latitude ?? (geocodedCoords?.customerId === ktCustomerId ? geocodedCoords.lat : null);
+  const effectiveCustomerLng = selectedCustomer?.longitude ?? (geocodedCoords?.customerId === ktCustomerId ? geocodedCoords.lng : null);
+
   const employeeOptions = useMemo(() => {
     const active = employees.filter(e => e.isActive);
     if (selectedCustomer) {
@@ -772,6 +816,10 @@ export function useNewAppointmentForm() {
     hasAlltagsbegleitung,
     selectedCustomer,
     handlePickupTimeCalculated,
+    isGeocodingCustomer,
+    geocodingError,
+    effectiveCustomerLat,
+    effectiveCustomerLng,
 
     seriesEnabled,
     setSeriesEnabled,

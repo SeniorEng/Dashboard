@@ -149,6 +149,7 @@ router.get("/travel-time", requireAuth, asyncHandler("Fahrtzeit konnte nicht ber
   }
 
   const toStrasse = req.query.toStrasse as string;
+  const toNr = req.query.toNr as string | undefined;
   const toPlz = req.query.toPlz as string;
   const toStadt = req.query.toStadt as string;
 
@@ -157,7 +158,7 @@ router.get("/travel-time", requireAuth, asyncHandler("Fahrtzeit konnte nicht ber
   }
 
   const result = await calculateTravelTime({
-    fromLat, fromLng, toStrasse, toPlz, toStadt, doctorAppointmentTime,
+    fromLat, fromLng, toStrasse, toNr, toPlz, toStadt, doctorAppointmentTime,
   });
   if (!result) {
     return res.status(422).json({ error: "Fahrtzeit konnte nicht berechnet werden. Bitte prüfen Sie die Adressen." });
@@ -214,6 +215,48 @@ router.get("/address-search", asyncHandler("Adresssuche fehlgeschlagen", async (
     }));
 
   res.json(suggestions);
+}));
+
+router.post("/customers/:id/geocode", requireAuth, asyncHandler("Geocodierung fehlgeschlagen", async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: "Ungültige Kunden-ID" });
+
+  const { db } = await import("../lib/db");
+  const { customers } = await import("@shared/schema/customers");
+  const { eq } = await import("drizzle-orm");
+
+  const [customer] = await db.select({
+    id: customers.id,
+    latitude: customers.latitude,
+    longitude: customers.longitude,
+    strasse: customers.strasse,
+    nr: customers.nr,
+    plz: customers.plz,
+    stadt: customers.stadt,
+  }).from(customers).where(eq(customers.id, id));
+
+  if (!customer) return res.status(404).json({ error: "Kunde nicht gefunden" });
+
+  if (customer.latitude && customer.longitude) {
+    return res.json({ latitude: customer.latitude, longitude: customer.longitude });
+  }
+
+  if (!customer.strasse || !customer.plz || !customer.stadt) {
+    return res.status(422).json({ error: "Kundenadresse unvollständig — Geocodierung nicht möglich" });
+  }
+
+  const { geocodeAddress } = await import("../services/geocoding");
+  const result = await geocodeAddress(customer.strasse, customer.nr, customer.plz, customer.stadt);
+
+  if (!result) {
+    return res.status(422).json({ error: "Adresse konnte nicht aufgelöst werden. Bitte Kundenadresse prüfen." });
+  }
+
+  await db.update(customers)
+    .set({ latitude: result.latitude, longitude: result.longitude })
+    .where(eq(customers.id, id));
+
+  res.json({ latitude: result.latitude, longitude: result.longitude });
 }));
 
 export default router;
