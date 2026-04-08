@@ -252,7 +252,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
   const { data: openOffer } = useProspectOffer(prospect?.status === "angebot_gemacht" ? prospectId : null);
   const { data: appointmentData } = useProspectAppointmentData(prospect?.status === "erstberatung_vereinbart" ? prospectId : null);
   const hasActiveErstberatung = appointmentData?.appointments?.some(
-    (a) => a.appointmentType === "Erstberatung" && a.status !== "cancelled"
+    (a) => a.appointmentType?.toLowerCase() === "erstberatung" && a.status !== "cancelled"
   ) ?? false;
   const [, navigate] = useLocation();
   const [noteText, setNoteText] = useState("");
