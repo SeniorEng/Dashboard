@@ -65,7 +65,7 @@ import {
   X,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
-import { useProspects, useProspectStats, useProspect, useCreateProspect, useUpdateProspect, useAddProspectNote, useReparseProspect, useDeleteProspect, useQualifyProspect, useProspectOffer, useDeclineProspectOffer } from "@/features/prospects";
+import { useProspects, useProspectStats, useProspect, useProspectAppointmentData, useCreateProspect, useUpdateProspect, useAddProspectNote, useReparseProspect, useDeleteProspect, useQualifyProspect, useProspectOffer, useDeclineProspectOffer } from "@/features/prospects";
 import { AddressFields } from "@/pages/admin/components/address-fields";
 import { isDachPhone } from "@shared/schema/common";
 import { PROSPECT_STATUS_LABELS, PROSPECT_STATUSES, PROSPECT_NOTE_TYPE_LABELS, DISQUALIFICATION_REASON_LABELS, DISQUALIFICATION_REASONS, type ProspectStatus, type ProspectNoteType, type DisqualificationReason } from "@shared/schema";
@@ -250,6 +250,10 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
   const reparseMutation = useReparseProspect();
   const declineOfferMutation = useDeclineProspectOffer();
   const { data: openOffer } = useProspectOffer(prospect?.status === "angebot_gemacht" ? prospectId : null);
+  const { data: appointmentData } = useProspectAppointmentData(prospect?.status === "erstberatung_vereinbart" ? prospectId : null);
+  const hasActiveErstberatung = appointmentData?.appointments?.some(
+    (a) => a.appointmentType === "Erstberatung" && a.status !== "cancelled"
+  ) ?? false;
   const [, navigate] = useLocation();
   const [noteText, setNoteText] = useState("");
   const [noteType, setNoteType] = useState<ProspectNoteType>("notiz");
@@ -672,7 +676,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                         </Button>
                       </div>
 
-                      {(prospect.status === "qualifiziert" || prospect.status === "erstberatung_vereinbart") && (
+                      {(prospect.status === "qualifiziert" || (prospect.status === "erstberatung_vereinbart" && !hasActiveErstberatung)) && (
                         <Button
                           className="w-full"
                           onClick={handleConvertToErstberatung}
