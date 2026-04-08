@@ -357,6 +357,12 @@ export function useNewAppointmentForm() {
     if (!ktCustomerId) newErrors.ktCustomerId = "Bitte wählen Sie einen Kunden";
     if (ktServices.length === 0) newErrors.ktServices = "Bitte wählen Sie mindestens einen Service";
     if (isAdmin && !ktAssignedEmployeeId) newErrors.ktAssignedEmployeeId = "Bitte wählen Sie einen Mitarbeiter";
+    if (hasAlltagsbegleitung && fahrtdienst.enabled) {
+      if (!fahrtdienst.doctorAppointmentTime) newErrors.doctorAppointmentTime = "Arzt-Termin Uhrzeit ist erforderlich";
+      if (!fahrtdienst.doctorStrasse) newErrors.doctorStrasse = "Arzt-Adresse (Straße) ist erforderlich";
+      if (!fahrtdienst.doctorPlz || !/^\d{5}$/.test(fahrtdienst.doctorPlz)) newErrors.doctorPlz = "PLZ muss 5 Ziffern haben";
+      if (!fahrtdienst.doctorStadt) newErrors.doctorStadt = "Arzt-Adresse (Ort) ist erforderlich";
+    }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -533,7 +539,7 @@ export function useNewAppointmentForm() {
       }
     }
 
-    createKundenterminMutation.mutate(mutationData as any, {
+    createKundenterminMutation.mutate(mutationData, {
       onSuccess: (data: any) => {
         toast({ title: "Termin erstellt", description: "Der Kundentermin wurde erfolgreich angelegt." });
         if (data?._warning) {

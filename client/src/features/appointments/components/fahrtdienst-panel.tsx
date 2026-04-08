@@ -29,6 +29,7 @@ interface FahrtdienstPanelProps {
   customerLat?: number | null;
   customerLng?: number | null;
   onPickupTimeCalculated?: (pickupTime: string, travelMinutes: number, bufferMinutes: number, distanceKm: number, doctorLat?: number, doctorLng?: number) => void;
+  errors?: Record<string, string>;
 }
 
 export function FahrtdienstPanel({
@@ -37,6 +38,7 @@ export function FahrtdienstPanel({
   customerLat,
   customerLng,
   onPickupTimeCalculated,
+  errors,
 }: FahrtdienstPanelProps) {
   const [debouncedParams, setDebouncedParams] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -158,6 +160,9 @@ export function FahrtdienstPanel({
             className="text-base"
             data-testid="input-doctor-time"
           />
+          {errors?.doctorAppointmentTime && (
+            <p className="text-xs text-destructive">{errors.doctorAppointmentTime}</p>
+          )}
         </div>
 
         <div className="space-y-2">
@@ -187,6 +192,9 @@ export function FahrtdienstPanel({
                 onChange={(e) => updateField("doctorStrasse", e.target.value)}
                 data-testid="input-doctor-strasse"
               />
+              {errors?.doctorStrasse && (
+                <p className="text-xs text-destructive mt-1">{errors.doctorStrasse}</p>
+              )}
             </div>
             <div>
               <Input
@@ -196,6 +204,9 @@ export function FahrtdienstPanel({
                 maxLength={5}
                 data-testid="input-doctor-plz"
               />
+              {errors?.doctorPlz && (
+                <p className="text-xs text-destructive mt-1">{errors.doctorPlz}</p>
+              )}
             </div>
             <div className="col-span-2">
               <Input
@@ -204,6 +215,9 @@ export function FahrtdienstPanel({
                 onChange={(e) => updateField("doctorStadt", e.target.value)}
                 data-testid="input-doctor-stadt"
               />
+              {errors?.doctorStadt && (
+                <p className="text-xs text-destructive mt-1">{errors.doctorStadt}</p>
+              )}
             </div>
           </div>
         </div>

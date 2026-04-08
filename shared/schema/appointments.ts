@@ -211,6 +211,21 @@ export const insertKundenterminSchema = z.object({
   doctorLongitude: z.number().optional(),
   estimatedTravelMinutes: z.number().int().min(0).optional(),
   travelBufferMinutes: z.number().int().min(0).optional(),
+}).superRefine((data, ctx) => {
+  if (data.isFahrtdienst) {
+    if (!data.doctorAppointmentTime) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Arzt-Termin Uhrzeit ist bei Fahrtdienst erforderlich", path: ["doctorAppointmentTime"] });
+    }
+    if (!data.doctorStrasse) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Arzt-Adresse (Straße) ist bei Fahrtdienst erforderlich", path: ["doctorStrasse"] });
+    }
+    if (!data.doctorPlz) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "PLZ ist bei Fahrtdienst erforderlich", path: ["doctorPlz"] });
+    }
+    if (!data.doctorStadt) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Ort ist bei Fahrtdienst erforderlich", path: ["doctorStadt"] });
+    }
+  }
 });
 
 // Schema for Erstberatung appointment linked to prospect

@@ -268,6 +268,7 @@ export default function NewAppointment() {
                   customerLat={form.selectedCustomer?.latitude}
                   customerLng={form.selectedCustomer?.longitude}
                   onPickupTimeCalculated={form.handlePickupTimeCalculated}
+                  errors={form.errors}
                 />
               )}
 
