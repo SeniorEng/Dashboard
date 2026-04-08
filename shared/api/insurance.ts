@@ -3,7 +3,8 @@ export interface InsuranceProviderItem {
   name: string;
   empfaenger: string | null;
   empfaengerZeile2: string | null;
-  ikNummer: string;
+  isPrivate: boolean;
+  ikNummer: string | null;
   strasse: string | null;
   hausnummer: string | null;
   plz: string | null;

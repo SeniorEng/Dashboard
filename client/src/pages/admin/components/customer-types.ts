@@ -44,6 +44,7 @@ export interface CustomerFormData {
   personenbefoerderungGewuenscht: boolean;
   insuranceProviderId: string;
   versichertennummer: string;
+  beihilfeBerechtigt: boolean;
   contacts: ContactFormData[];
   budgetTypeSettings: BudgetTypeSettingForm[];
   entlastungsbetrag45b: string;

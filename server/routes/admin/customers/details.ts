@@ -7,6 +7,7 @@ import {
   insertCustomerContactSchema,
   insertCareLevelHistorySchema,
 } from "@shared/schema";
+import { versichertennummerFlexSchema } from "@shared/schema/common";
 
 const router = Router();
 
@@ -22,7 +23,15 @@ router.post("/customers/:id/insurance", asyncHandler("Versicherung konnte nicht 
   const customerId = requireIntParam(req.params.id, res);
   if (customerId === null) return;
   
-  const data = insertCustomerInsuranceSchema.parse({ ...req.body, customerId });
+  const providerId = Number(req.body.insuranceProviderId);
+  const provider = providerId ? await customerManagementStorage.getInsuranceProvider(providerId) : null;
+  const isPrivate = provider?.isPrivate || false;
+
+  const schema = isPrivate
+    ? insertCustomerInsuranceSchema.extend({ versichertennummer: versichertennummerFlexSchema })
+    : insertCustomerInsuranceSchema;
+
+  const data = schema.parse({ ...req.body, customerId });
   const insurance = await customerManagementStorage.addCustomerInsurance(data, req.user!.id);
   res.status(201).json(insurance);
 }));

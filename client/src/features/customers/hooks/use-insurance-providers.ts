@@ -13,6 +13,7 @@ export interface InsuranceProviderFormData {
   name: string;
   empfaenger?: string | null;
   empfaengerZeile2?: string | null;
+  isPrivate?: boolean;
   ikNummer: string;
   strasse?: string | null;
   hausnummer?: string | null;

@@ -20,6 +20,7 @@ interface CustomerBaseFields {
   haustierDetails?: string | null;
   personenbefoerderungGewuenscht?: boolean;
   acceptsPrivatePayment?: boolean;
+  beihilfeBerechtigt?: boolean;
   receivesMonthlyInvoice?: boolean;
   documentDeliveryMethod?: string;
   billingType: string;
@@ -46,6 +47,7 @@ export function buildCustomerInsertData(data: CustomerBaseFields, createdByUserI
     personenbefoerderungGewuenscht: data.personenbefoerderungGewuenscht || false,
     documentDeliveryMethod: (data.documentDeliveryMethod as "email" | "post") || "email",
     acceptsPrivatePayment: data.acceptsPrivatePayment ?? false,
+    beihilfeBerechtigt: data.beihilfeBerechtigt ?? false,
     receivesMonthlyInvoice: data.receivesMonthlyInvoice ?? false,
     billingType: data.billingType,
     createdByUserId,

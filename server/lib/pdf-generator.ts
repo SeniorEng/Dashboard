@@ -68,6 +68,9 @@ export interface InvoicePdfData {
   // Notes
   notes: string | null;
 
+  // Beihilfe
+  beihilfeBerechtigt?: boolean;
+
   // Employee qualifications (for Leistungsnachweis header)
   employeeQualifications?: Map<string, string>;
   
@@ -122,12 +125,12 @@ function getInvoiceTypeLabel(type: string): string {
   }
 }
 
-function getBillingTypeNote(billingType: string, insuranceProviderName: string | null): string {
+function getBillingTypeNote(billingType: string, insuranceProviderName: string | null, beihilfeBerechtigt?: boolean): string {
   switch (billingType) {
     case "pflegekasse_gesetzlich":
       return `Abrechnung gemäß Abtretungserklärung über den Entlastungsbetrag nach § 45b SGB XI.`;
     case "pflegekasse_privat":
-      return `Zur Erstattung bei Ihrer privaten Pflegekasse${insuranceProviderName ? ` (${insuranceProviderName})` : ""} einzureichen. Abrechnung des Entlastungsbetrags nach § 45b SGB XI.`;
+      return `Zur Erstattung bei Ihrer privaten Pflegekasse${insuranceProviderName ? ` (${insuranceProviderName})` : ""} einzureichen. Abrechnung des Entlastungsbetrags nach § 45b SGB XI.${beihilfeBerechtigt ? " Diese Rechnung wurde in doppelter Ausfertigung erstellt — für Ihre private Pflegekasse und Ihre Beihilfestelle." : ""}`;
     case "selbstzahler":
       return "";
     default:
@@ -166,7 +169,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
   const invoiceDate = data.invoiceDate || `${today.getDate().toString().padStart(2, "0")}.${(today.getMonth() + 1).toString().padStart(2, "0")}.${today.getFullYear()}`;
   const periodLabel = `${MONTH_NAMES[data.billingMonth - 1]} ${data.billingYear}`;
   const typeLabel = getInvoiceTypeLabel(data.invoiceType);
-  const billingNote = getBillingTypeNote(data.billingType, data.insuranceProviderName);
+  const billingNote = getBillingTypeNote(data.billingType, data.insuranceProviderName, data.beihilfeBerechtigt);
   const isStorno = data.invoiceType === "stornorechnung";
   
   const lineItemsHtml = data.lineItems.map(item => {

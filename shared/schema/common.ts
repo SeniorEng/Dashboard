@@ -130,5 +130,10 @@ export const internationalEmailSchema = z.string()
 export const versichertennummerSchema = z.string()
   .regex(/^[A-Z]\d{9}$/, "Versichertennummer muss 1 Buchstabe + 9 Ziffern sein (z.B. A123456789)");
 
+export const versichertennummerFlexSchema = z.string()
+  .min(3, "Versichertennummer muss mindestens 3 Zeichen haben")
+  .max(20, "Versichertennummer darf maximal 20 Zeichen haben")
+  .regex(/^[A-Za-z0-9\-\/]+$/, "Versichertennummer darf nur Buchstaben, Ziffern, Bindestriche und Schrägstriche enthalten");
+
 export const plzSchema = z.string()
   .regex(/^\d{5}$/, "PLZ muss 5 Ziffern haben");

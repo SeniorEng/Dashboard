@@ -335,7 +335,7 @@ export default function ProspectConvert() {
   );
 
   const insuranceOptions = useMemo(() =>
-    insuranceProviders.map((p) => ({ value: p.id.toString(), label: `${p.name} (${p.ikNummer})` }))
+    insuranceProviders.map((p) => ({ value: p.id.toString(), label: p.ikNummer ? `${p.name} (${p.ikNummer})` : `${p.name}${p.isPrivate ? " (Privat)" : ""}` }))
       .sort((a, b) => a.label.localeCompare(b.label, "de")),
     [insuranceProviders]
   );

@@ -50,6 +50,7 @@ const EMPTY_FORM: InsuranceProviderFormData = {
   name: "",
   empfaenger: "",
   empfaengerZeile2: "",
+  isPrivate: false,
   ikNummer: "",
   strasse: "",
   hausnummer: "",
@@ -87,7 +88,7 @@ export default function AdminInsuranceProviders() {
     const q = searchQuery.trim().toLowerCase();
     return providers.filter(p =>
       p.name.toLowerCase().includes(q) ||
-      p.ikNummer.includes(q) ||
+      (p.ikNummer && p.ikNummer.includes(q)) ||
       (p.empfaenger && p.empfaenger.toLowerCase().includes(q))
     );
   }, [providers, searchQuery]);
@@ -111,7 +112,8 @@ export default function AdminInsuranceProviders() {
       name: provider.name,
       empfaenger: provider.empfaenger || "",
       empfaengerZeile2: provider.empfaengerZeile2 || "",
-      ikNummer: provider.ikNummer,
+      isPrivate: provider.isPrivate || false,
+      ikNummer: provider.ikNummer || "",
       strasse: provider.strasse || "",
       hausnummer: provider.hausnummer || "",
       plz: provider.plz || "",
@@ -140,8 +142,13 @@ export default function AdminInsuranceProviders() {
       toast({ title: "Suchbegriff ist erforderlich", variant: "destructive" });
       return null;
     }
-    if (!form.ikNummer.trim() || !/^\d{9}$/.test(form.ikNummer)) {
-      toast({ title: "IK-Nummer muss genau 9 Ziffern haben", variant: "destructive" });
+    if (!form.isPrivate) {
+      if (!form.ikNummer.trim() || !/^\d{9}$/.test(form.ikNummer)) {
+        toast({ title: "IK-Nummer muss genau 9 Ziffern haben", variant: "destructive" });
+        return null;
+      }
+    } else if (form.ikNummer.trim() && !/^\d{9}$/.test(form.ikNummer)) {
+      toast({ title: "Falls angegeben, muss die IK-Nummer genau 9 Ziffern haben", variant: "destructive" });
       return null;
     }
     const plzValue = typeof form.plz === 'string' ? form.plz.trim() : "";
@@ -324,12 +331,15 @@ export default function AdminInsuranceProviders() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
                               <span className="font-medium text-gray-900 truncate">{provider.name}</span>
+                              {provider.isPrivate && (
+                                <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full" data-testid={`badge-private-${provider.id}`}>Privat</span>
+                              )}
                               {!provider.isActive && (
                                 <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">Inaktiv</span>
                               )}
                             </div>
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
-                              <span>IK: {provider.ikNummer}</span>
+                              {provider.ikNummer ? <span>IK: {provider.ikNummer}</span> : <span>Privat</span>}
                               {provider.empfaenger && <span>· {provider.empfaenger}</span>}
                               {(provider.strasse || provider.plz || provider.stadt) && (
                                 <span>· {formatAddress(provider)}</span>
@@ -383,6 +393,18 @@ export default function AdminInsuranceProviders() {
               />
             </div>
 
+            <div className="flex items-center gap-3 py-2">
+              <Switch
+                id="isPrivate"
+                checked={form.isPrivate || false}
+                onCheckedChange={(checked) => handleChange("isPrivate", checked)}
+                data-testid="switch-provider-is-private"
+              />
+              <Label htmlFor="isPrivate" className="cursor-pointer">
+                Private Pflegekasse
+              </Label>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="empfaenger">Empfänger</Label>
               <Input
@@ -406,7 +428,7 @@ export default function AdminInsuranceProviders() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="ikNummer">IK-Nummer *</Label>
+              <Label htmlFor="ikNummer">IK-Nummer {form.isPrivate ? "(optional)" : "*"}</Label>
               <Input
                 id="ikNummer"
                 value={form.ikNummer}
@@ -415,7 +437,9 @@ export default function AdminInsuranceProviders() {
                 maxLength={9}
                 data-testid="input-provider-ik"
               />
-              <p className="text-xs text-gray-500">9-stelliges Institutionskennzeichen</p>
+              <p className="text-xs text-gray-500">
+                {form.isPrivate ? "9-stelliges Institutionskennzeichen (optional bei privaten Kassen)" : "9-stelliges Institutionskennzeichen"}
+              </p>
             </div>
 
             <div className="border-t pt-4">

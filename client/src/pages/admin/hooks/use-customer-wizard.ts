@@ -59,6 +59,7 @@ function createInitialFormData(): CustomerFormData {
     personenbefoerderungGewuenscht: false,
     insuranceProviderId: "",
     versichertennummer: "",
+    beihilfeBerechtigt: false,
     contacts: [{ ...EMPTY_CONTACT }],
     budgetTypeSettings: BUDGET_TYPES.map((bt) => ({
       budgetType: bt,
@@ -193,8 +194,8 @@ export function useCustomerWizard() {
   const insuranceOptions = useMemo(() =>
     (insuranceProviders?.map((p) => ({
       value: p.id.toString(),
-      label: p.name,
-      sublabel: `IK: ${p.ikNummer}`,
+      label: p.isPrivate ? `${p.name} (Privat)` : p.name,
+      sublabel: p.ikNummer ? `IK: ${p.ikNummer}` : "Privat",
     })) || []).sort((a, b) => a.label.localeCompare(b.label, "de")),
     [insuranceProviders]
   );
@@ -284,13 +285,24 @@ export function useCustomerWizard() {
     }
     
     const versNr = formData.versichertennummer.trim();
-    if (formData.insuranceProviderId && versNr && !/^[A-Z]\d{9}$/.test(versNr)) {
-      toast({
-        title: "Ungültige Versichertennummer",
-        description: "Format: 1 Buchstabe + 9 Ziffern (z.B. A123456789)",
-        variant: "destructive",
-      });
-      return;
+    const selectedProvider = insuranceProviders?.find(p => p.id.toString() === formData.insuranceProviderId);
+    const isPrivateProvider = selectedProvider?.isPrivate || false;
+    if (formData.insuranceProviderId && versNr) {
+      if (isPrivateProvider && !/^[A-Za-z0-9\-\/]{3,20}$/.test(versNr)) {
+        toast({
+          title: "Ungültige Versichertennummer",
+          description: "3-20 Zeichen: Buchstaben, Ziffern, Bindestriche, Schrägstriche",
+          variant: "destructive",
+        });
+        return;
+      } else if (!isPrivateProvider && !/^[A-Z]\d{9}$/.test(versNr)) {
+        toast({
+          title: "Ungültige Versichertennummer",
+          description: "Format: 1 Buchstabe + 9 Ziffern (z.B. A123456789)",
+          variant: "destructive",
+        });
+        return;
+      }
     }
 
     const insurance = formData.insuranceProviderId && versNr
@@ -361,6 +373,7 @@ export function useCustomerWizard() {
       haustierDetails: formData.haustierVorhanden ? (formData.haustierDetails.trim() || undefined) : undefined,
       personenbefoerderungGewuenscht: formData.personenbefoerderungGewuenscht,
       acceptsPrivatePayment: formData.acceptsPrivatePayment,
+      beihilfeBerechtigt: formData.billingType === "pflegekasse_privat" ? formData.beihilfeBerechtigt : false,
       documentDeliveryMethod: formData.documentDeliveryMethod,
       receivesMonthlyInvoice: formData.receivesMonthlyInvoice,
       insurance: isPflegekasse ? insurance : undefined,

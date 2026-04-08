@@ -43,6 +43,7 @@ export const customers = pgTable("customers", {
   personenbefoerderungGewuenscht: boolean("personenbefoerderung_gewuenscht").notNull().default(false),
   // Billing
   billingType: text("billing_type").notNull().default("pflegekasse_gesetzlich"), // pflegekasse_gesetzlich, pflegekasse_privat, selbstzahler
+  beihilfeBerechtigt: boolean("beihilfe_berechtigt").notNull().default(false),
   acceptsPrivatePayment: boolean("accepts_private_payment").notNull().default(false),
   // Deactivation tracking
   documentDeliveryMethod: text("document_delivery_method").notNull().default("email"),

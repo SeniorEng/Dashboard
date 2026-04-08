@@ -101,7 +101,7 @@ export default function AdminCustomers() {
     { value: "all", label: "Alle Kostenträger" },
     ...(insuranceProviders?.map((p) => ({
       value: p.id.toString(),
-      label: `${p.name} (${p.ikNummer})`,
+      label: p.ikNummer ? `${p.name} (${p.ikNummer})` : `${p.name}${p.isPrivate ? " (Privat)" : ""}`,
     })).sort((a, b) => a.label.localeCompare(b.label, "de")) || []),
   ], [insuranceProviders]);
 

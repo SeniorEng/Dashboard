@@ -45,7 +45,8 @@ interface CustomerInsuranceTabProps {
   } | null;
 }
 
-const VERSICHERTENNUMMER_REGEX = /^[A-Z]\d{9}$/; // matches versichertennummerSchema from @shared/schema
+const VERSICHERTENNUMMER_REGEX = /^[A-Z]\d{9}$/;
+const VERSICHERTENNUMMER_FLEX_REGEX = /^[A-Za-z0-9\-\/]{3,20}$/;
 
 export function CustomerInsuranceTab({ customerId, currentInsurance }: CustomerInsuranceTabProps) {
   const { toast } = useToast();
@@ -104,19 +105,32 @@ export function CustomerInsuranceTab({ customerId, currentInsurance }: CustomerI
     setDialogOpen(true);
   };
 
+  const selectedProvider = providers?.find(p => p.id.toString() === insuranceProviderId);
+  const isPrivateProvider = selectedProvider?.isPrivate || false;
+
   const handleVnChange = (value: string) => {
-    const upper = value.toUpperCase();
-    setVersichertennummer(upper);
-    if (upper.length === 0) {
+    const processed = isPrivateProvider ? value : value.toUpperCase();
+    setVersichertennummer(processed);
+    if (processed.length === 0) {
       setVnError(null);
-    } else if (upper.length === 10 && !VERSICHERTENNUMMER_REGEX.test(upper)) {
-      setVnError("Format: 1 Buchstabe + 9 Ziffern (z.B. A123456789)");
-    } else if (upper.length === 10 && VERSICHERTENNUMMER_REGEX.test(upper)) {
-      setVnError(null);
-    } else if (upper.length > 10) {
-      setVnError("Maximal 10 Zeichen");
+    } else if (isPrivateProvider) {
+      if (processed.length > 20) {
+        setVnError("Maximal 20 Zeichen");
+      } else if (processed.length < 3) {
+        setVnError(null);
+      } else if (!VERSICHERTENNUMMER_FLEX_REGEX.test(processed)) {
+        setVnError("Nur Buchstaben, Ziffern, Bindestriche und Schrägstriche erlaubt");
+      } else {
+        setVnError(null);
+      }
     } else {
-      setVnError(null);
+      if (processed.length === 10 && !VERSICHERTENNUMMER_REGEX.test(processed)) {
+        setVnError("Format: 1 Buchstabe + 9 Ziffern (z.B. A123456789)");
+      } else if (processed.length > 10) {
+        setVnError("Maximal 10 Zeichen");
+      } else {
+        setVnError(null);
+      }
     }
   };
 
@@ -125,7 +139,12 @@ export function CustomerInsuranceTab({ customerId, currentInsurance }: CustomerI
       toast({ title: "Bitte Pflegekasse auswählen", variant: "destructive" });
       return;
     }
-    if (!VERSICHERTENNUMMER_REGEX.test(versichertennummer)) {
+    if (isPrivateProvider) {
+      if (!VERSICHERTENNUMMER_FLEX_REGEX.test(versichertennummer)) {
+        setVnError("Versichertennummer muss 3-20 Zeichen lang sein (Buchstaben, Ziffern, Bindestriche, Schrägstriche)");
+        return;
+      }
+    } else if (!VERSICHERTENNUMMER_REGEX.test(versichertennummer)) {
       setVnError("Versichertennummer muss 1 Buchstabe + 9 Ziffern sein (z.B. A123456789)");
       return;
     }
@@ -143,7 +162,7 @@ export function CustomerInsuranceTab({ customerId, currentInsurance }: CustomerI
 
   const providerOptions = (providers || []).map((p) => ({
     value: p.id.toString(),
-    label: `${p.name} (IK: ${p.ikNummer})`,
+    label: p.ikNummer ? `${p.name} (IK: ${p.ikNummer})` : `${p.name}${p.isPrivate ? " (Privat)" : ""}`,
   })).sort((a, b) => a.label.localeCompare(b.label, "de"));
 
   return (

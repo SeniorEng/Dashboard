@@ -32,7 +32,8 @@ export const insuranceProviders = pgTable("insurance_providers", {
   name: text("name").notNull(), // Suchbegriff (z.B. "DAK")
   empfaenger: text("empfaenger"), // Empfänger (z.B. "DAK NordWest")
   empfaengerZeile2: text("empfaenger_zeile2"), // Empfänger Zeile 2 (optional, z.B. "z.H. Herrn Mustermann")
-  ikNummer: text("ik_nummer").notNull().unique(), // 9-digit Institutionskennzeichen
+  isPrivate: boolean("is_private").notNull().default(false),
+  ikNummer: text("ik_nummer").unique(), // 9-digit Institutionskennzeichen (optional for private)
   strasse: text("strasse"),
   hausnummer: text("hausnummer"),
   plz: text("plz"),
@@ -73,11 +74,12 @@ export const customerInsuranceHistory = pgTable("customer_insurance_history", {
 ]);
 
 // Insurance Provider schemas
-export const insertInsuranceProviderSchema = z.object({
+export const insuranceProviderBaseSchema = z.object({
   name: z.string().min(1, "Suchbegriff ist erforderlich"),
   empfaenger: z.string().optional().nullable(),
   empfaengerZeile2: z.string().optional().nullable(),
-  ikNummer: ikNummerSchema,
+  isPrivate: z.boolean().optional().default(false),
+  ikNummer: z.string().optional().nullable(),
   strasse: z.string().optional().nullable(),
   hausnummer: z.string().optional().nullable(),
   plz: z.string().regex(/^\d{5}$/, "PLZ muss 5 Ziffern haben").optional().nullable().or(z.literal("")),
@@ -94,6 +96,16 @@ export const insertInsuranceProviderSchema = z.object({
   zahlungsart: z.enum(ZAHLUNGSARTEN).optional().default("ueberweisung"),
   isActive: z.boolean().optional().default(true),
 });
+
+export const insertInsuranceProviderSchema = insuranceProviderBaseSchema.refine(
+  (data) => {
+    if (!data.isPrivate) {
+      return data.ikNummer && /^\d{9}$/.test(data.ikNummer);
+    }
+    return !data.ikNummer || data.ikNummer === "" || /^\d{9}$/.test(data.ikNummer);
+  },
+  { message: "IK-Nummer muss genau 9 Ziffern haben (bei gesetzlichen Kassen Pflicht)", path: ["ikNummer"] }
+);
 
 export type InsuranceProvider = typeof insuranceProviders.$inferSelect;
 export type InsertInsuranceProvider = z.infer<typeof insertInsuranceProviderSchema>;

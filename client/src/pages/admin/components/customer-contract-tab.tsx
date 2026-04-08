@@ -85,6 +85,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
   const [vereinbarteLeistungen, setVereinbarteLeistungen] = useState("");
   const [personenbefoerderungGewuenscht, setPersonenbefoerderungGewuenscht] = useState(false);
   const [acceptsPrivatePayment, setAcceptsPrivatePayment] = useState(false);
+  const [beihilfeBerechtigt, setBeihilfeBerechtigt] = useState(false);
 
   const [creatingContract, setCreatingContract] = useState(false);
   const [newContractStart, setNewContractStart] = useState("");
@@ -129,6 +130,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
       setPersonenbefoerderungGewuenscht(customer.personenbefoerderungGewuenscht ?? false);
     } else if (section === "abrechnung") {
       setAcceptsPrivatePayment(customer.acceptsPrivatePayment ?? false);
+      setBeihilfeBerechtigt(customer.beihilfeBerechtigt ?? false);
     }
     setEditingSection(section);
   };
@@ -244,10 +246,11 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
     },
   });
 
-  const togglePrivatePayment = useMutation({
-    mutationFn: async (accepts: boolean) => {
+  const saveAbrechnung = useMutation({
+    mutationFn: async (data: { acceptsPrivatePayment: boolean; beihilfeBerechtigt: boolean }) => {
       const result = await api.patch(`/admin/customers/${customerId}`, {
-        acceptsPrivatePayment: accepts,
+        acceptsPrivatePayment: data.acceptsPrivatePayment,
+        beihilfeBerechtigt: data.beihilfeBerechtigt,
       });
       return unwrapResult(result);
     },
@@ -657,14 +660,28 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
                 data-testid="switch-accepts-private-payment"
               />
             </div>
+            {customer.billingType === "pflegekasse_privat" && (
+              <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
+                <div className="space-y-0.5">
+                  <Label htmlFor="beihilfeBerechtigt" className="cursor-pointer">Beihilfeberechtigt</Label>
+                  <p className="text-xs text-gray-500">Rechnungen und Leistungsnachweise werden in doppelter Ausfertigung erstellt</p>
+                </div>
+                <Switch
+                  id="beihilfeBerechtigt"
+                  checked={beihilfeBerechtigt}
+                  onCheckedChange={setBeihilfeBerechtigt}
+                  data-testid="switch-beihilfe-berechtigt"
+                />
+              </div>
+            )}
             <div className="flex items-center gap-2 pt-3">
               <Button
                 className={componentStyles.btnPrimary}
-                onClick={() => togglePrivatePayment.mutate(acceptsPrivatePayment)}
-                disabled={togglePrivatePayment.isPending}
+                onClick={() => saveAbrechnung.mutate({ acceptsPrivatePayment, beihilfeBerechtigt })}
+                disabled={saveAbrechnung.isPending}
                 data-testid="button-save-abrechnung"
               >
-                {togglePrivatePayment.isPending ? (
+                {saveAbrechnung.isPending ? (
                   <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
                 ) : (
                   <Save className={`${iconSize.sm} mr-2`} />
@@ -674,7 +691,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
               <Button
                 variant="outline"
                 onClick={cancelEditing}
-                disabled={togglePrivatePayment.isPending}
+                disabled={saveAbrechnung.isPending}
                 data-testid="button-cancel-abrechnung"
               >
                 <X className={`${iconSize.sm} mr-2`} />
@@ -691,6 +708,15 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
                 value={customer.acceptsPrivatePayment ? "Ja" : "Nein"}
               />
             </div>
+            {customer.billingType === "pflegekasse_privat" && (
+              <div className="flex items-center gap-2" data-testid="text-beihilfe-berechtigt">
+                <p className="text-sm text-gray-700">Beihilfeberechtigt:</p>
+                <StatusBadge
+                  type={customer.beihilfeBerechtigt ? "activity" : "info"}
+                  value={customer.beihilfeBerechtigt ? "Ja" : "Nein"}
+                />
+              </div>
+            )}
           </div>
         )}
       </SectionCard>

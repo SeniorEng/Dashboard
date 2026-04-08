@@ -185,11 +185,12 @@ const simpleCreateCustomerSchema = z.object({
   haustierDetails: z.string().max(500, "Maximal 500 Zeichen erlaubt").optional().nullable(),
   personenbefoerderungGewuenscht: z.boolean().optional(),
   acceptsPrivatePayment: z.boolean().optional(),
+  beihilfeBerechtigt: z.boolean().optional(),
   documentDeliveryMethod: z.enum(["email", "post"]).optional(),
   receivesMonthlyInvoice: z.boolean().optional(),
   insurance: z.object({
     providerId: z.number(),
-    versichertennummer: versichertennummerSchema,
+    versichertennummer: z.string().min(3).max(20),
     validFrom: z.string(),
   }).optional(),
   contacts: z.array(z.object({
@@ -224,6 +225,23 @@ const simpleCreateCustomerSchema = z.object({
 
 router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", async (req: Request, res: Response) => {
   const data = simpleCreateCustomerSchema.parse(req.body);
+
+  if (data.insurance?.versichertennummer) {
+    const vnr = data.insurance.versichertennummer;
+    const provider = await customerManagementStorage.getInsuranceProvider(data.insurance.providerId);
+    const isPrivateProvider = provider?.isPrivate || false;
+    if (isPrivateProvider) {
+      if (!/^[A-Za-z0-9\-\/]{3,20}$/.test(vnr)) {
+        res.status(400).json({ error: "VALIDATION_ERROR", message: "Versichertennummer muss 3-20 Zeichen sein (Buchstaben, Ziffern, Bindestriche, Schrägstriche)" });
+        return;
+      }
+    } else {
+      if (!/^[A-Z]\d{9}$/.test(vnr)) {
+        res.status(400).json({ error: "VALIDATION_ERROR", message: "Versichertennummer muss 1 Großbuchstabe + 9 Ziffern sein (z.B. A123456789)" });
+        return;
+      }
+    }
+  }
 
   const geburtsdatumError = validateGeburtsdatum(data.geburtsdatum);
   if (geburtsdatumError) {
@@ -287,6 +305,7 @@ const updateCustomerSchema = z.object({
   documentDeliveryMethod: z.enum(["email", "post"]).optional(),
   receivesMonthlyInvoice: z.boolean().optional(),
   acceptsPrivatePayment: z.boolean().optional(),
+  beihilfeBerechtigt: z.boolean().optional(),
   inaktivAb: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat (YYYY-MM-DD erwartet)").nullable().optional(),
   deactivationReason: z.string().nullable().optional(),
   deactivationNote: z.string().max(1000, "Maximal 1000 Zeichen erlaubt").nullable().optional(),

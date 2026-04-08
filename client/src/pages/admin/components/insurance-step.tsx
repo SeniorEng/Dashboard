@@ -10,7 +10,9 @@ import { useCreateInsuranceProvider } from "@/features/customers";
 import type { InsuranceProviderFormData } from "@/features/customers";
 import { Loader2, Check, Plus, X } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
+import { Checkbox } from "@/components/ui/checkbox";
 import { CustomerFormData, SelectOption } from "./customer-types";
+import type { InsuranceProviderItem } from "@/lib/api/types";
 import {
   ZAHLUNGSBEDINGUNGEN,
   ZAHLUNGSBEDINGUNGEN_LABELS,
@@ -22,6 +24,7 @@ interface InsuranceStepProps {
   formData: CustomerFormData;
   insuranceOptions: SelectOption[];
   insuranceProvidersEmpty: boolean;
+  insuranceProviders?: InsuranceProviderItem[];
   onChange: (field: string, value: string | boolean) => void;
   onInsuranceProviderCreated: (providerId: string) => void;
 }
@@ -30,6 +33,7 @@ const EMPTY_PROVIDER: InsuranceProviderFormData = {
   name: "",
   empfaenger: "",
   empfaengerZeile2: "",
+  isPrivate: false,
   ikNummer: "",
   strasse: "",
   hausnummer: "",
@@ -57,6 +61,7 @@ export function InsuranceStep({
   formData,
   insuranceOptions,
   insuranceProvidersEmpty,
+  insuranceProviders = [],
   onChange,
   onInsuranceProviderCreated,
 }: InsuranceStepProps) {
@@ -79,10 +84,19 @@ export function InsuranceStep({
       return;
     }
 
-    if (!newProvider.ikNummer.trim() || !/^\d{9}$/.test(newProvider.ikNummer)) {
+    if (!newProvider.isPrivate) {
+      if (!newProvider.ikNummer.trim() || !/^\d{9}$/.test(newProvider.ikNummer)) {
+        toast({
+          title: "Ungültige IK-Nummer",
+          description: "Die IK-Nummer muss genau 9 Ziffern enthalten.",
+          variant: "destructive",
+        });
+        return;
+      }
+    } else if (newProvider.ikNummer.trim() && !/^\d{9}$/.test(newProvider.ikNummer)) {
       toast({
         title: "Ungültige IK-Nummer",
-        description: "Die IK-Nummer muss genau 9 Ziffern enthalten.",
+        description: "Falls angegeben, muss die IK-Nummer genau 9 Ziffern enthalten.",
         variant: "destructive",
       });
       return;
@@ -155,23 +169,45 @@ export function InsuranceStep({
             </div>
           </div>
 
-          {formData.insuranceProviderId && (
-            <div className="space-y-2">
-              <Label htmlFor="versichertennummer">Versichertennummer *</Label>
-              <Input
-                id="versichertennummer"
-                value={formData.versichertennummer}
-                onChange={(e) => onChange("versichertennummer", e.target.value.toUpperCase())}
-                placeholder="A123456789"
-                maxLength={10}
-                required
-                data-testid="input-versichertennummer"
-              />
-              <p className="text-xs text-gray-500">
-                Format: Buchstabe + 9 Ziffern (z.B. A123456789)
-              </p>
-            </div>
-          )}
+          {formData.insuranceProviderId && (() => {
+            const selectedProvider = insuranceProviders.find(p => p.id.toString() === formData.insuranceProviderId);
+            const isProviderPrivate = selectedProvider?.isPrivate ?? false;
+            return (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="versichertennummer">Versichertennummer *</Label>
+                  <Input
+                    id="versichertennummer"
+                    value={formData.versichertennummer}
+                    onChange={(e) => onChange("versichertennummer", isProviderPrivate ? e.target.value : e.target.value.toUpperCase())}
+                    placeholder={isProviderPrivate ? "Vertragsnummer" : "A123456789"}
+                    maxLength={isProviderPrivate ? 20 : 10}
+                    required
+                    data-testid="input-versichertennummer"
+                  />
+                  <p className="text-xs text-gray-500">
+                    {isProviderPrivate
+                      ? "Vertragsnummer Ihrer privaten Pflegekasse (3–20 Zeichen)"
+                      : "Format: Buchstabe + 9 Ziffern (z.B. A123456789)"}
+                  </p>
+                </div>
+
+                {formData.billingType === "pflegekasse_privat" && (
+                  <div className="flex items-center gap-3 py-2">
+                    <Checkbox
+                      id="beihilfeBerechtigt"
+                      checked={formData.beihilfeBerechtigt}
+                      onCheckedChange={(checked) => onChange("beihilfeBerechtigt", !!checked)}
+                      data-testid="checkbox-beihilfe-berechtigt"
+                    />
+                    <Label htmlFor="beihilfeBerechtigt" className="cursor-pointer">
+                      Beihilfeberechtigt
+                    </Label>
+                  </div>
+                )}
+              </>
+            );
+          })()}
 
           {insuranceProvidersEmpty && !showNewProviderForm && (
             <div className="p-4 rounded-lg bg-amber-50 border border-amber-200">
@@ -216,6 +252,18 @@ export function InsuranceStep({
               />
             </div>
 
+            <div className="flex items-center gap-3 py-2">
+              <Switch
+                id="newProviderIsPrivate"
+                checked={newProvider.isPrivate || false}
+                onCheckedChange={(checked) => handleNewProviderChange("isPrivate", checked)}
+                data-testid="switch-new-provider-is-private"
+              />
+              <Label htmlFor="newProviderIsPrivate" className="cursor-pointer">
+                Private Pflegekasse
+              </Label>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="newProviderEmpfaenger">Empfänger</Label>
               <Input
@@ -239,7 +287,7 @@ export function InsuranceStep({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="newProviderIk">IK-Nummer *</Label>
+              <Label htmlFor="newProviderIk">IK-Nummer {newProvider.isPrivate ? "(optional)" : "*"}</Label>
               <Input
                 id="newProviderIk"
                 value={newProvider.ikNummer}
@@ -248,7 +296,9 @@ export function InsuranceStep({
                 maxLength={9}
                 data-testid="input-new-provider-ik"
               />
-              <p className="text-xs text-gray-500">9-stelliges Institutionskennzeichen</p>
+              <p className="text-xs text-gray-500">
+                {newProvider.isPrivate ? "9-stelliges Institutionskennzeichen (optional bei privaten Kassen)" : "9-stelliges Institutionskennzeichen"}
+              </p>
             </div>
 
             <div className="border-t border-teal-200 pt-4">

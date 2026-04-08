@@ -337,7 +337,7 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
         results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "skipped", error: `Status: ${invoice.status}` });
         continue;
       }
-      if (invoice.billingType !== "pflegekasse_gesetzlich") {
+      if (invoice.billingType !== "pflegekasse_gesetzlich" && invoice.billingType !== "pflegekasse_privat") {
         results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "skipped", error: "Nicht an Pflegekasse" });
         continue;
       }
@@ -347,6 +347,9 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
         results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "error", error: "Kunde nicht gefunden" });
         continue;
       }
+
+      const isPrivatBilling = invoice.billingType === "pflegekasse_privat";
+      const isBeihilfe = isPrivatBilling && cust[0].beihilfeBerechtigt;
 
       const insHist = await db.select({
         providerId: customerInsuranceHistory.insuranceProviderId,
@@ -362,29 +365,47 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
       }
 
       const prov = await db.select().from(insuranceProviders).where(eq(insuranceProviders.id, insHist[0].providerId)).limit(1);
-      if (!prov.length || !prov[0].emailInvoiceEnabled) {
-        results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "error", error: "E-Mail-Versand nicht aktiviert" });
+
+      let recipientEmail: string | null = null;
+      let recipientName = "";
+      let hasParagraph39 = false;
+
+      if (isPrivatBilling) {
+        if (!cust[0].email) {
+          results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "error", error: "Keine E-Mail beim Kunden hinterlegt" });
+          continue;
+        }
+        recipientEmail = cust[0].email;
+        recipientName = [cust[0].vorname, cust[0].nachname].filter(Boolean).join(" ") || cust[0].name;
+      } else {
+        if (!prov.length || !prov[0].emailInvoiceEnabled) {
+          results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "error", error: "E-Mail-Versand nicht aktiviert" });
+          continue;
+        }
+
+        const lineItemsForCheck = await storage.getInvoiceLineItems(invoiceId);
+        const appointmentIds = lineItemsForCheck.map(li => li.appointmentId).filter(Boolean) as number[];
+        if (appointmentIds.length > 0) {
+          const txns = await db.select({ budgetType: budgetTransactions.budgetType })
+            .from(budgetTransactions)
+            .where(and(inArray(budgetTransactions.appointmentId, appointmentIds), eq(budgetTransactions.transactionType, "consumption")));
+          hasParagraph39 = txns.some(t => t.budgetType === "ersatzpflege_39_42a");
+        }
+
+        recipientEmail = hasParagraph39 ? (prov[0].emailVerhinderungspflege || prov[0].email) : prov[0].email;
+        recipientName = prov[0].name;
+      }
+
+      if (!recipientEmail) {
+        results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "error", error: isPrivatBilling ? "Keine E-Mail beim Kunden" : "Keine E-Mail bei Pflegekasse" });
         continue;
       }
 
       const lineItems = await storage.getInvoiceLineItems(invoiceId);
-      let hasParagraph39 = false;
-      const appointmentIds = lineItems.map(li => li.appointmentId).filter(Boolean) as number[];
-      if (appointmentIds.length > 0) {
-        const txns = await db.select({ budgetType: budgetTransactions.budgetType })
-          .from(budgetTransactions)
-          .where(and(inArray(budgetTransactions.appointmentId, appointmentIds), eq(budgetTransactions.transactionType, "consumption")));
-        hasParagraph39 = txns.some(t => t.budgetType === "ersatzpflege_39_42a");
-      }
-
-      const recipientEmail = hasParagraph39 ? (prov[0].emailVerhinderungspflege || prov[0].email) : prov[0].email;
-      if (!recipientEmail) {
-        results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "error", error: "Keine E-Mail bei Pflegekasse" });
-        continue;
-      }
 
       const pdfData = buildPdfData(invoice, lineItems, companySettings);
       if (cust[0].geburtsdatum) pdfData.customerGeburtsdatum = cust[0].geburtsdatum;
+      if (isBeihilfe) pdfData.beihilfeBerechtigt = true;
 
       const invoiceHtml = generateInvoiceHtml(pdfData);
       const { buffer: invoicePdf } = await generatePdf(invoiceHtml);
@@ -393,19 +414,53 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
       const lnHtml = generateLeistungsnachweisHtml(pdfData);
       const { buffer: lnPdf } = await generatePdf(lnHtml);
 
+      let finalInvoicePdf: Buffer = zugferdBuffer;
+      let finalLnPdf: Buffer = lnPdf;
+
+      if (isBeihilfe) {
+        const { PDFDocument } = await import("pdf-lib");
+        const mergedInv = await PDFDocument.create();
+        const invDoc = await PDFDocument.load(zugferdBuffer);
+        const invPages1 = await mergedInv.copyPages(invDoc, invDoc.getPageIndices());
+        invPages1.forEach(p => mergedInv.addPage(p));
+        const invPages2 = await mergedInv.copyPages(invDoc, invDoc.getPageIndices());
+        invPages2.forEach(p => mergedInv.addPage(p));
+        finalInvoicePdf = Buffer.from(await mergedInv.save());
+
+        const mergedLn = await PDFDocument.create();
+        const lnDoc = await PDFDocument.load(lnPdf);
+        const lnPages1 = await mergedLn.copyPages(lnDoc, lnDoc.getPageIndices());
+        lnPages1.forEach(p => mergedLn.addPage(p));
+        const lnPages2 = await mergedLn.copyPages(lnDoc, lnDoc.getPageIndices());
+        lnPages2.forEach(p => mergedLn.addPage(p));
+        finalLnPdf = Buffer.from(await mergedLn.save());
+      }
+
       const monthName = MONTH_NAMES_DE[(invoice.billingMonth - 1)] || String(invoice.billingMonth);
       const customerFullName = [cust[0].vorname, cust[0].nachname].filter(Boolean).join(" ") || cust[0].name;
       const versNr = insHist[0].versichertennummer || invoice.versichertennummer || "";
 
       const subject = `Rechnung ${invoice.invoiceNumber} — ${customerFullName}${versNr ? ` (${versNr})` : ""} — ${monthName} ${invoice.billingYear} — ${companyName}`;
-      const bodyContent = `
-        <p>Sehr geehrte Damen und Herren,</p>
-        <p>anbei erhalten Sie die Rechnung <strong>${invoice.invoiceNumber}</strong> sowie den zugehörigen Leistungsnachweis
-        für <strong>${customerFullName}</strong>${versNr ? ` (Versichertennr. ${versNr})` : ""}
-        für den Leistungszeitraum <strong>${monthName} ${invoice.billingYear}</strong>.</p>
-        <p>Bei Rückfragen stehen wir Ihnen gerne zur Verfügung.</p>
-        <p>Mit freundlichen Grüßen<br/>${companyName}</p>
-      `;
+      let bodyContent = "";
+      if (isPrivatBilling) {
+        bodyContent = `
+          <p>Sehr geehrte/r ${cust[0].vorname || ""} ${cust[0].nachname || ""},</p>
+          <p>anbei erhalten Sie die Rechnung <strong>${invoice.invoiceNumber}</strong> sowie den zugehörigen Leistungsnachweis
+          für den Leistungszeitraum <strong>${monthName} ${invoice.billingYear}</strong>.</p>
+          ${isBeihilfe ? `<p><strong>Hinweis:</strong> Anbei erhalten Sie Ihre Rechnung und den Leistungsnachweis in doppelter Ausfertigung — bitte reichen Sie je ein Exemplar bei Ihrer privaten Pflegekasse und Ihrer Beihilfestelle ein.</p>` : ""}
+          <p>Bei Rückfragen stehen wir Ihnen gerne zur Verfügung.</p>
+          <p>Mit freundlichen Grüßen<br/>${companyName}</p>
+        `;
+      } else {
+        bodyContent = `
+          <p>Sehr geehrte Damen und Herren,</p>
+          <p>anbei erhalten Sie die Rechnung <strong>${invoice.invoiceNumber}</strong> sowie den zugehörigen Leistungsnachweis
+          für <strong>${customerFullName}</strong>${versNr ? ` (Versichertennr. ${versNr})` : ""}
+          für den Leistungszeitraum <strong>${monthName} ${invoice.billingYear}</strong>.</p>
+          <p>Bei Rückfragen stehen wir Ihnen gerne zur Verfügung.</p>
+          <p>Mit freundlichen Grüßen<br/>${companyName}</p>
+        `;
+      }
       const html = buildEmailLayout(companyName, resolvedLogo, bodyContent);
 
       const fileNames = `[${invoice.invoiceNumber}] ${invoice.invoiceNumber}.pdf, LN-${invoice.invoiceNumber}.pdf`;
@@ -416,8 +471,8 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
           subject,
           html,
           attachments: [
-            { filename: `${invoice.invoiceNumber}.pdf`, content: zugferdBuffer, contentType: "application/pdf" },
-            { filename: `LN-${invoice.invoiceNumber}.pdf`, content: lnPdf, contentType: "application/pdf" },
+            { filename: `${invoice.invoiceNumber}.pdf`, content: finalInvoicePdf, contentType: "application/pdf" },
+            { filename: `LN-${invoice.invoiceNumber}.pdf`, content: finalLnPdf, contentType: "application/pdf" },
           ],
         });
 
@@ -428,7 +483,7 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
           deliveryMethod: "email",
           status: "sent",
           recipientEmail,
-          recipientName: prov[0].name,
+          recipientName: recipientName || (prov.length ? prov[0].name : ""),
           documentFileNames: fileNames,
           sentAt: new Date(),
           createdByUserId: req.user!.id,
@@ -442,7 +497,7 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
           deliveryMethod: "email",
           status: "error",
           recipientEmail,
-          recipientName: prov[0].name,
+          recipientName: recipientName || (prov.length ? prov[0].name : ""),
           documentFileNames: fileNames,
           errorMessage: errMsg,
           createdByUserId: req.user!.id,
@@ -453,7 +508,7 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
 
       await auditService.log(req.user!.id, "invoice_sent", "invoice", invoiceId, {
         invoiceNumber: invoice.invoiceNumber, recipientEmail, customerId: invoice.customerId,
-        insuranceProviderId: prov[0].id, hasParagraph39, batchSend: true,
+        insuranceProviderId: prov.length ? prov[0].id : null, hasParagraph39, batchSend: true, isPrivatBilling, isBeihilfe,
       }, req.ip);
 
       if (cust[0].receivesMonthlyInvoice) {
@@ -1266,12 +1321,17 @@ router.get("/:id/pdf", asyncHandler("PDF konnte nicht generiert werden", async (
   
   const pdfData = buildPdfData(invoice, lineItems, companySettings);
 
-  const customerForInv = await db.select({ geburtsdatum: customersTable.geburtsdatum })
+  const customerForInv = await db.select({ geburtsdatum: customersTable.geburtsdatum, beihilfeBerechtigt: customersTable.beihilfeBerechtigt })
     .from(customersTable)
     .where(eq(customersTable.id, invoice.customerId))
     .limit(1);
-  if (customerForInv.length > 0 && customerForInv[0].geburtsdatum) {
-    pdfData.customerGeburtsdatum = customerForInv[0].geburtsdatum;
+  if (customerForInv.length > 0) {
+    if (customerForInv[0].geburtsdatum) {
+      pdfData.customerGeburtsdatum = customerForInv[0].geburtsdatum;
+    }
+    if (customerForInv[0].beihilfeBerechtigt) {
+      pdfData.beihilfeBerechtigt = true;
+    }
   }
 
   const html = generateInvoiceHtml(pdfData);
@@ -1294,6 +1354,14 @@ router.get("/:id/pdf", asyncHandler("PDF konnte nicht generiert werden", async (
     invoicePages.forEach(p => merged.addPage(p));
     const lnPages = await merged.copyPages(lnDoc, lnDoc.getPageIndices());
     lnPages.forEach(p => merged.addPage(p));
+
+    if (pdfData.beihilfeBerechtigt) {
+      const invoicePages2 = await merged.copyPages(invoiceDoc, invoiceDoc.getPageIndices());
+      invoicePages2.forEach(p => merged.addPage(p));
+      const lnPages2 = await merged.copyPages(lnDoc, lnDoc.getPageIndices());
+      lnPages2.forEach(p => merged.addPage(p));
+    }
+
     const mergedBytes = await merged.save();
 
     res.setHeader("Content-Type", "application/pdf");
@@ -1352,13 +1420,16 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
     throw badRequest(`Rechnung hat Status "${invoice.status}" — nur Entwürfe können versendet werden.`);
   }
 
-  if (invoice.billingType !== "pflegekasse_gesetzlich") {
-    throw badRequest("Nur Rechnungen an gesetzliche Pflegekassen können über diese Funktion versendet werden.");
+  if (invoice.billingType !== "pflegekasse_gesetzlich" && invoice.billingType !== "pflegekasse_privat") {
+    throw badRequest("Nur Rechnungen an Pflegekassen können über diese Funktion versendet werden.");
   }
 
   const customer = await db.select().from(customersTable).where(eq(customersTable.id, invoice.customerId)).limit(1);
   if (!customer.length) throw notFound("Kunde nicht gefunden");
   const cust = customer[0];
+
+  const isPrivatBilling = invoice.billingType === "pflegekasse_privat";
+  const isBeihilfe = isPrivatBilling && cust.beihilfeBerechtigt;
 
   const insHistory = await db.select({
     providerId: customerInsuranceHistory.insuranceProviderId,
@@ -1374,36 +1445,45 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
   if (!insHistory.length) throw badRequest("Keine aktive Pflegekassenzuordnung für diesen Kunden.");
 
   const provider = await db.select().from(insuranceProviders).where(eq(insuranceProviders.id, insHistory[0].providerId)).limit(1);
-  if (!provider.length) throw notFound("Pflegekasse nicht gefunden");
-  const ins = provider[0];
 
-  if (!ins.emailInvoiceEnabled) {
-    throw badRequest("E-Mail-Versand ist für diese Pflegekasse nicht aktiviert.");
+  let recipientEmail: string | null = null;
+  let recipientDisplayName = "";
+  let hasParagraph39 = false;
+
+  if (isPrivatBilling) {
+    if (!cust.email) throw badRequest("Keine E-Mail-Adresse beim Kunden hinterlegt.");
+    recipientEmail = cust.email;
+    recipientDisplayName = [cust.vorname, cust.nachname].filter(Boolean).join(" ") || cust.name;
+  } else {
+    if (!provider.length) throw notFound("Pflegekasse nicht gefunden");
+    const ins = provider[0];
+    if (!ins.emailInvoiceEnabled) {
+      throw badRequest("E-Mail-Versand ist für diese Pflegekasse nicht aktiviert.");
+    }
+
+    const lineItemsForCheck = await storage.getInvoiceLineItems(id);
+    if (lineItemsForCheck.length > 0) {
+      const appointmentIds = lineItemsForCheck.map(li => li.appointmentId).filter(Boolean) as number[];
+      if (appointmentIds.length > 0) {
+        const txns = await db.select({ budgetType: budgetTransactions.budgetType })
+          .from(budgetTransactions)
+          .where(and(
+            inArray(budgetTransactions.appointmentId, appointmentIds),
+            eq(budgetTransactions.transactionType, "consumption"),
+          ));
+        hasParagraph39 = txns.some(t => t.budgetType === "ersatzpflege_39_42a");
+      }
+    }
+
+    recipientEmail = hasParagraph39 ? (ins.emailVerhinderungspflege || ins.email) : ins.email;
+    recipientDisplayName = ins.name;
+  }
+
+  if (!recipientEmail) {
+    throw badRequest(isPrivatBilling ? "Keine E-Mail-Adresse beim Kunden hinterlegt." : "Keine E-Mail-Adresse bei der Pflegekasse hinterlegt.");
   }
 
   const lineItems = await storage.getInvoiceLineItems(id);
-
-  let hasParagraph39 = false;
-  if (lineItems.length > 0) {
-    const appointmentIds = lineItems.map(li => li.appointmentId).filter(Boolean) as number[];
-    if (appointmentIds.length > 0) {
-      const txns = await db.select({ budgetType: budgetTransactions.budgetType })
-        .from(budgetTransactions)
-        .where(and(
-          inArray(budgetTransactions.appointmentId, appointmentIds),
-          eq(budgetTransactions.transactionType, "consumption"),
-        ));
-      hasParagraph39 = txns.some(t => t.budgetType === "ersatzpflege_39_42a");
-    }
-  }
-
-  const recipientEmail = hasParagraph39
-    ? (ins.emailVerhinderungspflege || ins.email)
-    : ins.email;
-
-  if (!recipientEmail) {
-    throw badRequest("Keine E-Mail-Adresse bei der Pflegekasse hinterlegt.");
-  }
 
   const companySettings = await getCachedCompanySettings();
   if (!companySettings) throw badRequest("Firmendaten nicht konfiguriert.");
@@ -1411,13 +1491,8 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
   const { generateInvoiceHtml, generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
   const pdfData = buildPdfData(invoice, lineItems, companySettings);
 
-  const customerForPdf = await db.select({ geburtsdatum: customersTable.geburtsdatum })
-    .from(customersTable)
-    .where(eq(customersTable.id, invoice.customerId))
-    .limit(1);
-  if (customerForPdf.length > 0 && customerForPdf[0].geburtsdatum) {
-    pdfData.customerGeburtsdatum = customerForPdf[0].geburtsdatum;
-  }
+  if (cust.geburtsdatum) pdfData.customerGeburtsdatum = cust.geburtsdatum;
+  if (isBeihilfe) pdfData.beihilfeBerechtigt = true;
 
   const invoiceHtml = generateInvoiceHtml(pdfData);
   const { buffer: invoicePdf } = await generatePdf(invoiceHtml);
@@ -1427,6 +1502,28 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
 
   const lnHtml = generateLeistungsnachweisHtml(pdfData);
   const { buffer: lnPdf } = await generatePdf(lnHtml);
+
+  let finalInvoicePdf: Buffer = zugferdBuffer;
+  let finalLnPdf: Buffer = lnPdf;
+
+  if (isBeihilfe) {
+    const { PDFDocument } = await import("pdf-lib");
+    const mergedInv = await PDFDocument.create();
+    const invDoc = await PDFDocument.load(zugferdBuffer);
+    const invPages1 = await mergedInv.copyPages(invDoc, invDoc.getPageIndices());
+    invPages1.forEach(p => mergedInv.addPage(p));
+    const invPages2 = await mergedInv.copyPages(invDoc, invDoc.getPageIndices());
+    invPages2.forEach(p => mergedInv.addPage(p));
+    finalInvoicePdf = Buffer.from(await mergedInv.save());
+
+    const mergedLn = await PDFDocument.create();
+    const lnDoc = await PDFDocument.load(lnPdf);
+    const lnPages1 = await mergedLn.copyPages(lnDoc, lnDoc.getPageIndices());
+    lnPages1.forEach(p => mergedLn.addPage(p));
+    const lnPages2 = await mergedLn.copyPages(lnDoc, lnDoc.getPageIndices());
+    lnPages2.forEach(p => mergedLn.addPage(p));
+    finalLnPdf = Buffer.from(await mergedLn.save());
+  }
 
   const { sendEmail, buildEmailLayout } = await import("../services/email-service");
   const { resolveLogoToDataUrl } = await import("../services/logo-resolver");
@@ -1438,14 +1535,26 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
   const versNr = insHistory[0].versichertennummer || invoice.versichertennummer || "";
 
   const subject = `Rechnung ${invoice.invoiceNumber} — ${customerFullName}${versNr ? ` (${versNr})` : ""} — ${monthName} ${invoice.billingYear} — ${companyName}`;
-  const bodyContent = `
-    <p>Sehr geehrte Damen und Herren,</p>
-    <p>anbei erhalten Sie die Rechnung <strong>${invoice.invoiceNumber}</strong> sowie den zugehörigen Leistungsnachweis
-    für <strong>${customerFullName}</strong>${versNr ? ` (Versichertennr. ${versNr})` : ""} 
-    für den Leistungszeitraum <strong>${monthName} ${invoice.billingYear}</strong>.</p>
-    <p>Bei Rückfragen stehen wir Ihnen gerne zur Verfügung.</p>
-    <p>Mit freundlichen Grüßen<br/>${companyName}</p>
-  `;
+  let bodyContent = "";
+  if (isPrivatBilling) {
+    bodyContent = `
+      <p>Sehr geehrte/r ${cust.vorname || ""} ${cust.nachname || ""},</p>
+      <p>anbei erhalten Sie die Rechnung <strong>${invoice.invoiceNumber}</strong> sowie den zugehörigen Leistungsnachweis
+      für den Leistungszeitraum <strong>${monthName} ${invoice.billingYear}</strong>.</p>
+      ${isBeihilfe ? `<p><strong>Hinweis:</strong> Anbei erhalten Sie Ihre Rechnung und den Leistungsnachweis in doppelter Ausfertigung — bitte reichen Sie je ein Exemplar bei Ihrer privaten Pflegekasse und Ihrer Beihilfestelle ein.</p>` : ""}
+      <p>Bei Rückfragen stehen wir Ihnen gerne zur Verfügung.</p>
+      <p>Mit freundlichen Grüßen<br/>${companyName}</p>
+    `;
+  } else {
+    bodyContent = `
+      <p>Sehr geehrte Damen und Herren,</p>
+      <p>anbei erhalten Sie die Rechnung <strong>${invoice.invoiceNumber}</strong> sowie den zugehörigen Leistungsnachweis
+      für <strong>${customerFullName}</strong>${versNr ? ` (Versichertennr. ${versNr})` : ""} 
+      für den Leistungszeitraum <strong>${monthName} ${invoice.billingYear}</strong>.</p>
+      <p>Bei Rückfragen stehen wir Ihnen gerne zur Verfügung.</p>
+      <p>Mit freundlichen Grüßen<br/>${companyName}</p>
+    `;
+  }
 
   const html = buildEmailLayout(companyName, resolvedLogo, bodyContent);
 
@@ -1457,8 +1566,8 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
       subject,
       html,
       attachments: [
-        { filename: `${invoice.invoiceNumber}.pdf`, content: zugferdBuffer, contentType: "application/pdf" },
-        { filename: `LN-${invoice.invoiceNumber}.pdf`, content: lnPdf, contentType: "application/pdf" },
+        { filename: `${invoice.invoiceNumber}.pdf`, content: finalInvoicePdf, contentType: "application/pdf" },
+        { filename: `LN-${invoice.invoiceNumber}.pdf`, content: finalLnPdf, contentType: "application/pdf" },
       ],
     });
   } catch (sendErr: unknown) {
@@ -1468,7 +1577,7 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
       deliveryMethod: "email",
       status: "error",
       recipientEmail,
-      recipientName: ins.name,
+      recipientName: recipientDisplayName,
       documentFileNames: fileNames,
       errorMessage: errMsg,
       createdByUserId: req.user!.id,
@@ -1483,7 +1592,7 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
     deliveryMethod: "email",
     status: "sent",
     recipientEmail,
-    recipientName: ins.name,
+    recipientName: recipientDisplayName,
     documentFileNames: fileNames,
     sentAt: new Date(),
     createdByUserId: req.user!.id,
@@ -1493,9 +1602,9 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
     invoiceNumber: invoice.invoiceNumber,
     recipientEmail,
     customerId: invoice.customerId,
-    insuranceProviderId: ins.id,
-    insuranceProviderName: ins.name,
-    hasParagraph39,
+    insuranceProviderId: provider.length ? provider[0].id : null,
+    insuranceProviderName: recipientDisplayName,
+    hasParagraph39, isPrivatBilling, isBeihilfe,
   }, req.ip);
 
   const results: { invoiceId: number; status: string; recipientEmail: string; customerCopy?: boolean }[] = [

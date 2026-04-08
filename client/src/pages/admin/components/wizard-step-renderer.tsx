@@ -10,6 +10,7 @@ import { DeliveryStep } from "./delivery-step";
 import type { CustomerFormData, ContactFormData, BudgetTypeSettingForm } from "./customer-types";
 import type { BudgetType } from "@shared/domain/budgets";
 import type { BillingType } from "@shared/domain/customers";
+import type { InsuranceProviderItem } from "@/lib/api/types";
 
 interface WizardStepRendererProps {
   currentStepId: string;
@@ -17,6 +18,7 @@ interface WizardStepRendererProps {
   phoneErrors: Record<string, string | null>;
   insuranceOptions: Array<{ value: string; label: string; sublabel: string }>;
   insuranceProvidersEmpty: boolean;
+  insuranceProviders?: InsuranceProviderItem[];
   customerSignatures: Record<string, string>;
   uploadedDocuments: WizardUploadedDoc[];
   handleChange: (field: string, value: string | boolean) => void;
@@ -31,7 +33,7 @@ interface WizardStepRendererProps {
   handleUploadedDocumentsChange: (docs: WizardUploadedDoc[]) => void;
 }
 
-export function WizardStepRenderer({ currentStepId, formData, phoneErrors, insuranceOptions, insuranceProvidersEmpty, customerSignatures, uploadedDocuments, handleChange, handleBillingTypeChange, handleInsuranceProviderCreated, handleContactChange, handleAddContact, handleRemoveContact, handleBudgetTypeToggle, handleBudgetTypeLimitChange, handleSignatureChange, handleUploadedDocumentsChange }: WizardStepRendererProps) {
+export function WizardStepRenderer({ currentStepId, formData, phoneErrors, insuranceOptions, insuranceProvidersEmpty, insuranceProviders, customerSignatures, uploadedDocuments, handleChange, handleBillingTypeChange, handleInsuranceProviderCreated, handleContactChange, handleAddContact, handleRemoveContact, handleBudgetTypeToggle, handleBudgetTypeLimitChange, handleSignatureChange, handleUploadedDocumentsChange }: WizardStepRendererProps) {
   switch (currentStepId) {
     case "customerType":
       return (
@@ -54,6 +56,7 @@ export function WizardStepRenderer({ currentStepId, formData, phoneErrors, insur
           formData={formData}
           insuranceOptions={insuranceOptions}
           insuranceProvidersEmpty={insuranceProvidersEmpty}
+          insuranceProviders={insuranceProviders}
           onChange={handleChange}
           onInsuranceProviderCreated={handleInsuranceProviderCreated}
         />

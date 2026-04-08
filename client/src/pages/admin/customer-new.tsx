@@ -78,6 +78,7 @@ export default function AdminCustomerNew() {
             phoneErrors={wizard.phoneErrors}
             insuranceOptions={wizard.insuranceOptions}
             insuranceProvidersEmpty={!wizard.insuranceProviders?.length}
+            insuranceProviders={wizard.insuranceProviders}
             customerSignatures={wizard.customerSignatures}
             uploadedDocuments={wizard.uploadedDocuments}
             handleChange={wizard.handleChange}
