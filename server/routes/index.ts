@@ -221,6 +221,15 @@ router.post("/customers/:id/geocode", requireAuth, asyncHandler("Geocodierung fe
   const id = parseInt(req.params.id);
   if (isNaN(id)) return res.status(400).json({ error: "Ungültige Kunden-ID" });
 
+  const user = req.user!;
+  if (!user.isAdmin) {
+    const { storage } = await import("../storage");
+    const assignedIds = await storage.getAssignedCustomerIds(user.id);
+    if (!assignedIds.includes(id)) {
+      return res.status(403).json({ error: "Zugriff verweigert" });
+    }
+  }
+
   const { db } = await import("../lib/db");
   const { customers } = await import("@shared/schema/customers");
   const { eq } = await import("drizzle-orm");
