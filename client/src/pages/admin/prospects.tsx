@@ -1007,16 +1007,16 @@ export default function AdminProspects() {
                           <Phone className="h-3 w-3" /> {formatPhoneForDisplay(prospect.telefon)}
                         </a>
                       )}
-                      {prospect.stadt && (
+                      {(prospect.stadt || prospect.strasse) && (
                         <a
-                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formatAddress(prospect) || prospect.stadt)}`}
+                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formatAddress(prospect) || prospect.stadt || '')}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex items-center gap-1 text-primary hover:underline"
                           data-testid={`link-prospect-address-${prospect.id}`}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <MapPin className="h-3 w-3" /> {prospect.stadt}
+                          <MapPin className="h-3 w-3" /> {formatAddress(prospect) || prospect.stadt}
                         </a>
                       )}
                       {prospect.quelle && (
