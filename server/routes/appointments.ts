@@ -1109,8 +1109,10 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   if (appointment.appointmentType === "Erstberatung" && appointment.prospectId) {
     const prospectData = await prospectStorage.getAppointmentData(appointment.prospectId);
     if (prospectData && prospectData.prospect.status === "erstberatung_vereinbart") {
-      const hasOtherActiveAppointments = prospectData.appointments.length > 0;
-      if (!hasOtherActiveAppointments) {
+      const hasOtherActiveErstberatung = prospectData.appointments.some(
+        (a) => a.appointmentType === "Erstberatung" && a.status !== "cancelled"
+      );
+      if (!hasOtherActiveErstberatung) {
         await db.update(prospects)
           .set({ status: "qualifiziert", updatedAt: new Date() })
           .where(eq(prospects.id, appointment.prospectId));

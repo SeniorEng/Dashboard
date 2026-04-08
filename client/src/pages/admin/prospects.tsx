@@ -672,14 +672,14 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                         </Button>
                       </div>
 
-                      {prospect.status === "qualifiziert" && (
+                      {(prospect.status === "qualifiziert" || prospect.status === "erstberatung_vereinbart") && (
                         <Button
                           className="w-full"
                           onClick={handleConvertToErstberatung}
                           data-testid="button-convert-erstberatung"
                         >
                           <ArrowRightCircle className="h-4 w-4 mr-2" />
-                          Erstberatung planen
+                          {prospect.status === "erstberatung_vereinbart" ? "Erstberatung neu planen" : "Erstberatung planen"}
                         </Button>
                       )}
 
