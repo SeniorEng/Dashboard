@@ -1291,13 +1291,13 @@ describe("IP: Individuelle Preise – Zwei Kunden mit verschiedenen Preisen für
 
     const hwAppt = await findFreeSlotAndCreate(
       customerId, hwServiceId, 60,
-      [0, 0], hwSlots,
+      [0, 5], hwSlots,
     );
     await documentAppointment(hwAppt.id, hwAppt.time, hwServiceId, 60, `IP-HW-${nachname}`, 10, 5);
 
     const abAppt = await findFreeSlotAndCreate(
       customerId, abServiceId, 90,
-      [0, 0], abSlots,
+      [0, 5], abSlots,
     );
     await documentAppointment(abAppt.id, abAppt.time, abServiceId, 90, `IP-AB-${nachname}`, 0, 0);
 
@@ -1312,8 +1312,8 @@ describe("IP: Individuelle Preise – Zwei Kunden mit verschiedenen Preisen für
   it("IP-1 – Kunde A: Individualpreise für alle Services setzen, Termine erstellen, Rechnung generieren", async () => {
     const result = await createCustomerWithPricesAndInvoice(
       "IP-KundeA-" + uniqueId(), kundeAPreise,
-      ["03:00", "03:30", "04:00", "04:30"],
-      ["05:00", "05:30", "06:00", "06:30"],
+      ["10:00", "10:30", "11:00", "11:30"],
+      ["12:00", "12:30", "13:00", "13:30"],
     );
     kundeAId = result.customerId;
     kundeAInvoiceId = result.invoiceId;
@@ -1323,8 +1323,8 @@ describe("IP: Individuelle Preise – Zwei Kunden mit verschiedenen Preisen für
   it("IP-2 – Kunde B: Andere Individualpreise für alle Services setzen, Termine erstellen, Rechnung generieren", async () => {
     const result = await createCustomerWithPricesAndInvoice(
       "IP-KundeB-" + uniqueId(), kundeBPreise,
-      ["07:00", "07:30", "08:00", "08:30"],
-      ["09:00", "09:30", "10:00", "10:30"],
+      ["16:00", "16:30", "17:00", "17:30"],
+      ["18:00", "18:30", "19:00", "19:30"],
     );
     kundeBId = result.customerId;
     kundeBInvoiceId = result.invoiceId;
