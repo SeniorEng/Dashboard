@@ -16,7 +16,6 @@ interface EmployeeSummaryRow {
   vorname: string;
   stundenHauswirtschaft: number;
   stundenAlltagsbegleitung: number;
-  stundenErstberatung: number;
   stundenSonstiges: number;
   stundenFeiertage: number;
   kilometer: number;
@@ -73,7 +72,6 @@ function calculateHolidayHours(
 function calculateBruttoAndCarryover(
   hwHours: number,
   abHours: number,
-  ebHours: number,
   sonstigesHours: number,
   feiertagHours: number,
   rates: CompensationRates,
@@ -82,11 +80,10 @@ function calculateBruttoAndCarryover(
 ): { bruttoCents: number; auszahlbarCents: number; carryoverCents: number } {
   const hwCents = Math.round(hwHours * rates.hwCents);
   const abCents = Math.round(abHours * rates.abCents);
-  const ebCents = Math.round(ebHours * rates.abCents);
   const sonstigesCents = Math.round(sonstigesHours * rates.hwCents);
   const feiertagCents = Math.round(feiertagHours * rates.hwCents);
 
-  const bruttoCents = hwCents + abCents + ebCents + sonstigesCents + feiertagCents;
+  const bruttoCents = hwCents + abCents + sonstigesCents + feiertagCents;
 
   const totalPayableCents = bruttoCents + carryoverCentsFromPrev;
 
@@ -105,7 +102,7 @@ function calculateBruttoAndCarryover(
   };
 }
 
-type MonthlyHoursMap = Record<number, Record<number, { hauswirtschaft: number; alltagsbegleitung: number; erstberatung: number; sonstiges: number }>>;
+type MonthlyHoursMap = Record<number, Record<number, { hauswirtschaft: number; alltagsbegleitung: number; sonstiges: number }>>;
 
 async function getMonthlyHoursBatch(
   employeeIds: number[],
@@ -124,7 +121,6 @@ async function getMonthlyHoursBatch(
       a.performed_by_employee_id as employee_id,
       EXTRACT(MONTH FROM a.date::date) as month_num,
       CASE
-        WHEN s.code = 'erstberatung' THEN 'erstberatung'
         WHEN s.code = 'alltagsbegleitung' THEN 'alltagsbegleitung'
         WHEN s.code = 'hauswirtschaft' THEN 'hauswirtschaft'
         ELSE 'sonstiges'
@@ -146,18 +142,39 @@ async function getMonthlyHoursBatch(
     const empId = row.employee_id;
     const m = Number(row.month_num);
     if (!result[m]) result[m] = {};
-    if (!result[m][empId]) result[m][empId] = { hauswirtschaft: 0, alltagsbegleitung: 0, erstberatung: 0, sonstiges: 0 };
+    if (!result[m][empId]) result[m][empId] = { hauswirtschaft: 0, alltagsbegleitung: 0, sonstiges: 0 };
     const minutes = Number(row.minutes) || 0;
     const category = row.category as string;
     if (category === "alltagsbegleitung") {
       result[m][empId].alltagsbegleitung += minutes;
     } else if (category === "hauswirtschaft") {
       result[m][empId].hauswirtschaft += minutes;
-    } else if (category === "erstberatung") {
-      result[m][empId].erstberatung += minutes;
     } else {
       result[m][empId].sonstiges += minutes;
     }
+  }
+
+  const travelMinutes = await db.execute(sql`
+    SELECT 
+      performed_by_employee_id as employee_id,
+      EXTRACT(MONTH FROM date::date) as month_num,
+      SUM(COALESCE(travel_minutes, 0)) as total_travel_minutes
+    FROM appointments
+    WHERE status IN ('completed')
+      AND deleted_at IS NULL
+      AND date >= ${startDate}
+      AND date <= ${endDate}
+      AND performed_by_employee_id = ANY(${sql`ARRAY[${sql.join(employeeIds.map(id => sql`${id}`), sql`, `)}]::int[]`})
+      AND travel_minutes > 0
+    GROUP BY performed_by_employee_id, EXTRACT(MONTH FROM date::date)
+  `);
+
+  for (const row of travelMinutes.rows as any[]) {
+    const empId = row.employee_id;
+    const m = Number(row.month_num);
+    if (!result[m]) result[m] = {};
+    if (!result[m][empId]) result[m][empId] = { hauswirtschaft: 0, alltagsbegleitung: 0, sonstiges: 0 };
+    result[m][empId].sonstiges += Number(row.total_travel_minutes) || 0;
   }
 
   const timeEntries = await db.select({
@@ -179,7 +196,7 @@ async function getMonthlyHoursBatch(
     const empId = entry.userId;
     const m = parseLocalDate(entry.entryDate).getMonth() + 1;
     if (!result[m]) result[m] = {};
-    if (!result[m][empId]) result[m][empId] = { hauswirtschaft: 0, alltagsbegleitung: 0, erstberatung: 0, sonstiges: 0 };
+    if (!result[m][empId]) result[m][empId] = { hauswirtschaft: 0, alltagsbegleitung: 0, sonstiges: 0 };
     if (entry.entryType !== "kundentermin" && entry.entryType !== "urlaub" && entry.entryType !== "krankheit" && entry.entryType !== "verfuegbar") {
       let minutes = entry.durationMinutes || 0;
       if (!minutes && entry.startTime && entry.endTime) {
@@ -262,7 +279,7 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
         const rates = ratesByEmployee[empId];
         if (!rates || (rates.hwCents === 0 && rates.abCents === 0)) continue;
 
-        const hours = monthData[empId] || { hauswirtschaft: 0, alltagsbegleitung: 0, erstberatung: 0, sonstiges: 0 };
+        const hours = monthData[empId] || { hauswirtschaft: 0, alltagsbegleitung: 0, sonstiges: 0 };
         const emp = employees.find(e => e.id === empId)!;
         const feiertage = calculateHolidayHours(year, m, emp.employmentType, emp.monthlyWorkHours);
         
@@ -270,7 +287,6 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
         const result = calculateBruttoAndCarryover(
           hours.hauswirtschaft / 60,
           hours.alltagsbegleitung / 60,
-          hours.erstberatung / 60,
           hours.sonstiges / 60,
           feiertage,
           rates,
@@ -328,11 +344,10 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
   const rows: EmployeeSummaryRow[] = [];
 
   for (const emp of employees) {
-    const hours = currentMonthHours[emp.id] || { hauswirtschaft: 0, alltagsbegleitung: 0, erstberatung: 0, sonstiges: 0 };
+    const hours = currentMonthHours[emp.id] || { hauswirtschaft: 0, alltagsbegleitung: 0, sonstiges: 0 };
 
     const stundenHW = hours.hauswirtschaft / 60;
     const stundenAB = hours.alltagsbegleitung / 60;
-    const stundenEB = hours.erstberatung / 60;
     const stundenSonstiges = hours.sonstiges / 60;
     const km = kmByEmployee[emp.id] || 0;
     const urlaub = vacationDays[emp.id] || 0;
@@ -351,7 +366,7 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
         uebertragVormonatCents = prevCarryoverCents;
 
         const result = calculateBruttoAndCarryover(
-          stundenHW, stundenAB, stundenEB, stundenSonstiges, feiertage,
+          stundenHW, stundenAB, stundenSonstiges, feiertage,
           rates, earningsLimitCents, prevCarryoverCents
         );
         bruttoCents = result.bruttoCents;
@@ -360,14 +375,13 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
       }
     }
 
-    if (stundenHW > 0 || stundenAB > 0 || stundenEB > 0 || stundenSonstiges > 0 || km > 0 || urlaub > 0 || krankheit > 0 || feiertage > 0) {
+    if (stundenHW > 0 || stundenAB > 0 || stundenSonstiges > 0 || km > 0 || urlaub > 0 || krankheit > 0 || feiertage > 0) {
       rows.push({
         employeeId: emp.id,
         nachname: emp.nachname || "",
         vorname: emp.vorname || "",
         stundenHauswirtschaft: Math.round(stundenHW * 100) / 100,
         stundenAlltagsbegleitung: Math.round(stundenAB * 100) / 100,
-        stundenErstberatung: Math.round(stundenEB * 100) / 100,
         stundenSonstiges: Math.round(stundenSonstiges * 100) / 100,
         stundenFeiertage: feiertage,
         kilometer: km,
