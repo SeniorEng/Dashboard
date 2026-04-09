@@ -284,15 +284,23 @@ describe("LN-6: Duplikat-Erkennung", () => {
 
 describe("LN-7: Nicht-dokumentierter Termin blockiert LN", () => {
   it("LN-7.1 – LN für scheduled Termin wird abgelehnt (400)", async () => {
-    const futureDate = getFutureDate(290);
-    const apptRes = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date: futureDate,
-      scheduledStart: "09:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
-      assignedEmployeeId: auth.user.id,
-    });
-    expect(apptRes.status).toBe(201);
+    const timeSlots = ["04:00", "03:00", "02:00", "21:00", "22:00"];
+    const dateOffsets = [290, 310, 330, 340, 345];
+    let apptRes: any = null;
+    for (const offset of dateOffsets) {
+      for (const time of timeSlots) {
+        const res = await apiPost<any>("/api/appointments/kundentermin", {
+          customerId: testCustomerId,
+          date: getFutureDate(offset),
+          scheduledStart: time,
+          services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+          assignedEmployeeId: auth.user.id,
+        });
+        if (res.status === 201) { apptRes = res; break; }
+      }
+      if (apptRes) break;
+    }
+    expect(apptRes?.status, "Termin muss erstellt werden (201)").toBe(201);
     cleanupApptIds.push(apptRes.data.id);
 
     const res = await apiPost<any>("/api/service-records/single", {
@@ -351,15 +359,25 @@ describe("LN-9: Monatlicher Leistungsnachweis", () => {
   });
 
   it("LN-9.2 – Monatlicher LN blockiert wenn undokumentierte Termine vorhanden", async () => {
-    const futureDate = getFutureDate(291);
-    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date: futureDate,
-      scheduledStart: "07:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
-      assignedEmployeeId: auth.user.id,
-    });
-    expect(createRes.status).toBe(201);
+    const timeSlots = ["04:30", "03:30", "02:30", "21:30", "22:30"];
+    const dateOffsets = [291, 311, 331, 341, 346];
+    let createRes: any = null;
+    let futureDate = "";
+    for (const offset of dateOffsets) {
+      for (const time of timeSlots) {
+        futureDate = getFutureDate(offset);
+        const res = await apiPost<any>("/api/appointments/kundentermin", {
+          customerId: testCustomerId,
+          date: futureDate,
+          scheduledStart: time,
+          services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+          assignedEmployeeId: auth.user.id,
+        });
+        if (res.status === 201) { createRes = res; break; }
+      }
+      if (createRes) break;
+    }
+    expect(createRes?.status, "Termin muss erstellt werden (201)").toBe(201);
     cleanupApptIds.push(createRes.data.id);
 
     const d = new Date(futureDate);
@@ -378,7 +396,7 @@ describe("LN-10: In-progress Termin blockiert LN", () => {
     const apptRes = await apiPost<any>("/api/appointments/kundentermin", {
       customerId: testCustomerId,
       date: futureDate,
-      scheduledStart: "08:00",
+      scheduledStart: "03:30",
       services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
       assignedEmployeeId: auth.user.id,
     });

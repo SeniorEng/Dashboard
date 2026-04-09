@@ -333,7 +333,7 @@ describe("EB-8B: Erstberatung-PATCH Updates", () => {
 
   it("EB-8B.3 – Erstberatungs-Termin PATCH Datum auf Werktag aktualisiert", async () => {
     expect(erstberatungId, "erstberatungId muss gesetzt sein").toBeTruthy();
-    const futureDate = getFutureDate(14);
+    const futureDate = getFutureDate(55);
     const res = await apiPatch<any>(`/api/appointments/${erstberatungId}`, {
       date: futureDate,
     });

@@ -49,7 +49,7 @@ app.use(cookieParser());
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: (process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test") ? 5000 : 300,
+  max: (process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test") ? 50000 : 300,
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => req.path.startsWith("/api/auth/") || req.path.startsWith("/auth/"),

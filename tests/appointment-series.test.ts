@@ -192,7 +192,7 @@ describe("SER-5: Verlängern & Verkürzen", () => {
 
   beforeAll(async () => {
     const res = await apiPost<any>("/api/appointment-series",
-      seriesPayload({ _offset: 200, _span: 14, weekdays: ["mi"], scheduledStart: "10:00" })
+      seriesPayload({ _offset: 200, _span: 14, weekdays: ["mi"], scheduledStart: "05:00" })
     );
     expect(res.status).toBe(201);
     extendSeriesId = res.data.series.id;
@@ -248,7 +248,7 @@ describe("SER-6: Einzeltermin bearbeiten (isSeriesException)", () => {
       `/api/appointment-series/${seriesId}/appointments/${target.id}/update`,
       {
         mode: "single",
-        scheduledStart: "11:00",
+        scheduledStart: "05:30",
         notes: "Einzeln verschoben",
       }
     );
