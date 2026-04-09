@@ -404,8 +404,14 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       .where(
         and(
           sqlBuilder`(
-            ${appointments.assignedEmployeeId} = ${userId} 
-            OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId} OR ${customers.backupEmployeeId2} = ${userId}))
+            CASE 
+              WHEN ${appointments.status} = 'completed' AND ${appointments.performedByEmployeeId} IS NOT NULL 
+                THEN ${appointments.performedByEmployeeId} = ${userId}
+              ELSE (
+                ${appointments.assignedEmployeeId} = ${userId} 
+                OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId} OR ${customers.backupEmployeeId2} = ${userId}))
+              )
+            END
           )`,
           gte(appointments.date, startDate),
           lte(appointments.date, endDate),

@@ -843,7 +843,7 @@ describe("TE-BIZ-18: Nicht-Admin Einschränkungen für vergangene Urlaub/Krankhe
 
 describe("TE-BIZ-19: CRUD-Ergänzungen (PUT, Urlaub, Offene Aufgaben)", () => {
   let editEntryId: number;
-  const editDate = getFutureDate(400);
+  const editDate = getFutureDate(700);
 
   beforeAll(async () => {
     await getAuthCookie();

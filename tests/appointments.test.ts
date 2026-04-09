@@ -152,7 +152,7 @@ describe("BIZ-2: Überlappungsprüfung", () => {
 describe("BIZ-3: scheduledEnd Berechnung", () => {
   it("BIZ-3.1 – scheduledEnd = start + summe(durationMinutes)", async () => {
     let created = false;
-    for (let off = 283; off <= 295; off++) {
+    for (let off = 283; off <= 330; off++) {
       const date = getFutureDate(off);
       const res = await apiPost<any>("/api/appointments/kundentermin", {
         customerId: testCustomerId,
@@ -177,7 +177,7 @@ describe("BIZ-3: scheduledEnd Berechnung", () => {
 
   it("BIZ-3.2 – Einzelner Service berechnet scheduledEnd korrekt", async () => {
     let created = false;
-    for (let off = 296; off <= 308; off++) {
+    for (let off = 340; off <= 380; off++) {
       const date = getFutureDate(off);
       const createRes = await createAppointment(date, "14:00", hwServiceId, 45);
       if (createRes.status === 201) {
