@@ -629,7 +629,7 @@ describe("ME: Multi-Employee – Verschiedene Mitarbeiter in Rechnungspositionen
 
     meAppt2 = await findFreeSlotAndCreate(
       meCustomerId, abServiceId, 60,
-      [4, 30], ["04:00", "04:30", "22:00", "22:30"],
+      [4, 30], ["04:00", "04:30", "22:00", "22:30", "03:00", "03:30", "23:00", "02:00", "02:30"],
       employee2Id,
     );
     await documentAppointmentAs(employee2Auth, meAppt2.id, meAppt2.time, abServiceId, 60, "ME-Termin-2-MA2", 0, 0);
@@ -648,52 +648,56 @@ describe("ME: Multi-Employee – Verschiedene Mitarbeiter in Rechnungspositionen
       await signServiceRecord(srId);
     }
 
-    const apptDate = new Date(meAppt1.date);
-    const invoiceData = await generateInvoice(
-      meCustomerId,
-      apptDate.getFullYear(),
-      apptDate.getMonth() + 1,
-    );
-    const invoice = Array.isArray(invoiceData) ? invoiceData[0] : invoiceData;
-    meInvoiceId = invoice.id;
+    const meInvoiceIds: number[] = [];
+    for (const m of months) {
+      const [year, month] = m.split("-").map(Number);
+      const invoiceData = await generateInvoice(meCustomerId, year, month);
+      const invoice = Array.isArray(invoiceData) ? invoiceData[0] : invoiceData;
+      meInvoiceIds.push(invoice.id);
+    }
+    meInvoiceId = meInvoiceIds[0];
+    (globalThis as any).__meAllInvoiceIds = meInvoiceIds;
   });
 
   it("ME-4 – Rechnungspositionen enthalten UNTERSCHIEDLICHE Mitarbeiternamen pro Termin mit appointmentId-Zuordnung", async () => {
     expect(meInvoiceId).toBeDefined();
-    const detail = await getInvoiceWithLineItems(meInvoiceId);
-    const lineItems = detail.lineItems;
+    const allInvoiceIds: number[] = (globalThis as any).__meAllInvoiceIds || [meInvoiceId];
 
-    expect(lineItems.length).toBeGreaterThanOrEqual(2);
+    let allLineItems: any[] = [];
+    for (const invId of allInvoiceIds) {
+      const detail = await getInvoiceWithLineItems(invId);
+      allLineItems = allLineItems.concat(detail.lineItems);
+    }
 
-    for (const li of lineItems) {
+    expect(allLineItems.length).toBeGreaterThanOrEqual(2);
+
+    for (const li of allLineItems) {
       expect(li.employeeName, `Position ${li.serviceCode} muss Mitarbeiternamen haben`).toBeTruthy();
       expect(li.appointmentDate, `Position ${li.serviceCode} muss Termindatum haben`).toBeTruthy();
       expect(li.appointmentId, `Position ${li.serviceCode} muss appointmentId haben`).toBeTruthy();
       expect(li.totalCents, `Position ${li.serviceCode} muss Betrag haben`).toBeGreaterThan(0);
     }
 
-    if (new Date(meAppt1.date).getMonth() === new Date(meAppt2.date).getMonth()) {
-      const hwItemMA1 = lineItems.find(
-        (li: any) => li.serviceCode === "hauswirtschaft" && li.appointmentId === meAppt1.id,
-      );
-      expect(hwItemMA1, `HW-Position mit appointmentId=${meAppt1.id} von MA1 muss existieren`).toBeDefined();
-      expect(hwItemMA1.appointmentDate).toBe(meAppt1.date);
-      expect(hwItemMA1.serviceDetails).toBe("ME-Termin-1-MA1");
+    const hwItemMA1 = allLineItems.find(
+      (li: any) => li.serviceCode === "hauswirtschaft" && li.appointmentId === meAppt1.id,
+    );
+    expect(hwItemMA1, `HW-Position mit appointmentId=${meAppt1.id} von MA1 muss existieren`).toBeDefined();
+    expect(hwItemMA1.appointmentDate).toBe(meAppt1.date);
+    expect(hwItemMA1.serviceDetails).toBe("ME-Termin-1-MA1");
 
-      const abItemMA2 = lineItems.find(
-        (li: any) => li.serviceCode === "alltagsbegleitung" && li.appointmentId === meAppt2.id,
-      );
-      expect(abItemMA2, `AB-Position mit appointmentId=${meAppt2.id} von MA2 muss existieren`).toBeDefined();
-      expect(abItemMA2.appointmentDate).toBe(meAppt2.date);
-      expect(abItemMA2.serviceDetails).toBe("ME-Termin-2-MA2");
+    const abItemMA2 = allLineItems.find(
+      (li: any) => li.serviceCode === "alltagsbegleitung" && li.appointmentId === meAppt2.id,
+    );
+    expect(abItemMA2, `AB-Position mit appointmentId=${meAppt2.id} von MA2 muss existieren`).toBeDefined();
+    expect(abItemMA2.appointmentDate).toBe(meAppt2.date);
+    expect(abItemMA2.serviceDetails).toBe("ME-Termin-2-MA2");
 
-      expect(
-        hwItemMA1.employeeName,
-        `MA1 (${hwItemMA1.employeeName}) ≠ MA2 (${abItemMA2.employeeName})`,
-      ).not.toBe(abItemMA2.employeeName);
-    }
+    expect(
+      hwItemMA1.employeeName,
+      `MA1 (${hwItemMA1.employeeName}) ≠ MA2 (${abItemMA2.employeeName})`,
+    ).not.toBe(abItemMA2.employeeName);
 
-    const serviceCodes = [...new Set(lineItems.map((li: any) => li.serviceCode).filter((c: string) => !["travel_km", "customer_km"].includes(c)))];
+    const serviceCodes = [...new Set(allLineItems.map((li: any) => li.serviceCode).filter((c: string) => !["travel_km", "customer_km"].includes(c)))];
     expect(serviceCodes.length, "Mindestens 2 verschiedene Service-Typen").toBeGreaterThanOrEqual(2);
 
     if (cleanupEmployee2Id) {
@@ -1094,23 +1098,29 @@ describe("XV: Cross-Validation – Abrechnungstyp-übergreifende Prüfungen", ()
     const appt1 = await findFreeSlotAndCreate(custId, hwServiceId, 30, [3, 20], ["00:00", "00:30"]);
     await documentAppointment(appt1.id, appt1.time, hwServiceId, 30, "XV-NoDup-1", 0, 0);
 
-    const appt2 = await findFreeSlotAndCreate(custId, abServiceId, 30, [3, 20], ["01:00", "01:30"]);
+    const appt2 = await findFreeSlotAndCreate(custId, abServiceId, 30, [3, 20], ["01:00", "01:30", "02:00", "02:30", "03:00", "03:30", "19:00", "19:30", "20:00", "20:30"]);
     await documentAppointment(appt2.id, appt2.time, abServiceId, 30, "XV-NoDup-2", 0, 0);
 
-    const apptDate = new Date(appt1.date);
-    const srId = await createServiceRecord(custId, apptDate.getFullYear(), apptDate.getMonth() + 1);
-    await signServiceRecord(srId);
-    const invData = await generateInvoice(custId, apptDate.getFullYear(), apptDate.getMonth() + 1);
-    const inv = Array.isArray(invData) ? invData[0] : invData;
+    const dates = [new Date(appt1.date), new Date(appt2.date)];
+    const months = [...new Set(dates.map(d => `${d.getFullYear()}-${d.getMonth() + 1}`))];
 
-    const detail = await getInvoiceWithLineItems(inv.id);
-    const nonKmItems = detail.lineItems.filter((li: any) => !["travel_km", "customer_km"].includes(li.serviceCode));
+    let allNonKmItems: any[] = [];
+    for (const m of months) {
+      const [year, month] = m.split("-").map(Number);
+      const srId = await createServiceRecord(custId, year, month);
+      await signServiceRecord(srId);
+      const invData = await generateInvoice(custId, year, month);
+      const inv = Array.isArray(invData) ? invData[0] : invData;
+      const detail = await getInvoiceWithLineItems(inv.id);
+      const nonKm = detail.lineItems.filter((li: any) => !["travel_km", "customer_km"].includes(li.serviceCode));
+      allNonKmItems = allNonKmItems.concat(nonKm);
+    }
 
-    const appointmentIds = nonKmItems.map((li: any) => li.appointmentId).filter(Boolean);
+    const appointmentIds = allNonKmItems.map((li: any) => li.appointmentId).filter(Boolean);
     const uniqueApptIds = [...new Set(appointmentIds)];
     expect(uniqueApptIds.length).toBe(appointmentIds.length);
 
-    expect(nonKmItems.length).toBeGreaterThanOrEqual(2);
+    expect(allNonKmItems.length).toBeGreaterThanOrEqual(2);
   });
 
   it("XV-7 – Dokumentierte Termine = Abrechnungspositionen (Aggregate über alle Rechnungen)", async () => {

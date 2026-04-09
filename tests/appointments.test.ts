@@ -283,17 +283,31 @@ describe("BIZ-7: Termin bearbeiten", () => {
   let editApptId: number;
 
   it("BIZ-7.1 – Termin-Zeit verschieben", async () => {
-    const date = getFutureDate(228);
-    const createRes = await createAppointment(date, "09:00", hwServiceId, 60);
-    expect(createRes.status).toBe(201);
-    editApptId = createRes.data.id;
-    createdIds.push(editApptId);
-
-    const updateRes = await apiPatch<any>(`/api/appointments/${editApptId}`, {
-      scheduledStart: "11:00",
-    });
-    expect(updateRes.status).toBe(200);
-    expect(updateRes.data.scheduledStart).toBe("11:00:00");
+    const times = ["09:00", "08:00", "07:00", "06:00", "05:00"];
+    const targetTimes = ["11:00", "14:00", "15:00", "16:00", "17:00"];
+    let createRes: any;
+    let usedTargetTime = "";
+    for (let t = 0; t < times.length; t++) {
+      const date = getFutureDate(228 + t);
+      createRes = await createAppointment(date, times[t], hwServiceId, 60);
+      if (createRes.status === 201) {
+        editApptId = createRes.data.id;
+        createdIds.push(editApptId);
+        for (const target of targetTimes) {
+          const updateRes = await apiPatch<any>(`/api/appointments/${editApptId}`, {
+            scheduledStart: target,
+          });
+          if (updateRes.status === 200) {
+            usedTargetTime = target;
+            expect(updateRes.data.scheduledStart).toBe(target + ":00");
+            break;
+          }
+        }
+        break;
+      }
+    }
+    expect(createRes?.status, "Mindestens ein Slot muss frei sein").toBe(201);
+    expect(usedTargetTime, "Mindestens ein Zielslot muss frei sein").toBeTruthy();
   });
 
   it("BIZ-7.2 – Notizen eines geplanten Termins ändern", async () => {
@@ -529,24 +543,28 @@ describe("BIZ-16: Completed -> Reopen -> Documenting", () => {
 describe("BIZ-17: durationPromised wird bei Erstellung aus Services berechnet", () => {
   it("BIZ-17.1 – durationPromised = Summe aller Service-Dauern", async () => {
     let created = false;
-    for (const offset of [276, 277, 278, 279, 280, 281, 282]) {
+    const timesDP = ["07:00", "06:00", "05:00", "04:00", "03:00", "14:00", "15:00", "16:00"];
+    for (const offset of [276, 277, 278, 279, 280, 281, 282, 283, 284, 285]) {
       const date = getFutureDate(offset);
-      const createRes = await apiPost<any>("/api/appointments/kundentermin", {
-        customerId: testCustomerId,
-        date,
-        scheduledStart: "07:00",
-        services: [
-          { serviceId: hwServiceId, durationMinutes: 30 },
-          { serviceId: abServiceId, durationMinutes: 45 },
-        ],
-        assignedEmployeeId: auth.user.id,
-      });
-      if (createRes.status === 201) {
-        createdIds.push(createRes.data.id);
-        expect(createRes.data.durationPromised).toBe(75);
-        created = true;
-        break;
+      for (const time of timesDP) {
+        const createRes = await apiPost<any>("/api/appointments/kundentermin", {
+          customerId: testCustomerId,
+          date,
+          scheduledStart: time,
+          services: [
+            { serviceId: hwServiceId, durationMinutes: 30 },
+            { serviceId: abServiceId, durationMinutes: 45 },
+          ],
+          assignedEmployeeId: auth.user.id,
+        });
+        if (createRes.status === 201) {
+          createdIds.push(createRes.data.id);
+          expect(createRes.data.durationPromised).toBe(75);
+          created = true;
+          break;
+        }
       }
+      if (created) break;
     }
     expect(created, "Termin muss erstellt werden").toBe(true);
   });

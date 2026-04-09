@@ -46,7 +46,7 @@ export async function upsertInitialBalanceAllocation(
   params: { customerId: number; budgetType: string; year: number; month: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string },
   userId?: number
 ): Promise<void> {
-  const existing = await db.select({ id: budgetAllocations.id, deletedAt: budgetAllocations.deletedAt })
+  const allExisting = await db.select({ id: budgetAllocations.id, deletedAt: budgetAllocations.deletedAt })
     .from(budgetAllocations)
     .where(and(
       eq(budgetAllocations.customerId, params.customerId),
@@ -57,7 +57,26 @@ export async function upsertInitialBalanceAllocation(
     ))
     .orderBy(desc(budgetAllocations.id));
 
-  if (existing.length > 0) {
+  const active = allExisting.filter(e => !e.deletedAt);
+  const deleted = allExisting.filter(e => !!e.deletedAt);
+
+  if (active.length > 0) {
+    await db.update(budgetAllocations)
+      .set({
+        amountCents: params.amountCents,
+        month: params.month,
+        validFrom: params.validFrom,
+        expiresAt: params.expiresAt,
+        notes: params.notes ?? null,
+      })
+      .where(eq(budgetAllocations.id, active[0].id));
+
+    for (let i = 1; i < active.length; i++) {
+      await db.update(budgetAllocations)
+        .set({ deletedAt: new Date() })
+        .where(eq(budgetAllocations.id, active[i].id));
+    }
+  } else if (deleted.length > 0) {
     await db.update(budgetAllocations)
       .set({
         amountCents: params.amountCents,
@@ -67,15 +86,7 @@ export async function upsertInitialBalanceAllocation(
         notes: params.notes ?? null,
         deletedAt: null,
       })
-      .where(eq(budgetAllocations.id, existing[0].id));
-
-    if (existing.length > 1) {
-      for (let i = 1; i < existing.length; i++) {
-        await db.update(budgetAllocations)
-          .set({ deletedAt: new Date() })
-          .where(eq(budgetAllocations.id, existing[i].id));
-      }
-    }
+      .where(eq(budgetAllocations.id, deleted[0].id));
   } else {
     await db.insert(budgetAllocations)
       .values({
