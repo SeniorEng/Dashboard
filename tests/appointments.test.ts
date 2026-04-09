@@ -676,25 +676,34 @@ describe("BIZ-20A: Admin kann completed Termin löschen mit Budget-Reversal", ()
 describe("BIZ-20B: PATCH mit Termin-Verschiebung in Konflikt", () => {
   it("BIZ-20B.1 – PATCH Terminverschiebung in bestehenden Zeitraum liefert 409", async () => {
     let date: string | undefined;
-    let r1Id: number | undefined;
+    let r1Time = "";
     let r2Id: number | undefined;
-    for (let off = 351; off <= 365; off++) {
+    const timePairs = [
+      ["04:00", "06:00"],
+      ["03:00", "05:00"],
+      ["17:00", "19:00"],
+      ["20:00", "22:00"],
+    ];
+    outer:
+    for (let off = 351; off <= 435; off++) {
       const d = getFutureDate(off);
-      const r1 = await createAppointment(d, "10:00", hwServiceId, 60);
-      if (r1.status !== 201) continue;
-      createdIds.push(r1.data.id);
-      const r2 = await createAppointment(d, "12:00", hwServiceId, 60);
-      if (r2.status !== 201) continue;
-      createdIds.push(r2.data.id);
-      date = d;
-      r1Id = r1.data.id;
-      r2Id = r2.data.id;
-      break;
+      for (const [t1, t2] of timePairs) {
+        const r1 = await createAppointment(d, t1, hwServiceId, 60);
+        if (r1.status !== 201) continue;
+        createdIds.push(r1.data.id);
+        const r2 = await createAppointment(d, t2, hwServiceId, 60);
+        if (r2.status !== 201) continue;
+        createdIds.push(r2.data.id);
+        date = d;
+        r1Time = t1;
+        r2Id = r2.data.id;
+        break outer;
+      }
     }
     expect(date, "Freier Tag für zwei Termine muss gefunden werden").toBeDefined();
 
     const patchRes = await apiPatch<any>(`/api/appointments/${r2Id}`, {
-      scheduledStart: "10:00",
+      scheduledStart: r1Time,
     });
     expect(patchRes.status).toBe(409);
   });

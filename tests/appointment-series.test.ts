@@ -19,7 +19,7 @@ async function deleteSeriesSafe(id: number) {
 }
 
 function seriesPayload(overrides: Record<string, any> = {}) {
-  const startDate = getFutureDate(overrides._offset || 30);
+  const startDate = getFutureDate(overrides._offset || 730);
   const endObj = new Date(startDate + "T00:00:00");
   endObj.setDate(endObj.getDate() + (overrides._span || 28));
   const endDate = endObj.toISOString().split("T")[0];
@@ -192,7 +192,7 @@ describe("SER-5: Verlängern & Verkürzen", () => {
 
   beforeAll(async () => {
     const res = await apiPost<any>("/api/appointment-series",
-      seriesPayload({ _offset: 200, _span: 14, weekdays: ["mi"], scheduledStart: "05:00" })
+      seriesPayload({ _offset: 800, _span: 14, weekdays: ["mi"], scheduledStart: "05:00" })
     );
     expect(res.status).toBe(201);
     extendSeriesId = res.data.series.id;
@@ -264,7 +264,7 @@ describe("SER-7: Serie beenden (DELETE)", () => {
 
   it("SER-7.1 – Serie beenden cancelt zukünftige Termine", async () => {
     const createRes = await apiPost<any>("/api/appointment-series",
-      seriesPayload({ _offset: 250, _span: 21, weekdays: ["fr"], scheduledStart: "09:00" })
+      seriesPayload({ _offset: 850, _span: 21, weekdays: ["fr"], scheduledStart: "09:00" })
     );
     expect(createRes.status).toBe(201);
     endSeriesId = createRes.data.series.id;
@@ -297,7 +297,7 @@ describe("SER-8: Serien-Liste mit remainingCount", () => {
 describe("SER-9: Zweiwöchentliche Serie", () => {
   it("SER-9.1 – biweekly Serie erstellen", async () => {
     const res = await apiPost<any>("/api/appointment-series",
-      seriesPayload({ _offset: 270, _span: 56, weekdays: ["mi"], frequency: "biweekly", scheduledStart: "14:00" })
+      seriesPayload({ _offset: 870, _span: 56, weekdays: ["mi"], frequency: "biweekly", scheduledStart: "14:00" })
     );
     expect(res.status).toBe(201);
     expect(res.data.series).toBeDefined();
@@ -313,7 +313,7 @@ describe("SER-9: Zweiwöchentliche Serie", () => {
 describe("SER-10: Serie Status nach Löschung", () => {
   it("SER-10.1 – Gelöschte Serie hat Status ended", async () => {
     const createRes = await apiPost<any>("/api/appointment-series",
-      seriesPayload({ _offset: 290, _span: 14, weekdays: ["do"], scheduledStart: "16:00" })
+      seriesPayload({ _offset: 890, _span: 14, weekdays: ["do"], scheduledStart: "16:00" })
     );
     expect(createRes.status).toBe(201);
     const id = createRes.data.series.id;
@@ -355,14 +355,14 @@ describe("SER-11: Serie Counts und Details", () => {
 describe("SER-12A: Wochenendtag-Filterung", () => {
   it("SER-12A.1 – Serie mit ungültigen Wochenendtagen sa/so wird abgelehnt (400)", async () => {
     const res = await apiPost<any>("/api/appointment-series",
-      seriesPayload({ _offset: 305, _span: 21, weekdays: ["sa", "so"], scheduledStart: "10:00" })
+      seriesPayload({ _offset: 905, _span: 21, weekdays: ["sa", "so"], scheduledStart: "10:00" })
     );
     expect(res.status).toBe(400);
   });
 
   it("SER-12A.2 – Serie mit nur Wochentagen enthält keine Wochenenden", async () => {
     const res = await apiPost<any>("/api/appointment-series",
-      seriesPayload({ _offset: 306, _span: 14, weekdays: ["mo", "di", "mi"], scheduledStart: "10:30" })
+      seriesPayload({ _offset: 906, _span: 14, weekdays: ["mo", "di", "mi"], scheduledStart: "10:30" })
     );
     expect(res.status).toBe(201);
     cleanupSeriesIds.push(res.data.series.id);
@@ -381,14 +381,14 @@ describe("SER-12A: Wochenendtag-Filterung", () => {
 describe("SER-12: Serie mit ungültigen Daten", () => {
   it("SER-12.1 – Serie ohne weekdays wird abgelehnt (400)", async () => {
     const res = await apiPost<any>("/api/appointment-series",
-      seriesPayload({ _offset: 295, _span: 14, weekdays: [] })
+      seriesPayload({ _offset: 920, _span: 14, weekdays: [] })
     );
     expect(res.status).toBe(400);
   });
 
   it("SER-12.2 – Serie Enddatum vor Startdatum wird abgelehnt (400)", async () => {
-    const start = getFutureDate(300);
-    const end = getFutureDate(295);
+    const start = getFutureDate(930);
+    const end = getFutureDate(925);
     const res = await apiPost<any>("/api/appointment-series", {
       customerId: testCustomerId,
       startDate: start,
