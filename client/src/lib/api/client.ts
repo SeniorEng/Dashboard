@@ -178,6 +178,7 @@ export async function apiRequest<TResponse, TBody = unknown>(
         credentials: 'include',
         signal,
         headers: requestHeaders,
+        cache: 'no-store',
       };
 
       if (body !== undefined) {

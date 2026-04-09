@@ -8,7 +8,7 @@ import {
   type CustomerBudgetPreferences,
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
-import { eq, and, sql, lte, gte, isNull, or, desc, asc, inArray } from "drizzle-orm";
+import { eq, and, sql, lte, gte, isNull, isNotNull, or, desc, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate, currentYearAndMonth } from "@shared/utils/datetime";
 import { BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
 import { db } from "../../lib/db";
@@ -266,9 +266,24 @@ async function calculateAllocated45b(
   let allocStartYear = startDate.getFullYear();
   let allocStartMonth = startDate.getMonth() + 1;
 
+  const deletedIbEntries = await d.select({
+    year: budgetAllocations.year,
+    month: budgetAllocations.month,
+  }).from(budgetAllocations)
+    .where(and(
+      eq(budgetAllocations.customerId, customerId),
+      eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
+      eq(budgetAllocations.source, "initial_balance"),
+      isNotNull(budgetAllocations.deletedAt)
+    ));
+
   const initialBalanceMonths = existingAllocations
     .filter(a => a.source === "initial_balance" && a.month != null)
     .map(a => ({ year: a.year, month: a.month! }));
+
+  const deletedIbMonths = deletedIbEntries
+    .filter(e => e.month != null)
+    .map(e => ({ year: e.year, month: e.month! }));
 
   if (initialBalanceMonths.length > 0) {
     let latestIbYear = 0, latestIbMonth = 0;
@@ -287,7 +302,7 @@ async function calculateAllocated45b(
   }
 
   const initialBalanceSet = new Set(
-    initialBalanceMonths.map(ib => `${ib.year}-${ib.month}`)
+    [...initialBalanceMonths, ...deletedIbMonths].map(ib => `${ib.year}-${ib.month}`)
   );
 
   const monthlyAmount = await getMonthlyBudgetAmountCents(customerId, undefined, typeSettings);
