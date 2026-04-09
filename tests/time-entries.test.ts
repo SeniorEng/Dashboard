@@ -940,3 +940,80 @@ describe("TE-EDGE: Zeiterfassung Grenzfälle", () => {
     expect(closeRes.data.message).toContain("keine Zeiteinträge");
   });
 });
+
+describe("TE-ATTR: Stundenübersicht Attribution (performedByEmployeeId)", () => {
+  let employee2Id: number;
+  let attrApptId: number | null = null;
+  const attrDate = getFutureDate(750);
+
+  beforeAll(async () => {
+    const usersRes = await apiGet<any[]>("/api/admin/users");
+    const allUsers = Array.isArray(usersRes.data) ? usersRes.data : [];
+    const otherUser = allUsers.find((u: any) => u.id !== auth.user.id && u.isActive !== false);
+    if (!otherUser) {
+      throw new Error("Need a second employee for attribution test");
+    }
+    employee2Id = otherUser.id;
+  });
+
+  afterAll(async () => {
+    if (attrApptId) {
+      try { await apiDelete(`/api/appointments/${attrApptId}`); } catch {}
+    }
+  });
+
+  it("TE-ATTR-1 – Completed appointment attributed to performer, not assignee", async () => {
+    let createRes: any;
+    let usedDate = attrDate;
+    for (let off = 750; off <= 800; off++) {
+      usedDate = getFutureDate(off);
+      createRes = await apiPost<any>("/api/appointments/kundentermin", {
+        customerId: testCustomerId,
+        date: usedDate,
+        scheduledStart: "09:00",
+        services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
+        assignedEmployeeId: auth.user.id,
+      });
+      if (createRes.status === 201) break;
+    }
+    expect(createRes.status, "Must create appointment for attribution test").toBe(201);
+    attrApptId = createRes.data.id;
+
+    const docRes = await apiPost<any>(`/api/appointments/${attrApptId}/document`, {
+      performedByEmployeeId: employee2Id,
+      actualStart: "09:00",
+      travelOriginType: "home",
+      travelKilometers: 5,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 60, details: "Attribution-Test HW" }],
+    });
+    if (docRes.status !== 200) {
+      console.error("ATTR doc failed:", docRes.status, JSON.stringify(docRes.data));
+    }
+    expect(docRes.status).toBe(200);
+    expect(docRes.data.performedByEmployeeId).toBe(employee2Id);
+    expect(docRes.data.status).toBe("completed");
+
+    const d = new Date(usedDate);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+
+    const adminAppts = await apiGet<any[]>(`/api/admin/employee-appointments?year=${year}&month=${month}&userId=${employee2Id}`);
+    expect(adminAppts.status).toBe(200);
+    const matchingAppt = adminAppts.data?.find((a: any) => a.id === attrApptId);
+    expect(matchingAppt, "Admin employee-appointments must show appointment for performer").toBeDefined();
+    expect(matchingAppt?.performedByEmployeeId).toBe(employee2Id);
+
+    const assigneeOverview = await apiGet<any>(`/api/time-entries/overview/${year}/${month}?viewAsEmployeeId=${auth.user.id}`);
+    expect(assigneeOverview.status).toBe(200);
+    const assigneeCompleted = assigneeOverview.data.completedServiceHours;
+    const assigneeTotal = assigneeCompleted.hauswirtschaftMinutes + assigneeCompleted.alltagsbegleitungMinutes + assigneeCompleted.erstberatungMinutes;
+    expect(assigneeTotal,
+      "Assignee should NOT see completed hours when performer is different").toBe(0);
+
+    const performerOverview = await apiGet<any>(`/api/time-entries/overview/${year}/${month}?viewAsEmployeeId=${employee2Id}`);
+    expect(performerOverview.status).toBe(200);
+    const completedHrs = performerOverview.data.completedServiceHours;
+    const totalCompleted = completedHrs.hauswirtschaftMinutes + completedHrs.alltagsbegleitungMinutes + completedHrs.erstberatungMinutes;
+    expect(totalCompleted, "Performer should see 60 completed minutes total").toBe(60);
+  });
+});

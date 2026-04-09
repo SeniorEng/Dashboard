@@ -403,16 +403,19 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       .innerJoin(customers, eq(appointments.customerId, customers.id))
       .where(
         and(
-          sqlBuilder`(
-            CASE 
-              WHEN ${appointments.status} = 'completed' AND ${appointments.performedByEmployeeId} IS NOT NULL 
-                THEN ${appointments.performedByEmployeeId} = ${userId}
-              ELSE (
+          or(
+            and(
+              eq(appointments.status, 'completed'),
+              eq(appointments.performedByEmployeeId, userId)
+            ),
+            and(
+              ne(appointments.status, 'completed'),
+              sqlBuilder`(
                 ${appointments.assignedEmployeeId} = ${userId} 
                 OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId} OR ${customers.backupEmployeeId2} = ${userId}))
-              )
-            END
-          )`,
+              )`
+            )
+          ),
           gte(appointments.date, startDate),
           lte(appointments.date, endDate),
           isNull(appointments.deletedAt)
