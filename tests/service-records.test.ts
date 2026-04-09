@@ -392,15 +392,23 @@ describe("LN-9: Monatlicher Leistungsnachweis", () => {
 
 describe("LN-10: In-progress Termin blockiert LN", () => {
   it("LN-10.1 – LN für documenting-Status Termin wird abgelehnt (400)", async () => {
-    const futureDate = getFutureDate(292);
-    const apptRes = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date: futureDate,
-      scheduledStart: "03:30",
-      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
-      assignedEmployeeId: auth.user.id,
-    });
-    expect(apptRes.status).toBe(201);
+    const timeSlots = ["03:30", "03:00", "04:00", "04:30", "22:00", "22:30", "05:00", "05:30"];
+    let apptRes: any = null;
+    outer:
+    for (let off = 292; off <= 330; off++) {
+      const futureDate = getFutureDate(off);
+      for (const time of timeSlots) {
+        apptRes = await apiPost<any>("/api/appointments/kundentermin", {
+          customerId: testCustomerId,
+          date: futureDate,
+          scheduledStart: time,
+          services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+          assignedEmployeeId: auth.user.id,
+        });
+        if (apptRes.status === 201) break outer;
+      }
+    }
+    expect(apptRes?.status).toBe(201);
     cleanupApptIds.push(apptRes.data.id);
 
     await apiPost<any>(`/api/appointments/${apptRes.data.id}/start`, {});

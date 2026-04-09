@@ -407,7 +407,7 @@ describe("TE-BIZ-9: End-Zeit vor Start-Zeit", () => {
 
 describe("TE-BIZ-10: Ganztags-Urlaub blockiert weitere Einträge", () => {
   it("TE-BIZ-10.1 – Ganztags-Urlaub blockiert timed Eintrag (400)", async () => {
-    const date = getFutureDate(270);
+    const date = getFutureDate(560);
     await clearDateEntries(date);
 
     const vacRes = await apiPost<any>("/api/time-entries", {
@@ -682,18 +682,30 @@ describe("TE-BIZ-14: Ungültige Eintragstypen", () => {
 
 describe("TE-BIZ-15: Ganztags-Eintrag blockiert bei bestehendem Termin", () => {
   it("TE-BIZ-15.1 – Urlaub an Tag mit Kundentermin wird abgelehnt (400)", async () => {
-    const date = getFutureDate(290);
-    const apptRes = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date,
-      scheduledStart: "10:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
-      assignedEmployeeId: auth.user.id,
-    });
-    expect(apptRes.status).toBe(201);
+    const timeSlots = ["10:00", "06:00", "07:00", "04:00", "05:00", "17:00", "18:00", "19:00", "20:00"];
+    let apptRes: any = null;
+    let usedDate = "";
+    outer:
+    for (let off = 590; off <= 650; off++) {
+      const date = getFutureDate(off);
+      for (const time of timeSlots) {
+        apptRes = await apiPost<any>("/api/appointments/kundentermin", {
+          customerId: testCustomerId,
+          date,
+          scheduledStart: time,
+          services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+          assignedEmployeeId: auth.user.id,
+        });
+        if (apptRes.status === 201) {
+          usedDate = date;
+          break outer;
+        }
+      }
+    }
+    expect(apptRes?.status).toBe(201);
 
     const teRes = await apiPost<any>("/api/time-entries", {
-      entryDate: date,
+      entryDate: usedDate,
       entryType: "urlaub",
       isFullDay: true,
     });
@@ -705,21 +717,39 @@ describe("TE-BIZ-15: Ganztags-Eintrag blockiert bei bestehendem Termin", () => {
 
 describe("TE-BIZ-16: Zeitbasierter Eintrag überlappt mit Termin", () => {
   it("TE-BIZ-16.1 – Büroarbeit überlappend mit Termin wird abgelehnt (400)", async () => {
-    const date = getFutureDate(291);
-    const apptRes = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: testCustomerId,
-      date,
-      scheduledStart: "10:00",
-      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
-      assignedEmployeeId: auth.user.id,
-    });
-    expect(apptRes.status).toBe(201);
+    const timeSlots = ["10:00", "06:00", "07:00", "04:00", "05:00", "17:00", "18:00", "19:00", "20:00"];
+    let apptRes: any = null;
+    let usedDate = "";
+    let usedTime = "";
+    outer:
+    for (let off = 660; off <= 720; off++) {
+      const date = getFutureDate(off);
+      for (const time of timeSlots) {
+        apptRes = await apiPost<any>("/api/appointments/kundentermin", {
+          customerId: testCustomerId,
+          date,
+          scheduledStart: time,
+          services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
+          assignedEmployeeId: auth.user.id,
+        });
+        if (apptRes.status === 201) {
+          usedDate = date;
+          usedTime = time;
+          break outer;
+        }
+      }
+    }
+    expect(apptRes?.status).toBe(201);
+
+    const [h, m] = usedTime.split(":").map(Number);
+    const overlapStart = `${String(h).padStart(2, "0")}:30`;
+    const overlapEnd = `${String(h + 1).padStart(2, "0")}:30`;
 
     const teRes = await apiPost<any>("/api/time-entries", {
-      entryDate: date,
+      entryDate: usedDate,
       entryType: "bueroarbeit",
-      startTime: "10:30",
-      endTime: "11:30",
+      startTime: overlapStart,
+      endTime: overlapEnd,
       isFullDay: false,
     });
     expect(teRes.status).toBe(400);
@@ -756,7 +786,7 @@ describe("TE-BIZ-17: Konflikt-Vorprüfung API", () => {
   });
 
   it("TE-BIZ-17.2 – check-conflicts ohne Konflikt", async () => {
-    const date = getFutureDate(393);
+    const date = getFutureDate(580);
     const checkRes = await apiPost<any>("/api/time-entries/check-conflicts", {
       date,
       startTime: "08:00",

@@ -1,12 +1,32 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   apiGet,
   apiPatch,
   getAuthCookie,
 } from "./test-utils";
 
+let originalCompanySettings: Record<string, any> | null = null;
+let originalSystemSettings: Record<string, any> | null = null;
+
 beforeAll(async () => {
   await getAuthCookie();
+  const csRes = await apiGet<any>("/api/company-settings");
+  if (csRes.status === 200) originalCompanySettings = csRes.data;
+  const ssRes = await apiGet<any>("/api/settings");
+  if (ssRes.status === 200) originalSystemSettings = ssRes.data;
+});
+
+afterAll(async () => {
+  if (originalCompanySettings) {
+    await apiPatch("/api/company-settings", {
+      companyName: originalCompanySettings.companyName,
+    });
+  }
+  if (originalSystemSettings) {
+    await apiPatch("/api/settings", {
+      vacationDaysPerYear: originalSystemSettings.vacationDaysPerYear,
+    });
+  }
 });
 
 describe("CS-1: Firmendaten laden", () => {

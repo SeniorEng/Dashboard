@@ -1,12 +1,27 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   apiGet,
   apiPatch,
   getAuthCookie,
 } from "./test-utils";
 
+let originalProfile: Record<string, any> | null = null;
+
 beforeAll(async () => {
   await getAuthCookie();
+  const res = await apiGet<any>("/api/profile");
+  if (res.status === 200) {
+    originalProfile = res.data;
+  }
+});
+
+afterAll(async () => {
+  if (originalProfile) {
+    await apiPatch("/api/profile", {
+      stadt: originalProfile.stadt || null,
+      notfallkontaktName: originalProfile.notfallkontaktName || null,
+    });
+  }
 });
 
 describe("PROF-1: Profil laden", () => {

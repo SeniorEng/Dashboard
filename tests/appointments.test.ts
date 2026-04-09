@@ -121,7 +121,7 @@ describe("BIZ-2: Überlappungsprüfung", () => {
   let overlapDate: string;
 
   it("BIZ-2.1 – Erstellt Basis-Termin 10:00-11:30", async () => {
-    for (let off = 220; off <= 235; off++) {
+    for (let off = 220; off <= 260; off++) {
       const d = getFutureDate(off);
       const res = await createAppointment(d, "10:00", hwServiceId, 90);
       if (res.status === 201) {
@@ -381,7 +381,7 @@ describe("BIZ-10: Kunden-Überlappung", () => {
   it("BIZ-10.1 – Zweiter Termin für gleichen Kunden zur gleichen Zeit wird abgelehnt", async () => {
     let foundDate: string | undefined;
     let firstId: number | undefined;
-    for (let off = 392; off <= 405; off++) {
+    for (let off = 392; off <= 435; off++) {
       const d = getFutureDate(off);
       const res1 = await createAppointment(d, "10:00", hwServiceId, 60);
       if (res1.status === 201) {
@@ -543,8 +543,8 @@ describe("BIZ-16: Completed -> Reopen -> Documenting", () => {
 describe("BIZ-17: durationPromised wird bei Erstellung aus Services berechnet", () => {
   it("BIZ-17.1 – durationPromised = Summe aller Service-Dauern", async () => {
     let created = false;
-    const timesDP = ["07:00", "06:00", "05:00", "04:00", "03:00", "14:00", "15:00", "16:00"];
-    for (const offset of [276, 277, 278, 279, 280, 281, 282, 283, 284, 285]) {
+    const timesDP = ["07:00", "06:00", "05:00", "04:00", "03:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
+    for (const offset of [276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295]) {
       const date = getFutureDate(offset);
       for (const time of timesDP) {
         const createRes = await apiPost<any>("/api/appointments/kundentermin", {
@@ -571,14 +571,18 @@ describe("BIZ-17: durationPromised wird bei Erstellung aus Services berechnet", 
 
   it("BIZ-17.2 – Einzelner Service: durationPromised = Einzeldauer", async () => {
     let created = false;
-    for (let off = 309; off <= 320; off++) {
+    const timesDP2 = ["07:00", "06:00", "05:00", "04:00", "03:00", "17:00", "18:00", "19:00"];
+    outer2:
+    for (let off = 309; off <= 340; off++) {
       const date = getFutureDate(off);
-      const createRes = await createAppointment(date, "07:00", hwServiceId, 60);
-      if (createRes.status === 201) {
-        createdIds.push(createRes.data.id);
-        expect(createRes.data.durationPromised).toBe(60);
-        created = true;
-        break;
+      for (const time of timesDP2) {
+        const createRes = await createAppointment(date, time, hwServiceId, 60);
+        if (createRes.status === 201) {
+          createdIds.push(createRes.data.id);
+          expect(createRes.data.durationPromised).toBe(60);
+          created = true;
+          break outer2;
+        }
       }
     }
     expect(created, "Termin muss erstellt werden").toBe(true);
