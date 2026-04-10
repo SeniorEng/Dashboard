@@ -15,7 +15,9 @@ export function hours(minutes: number | null | undefined): string {
   const min = Number(minutes) || 0;
   const h = Math.floor(min / 60);
   const m = min % 60;
-  return m > 0 ? `${h}h ${m}min` : `${h}h`;
+  if (h === 0) return `${m}min`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}min`;
 }
 
 export const SERVICE_TYPE_LABELS: Record<string, string> = {
