@@ -550,9 +550,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       
       for (const svc of apptServices) {
         let minutes = 0;
-        if (appt.status === 'completed') {
-          minutes = svc.actualDurationMinutes || 0;
-        } else if (appt.status === 'documenting') {
+        if (appt.status === 'completed' || appt.status === 'documenting') {
           minutes = svc.actualDurationMinutes ?? svc.plannedDurationMinutes ?? 0;
         } else {
           minutes = svc.plannedDurationMinutes || 0;
