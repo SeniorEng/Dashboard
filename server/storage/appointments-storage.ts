@@ -206,8 +206,7 @@ export async function getAppointmentsForDay(employeeId: number, date: string): P
       eq(appointments.date, date),
       or(
         eq(appointments.assignedEmployeeId, employeeId),
-        eq(appointments.createdByUserId, employeeId),
-        isNull(appointments.assignedEmployeeId)
+        eq(appointments.performedByEmployeeId, employeeId),
       ),
       isNull(appointments.deletedAt),
       ne(appointments.status, "cancelled")
