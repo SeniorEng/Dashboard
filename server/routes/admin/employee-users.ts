@@ -72,16 +72,23 @@ router.get("/users/:id", asyncHandler("Benutzer konnte nicht geladen werden", as
 }));
 
 router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", async (req: Request, res: Response) => {
-  const bodyWithPassword = {
-    ...req.body,
-    password: req.body.password || randomBytes(24).toString("hex"),
-  };
-
-  const result = insertUserSchema.safeParse(bodyWithPassword);
-  if (!result.success) {
+  if (!req.body.password || typeof req.body.password !== "string" || req.body.password.trim().length === 0) {
     res.status(400).json({
       error: "VALIDATION_ERROR",
-      message: "Ungültige Daten",
+      message: "Passwort ist erforderlich",
+    });
+    return;
+  }
+
+  const result = insertUserSchema.safeParse(req.body);
+  if (!result.success) {
+    const fieldMessages = result.error.issues.map(issue => {
+      const field = issue.path.length > 0 ? issue.path.join(".") : undefined;
+      return field ? `${field}: ${issue.message}` : issue.message;
+    });
+    res.status(400).json({
+      error: "VALIDATION_ERROR",
+      message: fieldMessages.join("; "),
       details: result.error.issues,
     });
     return;
@@ -240,9 +247,13 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
 
   const result = updateUserSchema.safeParse({ ...bodyWithoutExtras, carryOverDays: carryOverDaysRaw });
   if (!result.success) {
+    const fieldMessages = result.error.issues.map(issue => {
+      const field = issue.path.length > 0 ? issue.path.join(".") : undefined;
+      return field ? `${field}: ${issue.message}` : issue.message;
+    });
     res.status(400).json({
       error: "VALIDATION_ERROR",
-      message: "Ungültige Daten",
+      message: fieldMessages.join("; "),
       details: result.error.issues,
     });
     return;

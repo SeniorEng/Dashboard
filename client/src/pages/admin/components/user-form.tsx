@@ -42,6 +42,7 @@ export function UserForm({
 
   const [email, setEmail] = useState(user?.email ?? "");
   const [password, setPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
   const [vorname, setVorname] = useState(user?.vorname ?? "");
   const [nachname, setNachname] = useState(user?.nachname ?? "");
   const [telefon, setTelefon] = useState(user?.telefon ? formatPhoneForDisplay(user.telefon) : "");
@@ -109,8 +110,24 @@ export function UserForm({
     }
   };
 
+  const validatePassword = (value: string): string => {
+    if (!value.trim()) return "Passwort ist erforderlich";
+    if (value.length < 8) return "Passwort muss mindestens 8 Zeichen haben";
+    if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(value))
+      return "Passwort muss Groß-/Kleinbuchstaben und eine Zahl enthalten";
+    return "";
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (mode === "create") {
+      const pwError = validatePassword(password);
+      if (pwError) {
+        setPasswordError(pwError);
+        return;
+      }
+    }
     
     let normalizedTelefon: string | undefined = undefined;
     if (telefon.trim()) {
@@ -148,7 +165,7 @@ export function UserForm({
       whatsappEnabled,
     };
     
-    if (mode === "create" && password) {
+    if (mode === "create") {
       data.password = password;
     }
     
@@ -410,18 +427,23 @@ export function UserForm({
           
           {isCreate && (
             <div className="space-y-2">
-              <Label htmlFor="password">Passwort</Label>
+              <Label htmlFor="password">Passwort *</Label>
               <Input
                 id="password"
                 type="password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => { setPassword(e.target.value); setPasswordError(""); }}
+                required
                 minLength={8}
-                placeholder="Mindestens 8 Zeichen"
+                placeholder="Mindestens 8 Zeichen, Groß-/Kleinbuchstaben und Zahl"
+                className={passwordError ? "border-red-500" : ""}
                 data-testid="input-user-password"
               />
+              {passwordError && (
+                <p className="text-xs text-red-500">{passwordError}</p>
+              )}
               <p className="text-xs text-gray-500">
-                Leer lassen, um automatisch ein Passwort zu generieren. Der Mitarbeiter erhält eine Willkommens-E-Mail mit einem Link zur Passwort-Einrichtung.
+                Mindestens 8 Zeichen, mit Groß- und Kleinbuchstaben sowie einer Zahl.
               </p>
             </div>
           )}

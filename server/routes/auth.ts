@@ -219,9 +219,13 @@ router.post(
 router.post("/password-reset/confirm", csrfProtection, asyncHandler("Passwort konnte nicht geändert werden", async (req: Request, res: Response) => {
   const result = passwordResetSchema.safeParse(req.body);
   if (!result.success) {
+    const fieldMessages = result.error.issues.map(issue => {
+      const field = issue.path.length > 0 ? issue.path.join(".") : undefined;
+      return field ? `${field}: ${issue.message}` : issue.message;
+    });
     res.status(400).json({
       error: "VALIDATION_ERROR",
-      message: "Ungültige Daten",
+      message: fieldMessages.join("; "),
       details: result.error.issues,
     });
     return;

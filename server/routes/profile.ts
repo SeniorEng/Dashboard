@@ -36,9 +36,13 @@ router.get("/", asyncHandler("Profil konnte nicht geladen werden", async (req: R
 router.patch("/", asyncHandler("Profil konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
   const result = updateProfileSchema.safeParse(req.body);
   if (!result.success) {
+    const fieldMessages = result.error.issues.map(issue => {
+      const field = issue.path.length > 0 ? issue.path.join(".") : undefined;
+      return field ? `${field}: ${issue.message}` : issue.message;
+    });
     res.status(400).json({
       error: "VALIDATION_ERROR",
-      message: "Ungültige Daten",
+      message: fieldMessages.join("; "),
       details: result.error.issues,
     });
     return;
@@ -88,9 +92,13 @@ router.post("/documents", asyncHandler("Dokument konnte nicht hochgeladen werden
   const { insertEmployeeDocumentSchema } = await import("@shared/schema");
   const result = insertEmployeeDocumentSchema.safeParse(data);
   if (!result.success) {
+    const fieldMessages = result.error.issues.map(issue => {
+      const field = issue.path.length > 0 ? issue.path.join(".") : undefined;
+      return field ? `${field}: ${issue.message}` : issue.message;
+    });
     res.status(400).json({
       error: "VALIDATION_ERROR",
-      message: "Ungültige Daten",
+      message: fieldMessages.join("; "),
       details: result.error.issues,
     });
     return;
@@ -144,7 +152,7 @@ router.patch("/proofs/:proofId/upload", asyncHandler("Nachweis konnte nicht hoch
   });
   const result = proofSchema.safeParse(req.body);
   if (!result.success) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Daten" });
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Dateiname und Dateipfad sind erforderlich" });
     return;
   }
 
