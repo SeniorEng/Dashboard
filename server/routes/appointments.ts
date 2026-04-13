@@ -80,9 +80,19 @@ function isDateMoreThan3MonthsInPast(dateStr: string): boolean {
   return date < threeMonthsAgo;
 }
 
-export async function checkCustomerAccess(user: { id: number; isAdmin: boolean }, customerId: number | null, res: Response): Promise<boolean> {
+export async function checkCustomerAccess(
+  user: { id: number; isAdmin: boolean },
+  customerId: number | null,
+  res: Response,
+  appointmentEmployeeIds?: { assignedEmployeeId?: number | null; performedByEmployeeId?: number | null }
+): Promise<boolean> {
   if (user.isAdmin) return true;
   if (customerId === null) {
+    if (appointmentEmployeeIds &&
+        (appointmentEmployeeIds.assignedEmployeeId === user.id ||
+         appointmentEmployeeIds.performedByEmployeeId === user.id)) {
+      return true;
+    }
     sendForbidden(res, "ACCESS_DENIED", "Sie haben keinen Zugriff auf diesen Termin.");
     return false;
   }
@@ -364,7 +374,10 @@ router.get("/:id/services", asyncHandler("Fehler beim Laden der Termin-Services"
   
   const appointment = await storage.getAppointment(id);
   if (!appointment) return sendNotFound(res, "Termin nicht gefunden");
-  if (!(await checkCustomerAccess(user, appointment.customerId, res))) return;
+  if (!(await checkCustomerAccess(user, appointment.customerId, res, {
+    assignedEmployeeId: appointment.assignedEmployeeId,
+    performedByEmployeeId: appointment.performedByEmployeeId,
+  }))) return;
   
   const result = await storage.getAppointmentServices(id);
   
@@ -382,12 +395,10 @@ router.get("/:id", asyncHandler(ErrorMessages.fetchAppointmentFailed, async (req
     return sendNotFound(res, ErrorMessages.appointmentNotFound);
   }
   
-  if (!user.isAdmin) {
-    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-    if (!assignedCustomerIds.includes(appointment.customerId!)) {
-      return sendForbidden(res, "Zugriff verweigert", "Sie haben keinen Zugriff auf diesen Termin.");
-    }
-  }
+  if (!(await checkCustomerAccess(user, appointment.customerId, res, {
+    assignedEmployeeId: appointment.assignedEmployeeId,
+    performedByEmployeeId: appointment.performedByEmployeeId,
+  }))) return;
 
   const isLocked = await storage.isAppointmentLocked(id);
 
