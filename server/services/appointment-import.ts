@@ -203,7 +203,8 @@ function normalizeForMatch(s: string): string {
 export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
   const allCustomers = await db
     .select({ id: customers.id, vorname: customers.vorname, nachname: customers.nachname })
-    .from(customers);
+    .from(customers)
+    .orderBy(customers.id);
 
   const allUsers = await db
     .select({ id: users.id, vorname: users.vorname, nachname: users.nachname, displayName: users.displayName })
@@ -232,7 +233,9 @@ export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
   for (const c of allCustomers) {
     if (c.vorname && c.nachname) {
       const key = normalizeForMatch(`${c.vorname} ${c.nachname}`);
-      customerMap.set(key, c.id);
+      if (!customerMap.has(key)) {
+        customerMap.set(key, c.id);
+      }
     }
   }
 
@@ -451,7 +454,6 @@ export async function enrichWithBudgetInfo(rows: MatchedRow[]): Promise<void> {
         };
       }
     } catch {
-      // Skip budget enrichment on error
     }
   }
 }
