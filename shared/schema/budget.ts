@@ -1,4 +1,5 @@
 import { pgTable, text, integer, serial, date, boolean, index, uniqueIndex, real } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { timestamp } from "./common";
@@ -107,6 +108,9 @@ export const budgetTransactions = pgTable("budget_transactions", {
   index("budget_transactions_appointment_idx").on(table.appointmentId),
   index("budget_transactions_allocation_idx").on(table.allocationId),
   index("budget_transactions_allocation_type_idx").on(table.allocationId, table.transactionType),
+  uniqueIndex("budget_transactions_reversal_unique_idx")
+    .on(table.reversedTransactionId)
+    .where(sql`transaction_type = 'reversal' AND reversed_transaction_id IS NOT NULL`),
 ]);
 
 // Customer budget preferences (monthly limit, etc.)

@@ -794,4 +794,131 @@ router.post("/:customerId/rebook", requireAdmin, asyncHandler("Umbuchung konnte 
   res.json(result);
 }));
 
+router.post("/admin/repair-orphaned-transactions", requireAdmin, asyncHandler("Budget-Reparatur fehlgeschlagen", async (req: Request, res: Response) => {
+  const execute = req.query.execute === "true";
+  const userId = req.user!.id;
+
+  const { db: drizzleDb } = await import("../lib/db");
+  const { appointments, budgetTransactions } = await import("@shared/schema");
+  const { eq, and, isNotNull, isNull, sql } = await import("drizzle-orm");
+
+  const softDeletedOrphans = await drizzleDb.select({
+    txId: budgetTransactions.id,
+    appointmentId: budgetTransactions.appointmentId,
+    customerId: budgetTransactions.customerId,
+    amountCents: budgetTransactions.amountCents,
+    transactionDate: budgetTransactions.transactionDate,
+    budgetType: budgetTransactions.budgetType,
+  })
+    .from(budgetTransactions)
+    .innerJoin(appointments, eq(budgetTransactions.appointmentId, appointments.id))
+    .where(and(
+      eq(budgetTransactions.transactionType, "consumption"),
+      isNotNull(appointments.deletedAt),
+      sql`NOT EXISTS (
+        SELECT 1 FROM budget_transactions r
+        WHERE r.reversed_transaction_id = ${budgetTransactions.id}
+          AND r.transaction_type = 'reversal'
+      )`
+    ));
+
+  const hardDeletedOrphans = await drizzleDb.select({
+    txId: budgetTransactions.id,
+    appointmentId: budgetTransactions.appointmentId,
+    customerId: budgetTransactions.customerId,
+    amountCents: budgetTransactions.amountCents,
+    transactionDate: budgetTransactions.transactionDate,
+    budgetType: budgetTransactions.budgetType,
+  })
+    .from(budgetTransactions)
+    .leftJoin(appointments, eq(budgetTransactions.appointmentId, appointments.id))
+    .where(and(
+      eq(budgetTransactions.transactionType, "consumption"),
+      isNotNull(budgetTransactions.appointmentId),
+      isNull(appointments.id),
+      sql`NOT EXISTS (
+        SELECT 1 FROM budget_transactions r
+        WHERE r.reversed_transaction_id = ${budgetTransactions.id}
+          AND r.transaction_type = 'reversal'
+      )`
+    ));
+
+  const orphanedConsumptions = [...softDeletedOrphans, ...hardDeletedOrphans];
+
+  const duplicateReversals = await drizzleDb.execute(sql`
+    SELECT bt.id, bt.reversed_transaction_id, bt.amount_cents, bt.customer_id, bt.appointment_id
+    FROM budget_transactions bt
+    WHERE bt.transaction_type = 'reversal'
+      AND bt.reversed_transaction_id IS NOT NULL
+      AND bt.id > (
+        SELECT MIN(bt2.id)
+        FROM budget_transactions bt2
+        WHERE bt2.reversed_transaction_id = bt.reversed_transaction_id
+          AND bt2.transaction_type = 'reversal'
+      )
+  `);
+
+  const summary = {
+    orphanedConsumptions: orphanedConsumptions.map(oc => ({
+      transactionId: oc.txId,
+      appointmentId: oc.appointmentId,
+      customerId: oc.customerId,
+      amountCents: oc.amountCents,
+      euroAmount: (Math.abs(oc.amountCents) / 100).toFixed(2),
+      transactionDate: oc.transactionDate,
+      budgetType: oc.budgetType,
+    })),
+    duplicateReversals: (duplicateReversals.rows || []).map((dr: any) => ({
+      transactionId: dr.id,
+      reversedTransactionId: dr.reversed_transaction_id,
+      amountCents: dr.amount_cents,
+      customerId: dr.customer_id,
+      appointmentId: dr.appointment_id,
+    })),
+    totalOrphaned: orphanedConsumptions.length,
+    totalDuplicates: (duplicateReversals.rows || []).length,
+    executed: false,
+  };
+
+  if (execute) {
+    let reversedCount = 0;
+    let deletedDuplicates = 0;
+    const errors: { txId: number; error: string }[] = [];
+
+    for (const oc of orphanedConsumptions) {
+      try {
+        await budgetLedgerStorage.reverseBudgetTransaction(oc.txId, userId);
+        reversedCount++;
+      } catch (err) {
+        errors.push({ txId: oc.txId, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
+    for (const dr of (duplicateReversals.rows || []) as any[]) {
+      try {
+        await drizzleDb.delete(budgetTransactions)
+          .where(eq(budgetTransactions.id, dr.id));
+        deletedDuplicates++;
+      } catch (err) {
+        errors.push({ txId: dr.id, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
+    summary.executed = true;
+
+    const ip = req.ip || req.socket?.remoteAddress || "unknown";
+    await auditService.log(userId, "budget_repair_orphaned", "budget", 0, {
+      reversedCount,
+      deletedDuplicates,
+      errors,
+      orphanedDetails: summary.orphanedConsumptions,
+      duplicateDetails: summary.duplicateReversals,
+    }, ip);
+
+    res.json({ ...summary, reversedCount, deletedDuplicates, errors });
+  } else {
+    res.json(summary);
+  }
+}));
+
 export default router;

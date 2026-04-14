@@ -93,7 +93,18 @@ export async function reverseBudgetTransaction(transactionId: number, userId?: n
     reversedTransactionId: transactionId,
     notes: `Storno von Transaktion #${transactionId}`,
     createdByUserId: userId,
-  }).returning();
+  }).onConflictDoNothing().returning();
+
+  if (reversal.length === 0) {
+    const existing = await d.select()
+      .from(budgetTransactions)
+      .where(and(
+        eq(budgetTransactions.reversedTransactionId, transactionId),
+        eq(budgetTransactions.transactionType, "reversal")
+      ))
+      .limit(1);
+    return existing[0];
+  }
 
   return reversal[0];
 }
