@@ -1,9 +1,12 @@
 import * as XLSX from "xlsx";
 import { db } from "../lib/db";
 import { customers, users, appointments, appointmentServices, services, monthlyServiceRecords } from "@shared/schema";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, sql } from "drizzle-orm";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
 import { storage } from "../storage";
+import { getAllBudgetSummaries } from "../storage/budget/summary-queries";
+import { getBudgetTypeSettings } from "../storage/budget/preferences-storage";
+import { calculateAppointmentCost } from "../storage/budget/appointment-cost-calculator";
 
 export interface ImportRow {
   rowIndex: number;
@@ -25,6 +28,12 @@ export interface ImportRow {
   pflegegrad: string;
 }
 
+export interface BudgetTrimInfo {
+  originalMinutes: number;
+  trimmedMinutes: number;
+  reason: string;
+}
+
 export interface MatchedRow extends ImportRow {
   customerId: number | null;
   employeeId: number | null;
@@ -34,6 +43,7 @@ export interface MatchedRow extends ImportRow {
   errors: string[];
   existingAppointmentId: number | null;
   differences: string[];
+  budgetTrimInfo: BudgetTrimInfo | null;
 }
 
 export interface ImportAction {
@@ -46,6 +56,7 @@ export interface ImportResult {
   imported: number;
   updated: number;
   skipped: number;
+  trimmed: number;
   errors: { rowIndex: number; error: string }[];
 }
 
@@ -322,7 +333,189 @@ export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
       errors,
       existingAppointmentId,
       differences,
+      budgetTrimInfo: null,
     };
+  });
+}
+
+async function getAvailableBudgetCents(customerId: number): Promise<number> {
+  const summaries = await getAllBudgetSummaries(customerId);
+  const typeSettings = await getBudgetTypeSettings(customerId);
+
+  let total45b = summaries.entlastungsbetrag45b.availableCents;
+  let total45a = summaries.umwandlung45a.currentMonthAvailableCents;
+  let total39_42a = summaries.ersatzpflege39_42a.currentYearAvailableCents;
+
+  if (typeSettings.length > 0) {
+    const settingsMap = new Map(typeSettings.map(s => [s.budgetType, s]));
+    if (settingsMap.get("entlastungsbetrag_45b")?.enabled === false) total45b = 0;
+    if (settingsMap.get("umwandlung_45a")?.enabled === false) total45a = 0;
+    if (settingsMap.get("ersatzpflege_39_42a")?.enabled === false) total39_42a = 0;
+  }
+
+  return total45a + total45b + total39_42a;
+}
+
+async function computeVerifiedTrimmedMinutes(
+  customerId: number,
+  serviceType: string,
+  originalMinutes: number,
+  kilometers: number,
+  date: string,
+  availableCents: number,
+): Promise<number> {
+  const isHauswirtschaft = serviceType.toLowerCase() === "hauswirtschaft";
+
+  const fullCosts = await calculateAppointmentCost({
+    customerId,
+    hauswirtschaftMinutes: isHauswirtschaft ? originalMinutes : 0,
+    alltagsbegleitungMinutes: isHauswirtschaft ? 0 : originalMinutes,
+    travelKilometers: kilometers,
+    customerKilometers: 0,
+    date,
+  });
+
+  const travelCents = fullCosts.travelCents;
+  const serviceCents = fullCosts.hauswirtschaftCents + fullCosts.alltagsbegleitungCents;
+  const budgetForService = Math.max(0, availableCents - travelCents);
+
+  let estimate: number;
+  if (serviceCents <= 0 || budgetForService <= 0) {
+    estimate = 0;
+  } else {
+    estimate = Math.floor(originalMinutes * budgetForService / serviceCents);
+  }
+
+  for (let candidate = estimate; candidate >= 0; candidate--) {
+    const costs = await calculateAppointmentCost({
+      customerId,
+      hauswirtschaftMinutes: isHauswirtschaft ? candidate : 0,
+      alltagsbegleitungMinutes: isHauswirtschaft ? 0 : candidate,
+      travelKilometers: kilometers,
+      customerKilometers: 0,
+      date,
+    });
+    if (costs.totalCents <= availableCents) {
+      return candidate;
+    }
+  }
+
+  return 0;
+}
+
+export async function enrichWithBudgetInfo(rows: MatchedRow[]): Promise<void> {
+  const customerIds = [...new Set(
+    rows.filter(r => r.customerId && r.status === "new").map(r => r.customerId!)
+  )];
+
+  const privatePaymentMap = new Map<number, boolean>();
+  for (const customerId of customerIds) {
+    const [customer] = await db
+      .select({ acceptsPrivatePayment: customers.acceptsPrivatePayment })
+      .from(customers)
+      .where(eq(customers.id, customerId))
+      .limit(1);
+    privatePaymentMap.set(customerId, customer?.acceptsPrivatePayment ?? false);
+  }
+
+  for (const row of rows) {
+    row.budgetTrimInfo = null;
+    if (!row.customerId || row.status !== "new") continue;
+    if (privatePaymentMap.get(row.customerId)) continue;
+
+    try {
+      const isHauswirtschaft = row.serviceType.toLowerCase() === "hauswirtschaft";
+      const costs = await calculateAppointmentCost({
+        customerId: row.customerId,
+        hauswirtschaftMinutes: isHauswirtschaft ? row.durationMinutes : 0,
+        alltagsbegleitungMinutes: isHauswirtschaft ? 0 : row.durationMinutes,
+        travelKilometers: row.kilometers,
+        customerKilometers: 0,
+        date: row.date,
+      });
+
+      const availableCents = await getAvailableBudgetCents(row.customerId);
+
+      if (costs.totalCents > availableCents) {
+        const trimmedMinutes = await computeVerifiedTrimmedMinutes(
+          row.customerId, row.serviceType, row.durationMinutes,
+          row.kilometers, row.date, availableCents,
+        );
+
+        row.budgetTrimInfo = {
+          originalMinutes: row.durationMinutes,
+          trimmedMinutes,
+          reason: trimmedMinutes > 0
+            ? `Budget reicht nur für ${trimmedMinutes} Min`
+            : `Budget erschöpft — 0 Leistungsminuten`,
+        };
+      }
+    } catch {
+      // Skip budget enrichment on error
+    }
+  }
+}
+
+async function importSingleRow(
+  row: MatchedRow,
+  employeeId: number,
+  userId: number,
+  durationMinutes: number,
+  notes: string,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const scheduledEnd = row.endTime || row.startTime;
+
+    const [appt] = await tx
+      .insert(appointments)
+      .values({
+        customerId: row.customerId!,
+        createdByUserId: userId,
+        assignedEmployeeId: employeeId,
+        performedByEmployeeId: employeeId,
+        appointmentType: "Kundentermin",
+        date: row.date,
+        scheduledStart: row.startTime,
+        scheduledEnd: scheduledEnd,
+        durationPromised: durationMinutes,
+        status: "completed",
+        actualStart: row.startTime,
+        actualEnd: row.endTime || null,
+        travelOriginType: "home",
+        travelKilometers: row.kilometers,
+        travelMinutes: 0,
+        customerKilometers: 0,
+        notes,
+        signedAt: new Date(),
+        signedByUserId: userId,
+      })
+      .returning();
+
+    await tx.insert(appointmentServices).values({
+      appointmentId: appt.id,
+      serviceId: row.serviceId!,
+      plannedDurationMinutes: durationMinutes,
+      actualDurationMinutes: durationMinutes,
+      details: `Import: ${row.serviceType}`,
+    });
+
+    const isHauswirtschaft = row.serviceType.toLowerCase() === "hauswirtschaft";
+    const hwMinutes = isHauswirtschaft ? durationMinutes : 0;
+    const abMinutes = isHauswirtschaft ? 0 : durationMinutes;
+
+    await budgetLedgerStorage.createConsumptionTransaction(
+      {
+        customerId: row.customerId!,
+        appointmentId: appt.id,
+        transactionDate: row.date,
+        hauswirtschaftMinutes: hwMinutes,
+        alltagsbegleitungMinutes: abMinutes,
+        travelKilometers: row.kilometers,
+        customerKilometers: 0,
+        userId,
+      },
+      tx
+    );
   });
 }
 
@@ -331,7 +524,7 @@ export async function executeImport(
   actions: ImportAction[],
   userId: number
 ): Promise<ImportResult> {
-  const result: ImportResult = { imported: 0, updated: 0, skipped: 0, errors: [] };
+  const result: ImportResult = { imported: 0, updated: 0, skipped: 0, trimmed: 0, errors: [] };
 
   const actionMap = new Map<number, ImportAction>();
   for (const a of actions) {
@@ -354,64 +547,32 @@ export async function executeImport(
       }
 
       try {
-        await db.transaction(async (tx) => {
-          const scheduledEnd = row.endTime || row.startTime;
-
-          const [appt] = await tx
-            .insert(appointments)
-            .values({
-              customerId: row.customerId!,
-              createdByUserId: userId,
-              assignedEmployeeId: effectiveEmployeeId,
-              performedByEmployeeId: effectiveEmployeeId,
-              appointmentType: "Kundentermin",
-              date: row.date,
-              scheduledStart: row.startTime,
-              scheduledEnd: scheduledEnd,
-              durationPromised: row.durationMinutes,
-              status: "completed",
-              actualStart: row.startTime,
-              actualEnd: row.endTime || null,
-              travelOriginType: "home",
-              travelKilometers: row.kilometers,
-              travelMinutes: 0,
-              customerKilometers: 0,
-              notes: "Import aus Altdaten",
-              signedAt: new Date(),
-              signedByUserId: userId,
-            })
-            .returning();
-
-          await tx.insert(appointmentServices).values({
-            appointmentId: appt.id,
-            serviceId: row.serviceId!,
-            plannedDurationMinutes: row.durationMinutes,
-            actualDurationMinutes: row.durationMinutes,
-            details: `Import: ${row.serviceType}`,
-          });
-
-          const isHauswirtschaft = row.serviceType.toLowerCase() === "hauswirtschaft";
-          const hwMinutes = isHauswirtschaft ? row.durationMinutes : 0;
-          const abMinutes = isHauswirtschaft ? 0 : row.durationMinutes;
-
-          await budgetLedgerStorage.createConsumptionTransaction(
-            {
-              customerId: row.customerId!,
-              appointmentId: appt.id,
-              transactionDate: row.date,
-              hauswirtschaftMinutes: hwMinutes,
-              alltagsbegleitungMinutes: abMinutes,
-              travelKilometers: row.kilometers,
-              customerKilometers: 0,
-              userId,
-            },
-            tx
-          );
-        });
+        await importSingleRow(row, effectiveEmployeeId, userId, row.durationMinutes, "Import aus Altdaten");
         result.imported++;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        result.errors.push({ rowIndex: row.rowIndex, error: msg });
+
+        if (msg.includes("Budget reicht nicht")) {
+          try {
+            const availableCents = await getAvailableBudgetCents(row.customerId);
+            const trimmedMinutes = await computeVerifiedTrimmedMinutes(
+              row.customerId, row.serviceType, row.durationMinutes,
+              row.kilometers, row.date, availableCents,
+            );
+
+            const trimNote = trimmedMinutes > 0
+              ? `Import aus Altdaten — Budget gekürzt: ${row.durationMinutes} → ${trimmedMinutes} Min`
+              : `Import aus Altdaten — Budget erschöpft: ${row.durationMinutes} → 0 Min`;
+            await importSingleRow(row, effectiveEmployeeId, userId, trimmedMinutes, trimNote);
+            result.imported++;
+            result.trimmed++;
+          } catch (retryErr: unknown) {
+            const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+            result.errors.push({ rowIndex: row.rowIndex, error: retryMsg });
+          }
+        } else {
+          result.errors.push({ rowIndex: row.rowIndex, error: msg });
+        }
       }
     }
 
@@ -449,7 +610,7 @@ export async function createServiceRecordsForImported(userId: number): Promise<{
     .from(appointments)
     .where(
       and(
-        eq(appointments.notes, "Import aus Altdaten"),
+        sql`${appointments.notes} LIKE 'Import aus Altdaten%'`,
         eq(appointments.status, "completed"),
         isNull(appointments.deletedAt)
       )

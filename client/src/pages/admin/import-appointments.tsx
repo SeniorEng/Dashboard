@@ -6,9 +6,15 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Upload, CheckCircle, AlertTriangle, XCircle, FileSpreadsheet } from "lucide-react";
+import { ArrowLeft, Upload, CheckCircle, AlertTriangle, XCircle, FileSpreadsheet, Scissors } from "lucide-react";
 import { Link } from "wouter";
 import { api, unwrapResult } from "@/lib/api/client";
+
+interface BudgetTrimInfo {
+  originalMinutes: number;
+  trimmedMinutes: number;
+  reason: string;
+}
 
 interface MatchedRow {
   rowIndex: number;
@@ -31,17 +37,19 @@ interface MatchedRow {
   errors: string[];
   existingAppointmentId: number | null;
   differences: string[];
+  budgetTrimInfo: BudgetTrimInfo | null;
 }
 
 interface PreviewResponse {
   rows: MatchedRow[];
-  summary: { total: number; new: number; duplicate: number; error: number };
+  summary: { total: number; new: number; duplicate: number; error: number; budgetTrimmed: number };
 }
 
 interface ImportResult {
   imported: number;
   updated: number;
   skipped: number;
+  trimmed: number;
   errors: { rowIndex: number; error: string }[];
 }
 
@@ -235,6 +243,12 @@ export default function ImportAppointmentsPage() {
                     <XCircle className="h-4 w-4 text-red-600" />
                     <span>Fehler: {preview.summary.error}</span>
                   </div>
+                  {preview.summary.budgetTrimmed > 0 && (
+                    <div className="flex items-center gap-1">
+                      <Scissors className="h-4 w-4 text-orange-600" />
+                      <span>Budget-Kürzung: {preview.summary.budgetTrimmed}</span>
+                    </div>
+                  )}
                   <div className="ml-auto font-medium">
                     Ausgewählt: {selectedForImport}
                   </div>
@@ -295,12 +309,13 @@ export default function ImportAppointmentsPage() {
                     const isSelected = action === "import" || action === "update";
                     const hasEmployeeError = row.errors.some((e) => e.includes("Mitarbeiter"));
                     const override = employeeOverrides.get(row.rowIndex);
+                    const isBudgetTrimmed = row.budgetTrimInfo !== null;
 
                     return (
                       <tr
                         key={row.rowIndex}
                         className={`border-b ${
-                          row.status === "error" ? "bg-red-50" : row.status === "duplicate" ? "bg-yellow-50" : ""
+                          row.status === "error" ? "bg-red-50" : row.status === "duplicate" ? "bg-yellow-50" : isBudgetTrimmed ? "bg-orange-50" : ""
                         } ${isSelected ? "bg-green-50/30" : ""}`}
                         data-testid={`row-import-${row.rowIndex}`}
                       >
@@ -321,9 +336,15 @@ export default function ImportAppointmentsPage() {
                           />
                         </td>
                         <td className="p-2">
-                          {row.status === "new" && (
+                          {row.status === "new" && !isBudgetTrimmed && (
                             <Badge variant="outline" className="text-green-700 border-green-300 text-[10px]" data-testid={`status-new-${row.rowIndex}`}>
                               Neu
+                            </Badge>
+                          )}
+                          {row.status === "new" && isBudgetTrimmed && (
+                            <Badge variant="outline" className="text-orange-700 border-orange-300 bg-orange-50 text-[10px]" data-testid={`status-budget-trimmed-${row.rowIndex}`}>
+                              <Scissors className="h-3 w-3 mr-0.5" />
+                              Gekürzt
                             </Badge>
                           )}
                           {row.status === "duplicate" && (
@@ -365,7 +386,17 @@ export default function ImportAppointmentsPage() {
                         </td>
                         <td className="p-2 whitespace-nowrap" data-testid={`text-date-${row.rowIndex}`}>{row.date}</td>
                         <td className="p-2 whitespace-nowrap">{row.startTime}–{row.endTime}</td>
-                        <td className="p-2">{row.durationMinutes}min</td>
+                        <td className="p-2" data-testid={`text-duration-${row.rowIndex}`}>
+                          {isBudgetTrimmed ? (
+                            <span className="text-orange-700 font-medium">
+                              <span className="line-through text-muted-foreground">{row.budgetTrimInfo!.originalMinutes}</span>
+                              {" → "}
+                              {row.budgetTrimInfo!.trimmedMinutes}min
+                            </span>
+                          ) : (
+                            <span>{row.durationMinutes}min</span>
+                          )}
+                        </td>
                         <td className="p-2">{row.serviceType}</td>
                         <td className="p-2 whitespace-nowrap text-[10px]">{row.budgetType}</td>
                         <td className="p-2">
@@ -402,6 +433,11 @@ export default function ImportAppointmentsPage() {
                         </td>
                         <td className="p-2">{row.kilometers}</td>
                         <td className="p-2">
+                          {isBudgetTrimmed && (
+                            <span className="text-orange-700 text-[10px] block" data-testid={`text-budget-trim-${row.rowIndex}`}>
+                              {row.budgetTrimInfo!.reason}
+                            </span>
+                          )}
                           {row.errors.length > 0 && (
                             <span className="text-red-600 text-[10px]" data-testid={`text-errors-${row.rowIndex}`}>
                               {row.errors.filter(e => !hasEmployeeError || !e.includes("Mitarbeiter")).join("; ")}
@@ -428,11 +464,17 @@ export default function ImportAppointmentsPage() {
               <CardTitle className="text-base">Import-Ergebnis</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
                 <div className="p-3 rounded bg-green-50 border border-green-200" data-testid="text-result-imported">
                   <div className="font-medium text-green-800">Importiert</div>
                   <div className="text-2xl font-bold text-green-700">{importResult.imported}</div>
                 </div>
+                {importResult.trimmed > 0 && (
+                  <div className="p-3 rounded bg-orange-50 border border-orange-200" data-testid="text-result-trimmed">
+                    <div className="font-medium text-orange-800">Davon gekürzt</div>
+                    <div className="text-2xl font-bold text-orange-700">{importResult.trimmed}</div>
+                  </div>
+                )}
                 <div className="p-3 rounded bg-blue-50 border border-blue-200" data-testid="text-result-updated">
                   <div className="font-medium text-blue-800">Aktualisiert</div>
                   <div className="text-2xl font-bold text-blue-700">{importResult.updated}</div>

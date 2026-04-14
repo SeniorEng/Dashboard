@@ -5,6 +5,7 @@ import multer from "multer";
 import {
   parseExcelFile,
   matchRows,
+  enrichWithBudgetInfo,
   executeImport,
   createServiceRecordsForImported,
   type MatchedRow,
@@ -27,12 +28,14 @@ router.post(
 
     const parsed = parseExcelFile(req.file.buffer);
     const matched = await matchRows(parsed);
+    await enrichWithBudgetInfo(matched);
 
     const summary = {
       total: matched.length,
       new: matched.filter((r) => r.status === "new").length,
       duplicate: matched.filter((r) => r.status === "duplicate").length,
       error: matched.filter((r) => r.status === "error").length,
+      budgetTrimmed: matched.filter((r) => r.budgetTrimInfo !== null).length,
     };
 
     res.json({ rows: matched, summary });
@@ -65,6 +68,11 @@ const matchedRowSchema = z.object({
   errors: z.array(z.string()),
   existingAppointmentId: z.number().nullable(),
   differences: z.array(z.string()),
+  budgetTrimInfo: z.object({
+    originalMinutes: z.number(),
+    trimmedMinutes: z.number(),
+    reason: z.string(),
+  }).nullable().optional(),
 });
 
 const executeSchema = z.object({
