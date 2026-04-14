@@ -182,7 +182,7 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
     const employeeLbnr = emp?.lbnr || "";
 
     for (const svc of apptServices) {
-      const durationMinutes = svc.actualDurationMinutes ?? svc.plannedDurationMinutes;
+      const durationMinutes = Math.round(svc.actualDurationMinutes ?? svc.plannedDurationMinutes ?? 0);
       const customerPrice = getCustomerPrice(svc.serviceId, apptDate);
       const pricePer60Min = customerPrice ?? svc.defaultPriceCents;
       if (pricePer60Min == null) {
@@ -224,7 +224,6 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
       if (!kmSvc) continue;
       const kmCustomerPrice = getCustomerPrice(kmSvc.id, apptDate);
       const pricePerKm = kmCustomerPrice ?? kmSvc.defaultPriceCents ?? 35;
-      const kmDisplay = Math.round(kmEntry.km * 10) / 10;
       const kmTotalCents = Math.round(kmEntry.km * pricePerKm);
       const kmVatBasisPoints = isVatExempt ? 0 : (kmSvc.vatRate || 0);
       const kmVatCents = Math.round(kmTotalCents * kmVatBasisPoints / 10000);
@@ -236,7 +235,7 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
         serviceCode: kmEntry.code,
         startTime: appt.actualStart || appt.scheduledStart,
         endTime: appt.actualEnd || appt.scheduledEnd,
-        durationMinutes: kmDisplay,
+        durationMinutes: Math.round(kmEntry.km),
         unitPriceCents: pricePerKm,
         totalCents: kmTotalCents,
         employeeName,
@@ -1042,7 +1041,25 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
     status: "entwurf",
   };
 
-  const invoice = await storage.createInvoice(invoiceData, lineItems as Record<string, unknown>[], req.user!.id);
+  let invoice: Invoice;
+  try {
+    invoice = await storage.createInvoice(invoiceData, lineItems as Record<string, unknown>[], req.user!.id);
+  } catch (err) {
+    console.error("[billing/generate] Invoice insert failed.", {
+      customerId,
+      billingMonth,
+      billingYear,
+      lineItemCount: lineItems.length,
+      sampleItem: lineItems[0] ? {
+        appointmentDate: lineItems[0].appointmentDate,
+        durationMinutes: lineItems[0].durationMinutes,
+        unitPriceCents: lineItems[0].unitPriceCents,
+        totalCents: lineItems[0].totalCents,
+        serviceCode: lineItems[0].serviceCode,
+      } : null,
+    });
+    throw err;
+  }
 
   await auditService.log(req.user!.id, "invoice_created", "invoice", invoice.id, {
     invoiceNumber,
