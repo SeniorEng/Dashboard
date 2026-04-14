@@ -6,7 +6,7 @@ import {
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
 import { eq, and, sql, lte, gte, isNull, or, asc, inArray } from "drizzle-orm";
-import { parseLocalDate } from "@shared/utils/datetime";
+import { parseLocalDate, todayISO } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
 import type { DbClient, CascadeResult } from "./types";
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
@@ -89,7 +89,8 @@ export async function consumeFifo(
       asc(budgetAllocations.id)
     );
 
-  const totalAllocated = await calculateAllocatedCents(customerId, budgetType, { asOfDate: today }, _tx);
+  const allocationAsOfDate = budgetType === "entlastungsbetrag_45b" ? todayISO() : today;
+  const totalAllocated = await calculateAllocatedCents(customerId, budgetType, { asOfDate: allocationAsOfDate }, _tx);
 
   if (totalAllocated <= 0 && specialAllocations.length === 0) {
     return { consumedCents: 0, transactions: [], remainingCents: amountCents };

@@ -72,6 +72,16 @@ export async function reverseBudgetTransaction(transactionId: number, userId?: n
 
   if (!original[0]) return undefined;
 
+  const existingReversal = await d.select()
+    .from(budgetTransactions)
+    .where(and(
+      eq(budgetTransactions.reversedTransactionId, transactionId),
+      eq(budgetTransactions.transactionType, "reversal")
+    ))
+    .limit(1);
+
+  if (existingReversal.length > 0) return existingReversal[0];
+
   const reversal = await d.insert(budgetTransactions).values({
     customerId: original[0].customerId,
     budgetType: original[0].budgetType,

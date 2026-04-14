@@ -383,7 +383,7 @@ async function computeVerifiedTrimmedMinutes(
   if (serviceCents <= 0 || budgetForService <= 0) {
     estimate = 0;
   } else {
-    estimate = Math.floor(originalMinutes * budgetForService / serviceCents);
+    estimate = Math.min(Math.floor(originalMinutes * budgetForService / serviceCents), originalMinutes);
   }
 
   for (let candidate = estimate; candidate >= 0; candidate--) {

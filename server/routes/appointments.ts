@@ -1093,8 +1093,9 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   const ip = req.ip || req.socket.remoteAddress;
 
   let reversedTransactions = 0;
-  if (isAdmin && isCompleted) {
-    const transactions = await budgetLedgerStorage.getTransactionsByAppointmentId(id);
+  const transactions = await budgetLedgerStorage.getTransactionsByAppointmentId(id);
+
+  if (transactions.length > 0) {
     await db.transaction(async (txClient) => {
       for (const tx of transactions) {
         await budgetLedgerStorage.reverseBudgetTransaction(tx.id, req.user!.id, txClient);
