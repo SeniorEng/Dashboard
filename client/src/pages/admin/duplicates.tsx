@@ -259,7 +259,7 @@ export default function AdminDuplicates() {
 
   const { data, isLoading, error } = useQuery<DuplicatesResponse>({
     queryKey: ["admin-customers-duplicates"],
-    queryFn: async () => unwrapResult(await api.get<DuplicatesResponse>("/admin/customers/duplicates")),
+    queryFn: async () => unwrapResult(await api.post<DuplicatesResponse>("/admin/customers/duplicates", {})),
   });
 
   const mergeMutation = useMutation<MergeResponse, ApiError, { sourceCustomerId: number; targetCustomerId: number }>({

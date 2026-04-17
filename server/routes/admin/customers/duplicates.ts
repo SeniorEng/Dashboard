@@ -35,7 +35,7 @@ interface DuplicateGroup {
   customers: DuplicateCustomer[];
 }
 
-router.get(
+router.post(
   "/customers/duplicates",
   asyncHandler("Duplikate konnten nicht ermittelt werden", async (_req: Request, res: Response) => {
     const rows = await db.execute(sql`
@@ -168,6 +168,21 @@ router.post(
       if (target.deleted_at) throw new Error(`Zielkunde ${targetCustomerId} ist gelöscht`);
       if (source.is_anonymized) throw new Error(`Quellkunde ${sourceCustomerId} ist anonymisiert`);
       if (target.is_anonymized) throw new Error(`Zielkunde ${targetCustomerId} ist anonymisiert – Zusammenführen würde Datenschutz verletzen`);
+
+      // Enforce same-name policy: both customers must share the normalized
+      // "vorname nachname" key. This blocks merges of unrelated records via
+      // crafted requests that bypass the UI.
+      const normalize = (vor: unknown, nach: unknown, name: unknown): string => {
+        const combined = `${(vor as string | null) ?? ""} ${(nach as string | null) ?? (name as string | null) ?? ""}`;
+        return combined.trim().toLowerCase().replace(/\s+/g, " ");
+      };
+      const sourceKey = normalize(source.vorname, source.nachname, source.name);
+      const targetKey = normalize(target.vorname, target.nachname, target.name);
+      if (!sourceKey || sourceKey !== targetKey) {
+        throw new Error(
+          `Zusammenführen abgelehnt: Quell- und Zielkunde haben unterschiedliche Namen (${sourceKey || "—"} vs. ${targetKey || "—"}). Nur Kunden mit identischem Namen dürfen zusammengeführt werden.`
+        );
+      }
 
       const counts: Record<string, number> = {};
 
