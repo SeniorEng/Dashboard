@@ -8,7 +8,7 @@ import {
   type CustomerBudgetPreferences,
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
-import { eq, and, sql, lte, gte, isNull, isNotNull, or, desc, asc, inArray } from "drizzle-orm";
+import { eq, and, sql, lte, gte, isNull, isNotNull, desc, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate, currentYearAndMonth } from "@shared/utils/datetime";
 import { BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
 import { db } from "../../lib/db";
@@ -105,16 +105,15 @@ export async function upsertInitialBalanceAllocation(
 }
 
 export async function getInitialBalanceAllocations(customerId: number, budgetType: string): Promise<BudgetAllocation[]> {
+  // Startwert-Historie darf ausschließlich manuelle initial_balance-Einträge enthalten.
+  // Carryover-Einträge entstehen automatisch und gehören nicht in die Startwert-Sektion (Task #101).
   return db.select()
     .from(budgetAllocations)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, budgetType),
       isNull(budgetAllocations.deletedAt),
-      or(
-        eq(budgetAllocations.source, "initial_balance"),
-        eq(budgetAllocations.source, "carryover"),
-      ),
+      eq(budgetAllocations.source, "initial_balance"),
     ))
     .orderBy(desc(budgetAllocations.validFrom));
 }
@@ -373,10 +372,17 @@ async function calculateAllocated45b(
     .filter(a => a.source === "initial_balance" && a.validFrom <= ibDateLimit)
     .reduce((sum, a) => sum + a.amountCents, 0);
 
+  // Carryover ignorieren, wenn für das *Quelljahr* (carryover.year - 1) ein manueller Startwert
+  // existiert: Der Startwert bildet das Restguthaben bereits ab und der Carryover wäre
+  // Doppelzählung (Task #101). Das Cleanup-Skript räumt solche obsoleten Einträge zusätzlich auf.
+  const ibYears = new Set(
+    existingAllocations.filter(a => a.source === "initial_balance").map(a => a.year)
+  );
   const carryoverTotal = existingAllocations
     .filter(a => a.source === "carryover" &&
       a.validFrom <= (opts.asOfDate ?? `${curYear}-12-31`) &&
-      (!a.expiresAt || a.expiresAt >= (opts.asOfDate ?? `${curYear}-01-01`)))
+      (!a.expiresAt || a.expiresAt >= (opts.asOfDate ?? `${curYear}-01-01`)) &&
+      !ibYears.has(a.year - 1))
     .reduce((sum, a) => sum + a.amountCents, 0);
 
   return totalCalculated + initialBalanceTotal + carryoverTotal;
@@ -660,10 +666,20 @@ export async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClien
 
   const created: BudgetAllocation[] = [];
 
+  // Jahre mit manuellem Startwert (initial_balance) – für diese Jahre darf KEIN automatischer
+  // Carryover ins Folgejahr erzeugt werden. Begründung (Task #101): Ein manuell gesetzter
+  // Startwert bildet das Restguthaben ab seinem Stichmonat bereits ab. Würde zusätzlich ein
+  // Carryover für das Folgejahr automatisch angelegt, käme es zur Doppelzählung. Die klassische
+  // Übertrags-Logik bleibt erhalten für Jahre OHNE manuellen Startwert.
+  const yearsWithInitialBalance = new Set(
+    allAllocations.filter(a => a.source === "initial_balance").map(a => a.year)
+  );
+
   for (const year of years) {
     if (year >= curYear) continue;
     const targetYear = year + 1;
     if (existingCarryoverYears.has(targetYear)) continue;
+    if (yearsWithInitialBalance.has(year)) continue;
 
     const yearAllocatedCents = await calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { year }, _tx, preferences, typeSettings);
 

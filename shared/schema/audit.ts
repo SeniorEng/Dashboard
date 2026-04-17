@@ -48,6 +48,7 @@ export const AUDIT_ACTIONS = [
   "budget_rebook_single",
   "invoice_sent",
   "customer_merged",
+  "budget_carryover_cleanup_soft_deleted",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];

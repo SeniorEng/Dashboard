@@ -778,3 +778,116 @@ describe("BUD-EDGE: Budget-Grenzfälle", () => {
     expect(res.status).toBe(200);
   });
 });
+
+// Task #101: Doppelzählung & Mehrfach-Anzeige Startwert §45b
+describe("BUD-IB-DEDUP: Startwert §45b – keine Doppelzählung mit Carryover", () => {
+  let dedupCustomerId: number;
+  const previousYear = new Date().getFullYear() - 1;
+  const startMonth = 12;
+  const ibAmountCents = 157200; // 1.572 €
+
+  beforeAll(async () => {
+    const suffix = Date.now();
+    const createRes = await apiPost<any>("/api/admin/customers", {
+      vorname: "IBDedup",
+      nachname: `Test-${suffix}`,
+      geburtsdatum: "1942-04-04",
+      strasse: "Teststr.",
+      nr: "1",
+      plz: "12345",
+      stadt: "Berlin",
+      pflegegrad: 3,
+      billingType: "pflegekasse_gesetzlich",
+    });
+    expect(createRes.status).toBe(201);
+    dedupCustomerId = createRes.data.id;
+
+    await apiPut<any>(`/api/budget/${dedupCustomerId}/type-settings`, {
+      settings: [
+        { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
+        { budgetType: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
+        { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+      ],
+    });
+
+    // Startwert ab Dezember Vorjahr
+    const ibRes = await apiPost<any>(`/api/budget/${dedupCustomerId}/initial-balance/entlastungsbetrag_45b`, {
+      amountCents: ibAmountCents,
+      validFrom: `${previousYear}-${String(startMonth).padStart(2, "0")}`,
+    });
+    expect(ibRes.status).toBe(200);
+  });
+
+  it("BUD-IB-DEDUP-1 – Startwert-Historie liefert ausschließlich initial_balance-Einträge", async () => {
+    // Auch nachdem die Carryover-Sync gelaufen ist (via overview)
+    await apiGet<any>(`/api/budget/${dedupCustomerId}/overview`);
+    const res = await apiGet<any[]>(`/api/budget/${dedupCustomerId}/initial-balances/entlastungsbetrag_45b`);
+    expect(res.status).toBe(200);
+    expect(res.data.length).toBeGreaterThan(0);
+    for (const a of res.data) {
+      expect(a.source).toBe("initial_balance");
+    }
+  });
+
+  it("BUD-IB-DEDUP-2 – Es entsteht kein automatischer Carryover, wenn für das Vorjahr ein Startwert existiert", async () => {
+    await apiGet<any>(`/api/budget/${dedupCustomerId}/overview`); // triggert syncCarryoverAndExpiry
+    const allocRes = await apiGet<any[]>(`/api/budget/${dedupCustomerId}/allocations`);
+    expect(allocRes.status).toBe(200);
+    const autoCarryover = allocRes.data.filter(
+      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover"
+    );
+    expect(autoCarryover.length).toBe(0);
+  });
+
+  it("BUD-IB-DEDUP-3 – totalAllocatedCents = Startwert + monatliche Auto-Allokationen ab Folgemonat (keine Doppelzählung)", async () => {
+    const overviewRes = await apiGet<any>(`/api/budget/${dedupCustomerId}/overview`);
+    expect(overviewRes.status).toBe(200);
+    const s45b = overviewRes.data.entlastungsbetrag45b;
+
+    const now = new Date();
+    const curYear = now.getFullYear();
+    const curMonth = now.getMonth() + 1;
+    // Monate ab Januar curYear bis aktueller Monat
+    const monthsSinceIB = (curYear - previousYear) * 12 + (curMonth - startMonth);
+    const expected = ibAmountCents + Math.max(0, monthsSinceIB) * 13100;
+
+    expect(s45b.totalAllocatedCents).toBe(expected);
+  });
+
+  it("BUD-IB-DEDUP-4 – Klassischer Carryover funktioniert weiterhin, wenn KEIN Startwert für das Vorjahr existiert", async () => {
+    const suffix = Date.now();
+    const createRes = await apiPost<any>("/api/admin/customers", {
+      vorname: "IBDedupCO",
+      nachname: `Test-${suffix}`,
+      geburtsdatum: "1942-04-04",
+      strasse: "Teststr.",
+      nr: "1",
+      plz: "12345",
+      stadt: "Berlin",
+      pflegegrad: 3,
+      billingType: "pflegekasse_gesetzlich",
+    });
+    const id = createRes.data.id;
+
+    await apiPut<any>(`/api/budget/${id}/type-settings`, {
+      settings: [
+        { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
+        { budgetType: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
+        { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+      ],
+    });
+    // Budgetstart Januar Vorjahr → klassischer Übertrag soll erzeugt werden
+    await apiPut<any>(`/api/budget/${id}/preferences`, {
+      customerId: id,
+      budgetStartDate: `${previousYear}-01-01`,
+    });
+
+    await apiGet<any>(`/api/budget/${id}/overview`);
+    const allocRes = await apiGet<any[]>(`/api/budget/${id}/allocations`);
+    const carryovers = allocRes.data.filter(
+      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover"
+    );
+    // Mindestens ein automatischer Carryover für das aktuelle Jahr
+    expect(carryovers.length).toBeGreaterThan(0);
+  });
+});
