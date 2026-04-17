@@ -19,6 +19,7 @@ import { geocodeCustomer } from "../../services/geocoding";
 import { birthdaysCache, customerIdsCache } from "../../services/cache";
 import { validateGeburtsdatum } from "@shared/utils/datetime";
 import { createCustomerRelatedData, buildCustomerInsertData } from "../../lib/customer-creation-helpers";
+import { findCustomerDuplicates } from "../../lib/duplicate-check";
 import { db } from "../../lib/db";
 import { eq, and, isNull } from "drizzle-orm";
 
@@ -311,6 +312,19 @@ router.post("/prospects/:id/convert", asyncHandler("Konvertierung fehlgeschlagen
   }
 
   const data = convertProspectSchema.parse(req.body);
+
+  if (!data.skipDuplicateCheck) {
+    const duplicates = await findCustomerDuplicates(data.vorname, data.nachname, data.geburtsdatum);
+    if (duplicates.length > 0) {
+      res.status(409).json({
+        error: "DUPLICATE_WARNING",
+        code: "DUPLICATE_WARNING",
+        message: `Es existiert bereits ${duplicates.length === 1 ? "ein Kunde" : `${duplicates.length} Kunden`} mit gleichem Namen. Zum Konvertieren "skipDuplicateCheck" setzen.`,
+        details: { duplicates },
+      });
+      return;
+    }
+  }
 
   const geburtsdatumError = validateGeburtsdatum(data.geburtsdatum);
   if (geburtsdatumError) {

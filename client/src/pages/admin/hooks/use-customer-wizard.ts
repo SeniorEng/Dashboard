@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { useInsuranceProviders, useCreateCustomer } from "@/features/customers";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { validateDachPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";
 import { CustomerFormData, ContactFormData, BudgetTypeSettingForm, getStepsForBillingType, DEFAULT_BUDGETS, EMPTY_CONTACT, MAX_CONTACTS } from "../components/customer-types";
@@ -252,7 +252,7 @@ export function useCustomerWizard() {
     });
   }, []);
 
-  const handleCreate = () => {
+  const handleCreate = (forceSkipDuplicate = false) => {
     const today = todayISO();
     
     const phoneValidationErrors: string[] = [];
@@ -380,6 +380,7 @@ export function useCustomerWizard() {
       contacts: contacts.length > 0 ? contacts : undefined,
       budgets: isPflegekasse ? budgets : undefined,
       contract,
+      skipDuplicateCheck: duplicateCheckedRef.current || forceSkipDuplicate,
     };
 
     const warnings: string[] = [];
@@ -486,6 +487,13 @@ export function useCustomerWizard() {
         setLocation(`/admin/customers/${customer.id}`);
       },
       onError: (error: Error) => {
+        if (error instanceof ApiError && error.code === "DUPLICATE_WARNING") {
+          const dups = (error.details?.duplicates as Array<{ id: number; vorname: string; nachname: string; geburtsdatum: string | null; stadt: string | null; strasse: string | null; nr: string | null; status: string | null }> | undefined) || [];
+          if (dups.length > 0) {
+            setDuplicateWarning({ duplicates: dups });
+            return;
+          }
+        }
         toast({ title: "Fehler", description: error.message, variant: "destructive" });
       },
     });
@@ -704,6 +712,8 @@ export function useCustomerWizard() {
     setDuplicateWarning(null);
     if (currentStep < steps.length - 1) {
       goToStep(currentStep + 1);
+    } else {
+      handleCreate(true);
     }
   }, [currentStep, steps.length, goToStep]);
 

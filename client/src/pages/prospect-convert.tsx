@@ -19,7 +19,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { api, unwrapResult } from "@/lib/api";
+import { api, unwrapResult, ApiError } from "@/lib/api";
+import { DuplicateDialog } from "@/pages/admin/components/wizard-dialogs";
 import { iconSize, componentStyles } from "@/design-system";
 import {
   ArrowLeft,
@@ -148,6 +149,7 @@ export default function ProspectConvert() {
   const [contactType, setContactType] = useState("sonstige");
   const [primaryEmployeeId, setPrimaryEmployeeId] = useState("");
   const [backupEmployeeId, setBackupEmployeeId] = useState("");
+  const [duplicateWarning, setDuplicateWarning] = useState<{ duplicates: Array<{ id: number; vorname: string; nachname: string; geburtsdatum: string | null; stadt: string | null; strasse: string | null; nr: string | null; status: string | null }> } | null>(null);
 
   const prospectHydrated = useRef(false);
   const offerHydrated = useRef(false);
@@ -257,8 +259,8 @@ export default function ProspectConvert() {
   });
 
   const convertMutation = useMutation({
-    mutationFn: async () => {
-      const payload = buildPayload();
+    mutationFn: async (opts?: { skipDuplicateCheck?: boolean }) => {
+      const payload = { ...buildPayload(), skipDuplicateCheck: opts?.skipDuplicateCheck ?? false };
       const result = await api.post(`/admin/prospects/${prospectId}/convert`, payload);
       return unwrapResult(result);
     },
@@ -268,6 +270,13 @@ export default function ProspectConvert() {
       setLocation("/admin/prospects");
     },
     onError: (error: Error) => {
+      if (error instanceof ApiError && error.code === "DUPLICATE_WARNING") {
+        const dups = (error.details?.duplicates as Array<{ id: number; vorname: string; nachname: string; geburtsdatum: string | null; stadt: string | null; strasse: string | null; nr: string | null; status: string | null }> | undefined) || [];
+        if (dups.length > 0) {
+          setDuplicateWarning({ duplicates: dups });
+          return;
+        }
+      }
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
@@ -373,6 +382,14 @@ export default function ProspectConvert() {
 
   return (
     <Layout variant="admin">
+      <DuplicateDialog
+        duplicateWarning={duplicateWarning}
+        onContinue={() => {
+          setDuplicateWarning(null);
+          convertMutation.mutate({ skipDuplicateCheck: true });
+        }}
+        onCancel={() => setDuplicateWarning(null)}
+      />
       <div className="flex items-center gap-4 mb-6">
         <Button variant="ghost" size="icon" onClick={() => setLocation("/admin/prospects")} aria-label="Zurück" data-testid="button-back">
           <ArrowLeft className={iconSize.md} />

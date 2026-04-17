@@ -6,6 +6,7 @@ import { auditService } from "../../services/audit";
 import { geocodeCustomer } from "../../services/geocoding";
 import { validateGeburtsdatum } from "@shared/utils/datetime";
 import { createCustomerRelatedData, buildCustomerInsertData } from "../../lib/customer-creation-helpers";
+import { findCustomerDuplicates } from "../../lib/duplicate-check";
 import { 
   versichertennummerSchema,
   customers,
@@ -46,31 +47,8 @@ router.get("/customers/check-duplicate", asyncHandler("Duplikatprüfung fehlgesc
     return;
   }
 
-  const conditions = [
-    sql`LOWER(${customers.vorname}) = LOWER(${vorname})`,
-    sql`LOWER(${customers.nachname}) = LOWER(${nachname})`,
-    isNull(customers.deletedAt),
-  ];
-
-  if (geburtsdatum) {
-    conditions.push(eq(customers.geburtsdatum, geburtsdatum));
-  }
-
-  const existing = await db.select({
-    id: customers.id,
-    vorname: customers.vorname,
-    nachname: customers.nachname,
-    geburtsdatum: customers.geburtsdatum,
-    stadt: customers.stadt,
-    strasse: customers.strasse,
-    nr: customers.nr,
-    status: customers.status,
-  })
-    .from(customers)
-    .where(and(...conditions))
-    .limit(5);
-
-  res.json({ duplicates: existing });
+  const duplicates = await findCustomerDuplicates(vorname, nachname, geburtsdatum);
+  res.json({ duplicates });
 }));
 
 router.get("/customers", asyncHandler("Kunden konnten nicht geladen werden", async (req: Request, res: Response) => {
@@ -223,10 +201,24 @@ const simpleCreateCustomerSchema = z.object({
       hourlyRateCents: z.number(),
     })).optional(),
   }).optional(),
+  skipDuplicateCheck: z.boolean().optional(),
 });
 
 router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", async (req: Request, res: Response) => {
   const data = simpleCreateCustomerSchema.parse(req.body);
+
+  if (!data.skipDuplicateCheck) {
+    const duplicates = await findCustomerDuplicates(data.vorname, data.nachname, data.geburtsdatum);
+    if (duplicates.length > 0) {
+      res.status(409).json({
+        error: "DUPLICATE_WARNING",
+        code: "DUPLICATE_WARNING",
+        message: `Es existiert bereits ${duplicates.length === 1 ? "ein Kunde" : `${duplicates.length} Kunden`} mit gleichem Namen. Zum Anlegen "skipDuplicateCheck" setzen.`,
+        details: { duplicates },
+      });
+      return;
+    }
+  }
 
   if (data.insurance?.versichertennummer) {
     const vnr = data.insurance.versichertennummer;

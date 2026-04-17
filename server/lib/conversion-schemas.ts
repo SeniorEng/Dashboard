@@ -57,6 +57,7 @@ const baseConversionFields = {
   primaryEmployeeId: z.number().nullable().optional(),
   backupEmployeeId: z.number().nullable().optional(),
   backupEmployeeId2: z.number().nullable().optional(),
+  skipDuplicateCheck: z.boolean().optional(),
 } as const;
 
 export const convertCustomerSchema = z.object({
