@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { customers } from "@shared/schema";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, ne, sql } from "drizzle-orm";
 
 export interface DuplicateCustomer {
   id: number;
@@ -17,6 +17,7 @@ export async function findCustomerDuplicates(
   vorname: string,
   nachname: string,
   geburtsdatum?: string | null,
+  excludeId?: number,
 ): Promise<DuplicateCustomer[]> {
   const v = vorname.trim();
   const n = nachname.trim();
@@ -29,6 +30,9 @@ export async function findCustomerDuplicates(
   ];
   if (geburtsdatum) {
     conditions.push(eq(customers.geburtsdatum, geburtsdatum));
+  }
+  if (excludeId !== undefined) {
+    conditions.push(ne(customers.id, excludeId));
   }
 
   return db.select({

@@ -9,12 +9,15 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DatePicker } from "@/components/ui/date-picker";
 import { useToast } from "@/hooks/use-toast";
-import { api, unwrapResult } from "@/lib/api";
+import { api, unwrapResult, ApiError } from "@/lib/api";
 import { iconSize } from "@/design-system";
 import { AddressFields } from "../address-fields";
 import { EditButton, SaveCancelButtons } from "./section-helpers";
+import { DuplicateDialog } from "../wizard-dialogs";
 import { User2, MapPin, Phone, Mail, Calendar } from "lucide-react";
 import type { SectionProps } from "./types";
+
+type DuplicateInfo = { id: number; vorname: string; nachname: string; geburtsdatum: string | null; stadt: string | null; strasse: string | null; nr: string | null; status: string | null };
 
 export function ContactSection({ customer, customerId, editingSection, setEditingSection, saving, setSaving, invalidateCustomer }: SectionProps) {
   const { toast } = useToast();
@@ -33,6 +36,7 @@ export function ContactSection({ customer, customerId, editingSection, setEditin
     stadt: "",
   });
   const [phoneErrors, setPhoneErrors] = useState<Record<string, string | null>>({});
+  const [duplicateWarning, setDuplicateWarning] = useState<{ duplicates: DuplicateInfo[] } | null>(null);
 
   const initStammdaten = () => {
     setStammdaten({
@@ -65,15 +69,7 @@ export function ContactSection({ customer, customerId, editingSection, setEditin
     }
   };
 
-  const handleSaveStammdaten = async () => {
-    if (!stammdaten.vorname.trim() || !stammdaten.nachname.trim()) {
-      toast({ title: "Pflichtfelder fehlen", description: "Vorname und Nachname sind erforderlich.", variant: "destructive" });
-      return;
-    }
-    if (phoneErrors.telefon || phoneErrors.festnetz) {
-      toast({ title: "Ungültige Telefonnummer", description: "Bitte korrigieren Sie die Telefonnummer(n).", variant: "destructive" });
-      return;
-    }
+  const submitStammdaten = async (skipDuplicateCheck: boolean) => {
     setSaving(true);
     try {
       const data: Record<string, unknown> = {
@@ -88,6 +84,7 @@ export function ContactSection({ customer, customerId, editingSection, setEditin
         nr: stammdaten.nr.trim() || null,
         plz: stammdaten.plz.trim() || null,
         stadt: stammdaten.stadt.trim() || null,
+        skipDuplicateCheck,
       };
       const result = await api.patch(`/admin/customers/${customerId}`, data);
       unwrapResult(result);
@@ -95,10 +92,29 @@ export function ContactSection({ customer, customerId, editingSection, setEditin
       invalidateCustomer();
       setEditingSection(null);
     } catch (error: unknown) {
+      if (error instanceof ApiError && error.code === "DUPLICATE_WARNING") {
+        const dups = (error.details?.duplicates as DuplicateInfo[] | undefined) || [];
+        if (dups.length > 0) {
+          setDuplicateWarning({ duplicates: dups });
+          return;
+        }
+      }
       toast({ variant: "destructive", title: "Fehler", description: error instanceof Error ? error.message : "Speichern fehlgeschlagen." });
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSaveStammdaten = async () => {
+    if (!stammdaten.vorname.trim() || !stammdaten.nachname.trim()) {
+      toast({ title: "Pflichtfelder fehlen", description: "Vorname und Nachname sind erforderlich.", variant: "destructive" });
+      return;
+    }
+    if (phoneErrors.telefon || phoneErrors.festnetz) {
+      toast({ title: "Ungültige Telefonnummer", description: "Bitte korrigieren Sie die Telefonnummer(n).", variant: "destructive" });
+      return;
+    }
+    await submitStammdaten(false);
   };
 
   const startEditing = () => {
@@ -107,6 +123,15 @@ export function ContactSection({ customer, customerId, editingSection, setEditin
   };
 
   return (
+    <>
+    <DuplicateDialog
+      duplicateWarning={duplicateWarning}
+      onContinue={() => {
+        setDuplicateWarning(null);
+        void submitStammdaten(true);
+      }}
+      onCancel={() => setDuplicateWarning(null)}
+    />
     <SectionCard
       title="Kontaktdaten"
       icon={<User2 className={iconSize.sm} />}
@@ -266,5 +291,6 @@ export function ContactSection({ customer, customerId, editingSection, setEditin
         </div>
       )}
     </SectionCard>
+    </>
   );
 }

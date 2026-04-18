@@ -303,6 +303,7 @@ const updateCustomerSchema = z.object({
   inaktivAb: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat (YYYY-MM-DD erwartet)").nullable().optional(),
   deactivationReason: z.string().nullable().optional(),
   deactivationNote: z.string().max(1000, "Maximal 1000 Zeichen erlaubt").nullable().optional(),
+  skipDuplicateCheck: z.boolean().optional(),
 });
 
 router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
@@ -312,7 +313,8 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
     return;
   }
   
-  const validatedData = updateCustomerSchema.parse(req.body);
+  const parsed = updateCustomerSchema.parse(req.body);
+  const { skipDuplicateCheck, ...validatedData } = parsed;
 
   if (validatedData.geburtsdatum !== undefined) {
     const geburtsdatumError = validateGeburtsdatum(validatedData.geburtsdatum);
@@ -326,6 +328,27 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
   if (!existingCustomer) {
     res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
     return;
+  }
+
+  const nameChanging = (validatedData.vorname !== undefined && validatedData.vorname !== existingCustomer.vorname)
+    || (validatedData.nachname !== undefined && validatedData.nachname !== existingCustomer.nachname);
+
+  if (nameChanging && !skipDuplicateCheck) {
+    const checkVorname = validatedData.vorname ?? existingCustomer.vorname ?? "";
+    const checkNachname = validatedData.nachname ?? existingCustomer.nachname ?? "";
+    const checkGeburtsdatum = validatedData.geburtsdatum !== undefined
+      ? validatedData.geburtsdatum
+      : existingCustomer.geburtsdatum;
+    const duplicates = await findCustomerDuplicates(checkVorname, checkNachname, checkGeburtsdatum, id);
+    if (duplicates.length > 0) {
+      res.status(409).json({
+        error: "DUPLICATE_WARNING",
+        code: "DUPLICATE_WARNING",
+        message: `Es existiert bereits ${duplicates.length === 1 ? "ein Kunde" : `${duplicates.length} Kunden`} mit gleichem Namen. Zum Speichern "skipDuplicateCheck" setzen.`,
+        details: { duplicates },
+      });
+      return;
+    }
   }
 
   const changedFields: string[] = [];
