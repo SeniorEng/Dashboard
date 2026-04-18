@@ -185,41 +185,6 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
   let privateCents = 0;
   let vatCents = 0;
 
-  if (summary45b.monthlyLimitCents !== null) {
-    const appointmentDate = parseLocalDate(date);
-    const today = parseLocalDate(todayISO());
-    const isSameMonth = appointmentDate.getFullYear() === today.getFullYear() && appointmentDate.getMonth() === today.getMonth();
-
-    let appointmentMonthUsedCents = summary45b.currentMonthUsedCents;
-    if (!isSameMonth) {
-      const { sql: sqlTag } = await import("drizzle-orm");
-      const { db: dbInstance } = await import("../lib/db");
-      const appointmentMonthStart = `${appointmentDate.getFullYear()}-${String(appointmentDate.getMonth() + 1).padStart(2, '0')}-01`;
-      const appointmentMonthEndDate = new Date(appointmentDate.getFullYear(), appointmentDate.getMonth() + 1, 0);
-      const appointmentMonthEnd = `${appointmentMonthEndDate.getFullYear()}-${String(appointmentMonthEndDate.getMonth() + 1).padStart(2, '0')}-${String(appointmentMonthEndDate.getDate()).padStart(2, '0')}`;
-      const monthResult = await dbInstance.execute(sqlTag`
-        SELECT COALESCE(SUM(ABS(amount_cents)), 0) as total
-        FROM budget_transactions
-        WHERE customer_id = ${customerId}
-          AND budget_type = 'entlastungsbetrag_45b'
-          AND transaction_type = 'consumption'
-          AND transaction_date >= ${appointmentMonthStart}
-          AND transaction_date <= ${appointmentMonthEnd}
-      `);
-      appointmentMonthUsedCents = Number((monthResult.rows[0] as any)?.total ?? 0);
-    }
-
-    const monthlyRemaining45b = Math.max(0, summary45b.monthlyLimitCents - appointmentMonthUsedCents);
-    const effectiveAvailable =
-      (enabledMap.entlastungsbetrag_45b ? monthlyRemaining45b : 0) +
-      (enabledMap.umwandlung_45a ? summary45a.currentMonthAvailableCents : 0) +
-      (enabledMap.ersatzpflege_39_42a ? summary39_42a.currentYearAvailableCents : 0);
-    if (totalCostCents > effectiveAvailable) {
-      const remainingEuro = (monthlyRemaining45b / 100).toFixed(2).replace(".", ",");
-      warning = `Monatslimit fast erreicht — noch ${remainingEuro} € verfügbar.`;
-    }
-  }
-
   if (totalCostCents > totalAvailable) {
     const shortfall = totalCostCents - totalAvailable;
     const shortfallEuro = (shortfall / 100).toFixed(2).replace(".", ",");
