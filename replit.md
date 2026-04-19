@@ -126,6 +126,9 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Build Verification**: `script/check-build.mjs` — validates that `dist/` matches source code using **content-based hashing** (NOT file modification times). Both build.ts and check-build.mjs must use identical hashing logic. Critical: mtime-based hashing breaks in deployment environments where file timestamps differ.
 - **Deployment Config**: `.replit` `[deployment]` section — `build` runs `npm run build`, `run` executes check-build then starts `dist/index.cjs`.
 
+### Type Checking (CI Gate)
+- **TypeScript Check**: `npm run check` führt `tsc` (mit `noEmit: true` aus `tsconfig.json`) aus und schlägt bei jedem Typfehler mit Exit-Code ≠ 0 fehl. Der Schritt läuft als erster Befehl im `test`-Workflow (`npm run check && npx vitest run`), sodass jeder Test-Lauf mit 0 TS-Fehlern abschließen muss, bevor Vitest startet. Lokal kann der Check jederzeit mit `npm run check` ausgeführt werden.
+
 ### Startup Migrations
 - **Backfill appointment_services** (`server/startup/backfill-appointment-services.ts`): Idempotent — erstellt fehlende `appointment_services`-Einträge für completed/documented Termine die `service_type` + `duration_promised` haben aber keinen `appointment_services`-Eintrag. Behebt die Diskrepanz zwischen Einsatzzeit und Erlösen in der Statistik.
 - **Pflegekassen-Import** (`server/startup/import-pflegekassen.ts`): Idempotent — parst EDIFACT-Kostenträgerverzeichnisse (.ke0/.ke1 Dateien) aus `attached_assets/` und importiert alle Pflegekassen (IK 18*) als `insurance_providers`. 304 Pflegekassen aus 6 Dateien (AOK, BKK, BN, EK, IK, LK). Aktualisiert `name`/`empfaenger` immer, Adresse/Kontakt/KIM nur leere Felder. Parst IDK (IK+Name), NAM (Empfänger), ANS (Adresse), DFU+080 (KIM), DFU+070 (E-Mail), ASP (Ansprechpartner), VKG (Datenannahme-IK). KIM-Vorbereitung: `kimAdresse`, `fax`, `ansprechpartner`, `datenannahmeIk` Felder in Schema und Frontend.

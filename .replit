@@ -50,7 +50,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npx vitest run"
+args = "npm run check && npx vitest run"
 
 [workflows.workflow.metadata]
 isValidation = true
