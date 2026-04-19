@@ -91,7 +91,10 @@ router.post(
   asyncHandler("Import konnte nicht durchgeführt werden", async (req: Request, res: Response) => {
     const { rows, actions } = executeSchema.parse(req.body);
 
-    const matchedRows: MatchedRow[] = rows;
+    const matchedRows: MatchedRow[] = rows.map((r) => ({
+      ...r,
+      budgetTrimInfo: r.budgetTrimInfo ?? null,
+    }));
 
     for (const action of actions) {
       if (action.employeeIdOverride) {

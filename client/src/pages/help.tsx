@@ -484,8 +484,8 @@ function getTextContent(node: React.ReactNode): string {
   if (!node) return "";
   if (Array.isArray(node)) return node.map(getTextContent).join(" ");
   if (typeof node === "object" && "props" in node) {
-    const { children } = (node as React.ReactElement).props;
-    return getTextContent(children);
+    const props = (node as React.ReactElement).props as { children?: React.ReactNode };
+    return getTextContent(props.children);
   }
   return "";
 }

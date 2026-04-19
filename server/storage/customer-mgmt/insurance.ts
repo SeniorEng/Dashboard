@@ -24,6 +24,7 @@ const insuranceHistoryWithProviderSelect = {
     id: insuranceProviders.id,
     name: insuranceProviders.name,
     ikNummer: insuranceProviders.ikNummer,
+    isPrivate: insuranceProviders.isPrivate,
     strasse: insuranceProviders.strasse,
     hausnummer: insuranceProviders.hausnummer,
     plz: insuranceProviders.plz,

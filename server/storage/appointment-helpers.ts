@@ -186,6 +186,7 @@ function mapProspectAsCustomer(p: ProspectRow): AppointmentWithCustomer["custome
     plz: p.plz,
     stadt: p.stadt,
     pflegegrad: p.pflegegrad,
+    beihilfeBerechtigt: false,
     primaryEmployeeId: null,
     backupEmployeeId: null,
     backupEmployeeId2: null,

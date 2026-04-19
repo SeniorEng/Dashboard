@@ -4,13 +4,13 @@ import { and, eq, isNull, ne, sql } from "drizzle-orm";
 
 export interface DuplicateCustomer {
   id: number;
-  vorname: string;
-  nachname: string;
+  vorname: string | null;
+  nachname: string | null;
   geburtsdatum: string | null;
   stadt: string | null;
   strasse: string | null;
   nr: string | null;
-  status: string | null;
+  status: string;
 }
 
 export async function findCustomerDuplicates(

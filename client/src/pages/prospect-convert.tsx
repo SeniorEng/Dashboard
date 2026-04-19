@@ -61,6 +61,7 @@ interface InsuranceProviderOption {
   id: number;
   name: string;
   ikNummer: string;
+  isPrivate?: boolean;
 }
 
 const STEPS = [
@@ -742,7 +743,7 @@ export default function ProspectConvert() {
               </Button>
               <Button
                 className={componentStyles.btnPrimary}
-                onClick={() => convertMutation.mutate()}
+                onClick={() => convertMutation.mutate(undefined)}
                 disabled={isPending}
                 data-testid="button-convert"
               >

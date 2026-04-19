@@ -840,8 +840,8 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
         let kasseRecipientName = "";
         let kasseRecipientAddress = "";
         let insuranceProviderName = "";
-        let insuranceIkNummer = "";
-        let versichertennummer = "";
+        let insuranceIkNummer: string | null = "";
+        let versichertennummer: string | null = "";
 
         if (billingType === "pflegekasse_gesetzlich" && insuranceInfo) {
           kasseRecipientName = insuranceInfo.empfaenger || insuranceInfo.providerName;
@@ -914,8 +914,8 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
         const privateNetCents = privateItems.reduce((sum, i) => sum + i.totalCents, 0);
         const privateVatCents = Math.round(privateNetCents * 1900 / 10000);
         let insuranceProviderName = "";
-        let insuranceIkNummer = "";
-        let versichertennummer = "";
+        let insuranceIkNummer: string | null = "";
+        let versichertennummer: string | null = "";
         if (insuranceInfo) {
           insuranceProviderName = insuranceInfo.providerName;
           insuranceIkNummer = insuranceInfo.ikNummer;
@@ -981,8 +981,8 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
   let recipientName = "";
   let recipientAddress = "";
   let insuranceProviderName = "";
-  let insuranceIkNummer = "";
-  let versichertennummer = "";
+  let insuranceIkNummer: string | null = "";
+  let versichertennummer: string | null = "";
 
   if (billingType === "pflegekasse_gesetzlich") {
     if (insuranceInfo) {

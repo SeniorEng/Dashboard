@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, inArray, sql as sqlBuilder, asc, isNull, or, notInArray, count, ne } from "drizzle-orm";
+import { eq, and, gte, lte, inArray, sql as sqlBuilder, asc, isNull, or, notInArray, count, ne, getTableColumns } from "drizzle-orm";
 import {
   employeeTimeEntries,
   employeeVacationAllowance,
@@ -367,36 +367,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
   async getEmployeeAppointments(userId: number, startDate: string, endDate: string): Promise<AppointmentWithCustomerName[]> {
     const results = await db
       .select({
-        id: appointments.id,
-        customerId: appointments.customerId,
-        createdByUserId: appointments.createdByUserId,
-        assignedEmployeeId: appointments.assignedEmployeeId,
-        appointmentType: appointments.appointmentType,
-        serviceType: appointments.serviceType,
-        date: appointments.date,
-        scheduledStart: appointments.scheduledStart,
-        scheduledEnd: appointments.scheduledEnd,
-        durationPromised: appointments.durationPromised,
-        actualStart: appointments.actualStart,
-        actualEnd: appointments.actualEnd,
-        status: appointments.status,
-        notes: appointments.notes,
-        travelOriginType: appointments.travelOriginType,
-        travelFromAppointmentId: appointments.travelFromAppointmentId,
-        travelKilometers: appointments.travelKilometers,
-        travelMinutes: appointments.travelMinutes,
-        customerKilometers: appointments.customerKilometers,
-        signatureData: appointments.signatureData,
-        signatureHash: appointments.signatureHash,
-        signedAt: appointments.signedAt,
-        signedByUserId: appointments.signedByUserId,
-        servicesDone: appointments.servicesDone,
-        createdAt: appointments.createdAt,
-        performedByEmployeeId: appointments.performedByEmployeeId,
-        prospectId: appointments.prospectId,
-        deletedAt: appointments.deletedAt,
-        seriesId: appointments.seriesId,
-        isSeriesException: appointments.isSeriesException,
+        ...getTableColumns(appointments),
         customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as('customer_name'),
       })
       .from(appointments)
@@ -432,36 +403,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
   async getAllAppointmentsInRange(startDate: string, endDate: string): Promise<AppointmentWithCustomerName[]> {
     const results = await db
       .select({
-        id: appointments.id,
-        customerId: appointments.customerId,
-        createdByUserId: appointments.createdByUserId,
-        assignedEmployeeId: appointments.assignedEmployeeId,
-        appointmentType: appointments.appointmentType,
-        serviceType: appointments.serviceType,
-        date: appointments.date,
-        scheduledStart: appointments.scheduledStart,
-        scheduledEnd: appointments.scheduledEnd,
-        durationPromised: appointments.durationPromised,
-        actualStart: appointments.actualStart,
-        actualEnd: appointments.actualEnd,
-        status: appointments.status,
-        notes: appointments.notes,
-        travelOriginType: appointments.travelOriginType,
-        travelFromAppointmentId: appointments.travelFromAppointmentId,
-        travelKilometers: appointments.travelKilometers,
-        travelMinutes: appointments.travelMinutes,
-        customerKilometers: appointments.customerKilometers,
-        signatureData: appointments.signatureData,
-        signatureHash: appointments.signatureHash,
-        signedAt: appointments.signedAt,
-        signedByUserId: appointments.signedByUserId,
-        servicesDone: appointments.servicesDone,
-        createdAt: appointments.createdAt,
-        performedByEmployeeId: appointments.performedByEmployeeId,
-        prospectId: appointments.prospectId,
-        deletedAt: appointments.deletedAt,
-        seriesId: appointments.seriesId,
-        isSeriesException: appointments.isSeriesException,
+        ...getTableColumns(appointments),
         customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as('customer_name'),
       })
       .from(appointments)
