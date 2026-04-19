@@ -6,6 +6,7 @@ import {
   apiDelete,
   getFutureDate,
   getAuthCookie,
+  createTestCustomer,
 } from "./test-utils";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
@@ -46,8 +47,11 @@ beforeAll(async () => {
   const servicesRes = await apiGet<any[]>("/api/services/all");
   hwServiceId = servicesRes.data.find((s: any) => s.code === "hauswirtschaft")!.id;
 
-  const custRes = await apiGet<{ data: any[] }>("/api/admin/customers?limit=1");
-  testCustomerId = custRes.data.data[0].id;
+  const newCust = await createTestCustomer({
+    vorname: "Test",
+    nachname: `Auto_SER-${Date.now()}`,
+  });
+  testCustomerId = newCust.id;
 
   await apiPatch(`/api/admin/customers/${testCustomerId}/assign`, {
     primaryEmployeeId: auth.user.id,
@@ -60,11 +64,14 @@ afterAll(async () => {
   for (const id of cleanupSeriesIds) {
     await deleteSeriesSafe(id);
   }
+  if (testCustomerId) {
+    try { await apiDelete(`/api/admin/customers/${testCustomerId}`); } catch {}
+  }
 });
 
 describe("SER-1: Serie erstellen", () => {
   it("SER-1.1 – Wöchentliche Serie (4 Wochen, Mittwoch)", async () => {
-    const res = await apiPost<any>("/api/appointment-series", seriesPayload({ _offset: 30, _span: 28 }));
+    const res = await apiPost<any>("/api/appointment-series", seriesPayload({ _offset: 940, _span: 28 }));
     expect(res.status).toBe(201);
     expect(res.data).toHaveProperty("series");
     expect(res.data.series).toHaveProperty("id");
@@ -153,7 +160,7 @@ describe("SER-4: Alle zukünftigen absagen mit Verifikation", () => {
 
   it("SER-4.1 – Serie erstellen und ab Mitte alle zukünftigen absagen", async () => {
     const createRes = await apiPost<any>("/api/appointment-series",
-      seriesPayload({ _offset: 160, _span: 28, weekdays: ["di", "do"], scheduledStart: "15:00", durationMinutes: 45, services: [{ serviceId: hwServiceId, durationMinutes: 45 }] })
+      seriesPayload({ _offset: 980, _span: 28, weekdays: ["di", "do"], scheduledStart: "15:00", durationMinutes: 45, services: [{ serviceId: hwServiceId, durationMinutes: 45 }] })
     );
     expect(createRes.status).toBe(201);
     tempSeriesId = createRes.data.series.id;

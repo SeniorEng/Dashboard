@@ -61,6 +61,23 @@ async function waitForAutoBreakChange(dateStr: string, previousDuration: number,
   return lastSeen;
 }
 
+async function findFreeFutureWeekdayGlobal(startOffset: number, maxScan = 60): Promise<string> {
+  for (let off = startOffset; off < startOffset + maxScan; off++) {
+    const candidate = getFutureDate(off);
+    await clearDateEntries(candidate);
+    const probe = await apiPost<any>("/api/time-entries", {
+      entryDate: candidate,
+      entryType: "urlaub",
+      isFullDay: true,
+    });
+    if (probe.status === 201) {
+      await apiDelete(`/api/time-entries/${probe.data.id}`);
+      return candidate;
+    }
+  }
+  throw new Error(`Kein freier Werktag gefunden ab Offset ${startOffset}`);
+}
+
 async function clearDateEntries(dateStr: string) {
   const d = new Date(dateStr);
   const existing = await apiGet<any[]>(`/api/time-entries?year=${d.getFullYear()}&month=${d.getMonth() + 1}`);
@@ -138,11 +155,11 @@ describe("TE-BIZ-1: Wochenend-Sperre", () => {
 });
 
 describe("TE-BIZ-2: Zeitkonflikte", () => {
-  const conflictDate = getFutureDate(200);
+  let conflictDate: string;
   let baseId: number;
 
   beforeAll(async () => {
-    await clearDateEntries(conflictDate);
+    conflictDate = await findFreeFutureWeekdayGlobal(200);
   });
 
   it("TE-BIZ-2.1 – Erstellt Basis-Eintrag 09:00-12:00", async () => {
@@ -187,10 +204,10 @@ describe("TE-BIZ-2: Zeitkonflikte", () => {
 });
 
 describe("TE-BIZ-3: Ganztags-Konflikte", () => {
-  const fullDayDate = getFutureDate(210);
+  let fullDayDate: string;
 
   beforeAll(async () => {
-    await clearDateEntries(fullDayDate);
+    fullDayDate = await findFreeFutureWeekdayGlobal(260);
   });
 
   it("TE-BIZ-3.1 – Ganztags-Urlaub erstellen (201)", async () => {
@@ -431,8 +448,7 @@ describe("TE-BIZ-10: Ganztags-Urlaub blockiert weitere Einträge", () => {
 
 describe("TE-BIZ-11: Überlappungserkennung", () => {
   it("TE-BIZ-11.1 – Überlappende Zeiteinträge werden abgelehnt (400)", async () => {
-    const date = getFutureDate(275);
-    await clearDateEntries(date);
+    const date = await findFreeFutureWeekdayGlobal(320);
 
     const res1 = await apiPost<any>("/api/time-entries", {
       entryDate: date,
@@ -853,7 +869,7 @@ describe("TE-BIZ-18: Nicht-Admin Einschränkungen für vergangene Urlaub/Krankhe
   it("TE-BIZ-18.2 – Nicht-Admin kann vergangene Krankheit nicht löschen (403)", async () => {
     expect(nonAdminAuth).toBeTruthy();
     const pastDate = new Date();
-    pastDate.setDate(pastDate.getDate() - 7);
+    pastDate.setDate(pastDate.getDate() - 12);
     getNextWeekday(pastDate);
     const dateStr = pastDate.toISOString().split("T")[0];
 
@@ -1008,6 +1024,14 @@ describe("TE-ATTR: Stundenübersicht Attribution (performedByEmployeeId)", () =>
     }
     expect(createRes.status, "Must create appointment for attribution test").toBe(201);
     attrApptId = createRes.data.id;
+
+    // Ensure customer has §45b budget for documentation (test customer is shared
+    // and may have accumulated state from other test runs).
+    await apiPost<any>(`/api/budget/${testCustomerId}/manual-adjustment`, {
+      budgetType: "entlastungsbetrag_45b",
+      amountCents: 20000,
+      notes: "TE-ATTR Setup: Budget-Topup",
+    }).catch(() => {});
 
     const docRes = await apiPost<any>(`/api/appointments/${attrApptId}/document`, {
       performedByEmployeeId: employee2Id,
