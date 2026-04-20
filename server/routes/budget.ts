@@ -525,6 +525,10 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
   }
 
   if (carryoverAmountCents > 0 && budgetType === "entlastungsbetrag_45b") {
+    // validFrom auf Jahresanfang setzen, damit der Carryover auch für
+    // rückwirkende Buchungen/Imports im Stichjahr verfügbar ist (Task #116).
+    // Ein an `budgetStartDate` gebundener Carryover wäre für Importmonate VOR
+    // diesem Datum unsichtbar und würde fälschlich zu Monatscap-Kürzungen führen.
     const carryoverAllocation = await budgetLedgerStorage.createBudgetAllocation({
       customerId,
       budgetType: "entlastungsbetrag_45b",
@@ -532,8 +536,8 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
       month: null,
       amountCents: carryoverAmountCents,
       source: "carryover",
-      validFrom: budgetStartDate,
-      expiresAt: `${year + 1}-06-30`,
+      validFrom: `${year}-01-01`,
+      expiresAt: `${year}-06-30`,
       notes: `Übertrag aus ${year - 1}`,
     }, userId);
     allocations.push(carryoverAllocation);

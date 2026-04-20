@@ -189,6 +189,10 @@ export async function createCustomerRelatedData(input: CreateRelatedDataInput): 
             const validFrom = input.budgets.validFrom || todayISO();
             const validFromDate = parseLocalDate(validFrom);
             const currentYear = validFromDate.getFullYear();
+            // validFrom des Carryover wird auf Jahresanfang gesetzt, damit
+            // rückwirkende Buchungen/Importe im Stichjahr den Übertrag sehen
+            // (Task #116). Andernfalls wäre der Übertrag für Monate VOR dem
+            // Anlagedatum unsichtbar und würde Monatscap-Kürzungen erzeugen.
             await budgetLedgerStorage.createBudgetAllocation({
               customerId,
               budgetType: "entlastungsbetrag_45b",
@@ -196,7 +200,7 @@ export async function createCustomerRelatedData(input: CreateRelatedDataInput): 
               month: null,
               amountCents: input.budgets.carryoverAmountCents,
               source: "carryover",
-              validFrom,
+              validFrom: `${currentYear}-01-01`,
               expiresAt: `${currentYear}-06-30`,
               notes: `Übertrag aus ${currentYear - 1}`,
             }, userId);

@@ -4,9 +4,8 @@ import { customers, users, appointments, appointmentServices, services, monthlyS
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
 import { storage } from "../storage";
-import { getAllBudgetSummaries } from "../storage/budget/summary-queries";
-import { getBudgetTypeSettings } from "../storage/budget/preferences-storage";
 import { calculateAppointmentCost } from "../storage/budget/appointment-cost-calculator";
+import { getAvailableForDate } from "../storage/budget/import-availability";
 
 export interface ImportRow {
   rowIndex: number;
@@ -341,22 +340,9 @@ export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
   });
 }
 
-async function getAvailableBudgetCents(customerId: number): Promise<number> {
-  const summaries = await getAllBudgetSummaries(customerId);
-  const typeSettings = await getBudgetTypeSettings(customerId);
-
-  let total45b = summaries.entlastungsbetrag45b.availableCents;
-  let total45a = summaries.umwandlung45a.currentMonthAvailableCents;
-  let total39_42a = summaries.ersatzpflege39_42a.currentYearAvailableCents;
-
-  if (typeSettings.length > 0) {
-    const settingsMap = new Map(typeSettings.map(s => [s.budgetType, s]));
-    if (settingsMap.get("entlastungsbetrag_45b")?.enabled === false) total45b = 0;
-    if (settingsMap.get("umwandlung_45a")?.enabled === false) total45a = 0;
-    if (settingsMap.get("ersatzpflege_39_42a")?.enabled === false) total39_42a = 0;
-  }
-
-  return total45a + total45b + total39_42a;
+async function getAvailableBudgetCentsForDate(customerId: number, transactionDate: string): Promise<number> {
+  const result = await getAvailableForDate(customerId, transactionDate);
+  return result.totalCents;
 }
 
 async function computeVerifiedTrimmedMinutes(
@@ -437,7 +423,7 @@ export async function enrichWithBudgetInfo(rows: MatchedRow[]): Promise<void> {
         date: row.date,
       });
 
-      const availableCents = await getAvailableBudgetCents(row.customerId);
+      const availableCents = await getAvailableBudgetCentsForDate(row.customerId, row.date);
 
       if (costs.totalCents > availableCents) {
         const trimmedMinutes = await computeVerifiedTrimmedMinutes(
@@ -556,7 +542,7 @@ export async function executeImport(
 
         if (msg.includes("Budget reicht nicht")) {
           try {
-            const availableCents = await getAvailableBudgetCents(row.customerId);
+            const availableCents = await getAvailableBudgetCentsForDate(row.customerId, row.date);
             const trimmedMinutes = await computeVerifiedTrimmedMinutes(
               row.customerId, row.serviceType, row.durationMinutes,
               row.kilometers, row.date, availableCents,
