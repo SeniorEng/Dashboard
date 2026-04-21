@@ -51,6 +51,7 @@ export const AUDIT_ACTIONS = [
   "budget_carryover_cleanup_soft_deleted",
   "budget_repair_orphaned",
   "import_trim_reconciled",
+  "import_trim_reconciled_batch",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];

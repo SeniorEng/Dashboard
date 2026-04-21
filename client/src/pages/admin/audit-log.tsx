@@ -22,11 +22,14 @@ const ACTION_LABELS: Record<string, string> = {
   appointment_revoked: "Termin storniert",
   appointment_updated: "Termin bearbeitet",
   appointment_deleted: "Termin gelöscht",
+  import_trim_reconciled: "Import-Reparatur (Termin)",
+  import_trim_reconciled_batch: "Import-Reparatur (Sitzung)",
 };
 
 const ENTITY_TYPE_LABELS: Record<string, string> = {
   appointment: "Termin",
   service_record: "Leistungsnachweis",
+  customer: "Kunde",
 };
 
 interface AuditEntry {
@@ -92,6 +95,18 @@ export default function AdminAuditLog() {
     if (m.reason) parts.push(`Grund: ${m.reason}`);
     if (m.previousStatus) parts.push(`Vorher: ${m.previousStatus}`);
     if (m.date) parts.push(`Datum: ${m.date}`);
+    if (typeof m.previousMinutes === "number" && typeof m.restoredMinutes === "number") {
+      parts.push(`${m.previousMinutes} → ${m.restoredMinutes} Min`);
+    }
+    if (typeof m.restored === "number" || typeof m.insufficient === "number" || typeof m.skipped === "number") {
+      const r = (m.restored as number | undefined) ?? 0;
+      const i = (m.insufficient as number | undefined) ?? 0;
+      const s = (m.skipped as number | undefined) ?? 0;
+      parts.push(`${r} wiederhergestellt · ${i} unzureichend · ${s} übersprungen`);
+    }
+    if (typeof m.batchId === "string") {
+      parts.push(`Sitzung: ${m.batchId.slice(0, 8)}`);
+    }
     return parts.join(" · ");
   };
 

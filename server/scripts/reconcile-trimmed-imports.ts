@@ -29,6 +29,7 @@
  *   - Mehrere Kunden:     tsx server/scripts/reconcile-trimmed-imports.ts --customer=12,34 --apply
  */
 
+import { randomUUID } from "node:crypto";
 import { eq, and, isNull, sql, inArray } from "drizzle-orm";
 import { db } from "../lib/db";
 import {
@@ -162,7 +163,7 @@ async function findCandidates(customerId: number): Promise<CandidateAppt[]> {
   return candidates;
 }
 
-async function reconcileAppointment(c: CandidateAppt, apply: boolean, userId?: number): Promise<{ status: "ok" | "insufficient" | "skipped"; detail: string }> {
+async function reconcileAppointment(c: CandidateAppt, apply: boolean, userId?: number, batchId?: string): Promise<{ status: "ok" | "insufficient" | "skipped"; detail: string }> {
   if (!c.serviceCode || !c.serviceId) {
     return { status: "skipped", detail: "kein Service zugeordnet" };
   }
@@ -282,6 +283,7 @@ async function reconcileAppointment(c: CandidateAppt, apply: boolean, userId?: n
       previousMinutes: c.currentMinutes,
       restoredMinutes: c.originalMinutes,
       restoredCostCents: fullCosts.totalCents,
+      ...(batchId ? { batchId } : {}),
     });
   }
 
@@ -305,6 +307,7 @@ export interface ReconcileSummary {
   restored: number;
   insufficient: number;
   skipped: number;
+  batchId?: string;
 }
 
 /**
@@ -324,13 +327,21 @@ export async function reconcileCustomerStructured(
   const carryoverNormalized = await normalizeCarryoverValidFrom(customerId, apply);
   const candidates = await findCandidates(customerId);
 
+  // Eine batchId pro Lauf — wird in jedem Einzel-Audit hinterlegt und am Ende
+  // zusätzlich in einem Sammel-Audit auf dem Kunden referenziert, damit die
+  // gesamte Reparatur-Sitzung im Audit-Log auffindbar bleibt. Nur im
+  // scharfen Modus mit echtem userId, da nur dann Audit-Einträge entstehen.
+  const batchId = apply && userId !== undefined && candidates.length > 0
+    ? randomUUID()
+    : undefined;
+
   const results: ReconcileApptResult[] = [];
   let restored = 0;
   let insufficient = 0;
   let skipped = 0;
 
   for (const c of candidates) {
-    const r = await reconcileAppointment(c, apply, userId);
+    const r = await reconcileAppointment(c, apply, userId, batchId);
     results.push({
       appointmentId: c.id,
       date: c.date,
@@ -344,7 +355,20 @@ export async function reconcileCustomerStructured(
     else skipped++;
   }
 
-  return { customerId, customerName, carryoverNormalized, results, restored, insufficient, skipped };
+  if (batchId && userId !== undefined) {
+    await auditService.log(userId, "import_trim_reconciled_batch", "customer", customerId, {
+      batchId,
+      customerName,
+      carryoverNormalized,
+      restored,
+      insufficient,
+      skipped,
+      totalCandidates: candidates.length,
+      appointmentIds: results.filter(r => r.status === "ok").map(r => r.appointmentId),
+    });
+  }
+
+  return { customerId, customerName, carryoverNormalized, results, restored, insufficient, skipped, batchId };
 }
 
 export async function reconcileCustomer(customerId: number, apply: boolean) {
