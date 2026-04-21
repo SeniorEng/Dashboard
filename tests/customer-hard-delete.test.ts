@@ -3,6 +3,7 @@ import {
   apiGet,
   apiPost,
   apiDelete,
+  apiPatch,
   getAuthCookie,
   uniqueId,
   createTestCustomer,
@@ -89,6 +90,76 @@ describe("KV-25: Hard-Delete Karteileichen (SuperAdmin)", () => {
     });
     expect(res.status).toBe(400);
     expect(res.data?.message).toContain("Name");
+  });
+
+  it("KV-25.6 – Readiness blockiert bei vorhandener offener Aufgabe; DELETE liefert 409", async () => {
+    const c = await createTestCustomer({
+      vorname: "Karteileiche",
+      nachname: "WithTask-" + uniqueId(),
+    }) as { id: number; name: string };
+    trackedIds.push(c.id);
+
+    const taskRes = await apiPost<{ id: number }>("/api/tasks", {
+      title: `Hard-Delete-Block-Test ${uniqueId()}`,
+      priority: "low",
+      customerId: c.id,
+    });
+    expect(taskRes.status).toBe(201);
+
+    const readiness = await apiGet<{ ready: boolean; checks: Array<{ key: string; met: boolean; count: number }> }>(
+      `/api/admin/customers/${c.id}/hard-delete-readiness`
+    );
+    expect(readiness.status).toBe(200);
+    expect(readiness.data.ready).toBe(false);
+    const tasksCheck = readiness.data.checks.find((x) => x.key === "noTasks");
+    expect(tasksCheck?.met).toBe(false);
+    expect(tasksCheck?.count).toBeGreaterThanOrEqual(1);
+
+    const delRes = await deleteCustomerWithBody(c.id, {
+      reason: "Versuch trotz offener Aufgabe",
+      confirmName: c.name,
+    });
+    expect(delRes.status).toBe(409);
+    expect(delRes.data?.details?.checks?.find((x: { key: string }) => x.key === "noTasks")?.met).toBe(false);
+
+    // Cleanup task
+    await apiDelete(`/api/tasks/${taskRes.data.id}`);
+  });
+
+  it("KV-25.7 – Race: Aufgabe wird zwischen Readiness und DELETE angelegt → 409, Kunde bleibt erhalten", async () => {
+    const c = await createTestCustomer({
+      vorname: "Karteileiche",
+      nachname: "Race-" + uniqueId(),
+    }) as { id: number; name: string };
+    trackedIds.push(c.id);
+
+    // 1. Readiness ist OK
+    const readiness = await apiGet<{ ready: boolean }>(
+      `/api/admin/customers/${c.id}/hard-delete-readiness`
+    );
+    expect(readiness.data.ready).toBe(true);
+
+    // 2. Race-Konflikt simulieren: vor dem DELETE eine Aufgabe anlegen
+    const taskRes = await apiPost<{ id: number }>("/api/tasks", {
+      title: `Race-Insert ${uniqueId()}`,
+      priority: "low",
+      customerId: c.id,
+    });
+    expect(taskRes.status).toBe(201);
+
+    // 3. DELETE muss durch Recheck-in-Transaktion + FOR UPDATE 409 liefern
+    const delRes = await deleteCustomerWithBody(c.id, {
+      reason: "Race-Test",
+      confirmName: c.name,
+    });
+    expect(delRes.status).toBe(409);
+
+    // 4. Kunde existiert noch
+    const stillThere = await apiGet(`/api/admin/customers/${c.id}/hard-delete-readiness`);
+    expect(stillThere.status).toBe(200);
+
+    // Cleanup
+    await apiDelete(`/api/tasks/${taskRes.data.id}`);
   });
 
   it("KV-25.5 – Erfolgsfall: leerer Kunde wird gelöscht und Audit-Eintrag geschrieben", async () => {

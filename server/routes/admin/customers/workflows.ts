@@ -411,33 +411,35 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
 // HARD-DELETE (Karteileichen) — SuperAdmin only
 // ============================================================================
 
-async function computeHardDeleteReadiness(id: number) {
-  const [apptRows] = await db
+type DbExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function computeHardDeleteReadiness(id: number, executor: DbExecutor = db) {
+  const [apptRows] = await executor
     .select({ c: sql<number>`count(*)::int` })
     .from(appointments)
     .where(eq(appointments.customerId, id));
 
-  const [serviceRows] = await db
+  const [serviceRows] = await executor
     .select({ c: sql<number>`count(*)::int` })
     .from(monthlyServiceRecords)
     .where(eq(monthlyServiceRecords.customerId, id));
 
-  const [invoiceRows] = await db
+  const [invoiceRows] = await executor
     .select({ c: sql<number>`count(*)::int` })
     .from(invoicesTable)
     .where(eq(invoicesTable.customerId, id));
 
-  const [mergeRows] = await db
+  const [mergeRows] = await executor
     .select({ c: sql<number>`count(*)::int` })
     .from(customers)
     .where(eq(customers.mergedIntoCustomerId, id));
 
-  const [prospectRows] = await db
+  const [prospectRows] = await executor
     .select({ c: sql<number>`count(*)::int` })
     .from(prospects)
     .where(eq(prospects.convertedCustomerId, id));
 
-  const [taskRows] = await db
+  const [taskRows] = await executor
     .select({ c: sql<number>`count(*)::int` })
     .from(tasks)
     .where(and(eq(tasks.customerId, id), isNull(tasks.deletedAt)));
@@ -514,7 +516,20 @@ router.delete(
 
     try {
       await db.transaction(async (tx) => {
-        const recheck = await computeHardDeleteReadiness(id);
+        // Lock the customer row to serialize concurrent hard-deletes / writes
+        // against this customer for the duration of the transaction.
+        const lockResult = await tx.execute(
+          sql`SELECT id FROM customers WHERE id = ${id} FOR UPDATE`
+        );
+        if (lockResult.rows.length === 0) {
+          conflict = { ready: false, checks: [] };
+          return;
+        }
+        // Recheck readiness *inside* the transaction using `tx`, so the counts
+        // reflect the locked snapshot. Concurrent inserts into operative tables
+        // either committed before (and will be seen here) or after (and will
+        // hit the FK constraint, since we're about to delete the customer row).
+        const recheck = await computeHardDeleteReadiness(id, tx);
         if (!recheck.ready) {
           conflict = recheck;
           return;

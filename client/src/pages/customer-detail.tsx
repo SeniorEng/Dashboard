@@ -783,9 +783,16 @@ export default function CustomerDetailPage() {
                   )}
 
                   {hardDeleteReadiness && !hardDeleteReadiness.ready && (
-                    <p className="text-xs text-amber-700" data-testid="hard-delete-blocked-hint">
-                      Kunde hat operative Daten — bitte Anonymisierung verwenden (DSGVO-konform).
-                    </p>
+                    <div className="text-xs text-amber-700 space-y-1" data-testid="hard-delete-blocked-hint">
+                      <p>
+                        Kunde hat operative Daten — Hard-Delete ist nicht erlaubt.
+                      </p>
+                      <p>
+                        Stattdessen bitte den DSGVO-konformen Weg verwenden:
+                        Vertragsende setzen und Kunde anschließend deaktivieren / anonymisieren
+                        (Bereich „Vertrag &amp; Status“ in der Akte).
+                      </p>
+                    </div>
                   )}
 
                   {hardDeleteReadiness && hardDeleteReadiness.ready && (
