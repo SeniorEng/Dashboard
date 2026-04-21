@@ -19,7 +19,9 @@ import {
   serviceRecordAppointments,
   invoices as invoicesTable,
   invoiceLineItems,
+  tasks,
 } from "@shared/schema";
+import { requireSuperAdmin } from "../../../middleware/auth";
 import { db } from "../../../lib/db";
 import { eq, and, sql, isNull, gte, lte, ne, inArray } from "drizzle-orm";
 
@@ -404,5 +406,153 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
 
   res.json(updated);
 }));
+
+// ============================================================================
+// HARD-DELETE (Karteileichen) — SuperAdmin only
+// ============================================================================
+
+async function computeHardDeleteReadiness(id: number) {
+  const [apptRows] = await db
+    .select({ c: sql<number>`count(*)::int` })
+    .from(appointments)
+    .where(eq(appointments.customerId, id));
+
+  const [serviceRows] = await db
+    .select({ c: sql<number>`count(*)::int` })
+    .from(monthlyServiceRecords)
+    .where(eq(monthlyServiceRecords.customerId, id));
+
+  const [invoiceRows] = await db
+    .select({ c: sql<number>`count(*)::int` })
+    .from(invoicesTable)
+    .where(eq(invoicesTable.customerId, id));
+
+  const [mergeRows] = await db
+    .select({ c: sql<number>`count(*)::int` })
+    .from(customers)
+    .where(eq(customers.mergedIntoCustomerId, id));
+
+  const [prospectRows] = await db
+    .select({ c: sql<number>`count(*)::int` })
+    .from(prospects)
+    .where(eq(prospects.convertedCustomerId, id));
+
+  const [taskRows] = await db
+    .select({ c: sql<number>`count(*)::int` })
+    .from(tasks)
+    .where(and(eq(tasks.customerId, id), isNull(tasks.deletedAt)));
+
+  const checks = [
+    { key: "noAppointments", label: "Keine Termine vorhanden", count: apptRows.c, met: apptRows.c === 0 },
+    { key: "noServiceRecords", label: "Keine Leistungsnachweise vorhanden", count: serviceRows.c, met: serviceRows.c === 0 },
+    { key: "noInvoices", label: "Keine Rechnungen vorhanden", count: invoiceRows.c, met: invoiceRows.c === 0 },
+    { key: "noMergeRefs", label: "Keine Merge-Verlinkungen", count: mergeRows.c, met: mergeRows.c === 0 },
+    { key: "noProspectRefs", label: "Keine Interessenten-Verknüpfung", count: prospectRows.c, met: prospectRows.c === 0 },
+    { key: "noTasks", label: "Keine offenen Aufgaben", count: taskRows.c, met: taskRows.c === 0 },
+  ];
+
+  return { ready: checks.every(c => c.met), checks };
+}
+
+router.get(
+  "/customers/:id/hard-delete-readiness",
+  requireSuperAdmin,
+  asyncHandler("Lösch-Vorprüfung fehlgeschlagen", async (req: Request, res: Response) => {
+    const id = requireIntParam(req.params.id, res);
+    if (id === null) return;
+
+    const customer = await storage.getCustomer(id);
+    if (!customer) {
+      res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+      return;
+    }
+
+    const result = await computeHardDeleteReadiness(id);
+    res.json(result);
+  })
+);
+
+const hardDeleteSchema = z.object({
+  reason: z.string().min(5, "Grund muss mindestens 5 Zeichen lang sein").max(1000, "Grund darf maximal 1000 Zeichen haben"),
+  confirmName: z.string().min(1, "Bitte den Kundennamen zur Bestätigung eingeben"),
+});
+
+router.delete(
+  "/customers/:id",
+  requireSuperAdmin,
+  asyncHandler("Löschen fehlgeschlagen", async (req: Request, res: Response) => {
+    const id = requireIntParam(req.params.id, res);
+    if (id === null) return;
+
+    const { reason, confirmName } = hardDeleteSchema.parse(req.body);
+
+    const customer = await storage.getCustomer(id);
+    if (!customer) {
+      res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+      return;
+    }
+
+    if (confirmName.trim() !== customer.name.trim()) {
+      res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "Eingegebener Name stimmt nicht mit dem Kundennamen überein",
+      });
+      return;
+    }
+
+    const snapshot = {
+      customerName: customer.name,
+      vorname: customer.vorname,
+      nachname: customer.nachname,
+      geburtsdatum: customer.geburtsdatum,
+      createdAt: customer.createdAt ? customer.createdAt.toISOString() : null,
+      reason,
+    };
+
+    let conflict: { ready: boolean; checks: Array<{ key: string; label: string; count: number; met: boolean }> } | null = null;
+    let fkConflict = false;
+
+    try {
+      await db.transaction(async (tx) => {
+        const recheck = await computeHardDeleteReadiness(id);
+        if (!recheck.ready) {
+          conflict = recheck;
+          return;
+        }
+        await tx.delete(customers).where(eq(customers.id, id));
+      });
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === "23503") {
+        fkConflict = true;
+      } else {
+        throw err;
+      }
+    }
+
+    if (conflict) {
+      res.status(409).json({
+        error: "CONFLICT",
+        message: "Kunde hat zwischenzeitlich operative Daten erhalten — Löschen nicht möglich.",
+        details: conflict,
+      });
+      return;
+    }
+
+    if (fkConflict) {
+      res.status(409).json({
+        error: "CONFLICT",
+        message: "Kunde kann nicht gelöscht werden, weil noch verknüpfte Daten existieren. Bitte Anonymisierung verwenden.",
+      });
+      return;
+    }
+
+    await auditService.customerHardDeleted(req.user!.id, id, snapshot, req.ip);
+
+    birthdaysCache.invalidateAll();
+
+    res.json({ success: true, message: `Kunde "${customer.name}" wurde gelöscht` });
+  })
+);
 
 export default router;

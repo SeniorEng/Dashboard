@@ -24,6 +24,7 @@ const ACTION_LABELS: Record<string, string> = {
   appointment_deleted: "Termin gelöscht",
   import_trim_reconciled: "Import-Reparatur (Termin)",
   import_trim_reconciled_batch: "Import-Reparatur (Sitzung)",
+  customer_hard_deleted: "Kunde gelöscht (hart)",
 };
 
 const ENTITY_TYPE_LABELS: Record<string, string> = {

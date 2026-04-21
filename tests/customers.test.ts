@@ -541,9 +541,11 @@ describe("KV-17: Kunde nicht gefunden", () => {
     expect(res.status).toBe(404);
   });
 
-  it("KV-17.2 – DELETE auf nicht-existierenden Kunden ist idempotent", async () => {
+  it("KV-17.2 – DELETE auf nicht-existierenden Kunden liefert Validierungs-/Not-Found-Fehler", async () => {
+    // Hard-Delete-Endpoint (SuperAdmin) erfordert Body (reason + confirmName).
+    // Ohne Body → 400 (Zod-Validierung). Mit Body und unbekannter ID → 404.
     const res = await apiDelete("/api/admin/customers/999999");
-    expect(res.status).toBe(200);
+    expect([400, 404]).toContain(res.status);
   });
 });
 

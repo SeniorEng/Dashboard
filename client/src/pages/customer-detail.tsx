@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { useRoute, Link, useSearch } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useRoute, Link, useSearch, useLocation } from "wouter";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,8 +12,10 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import {
-  ArrowLeft, Calendar, AlertCircle, FileSignature, ChevronRight, X, Wallet, Shield, Wrench, Loader2,
+  ArrowLeft, Calendar, AlertCircle, FileSignature, ChevronRight, X, Wallet, Shield, Wrench, Loader2, Trash2, AlertTriangle,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { iconSize, componentStyles } from "@/design-system";
 import { ErrorState } from "@/components/patterns/error-state";
 import { AppointmentCard } from "@/features/appointments/components/appointment-card";
@@ -133,7 +135,74 @@ export default function CustomerDetailPage() {
   const form = useCustomerDetailForm(customerId, customer, details);
   const { toast } = useToast();
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const [, setLocation] = useLocation();
   const isSuperAdmin = user?.isSuperAdmin ?? false;
+
+  const [dangerZoneOpen, setDangerZoneOpen] = useState(false);
+  const [hardDeleteDialogOpen, setHardDeleteDialogOpen] = useState(false);
+  const [hardDeleteReason, setHardDeleteReason] = useState("");
+  const [hardDeleteConfirmName, setHardDeleteConfirmName] = useState("");
+  const [hardDeleting, setHardDeleting] = useState(false);
+  const [hardDeleteConflict, setHardDeleteConflict] = useState<Array<{ key: string; label: string; count: number; met: boolean }> | null>(null);
+
+  interface HardDeleteCheck { key: string; label: string; count: number; met: boolean }
+  interface HardDeleteReadiness { ready: boolean; checks: HardDeleteCheck[] }
+
+  const { data: hardDeleteReadiness, isLoading: hardDeleteLoading, refetch: refetchHardDeleteReadiness } = useQuery<HardDeleteReadiness>({
+    queryKey: ["hard-delete-readiness", customerId],
+    queryFn: async () => {
+      const result = await api.get<HardDeleteReadiness>(`/admin/customers/${customerId}/hard-delete-readiness`);
+      return unwrapResult(result);
+    },
+    enabled: !!customerId && isSuperAdmin && dangerZoneOpen,
+  });
+
+  const handleHardDelete = async () => {
+    if (!customerId || !customer) return;
+    setHardDeleting(true);
+    setHardDeleteConflict(null);
+    try {
+      const response = await fetch(`/api/admin/customers/${customerId}`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "x-csrf-token": document.cookie.split("; ").find((c) => c.startsWith("careconnect_csrf="))?.split("=")[1] ?? "",
+        },
+        body: JSON.stringify({ reason: hardDeleteReason, confirmName: hardDeleteConfirmName }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (response.status === 409 && data?.details?.checks) {
+          setHardDeleteConflict(data.details.checks);
+          await refetchHardDeleteReadiness();
+        }
+        toast({
+          title: "Löschen fehlgeschlagen",
+          description: data?.message || `Fehler ${response.status}`,
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: "Kunde gelöscht",
+        description: `"${customer.name}" wurde dauerhaft entfernt.`,
+      });
+      queryClient.removeQueries({ queryKey: ["customer", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      setHardDeleteDialogOpen(false);
+      setLocation("/customers");
+    } catch (e) {
+      toast({
+        title: "Fehler",
+        description: e instanceof Error ? e.message : "Unbekannter Fehler",
+        variant: "destructive",
+      });
+    } finally {
+      setHardDeleting(false);
+    }
+  };
 
   interface ReconcileApptResult {
     appointmentId: number;
@@ -667,6 +736,151 @@ export default function CustomerDetailPage() {
             <CustomerDocumentsSection customerId={customerId!} customerName={customer?.name || ""} />
           </CardContent>
         </Card>
+
+        {isSuperAdmin && (
+          <Card className="mt-4 border-red-200" data-testid="card-danger-zone">
+            <CardContent className="p-4">
+              <button
+                type="button"
+                onClick={() => setDangerZoneOpen((v) => !v)}
+                className="w-full flex items-center justify-between text-left"
+                data-testid="button-toggle-danger-zone"
+              >
+                <h2 className="text-sm font-semibold flex items-center gap-2 text-red-700">
+                  <AlertTriangle className={`${iconSize.sm}`} />
+                  Gefahrenzone
+                </h2>
+                <ChevronRight className={`${iconSize.sm} text-red-700 transition-transform ${dangerZoneOpen ? "rotate-90" : ""}`} />
+              </button>
+
+              {dangerZoneOpen && (
+                <div className="mt-3 space-y-3" data-testid="danger-zone-content">
+                  <p className="text-xs text-muted-foreground">
+                    Karteileichen (versehentlich angelegte Dubletten ohne operative Daten) können hier dauerhaft gelöscht werden. Diese Aktion ist <strong>nicht umkehrbar</strong>.
+                  </p>
+
+                  {hardDeleteLoading && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className={`${iconSize.sm} animate-spin`} />
+                      Vorprüfung läuft…
+                    </div>
+                  )}
+
+                  {hardDeleteReadiness && (
+                    <ul className="space-y-1 text-xs" data-testid="hard-delete-checks">
+                      {hardDeleteReadiness.checks.map((c) => (
+                        <li
+                          key={c.key}
+                          className={c.met ? "text-green-700" : "text-red-700"}
+                          data-testid={`hard-delete-check-${c.key}`}
+                        >
+                          <span className="mr-1">{c.met ? "✓" : "✗"}</span>
+                          {c.label}
+                          {!c.met && c.count > 0 && <span className="ml-1 text-muted-foreground">({c.count})</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {hardDeleteReadiness && !hardDeleteReadiness.ready && (
+                    <p className="text-xs text-amber-700" data-testid="hard-delete-blocked-hint">
+                      Kunde hat operative Daten — bitte Anonymisierung verwenden (DSGVO-konform).
+                    </p>
+                  )}
+
+                  {hardDeleteReadiness && hardDeleteReadiness.ready && (
+                    <AlertDialog
+                      open={hardDeleteDialogOpen}
+                      onOpenChange={(open) => {
+                        setHardDeleteDialogOpen(open);
+                        if (!open) {
+                          setHardDeleteReason("");
+                          setHardDeleteConfirmName("");
+                          setHardDeleteConflict(null);
+                        }
+                      }}
+                    >
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          data-testid="button-hard-delete-customer"
+                        >
+                          <Trash2 className={`${iconSize.sm} mr-2`} />
+                          Kunde löschen
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Kunde dauerhaft löschen?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            <strong>{customer.name}</strong> wird unwiderruflich aus der Datenbank entfernt. Alle Stammdaten, Kontakte, Verträge, Versicherungen, Pflegegrad-Historie und Budget-Einstellungen werden mitgelöscht.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+
+                        <div className="space-y-3 my-2">
+                          <div>
+                            <label className="text-sm font-medium block mb-1">Grund der Löschung</label>
+                            <Textarea
+                              value={hardDeleteReason}
+                              onChange={(e) => setHardDeleteReason(e.target.value)}
+                              placeholder="z. B. Doppel-Anlage am 15.04. — Karteileiche, nie genutzt"
+                              rows={3}
+                              data-testid="textarea-hard-delete-reason"
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">Mindestens 5 Zeichen.</p>
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium block mb-1">
+                              Zur Bestätigung Kundenname tippen: <span className="font-mono">{customer.name}</span>
+                            </label>
+                            <Input
+                              value={hardDeleteConfirmName}
+                              onChange={(e) => setHardDeleteConfirmName(e.target.value)}
+                              placeholder={customer.name}
+                              data-testid="input-hard-delete-confirm-name"
+                            />
+                          </div>
+
+                          {hardDeleteConflict && (
+                            <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs space-y-1" data-testid="hard-delete-conflict">
+                              <p className="font-medium text-amber-800">Kunde hat zwischenzeitlich Daten erhalten:</p>
+                              {hardDeleteConflict.filter(c => !c.met).map((c) => (
+                                <div key={c.key} className="text-amber-800">✗ {c.label} ({c.count})</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <AlertDialogFooter>
+                          <AlertDialogCancel disabled={hardDeleting} data-testid="button-hard-delete-cancel">
+                            Abbrechen
+                          </AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleHardDelete();
+                            }}
+                            disabled={
+                              hardDeleting
+                              || hardDeleteReason.trim().length < 5
+                              || hardDeleteConfirmName.trim() !== customer.name.trim()
+                            }
+                            className="bg-red-600 hover:bg-red-700 text-white"
+                            data-testid="button-hard-delete-confirm"
+                          >
+                            {hardDeleting && <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />}
+                            Endgültig löschen
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
     </Layout>
   );

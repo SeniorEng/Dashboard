@@ -151,6 +151,22 @@ class AuditService {
     await this.log(userId, "customer_created", "customer", customerId, metadata, ipAddress);
   }
 
+  async customerHardDeleted(
+    userId: number,
+    customerId: number,
+    metadata: {
+      customerName: string;
+      vorname: string | null;
+      nachname: string | null;
+      geburtsdatum: string | null;
+      createdAt: string | null;
+      reason: string;
+    },
+    ipAddress?: string
+  ): Promise<void> {
+    await this.log(userId, "customer_hard_deleted", "customer", customerId, metadata, ipAddress);
+  }
+
   async customerContractUpdated(
     userId: number,
     customerId: number,
