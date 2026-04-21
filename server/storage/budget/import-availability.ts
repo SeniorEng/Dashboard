@@ -1,54 +1,16 @@
 import { budgetTransactions } from "@shared/schema";
-import { eq, and, sql, lte, gte } from "drizzle-orm";
-import { parseLocalDate } from "@shared/utils/datetime";
+import { eq, and, sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
 import { getBudgetTypeSettings, getBudgetPreferences } from "./preferences-storage";
-import { getTotalCarryoverCents } from "./summary-queries";
 import { calculateAllocatedCents, syncCarryoverAndExpiry } from "./allocation-storage";
+import { computeCapSlot } from "./cap-calculator";
 
 export interface DateAwareAvailability {
   total45b: number;
   total45a: number;
   total39_42a: number;
   totalCents: number;
-}
-
-/**
- * Spiegelt exakt die Cap-Logik aus `createCascadeConsumption`:
- *   alreadyUsed = SUM(consumption[transactionDate ∈ range])
- *               - SUM(reversal   [transactionDate ∈ range])
- * Insbesondere wird `write_off` NICHT mitgezählt (nur consumption/reversal),
- * damit Vorschau und Buchung garantiert dieselben Cap-Werte liefern.
- */
-async function netConsumedInRange(
-  customerId: number,
-  budgetType: string,
-  fromDate: string,
-  toDate: string,
-  d: DbClient,
-): Promise<number> {
-  const [consumed, reversed] = await Promise.all([
-    d.select({
-      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-    }).from(budgetTransactions).where(and(
-      eq(budgetTransactions.customerId, customerId),
-      eq(budgetTransactions.budgetType, budgetType),
-      eq(budgetTransactions.transactionType, "consumption"),
-      gte(budgetTransactions.transactionDate, fromDate),
-      lte(budgetTransactions.transactionDate, toDate),
-    )),
-    d.select({
-      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-    }).from(budgetTransactions).where(and(
-      eq(budgetTransactions.customerId, customerId),
-      eq(budgetTransactions.budgetType, budgetType),
-      eq(budgetTransactions.transactionType, "reversal"),
-      gte(budgetTransactions.transactionDate, fromDate),
-      lte(budgetTransactions.transactionDate, toDate),
-    )),
-  ]);
-  return Math.max(0, Number(consumed[0]?.total ?? 0) - Number(reversed[0]?.total ?? 0));
 }
 
 async function netConsumedAllTime(
@@ -79,8 +41,10 @@ async function netConsumedAllTime(
  * Computes the available budget cents for a given transaction date, applying
  * the SAME monthly/yearly cap logic used by createCascadeConsumption.
  *
- * - §45b: min(pot remaining, monthlyLimit + totalCarryover(asOf=transactionDate)
- *         - alreadyUsedThisMonth)
+ * The cap math (limit + carryover - usedInWindow) lives in
+ * `cap-calculator.computeCapSlot` and is shared with the booking path.
+ *
+ * - §45b: min(pot remaining, monthlyLimit + totalCarryover - usedThisMonth)
  * - §45a: min(pot remaining, monthlyLimit - usedThisMonth)
  * - §39/§42a: min(pot remaining, yearlyLimit - usedThisYear)
  *
@@ -103,14 +67,7 @@ export async function getAvailableForDate(
 
   const settingsMap = new Map(typeSettings.map(s => [s.budgetType, s]));
 
-  const txDate = parseLocalDate(transactionDate);
-  const txYear = txDate.getFullYear();
-  const txMonth = txDate.getMonth() + 1;
-  const monthStart = `${txYear}-${String(txMonth).padStart(2, "0")}-01`;
-  const lastDay = new Date(txYear, txMonth, 0).getDate();
-  const monthEnd = `${txYear}-${String(txMonth).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
-  const yearStart = `${txYear}-01-01`;
-  const yearEnd = `${txYear}-12-31`;
+  const txYear = parseInt(transactionDate.slice(0, 4), 10);
 
   // ---- §45b ----
   let total45b = 0;
@@ -134,14 +91,14 @@ export async function getAvailableForDate(
     const potRemaining = Math.max(0, allocated - netUsed);
 
     const monthlyLimit = s45b?.monthlyLimitCents ?? preferences?.monthlyLimitCents ?? null;
-    if (monthlyLimit !== null) {
-      const totalCarryover = await getTotalCarryoverCents(customerId, transactionDate, _tx);
-      const usedThisMonth = await netConsumedInRange(customerId, "entlastungsbetrag_45b", monthStart, monthEnd, d);
-      const monthlyRemaining = Math.max(0, monthlyLimit + totalCarryover - usedThisMonth);
-      total45b = Math.min(potRemaining, monthlyRemaining);
-    } else {
-      total45b = potRemaining;
-    }
+    const cap = await computeCapSlot({
+      customerId,
+      budgetType: "entlastungsbetrag_45b",
+      transactionDate,
+      monthlyLimitCents: monthlyLimit,
+      yearlyLimitCents: null,
+    }, _tx);
+    total45b = Math.min(potRemaining, cap.capRemainingCents);
   }
 
   // ---- §45a ----
@@ -162,16 +119,15 @@ export async function getAvailableForDate(
       preferences,
       typeSettings,
     );
-    const usedThisMonth = await netConsumedInRange(customerId, "umwandlung_45a", monthStart, monthEnd, d);
-    const potRemaining = Math.max(0, allocated - usedThisMonth);
-
-    const monthlyLimit = s45a?.monthlyLimitCents ?? null;
-    if (monthlyLimit !== null) {
-      const monthlyRemaining = Math.max(0, monthlyLimit - usedThisMonth);
-      total45a = Math.min(potRemaining, monthlyRemaining);
-    } else {
-      total45a = potRemaining;
-    }
+    const cap = await computeCapSlot({
+      customerId,
+      budgetType: "umwandlung_45a",
+      transactionDate,
+      monthlyLimitCents: s45a?.monthlyLimitCents ?? null,
+      yearlyLimitCents: null,
+    }, _tx);
+    const potRemaining = Math.max(0, allocated - cap.netUsedInWindowCents);
+    total45a = Math.min(potRemaining, cap.capRemainingCents);
   }
 
   // ---- §39/§42a ----
@@ -192,16 +148,15 @@ export async function getAvailableForDate(
       preferences,
       typeSettings,
     );
-    const usedThisYear = await netConsumedInRange(customerId, "ersatzpflege_39_42a", yearStart, yearEnd, d);
-    const potRemaining = Math.max(0, allocated - usedThisYear);
-
-    const yearlyLimit = s39?.yearlyLimitCents ?? null;
-    if (yearlyLimit !== null) {
-      const yearlyRemaining = Math.max(0, yearlyLimit - usedThisYear);
-      total39_42a = Math.min(potRemaining, yearlyRemaining);
-    } else {
-      total39_42a = potRemaining;
-    }
+    const cap = await computeCapSlot({
+      customerId,
+      budgetType: "ersatzpflege_39_42a",
+      transactionDate,
+      monthlyLimitCents: null,
+      yearlyLimitCents: s39?.yearlyLimitCents ?? null,
+    }, _tx);
+    const potRemaining = Math.max(0, allocated - cap.netUsedInWindowCents);
+    total39_42a = Math.min(potRemaining, cap.capRemainingCents);
   }
 
   return {

@@ -13,7 +13,8 @@ import { calculateAppointmentCost } from "./appointment-cost-calculator";
 import { getTransactionByAppointmentId } from "./transaction-storage";
 import { getBudgetPreferences, getBudgetTypeSettings } from "./preferences-storage";
 import { syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-storage";
-import { getAllBudgetSummaries, getTotalCarryoverCents } from "./summary-queries";
+import { getAllBudgetSummaries } from "./summary-queries";
+import { computeCapSlot, type CappedBudgetType } from "./cap-calculator";
 
 type ConsumptionParams = {
   appointmentId?: number;
@@ -300,84 +301,24 @@ export async function createCascadeConsumption(params: {
 
       let maxConsumable = remaining;
 
-      const isMonthlyBudget = pot.budgetType === "entlastungsbetrag_45b" || pot.budgetType === "umwandlung_45a";
-      if (isMonthlyBudget && pot.monthlyLimitCents !== null) {
-        const txDate = parseLocalDate(params.transactionDate);
-        const txYear = txDate.getFullYear();
-        const txMonth = txDate.getMonth() + 1;
-        const currentMonthStart = `${txYear}-${String(txMonth).padStart(2, '0')}-01`;
-        const lastDay = new Date(txYear, txMonth, 0).getDate();
-        const currentMonthEnd = `${txYear}-${String(txMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+      const isCappedBudget =
+        pot.budgetType === "entlastungsbetrag_45b" ||
+        pot.budgetType === "umwandlung_45a" ||
+        pot.budgetType === "ersatzpflege_39_42a";
+      const hasCap =
+        pot.monthlyLimitCents !== null || pot.yearlyLimitCents !== null;
 
-        const monthConsumptions = await tx.select({
-          total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-        })
-          .from(budgetTransactions)
-          .where(and(
-            eq(budgetTransactions.customerId, params.customerId),
-            eq(budgetTransactions.budgetType, pot.budgetType),
-            eq(budgetTransactions.transactionType, "consumption"),
-            gte(budgetTransactions.transactionDate, currentMonthStart),
-            lte(budgetTransactions.transactionDate, currentMonthEnd)
-          ));
-
-        const monthReversals = await tx.select({
-          total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-        })
-          .from(budgetTransactions)
-          .where(and(
-            eq(budgetTransactions.customerId, params.customerId),
-            eq(budgetTransactions.budgetType, pot.budgetType),
-            eq(budgetTransactions.transactionType, "reversal"),
-            gte(budgetTransactions.transactionDate, currentMonthStart),
-            lte(budgetTransactions.transactionDate, currentMonthEnd)
-          ));
-
-        const alreadyUsedThisMonth = Math.max(0, Number(monthConsumptions[0]?.total ?? 0) - Number(monthReversals[0]?.total ?? 0));
-
-        let effectiveMonthlyLimit = pot.monthlyLimitCents;
-        if (pot.budgetType === "entlastungsbetrag_45b") {
-          const totalCarryover = await getTotalCarryoverCents(params.customerId, params.transactionDate, tx);
-          effectiveMonthlyLimit = pot.monthlyLimitCents + totalCarryover;
-        }
-
-        const monthlyRemaining = Math.max(0, effectiveMonthlyLimit - alreadyUsedThisMonth);
-        maxConsumable = Math.min(remaining, monthlyRemaining);
-      }
-
-      if (pot.budgetType === "ersatzpflege_39_42a" && pot.yearlyLimitCents !== null) {
-        const txDate = parseLocalDate(params.transactionDate);
-        const txYear = txDate.getFullYear();
-        const yearStart = `${txYear}-01-01`;
-        const yearEnd = `${txYear}-12-31`;
-
-        const yearConsumptions = await tx.select({
-          total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-        })
-          .from(budgetTransactions)
-          .where(and(
-            eq(budgetTransactions.customerId, params.customerId),
-            eq(budgetTransactions.budgetType, "ersatzpflege_39_42a"),
-            eq(budgetTransactions.transactionType, "consumption"),
-            gte(budgetTransactions.transactionDate, yearStart),
-            lte(budgetTransactions.transactionDate, yearEnd)
-          ));
-
-        const yearReversals = await tx.select({
-          total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-        })
-          .from(budgetTransactions)
-          .where(and(
-            eq(budgetTransactions.customerId, params.customerId),
-            eq(budgetTransactions.budgetType, "ersatzpflege_39_42a"),
-            eq(budgetTransactions.transactionType, "reversal"),
-            gte(budgetTransactions.transactionDate, yearStart),
-            lte(budgetTransactions.transactionDate, yearEnd)
-          ));
-
-        const alreadyUsedThisYear = Math.max(0, Number(yearConsumptions[0]?.total ?? 0) - Number(yearReversals[0]?.total ?? 0));
-        const yearlyRemaining = Math.max(0, pot.yearlyLimitCents - alreadyUsedThisYear);
-        maxConsumable = Math.min(maxConsumable, yearlyRemaining);
+      if (isCappedBudget && hasCap) {
+        // Single source of truth for cap math — shared with the import-preview
+        // path (`getAvailableForDate`) so preview and booking can never drift.
+        const cap = await computeCapSlot({
+          customerId: params.customerId,
+          budgetType: pot.budgetType as CappedBudgetType,
+          transactionDate: params.transactionDate,
+          monthlyLimitCents: pot.monthlyLimitCents,
+          yearlyLimitCents: pot.yearlyLimitCents,
+        }, tx);
+        maxConsumable = Math.min(remaining, cap.capRemainingCents);
       }
 
       if (maxConsumable <= 0) {
