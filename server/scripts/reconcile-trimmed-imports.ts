@@ -42,6 +42,7 @@ import {
 import { calculateAppointmentCost } from "../storage/budget/appointment-cost-calculator";
 import { getAvailableForDate } from "../storage/budget/import-availability";
 import { createConsumptionTransaction } from "../storage/budget/consumption-engine";
+import { auditService } from "../services/audit";
 
 const TRIM_REGEX = /Budget (gekürzt|erschöpft):\s*(\d+)\s*→\s*(\d+)\s*Min/;
 const RECONCILED_MARKER = "Reconciled #116";
@@ -274,7 +275,76 @@ async function reconcileAppointment(c: CandidateAppt, apply: boolean, userId?: n
     }, tx);
   });
 
+  if (userId !== undefined) {
+    await auditService.log(userId, "import_trim_reconciled", "appointment", c.id, {
+      customerId: c.customerId,
+      date: c.date,
+      previousMinutes: c.currentMinutes,
+      restoredMinutes: c.originalMinutes,
+      restoredCostCents: fullCosts.totalCents,
+    });
+  }
+
   return { status: "ok", detail: `Wiederhergestellt: ${c.currentMinutes} → ${c.originalMinutes} Min` };
+}
+
+export interface ReconcileApptResult {
+  appointmentId: number;
+  date: string;
+  currentMinutes: number;
+  originalMinutes: number;
+  status: "ok" | "insufficient" | "skipped";
+  detail: string;
+}
+
+export interface ReconcileSummary {
+  customerId: number;
+  customerName: string;
+  carryoverNormalized: number;
+  results: ReconcileApptResult[];
+  restored: number;
+  insufficient: number;
+  skipped: number;
+}
+
+/**
+ * Programmatic entry point used by the admin UI / API. Returns structured per-appointment
+ * results in addition to the aggregate counts. Behaves like `reconcileCustomer` for the
+ * legacy CLI but without console.log noise — caller decides what to surface.
+ */
+export async function reconcileCustomerStructured(
+  customerId: number,
+  apply: boolean,
+  userId?: number,
+): Promise<ReconcileSummary> {
+  const [customer] = await db.select({ vorname: customers.vorname, nachname: customers.nachname })
+    .from(customers).where(eq(customers.id, customerId)).limit(1);
+  const customerName = customer ? `${customer.vorname} ${customer.nachname}` : `#${customerId}`;
+
+  const carryoverNormalized = await normalizeCarryoverValidFrom(customerId, apply);
+  const candidates = await findCandidates(customerId);
+
+  const results: ReconcileApptResult[] = [];
+  let restored = 0;
+  let insufficient = 0;
+  let skipped = 0;
+
+  for (const c of candidates) {
+    const r = await reconcileAppointment(c, apply, userId);
+    results.push({
+      appointmentId: c.id,
+      date: c.date,
+      currentMinutes: c.currentMinutes,
+      originalMinutes: c.originalMinutes,
+      status: r.status,
+      detail: r.detail,
+    });
+    if (r.status === "ok") restored++;
+    else if (r.status === "insufficient") insufficient++;
+    else skipped++;
+  }
+
+  return { customerId, customerName, carryoverNormalized, results, restored, insufficient, skipped };
 }
 
 export async function reconcileCustomer(customerId: number, apply: boolean) {

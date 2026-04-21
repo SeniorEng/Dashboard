@@ -11,6 +11,7 @@ import {
   type MatchedRow,
 } from "../../services/appointment-import";
 import { z } from "zod";
+import { reconcileCustomerStructured } from "../../scripts/reconcile-trimmed-imports";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -114,6 +115,24 @@ router.post(
   "/import-appointments/create-service-records",
   asyncHandler("Leistungsnachweise konnten nicht erstellt werden", async (req: Request, res: Response) => {
     const result = await createServiceRecordsForImported(req.user!.id);
+    res.json(result);
+  })
+);
+
+const reconcileSchema = z.object({
+  customerId: z.number().int().positive(),
+  apply: z.boolean().optional(),
+});
+
+router.post(
+  "/import-appointments/reconcile-trimmed",
+  asyncHandler("Reparatur konnte nicht ausgeführt werden", async (req: Request, res: Response) => {
+    const { customerId, apply } = reconcileSchema.parse(req.body);
+    const result = await reconcileCustomerStructured(
+      customerId,
+      apply === true,
+      req.user!.id,
+    );
     res.json(result);
   })
 );

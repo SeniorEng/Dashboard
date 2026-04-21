@@ -50,6 +50,7 @@ export const AUDIT_ACTIONS = [
   "customer_merged",
   "budget_carryover_cleanup_soft_deleted",
   "budget_repair_orphaned",
+  "import_trim_reconciled",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];

@@ -1,11 +1,18 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useRoute, Link, useSearch } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
-  ArrowLeft, Calendar, AlertCircle, FileSignature, ChevronRight, X, Wallet, Shield,
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
+import {
+  ArrowLeft, Calendar, AlertCircle, FileSignature, ChevronRight, X, Wallet, Shield, Wrench, Loader2,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { ErrorState } from "@/components/patterns/error-state";
@@ -124,6 +131,64 @@ export default function CustomerDetailPage() {
   });
 
   const form = useCustomerDetailForm(customerId, customer, details);
+  const { toast } = useToast();
+  const { user } = useAuth();
+  const isSuperAdmin = user?.isSuperAdmin ?? false;
+
+  interface ReconcileApptResult {
+    appointmentId: number;
+    date: string;
+    currentMinutes: number;
+    originalMinutes: number;
+    status: "ok" | "insufficient" | "skipped";
+    detail: string;
+  }
+  interface ReconcileSummary {
+    customerId: number;
+    customerName: string;
+    carryoverNormalized: number;
+    results: ReconcileApptResult[];
+    restored: number;
+    insufficient: number;
+    skipped: number;
+  }
+
+  const [reconcilePreview, setReconcilePreview] = useState<ReconcileSummary | null>(null);
+  const [reconcileLoading, setReconcileLoading] = useState(false);
+  const [reconcileApplying, setReconcileApplying] = useState(false);
+  const [reconcileResult, setReconcileResult] = useState<ReconcileSummary | null>(null);
+
+  const runReconcile = async (apply: boolean) => {
+    if (!customerId) return;
+    if (apply) setReconcileApplying(true); else setReconcileLoading(true);
+    try {
+      const result = await api.post<ReconcileSummary>(
+        "/admin/import-appointments/reconcile-trimmed",
+        { customerId, apply },
+      );
+      const summary = unwrapResult(result);
+      if (apply) {
+        setReconcileResult(summary);
+        setReconcilePreview(null);
+        toast({
+          title: "Reparatur abgeschlossen",
+          description: `${summary.restored} Termin(e) wiederhergestellt, ${summary.insufficient} unzureichend, ${summary.skipped} übersprungen.`,
+        });
+      } else {
+        setReconcilePreview(summary);
+        setReconcileResult(null);
+      }
+    } catch (e) {
+      toast({
+        title: "Fehler",
+        description: e instanceof Error ? e.message : "Reparatur fehlgeschlagen.",
+        variant: "destructive",
+      });
+    } finally {
+      setReconcileLoading(false);
+      setReconcileApplying(false);
+    }
+  };
 
   const today = todayISO();
   
@@ -394,6 +459,150 @@ export default function CustomerDetailPage() {
                   );
                 })()}
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {isSuperAdmin && (
+          <Card className="mb-4" data-testid="card-reconcile-trimmed">
+            <CardContent className="p-4">
+              <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                <Wrench className={`${iconSize.sm} text-amber-600`} />
+                Importierte Kürzungen prüfen
+              </h2>
+              <p className="text-xs text-muted-foreground mb-3">
+                Sucht historische Importe, die fälschlich auf 0 oder weniger Minuten gekürzt wurden, und stellt die Originalminuten wieder her — sofern das §45b-Budget (inkl. Übertrag) ausreicht.
+              </p>
+
+              {!reconcilePreview && !reconcileResult && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => runReconcile(false)}
+                  disabled={reconcileLoading}
+                  data-testid="button-reconcile-preview"
+                >
+                  {reconcileLoading && <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />}
+                  Importierte Kürzungen prüfen
+                </Button>
+              )}
+
+              {reconcilePreview && (
+                <div className="space-y-3" data-testid="reconcile-preview">
+                  <div className="text-sm">
+                    <strong>Vorschau:</strong>{" "}
+                    {reconcilePreview.restored} wiederherstellbar,{" "}
+                    {reconcilePreview.insufficient} unzureichend,{" "}
+                    {reconcilePreview.skipped} übersprungen
+                    {reconcilePreview.carryoverNormalized > 0 && (
+                      <> · {reconcilePreview.carryoverNormalized} Übertrag(e) werden normalisiert</>
+                    )}
+                  </div>
+                  {reconcilePreview.results.length === 0 && (
+                    <p className="text-sm text-muted-foreground" data-testid="reconcile-empty">
+                      Keine fehlerhaft gekürzten Importe gefunden.
+                    </p>
+                  )}
+                  {reconcilePreview.results.length > 0 && (
+                    <div className="border rounded-md max-h-64 overflow-auto text-xs">
+                      <table className="w-full">
+                        <thead className="bg-muted sticky top-0">
+                          <tr className="text-left">
+                            <th className="px-2 py-1">Termin</th>
+                            <th className="px-2 py-1">Datum</th>
+                            <th className="px-2 py-1">Aktuell</th>
+                            <th className="px-2 py-1">Original</th>
+                            <th className="px-2 py-1">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reconcilePreview.results.map((r) => (
+                            <tr key={r.appointmentId} className="border-t" data-testid={`row-reconcile-${r.appointmentId}`}>
+                              <td className="px-2 py-1">#{r.appointmentId}</td>
+                              <td className="px-2 py-1">{r.date}</td>
+                              <td className="px-2 py-1">{r.currentMinutes} Min</td>
+                              <td className="px-2 py-1">{r.originalMinutes} Min</td>
+                              <td className="px-2 py-1">
+                                <span className={
+                                  r.status === "ok" ? "text-green-600" :
+                                  r.status === "insufficient" ? "text-red-600" :
+                                  "text-muted-foreground"
+                                }>
+                                  {r.detail}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setReconcilePreview(null)}
+                      disabled={reconcileApplying}
+                      data-testid="button-reconcile-cancel"
+                    >
+                      Abbrechen
+                    </Button>
+                    {reconcilePreview.restored > 0 && (
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            size="sm"
+                            disabled={reconcileApplying}
+                            data-testid="button-reconcile-apply"
+                          >
+                            {reconcileApplying && <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />}
+                            Reparatur durchführen
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Reparatur bestätigen</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              {reconcilePreview.restored} Termin(e) werden auf ihre Originalminuten zurückgesetzt und neu gegen das §45b-Budget gebucht. Bestehende Buchungen werden storniert. Pro Termin wird ein Audit-Eintrag geschrieben. Fortfahren?
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel data-testid="button-confirm-cancel">Abbrechen</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={() => runReconcile(true)}
+                              data-testid="button-confirm-apply"
+                            >
+                              Reparatur durchführen
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {reconcileResult && (
+                <div className="space-y-2" data-testid="reconcile-result">
+                  <div className="text-sm">
+                    <strong>Ergebnis:</strong>{" "}
+                    {reconcileResult.restored} wiederhergestellt,{" "}
+                    {reconcileResult.insufficient} unzureichend,{" "}
+                    {reconcileResult.skipped} übersprungen
+                    {reconcileResult.carryoverNormalized > 0 && (
+                      <> · {reconcileResult.carryoverNormalized} Übertrag(e) normalisiert</>
+                    )}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setReconcileResult(null)}
+                    data-testid="button-reconcile-close"
+                  >
+                    Schließen
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
