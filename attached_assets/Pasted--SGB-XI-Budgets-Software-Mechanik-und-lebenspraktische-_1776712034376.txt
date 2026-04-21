@@ -1,0 +1,530 @@
+# SGB-XI-Budgets: Software-Mechanik und lebenspraktische Umsetzung
+
+**Ergänzungsdokument zu “SGB XI Budgets für die Alltagsbegleitung”**
+
+Dieses Dokument beschreibt, wie die drei Budgets (§ 45b, § 45a Abs. 4, § 42a) in einer Software wie CareConnect konsistent, doppelzählungsfrei und auditierbar abgebildet werden – über den gesamten Lebenszyklus eines Kunden.
+
+-----
+
+## 1. Das Grundprinzip: Opening Balance + Movement Log
+
+Das eine Muster, das **alle** Zweifelsfälle auflöst, kommt aus der doppelten Buchführung:
+
+> **Saldo zum Zeitpunkt T = Opening Balance + Summe aller Bewegungen bis T**
+
+Jedes Budget wird pro Kunde als Konto geführt, das zu einem definierten **Stichtag** eröffnet wird. Die Software rechnet **nur** Bewegungen **nach** dem Stichtag. Alles, was vor dem Stichtag war, fließt **pauschal** in den Opening Balance ein.
+
+**Konsequenz:** Die Software versucht nie, “rückwirkend zu erraten”, was schon verbraucht wurde. Sie übernimmt einen erklärten Anfangszustand und rechnet vorwärts.
+
+Das löst die vom Nutzer geschilderten Probleme elegant:
+
+- Kein Doppelzählen von Vortrag + Restbudget, weil beide im Opening Balance zusammengefasst sind.
+- Unterjähriger Start ist kein Sonderfall – es ist der Normalfall mit bekanntem Eröffnungssaldo.
+- Nachträgliche Korrekturen sind Bewegungen mit negativem Vorzeichen, nicht Opening-Balance-Änderungen.
+
+-----
+
+## 2. Datenmodell (konzeptionell)
+
+### 2.1 Entitäten
+
+**`customer`**
+
+- `id`
+- `pflegekasse_id`
+- `versichertennummer`
+- `anlage_datum`
+- `status` (AKTIV, PAUSIERT, VERSTORBEN, GEKÜNDIGT)
+- `anspruchsbeginn_datum` (Datum der Pflegegrad-Feststellung; ≠ Anlagedatum)
+
+**`pflegegrad_history`** (Versionierung)
+
+- `customer_id`
+- `pflegegrad` (1–5)
+- `gueltig_von`
+- `gueltig_bis` (nullable = aktuell)
+- `quelle` (BESCHEID, HOEHERSTUFUNG, HERABSTUFUNG)
+- `beleg_ref` (Pflegebescheid-Scan)
+
+**`budget_opening_balance`**  ← kritisch
+
+- `customer_id`
+- `budget_type` (`§45b`, `§45a`, `§42a`)
+- `stichtag` (z. B. 01.04.2026 – das Datum, ab dem die Software rechnet)
+- `opening_balance_fields` – unterschiedlich je Budgettyp, siehe unten
+- `quelle` (LEISTUNGSAUSZUG_KASSE, SELBSTAUSKUNFT_KUNDE, INTERNE_FORTFUEHRUNG, NEUKUNDE_OHNE_VERBRAUCH)
+- `beleg_id` (bei Leistungsauszug: PDF der Kasse)
+- `erstellt_von`
+- `erstellt_am`
+- `is_locked` (true nach erstem Movement → Änderung nur noch über Korrektur-Movement)
+
+**`budget_movement`** (Journal aller Veränderungen)
+
+- `id`
+- `customer_id`
+- `budget_type`
+- `leistungsmonat` (YYYY-MM) ← maßgeblich für die Periodenzuordnung
+- `buchungsdatum` (wann wurde die Bewegung angelegt)
+- `betrag` (positiv = Verbrauch, negativ = Rückbuchung/Storno)
+- `movement_type` (`LEISTUNG`, `RUECKBUCHUNG_KASSE`, `STORNO_INTERN`, `KORREKTUR`, `PERIODEN_VERFALL`)
+- `beleg_id` (Rechnung)
+- `kasse_status` (OFFEN, EINGEREICHT, TEILWEISE_ERSTATTET, VOLL_ERSTATTET, ABGELEHNT)
+- `parent_movement_id` (nullable; bei Rückbuchungen und Stornos)
+- `notizen`
+
+### 2.2 Opening-Balance-Felder je Budgettyp
+
+**§ 45b Entlastungsbetrag:**
+
+- `vortrag_aus_vorjahr` (€; was aus dem Vorjahr noch verfügbar ist, Verfall 30.06.)
+- `vortrag_verfallsdatum` (30.06.{Jahr des Stichtags})
+- `verbrauch_laufendes_jahr_vor_stichtag` (€; was im Stichtagsjahr vor dem Stichtag schon verbraucht wurde – egal ob durch uns oder Dritte)
+
+**§ 45a Umwandlungsanspruch:**
+
+- `verbrauch_aktueller_monat_vor_stichtag` (€; nur relevant, wenn Stichtag nicht Monatsanfang ist)
+- `bekannte_36_sachleistung_aktueller_monat` (€; optional, zur Berechnung des Restumwandlungsvolumens)
+
+**§ 42a Gemeinsamer Jahresbetrag:**
+
+- `verbrauch_laufendes_jahr_vor_stichtag` (€)
+
+-----
+
+## 3. Szenario-Katalog: Kundenanlage
+
+### 3.1 Szenario A – “Sauberer Neukunde zum Monatsanfang”
+
+**Situation:** PG 3 festgestellt am 01.04.2026. Kunde hatte noch nie AUA oder VHP. Anlage am 01.04.2026.
+
+**Opening Balances:**
+
+|Budget|vortrag_aus_vorjahr|verbrauch_laufendes_jahr_vor_stichtag|Kommentar           |
+|------|-------------------|-------------------------------------|--------------------|
+|§ 45b |0 €                |3 × 131 € = 393 € **oder 0 €**       |Siehe unten         |
+|§ 45a |—                  |0 €                                  |Monat noch unberührt|
+|§ 42a |—                  |0 €                                  |Jahr noch unberührt |
+
+**Feinheit beim § 45b:** Auch wenn der Kunde den Anspruch im Januar–März 2026 theoretisch hatte, zählt für die Software **was verbraucht wurde**, nicht was theoretisch verfügbar war. Wenn der Kunde den Anspruch **nicht genutzt** hat, wurde nichts verbraucht → `verbrauch_laufendes_jahr_vor_stichtag = 0 €`. Das aufgebaute Guthaben Jan–März gehört ihm weiter.
+
+→ **Regel:** Nicht genutzter Anspruch **vor** dem Stichtag wird als **0 € Verbrauch** gebucht, **nicht** als vorzeitig verbraucht.
+
+**Saldo am 01.04.2026:**
+
+- § 45b verfügbar: `131 × 12 - 0 = 1.572 €` für das Jahr 2026 (vortragsfrei). Aber technisch heruntergebrochen: Jahresrahmen 1.572 €, davon 0 € bisher verbraucht, 1.572 € verfügbar.
+
+### 3.2 Szenario B – “Neukunde mit voller Historie bei anderem Anbieter”
+
+**Situation:** PG 3 seit 01.01.2024. Kunde kommt am 15.04.2026 zu uns. Hatte vorher einen anderen AUA-Anbieter.
+
+**Informationsquellen (Priorität):**
+
+1. **Leistungsauszug der Pflegekasse nach § 108 SGB XI** (rechtssicher, vom Kunden angefordert)
+1. Rechnungen des Vorgängeranbieters (wenn verfügbar)
+1. Selbstauskunft des Kunden (unsicher)
+
+**Annahme aus dem Leistungsauszug:**
+
+- 2025: 1.400 € § 45b verbraucht → Restvortrag 2025 = 172 €, davon bis 30.06.2026 verwendbar
+- 2026 bis 14.04.: 250 € § 45b verbraucht
+- 2026: 800 € § 42a verbraucht
+- April 2026 bis 14.04.: 150 € § 45a verbraucht
+
+**Opening Balances am Stichtag 15.04.2026:**
+
+|Budget|Feld                                    |Wert      |
+|------|----------------------------------------|----------|
+|§ 45b |`vortrag_aus_vorjahr`                   |172 €     |
+|§ 45b |`vortrag_verfallsdatum`                 |30.06.2026|
+|§ 45b |`verbrauch_laufendes_jahr_vor_stichtag` |250 €     |
+|§ 45a |`verbrauch_aktueller_monat_vor_stichtag`|150 €     |
+|§ 42a |`verbrauch_laufendes_jahr_vor_stichtag` |800 €     |
+
+**Saldo am 15.04.2026:**
+
+- § 45b: `172 + 1.572 - 250 = 1.494 €` verfügbar (davon 172 € mit Verfall 30.06.2026)
+- § 45a: `598,80 - 150 = 448,80 €` verfügbar im April
+- § 42a: `3.539 - 800 = 2.739 €` verfügbar 2026
+
+**Warum das keine Doppelzählung ist:** Weder der Vortrag noch der laufende Jahresverbrauch werden “automatisch” aus fiktiven Monaten errechnet. Beide kommen **ausschließlich** aus dem Opening Balance. Die Software kennt sie, rechnet sie aber **nicht mehr**.
+
+### 3.3 Szenario C – “Neukunde mit Vortrag, aber ohne Leistungsauszug”
+
+**Situation:** Kunde kann keinen Leistungsauszug beibringen. Selbstauskunft: “Habe 2025 den Entlastungsbetrag nie genutzt.”
+
+**Vorgehen:**
+
+- Opening Balance wird mit `quelle = SELBSTAUSKUNFT_KUNDE` und `is_verified = false` angelegt.
+- Software zeigt einen Warnhinweis bei Abrechnung: “Opening Balance nicht verifiziert – Gefahr einer Rückbuchung durch die Kasse.”
+- Empfehlung im Workflow: Leistungsauszug nachfordern, bevor größere Summen abgerechnet werden.
+- Spätere Verifizierung: Opening Balance wird als “geprüft” markiert oder per Korrektur-Movement angepasst (nicht per Änderung des Opening Balance selbst, da dieser nach erstem Movement gesperrt ist).
+
+→ **Designprinzip:** Opening Balance ist **immutable** nach erster Bewegung. Alle nachträglichen Korrekturen laufen über spezielle `KORREKTUR`-Movements, damit der Audit Trail erhalten bleibt.
+
+### 3.4 Szenario D – “Kunde wird rückwirkend im System angelegt”
+
+**Situation:** Versorgung läuft seit 01.02.2026. Software-Migration erst am 01.05.2026. Es liegen Rechnungen Feb–Apr vor.
+
+**Zwei saubere Optionen:**
+
+**Option 1 – Vollständiger Nachtrag (bevorzugt):**
+
+- Stichtag = 01.02.2026 (Versorgungsbeginn).
+- Opening Balance = der Zustand zum 01.02.2026 (vermutlich 0 € Verbrauch im Jahr, ggf. Vortrag).
+- Alle Februar-bis-April-Rechnungen werden als reguläre Movements mit korrektem `leistungsmonat` nachgebucht.
+- Vorteil: Vollständiger Audit Trail, korrekte Monatssalden rückwirkend berechenbar.
+
+**Option 2 – Zusammengefasster Start:**
+
+- Stichtag = 01.05.2026.
+- Opening Balance = verbrauchte Summen Februar–April pauschal als `verbrauch_laufendes_jahr_vor_stichtag`.
+- Vorteil: Weniger Aufwand.
+- Nachteil: Monats-Reportings für Feb–Apr unvollständig; bei einer Kassen-Rückbuchung eines Februar-Belegs ist der Movement-Bezug schwierig.
+
+→ **Empfehlung:** Option 1 für Kunden, bei denen Einzelbelege vorliegen. Option 2 für Bestandskunden ohne greifbare Historie.
+
+### 3.5 Szenario E – “Neukunde tritt zum Monatsende ein”
+
+**Situation:** Kunde wird am 28.04.2026 aufgenommen. Erste Leistung am 02.05.2026.
+
+- Stichtag = 02.05.2026 (Datum der ersten tatsächlichen Leistung).
+- Alternativ: Stichtag = Datum der Vertragsunterzeichnung, selbst wenn noch keine Leistung erbracht wurde. Vorteil: Klar definierter Eintritt.
+- `verbrauch_aktueller_monat_vor_stichtag` für § 45a = 0 (neuer Monat).
+
+→ **Designentscheidung:** Stichtag sollte **Vertragsbeginn** sein, nicht die erste Leistung. Das entkoppelt die Logik vom operativen Zufall.
+
+### 3.6 Szenario F – “Pflegegrad-Feststellung rückwirkend”
+
+**Situation:** Pflegekasse stellt am 15.05.2026 PG 2 fest – rückwirkend zum Antragsdatum 10.02.2026. Kunde war de facto schon in unserer Versorgung, aber ohne Anspruch.
+
+- `anspruchsbeginn_datum` = 10.02.2026.
+- `pflegegrad_history`: Eintrag mit `gueltig_von = 10.02.2026`.
+- Leistungen, die im Zeitraum 10.02. – 14.05. erbracht wurden (als Selbstzahler), können nun **nachträglich** bei der Kasse eingereicht werden.
+- Im Opening Balance ist das neutral – aber die Software sollte aktiv einen **Rückerstattungsprozess** anstoßen: Liste aller bisher als Selbstzahler-Umsatz gebuchten Leistungen im Rückwirkungszeitraum, mit Option “an Kasse weiterleiten”.
+
+→ **Edge Case:** Die 30.06.-Vortragsfrist bezieht sich auf das **Jahr**, nicht auf den Feststellungszeitpunkt. Rückwirkende Feststellung rettet keine verfallenen Budgets.
+
+-----
+
+## 4. Szenario-Katalog: Laufender Betrieb
+
+### 4.1 Szenario G – “Leistungserbringung im normalen Monat”
+
+**Ablauf:**
+
+1. Leistung wird erfasst (Datum, Dauer, Mitarbeiter, Kunde).
+1. System prüft **vor** Rechnungsstellung gegen alle drei Budgets:
+- Welches Budget soll belastet werden? (Standardreihenfolge: § 45a zuerst, dann § 45b, dann § 42a nur bei Verhinderungsfall.)
+- Ist im jeweiligen Budget noch Saldo?
+1. Rechnung mit expliziter Budgetzuordnung.
+1. Movement wird gebucht mit `kasse_status = OFFEN`.
+1. Bei Einreichung bei der Kasse: `kasse_status = EINGEREICHT`.
+1. Bei Erstattung: `kasse_status = VOLL_ERSTATTET` (oder TEILWEISE bzw. ABGELEHNT).
+
+### 4.2 Szenario H – “Kasse bucht teilweise zurück”
+
+**Situation:** Rechnung März über 200 €, § 45b. Kasse erstattet nur 150 € mit Begründung “Leistungskorb-Zuordnung unklar”.
+
+**Buchung:**
+
+- Neue Bewegung: `movement_type = RUECKBUCHUNG_KASSE`, `betrag = -50 €`, `leistungsmonat = 2026-03`, `parent_movement_id` = ursprüngliche Buchung.
+- Ursprüngliche Bewegung bleibt **unverändert** – der Audit Trail zeigt, wann wer was gebucht hat und wann die Kasse korrigiert hat.
+- Im Saldo wird die Rückbuchung automatisch dem Leistungsmonat März zugeordnet.
+- Follow-up-Prozess: Beleg überarbeiten, erneut einreichen, ggf. Widerspruch.
+
+→ **Wichtig:** Das Budget im März wird durch die Rückbuchung **nicht** automatisch wieder für neue Leistungen frei, weil der März-Abrechnungszyklus aus operativer Sicht abgeschlossen ist. Die 50 € werden zum “offenen Posten” und müssen entweder vom Kunden selbst getragen oder nach Korrektur erneut bei der Kasse eingereicht werden.
+
+### 4.3 Szenario I – “Storno einer bereits gebuchten Leistung (intern)”
+
+**Situation:** Leistung vom 10.05. wurde fälschlich doppelt erfasst.
+
+- Neue Bewegung: `movement_type = STORNO_INTERN`, `betrag = -{Originalbetrag}`, `leistungsmonat = 2026-05`, `parent_movement_id = Originalbuchung`.
+- Wenn Originalbuchung noch nicht eingereicht (`kasse_status = OFFEN`): Rein interne Korrektur.
+- Wenn bereits eingereicht: Stornorechnung an Kasse, ggf. Rückzahlung.
+
+### 4.4 Szenario J – “Pflegegradänderung mitten im Monat”
+
+**Situation:** PG 2 → PG 3 mit Wirkung zum 15.05.2026.
+
+Effekte pro Budget:
+
+- **§ 45b:** Kein Effekt. 131 € unabhängig vom PG.
+- **§ 45a:** Kritisch. Der Monatshöchstbetrag ändert sich im Monat Mai.
+  - **Regel (vereinfachend, praxisüblich):** Für den gesamten Monat gilt der **am Monatsende** gültige PG. Also ab Mai 2026 Umwandlungsvolumen bis 598,80 €.
+  - **Alternative (streng):** Tageweise Proratierung. In der Praxis von den Kassen nicht durchgängig so gefordert; die Monatsend-Regel ist die sichere Annahme.
+  - Software soll den aktuell gültigen PG automatisch aus `pflegegrad_history` zum Monatsletzten lesen, nicht den am Buchungstag gültigen.
+- **§ 42a:** Sprung von “kein Anspruch” (PG 2 hatte vorher, also schon vorher Anspruch) oder von “neu” (PG 1 → PG 2). Bei erstmaligem Entstehen des Anspruchs: Voller Jahresbetrag ab Anspruchsentstehung. Kein Proratieren.
+
+**Besonders kritisch: PG 1 → PG 2 im laufenden Jahr.**
+
+- Vorher kein § 45a, kein § 42a. Ab Höherstufung beide Budgets voll verfügbar.
+- Opening Balance der neu entstehenden Budgets zum Feststellungsdatum = 0 € Verbrauch.
+- Jahresbetrag § 42a wird **nicht** anteilig gekürzt, auch wenn die Höherstufung erst im September erfolgt.
+
+### 4.5 Szenario K – “Kunde wechselt Pflegekasse”
+
+**Situation:** Umzug innerhalb Deutschlands, Wechsel von AOK PLUS zu TK ab 01.07.2026.
+
+- Alle drei Budgets laufen **bei der neuen Kasse weiter**. Der Jahreszähler wird nicht zurückgesetzt.
+- § 42a: Verbleibt beim Jahresverbrauch, den der Kunde bei der Altkasse hatte. Die Neukasse muss den bisherigen Verbrauch übernehmen (Kassen-interner Datenabgleich).
+- § 45b: Vortrag bleibt erhalten.
+- Für das Tool: `pflegekasse_id` wird mit `gueltig_von` aktualisiert. Am Umstellungsstichtag sollte ein neuer Leistungsauszug beantragt werden, um den Übergang abzugleichen.
+
+→ **Regel:** Kassenwechsel ist **kein** Reset der Opening Balance. Es ist nur ein Wechsel des Abrechnungsempfängers.
+
+### 4.6 Szenario L – “Kunde wechselt den Anbieter (kommt zu uns oder geht)”
+
+**Zugang:** Wie Szenario B, Opening Balance per Leistungsauszug setzen.
+
+**Abgang:** Kein Eingriff nötig. Die Bewegungen, die wir beim Kunden verbucht haben, bleiben. Der neue Anbieter holt sich einen Leistungsauszug und sieht **unsere** Buchungen bei der Kasse.
+
+### 4.7 Szenario M – “Krankenhausaufenthalt des Kunden”
+
+- § 45b: Anspruch bleibt bestehen, wenn Rückkehr in die Häuslichkeit geplant ist. Keine Buchungen während des Aufenthalts (keine Leistungserbringung).
+- § 45a: Ruht faktisch, da keine § 36-Basis. Monat verfällt regulär.
+- § 42a: VHP nicht einsetzbar während Krankenhausaufenthalt (nicht Zweck). KZP ggf. nach Entlassung aus dem Krankenhaus, wenn die pflegende Person nicht sofort übernehmen kann.
+
+→ Software sollte Status `PAUSIERT` mit Grund `KRANKENHAUS` und Zeitraum unterstützen, der die Leistungserfassung sperrt.
+
+### 4.8 Szenario N – “Tod des Kunden”
+
+- `status = VERSTORBEN`, `sterbedatum` gesetzt.
+- Für den Sterbemonat § 45b: Voller Monatsanspruch von 131 € bleibt bestehen (kein Proratieren). Leistungen bis zum Todestag können noch abgerechnet werden.
+- § 45a: Nur tatsächlich erbrachte Leistungen abrechenbar, begrenzt auf den Monatsdeckel.
+- § 42a: Jahresbetrag war für das Jahr verfügbar; tatsächlich genutzte Anteile wie gehabt.
+- Erstattungsansprüche gehen auf die Erben über (§ 58 SGB I). Abtretungserklärungen gelten fort, soweit zu Lebzeiten erteilt.
+- Software-seitig: Leistungserfassung nach Sterbedatum wird gesperrt; offene Rechnungen werden an die Erbengemeinschaft adressiert.
+
+-----
+
+## 5. Szenario-Katalog: Periodenwechsel (automatisch)
+
+Diese Jobs laufen zeitgesteuert im Hintergrund und erzeugen keine fachlichen Bewegungen, sondern Strukturen.
+
+### 5.1 Zum 01. jedes Monats (§ 45a und § 45b)
+
+**§ 45a:**
+
+- Neues Monatsfenster: Verfügbarer Monatsbetrag = 40 % × § 36-Höchstbetrag nach aktuellem PG.
+- Restbetrag aus Vormonat: **verfällt**. Ein `PERIODEN_VERFALL`-Movement kann optional gebucht werden, um den Audit Trail explizit zu halten (Betrag = 0 €, nur Marker).
+
+**§ 45b:**
+
+- +131 € zum verfügbaren Jahresrahmen. Kein Job nötig, wenn die Berechnung on-demand aus “131 € × Monate seit Jahresbeginn – Verbrauch im Jahr” erfolgt.
+
+### 5.2 Zum 01.07. jedes Jahres (§ 45b)
+
+**Verfall des Vorjahresvortrags:**
+
+- Alle Opening-Balance-Einträge mit `vortrag_verfallsdatum = 30.06.{Jahr}` werden geprüft.
+- Ist der Vortrag noch nicht vollständig verbraucht, wird der Rest als `PERIODEN_VERFALL`-Movement mit negativem Betrag gebucht.
+- Beispiel: Opening Balance hatte 172 € Vortrag, davon bis 30.06.2026 nur 100 € verbraucht → am 01.07.2026 wird ein Verfallsmovement über -72 € gebucht mit `leistungsmonat = 2026-06`.
+
+→ **Feinheit:** Der Verfall betrifft **nur** den Vortragsanteil aus dem Vorjahr. Der laufende Jahresanspruch ist davon nicht berührt.
+
+→ **Implementierungshinweis:** Die Logik “zuerst Vortrag, dann laufenden Jahresanspruch verbrauchen” (FIFO) ist entscheidend, damit zum 30.06. möglichst wenig verfällt. Ohne FIFO könnte es passieren, dass der Kunde 200 € im Jahr verbraucht, aber davon “aus dem falschen Topf”, sodass 172 € Vortrag verfallen, obwohl noch Budget vorhanden war.
+
+### 5.3 Zum 01.01. jedes Jahres
+
+**§ 45b Jahreswechsel:**
+
+- Restbetrag 31.12. des Vorjahres wird zum neuen `vortrag_aus_vorjahr` mit `verfallsdatum = 30.06.{neues Jahr}`.
+- Gleichzeitig beginnt der neue Jahresrahmen von 12 × 131 €.
+
+**§ 42a Jahreswechsel:**
+
+- Restbetrag 31.12. **verfällt** ersatzlos.
+- Ein `PERIODEN_VERFALL`-Movement über den Rest wird gebucht.
+- Neuer Jahresbetrag: 3.539 € (Stand 2026).
+
+**§ 45a:**
+
+- Kein Effekt über den normalen Monatswechsel hinaus.
+
+### 5.4 Zum 01. eines beliebigen Monats nach Feststellungs-Höherstufung
+
+- Die `pflegegrad_history` wird aktiv gelesen; der Monats-Höchstbetrag für § 45a passt sich automatisch an.
+- Bei Höherstufung rückwirkend (siehe 3.6): Vergangene Monate werden **nicht** re-bewertet, weil die Software nur für Monate nach `anspruchsbeginn_datum` rechnet. Selbstzahler-Leistungen vor der rückwirkenden Anerkennung werden separat behandelt.
+
+-----
+
+## 6. Saldo-Berechnungsalgorithmus (präzise)
+
+### 6.1 § 45b Saldo zum Zeitpunkt T (im Jahr J)
+
+```
+jahresrahmen_J = 131 € × {Anzahl vergangener Monate im Jahr J bis einschließlich Monat(T)}
+
+verbrauch_J = opening_balance.verbrauch_laufendes_jahr_vor_stichtag
+            + SUM(movement.betrag
+                  WHERE budget_type = '§45b'
+                  AND YEAR(leistungsmonat) = J
+                  AND buchungsdatum <= T
+                  AND movement_type NOT IN ('PERIODEN_VERFALL'))
+
+vortrag_verfuegbar =
+  IF T <= opening_balance.vortrag_verfallsdatum
+    THEN opening_balance.vortrag_aus_vorjahr
+  ELSE 0
+
+verfuegbar = jahresrahmen_J + vortrag_verfuegbar - verbrauch_J
+```
+
+**FIFO-Verrechnung (konzeptionell, für die Anzeige):**
+
+- Solange `vortrag_verfuegbar > 0` und verbrauch_J ≤ vortrag_verfuegbar: Verbrauch zehrt am Vortrag.
+- Darüber hinaus: Verbrauch zehrt am laufenden Jahresrahmen.
+
+### 6.2 § 45a Saldo zum Zeitpunkt T (im Monat M)
+
+```
+pg_am_monatsende = pflegegrad_history.get_for_date(last_day_of_month(M))
+monatsrahmen = 0.40 × § 36_Höchstbetrag[pg_am_monatsende]
+
+verbrauch_M = opening_balance.verbrauch_aktueller_monat_vor_stichtag (nur wenn M = Monat(Stichtag))
+            + SUM(movement.betrag
+                  WHERE budget_type = '§45a'
+                  AND leistungsmonat = M
+                  AND buchungsdatum <= T)
+
+optional_36_begrenzung =
+  § 36_Höchstbetrag[pg] - opening_balance.bekannte_36_sachleistung_aktueller_monat
+
+effektiver_rahmen = MIN(monatsrahmen, optional_36_begrenzung)
+
+verfuegbar_M = effektiver_rahmen - verbrauch_M
+```
+
+### 6.3 § 42a Saldo zum Zeitpunkt T (im Jahr J)
+
+```
+jahresrahmen = 3.539 €  (für PG 2-5; 0 € für PG 1)
+
+verbrauch_J = opening_balance.verbrauch_laufendes_jahr_vor_stichtag
+            + SUM(movement.betrag
+                  WHERE budget_type = '§42a'
+                  AND YEAR(leistungsmonat) = J
+                  AND buchungsdatum <= T
+                  AND movement_type NOT IN ('PERIODEN_VERFALL'))
+
+verfuegbar_J = jahresrahmen - verbrauch_J
+```
+
+### 6.4 Plausibilitäts-Checks bei jeder Buchung
+
+Bevor ein Movement mit `movement_type = LEISTUNG` gespeichert wird:
+
+1. Ist der Kunde `AKTIV` am Leistungsdatum?
+1. Gibt es einen gültigen PG am Leistungsdatum (≥ 1 für § 45b, ≥ 2 für § 45a und § 42a)?
+1. Passen Leistungsdatum und `leistungsmonat` zusammen?
+1. Ist der neue Saldo nach der Buchung ≥ 0?
+1. Bei § 42a VHP: Ist die Meldefrist (Leistungsmonat + 1 Monat) noch eingehalten?
+1. Ist der Anbieter zum Leistungsdatum landesrechtlich anerkannt (aus `anerkennungs_history`)?
+1. Überschreitet der Stundensatz nicht den Landeshöchstpreis?
+
+Verletzungen dieser Checks werden als Warnung angezeigt, können je nach Konfiguration den Workflow blockieren oder nur geloggt werden.
+
+-----
+
+## 7. Kritische Implementierungsfeinheiten
+
+### 7.1 Zeitlicher Bezugspunkt für Bewegungen
+
+Jede Bewegung hat drei Zeitangaben, die **nicht** vermischt werden dürfen:
+
+- **`leistungsmonat`**: Der Kalendermonat, in dem die Leistung erbracht wurde. Maßgeblich für die Periodenzuordnung.
+- **`buchungsdatum`**: Wann die Bewegung im System erfasst wurde. Nur für Audit Trail relevant.
+- **`kassen_abrechnungsdatum`**: Wann die Kasse den Vorgang bearbeitet hat (für kasse_status-Updates).
+
+**Folge:** Eine Rechnung für eine Leistung vom 15.03.2026, die erst am 10.05.2026 erfasst und am 25.05.2026 an die Kasse geschickt wird, ist budget-wirksam in **März 2026**, nicht Mai.
+
+### 7.2 Monats-Cutoff für § 45a
+
+Der Monatsverfall ist hart. **Vermeidung:**
+
+- System zeigt ab dem 25. eines Monats einen Alert für alle Kunden mit ungenutztem § 45a-Volumen ≥ X €.
+- Automatischer Report “Verfallsgefährdete Budgets zum Monatsende” für die Disposition.
+
+### 7.3 Vortrag-30.06.-Alert
+
+- Ab dem 01.05. jedes Jahres Alert für Kunden mit `vortrag_aus_vorjahr > 0` und Verbrauch im aktuellen Jahr zuzüglich geplanter Leistungen Mai + Juni < Vortragshöhe.
+- Disposition kann gezielt AUA-Leistungen anbieten, um den Vortrag noch zu retten.
+
+### 7.4 Idempotenz bei Import / Migration
+
+Bei Datenmigration aus Altsystemen müssen Bewegungen mit einem `external_reference_id` versehen werden, um bei erneutem Import keine Duplikate zu erzeugen. Die Kombination `(customer_id, budget_type, external_reference_id)` ist eindeutig.
+
+### 7.5 Soft Delete statt Hard Delete
+
+Bewegungen werden **nie** physisch gelöscht. Ein Storno ist ein neues Movement mit negativem Betrag. Das erhält den Audit Trail und genügt den GoBD-Anforderungen.
+
+### 7.6 Opening Balance versus Movements – ein Denkbeispiel
+
+Der User-Fall: “Kunde mit nicht verbrauchtem Budget 2025, Anlage 2026.”
+
+- **Falsch**: Tool sieht `vortrag = 1.572 €` und setzt zusätzlich `janaur-april 2026 = 4 × 131 € = 524 € bereits aufgebaut, aber nicht verbraucht`. Das wäre eine Scheinrechnung – der Kunde hatte den Anspruch, aber nicht verbraucht, also ist keine Doppelzählung. Die Software muss nur erkennen, dass `verbrauch = 0` ist – der Aufbau des laufenden Jahresrahmens passiert in der Saldo-Berechnung automatisch über “131 € × Anzahl Monate”.
+- **Richtig**: Opening Balance setzt `vortrag_aus_vorjahr = 1.572 €` und `verbrauch_laufendes_jahr_vor_stichtag = 0 €`. Der laufende Jahresrahmen wird in der Saldo-Formel über `131 × {Monate bis T}` aufgebaut. Am 01.05.2026 bedeutet das: `1.572 + 4 × 131 - 0 = 2.096 €` verfügbar. Das ist korrekt: 1.572 € Vortrag + 524 € aus Januar-April 2026.
+
+**Kernerkenntnis**: Das Tool rechnet den laufenden Jahresanspruch **nicht** als “schon geerbt”, sondern **als formel-basierten Rahmen**. Der Opening Balance erfasst nur, was vor dem Stichtag **verbraucht** wurde – niemals, was an **Rahmen** aufgebaut wurde. Der Rahmen folgt aus der Kalenderzeit.
+
+### 7.7 Unterjähriger Startwert-Setzen: Der saubere Weg
+
+Der User beschreibt den Fall “wenn ich einen unterjährigen Startwert setze”. Richtige UX:
+
+**Statt** “Setze Restbudget auf X €” abzufragen, fragt das Tool **zwei** unabhängige Dinge:
+
+1. **Vortrag aus Vorjahr** – wie viel ist davon zum Stichtag noch übrig? (mit Verfallsdatum 30.06. des aktuellen Jahres)
+1. **Verbrauch im laufenden Jahr vor Stichtag** – was wurde im aktuellen Jahr bereits abgerechnet?
+
+Der Rest ergibt sich **zwingend** aus der Formel. Damit ist Doppelzählung konstruktiv ausgeschlossen.
+
+Das Tool sollte **nicht** einen “verfügbaren Saldo” als Eingabe akzeptieren – das wäre mehrdeutig und fehleranfällig.
+
+-----
+
+## 8. UI-Implikationen
+
+### 8.1 Kundenanlage-Wizard
+
+**Schritt 1**: Stammdaten (Name, Adresse, Pflegekasse, Versichertennummer).
+**Schritt 2**: Pflegegrad-Historie (mindestens aktueller PG mit `gueltig_von`).
+**Schritt 3**: Anspruchsbeginn (= i. d. R. Pflegegrad-Feststellungsdatum).
+**Schritt 4**: Opening Balance pro Budget.
+
+- Für jedes Budget: “Gibt es Vorverbrauch im aktuellen Jahr?” (Ja/Nein) → Felder freigeben.
+- Für § 45b: “Gibt es unverbrauchten Vortrag aus dem Vorjahr?” (Ja/Nein) → Feld + Verfallsdatum.
+- Mit Datei-Upload für Leistungsauszug / Belege.
+- Quelle der Information pflichtig: LEISTUNGSAUSZUG_KASSE / SELBSTAUSKUNFT_KUNDE / NEUKUNDE_OHNE_VERBRAUCH.
+  **Schritt 5**: Vertrag, Abtretungserklärungen, Anerkennung-Zuordnung.
+
+### 8.2 Kunden-Dashboard Budget-Widget
+
+Für jedes Budget separate Kachel mit:
+
+- Aktuell verfügbarer Saldo (groß, farbig).
+- Bei § 45b: Zwei Zahlen – “Vortrag Vorjahr: X € (verfällt 30.06.)” und “Laufendes Jahr: Y €”.
+- Bei § 45a: Monatssaldo mit Resttagen im Monat.
+- Bei § 42a: Jahressaldo mit Hinweis auf VHP-Meldefristen offener Posten.
+- Historie der letzten 3 Monate als Zeitreihe.
+
+### 8.3 Korrektur-Dialog für Opening Balance
+
+Nach erster Buchung ist der Opening Balance gesperrt. Wenn der Nutzer ihn ändern muss (z. B. weil der Leistungsauszug nachträglich kam und vom Anfangswert abweicht), wird ein **Korrektur-Movement** erzeugt:
+
+- `movement_type = KORREKTUR`
+- Betrag = Differenz zwischen altem und neuem Zustand
+- `leistungsmonat` = Monat des Stichtags (retrospektiv)
+- Pflichtfeld `notizen` für die Begründung
+- Beleg-Upload des korrigierten Leistungsauszugs
+
+Damit bleibt der ursprüngliche Opening Balance dokumentiert, und die Korrektur ist nachvollziehbar.
+
+-----
+
+## 9. Zusammenfassung: Die drei Grundregeln
+
+1. **Trenne Opening Balance und Movements sauber.** Der Opening Balance beschreibt den Zustand zum Stichtag; alles danach sind Bewegungen. Der laufende Jahresrahmen wird **nicht** im Opening Balance hinterlegt, sondern durch die Saldo-Formel berechnet.
+1. **Lass den Opening Balance immutable sein, sobald die erste Bewegung gebucht ist.** Korrekturen laufen als eigene Movements mit Begründung.
+1. **Ordne jede Bewegung einem `leistungsmonat` zu, nicht dem Buchungs- oder Rechnungsdatum.** Das ist die einzige Zeitangabe, die budget-wirksam ist.
+
+Wenn diese drei Regeln konsequent durchgehalten werden, löst sich die vom User beschriebene Doppelzählungs-Falle von selbst – und das Tool bleibt auch in den komplexen Fällen (rückwirkende Feststellung, Kassenwechsel, Pflegegradänderung, Rückbuchung) konsistent und auditierbar.
