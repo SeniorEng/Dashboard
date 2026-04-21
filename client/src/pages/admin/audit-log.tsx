@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/patterns/status-badge";
-import { ArrowLeft, Loader2, Shield, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowLeft, Loader2, Shield, ChevronLeft, ChevronRight, Layers, X } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 
@@ -52,15 +52,17 @@ interface AuditResponse {
 export default function AdminAuditLog() {
   const [entityType, setEntityType] = useState<string>("all");
   const [action, setAction] = useState<string>("all");
+  const [batchId, setBatchId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const pageSize = 30;
 
   const { data, isLoading } = useQuery<AuditResponse>({
-    queryKey: ["audit-log", entityType, action, page],
+    queryKey: ["audit-log", entityType, action, batchId, page],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (entityType !== "all") params.set("entityType", entityType);
       if (action !== "all") params.set("action", action);
+      if (batchId) params.set("batchId", batchId);
       params.set("limit", pageSize.toString());
       params.set("offset", (page * pageSize).toString());
       const result = await api.get<AuditResponse>(`/admin/audit-log?${params}`);
@@ -68,6 +70,18 @@ export default function AdminAuditLog() {
     },
     staleTime: 10000,
   });
+
+  const filterByBatch = (id: string) => {
+    setBatchId(id);
+    setEntityType("all");
+    setAction("all");
+    setPage(0);
+  };
+
+  const clearBatchFilter = () => {
+    setBatchId(null);
+    setPage(0);
+  };
 
   const totalPages = data ? Math.ceil(data.total / pageSize) : 0;
 
@@ -170,6 +184,24 @@ export default function AdminAuditLog() {
                   </span>
                 </div>
               </div>
+              {batchId && (
+                <div className="mt-3 flex items-center gap-2 rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-900" data-testid="banner-batch-filter">
+                  <Layers className={iconSize.sm} />
+                  <span>
+                    Gefiltert nach Reparatur-Sitzung <span className="font-mono font-medium">{batchId.slice(0, 8)}</span>
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto h-7 px-2"
+                    onClick={clearBatchFilter}
+                    data-testid="button-clear-batch-filter"
+                  >
+                    <X className={iconSize.sm} />
+                    <span className="ml-1">Filter aufheben</span>
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -188,8 +220,15 @@ export default function AdminAuditLog() {
               <div className="flex flex-col gap-2">
                 {data.entries.map((entry) => {
                   const metaDisplay = getMetadataDisplay(entry);
+                  const entryBatchId = typeof entry.metadata?.batchId === "string" ? (entry.metadata.batchId as string) : null;
+                  const isBatchSummary = entry.action === "import_trim_reconciled_batch";
+                  const isActiveBatch = !!entryBatchId && entryBatchId === batchId;
                   return (
-                    <Card key={entry.id} data-testid={`audit-entry-${entry.id}`}>
+                    <Card
+                      key={entry.id}
+                      data-testid={`audit-entry-${entry.id}`}
+                      className={isBatchSummary ? "border-teal-300 bg-teal-50/40" : isActiveBatch ? "border-teal-200" : undefined}
+                    >
                       <CardContent className="p-3">
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
@@ -201,6 +240,18 @@ export default function AdminAuditLog() {
                               <span className="text-xs text-gray-500">
                                 {ENTITY_TYPE_LABELS[entry.entityType] || entry.entityType} #{entry.entityId}
                               </span>
+                              {entryBatchId && entryBatchId !== batchId && (
+                                <button
+                                  type="button"
+                                  onClick={() => filterByBatch(entryBatchId)}
+                                  className="inline-flex items-center gap-1 rounded border border-teal-300 bg-white px-2 py-0.5 text-xs text-teal-800 hover:bg-teal-50"
+                                  data-testid={`button-filter-batch-${entry.id}`}
+                                  title="Alle Einträge dieser Reparatur-Sitzung anzeigen"
+                                >
+                                  <Layers className="h-3 w-3" />
+                                  {isBatchSummary ? "Sitzung anzeigen" : `Sitzung ${entryBatchId.slice(0, 8)}`}
+                                </button>
+                              )}
                             </div>
                             <div className="text-sm text-gray-700">
                               <span className="font-medium">{entry.userName}</span>
@@ -211,6 +262,11 @@ export default function AdminAuditLog() {
                             {metaDisplay && (
                               <div className="text-xs text-gray-500 mt-1">
                                 {metaDisplay}
+                              </div>
+                            )}
+                            {isBatchSummary && entryBatchId && (
+                              <div className="text-xs text-teal-700 mt-1">
+                                Sammel-Eintrag der Reparatur-Sitzung — enthält die zugehörigen Einzel-Termine.
                               </div>
                             )}
                           </div>

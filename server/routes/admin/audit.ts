@@ -23,6 +23,7 @@ router.get("/audit-log", asyncHandler("Audit-Log konnte nicht geladen werden", a
     entityId: req.query.entityId ? parseInt(req.query.entityId as string) : undefined,
     userId: req.query.userId ? parseInt(req.query.userId as string) : undefined,
     action: req.query.action || undefined,
+    batchId: req.query.batchId || undefined,
     from: req.query.from || undefined,
     to: req.query.to || undefined,
     limit: req.query.limit ? parseInt(req.query.limit as string) : 50,

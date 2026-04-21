@@ -96,6 +96,7 @@ export const auditLogFilterSchema = z.object({
   entityId: z.number().optional(),
   userId: z.number().optional(),
   action: z.enum(AUDIT_ACTIONS).optional(),
+  batchId: z.string().uuid("batchId muss eine gültige UUID sein").optional(),
   from: z.string().optional(),
   to: z.string().optional(),
   limit: z.number().min(1, "Limit muss mindestens 1 sein").max(200, "Limit darf maximal 200 sein").default(50),

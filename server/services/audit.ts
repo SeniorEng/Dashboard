@@ -191,6 +191,9 @@ class AuditService {
     if (filter.to) {
       conditions.push(lte(auditLog.createdAt, new Date(filter.to)));
     }
+    if (filter.batchId) {
+      conditions.push(sql`${auditLog.metadata}->>'batchId' = ${filter.batchId}`);
+    }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
