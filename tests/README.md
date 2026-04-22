@@ -63,3 +63,21 @@ Alle Tests sollten grün sein bevor Code gemerged wird.
 - Tests laufen gegen die **Entwicklungsdatenbank** - nicht in Produktion ausführen!
 - Nach dem Testlauf können Test-Daten übrig bleiben (Termine, Kunden)
 - Die Tests prüfen echte API-Antworten - Änderungen an der API können Tests fehlschlagen lassen
+
+## Test-Datenisolation
+
+Damit Test-Suites unabhängig voneinander und reihenfolge-stabil laufen, gilt
+folgendes Pattern:
+
+- **Niemals** `apiGet("/api/admin/customers?limit=1")` o.ä. nutzen, um den
+  ersten existierenden Kunden zu greifen — das teilt State zwischen Tests
+  und macht sie flaky.
+- Stattdessen pro Suite (`beforeAll`) oder pro Test einen **frischen Kunden**
+  via `createTestCustomer()` aus `./test-utils` anlegen und über
+  `assignEmployeeToCustomer()` dem Test-Mitarbeiter zuweisen.
+- Bei Bedarf (z.B. mehrere Kunden für Cross-Tests) per Test einen weiteren
+  Kunden mit `createTestCustomer({ nachname: "..." + uniqueId() })` erzeugen.
+
+Beispiele für korrektes Pattern: `appointments.test.ts`, `time-entries.test.ts`,
+`appointment-series.test.ts`, `budget-e2e.test.ts`, `private-billing-e2e.test.ts`,
+`customer-hard-delete.test.ts`.

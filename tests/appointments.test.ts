@@ -12,6 +12,7 @@ import {
   apiDeleteAs,
   apiGetAs,
   uniqueId,
+  createTestCustomer,
 } from "./test-utils";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
@@ -81,8 +82,8 @@ beforeAll(async () => {
   hwServiceId = servicesRes.data.find((s: any) => s.code === "hauswirtschaft")!.id;
   abServiceId = servicesRes.data.find((s: any) => s.code === "alltagsbegleitung")!.id;
 
-  const custRes = await apiGet<{ data: any[] }>("/api/admin/customers?limit=1");
-  testCustomerId = custRes.data.data[0].id;
+  const cust = await createTestCustomer({ nachname: `ApptTest_${Date.now()}` });
+  testCustomerId = cust.id;
 
   await apiPatch(`/api/admin/customers/${testCustomerId}/assign`, {
     primaryEmployeeId: auth.user.id,

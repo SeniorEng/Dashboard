@@ -6,9 +6,11 @@ import {
   apiPut,
   apiPutAs,
   apiDeleteAs,
+  apiPatch,
   getAuthCookie,
   getFutureDate,
   loginAs,
+  createTestCustomer,
 } from "./test-utils";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
@@ -101,8 +103,14 @@ async function clearDateEntries(dateStr: string) {
 beforeAll(async () => {
   auth = await getAuthCookie();
 
-  const custRes = await apiGet<{ data: any[] }>("/api/admin/customers?limit=1");
-  testCustomerId = custRes.data.data[0].id;
+  const cust = await createTestCustomer({ nachname: `TimeEntryTest_${Date.now()}` });
+  testCustomerId = cust.id;
+
+  await apiPatch(`/api/admin/customers/${testCustomerId}/assign`, {
+    primaryEmployeeId: auth.user.id,
+    backupEmployeeId: null,
+    backupEmployeeId2: null,
+  });
 
   const svcRes = await apiGet<any[]>("/api/services/all");
   const hwSvc = svcRes.data.find((s: any) => s.kpiGroup === "HW" && s.isActive);
