@@ -13,8 +13,16 @@ import { formatDateForDisplay, isChild } from "@shared/utils/datetime";
 import { DEACTIVATION_REASON_LABELS, type DeactivationReason } from "@shared/domain/customers";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Card, CardContent } from "@/components/ui/card";
+import { useAuth } from "@/hooks/use-auth";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SectionCard } from "@/components/patterns/section-card";
@@ -39,6 +47,9 @@ import {
   XCircle,
   Ban,
   Merge,
+  Trash2,
+  AlertTriangle,
+  ChevronRight,
 } from "lucide-react";
 import { BudgetLedgerSection } from "@/components/budget/BudgetLedgerSection";
 import { BudgetTypeSettings } from "@/components/budget/BudgetTypeSettings";
@@ -228,6 +239,14 @@ export default function AdminCustomerDetail() {
   const { data: customer, isLoading, error, refetch } = useCustomer(customerId);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isSuperAdmin = user?.isSuperAdmin ?? false;
+  const [dangerZoneOpen, setDangerZoneOpen] = useState(false);
+  const [hardDeleteDialogOpen, setHardDeleteDialogOpen] = useState(false);
+  const [hardDeleteReason, setHardDeleteReason] = useState("");
+  const [hardDeleteConfirmName, setHardDeleteConfirmName] = useState("");
+  const [hardDeleting, setHardDeleting] = useState(false);
+  const [hardDeleteConflict, setHardDeleteConflict] = useState<Array<{ key: string; label: string; count: number; met: boolean }> | null>(null);
   const [showDeactivateDialog, setShowDeactivateDialog] = useState(false);
   const [deactivationNote, setDeactivationNote] = useState<string>("");
   const [showMergeDialog, setShowMergeDialog] = useState(false);
@@ -255,6 +274,65 @@ export default function AdminCustomerDetail() {
       .sort((a, b) => a.label.localeCompare(b.label, "de"));
   }, [activeCustomersData, customerId]);
 
+
+  interface HardDeleteCheck { key: string; label: string; count: number; met: boolean }
+  interface HardDeleteReadiness { ready: boolean; checks: HardDeleteCheck[] }
+
+  const { data: hardDeleteReadiness, isLoading: hardDeleteLoading, refetch: refetchHardDeleteReadiness } = useQuery<HardDeleteReadiness>({
+    queryKey: ["hard-delete-readiness", customerId],
+    queryFn: async () => {
+      const result = await api.get<HardDeleteReadiness>(`/admin/customers/${customerId}/hard-delete-readiness`);
+      return unwrapResult(result);
+    },
+    enabled: !!customerId && isSuperAdmin && dangerZoneOpen,
+  });
+
+  const handleHardDelete = async () => {
+    if (!customerId || !customer) return;
+    setHardDeleting(true);
+    setHardDeleteConflict(null);
+    try {
+      const response = await fetch(`/api/admin/customers/${customerId}`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "x-csrf-token": document.cookie.split("; ").find((c) => c.startsWith("careconnect_csrf="))?.split("=")[1] ?? "",
+        },
+        body: JSON.stringify({ reason: hardDeleteReason, confirmName: hardDeleteConfirmName }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (response.status === 409 && data?.details?.checks) {
+          setHardDeleteConflict(data.details.checks);
+          await refetchHardDeleteReadiness();
+        }
+        toast({
+          title: "Löschen fehlgeschlagen",
+          description: data?.message || `Fehler ${response.status}`,
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: "Kunde gelöscht",
+        description: `"${customer.name}" wurde dauerhaft entfernt.`,
+      });
+      queryClient.removeQueries({ queryKey: ["customer", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "customers"] });
+      setHardDeleteDialogOpen(false);
+      setLocation("/admin/customers");
+    } catch (e) {
+      toast({
+        title: "Fehler",
+        description: e instanceof Error ? e.message : "Unbekannter Fehler",
+        variant: "destructive",
+      });
+    } finally {
+      setHardDeleting(false);
+    }
+  };
 
   const updateStatus = useMutation({
     mutationFn: async (payload: { status: string; deactivationReason?: string | null; deactivationNote?: string | null; inaktivAb?: string | null }) => {
@@ -494,6 +572,145 @@ export default function AdminCustomerDetail() {
               <CustomerTimeline customerId={customerId} />
             </TabsContent>
           </ResponsiveTabs>
+
+          {isSuperAdmin && (
+            <Card className="mt-4 border-red-200" data-testid="card-danger-zone">
+              <CardContent className="p-4">
+                <button
+                  type="button"
+                  onClick={() => setDangerZoneOpen((v) => !v)}
+                  className="w-full flex items-center justify-between text-left"
+                  data-testid="button-toggle-danger-zone"
+                >
+                  <h2 className="text-sm font-semibold flex items-center gap-2 text-red-700">
+                    <AlertTriangle className="h-4 w-4" />
+                    Gefahrenzone
+                  </h2>
+                  <ChevronRight className={`h-4 w-4 text-red-700 transition-transform ${dangerZoneOpen ? "rotate-90" : ""}`} />
+                </button>
+
+                {dangerZoneOpen && (
+                  <div className="mt-3 space-y-3" data-testid="danger-zone-content">
+                    <p className="text-xs text-muted-foreground">
+                      Karteileichen (versehentlich angelegte Dubletten ohne operative Daten) können hier dauerhaft gelöscht werden. Diese Aktion ist <strong>nicht umkehrbar</strong>.
+                    </p>
+
+                    {hardDeleteLoading && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Voraussetzungen werden geprüft …
+                      </div>
+                    )}
+
+                    {hardDeleteReadiness && (
+                      <ul className="space-y-1 text-xs" data-testid="list-hard-delete-checks">
+                        {hardDeleteReadiness.checks.map((c) => (
+                          <li
+                            key={c.key}
+                            className={c.met ? "text-green-700" : "text-red-700"}
+                            data-testid={`check-${c.key}`}
+                          >
+                            {c.met ? "✓" : "✗"} {c.label}
+                            {c.count > 0 && !c.met && ` (${c.count})`}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    {hardDeleteConflict && (
+                      <div className="rounded border border-red-300 bg-red-50 p-2 text-xs text-red-800" data-testid="text-hard-delete-conflict">
+                        Löschen blockiert. Aktuelle Voraussetzungen:
+                        <ul className="mt-1 space-y-0.5">
+                          {hardDeleteConflict.map((c) => (
+                            <li key={c.key}>
+                              {c.met ? "✓" : "✗"} {c.label}
+                              {c.count > 0 && !c.met && ` (${c.count})`}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {hardDeleteReadiness?.ready && (
+                      <AlertDialog open={hardDeleteDialogOpen} onOpenChange={(o) => {
+                        setHardDeleteDialogOpen(o);
+                        if (!o) {
+                          setHardDeleteReason("");
+                          setHardDeleteConfirmName("");
+                          setHardDeleteConflict(null);
+                        }
+                      }}>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            data-testid="button-open-hard-delete"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Kunde dauerhaft löschen
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Kunde endgültig löschen</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Du löschst <strong>{customer.name}</strong> dauerhaft aus der Datenbank. Diese Aktion ist nicht umkehrbar. Bitte gib einen Grund an und tippe den Namen zur Bestätigung.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+
+                          <div className="space-y-3 py-2">
+                            <div>
+                              <Label htmlFor="hard-delete-reason" className="text-xs">Grund (mind. 10 Zeichen)</Label>
+                              <Textarea
+                                id="hard-delete-reason"
+                                value={hardDeleteReason}
+                                onChange={(e) => setHardDeleteReason(e.target.value)}
+                                placeholder="Versehentlich angelegte Dublette …"
+                                className="mt-1 text-xs"
+                                rows={2}
+                                data-testid="input-hard-delete-reason"
+                              />
+                            </div>
+                            <div>
+                              <Label htmlFor="hard-delete-confirm" className="text-xs">Name zur Bestätigung tippen</Label>
+                              <Input
+                                id="hard-delete-confirm"
+                                value={hardDeleteConfirmName}
+                                onChange={(e) => setHardDeleteConfirmName(e.target.value)}
+                                placeholder={customer.name}
+                                className="mt-1 text-xs"
+                                data-testid="input-hard-delete-confirm-name"
+                              />
+                            </div>
+                          </div>
+
+                          <AlertDialogFooter>
+                            <AlertDialogCancel data-testid="button-hard-delete-cancel">Abbrechen</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleHardDelete();
+                              }}
+                              disabled={
+                                hardDeleting ||
+                                hardDeleteReason.trim().length < 10 ||
+                                hardDeleteConfirmName.trim() !== customer.name.trim()
+                              }
+                              className="bg-red-600 hover:bg-red-700"
+                              data-testid="button-hard-delete-confirm"
+                            >
+                              {hardDeleting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                              Endgültig löschen
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           <Dialog open={showMergeDialog} onOpenChange={(open) => {
             if (!open) {
