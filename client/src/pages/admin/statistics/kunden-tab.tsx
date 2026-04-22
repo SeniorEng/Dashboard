@@ -261,7 +261,24 @@ export function KundenTab({ selectedYear, selectedMonth }: KundenTabProps) {
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
         <StatCard label="Interessenten" value={customerStats.prospects || 0} color="text-blue-600" testId="cust-prospects" />
         <StatCard label="In Erstberatung" value={customerStats.consultation || 0} color="text-amber-600" testId="cust-consultation" />
-        <StatCard label="Erstbesuche geplant" value={customerStats.plannedConsultations || 0} icon={<CalendarCheck className={iconSize.sm} />} color="text-orange-600" testId="cust-planned-consultations" />
+        <Card data-testid="cust-planned-consultations">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="text-orange-600"><CalendarCheck className={iconSize.sm} /></div>
+              <div className="min-w-0">
+                <div className="text-xl font-bold text-orange-600" data-testid="cust-planned-consultations-future">{customerStats.plannedConsultationsFuture || 0}</div>
+                <div className="text-xs text-muted-foreground truncate">
+                  Erstbesuche geplant <span data-testid="cust-planned-consultations-total">(Σ {customerStats.plannedConsultations || 0})</span>
+                </div>
+                {(customerStats.plannedConsultationsPast || 0) > 0 ? (
+                  <div className="text-xs font-semibold text-red-600" data-testid="cust-planned-consultations-past">{customerStats.plannedConsultationsPast} überfällig</div>
+                ) : (
+                  <div className="text-xs text-muted-foreground/70" data-testid="cust-planned-consultations-past">0 überfällig</div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
         <StatCard label="Inaktiv" value={customerStats.inactiveCustomers || 0} color="text-gray-500" testId="cust-inactive" />
         <StatCard label="Gekündigt" value={customerStats.terminated || 0} color="text-red-600" testId="cust-terminated" />
         <StatCard label="Ø Termine/Kunde" value={Number(customerStats.avgAppointmentsPerCustomer || 0).toFixed(1).replace(".", ",")} color="text-teal-600" testId="cust-avg-appts" />

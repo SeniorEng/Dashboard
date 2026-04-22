@@ -191,6 +191,19 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
            AND a.appointment_type = 'Erstberatung'
            AND a.status = 'scheduled'
            AND a.date >= CURRENT_DATE
+        )::int AS "plannedConsultationsFuture",
+        (SELECT COUNT(*)
+         FROM appointments a
+         WHERE a.deleted_at IS NULL
+           AND a.appointment_type = 'Erstberatung'
+           AND a.status = 'scheduled'
+           AND a.date < CURRENT_DATE
+        )::int AS "plannedConsultationsPast",
+        (SELECT COUNT(*)
+         FROM appointments a
+         WHERE a.deleted_at IS NULL
+           AND a.appointment_type = 'Erstberatung'
+           AND a.status = 'scheduled'
         )::int AS "plannedConsultations"
       FROM customers c
     `),

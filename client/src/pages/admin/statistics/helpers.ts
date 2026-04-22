@@ -143,6 +143,8 @@ export interface CustomerStats {
   terminated: number;
   avgAppointmentsPerCustomer: number;
   plannedConsultations: number;
+  plannedConsultationsFuture: number;
+  plannedConsultationsPast: number;
   consultation?: number;
 }
 
