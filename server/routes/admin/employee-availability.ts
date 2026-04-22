@@ -8,6 +8,7 @@ import {
   userRoles,
   appointments,
   customers,
+  prospects,
   employeeTimeEntries,
   customerAssignmentHistory,
 } from "@shared/schema";
@@ -193,11 +194,17 @@ router.get("/employees/weekly-availability", asyncHandler("Wochen-Verfügbarkeit
       scheduledStart: appointments.scheduledStart,
       scheduledEnd: appointments.scheduledEnd,
       durationPromised: appointments.durationPromised,
-      customerName: sql`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as("customer_name"),
+      customerName: sql`COALESCE(
+        ${customers.vorname} || ' ' || ${customers.nachname},
+        ${customers.name},
+        ${prospects.vorname} || ' ' || ${prospects.nachname},
+        'Erstberatung'
+      )`.as("customer_name"),
       status: appointments.status,
     })
     .from(appointments)
-    .innerJoin(customers, eq(appointments.customerId, customers.id))
+    .leftJoin(customers, eq(appointments.customerId, customers.id))
+    .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(and(
       inArray(appointments.assignedEmployeeId, employeeIds),
       inArray(appointments.date, dates),
@@ -374,10 +381,16 @@ router.get("/employees/availability", asyncHandler("Verfügbarkeiten konnten nic
       scheduledStart: appointments.scheduledStart,
       scheduledEnd: appointments.scheduledEnd,
       durationPromised: appointments.durationPromised,
-      customerName: sql`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as("customer_name"),
+      customerName: sql`COALESCE(
+        ${customers.vorname} || ' ' || ${customers.nachname},
+        ${customers.name},
+        ${prospects.vorname} || ' ' || ${prospects.nachname},
+        'Erstberatung'
+      )`.as("customer_name"),
     })
     .from(appointments)
-    .innerJoin(customers, eq(appointments.customerId, customers.id))
+    .leftJoin(customers, eq(appointments.customerId, customers.id))
+    .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(and(
       inArray(appointments.assignedEmployeeId, employeeIds),
       eq(appointments.date, date),
