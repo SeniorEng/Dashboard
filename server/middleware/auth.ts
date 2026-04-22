@@ -298,14 +298,15 @@ export function requireCustomerAccess(
       return;
     }
 
-    const customerId = parseInt(req.params.customerId);
-    if (isNaN(customerId)) {
+    const customerIdRaw = parseInt(req.params.customerId, 10);
+    if (isNaN(customerIdRaw)) {
       res.status(400).json({
         error: "VALIDATION_ERROR",
         message: "Ungültige Kunden-ID",
       });
       return;
     }
+    const customerId = customerIdRaw;
 
     const hasAccess = await canAccessCustomer(
       req.user.id,

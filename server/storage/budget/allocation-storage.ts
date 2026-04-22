@@ -216,6 +216,64 @@ export async function calculateAllocatedCents(
   return calculated;
 }
 
+/**
+ * Berechnet die für §45b (Entlastungsbetrag) zur Verfügung stehende Allocation in Cent.
+ *
+ * ## Auto-Renewal-Modell (virtuelle monatliche Allokation)
+ *
+ * §45b ist ein **kumulatives Jahresbudget mit monatlicher Aufstockung** (Default
+ * 131 €/Monat = `BUDGET_45B_MAX_MONTHLY_CENTS`). Wir legen für die monatliche
+ * Aufstockung **bewusst KEINE Datenbank-Zeilen** an. Stattdessen wird die Summe
+ * pro Aufruf rein **rechnerisch** ermittelt:
+ *
+ *   1. Bestimme `allocStartYear/Month` (Startpunkt der Aufstockung) aus:
+ *      - `preferences.budgetStartDate`,
+ *      - frühestem `initial_balance.validFrom`,
+ *      - frühestem persistierten `monthly_auto`/`monthly`/`carryover`,
+ *      - bzw. `s45b.validFrom` (überschreibt nach oben).
+ *      Liegt ein manueller Startwert vor, beginnt das Auto-Renewal erst im
+ *      Folgemonat (siehe `latestIbMonth + 1`-Logik), damit der Stichmonat des
+ *      Startwerts nicht doppelt gezählt wird.
+ *
+ *   2. Bestimme `endYear/Month = min(horizon, s45b.validTo)`. `horizon` ist
+ *      `opts.asOfDate` falls in der Vergangenheit, sonst „heute". Termine in
+ *      der Zukunft sehen damit nur Allokationen bis zum aktuellen Monat.
+ *
+ *   3. Iteriere Monat für Monat von Start bis Ende und addiere für jeden Monat
+ *      `monthlyAmount`, sofern für diesen `(year, month)` KEIN expliziter
+ *      `initial_balance` existiert (`initialBalanceSet` enthält auch gelöschte
+ *      Startwerte, damit ein gelöschter Startwert nicht durch monatliche
+ *      Auto-Allokation rückwirkend ersetzt wird → Task #101).
+ *
+ *   4. Addiere alle persistierten `initial_balance`-Einträge bis `ibDateLimit`.
+ *
+ *   5. Addiere alle persistierten `carryover`-Einträge — aber nur dann, wenn
+ *      für das **Quelljahr** (carryover.year - 1) **kein** manueller Startwert
+ *      existiert. Sonst Doppelzählung (Task #101). Das Cleanup-Skript
+ *      `server/scripts/cleanup-duplicate-carryovers.ts` räumt obsolet
+ *      gewordene Carryovers zusätzlich auf (Task #102).
+ *
+ * ## Warum virtuell statt gespeichert?
+ *
+ *  - **Kein periodischer Cron nötig** — die Aufstockung wirkt sofort, sobald
+ *    der nächste Monat erreicht ist.
+ *  - **Rückwirkende Importe** funktionieren konsistent: Ein im April
+ *    importierter Januar-Termin sieht für die Allocation-Summe nur Monate
+ *    bis zum aktuellen Datum, nicht etwa nur Januar (siehe
+ *    `consumption-engine.ts: allocationAsOfDate = todayISO()` für §45b).
+ *  - **Konsumtion** läuft hingegen über die echten `budget_transactions` —
+ *    das Auto-Renewal ist also nur eine Berechnungs-Konvention für die
+ *    Allocation-Seite.
+ *
+ * ## Wo das Modell zuschlägt
+ *
+ *  - Hier: Berechnung des Allocation-Headerwerts in Summary/UI.
+ *  - `summary-queries.ts: getCustomerBudgetSummary` ruft das via
+ *    `calculateAllocatedCents` auf.
+ *  - `consumption-engine.ts: consumeFifo` benutzt es als Obergrenze für die
+ *    FIFO-Buchung (mit `asOfDate = todayISO()` für §45b, sonst
+ *    `transactionDate`).
+ */
 async function calculateAllocated45b(
   customerId: number,
   opts: { year?: number; asOfDate?: string },

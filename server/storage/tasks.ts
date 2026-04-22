@@ -2,6 +2,7 @@ import { tasks, users, customers, Task, InsertTask, UpdateTask } from "@shared/s
 import { eq, and, desc, asc, ne, sql as sqlBuilder, inArray, count, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db, type DbOrTx } from "../lib/db";
+import { parseLocalDate } from "@shared/utils/datetime";
 
 const creatorUsers = alias(users, "creator_users");
 const assigneeUsers = alias(users, "assignee_users");
@@ -379,7 +380,7 @@ export async function ensureBirthdayTask(
     : `Geburtstagskarte versenden.\n${marker}`;
 
   const today = new Date();
-  const birthdayDate = new Date(birthdayDateISO);
+  const birthdayDate = parseLocalDate(birthdayDateISO);
   const nextBirthday = new Date(year, birthdayDate.getMonth(), birthdayDate.getDate());
   const dueDate = `${nextBirthday.getFullYear()}-${(nextBirthday.getMonth() + 1).toString().padStart(2, "0")}-${nextBirthday.getDate().toString().padStart(2, "0")}`;
 

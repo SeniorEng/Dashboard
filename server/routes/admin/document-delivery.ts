@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../../lib/errors";
+import { requireIntParam } from "../../lib/params";
 import { deliverDocuments } from "../../services/document-delivery";
 import { testSmtpConnection } from "../../services/email-service";
 import { testEpostConnection, requestSmsCode, setEpostPassword, checkEpostHealthCheck } from "../../services/epost-service";
@@ -49,11 +50,8 @@ router.post("/document-delivery/send", asyncHandler("Versand fehlgeschlagen", as
 }));
 
 router.get("/document-delivery/customer/:customerId", asyncHandler("Versandprotokoll konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
-  if (isNaN(customerId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
 
   const deliveries = await deliveryStorage.getDeliveriesByCustomer(customerId);
   res.json(deliveries);
@@ -65,11 +63,8 @@ router.get("/document-delivery/recent", asyncHandler("Versandprotokoll konnte ni
 }));
 
 router.post("/document-delivery/send-for-customer/:customerId", asyncHandler("Versand fehlgeschlagen", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.customerId);
-  if (isNaN(customerId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
 
   const customer = await storage.getCustomer(customerId);
   if (!customer) {

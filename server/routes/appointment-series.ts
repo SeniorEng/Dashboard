@@ -9,7 +9,7 @@ import { validateSeriesDates, createSeriesAppointments } from "../services/appoi
 import { storage } from "../storage";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
-import { todayISO, addMinutesToTimeHHMMSS, isWeekend } from "@shared/utils/datetime";
+import { todayISO, addMinutesToTimeHHMMSS, isWeekend, parseLocalDate } from "@shared/utils/datetime";
 import { appointmentService } from "../services/appointments";
 import { db } from "../lib/db";
 
@@ -119,7 +119,7 @@ router.post("/", asyncHandler("Serie konnte nicht erstellt werden", async (req, 
     return sendBadRequest(res, "Das Enddatum muss nach dem Startdatum liegen.");
   }
 
-  const startD = new Date(input.startDate);
+  const startD = parseLocalDate(input.startDate);
   const maxEndD = new Date(startD);
   maxEndD.setMonth(maxEndD.getMonth() + 12);
   const maxEndStr = formatDateFromObj(maxEndD);
@@ -527,7 +527,7 @@ router.post("/:id/extend", asyncHandler("Serie konnte nicht verlängert werden",
     return sendBadRequest(res, "Das neue Enddatum muss nach dem aktuellen Enddatum liegen.");
   }
 
-  const extendMaxEnd = new Date(series.startDate);
+  const extendMaxEnd = parseLocalDate(series.startDate);
   extendMaxEnd.setMonth(extendMaxEnd.getMonth() + 12);
   const extendMaxEndStr = formatDateFromObj(extendMaxEnd);
   if (newEndDate > extendMaxEndStr) {
@@ -539,7 +539,7 @@ router.post("/:id/extend", asyncHandler("Serie konnte nicht verlängert werden",
     durationMinutes: series.serviceDurations[i],
   }));
 
-  const dayAfterCurrentEnd = new Date(series.endDate);
+  const dayAfterCurrentEnd = parseLocalDate(series.endDate);
   dayAfterCurrentEnd.setDate(dayAfterCurrentEnd.getDate() + 1);
   const startDate = formatDateFromObj(dayAfterCurrentEnd);
 
@@ -621,7 +621,7 @@ router.post("/:id/shorten", asyncHandler("Serie konnte nicht verkürzt werden", 
     return sendBadRequest(res, "Das neue Enddatum muss vor dem aktuellen Enddatum liegen.");
   }
 
-  const dayAfterNewEnd = new Date(newEndDate);
+  const dayAfterNewEnd = parseLocalDate(newEndDate);
   dayAfterNewEnd.setDate(dayAfterNewEnd.getDate() + 1);
   const cutoffDate = formatDateFromObj(dayAfterNewEnd);
 

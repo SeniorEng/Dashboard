@@ -27,6 +27,7 @@ import { authMiddleware, requireAuth } from "../middleware/auth";
 import { cacheHeaders } from "../middleware/cache-headers";
 import { customerManagementStorage } from "../storage/customer-management";
 import { asyncHandler } from "../lib/errors";
+import { requireIntParam } from "../lib/params";
 import { getCachedCompanySettings } from "../services/cache";
 
 const router = Router();
@@ -218,8 +219,8 @@ router.get("/address-search", asyncHandler("Adresssuche fehlgeschlagen", async (
 }));
 
 router.post("/customers/:id/geocode", requireAuth, asyncHandler("Geocodierung fehlgeschlagen", async (req, res) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) return res.status(400).json({ error: "Ungültige Kunden-ID" });
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const user = req.user!;
   if (!user.isAdmin) {

@@ -16,6 +16,7 @@ import {
 import type { CustomerDetail } from "@shared/api";
 import { internationalEmailSchema, optionalGermanPhoneSchema } from "@shared/schema/common";
 import { asyncHandler } from "../../lib/errors";
+import { requireIntParam } from "../../lib/params";
 import { z } from "zod";
 import { db } from "../../lib/db";
 import { eq, and, sql, isNull, desc } from "drizzle-orm";
@@ -99,12 +100,9 @@ router.get("/customers/unassigned-count", asyncHandler("Zählung konnte nicht ge
 }));
 
 router.get("/customers/:id/details", asyncHandler("Kunde konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
-  
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
   const customer = await customerManagementStorage.getCustomerWithDetails(id);
   if (!customer) {
     res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
@@ -307,12 +305,9 @@ const updateCustomerSchema = z.object({
 });
 
 router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
-  
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
   const parsed = updateCustomerSchema.parse(req.body);
   const { skipDuplicateCheck, ...validatedData } = parsed;
 
@@ -385,11 +380,8 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
 }));
 
 router.get("/customers/:id/timeline", asyncHandler("Timeline konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
 
   const customer = await storage.getCustomer(id);
   if (!customer) {

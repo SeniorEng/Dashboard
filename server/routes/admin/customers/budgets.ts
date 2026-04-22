@@ -5,6 +5,7 @@ import { budgetLedgerStorage } from "../../../storage/budget-ledger";
 import { computeDataHash } from "../../../services/signature-integrity";
 import { auditService } from "../../../services/audit";
 import { asyncHandler } from "../../../lib/errors";
+import { requireIntParam } from "../../../lib/params";
 import { z } from "zod";
 import { validate45aAmount, validate45bAmount, validate39_42aAmount } from "@shared/domain/budgets";
 import {
@@ -17,23 +18,17 @@ import { eq, and, sql, gte, lte, isNull, isNotNull } from "drizzle-orm";
 const router = Router();
 
 router.get("/customers/:id/budgets", asyncHandler("Budget-Historie konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  if (isNaN(id)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
-  
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
   const history = await customerManagementStorage.getCustomerBudgetHistory(id);
   res.json(history);
 }));
 
 router.post("/customers/:id/budgets", asyncHandler("Budget konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
-  const customerId = parseInt(req.params.id);
-  if (isNaN(customerId)) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kunden-ID" });
-    return;
-  }
-  
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
+
   const validatedData = insertCustomerBudgetSchema.parse({ ...req.body, customerId });
   
   const customer = await storage.getCustomer(customerId);
