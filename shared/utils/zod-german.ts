@@ -1,6 +1,6 @@
 import { z, ZodIssueCode, ZodErrorMap } from "zod";
 
-export const germanErrorMap: ZodErrorMap = (issue, ctx) => {
+const germanErrorMap: ZodErrorMap = (issue, ctx) => {
   switch (issue.code) {
     case ZodIssueCode.invalid_type:
       if (issue.received === "undefined" || issue.received === "null") {

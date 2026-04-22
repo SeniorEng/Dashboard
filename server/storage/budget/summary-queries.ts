@@ -43,7 +43,7 @@ export async function getTotalCarryoverCents(customerId: number, asOfDate: strin
   return Number(carryoverAllocations[0]?.total ?? 0);
 }
 
-export async function getAvailableCarryoverCents(customerId: number, asOfDate: string, _tx?: DbClient): Promise<number> {
+async function getAvailableCarryoverCents(customerId: number, asOfDate: string, _tx?: DbClient): Promise<number> {
   const d = _tx ?? db;
   const carryoverAllocations = await d.select()
     .from(budgetAllocations)
@@ -203,7 +203,7 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
   };
 }
 
-export async function getBudgetSummary45a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<Budget45aSummary> {
+async function getBudgetSummary45a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<Budget45aSummary> {
   const today = todayISO();
   const todayDate = parseLocalDate(today);
   const currentYear = todayDate.getFullYear();
@@ -255,7 +255,7 @@ export async function getBudgetSummary45a(customerId: number, _preferences?: Cus
   };
 }
 
-export async function getBudgetSummary39_42a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<Budget39_42aSummary> {
+async function getBudgetSummary39_42a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<Budget39_42aSummary> {
   const today = todayISO();
   const todayDate = parseLocalDate(today);
   const currentYear = todayDate.getFullYear();

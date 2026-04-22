@@ -8,7 +8,7 @@ import {
 
 export const DACH_COUNTRIES: CountryCode[] = ["DE", "AT", "CH"];
 
-export function isDACHCountry(country: string | undefined): boolean {
+function isDACHCountry(country: string | undefined): boolean {
   return DACH_COUNTRIES.includes(country as CountryCode);
 }
 

@@ -19,20 +19,15 @@
 export {
   // Types
   type AppointmentStatus,
-  type AppointmentType,
   type ServiceType,
   type TravelOriginType,
   type ServiceInfo,
-  type CardServiceInfo,
-  type TravelOriginSuggestion,
   // Constants
   PFLEGEGRAD_OPTIONS,
   DURATION_OPTIONS,
-  STATUS_ORDER,
   STATUS_LABELS,
   STATUS_COLORS,
   STATUS_PRIORITY,
-  APPOINTMENT_TYPE_COLORS,
   SERVICE_TYPE_COLORS,
   // Time formatting utilities
   formatTimeSlot,

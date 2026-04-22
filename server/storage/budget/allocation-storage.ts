@@ -118,7 +118,7 @@ export async function getInitialBalanceAllocations(customerId: number, budgetTyp
     .orderBy(desc(budgetAllocations.validFrom));
 }
 
-export async function getMonthlyBudgetAmountCents(customerId: number, _tx?: DbClient, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<number> {
+async function getMonthlyBudgetAmountCents(customerId: number, _tx?: DbClient, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<number> {
   const d = _tx ?? db;
 
   const settings = _typeSettings ?? await d.select()
@@ -661,7 +661,7 @@ async function calculateAllocated39_42a(
   return Math.max(0, endYear - startYear + 1) * yearlyLimitCents + ibTotal;
 }
 
-export async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Promise<BudgetAllocation[]> {
+async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Promise<BudgetAllocation[]> {
   const d = _tx ?? db;
   const { year: curYear } = currentYearAndMonth();
 
@@ -824,7 +824,7 @@ export async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClien
   return created;
 }
 
-export async function processExpiredCarryover(customerId: number, _tx?: DbClient): Promise<import("@shared/schema").BudgetTransaction[]> {
+async function processExpiredCarryover(customerId: number, _tx?: DbClient): Promise<import("@shared/schema").BudgetTransaction[]> {
   const d = _tx ?? db;
   const today = todayISO();
 

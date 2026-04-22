@@ -1,6 +1,6 @@
 import { CONTACT_TYPES as CONTACT_TYPE_VALUES, LEGACY_CONTACT_TYPES } from "../schema/customers";
 
-export { CONTACT_TYPE_VALUES, LEGACY_CONTACT_TYPES };
+export { LEGACY_CONTACT_TYPES };
 
 export const BILLING_TYPES = [
   "pflegekasse_gesetzlich",

@@ -1,6 +1,6 @@
 import { parseLocalDate } from "../utils/datetime";
 
-export function calculateProRataVacationDays(
+function calculateProRataVacationDays(
   vacationDaysPerYear: number,
   eintrittsdatum: string,
   year: number

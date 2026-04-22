@@ -6,7 +6,7 @@ import { timeToMinutes, addMinutesToTime, formatDurationDisplay } from "../utils
 // ============================================
 
 export type AppointmentStatus = "scheduled" | "in-progress" | "documenting" | "completed" | "cancelled";
-export type AppointmentType = "Erstberatung" | "Kundentermin";
+type AppointmentType = "Erstberatung" | "Kundentermin";
 export type ServiceType = "Hauswirtschaft" | "Alltagsbegleitung" | "Erstberatung";
 export type TravelOriginType = "home" | "appointment";
 
@@ -15,7 +15,7 @@ export type TravelOriginType = "home" | "appointment";
 // ============================================
 
 
-export const STATUS_ORDER: Record<AppointmentStatus, number> = {
+const STATUS_ORDER: Record<AppointmentStatus, number> = {
   "scheduled": 0,
   "in-progress": 1,
   "documenting": 2,
@@ -115,7 +115,7 @@ export interface ServiceInfo {
   primaryType: ServiceType | null;
 }
 
-export interface CardServiceInfo extends ServiceInfo {
+interface CardServiceInfo extends ServiceInfo {
   borderClass: string;
 }
 
@@ -153,7 +153,7 @@ export const STATUS_COLORS: Record<AppointmentStatus, string> = {
   "cancelled": "bg-red-50 text-red-700 border-red-200",
 };
 
-export const APPOINTMENT_TYPE_COLORS: Record<AppointmentType, string> = {
+const APPOINTMENT_TYPE_COLORS: Record<AppointmentType, string> = {
   "Erstberatung": "bg-purple-100 text-purple-800 border-purple-200",
   "Kundentermin": "bg-teal-100 text-teal-800 border-teal-200",
 };
@@ -242,7 +242,7 @@ export function getCardServiceInfoFromAppointment(appointment: {
 }
 
 
-export interface TravelOriginSuggestion {
+interface TravelOriginSuggestion {
   suggestedOrigin: TravelOriginType;
   previousAppointment: Appointment | null;
   previousCustomerName?: string;
