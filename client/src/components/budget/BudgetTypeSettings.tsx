@@ -606,8 +606,10 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
   const hasValidInput = amount && (euroStringToCents(amount) ?? 0) > 0;
 
   const selectedYear = parseInt(month.split("-")[0]);
+  const selectedMonthNum = parseInt(month.split("-")[1]);
   const currentYear = new Date().getFullYear();
   const currentMonth = new Date().getMonth() + 1;
+  const showMidYearWarning = selectedMonthNum > 1;
 
   const filteredMonths = MONTH_OPTIONS.filter(m => {
     if (selectedYear < currentYear) return true;
@@ -714,6 +716,21 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
             </div>
           </div>
         </div>
+
+        {hasValidInput && showMidYearWarning && (
+          <div
+            className="flex items-start gap-2 mt-1 p-2 rounded bg-amber-50 border border-amber-200 text-xs text-amber-800"
+            data-testid={`warning-mid-year-stichmonat-${budgetType}`}
+          >
+            <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <span>
+              <strong>Hinweis:</strong> Stichmonat ist nicht Januar. Der eingegebene Betrag gilt
+              als Restguthaben <strong>ab {formatMonthYear(month)}</strong>. Bereits in den Vormonaten
+              ({selectedYear}) verbrauchtes Budget muss in diesem Wert berücksichtigt sein —
+              sonst werden Buchungen aus den Vormonaten doppelt gezählt.
+            </span>
+          </div>
+        )}
 
         {hasValidInput && (
           <div className="space-y-2 mt-1">
