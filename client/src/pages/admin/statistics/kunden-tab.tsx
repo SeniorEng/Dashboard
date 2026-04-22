@@ -266,12 +266,31 @@ export function KundenTab({ selectedYear, selectedMonth }: KundenTabProps) {
             <div className="flex items-center gap-3">
               <div className="text-orange-600"><CalendarCheck className={iconSize.sm} /></div>
               <div className="min-w-0">
-                <div className="text-xl font-bold text-orange-600" data-testid="cust-planned-consultations-future">{customerStats.plannedConsultationsFuture || 0}</div>
+                <Link
+                  href="/admin/planned-consultations?filter=upcoming"
+                  className="text-xl font-bold text-orange-600 hover:underline"
+                  data-testid="cust-planned-consultations-future"
+                >
+                  {customerStats.plannedConsultationsFuture || 0}
+                </Link>
                 <div className="text-xs text-muted-foreground truncate">
-                  Erstbesuche geplant <span data-testid="cust-planned-consultations-total">(Σ {customerStats.plannedConsultations || 0})</span>
+                  Erstbesuche geplant{" "}
+                  <Link
+                    href="/admin/planned-consultations?filter=all"
+                    className="hover:underline"
+                    data-testid="cust-planned-consultations-total"
+                  >
+                    (Σ {customerStats.plannedConsultations || 0})
+                  </Link>
                 </div>
                 {(customerStats.plannedConsultationsPast || 0) > 0 ? (
-                  <div className="text-xs font-semibold text-red-600" data-testid="cust-planned-consultations-past">{customerStats.plannedConsultationsPast} überfällig</div>
+                  <Link
+                    href="/admin/planned-consultations?filter=overdue"
+                    className="text-xs font-semibold text-red-600 hover:underline block"
+                    data-testid="cust-planned-consultations-past"
+                  >
+                    {customerStats.plannedConsultationsPast} überfällig
+                  </Link>
                 ) : (
                   <div className="text-xs text-muted-foreground/70" data-testid="cust-planned-consultations-past">0 überfällig</div>
                 )}

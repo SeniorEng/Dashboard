@@ -330,6 +330,18 @@ router.get("/counts", asyncHandler("Fehler beim Laden der Terminzähler", async 
   res.json(counts);
 }));
 
+router.get("/planned-consultations", asyncHandler("Fehler beim Laden der geplanten Erstberatungen", async (req, res) => {
+  if (!req.user?.isAdmin) {
+    return sendForbidden(res, "FORBIDDEN", "Sie haben keine Berechtigung für diese Aktion");
+  }
+  const filterParam = (req.query.filter as string | undefined) ?? "all";
+  const filter: "overdue" | "upcoming" | "all" =
+    filterParam === "overdue" || filterParam === "upcoming" ? filterParam : "all";
+  const today = todayISO();
+  const appointments = await storage.getPlannedConsultations(filter, today);
+  res.json(appointments);
+}));
+
 router.get("/undocumented", asyncHandler("Fehler beim Laden der offenen Dokumentationen", async (req, res) => {
   const user = req.user!;
   const today = todayISO();

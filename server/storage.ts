@@ -124,6 +124,7 @@ export interface IStorage {
   ): Promise<PaginatedResult<AppointmentWithCustomer>>;
   getAppointmentWithCustomer(id: number): Promise<AppointmentWithCustomer | undefined>;
   getUndocumentedAppointments(beforeDate: string, customerIds?: number[], employeeId?: number, assignedOnly?: boolean): Promise<AppointmentWithCustomer[]>;
+  getPlannedConsultations(filter: "overdue" | "upcoming" | "all", today: string): Promise<AppointmentWithCustomer[]>;
   
   // Get appointments for a specific employee on a specific day
   getAppointmentsForDay(employeeId: number, date: string): Promise<AppointmentWithCustomer[]>;
@@ -226,6 +227,7 @@ export class DatabaseStorage implements IStorage {
   getAppointmentsWithCustomersPaginated = appointmentsStorage.getAppointmentsWithCustomersPaginated;
   getAppointmentWithCustomer = appointmentsStorage.getAppointmentWithCustomer;
   getUndocumentedAppointments = appointmentsStorage.getUndocumentedAppointments;
+  getPlannedConsultations = appointmentsStorage.getPlannedConsultations;
   getAppointmentsForDay = appointmentsStorage.getAppointmentsForDay;
   getAppointmentServices = appointmentsStorage.getAppointmentServices;
   getBatchAppointmentServices = appointmentsStorage.getBatchAppointmentServices;

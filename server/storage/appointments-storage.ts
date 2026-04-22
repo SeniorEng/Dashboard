@@ -7,7 +7,7 @@ import {
   prospects,
 } from "@shared/schema";
 import type { AppointmentWithCustomer, PaginatedResult } from "@shared/types";
-import { eq, count, sql as sqlBuilder, lt, ne, and, or, inArray, isNull } from "drizzle-orm";
+import { eq, count, sql as sqlBuilder, lt, gte, ne, and, or, inArray, isNull, asc } from "drizzle-orm";
 import { customerIdsCache } from "../services/cache";
 import { db, type DbOrTx } from "../lib/db";
 import { appointmentWithCustomerSelectFields, mapAppointmentRow } from "./appointment-helpers";
@@ -193,6 +193,30 @@ export async function getUndocumentedAppointments(beforeDate: string, customerId
     .leftJoin(customers, eq(appointments.customerId, customers.id))
     .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(and(...conditions));
+
+  return results.map(mapAppointmentRow);
+}
+
+export async function getPlannedConsultations(filter: "overdue" | "upcoming" | "all", today: string): Promise<AppointmentWithCustomer[]> {
+  const conditions = [
+    isNull(appointments.deletedAt),
+    eq(appointments.appointmentType, "Erstberatung"),
+    eq(appointments.status, "scheduled"),
+  ];
+
+  if (filter === "overdue") {
+    conditions.push(lt(appointments.date, today));
+  } else if (filter === "upcoming") {
+    conditions.push(gte(appointments.date, today));
+  }
+
+  const results = await db
+    .select(appointmentWithCustomerSelectFields)
+    .from(appointments)
+    .leftJoin(customers, eq(appointments.customerId, customers.id))
+    .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
+    .where(and(...conditions))
+    .orderBy(asc(appointments.date), asc(appointments.scheduledStart));
 
   return results.map(mapAppointmentRow);
 }
