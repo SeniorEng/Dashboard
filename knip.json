@@ -1,0 +1,34 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "server/index.ts",
+    "client/src/main.tsx",
+    "vite.config.ts",
+    "drizzle.config.ts",
+    "tests/**/*.test.ts",
+    "tests/globalSetup.ts",
+    "tests/setup.ts",
+    "server/scripts/**/*.ts"
+  ],
+  "project": [
+    "client/src/**/*.{ts,tsx}",
+    "server/**/*.ts",
+    "shared/**/*.ts"
+  ],
+  "ignore": [
+    "**/node_modules/**",
+    ".cache/**",
+    "attached_assets/**",
+    "dist/**",
+    ".local/**",
+    "tests/budget_logic_tests.js"
+  ],
+  "ignoreDependencies": [
+    "tsx",
+    "@types/*",
+    "tailwindcss",
+    "autoprefixer",
+    "postcss",
+    "@tailwindcss/*"
+  ]
+}

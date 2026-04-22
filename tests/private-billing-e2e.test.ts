@@ -41,6 +41,16 @@ function getPastWeekday(daysAgo: number): string {
   return d.toISOString().split("T")[0];
 }
 
+function buildFallbackTimeGrid(stepMinutes = 5): string[] {
+  const out: string[] = [];
+  for (let h = 0; h < 24; h++) {
+    for (let m = 0; m < 60; m += stepMinutes) {
+      out.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
+    }
+  }
+  return out;
+}
+
 async function findFreeSlotAndCreate(
   customerId: number,
   serviceId: number,
@@ -49,26 +59,60 @@ async function findFreeSlotAndCreate(
   times: string[],
   employeeId?: number,
 ): Promise<{ id: number; date: string; time: string }> {
+  let lastStatus: number | undefined;
+  let lastBody: any;
+  let attempts = 0;
+  const triedDates = new Set<string>();
+  const tryAt = async (dateStr: string, time: string) => {
+    attempts++;
+    const res = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId,
+      date: dateStr,
+      scheduledStart: time,
+      services: [{ serviceId, durationMinutes }],
+      assignedEmployeeId: employeeId || auth.user.id,
+    });
+    if (res.status === 201) {
+      cleanupApptIds.push(res.data.id);
+      return { id: res.data.id, date: dateStr, time };
+    }
+    lastStatus = res.status;
+    lastBody = res.data;
+    return null;
+  };
+
   for (let offset = offsetRange[0]; offset <= offsetRange[1]; offset++) {
     const d = new Date();
     d.setDate(d.getDate() - offset);
     getWeekday(d);
     const dateStr = d.toISOString().split("T")[0];
+    triedDates.add(dateStr);
     for (const time of times) {
-      const res = await apiPost<any>("/api/appointments/kundentermin", {
-        customerId,
-        date: dateStr,
-        scheduledStart: time,
-        services: [{ serviceId, durationMinutes }],
-        assignedEmployeeId: employeeId || auth.user.id,
-      });
-      if (res.status === 201) {
-        cleanupApptIds.push(res.data.id);
-        return { id: res.data.id, date: dateStr, time };
-      }
+      const ok = await tryAt(dateStr, time);
+      if (ok) return ok;
     }
   }
-  throw new Error("Kein freier Slot gefunden");
+
+  // Fallback: dense 5-minute grid across the same date window.
+  // Robust gegen accumulated test data (stale appointments belegen die ursprünglich
+  // angefragten Zeitslots). Die Tests prüfen Inhalt/Aggregation, nicht die exakte Uhrzeit.
+  const fallback = buildFallbackTimeGrid(5).filter((t) => !times.includes(t));
+  for (let offset = offsetRange[0]; offset <= offsetRange[1]; offset++) {
+    const d = new Date();
+    d.setDate(d.getDate() - offset);
+    getWeekday(d);
+    const dateStr = d.toISOString().split("T")[0];
+    for (const time of fallback) {
+      const ok = await tryAt(dateStr, time);
+      if (ok) return ok;
+    }
+  }
+
+  throw new Error(
+    `Kein freier Slot gefunden (customer=${customerId} service=${serviceId} dur=${durationMinutes}min, ` +
+    `attempts=${attempts}, dates=${[...triedDates].join(",")}, ` +
+    `lastStatus=${lastStatus}, lastBody=${JSON.stringify(lastBody)})`
+  );
 }
 
 async function documentAppointment(
