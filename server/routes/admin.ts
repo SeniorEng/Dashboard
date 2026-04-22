@@ -18,6 +18,7 @@ import qontoRouter from "./admin/qonto";
 import whatsappRouter from "./admin/whatsapp";
 import importAppointmentsRouter from "./admin/import-appointments";
 import contactMigrationRouter from "./admin/contact-migration";
+import testCleanupRouter from "./admin/test-cleanup";
 import { initiateTestCall } from "../services/twilio-call-bridge";
 
 const router = Router();
@@ -126,6 +127,10 @@ router.use(async (req: Request, res: Response, next) => {
 
   next();
 });
+
+if (process.env.NODE_ENV !== "production") {
+  router.use("/", testCleanupRouter);
+}
 
 router.use("/qonto", qontoRouter);
 router.use("/whatsapp", whatsappRouter);

@@ -42,6 +42,19 @@ async function apiDelete(auth: AuthInfo, path: string): Promise<Response> {
   });
 }
 
+async function apiPost(auth: AuthInfo, path: string, body: unknown): Promise<Response> {
+  const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
+  return fetch(`${BASE_URL}${path}`, {
+    method: "POST",
+    headers: {
+      Cookie: cookieHeader,
+      "x-csrf-token": auth.csrfToken,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+}
+
 async function apiGet(auth: AuthInfo, path: string): Promise<Response> {
   return fetch(`${BASE_URL}${path}`, {
     headers: { Cookie: auth.cookie },
@@ -99,17 +112,19 @@ export async function setup() {
   const testCustomers = customers.filter(isTestCustomer);
 
   if (testCustomers.length > 0) {
-    console.log(`[globalSetup] Found ${testCustomers.length} stale test customers, deleting...`);
-    let deleted = 0;
-    for (const c of testCustomers) {
-      const res = await apiDelete(auth, `/api/admin/customers/${c.id}`);
-      if (res.ok) {
-        deleted++;
-      } else {
-        console.warn(`[globalSetup] Failed to delete customer ${c.id}: ${res.status}`);
+    console.log(`[globalSetup] Found ${testCustomers.length} stale test customers, purging...`);
+    const ids = testCustomers.map(c => c.id);
+    const res = await apiPost(auth, "/api/admin/test-cleanup/purge-customers", { ids });
+    if (!res.ok) {
+      console.warn(`[globalSetup] Bulk purge failed: ${res.status} ${await res.text()}`);
+    } else {
+      const result = await res.json() as { deleted: number[]; failed: Array<{ id: number; error: string }> };
+      console.log(`[globalSetup] Purged ${result.deleted.length}/${testCustomers.length} stale test customers`);
+      if (result.failed.length > 0) {
+        const sample = result.failed.slice(0, 3).map(f => `${f.id}:${f.error}`).join("; ");
+        console.warn(`[globalSetup] ${result.failed.length} purge failures (first 3): ${sample}`);
       }
     }
-    console.log(`[globalSetup] Deleted ${deleted}/${testCustomers.length} stale test customers`);
   }
 
   const prospRes = await apiGet(auth, "/api/admin/prospects");
