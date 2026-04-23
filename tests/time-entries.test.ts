@@ -262,26 +262,52 @@ describe("TE-BIZ-5: Mehrtägiger Urlaub überspringt Wochenenden", () => {
   let endStr: string;
 
   beforeAll(async () => {
-    let baseOffset = 500;
-    const start = new Date();
-    start.setDate(start.getDate() + baseOffset);
-    while (start.getDay() !== 1) {
-      start.setDate(start.getDate() + 1);
-    }
-    startStr = start.toISOString().split("T")[0];
-    const end = new Date(start);
-    end.setDate(end.getDate() + 6);
-    endStr = end.toISOString().split("T")[0];
-
-    const cur = new Date(start);
-    while (cur <= end) {
-      const ds = cur.toISOString().split("T")[0];
-      const day = cur.getDay();
-      if (day !== 0 && day !== 6) {
-        await clearDateEntries(ds);
+    // Scan forward from offset 500 in 7-day Monday windows until we find one
+    // where all 5 weekdays are conflict-free (no appointments, no time entries).
+    // Probe each weekday by attempting a full-day vacation create + immediate delete.
+    for (let baseOffset = 500; baseOffset < 500 + 365; baseOffset += 7) {
+      const start = new Date();
+      start.setDate(start.getDate() + baseOffset);
+      while (start.getDay() !== 1) {
+        start.setDate(start.getDate() + 1);
       }
-      cur.setDate(cur.getDate() + 1);
+      const candidateStart = start.toISOString().split("T")[0];
+      const end = new Date(start);
+      end.setDate(end.getDate() + 6);
+      const candidateEnd = end.toISOString().split("T")[0];
+
+      const probeIds: number[] = [];
+      let allFree = true;
+      const cur = new Date(start);
+      while (cur <= end) {
+        const ds = cur.toISOString().split("T")[0];
+        const day = cur.getDay();
+        if (day !== 0 && day !== 6) {
+          await clearDateEntries(ds);
+          const probe = await apiPost<any>("/api/time-entries", {
+            entryDate: ds,
+            entryType: "urlaub",
+            isFullDay: true,
+          });
+          if (probe.status === 201) {
+            probeIds.push(probe.data.id);
+          } else {
+            allFree = false;
+            break;
+          }
+        }
+        cur.setDate(cur.getDate() + 1);
+      }
+      for (const id of probeIds) {
+        await apiDelete(`/api/time-entries/${id}`);
+      }
+      if (allFree) {
+        startStr = candidateStart;
+        endStr = candidateEnd;
+        return;
+      }
     }
+    throw new Error("Kein freies Mo-So-Fenster für TE-BIZ-5.1 gefunden");
   });
 
   it("TE-BIZ-5.1 – Mehrtägiger Urlaub (Montag-Sonntag) erstellt nur Werktage", async () => {

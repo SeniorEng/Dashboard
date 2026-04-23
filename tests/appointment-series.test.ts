@@ -303,15 +303,21 @@ describe("SER-8: Serien-Liste mit remainingCount", () => {
 
 describe("SER-9: Zweiwöchentliche Serie", () => {
   it("SER-9.1 – biweekly Serie erstellen", async () => {
-    const res = await apiPost<any>("/api/appointment-series",
-      seriesPayload({ _offset: 870, _span: 56, weekdays: ["mi"], frequency: "biweekly", scheduledStart: "14:00" })
-    );
-    expect(res.status).toBe(201);
-    expect(res.data.series).toBeDefined();
-    expect(res.data.series.frequency).toBe("biweekly");
-    cleanupSeriesIds.push(res.data.series.id);
+    // Scan forward for an offset where the biweekly Wednesday window is free
+    // of pre-existing appointments. Seed data may occupy specific Wednesdays.
+    let res: { status: number; data: any } | null = null;
+    for (let off = 870; off < 870 + 365; off += 14) {
+      res = await apiPost<any>("/api/appointment-series",
+        seriesPayload({ _offset: off, _span: 56, weekdays: ["mi"], frequency: "biweekly", scheduledStart: "14:00" })
+      );
+      if (res.status === 201) break;
+    }
+    expect(res!.status).toBe(201);
+    expect(res!.data.series).toBeDefined();
+    expect(res!.data.series.frequency).toBe("biweekly");
+    cleanupSeriesIds.push(res!.data.series.id);
 
-    const created = res.data.createdAppointments || 0;
+    const created = res!.data.createdAppointments || 0;
     expect(created).toBeGreaterThan(0);
     expect(created).toBeLessThanOrEqual(5);
   });
