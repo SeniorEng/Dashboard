@@ -7,10 +7,14 @@ import {
   getFutureDate,
   getPastDate,
   getAuthCookie,
+  createTestCustomer,
+  createTestEmployee,
+  deactivateTestEmployee,
 } from "./test-utils";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let testCustomerId: number;
+let testEmployeeId: number;
 let hwServiceId: number;
 let completedAppointmentId: number | null = null;
 let serviceRecordId: number | null = null;
@@ -36,7 +40,7 @@ async function createAndDocumentAppointment(timeSlots: string[], offsetRange: [n
         date: dateStr,
         scheduledStart: time,
         services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
-        assignedEmployeeId: auth.user.id,
+        assignedEmployeeId: testEmployeeId,
       });
       if (createRes.status === 201) {
         cleanupApptIds.push(createRes.data.id);
@@ -62,12 +66,15 @@ beforeAll(async () => {
   const servicesRes = await apiGet<any[]>("/api/services/all");
   hwServiceId = servicesRes.data.find((s: any) => s.code === "hauswirtschaft")!.id;
 
-  const custRes = await apiGet<{ data: any[] }>("/api/admin/customers?limit=1");
-  testCustomerId = custRes.data.data[0].id;
+  const emp = await createTestEmployee({ nachnamePrefix: "TestSR" });
+  testEmployeeId = emp.id;
+
+  const cust = await createTestCustomer({ nachname: `LN-Test_${Date.now()}` });
+  testCustomerId = cust.id;
 
   await apiPatch(`/api/admin/customers/${testCustomerId}/assign`, {
     primaryEmployeeId: auth.user.id,
-    backupEmployeeId: null,
+    backupEmployeeId: testEmployeeId,
     backupEmployeeId2: null,
   });
 });
@@ -79,6 +86,7 @@ afterAll(async () => {
   for (const id of cleanupApptIds) {
     try { await apiDelete(`/api/appointments/${id}`); } catch {}
   }
+  await deactivateTestEmployee(testEmployeeId);
 });
 
 describe("LN-1: Grundlegende Endpunkte", () => {
@@ -294,7 +302,7 @@ describe("LN-7: Nicht-dokumentierter Termin blockiert LN", () => {
           date: getFutureDate(offset),
           scheduledStart: time,
           services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
-          assignedEmployeeId: auth.user.id,
+          assignedEmployeeId: testEmployeeId,
         });
         if (res.status === 201) { apptRes = res; break; }
       }
@@ -371,7 +379,7 @@ describe("LN-9: Monatlicher Leistungsnachweis", () => {
           date: futureDate,
           scheduledStart: time,
           services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
-          assignedEmployeeId: auth.user.id,
+          assignedEmployeeId: testEmployeeId,
         });
         if (res.status === 201) { createRes = res; break; }
       }
@@ -403,7 +411,7 @@ describe("LN-10: In-progress Termin blockiert LN", () => {
           date: futureDate,
           scheduledStart: time,
           services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
-          assignedEmployeeId: auth.user.id,
+          assignedEmployeeId: testEmployeeId,
         });
         if (apptRes.status === 201) break outer;
       }

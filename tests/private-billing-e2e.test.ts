@@ -9,11 +9,14 @@ import {
   loginAs,
   uniqueId,
   getPastDate,
+  createTestEmployee,
+  deactivateTestEmployee,
 } from "./test-utils";
 
 type AuthCookie = Awaited<ReturnType<typeof getAuthCookie>>;
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
+let testEmployeeId: number;
 let hwServiceId: number;
 let abServiceId: number;
 let travelKmServiceId: number;
@@ -70,7 +73,7 @@ async function findFreeSlotAndCreate(
       date: dateStr,
       scheduledStart: time,
       services: [{ serviceId, durationMinutes }],
-      assignedEmployeeId: employeeId || auth.user.id,
+      assignedEmployeeId: employeeId || testEmployeeId,
     });
     if (res.status === 201) {
       cleanupApptIds.push(res.data.id);
@@ -313,6 +316,9 @@ beforeAll(async () => {
   expect(provRes.status).toBe(200);
   expect(provRes.data.length).toBeGreaterThan(0);
   insuranceProviderId = provRes.data[0].id;
+
+  const emp = await createTestEmployee({ nachnamePrefix: "TestPB" });
+  testEmployeeId = emp.id;
 });
 
 afterAll(async () => {
@@ -331,6 +337,7 @@ afterAll(async () => {
   for (const id of cleanupCustomerIds) {
     try { await apiDelete(`/api/admin/customers/${id}`); } catch {}
   }
+  await deactivateTestEmployee(testEmployeeId);
 });
 
 
@@ -353,7 +360,7 @@ describe("SZ: Selbstzahler – Vollständiger Abrechnungs-Flow", () => {
     expect(szCustomerId).toBeDefined();
     const res = await apiPatch<any>(`/api/admin/customers/${szCustomerId}/assign`, {
       primaryEmployeeId: auth.user.id,
-      backupEmployeeId: null,
+      backupEmployeeId: testEmployeeId,
       backupEmployeeId2: null,
     });
     expect(res.status).toBe(200);
@@ -520,7 +527,7 @@ describe("PV: Privatversicherte – Vollständiger Abrechnungs-Flow", () => {
     expect(pvCustomerId).toBeDefined();
     const res = await apiPatch<any>(`/api/admin/customers/${pvCustomerId}/assign`, {
       primaryEmployeeId: auth.user.id,
-      backupEmployeeId: null,
+      backupEmployeeId: testEmployeeId,
       backupEmployeeId2: null,
     });
     expect(res.status).toBe(200);
@@ -770,7 +777,7 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
 
     await apiPatch<any>(`/api/admin/customers/${cpCustomerId}/assign`, {
       primaryEmployeeId: auth.user.id,
-      backupEmployeeId: null,
+      backupEmployeeId: testEmployeeId,
       backupEmployeeId2: null,
     });
 
@@ -960,7 +967,7 @@ describe("XV: Cross-Validation – Abrechnungstyp-übergreifende Prüfungen", ()
 
     await apiPatch<any>(`/api/admin/customers/${xvSzId}/assign`, {
       primaryEmployeeId: auth.user.id,
-      backupEmployeeId: null,
+      backupEmployeeId: testEmployeeId,
       backupEmployeeId2: null,
     });
 
@@ -989,7 +996,7 @@ describe("XV: Cross-Validation – Abrechnungstyp-übergreifende Prüfungen", ()
 
     await apiPatch<any>(`/api/admin/customers/${xvPvId}/assign`, {
       primaryEmployeeId: auth.user.id,
-      backupEmployeeId: null,
+      backupEmployeeId: testEmployeeId,
       backupEmployeeId2: null,
     });
 
@@ -1024,7 +1031,7 @@ describe("XV: Cross-Validation – Abrechnungstyp-übergreifende Prüfungen", ()
 
     await apiPatch<any>(`/api/admin/customers/${custId}/assign`, {
       primaryEmployeeId: auth.user.id,
-      backupEmployeeId: null,
+      backupEmployeeId: testEmployeeId,
       backupEmployeeId2: null,
     });
 
@@ -1054,7 +1061,7 @@ describe("XV: Cross-Validation – Abrechnungstyp-übergreifende Prüfungen", ()
 
     await apiPatch<any>(`/api/admin/customers/${custId}/assign`, {
       primaryEmployeeId: auth.user.id,
-      backupEmployeeId: null,
+      backupEmployeeId: testEmployeeId,
       backupEmployeeId2: null,
     });
 
@@ -1103,7 +1110,7 @@ describe("XV: Cross-Validation – Abrechnungstyp-übergreifende Prüfungen", ()
 
     await apiPatch<any>(`/api/admin/customers/${custId}/assign`, {
       primaryEmployeeId: auth.user.id,
-      backupEmployeeId: null,
+      backupEmployeeId: testEmployeeId,
       backupEmployeeId2: null,
     });
 
@@ -1135,7 +1142,7 @@ describe("XV: Cross-Validation – Abrechnungstyp-übergreifende Prüfungen", ()
 
     await apiPatch<any>(`/api/admin/customers/${custId}/assign`, {
       primaryEmployeeId: auth.user.id,
-      backupEmployeeId: null,
+      backupEmployeeId: testEmployeeId,
       backupEmployeeId2: null,
     });
 
@@ -1176,7 +1183,7 @@ describe("XV: Cross-Validation – Abrechnungstyp-übergreifende Prüfungen", ()
 
     await apiPatch<any>(`/api/admin/customers/${custId}/assign`, {
       primaryEmployeeId: auth.user.id,
-      backupEmployeeId: null,
+      backupEmployeeId: testEmployeeId,
       backupEmployeeId2: null,
     });
 
@@ -1239,7 +1246,7 @@ describe("XV: Cross-Validation – Abrechnungstyp-übergreifende Prüfungen", ()
 
     await apiPatch<any>(`/api/admin/customers/${custId}/assign`, {
       primaryEmployeeId: auth.user.id,
-      backupEmployeeId: null,
+      backupEmployeeId: testEmployeeId,
       backupEmployeeId2: null,
     });
 
@@ -1337,7 +1344,7 @@ describe("IP: Individuelle Preise – Zwei Kunden mit verschiedenen Preisen für
 
     await apiPatch<any>(`/api/admin/customers/${customerId}/assign`, {
       primaryEmployeeId: auth.user.id,
-      backupEmployeeId: null,
+      backupEmployeeId: testEmployeeId,
       backupEmployeeId2: null,
     });
 

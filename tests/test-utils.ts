@@ -280,6 +280,36 @@ export function uniqueId(): string {
   return `test_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
+export async function createTestEmployee(opts: { isAdmin?: boolean; nachnamePrefix?: string } = {}): Promise<{ id: number; email: string; password: string }> {
+  const ts = Date.now();
+  const rand = Math.random().toString(36).slice(2, 7);
+  const email = `testemp-${ts}-${rand}@test.local`;
+  const password = "TestPasswort123!";
+  const phoneSuffix = String(ts).slice(-9).padStart(9, "0");
+  const prefix = opts.nachnamePrefix || "TestEmp";
+  const res = await apiPost<any>("/api/admin/users", {
+    email,
+    password,
+    vorname: "Test",
+    nachname: `${prefix}_${ts}_${rand}`,
+    geburtsdatum: "1990-01-01",
+    eintrittsdatum: "2024-01-01",
+    isAdmin: opts.isAdmin ?? false,
+    telefon: `+49170${phoneSuffix}`,
+  });
+  if (res.status !== 201) {
+    throw new Error(`createTestEmployee failed: ${res.status} ${JSON.stringify(res.data)}`);
+  }
+  return { id: res.data.id, email, password };
+}
+
+export async function deactivateTestEmployee(id: number | null | undefined): Promise<void> {
+  if (!id) return;
+  try {
+    await apiPost(`/api/admin/users/${id}/deactivate`, {});
+  } catch {}
+}
+
 export async function createTestCustomer(overrides: Record<string, unknown> = {}): Promise<{ id: number; [key: string]: unknown }> {
   const payload = {
     vorname: "Test",
@@ -292,6 +322,7 @@ export async function createTestCustomer(overrides: Record<string, unknown> = {}
     telefon: "+4917600000000",
     pflegegrad: 3,
     pflegegradSeit: "2024-01-01",
+    acceptsPrivatePayment: true,
     ...overrides,
   };
   const res = await apiPost<any>("/api/admin/customers", payload);

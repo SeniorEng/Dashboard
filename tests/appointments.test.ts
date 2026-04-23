@@ -13,10 +13,13 @@ import {
   apiGetAs,
   uniqueId,
   createTestCustomer,
+  createTestEmployee,
+  deactivateTestEmployee,
 } from "./test-utils";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let testCustomerId: number;
+let testEmployeeId: number;
 let hwServiceId: number;
 let abServiceId: number;
 const createdIds: number[] = [];
@@ -39,7 +42,7 @@ async function createAppointment(
     date: dateStr,
     scheduledStart: time,
     services: [{ serviceId, durationMinutes }],
-    assignedEmployeeId: auth.user.id,
+    assignedEmployeeId: testEmployeeId,
   });
 }
 
@@ -82,17 +85,23 @@ beforeAll(async () => {
   hwServiceId = servicesRes.data.find((s: any) => s.code === "hauswirtschaft")!.id;
   abServiceId = servicesRes.data.find((s: any) => s.code === "alltagsbegleitung")!.id;
 
+  const emp = await createTestEmployee({ nachnamePrefix: "TestAppt" });
+  testEmployeeId = emp.id;
+
   const cust = await createTestCustomer({ nachname: `ApptTest_${Date.now()}` });
   testCustomerId = cust.id;
 
   await apiPatch(`/api/admin/customers/${testCustomerId}/assign`, {
     primaryEmployeeId: auth.user.id,
-    backupEmployeeId: null,
+    backupEmployeeId: testEmployeeId,
     backupEmployeeId2: null,
   });
 });
 
-afterAll(cleanup);
+afterAll(async () => {
+  await cleanup();
+  await deactivateTestEmployee(testEmployeeId);
+});
 
 describe("BIZ-1: Wochenend-Validierung", () => {
   it("BIZ-1.1 – Termin am Samstag wird abgelehnt", async () => {
@@ -163,7 +172,7 @@ describe("BIZ-3: scheduledEnd Berechnung", () => {
           { serviceId: hwServiceId, durationMinutes: 60 },
           { serviceId: abServiceId, durationMinutes: 30 },
         ],
-        assignedEmployeeId: auth.user.id,
+        assignedEmployeeId: testEmployeeId,
       });
       if (res.status === 201) {
         createdIds.push(res.data.id);
@@ -200,7 +209,7 @@ describe("BIZ-4: Leere Services", () => {
       date: getFutureDate(224),
       scheduledStart: "10:00",
       services: [],
-      assignedEmployeeId: auth.user.id,
+      assignedEmployeeId: testEmployeeId,
     });
     expect(res.status).toBe(400);
   });
@@ -399,7 +408,7 @@ describe("BIZ-10: Kunden-Überlappung", () => {
       date: foundDate,
       scheduledStart: "10:30",
       services: [{ serviceId: abServiceId, durationMinutes: 30 }],
-      assignedEmployeeId: auth.user.id,
+      assignedEmployeeId: testEmployeeId,
     });
     expect(res2.status).toBe(409);
   });
@@ -556,7 +565,7 @@ describe("BIZ-17: durationPromised wird bei Erstellung aus Services berechnet", 
             { serviceId: hwServiceId, durationMinutes: 30 },
             { serviceId: abServiceId, durationMinutes: 45 },
           ],
-          assignedEmployeeId: auth.user.id,
+          assignedEmployeeId: testEmployeeId,
         });
         if (createRes.status === 201) {
           createdIds.push(createRes.data.id);
@@ -873,7 +882,7 @@ describe("BIZ-21: Rollen-basierte Einschränkungen", () => {
         date: futureDate,
         scheduledStart: "06:00",
         scheduledEnd: "07:00",
-        assignedEmployeeId: auth.user.id,
+        assignedEmployeeId: testEmployeeId,
         services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
       });
       if (createRes.status === 201) {
@@ -1084,7 +1093,7 @@ describe("BIZ-26: Junction-Tabelle (appointment_services)", () => {
         date: dateStr,
         scheduledStart,
         services,
-        assignedEmployeeId: auth.user.id,
+        assignedEmployeeId: testEmployeeId,
       });
       if (res.status === 201) {
         createdIds.push(res.data.id);
