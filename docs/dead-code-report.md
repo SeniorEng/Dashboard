@@ -305,6 +305,25 @@ Konservativ behalten — Datei bleibt als Pass-Through-Layer für
 | Falsch-positive `client/src/lib/api/types.ts` Treffer | 12 | 0 |
 | `server/replit_integrations` Rauschen | 4 | 0 |
 
+### Korrektur §1.1 / §4 — Pakete bleiben (Task #139, 23.04.2026)
+
+Die in §1.1 und §4 als "ungenutzt" gelistete Quick-Win-Aktion
+`npm uninstall node-zugferd tw-animate-css` wurde **nicht ausgeführt**, weil
+beide Pakete tatsächlich in Benutzung sind. Knip hatte sie nur deshalb
+geflaggt, weil es weder dynamische `import()`-Aufrufe noch CSS-`@import`
+auflöst:
+
+| Paket            | Tatsächlicher Konsument                                                                 |
+|------------------|------------------------------------------------------------------------------------------|
+| `node-zugferd`   | `server/lib/zugferd.ts` (dynamisches `await import("node-zugferd")`), aufgerufen aus `server/routes/billing.ts` an drei Stellen für ZUGFeRD-konforme Rechnungs-PDFs (`embedZugferdXml`). |
+| `tw-animate-css` | `client/src/index.css` Zeile 2 (`@import "tw-animate-css";`) — liefert Tailwind-Animationsutilities. |
+
+**Konsequenz:** Beide Pakete bleiben im Lockfile. Falls in Zukunft erneut
+geprüft werden soll, müssen diese beiden Konsumenten entfernt bzw. ersetzt
+werden, bevor die Pakete deinstalliert werden können. Die Knip-Konfiguration
+sollte bei Gelegenheit so erweitert werden, dass `node-zugferd` und
+`tw-animate-css` nicht mehr fälschlich gemeldet werden.
+
 ### Bewusst ausgespart
 
 - Service-Klassen (`appointmentService`, `authService`, `whatsAppService`,
