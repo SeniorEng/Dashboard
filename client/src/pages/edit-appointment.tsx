@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useRoute, useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invalidateRelated } from "@/lib/query-invalidation";
@@ -25,9 +25,10 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
-import { useAppointment, useCustomerList, ServiceSelector, AppointmentSummary } from "@/features/appointments";
+import { useAppointment, useCustomerList, ServiceSelector, AppointmentSummary, FahrtdienstPanel } from "@/features/appointments";
 import { useAdminEmployees } from "@/features/appointments/hooks/use-active-employees";
 import { EmployeeAvailability } from "@/features/appointments/components/employee-availability";
+import type { FahrtdienstState } from "@/features/appointments/components/fahrtdienst-panel";
 import { addMinutesToTime, timeToMinutes, minutesToTimeDisplay, formatDurationDisplay } from "@shared/utils/datetime";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS, formatDuration } from "@shared/types";
 import { validateDachPhone, formatPhoneAsYouType } from "@shared/utils/phone";
@@ -47,7 +48,7 @@ export default function EditAppointment() {
   const { data: customers = [] } = useCustomerList();
   const { data: employees = [] } = useAdminEmployees({ enabled: isAdmin });
 
-  const { data: appointmentServiceEntries = [] } = useQuery<Array<{
+  const { data: appointmentServiceEntries = [], isSuccess: appointmentServicesLoaded } = useQuery<Array<{
     serviceId: number;
     plannedDurationMinutes: number;
     serviceName: string;
@@ -92,6 +93,41 @@ export default function EditAppointment() {
   const [ebPflegegrad, setEbPflegegrad] = useState("1");
   const [ebAssignedEmployeeId, setEbAssignedEmployeeId] = useState("");
 
+  const [fahrtdienst, setFahrtdienst] = useState<FahrtdienstState>({
+    enabled: false,
+    doctorName: "",
+    doctorAppointmentTime: "",
+    doctorStrasse: "",
+    doctorNr: "",
+    doctorPlz: "",
+    doctorStadt: "",
+  });
+  const [fahrtdienstTravelData, setFahrtdienstTravelData] = useState<{
+    pickupTime: string;
+    travelMinutes: number;
+    bufferMinutes: number;
+    distanceKm: number;
+    doctorLat?: number;
+    doctorLng?: number;
+  } | null>(null);
+  const [isGeocodingCustomer, setIsGeocodingCustomer] = useState(false);
+  const [geocodingError, setGeocodingError] = useState<string | null>(null);
+  const [geocodedCoords, setGeocodedCoords] = useState<{ customerId: number; lat: number; lng: number } | null>(null);
+
+  const fahrtdienstInitializedRef = useRef(false);
+
+  const handlePickupTimeCalculated = useCallback((
+    pickupTime: string,
+    travelMinutes: number,
+    bufferMinutes: number,
+    distanceKm: number,
+    doctorLat?: number,
+    doctorLng?: number,
+  ) => {
+    setFahrtdienstTravelData({ pickupTime, travelMinutes, bufferMinutes, distanceKm, doctorLat, doctorLng });
+    setTime(pickupTime);
+  }, []);
+
   useEffect(() => {
     if (appointment) {
       setDate(appointment.date);
@@ -107,6 +143,33 @@ export default function EditAppointment() {
         }
         if (appointment.assignedEmployeeId) {
           setKtAssignedEmployeeId(appointment.assignedEmployeeId.toString());
+        }
+        if (!fahrtdienstInitializedRef.current && appointmentServicesLoaded) {
+          fahrtdienstInitializedRef.current = true;
+          if (appointment.isFahrtdienst) {
+            setFahrtdienst({
+              enabled: true,
+              doctorName: appointment.doctorName ?? "",
+              doctorAppointmentTime: (appointment.doctorAppointmentTime ?? "").slice(0, 5),
+              doctorStrasse: appointment.doctorStrasse ?? "",
+              doctorNr: appointment.doctorNr ?? "",
+              doctorPlz: appointment.doctorPlz ?? "",
+              doctorStadt: appointment.doctorStadt ?? "",
+            });
+            if (
+              appointment.estimatedTravelMinutes != null &&
+              appointment.travelBufferMinutes != null
+            ) {
+              setFahrtdienstTravelData({
+                pickupTime: appointment.scheduledStart.slice(0, 5),
+                travelMinutes: appointment.estimatedTravelMinutes,
+                bufferMinutes: appointment.travelBufferMinutes,
+                distanceKm: 0,
+                doctorLat: appointment.doctorLatitude ?? undefined,
+                doctorLng: appointment.doctorLongitude ?? undefined,
+              });
+            }
+          }
         }
       } else {
         if (appointment.scheduledEnd) {
@@ -136,7 +199,64 @@ export default function EditAppointment() {
         }
       }
     }
-  }, [appointment, appointmentServiceEntries, catalogServices]);
+  }, [appointment, appointmentServiceEntries, catalogServices, appointmentServicesLoaded]);
+
+  const hasAlltagsbegleitung = useMemo(() => {
+    return services.some(s => {
+      const catalog = catalogServices.find(c => c.id === s.serviceId);
+      return catalog?.lohnartKategorie === "alltagsbegleitung";
+    });
+  }, [services, catalogServices]);
+
+  useEffect(() => {
+    if (!fahrtdienstInitializedRef.current) return;
+    if (!hasAlltagsbegleitung && fahrtdienst.enabled) {
+      setFahrtdienst({
+        enabled: false,
+        doctorName: "",
+        doctorAppointmentTime: "",
+        doctorStrasse: "",
+        doctorNr: "",
+        doctorPlz: "",
+        doctorStadt: "",
+      });
+      setFahrtdienstTravelData(null);
+    }
+  }, [hasAlltagsbegleitung, fahrtdienst.enabled]);
+
+  const customerForGeocode = appointment?.customer;
+  useEffect(() => {
+    if (!customerForGeocode || !fahrtdienst.enabled) {
+      setGeocodingError(null);
+      setIsGeocodingCustomer(false);
+      return;
+    }
+    if (geocodedCoords && geocodedCoords.customerId === customerForGeocode.id) return;
+    if (customerForGeocode.latitude && customerForGeocode.longitude) return;
+
+    let cancelled = false;
+    setIsGeocodingCustomer(true);
+    setGeocodingError(null);
+    api.post<{ latitude: number; longitude: number }>(`/customers/${customerForGeocode.id}/geocode`, {})
+      .then((result) => {
+        if (cancelled) return;
+        const data = unwrapResult(result);
+        setGeocodedCoords({ customerId: customerForGeocode.id, lat: data.latitude, lng: data.longitude });
+      })
+      .catch((err: Error) => {
+        if (cancelled) return;
+        setGeocodingError(err.message || "Kundenadresse konnte nicht aufgelöst werden");
+      })
+      .finally(() => {
+        if (!cancelled) setIsGeocodingCustomer(false);
+      });
+    return () => { cancelled = true; };
+  }, [customerForGeocode, fahrtdienst.enabled, geocodedCoords]);
+
+  const effectiveCustomerLat = customerForGeocode?.latitude
+    ?? (geocodedCoords?.customerId === customerForGeocode?.id ? geocodedCoords?.lat ?? null : null);
+  const effectiveCustomerLng = customerForGeocode?.longitude
+    ?? (geocodedCoords?.customerId === customerForGeocode?.id ? geocodedCoords?.lng ?? null : null);
 
   const ktEmployeeOptions = useMemo(() => {
     const active = employees.filter(e => e.isActive);
@@ -264,6 +384,12 @@ export default function EditAppointment() {
       if (isAdmin && !ktAssignedEmployeeId) {
         newErrors.ktAssignedEmployeeId = "Bitte wählen Sie einen Mitarbeiter";
       }
+      if (hasAlltagsbegleitung && fahrtdienst.enabled) {
+        if (!fahrtdienst.doctorAppointmentTime) newErrors.doctorAppointmentTime = "Arzt-Termin Uhrzeit ist erforderlich";
+        if (!fahrtdienst.doctorStrasse) newErrors.doctorStrasse = "Arzt-Adresse (Straße) ist erforderlich";
+        if (!fahrtdienst.doctorPlz || !/^\d{5}$/.test(fahrtdienst.doctorPlz)) newErrors.doctorPlz = "PLZ muss 5 Ziffern haben";
+        if (!fahrtdienst.doctorStadt) newErrors.doctorStadt = "Arzt-Adresse (Ort) ist erforderlich";
+      }
     } else if (appointment?.appointmentType === "Erstberatung") {
       if (isAdmin && !ebAssignedEmployeeId) newErrors.ebAssignedEmployeeId = "Bitte einen Mitarbeiter auswählen";
       if (!duration || duration <= 0) newErrors.time = "Bitte wählen Sie eine Dauer";
@@ -290,6 +416,40 @@ export default function EditAppointment() {
     return fields;
   };
 
+  const buildFahrtdienstPayload = (): Record<string, unknown> => {
+    if (!hasAlltagsbegleitung || !fahrtdienst.enabled) {
+      return {
+        isFahrtdienst: false,
+        doctorName: null,
+        doctorAppointmentTime: null,
+        doctorStrasse: null,
+        doctorNr: null,
+        doctorPlz: null,
+        doctorStadt: null,
+        doctorLatitude: null,
+        doctorLongitude: null,
+        estimatedTravelMinutes: null,
+        travelBufferMinutes: null,
+      };
+    }
+    const payload: Record<string, unknown> = {
+      isFahrtdienst: true,
+      doctorName: fahrtdienst.doctorName || null,
+      doctorAppointmentTime: fahrtdienst.doctorAppointmentTime,
+      doctorStrasse: fahrtdienst.doctorStrasse,
+      doctorNr: fahrtdienst.doctorNr || null,
+      doctorPlz: fahrtdienst.doctorPlz,
+      doctorStadt: fahrtdienst.doctorStadt,
+    };
+    if (fahrtdienstTravelData) {
+      payload.estimatedTravelMinutes = fahrtdienstTravelData.travelMinutes;
+      payload.travelBufferMinutes = fahrtdienstTravelData.bufferMinutes;
+      if (fahrtdienstTravelData.doctorLat !== undefined) payload.doctorLatitude = fahrtdienstTravelData.doctorLat;
+      if (fahrtdienstTravelData.doctorLng !== undefined) payload.doctorLongitude = fahrtdienstTravelData.doctorLng;
+    }
+    return payload;
+  };
+
   const handleSeriesUpdate = (mode: "single" | "this_and_future" | "all_future") => {
     if (mode === "single") {
       const totalDuration = services.reduce((sum, s) => sum + s.durationMinutes, 0);
@@ -305,6 +465,7 @@ export default function EditAppointment() {
           serviceId: s.serviceId,
           plannedDurationMinutes: s.durationMinutes,
         })),
+        ...buildFahrtdienstPayload(),
       });
       setShowSeriesEditDialog(false);
       return;
@@ -336,6 +497,7 @@ export default function EditAppointment() {
           serviceId: s.serviceId,
           plannedDurationMinutes: s.durationMinutes,
         })),
+        ...buildFahrtdienstPayload(),
       });
     } else if (appointment.appointmentType === "Erstberatung") {
       const calculatedEnd = addMinutesToTime(time, duration);
@@ -671,6 +833,19 @@ export default function EditAppointment() {
                 onChange={setServices}
                 error={errors.services}
               />
+
+              {hasAlltagsbegleitung && (
+                <FahrtdienstPanel
+                  fahrtdienst={fahrtdienst}
+                  onChange={setFahrtdienst}
+                  customerLat={effectiveCustomerLat}
+                  customerLng={effectiveCustomerLng}
+                  onPickupTimeCalculated={handlePickupTimeCalculated}
+                  errors={errors}
+                  isGeocodingCustomer={isGeocodingCustomer}
+                  geocodingError={geocodingError}
+                />
+              )}
 
               {summary && summary.hasServices && (
                 <AppointmentSummary
