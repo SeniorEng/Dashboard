@@ -324,6 +324,22 @@ werden, bevor die Pakete deinstalliert werden können. Die Knip-Konfiguration
 sollte bei Gelegenheit so erweitert werden, dass `node-zugferd` und
 `tw-animate-css` nicht mehr fälschlich gemeldet werden.
 
+### Korrektur §1.1 / §4 — Knip-Konfiguration angepasst (Task #140, 23.04.2026)
+
+`knip` löst weder String-Literal-`await import("…")`-Aufrufe (z. B.
+`server/lib/zugferd.ts`) noch CSS-`@import`-Direktiven (z. B.
+`client/src/index.css`) auf und meldet die dahinter stehenden Pakete deshalb
+fälschlich als „Unused dependencies". Das hatte in §1.1 / §4 zu einer
+Quick-Win-Empfehlung geführt, die die Rechnungs-PDFs und das CSS-Build
+zerstört hätte.
+
+Damit dieses Falsch-Positiv nicht erneut auftaucht, wurden `node-zugferd` und
+`tw-animate-css` in `knip.json` zur `ignoreDependencies`-Liste hinzugefügt.
+Wenn künftig weitere Pakete nur dynamisch (`await import("name")`) oder per
+CSS-`@import` eingebunden werden, gehört dieselbe Liste erweitert. Verifiziert
+mit `npx knip --no-progress --reporter compact` — der Block "Unused
+dependencies" erscheint nicht mehr.
+
 ### Bewusst ausgespart
 
 - Service-Klassen (`appointmentService`, `authService`, `whatsAppService`,

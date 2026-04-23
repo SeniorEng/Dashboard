@@ -32,6 +32,8 @@
     "tailwindcss",
     "autoprefixer",
     "postcss",
-    "@tailwindcss/*"
+    "@tailwindcss/*",
+    "node-zugferd",
+    "tw-animate-css"
   ]
 }
