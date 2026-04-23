@@ -8,7 +8,8 @@
     "tests/**/*.test.ts",
     "tests/globalSetup.ts",
     "tests/setup.ts",
-    "server/scripts/**/*.ts"
+    "server/scripts/**/*.ts",
+    "client/src/features/*/hooks/index.ts"
   ],
   "project": [
     "client/src/**/*.{ts,tsx}",
@@ -21,7 +22,9 @@
     "attached_assets/**",
     "dist/**",
     ".local/**",
-    "tests/budget_logic_tests.js"
+    "tests/budget_logic_tests.js",
+    "client/src/components/ui/**",
+    "server/replit_integrations/**"
   ],
   "ignoreDependencies": [
     "tsx",

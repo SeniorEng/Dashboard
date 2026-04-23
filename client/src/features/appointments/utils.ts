@@ -4,13 +4,7 @@ import {
   getEndTime as sharedGetEndTime,
 } from "@shared/types";
 
-export {
-  getStatusColor,
-  getAppointmentTypeColor,
-  getServiceColor,
-  getStatusLabel,
-  formatTimeSlot,
-} from "@shared/types";
+export { formatTimeSlot } from "@shared/types";
 
 export function sortAppointmentsByPriority(appointments: AppointmentWithCustomer[]): AppointmentWithCustomer[] {
   return [...appointments].sort((a, b) => {

@@ -21,14 +21,10 @@ export {
   type AppointmentStatus,
   type ServiceType,
   type TravelOriginType,
-  type ServiceInfo,
   // Constants
   PFLEGEGRAD_OPTIONS,
   DURATION_OPTIONS,
-  STATUS_LABELS,
-  STATUS_COLORS,
   STATUS_PRIORITY,
-  SERVICE_TYPE_COLORS,
   // Time formatting utilities
   formatTimeSlot,
   formatDuration,
@@ -37,17 +33,10 @@ export {
   getEndTime,
   // Service helpers
   getCardServiceInfoFromAppointment,
-  validateServiceDocumentationFromServices,
   // Status helpers
   isValidStatusTransition,
   canModifyAppointment,
   canEditNotes,
-  getStatusColor,
-  getStatusLabel,
-  getAppointmentTypeColor,
-  getServiceColor,
-  // Travel helpers
-  suggestTravelOrigin,
 } from "./domain/appointments";
 
 // ============================================

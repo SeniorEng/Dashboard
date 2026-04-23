@@ -235,3 +235,87 @@ npx ts-prune -p tsconfig.json | grep -v "used in module"   # Cross-Check
 ```
 
 Konfiguration: `knip.json` im Repo-Root.
+
+---
+
+## 7. Stand nach Round 2 (Task #136 — 23.04.2026)
+
+### Erledigt
+
+**Block A — `shared/types.ts` Doppel-Exports entfernt**
+
+Verifizierte Importer-Analyse (Script über alle `.ts`/`.tsx`-Dateien mit
+Multi-Line-Imports und `export ... from`-Re-Exports) ergab **6 echte
+Null-Konsumenten** — diese wurden entfernt:
+
+- `ServiceInfo`
+- `STATUS_LABELS`, `STATUS_COLORS`, `SERVICE_TYPE_COLORS`
+- `validateServiceDocumentationFromServices`
+- `suggestTravelOrigin`
+
+Zusätzlich wurden vier Helfer aus `shared/types.ts` UND aus dem
+Re-Export-Block in `client/src/features/appointments/utils.ts` entfernt,
+nachdem die Kette `utils.ts → @shared/types → @shared/domain/appointments`
+nirgends terminierte:
+
+- `getStatusColor`, `getStatusLabel`, `getAppointmentTypeColor`, `getServiceColor`
+
+Die übrigen ursprünglich gelisteten Symbole (`AppointmentType`, `CardServiceInfo`,
+`TravelOriginSuggestion`, `STATUS_ORDER`, `APPOINTMENT_TYPE_COLORS`) waren
+**bereits** in einem früheren Refactor entfernt worden.
+
+**Block B — Storage-Sichtbarkeit (#108-Restarbeit)**
+
+Bei Aufnahme von Round 2 stellte sich heraus, dass alle 6 Funktionen
+(`getMonthlyBudgetAmountCents`, `ensureYearlyCarryover45b`,
+`processExpiredCarryover` in `allocation-storage.ts`; `getBudgetSummary45a`,
+`getBudgetSummary39_42a`, `getAvailableCarryoverCents` in `summary-queries.ts`)
+**bereits modul-intern** waren (kein `export`-Keyword). Block B war damit
+bereits umgesetzt — kein Code-Change nötig.
+
+**Block C — Tote Client-Type-Re-Exports**
+
+`client/src/lib/api/types.ts` enthielt 29 Re-Exports aus `@shared/api`. Knip
+flaggte 12 davon als ungenutzt. Diese wurden entfernt:
+
+- `PaginationParams`, `CustomerPricingInfo`, `BudgetSummaryInfo`,
+  `CustomerBudgetsInfo`, `CustomerNeedsAssessmentInfo`,
+  `CustomerContractInfo`, `CustomerCareLevelHistoryItem`,
+  `AppointmentServiceBreakdown`, `ServiceHoursSummary`, `TravelSummary`,
+  `TimeEntrySummary`, `AppointmentWithCustomer` (war doppelt re-exportiert)
+
+Die verbleibenden 17 Typen werden tatsächlich konsumiert (24 Importer-Dateien).
+Konservativ behalten — Datei bleibt als Pass-Through-Layer für
+`@shared/api/*` erhalten.
+
+**Block D — `knip.json` verfeinert**
+
+- `client/src/components/ui/**` (shadcn/ui) zur `ignore`-Liste hinzugefügt
+- `server/replit_integrations/**` zur `ignore`-Liste hinzugefügt
+- `client/src/features/*/hooks/index.ts` als zusätzliche `entry`-Punkte
+  registriert (Hook-Barrels sind Public API)
+
+### Knip-Bilanz vor/nach Round 2
+
+| Kennzahl                 | Vorher | Nachher |
+|--------------------------|-------:|--------:|
+| Unused exports           |    ~52 |      35 |
+| Unused exported types    |    ~46 |      42 |
+| Falsch-positive `shared/types.ts` Treffer | 6 | 0 |
+| Falsch-positive `client/src/lib/api/types.ts` Treffer | 12 | 0 |
+| `server/replit_integrations` Rauschen | 4 | 0 |
+
+### Bewusst ausgespart
+
+- Service-Klassen (`appointmentService`, `authService`, `whatsAppService`,
+  `customerManagementStorage`, `documentStorage`, `serviceCatalogStorage`) —
+  Singleton-Konsumenten in 4–5 Dateien je Klasse.
+- Hook-Barrel-Re-Exports — produktiv genutzt; Treeshaking entfernt unbenutzte.
+- `shared/api/*`, `server/storage/budget-ledger.ts`, `server/storage/time-tracking.ts`,
+  `server/storage/documents.ts`, `server/storage/service-catalog.ts` — Vertragsdokument
+  bzw. Storage-Facade-Interfaces (#108).
+- 8 Domain-Color-Tokens und Helfer in `shared/domain/appointments.ts`
+  (`STATUS_COLORS`, `SERVICE_TYPE_COLORS`, `getStatusColor`, `getStatusLabel`,
+  `getAppointmentTypeColor`, `getServiceColor`) — sind jetzt knip-flagged
+  (nachdem die Re-Export-Kette gekappt wurde) und können in einer eventuellen
+  Round 3 ebenfalls entfernt werden, falls keine UI-Verwendung in Sicht.
