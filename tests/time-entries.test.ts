@@ -333,8 +333,7 @@ describe("TE-BIZ-6: Krankheitseintrag", () => {
 
 describe("TE-BIZ-7: Zeiterfassungs-Löschung", () => {
   it("TE-BIZ-7.1 – Zukunfts-Zeiteintrag kann gelöscht werden (204)", async () => {
-    const futureDate = getFutureDate(215);
-    await clearDateEntries(futureDate);
+    const futureDate = await findFreeFutureWeekdayGlobal(215);
 
     const createRes = await apiPost<any>("/api/time-entries", {
       entryDate: futureDate,
@@ -784,8 +783,7 @@ describe("TE-BIZ-16: Zeitbasierter Eintrag überlappt mit Termin", () => {
 
 describe("TE-BIZ-17: Konflikt-Vorprüfung API", () => {
   it("TE-BIZ-17.1 – check-conflicts Endpoint liefert Konflikte", async () => {
-    const date = getFutureDate(392);
-    await clearDateEntries(date);
+    const date = await findFreeFutureWeekdayGlobal(392);
 
     const teRes = await apiPost<any>("/api/time-entries", {
       entryDate: date,
