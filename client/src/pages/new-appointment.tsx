@@ -161,7 +161,7 @@ export default function NewAppointment() {
     queryFn: async () => {
       const params = new URLSearchParams({ status: ELIGIBLE_STATUSES });
       if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
-      const result = await api.get<Prospect[]>(`/admin/prospects?${params}`);
+      const result = await api.get<Prospect[]>(`/prospects/search?${params}`);
       return unwrapResult(result);
     },
     staleTime: 30_000,

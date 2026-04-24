@@ -5,10 +5,33 @@ import { prospectStorage } from "../storage/prospects";
 import { asyncHandler } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { optionalGermanPhoneSchema, internationalEmailSchema, plzSchema } from "@shared/schema/common";
+import type { Prospect } from "@shared/schema";
 
 const router = Router();
 
 router.use(requireAuth);
+
+router.get("/search", requireRoles("erstberatung"), asyncHandler("Interessenten konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const status = typeof req.query.status === "string" ? req.query.status : undefined;
+  const search = typeof req.query.search === "string" ? req.query.search : undefined;
+
+  const prospects = await prospectStorage.getAll({ status, search });
+
+  const safeFields: Array<Pick<Prospect, "id" | "vorname" | "nachname" | "telefon" | "email" | "strasse" | "nr" | "plz" | "stadt" | "pflegegrad" | "status">> = prospects.map((p) => ({
+    id: p.id,
+    vorname: p.vorname,
+    nachname: p.nachname,
+    telefon: p.telefon,
+    email: p.email,
+    strasse: p.strasse,
+    nr: p.nr,
+    plz: p.plz,
+    stadt: p.stadt,
+    pflegegrad: p.pflegegrad,
+    status: p.status,
+  }));
+  res.json(safeFields);
+}));
 
 const inlineProspectSchema = z.object({
   vorname: z.string().min(1),
