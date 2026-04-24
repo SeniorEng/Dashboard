@@ -8,7 +8,7 @@ export const ENTRY_TYPE_LABELS: Record<string, string> = {
   vertrieb: "Vertrieb",
   sonstiges: "Sonstiges",
   verfuegbar: "Verfügbar",
-  blocker: "Blocker",
+  blocker: "Blocker / nicht verfügbar",
 };
 
 export function getEntryTypeLabel(entryType: string): string {

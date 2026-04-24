@@ -19,7 +19,7 @@ export const TIME_ENTRY_TYPE_CONFIG: Record<TimeEntryType, { label: string; icon
   vertrieb: { label: "Vertrieb", icon: Briefcase, color: "text-purple-700", bgColor: "bg-purple-100" },
   sonstiges: { label: "Sonstiges", icon: FileText, color: "text-gray-700", bgColor: "bg-gray-100" },
   verfuegbar: { label: "Verfügbar", icon: CalendarCheck, color: "text-emerald-700", bgColor: "bg-emerald-100" },
-  blocker: { label: "Blocker", icon: Ban, color: "text-orange-700", bgColor: "bg-orange-100" },
+  blocker: { label: "Blocker / nicht verfügbar", icon: Ban, color: "text-orange-700", bgColor: "bg-orange-100" },
 };
 
 const FULL_DAY_TYPES = FULL_DAY_ENTRY_TYPES as unknown as TimeEntryType[];
