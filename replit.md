@@ -214,6 +214,17 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Remaining WARNs**: W2 (`any` type in budget-ledger consumeFifo), W4 (Puppeteer singleton memory), W5 (rounding in split budget txs), W6 (date parsing in isMonthClosed).
 - **Key shared utility**: `getEntryDuration()` exported from `@shared/domain/time-entries` — used by `time-tracking.ts`, `auto-breaks.ts`. Calculates duration from durationMinutes or startTime/endTime.
 
+## Tiefenanalyse Voll-Audit (Task #178 — 2026-04-24)
+- **Overall**: 0 KRITISCH, 4 HOCH, 6 MITTEL, 6 NIEDRIG. Gesunde Codebase, klar umrissene Probleme.
+- **Methodik**: 3-Phasen-Audit (deep-analysis Skill) über die letzten 10 Commits (Tasks #170–#177).
+- **Reports**: `.local/audit/scope.md`, `phase-1.md`, `phase-2.md`, `phase-3.md`, `tiefenanalyse-report.md`.
+- **HOCH-Findings**:
+  - **H1 Wochenend-Sperre Backend-Inkonsistenz**: `server/routes/appointments.ts:439` (kundentermin POST) hat `!user.isAdmin && isWeekend(...)`-Check, aber `:578` (prospect-erstberatung POST) und `:712` (PATCH /:id) blockieren auch Admins. Frontend (`dashboard.tsx:570`) erlaubt korrekt `isAdmin || !isSelectedWeekend` → Admin sieht UI-Buttons aber bekommt 400 vom Backend.
+  - **H2 Listen-Endpoints ohne Pagination**: `/api/customers` 1,9 MB / `/api/admin/users` 1,8 MB / `/api/appointments` 1,4 MB pro Woche. Mobile-DoS-Risiko für Pflegekräfte im Außendienst (überschneidet sich teilweise mit #17).
+  - **H3 Address-Search Filter zu strikt**: `server/routes/index.ts` ~Zeile 280 filtert Nominatim-Treffer ohne `address.road` raus → "Berlin Alexanderplatz" liefert nur 1 Treffer statt 5–8. Regression seit #174.
+  - **H4 drizzle-orm 0.39.3 HIGH-CVE** (GHSA-gpj5-g38j-94v9, SQL-Injection via `sql.identifier`): grep zeigt **kein** ausnutzbarer Codepfad (kein `sql.identifier()`/`sql.raw()` mit User-Input), aber Defense-in-Depth-Upgrade auf 0.45.x empfohlen.
+- **Bestätigt sauber**: Globale CSRF-Middleware (`server/routes/index.ts:94`), CSP via helmet, `requireAuth`/`requireAdmin`/`requireSuperAdmin` konsistent, Test-Cleanup mit Prod-Guard, Geocoding-Background-Job idempotent + dedupliziert, Graceful Shutdown korrekt.
+
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)
 - **Frontend Libraries**: React, TypeScript, Vite, Wouter, `shadcn/ui`, Radix UI, Tailwind CSS v4, TanStack Query, Zod.
