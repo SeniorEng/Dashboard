@@ -168,10 +168,23 @@ router.get("/travel-time", requireAuth, asyncHandler("Fahrtzeit konnte nicht ber
   res.json(result);
 }));
 
-router.get("/address-search", asyncHandler("Adresssuche fehlgeschlagen", async (req, res) => {
+router.get("/address-search", requireAuth, asyncHandler("Adresssuche fehlgeschlagen", async (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
   if (q.length < 3) {
     return res.json([]);
+  }
+
+  let biasLat: number | null = null;
+  let biasLon: number | null = null;
+  if (req.user && typeof req.user.latitude === "number" && typeof req.user.longitude === "number") {
+    biasLat = req.user.latitude;
+    biasLon = req.user.longitude;
+  } else {
+    const settings = await getCachedCompanySettings();
+    if (settings && typeof settings.latitude === "number" && typeof settings.longitude === "number") {
+      biasLat = settings.latitude;
+      biasLon = settings.longitude;
+    }
   }
 
   const { rateLimitedFetch } = await import("../services/geocoding");
@@ -180,8 +193,16 @@ router.get("/address-search", asyncHandler("Adresssuche fehlgeschlagen", async (
     format: "jsonv2",
     addressdetails: "1",
     countrycodes: "de",
-    limit: "5",
+    limit: "10",
   });
+  if (biasLat !== null && biasLon !== null) {
+    const delta = 0.5;
+    const left = biasLon - delta;
+    const right = biasLon + delta;
+    const top = biasLat + delta;
+    const bottom = biasLat - delta;
+    params.set("viewbox", `${left},${top},${right},${bottom}`);
+  }
   const url = `https://nominatim.openstreetmap.org/search?${params}`;
   const response = await rateLimitedFetch(url);
   if (!response.ok) {
@@ -203,7 +224,7 @@ router.get("/address-search", asyncHandler("Adresssuche fehlgeschlagen", async (
     };
   }>;
 
-  const suggestions = results
+  const mapped = results
     .filter(r => r.address?.road)
     .map(r => ({
       displayName: r.display_name,
@@ -215,7 +236,36 @@ router.get("/address-search", asyncHandler("Adresssuche fehlgeschlagen", async (
       longitude: parseFloat(r.lon),
     }));
 
-  res.json(suggestions);
+  const seen = new Set<string>();
+  const deduped: typeof mapped = [];
+  for (const s of mapped) {
+    const key = [s.strasse, s.hausnummer, s.plz, s.stadt]
+      .map(part => part.trim().toLowerCase())
+      .join("|");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(s);
+  }
+
+  let ordered = deduped;
+  if (biasLat !== null && biasLon !== null) {
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const haversine = (lat: number, lon: number) => {
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return Number.POSITIVE_INFINITY;
+      const R = 6371;
+      const dLat = toRad(lat - biasLat!);
+      const dLon = toRad(lon - biasLon!);
+      const a = Math.sin(dLat / 2) ** 2
+        + Math.cos(toRad(biasLat!)) * Math.cos(toRad(lat)) * Math.sin(dLon / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(a));
+    };
+    ordered = deduped
+      .map(s => ({ s, d: haversine(s.latitude, s.longitude) }))
+      .sort((a, b) => a.d - b.d)
+      .map(x => x.s);
+  }
+
+  res.json(ordered.slice(0, 8));
 }));
 
 router.post("/customers/:id/geocode", requireAuth, asyncHandler("Geocodierung fehlgeschlagen", async (req, res) => {
