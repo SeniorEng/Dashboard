@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import {
   getAuthCookie,
   apiGet,
@@ -38,20 +38,20 @@ async function uploadExcelPreview(buffer: Buffer): Promise<{ status: number; dat
   return { status: res.status, data };
 }
 
-function buildExcelBuffer(rows: Array<Record<string, string | number>>): Buffer {
+async function buildExcelBuffer(rows: Array<Record<string, string | number>>): Promise<Buffer> {
   const headers = [
     "Kunde", "Datum", "Start", "Ende", "Stunden", "Kilometer",
     "Senioren Engel", "Art", "Budget",
     "Pflegekasse Name", "IK", "Versichertennummer", "Pflegegrad",
   ];
-  const data: any[][] = [headers];
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Sheet1");
+  ws.addRow(headers);
   for (const r of rows) {
-    data.push(headers.map((h) => r[h] ?? ""));
+    ws.addRow(headers.map((h) => r[h] ?? ""));
   }
-  const ws = XLSX.utils.aoa_to_sheet(data);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
-  return XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+  const buf = await wb.xlsx.writeBuffer();
+  return Buffer.from(buf);
 }
 
 beforeAll(async () => {
@@ -149,7 +149,7 @@ describe("Task #116 — Carryover wird auch für rückwirkende Importmonate gese
     const customerName = `${created.vorname} ${created.nachname}`;
     const employeeName = auth.user.displayName || `${auth.user.vorname ?? ""} ${auth.user.nachname ?? ""}`.trim();
 
-    const buffer = buildExcelBuffer([{
+    const buffer = await buildExcelBuffer([{
       "Kunde": `${cid}|${created.vorname}|${created.nachname}`,
       "Datum": importDate,
       "Start": 0.375, // 09:00

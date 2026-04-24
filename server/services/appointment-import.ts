@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { db } from "../lib/db";
 import { customers, users, appointments, appointmentServices, services, monthlyServiceRecords } from "@shared/schema";
 import { eq, and, isNull, sql } from "drizzle-orm";
@@ -80,10 +80,59 @@ function hoursToMinutes(hours: number): number {
   return Math.round(hours * 60);
 }
 
-export function parseExcelFile(buffer: Buffer): ImportRow[] {
-  const workbook = XLSX.read(buffer, { type: "buffer" });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const raw = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as unknown[][];
+function dateToISO(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function dateToHHMM(d: Date): string {
+  const h = String(d.getUTCHours()).padStart(2, "0");
+  const m = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${h}:${m}`;
+}
+
+function unwrapCellValue(val: unknown): unknown {
+  if (val && typeof val === "object" && "result" in (val as Record<string, unknown>)) {
+    return (val as { result: unknown }).result;
+  }
+  if (val && typeof val === "object" && "text" in (val as Record<string, unknown>)) {
+    const t = (val as { text: unknown }).text;
+    if (typeof t === "string") return t;
+    if (Array.isArray(t)) {
+      return t
+        .map((p) => (typeof p === "object" && p !== null && "text" in p ? (p as { text: string }).text : String(p)))
+        .join("");
+    }
+  }
+  if (val && typeof val === "object" && "richText" in (val as Record<string, unknown>)) {
+    const rt = (val as { richText: Array<{ text: string }> }).richText;
+    return rt.map((p) => p.text).join("");
+  }
+  if (val && typeof val === "object" && "hyperlink" in (val as Record<string, unknown>)) {
+    return (val as { text?: string }).text ?? "";
+  }
+  return val;
+}
+
+export async function parseExcelFile(buffer: Buffer): Promise<ImportRow[]> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  const sheet = workbook.worksheets[0];
+  if (!sheet) {
+    throw new Error("Keine Arbeitsblätter in der Excel-Datei gefunden");
+  }
+
+  const raw: unknown[][] = [];
+  sheet.eachRow({ includeEmpty: true }, (row) => {
+    const values = row.values as unknown[];
+    const arr: unknown[] = [];
+    for (let c = 1; c < values.length; c++) {
+      arr.push(unwrapCellValue(values[c]));
+    }
+    raw.push(arr);
+  });
 
   const expectedHeaders: Record<string, string[]> = {
     kunde: ["Kunde"],
@@ -105,7 +154,7 @@ export function parseExcelFile(buffer: Buffer): ImportRow[] {
   const colMap: Record<string, number> = {};
 
   for (let ri = 0; ri < Math.min(10, raw.length); ri++) {
-    const candidate = raw[ri] as unknown[];
+    const candidate = raw[ri];
     if (!candidate) continue;
     const hasKunde = candidate.some((c) => typeof c === "string" && c.trim() === "Kunde");
     if (hasKunde) {
@@ -132,7 +181,7 @@ export function parseExcelFile(buffer: Buffer): ImportRow[] {
   const rows: ImportRow[] = [];
 
   for (let i = headerRowIndex + 1; i < raw.length; i++) {
-    const row = raw[i] as unknown[];
+    const row = raw[i];
     if (!row || row.length === 0) continue;
 
     const kundeRaw = String(row[colMap.kunde] ?? "").trim();
@@ -145,7 +194,9 @@ export function parseExcelFile(buffer: Buffer): ImportRow[] {
 
     const datumVal = row[colMap.datum];
     let date = "";
-    if (typeof datumVal === "number") {
+    if (datumVal instanceof Date) {
+      date = dateToISO(datumVal);
+    } else if (typeof datumVal === "number") {
       date = excelDateToISO(datumVal);
     } else if (typeof datumVal === "string") {
       date = datumVal;
@@ -155,10 +206,14 @@ export function parseExcelFile(buffer: Buffer): ImportRow[] {
     const endVal = row[colMap.ende];
     let startTime = "";
     let endTime = "";
-    if (typeof startVal === "number") {
+    if (startVal instanceof Date) {
+      startTime = dateToHHMM(startVal);
+    } else if (typeof startVal === "number") {
       startTime = excelTimeToHHMM(startVal);
     }
-    if (typeof endVal === "number") {
+    if (endVal instanceof Date) {
+      endTime = dateToHHMM(endVal);
+    } else if (typeof endVal === "number") {
       endTime = excelTimeToHHMM(endVal);
     }
 

@@ -27,7 +27,7 @@ router.post(
       return;
     }
 
-    const parsed = parseExcelFile(req.file.buffer);
+    const parsed = await parseExcelFile(req.file.buffer);
     const matched = await matchRows(parsed);
     await enrichWithBudgetInfo(matched);
 
