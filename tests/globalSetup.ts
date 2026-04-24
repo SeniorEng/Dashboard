@@ -22,12 +22,19 @@ async function loginAndGetAuth(): Promise<AuthInfo> {
   const password = process.env.TEST_USER_PASSWORD || process.env.TEST_USER_PASSWORD_INTERNAL;
   if (!password) throw new Error("TEST_USER_PASSWORD not set");
 
-  const res = await fetch(`${BASE_URL}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!res.ok) throw new Error(`Login failed: ${res.status}`);
+  let res: Response | null = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    res = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    if (res.status !== 429) break;
+    const delay = 1500 * Math.pow(2, attempt);
+    console.warn(`[globalSetup] 429 on login, retry in ${delay}ms`);
+    await new Promise((r) => setTimeout(r, delay));
+  }
+  if (!res || !res.ok) throw new Error(`Login failed: ${res?.status ?? "no response"}`);
 
   const cookies = res.headers.get("set-cookie") || "";
   const csrfMatch = cookies.match(/careconnect_csrf=([^;]+)/);
@@ -148,6 +155,33 @@ export async function setup() {
       }
       console.log(`[globalSetup] Deleted ${deleted}/${testProspects.length} stale test prospects`);
     }
+  }
+
+  // Step 3: Purge stale time-entries and admin-assigned appointments in the
+  // far-future test pollution window. Tests like TE-BIZ-3 (offset 260+) and
+  // EB-5.2 (offset 280) need a clean calendar window for the test admin.
+  // The near future (next 30 days) is preserved so any near-term planning data
+  // is not wiped. The window extends to ~2.5 years out which covers all
+  // far-future offsets used by the test suite (max ~680 + buffer).
+  try {
+    const calRes = await apiPost(auth, "/api/admin/test-cleanup/purge-admin-calendar-range", {
+      startOffsetDays: 30,
+      endOffsetDays: 900,
+    });
+    if (calRes.ok) {
+      const result = await calRes.json() as {
+        timeEntriesDeleted: number;
+        appointmentsDeleted: number;
+        startDate: string;
+        endDate: string;
+      };
+      console.log(`[globalSetup] Purged ${result.timeEntriesDeleted} stale time-entries and ${result.appointmentsDeleted} stale admin appointments in [${result.startDate}, ${result.endDate}]`);
+    } else {
+      console.warn(`[globalSetup] Calendar purge failed: ${calRes.status} ${await calRes.text()}`);
+    }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`[globalSetup] Calendar purge errored: ${msg}`);
   }
 
   console.log("[globalSetup] Cleanup complete");

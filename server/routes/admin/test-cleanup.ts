@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
-import { inArray, eq } from "drizzle-orm";
+import { inArray, eq, and, gte, lte, isNull, sql } from "drizzle-orm";
 import { asyncHandler } from "../../lib/errors";
 import { requireSuperAdmin } from "../../middleware/auth";
 import { db } from "../../lib/db";
@@ -11,6 +11,7 @@ import { budgetTransactions } from "@shared/schema";
 import { prospects } from "@shared/schema";
 import { qontoTransactions, paymentAdviceItems } from "@shared/schema";
 import { documentDeliveries } from "@shared/schema";
+import { employeeTimeEntries } from "@shared/schema/time-tracking";
 
 const router = Router();
 
@@ -93,6 +94,94 @@ router.post(
       }
     }
     res.json({ deleted, failed });
+  })
+);
+
+const purgeCalendarRangeSchema = z.object({
+  startOffsetDays: z.number().int().min(1).max(2000),
+  endOffsetDays: z.number().int().min(1).max(2000),
+}).refine((d) => d.endOffsetDays >= d.startOffsetDays, {
+  message: "endOffsetDays muss >= startOffsetDays sein",
+});
+
+function offsetToDateString(offsetDays: number): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + offsetDays);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+router.post(
+  "/test-cleanup/purge-admin-calendar-range",
+  requireSuperAdmin,
+  asyncHandler("Kalender-Cleanup fehlgeschlagen", async (req: Request, res: Response) => {
+    if (process.env.NODE_ENV === "production") {
+      res.status(403).json({ error: "FORBIDDEN", message: "Test-Cleanup ist in Produktion deaktiviert" });
+      return;
+    }
+    const { startOffsetDays, endOffsetDays } = purgeCalendarRangeSchema.parse(req.body);
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ error: "UNAUTHORIZED" });
+      return;
+    }
+
+    const startDate = offsetToDateString(startOffsetDays);
+    const endDate = offsetToDateString(endOffsetDays);
+
+    let timeEntriesDeleted = 0;
+    let appointmentsDeleted = 0;
+
+    await db.transaction(async (tx) => {
+      const teResult = await tx
+        .update(employeeTimeEntries)
+        .set({ deletedAt: new Date() })
+        .where(and(
+          eq(employeeTimeEntries.userId, userId),
+          gte(employeeTimeEntries.entryDate, startDate),
+          lte(employeeTimeEntries.entryDate, endDate),
+          isNull(employeeTimeEntries.deletedAt),
+        ))
+        .returning({ id: employeeTimeEntries.id });
+      timeEntriesDeleted = teResult.length;
+
+      const apptIdsRows = await tx
+        .select({ id: appointments.id })
+        .from(appointments)
+        .where(and(
+          eq(appointments.assignedEmployeeId, userId),
+          gte(appointments.date, startDate),
+          lte(appointments.date, endDate),
+          isNull(appointments.deletedAt),
+        ));
+      const apptIds = apptIdsRows.map(r => r.id);
+
+      if (apptIds.length > 0) {
+        await tx.update(budgetTransactions)
+          .set({ appointmentId: null })
+          .where(inArray(budgetTransactions.appointmentId, apptIds));
+        await tx.update(appointments)
+          .set({ travelFromAppointmentId: null })
+          .where(inArray(appointments.travelFromAppointmentId, apptIds));
+        const apptResult = await tx
+          .update(appointments)
+          .set({ deletedAt: new Date() })
+          .where(inArray(appointments.id, apptIds))
+          .returning({ id: appointments.id });
+        appointmentsDeleted = apptResult.length;
+      }
+    });
+
+    res.json({
+      userId,
+      startDate,
+      endDate,
+      timeEntriesDeleted,
+      appointmentsDeleted,
+    });
   })
 );
 

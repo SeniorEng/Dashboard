@@ -19,6 +19,24 @@ interface AuthCookie {
 
 let authCookie: AuthCookie | null = null;
 
+async function loginRequestWithRetry(email: string, password: string): Promise<Response> {
+  const maxRetries = 5;
+  const baseDelayMs = 1500;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    if (res.status !== 429) return res;
+    if (attempt === maxRetries) return res;
+    const delay = baseDelayMs * Math.pow(2, attempt);
+    console.warn(`[test-utils] 429 on login for ${email}, retry ${attempt + 1}/${maxRetries} in ${delay}ms`);
+    await new Promise((r) => setTimeout(r, delay));
+  }
+  throw new Error(`Login retry loop exhausted for ${email}`);
+}
+
 export async function getAuthCookie(): Promise<AuthCookie> {
   if (authCookie) return authCookie;
 
@@ -26,14 +44,7 @@ export async function getAuthCookie(): Promise<AuthCookie> {
     throw new Error("TEST_USER_PASSWORD Umgebungsvariable muss gesetzt sein. Setze sie mit: export TEST_USER_PASSWORD='dein_passwort'");
   }
 
-  const loginResponse = await fetch(`${BASE_URL}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email: TEST_EMAIL,
-      password: TEST_PASSWORD,
-    }),
-  });
+  const loginResponse = await loginRequestWithRetry(TEST_EMAIL, TEST_PASSWORD);
 
   if (!loginResponse.ok) {
     throw new Error(`Login failed: ${loginResponse.status}`);
@@ -63,11 +74,7 @@ export function resetAuthCache(): void {
 }
 
 export async function loginAs(email: string, password: string): Promise<AuthCookie> {
-  const loginResponse = await fetch(`${BASE_URL}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
+  const loginResponse = await loginRequestWithRetry(email, password);
 
   if (!loginResponse.ok) {
     throw new Error(`Login as ${email} failed: ${loginResponse.status}`);
