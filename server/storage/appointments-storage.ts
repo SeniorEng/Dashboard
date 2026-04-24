@@ -12,6 +12,10 @@ import { customerIdsCache } from "../services/cache";
 import { db, type DbOrTx } from "../lib/db";
 import { appointmentWithCustomerSelectFields, mapAppointmentRow } from "./appointment-helpers";
 import type { PaginationOptions } from "../storage";
+import { badRequest } from "../lib/errors";
+
+const APPOINTMENT_PERSON_REQUIRED_MESSAGE =
+  "Ein Termin muss entweder mit einem Kunden oder einem Interessenten verknüpft sein.";
 
 export async function getAppointments(): Promise<Appointment[]> {
   return await db.select().from(appointments).where(isNull(appointments.deletedAt));
@@ -78,6 +82,9 @@ export async function getAppointmentCountsByDates(dates: string[], customerIds?:
 }
 
 export async function createAppointment(appointment: InsertAppointment): Promise<Appointment> {
+  if (appointment.customerId == null && appointment.prospectId == null) {
+    throw badRequest(APPOINTMENT_PERSON_REQUIRED_MESSAGE);
+  }
   const result = await db.insert(appointments).values(appointment).returning();
   if (appointment.assignedEmployeeId) {
     customerIdsCache.invalidateForEmployee(appointment.assignedEmployeeId);
@@ -87,6 +94,26 @@ export async function createAppointment(appointment: InsertAppointment): Promise
 
 export async function updateAppointment(id: number, appointment: UpdateAppointment, tx?: DbOrTx): Promise<Appointment | undefined> {
   const client = tx || db;
+
+  const customerKey = "customerId" in appointment;
+  const prospectKey = "prospectId" in appointment;
+  const nullsCustomer = customerKey && appointment.customerId == null;
+  const nullsProspect = prospectKey && appointment.prospectId == null;
+
+  if (nullsCustomer || nullsProspect) {
+    const existing = await client
+      .select({ customerId: appointments.customerId, prospectId: appointments.prospectId })
+      .from(appointments)
+      .where(eq(appointments.id, id));
+    if (existing.length > 0) {
+      const finalCustomerId = customerKey ? appointment.customerId : existing[0].customerId;
+      const finalProspectId = prospectKey ? appointment.prospectId : existing[0].prospectId;
+      if (finalCustomerId == null && finalProspectId == null) {
+        throw badRequest(APPOINTMENT_PERSON_REQUIRED_MESSAGE);
+      }
+    }
+  }
+
   const result = await client.update(appointments)
     .set(appointment)
     .where(eq(appointments.id, id))
