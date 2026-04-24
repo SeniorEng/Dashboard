@@ -65,7 +65,7 @@ function DayButton({ dayStr, day, index, isSelected, isDayToday, appointmentCoun
   } else if (hasAppointments) {
     bgClass = "bg-primary/8 ring-1 ring-primary/20 hover:bg-primary/15";
   } else if (isWeekend) {
-    bgClass = "bg-muted/40 text-muted-foreground/50 hover:bg-muted/60";
+    bgClass = "bg-muted/30 text-muted-foreground hover:bg-muted/60";
   } else {
     bgClass = "bg-background hover:bg-muted";
   }
@@ -77,10 +77,10 @@ function DayButton({ dayStr, day, index, isSelected, isDayToday, appointmentCoun
       data-testid={`weekday-${dayStr}`}
       title={holidayName || undefined}
     >
-      <span className={`text-[10px] font-medium uppercase tracking-wide ${isWeekend && !isSelected ? "opacity-40" : "opacity-70"}`}>
+      <span className="text-[10px] font-medium uppercase tracking-wide opacity-70">
         {WEEKDAY_NAMES_SHORT[index]}
       </span>
-      <span className={`font-semibold ${isWeekend && !isSelected ? "text-sm text-muted-foreground/50" : "text-base"} ${isDayToday && !isSelected && !holidayName ? "text-primary" : ""}`}>
+      <span className={`font-semibold ${isWeekend && !isSelected ? "text-sm" : "text-base"} ${isDayToday && !isSelected && !holidayName ? "text-primary" : ""}`}>
         {format(day, "d")}
       </span>
       <span className={`text-[9px] font-semibold leading-none h-[10px] flex items-center justify-center ${
@@ -88,7 +88,7 @@ function DayButton({ dayStr, day, index, isSelected, isDayToday, appointmentCoun
           ? isSelected ? "text-white/80" : holidayName ? "text-red-600" : "text-primary"
           : holidayName
             ? isSelected ? "text-white/70" : "text-red-400"
-            : isSelected ? "text-white/50" : isWeekend ? "text-muted-foreground/30" : "text-muted-foreground/45"
+            : isSelected ? "text-white/50" : isWeekend ? "text-muted-foreground/60" : "text-muted-foreground/45"
       }`}>
         {hasAppointments ? appointmentCount : holidayName ? "●" : 0}
       </span>
@@ -497,21 +497,22 @@ export default function Dashboard() {
   return (
     <Layout>
       <div className="mb-6 animate-in fade-in duration-300">
-        <div className="flex items-center justify-between mb-2 px-1">
+        <div className="flex items-center justify-between mb-2 px-1 min-h-[28px]">
           <span className="text-sm font-medium text-muted-foreground capitalize" data-testid="text-month-label">
             {monthLabel}
           </span>
-          <Button
-            variant={isToday ? "ghost" : "outline"}
-            size="sm"
-            className={`h-7 text-xs px-3 ${isToday ? "text-muted-foreground/50 cursor-default" : "border-primary/30 text-primary font-medium"}`}
-            onClick={goToToday}
-            disabled={isToday}
-            data-testid="button-go-today"
-          >
-            <CalendarCheck className="h-3.5 w-3.5 mr-1" />
-            Heute
-          </Button>
+          {!isToday && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs px-3 border-primary/30 text-primary font-medium"
+              onClick={goToToday}
+              data-testid="button-go-today"
+            >
+              <CalendarCheck className="h-3.5 w-3.5 mr-1" />
+              Heute
+            </Button>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <Button
@@ -575,9 +576,17 @@ export default function Dashboard() {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-foreground/90" data-testid="text-date">
-              {isToday
-                ? `Heute, ${format(selectedDate, "d. MMMM", { locale: de })}`
-                : format(selectedDate, "EEEE, d. MMMM", { locale: de })}
+              {isToday ? (
+                <>
+                  <span className="sm:hidden">Heute, {format(selectedDate, "d. MMMM", { locale: de })}</span>
+                  <span className="hidden sm:inline">Heute, {format(selectedDate, "EEEE, d. MMMM", { locale: de })}</span>
+                </>
+              ) : (
+                <>
+                  <span className="sm:hidden">{format(selectedDate, "EEEEEE, d. MMMM", { locale: de })}</span>
+                  <span className="hidden sm:inline">{format(selectedDate, "EEEE, d. MMMM", { locale: de })}</span>
+                </>
+              )}
             </h2>
             {selectedHoliday && (
               <p className="text-sm font-medium text-red-600" data-testid="text-holiday">
