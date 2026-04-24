@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { Link, useSearch } from "wouter";
 import { Layout } from "@/components/layout";
 import { useAppointments, useWeekAppointmentCounts } from "@/features/appointments";
@@ -17,7 +17,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { format, addDays, startOfWeek, subWeeks, isSameDay } from "date-fns";
 import { de } from "date-fns/locale";
-import { Plus, ChevronsLeft, ChevronsRight, CalendarCheck, Pencil, Trash2, Loader2, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, ChevronsLeft, ChevronsRight, ChevronLeft, ChevronRight, CalendarCheck, Pencil, Trash2, Loader2, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { getHolidayMap } from "@shared/utils/holidays";
 import { iconSize } from "@/design-system";
@@ -48,6 +49,75 @@ interface DayButtonProps {
   holidayName?: string;
   isWeekend: boolean;
   onSelect: (day: Date) => void;
+}
+
+const PICKER_MONTH_NAMES = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+
+interface MonthYearPickerProps {
+  initialDate: Date;
+  onSelect: (date: Date) => void;
+}
+
+function MonthYearPicker({ initialDate, onSelect }: MonthYearPickerProps) {
+  const [pickerYear, setPickerYear] = useState(initialDate.getFullYear());
+  const today = useMemo(() => new Date(), []);
+  const todayYear = today.getFullYear();
+  const todayMonth = today.getMonth();
+  const initialMonth = initialDate.getMonth();
+  const initialYear = initialDate.getFullYear();
+
+  const handleSelect = (m: number) => {
+    const target = pickerYear === todayYear && m === todayMonth
+      ? today
+      : new Date(pickerYear, m, 1);
+    onSelect(target);
+  };
+
+  return (
+    <div className="w-60" data-testid="picker-month-year">
+      <div className="flex items-center justify-between mb-3">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={() => setPickerYear(y => y - 1)}
+          data-testid="button-picker-prev-year"
+          aria-label="Vorheriges Jahr"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <span className="text-sm font-semibold" data-testid="text-picker-year">{pickerYear}</span>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={() => setPickerYear(y => y + 1)}
+          data-testid="button-picker-next-year"
+          aria-label="Nächstes Jahr"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+      <div className="grid grid-cols-3 gap-1.5">
+        {PICKER_MONTH_NAMES.map((label, m) => {
+          const isCurrent = pickerYear === todayYear && m === todayMonth;
+          const isSelected = pickerYear === initialYear && m === initialMonth;
+          return (
+            <Button
+              key={m}
+              variant={isSelected ? "default" : "ghost"}
+              size="sm"
+              className={`h-8 text-xs ${isCurrent && !isSelected ? "ring-1 ring-primary/40" : ""}`}
+              onClick={() => handleSelect(m)}
+              data-testid={`button-picker-month-${m + 1}`}
+            >
+              {label}
+            </Button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function DayButton({ dayStr, day, index, isSelected, isDayToday, appointmentCount, holidayName, isWeekend, onSelect }: DayButtonProps) {
@@ -343,6 +413,9 @@ export default function Dashboard() {
   const createMutation = useCreateTimeEntry();
 
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const swipeTriggeredRef = useRef(false);
   const createForm = useTimeEntryForm();
   const createValidation = useTimeEntryConflict(
     showCreateDialog ? createForm.formState : null,
@@ -498,9 +571,27 @@ export default function Dashboard() {
     <Layout>
       <div className="mb-6 animate-in fade-in duration-300">
         <div className="flex items-center justify-between mb-2 px-1 min-h-[28px]">
-          <span className="text-sm font-medium text-muted-foreground capitalize" data-testid="text-month-label">
-            {monthLabel}
-          </span>
+          <Popover open={showMonthPicker} onOpenChange={setShowMonthPicker}>
+            <PopoverTrigger asChild>
+              <button
+                className="text-sm font-medium text-muted-foreground capitalize hover:text-foreground transition-colors -ml-1 px-1 py-0.5 rounded hover:bg-muted/60 inline-flex items-center gap-1"
+                data-testid="button-month-label"
+                aria-label={`${monthLabel} — Monat ändern`}
+              >
+                <span data-testid="text-month-label">{monthLabel}</span>
+                <ChevronDown className="h-3 w-3 opacity-60" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-auto p-3" data-testid="popover-month-picker">
+              <MonthYearPicker
+                initialDate={selectedDate}
+                onSelect={(date) => {
+                  setSelectedDate(date);
+                  setShowMonthPicker(false);
+                }}
+              />
+            </PopoverContent>
+          </Popover>
           {!isToday && (
             <Button
               variant="outline"
@@ -527,7 +618,37 @@ export default function Dashboard() {
             <ChevronsLeft className={iconSize.sm} />
           </Button>
 
-          <div className="flex gap-1 justify-center flex-1">
+          <div
+            className="flex gap-1 justify-center flex-1 touch-pan-y"
+            onTouchStart={(e) => {
+              swipeTriggeredRef.current = false;
+              if (e.touches.length !== 1) return;
+              swipeStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }}
+            onTouchEnd={(e) => {
+              if (!swipeStartRef.current) return;
+              const t = e.changedTouches[0];
+              const dx = t.clientX - swipeStartRef.current.x;
+              const dy = t.clientY - swipeStartRef.current.y;
+              swipeStartRef.current = null;
+              if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+                swipeTriggeredRef.current = true;
+                if (dx < 0) goToNextWeek();
+                else goToPreviousWeek();
+              }
+            }}
+            onTouchCancel={() => {
+              swipeStartRef.current = null;
+            }}
+            onClickCapture={(e) => {
+              if (swipeTriggeredRef.current) {
+                e.stopPropagation();
+                e.preventDefault();
+                swipeTriggeredRef.current = false;
+              }
+            }}
+            data-testid="weekday-strip"
+          >
             {weekDays.map((day, index) => {
               const dayStr = format(day, "yyyy-MM-dd");
               const isSelected = dayStr === dateString;
