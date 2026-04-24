@@ -168,6 +168,44 @@ router.get("/travel-time", requireAuth, asyncHandler("Fahrtzeit konnte nicht ber
   res.json(result);
 }));
 
+interface AddressSuggestion {
+  displayName: string;
+  strasse: string;
+  hausnummer: string;
+  plz: string;
+  stadt: string;
+  latitude: number;
+  longitude: number;
+}
+
+const ADDRESS_CACHE_TTL_MS = 60_000;
+const ADDRESS_CACHE_MAX_ENTRIES = 200;
+const addressSearchCache = new Map<string, { expires: number; data: AddressSuggestion[] }>();
+
+function getCachedAddressSearch(key: string): AddressSuggestion[] | null {
+  const entry = addressSearchCache.get(key);
+  if (!entry) return null;
+  if (entry.expires <= Date.now()) {
+    addressSearchCache.delete(key);
+    return null;
+  }
+  addressSearchCache.delete(key);
+  addressSearchCache.set(key, entry);
+  return entry.data;
+}
+
+function setCachedAddressSearch(key: string, data: AddressSuggestion[]) {
+  if (addressSearchCache.size >= ADDRESS_CACHE_MAX_ENTRIES) {
+    const iterator = addressSearchCache.keys();
+    for (let i = 0; i < 50; i++) {
+      const next = iterator.next();
+      if (next.done) break;
+      addressSearchCache.delete(next.value);
+    }
+  }
+  addressSearchCache.set(key, { expires: Date.now() + ADDRESS_CACHE_TTL_MS, data });
+}
+
 router.get("/address-search", requireAuth, asyncHandler("Adresssuche fehlgeschlagen", async (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
   if (q.length < 3) {
@@ -187,13 +225,20 @@ router.get("/address-search", requireAuth, asyncHandler("Adresssuche fehlgeschla
     }
   }
 
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const cacheKey = `${q.toLowerCase()}|${biasLat !== null ? round2(biasLat) : ""}|${biasLon !== null ? round2(biasLon) : ""}`;
+  const cached = getCachedAddressSearch(cacheKey);
+  if (cached) {
+    return res.json(cached);
+  }
+
   const { rateLimitedFetch } = await import("../services/geocoding");
   const params = new URLSearchParams({
     q,
     format: "jsonv2",
     addressdetails: "1",
     countrycodes: "de",
-    limit: "10",
+    limit: "8",
   });
   if (biasLat !== null && biasLon !== null) {
     const delta = 0.5;
@@ -215,6 +260,10 @@ router.get("/address-search", requireAuth, asyncHandler("Adresssuche fehlgeschla
     lon: string;
     address: {
       road?: string;
+      pedestrian?: string;
+      residential?: string;
+      footway?: string;
+      path?: string;
       house_number?: string;
       postcode?: string;
       city?: string;
@@ -225,19 +274,29 @@ router.get("/address-search", requireAuth, asyncHandler("Adresssuche fehlgeschla
   }>;
 
   const mapped = results
-    .filter(r => r.address?.road)
-    .map(r => ({
-      displayName: r.display_name,
-      strasse: r.address.road || "",
-      hausnummer: r.address.house_number || "",
-      plz: r.address.postcode || "",
-      stadt: r.address.city || r.address.town || r.address.village || r.address.municipality || "",
-      latitude: parseFloat(r.lat),
-      longitude: parseFloat(r.lon),
-    }));
+    .map(r => {
+      const street =
+        r.address?.road
+        || r.address?.pedestrian
+        || r.address?.residential
+        || r.address?.footway
+        || r.address?.path
+        || "";
+      if (!street) return null;
+      return {
+        displayName: r.display_name,
+        strasse: street,
+        hausnummer: r.address.house_number || "",
+        plz: r.address.postcode || "",
+        stadt: r.address.city || r.address.town || r.address.village || r.address.municipality || "",
+        latitude: parseFloat(r.lat),
+        longitude: parseFloat(r.lon),
+      };
+    })
+    .filter((s): s is AddressSuggestion => s !== null);
 
   const seen = new Set<string>();
-  const deduped: typeof mapped = [];
+  const deduped: AddressSuggestion[] = [];
   for (const s of mapped) {
     const key = [s.strasse, s.hausnummer, s.plz, s.stadt]
       .map(part => part.trim().toLowerCase())
@@ -265,7 +324,9 @@ router.get("/address-search", requireAuth, asyncHandler("Adresssuche fehlgeschla
       .map(x => x.s);
   }
 
-  res.json(ordered.slice(0, 8));
+  const final = ordered.slice(0, 8);
+  setCachedAddressSearch(cacheKey, final);
+  res.json(final);
 }));
 
 router.post("/customers/:id/geocode", requireAuth, asyncHandler("Geocodierung fehlgeschlagen", async (req, res) => {

@@ -10,19 +10,31 @@ const USER_AGENT = "CareConnect/1.0 (care-management-app)";
 const RATE_LIMIT_MS = 1100;
 
 let lastRequestTime = 0;
+let rateLimitChain: Promise<void> = Promise.resolve();
 
 interface GeocodingResult {
   latitude: number;
   longitude: number;
 }
 
+/**
+ * Thread-safe wrapper around fetch that enforces Nominatim's
+ * 1 request/second policy across concurrent callers by serialising
+ * waits through a shared Promise chain. The actual HTTP call still
+ * runs in parallel once the slot has been released, so latency for
+ * an isolated request stays at network RTT.
+ */
 export async function rateLimitedFetch(url: string): Promise<Response> {
-  const now = Date.now();
-  const elapsed = now - lastRequestTime;
-  if (elapsed < RATE_LIMIT_MS) {
-    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_MS - elapsed));
-  }
-  lastRequestTime = Date.now();
+  const wait = rateLimitChain.then(async () => {
+    const now = Date.now();
+    const elapsed = now - lastRequestTime;
+    if (elapsed < RATE_LIMIT_MS) {
+      await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_MS - elapsed));
+    }
+    lastRequestTime = Date.now();
+  });
+  rateLimitChain = wait.catch(() => undefined);
+  await wait;
   return fetch(url, {
     headers: { "User-Agent": USER_AGENT, "Accept": "application/json" },
     signal: AbortSignal.timeout(5000),

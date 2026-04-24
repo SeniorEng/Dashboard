@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { Loader2, MapPin } from "lucide-react";
 import { iconSize } from "@/design-system";
-import { api, unwrapResult } from "@/lib/api/client";
+import { api, unwrapResult, ApiError } from "@/lib/api/client";
 
 interface AddressSuggestion {
   displayName: string;
@@ -41,26 +41,50 @@ export function AddressAutocomplete({
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const suppressSearchRef = useRef(false);
+  const requestIdRef = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const search = useCallback(async (query: string) => {
     if (query.length < 3) {
+      requestIdRef.current += 1;
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
       setSuggestions([]);
       setIsOpen(false);
+      setIsLoading(false);
       return;
     }
 
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const myRequestId = ++requestIdRef.current;
+
     setIsLoading(true);
     try {
-      const result = await api.get<AddressSuggestion[]>(`/address-search?q=${encodeURIComponent(query)}`);
+      const result = await api.get<AddressSuggestion[]>(
+        `/address-search?q=${encodeURIComponent(query)}`,
+        controller.signal,
+      );
+      if (myRequestId !== requestIdRef.current) return;
       const data = unwrapResult(result);
       setSuggestions(data);
       setIsOpen(data.length > 0);
       setActiveIndex(-1);
-    } catch {
+    } catch (error) {
+      if (myRequestId !== requestIdRef.current) return;
+      if (error instanceof ApiError && error.code === "ABORTED") return;
       setSuggestions([]);
       setIsOpen(false);
     } finally {
-      setIsLoading(false);
+      if (myRequestId === requestIdRef.current) {
+        setIsLoading(false);
+        abortControllerRef.current = null;
+      }
     }
   }, []);
 
@@ -132,6 +156,7 @@ export function AddressAutocomplete({
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (abortControllerRef.current) abortControllerRef.current.abort();
     };
   }, []);
 
