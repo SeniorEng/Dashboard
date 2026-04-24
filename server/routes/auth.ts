@@ -26,6 +26,7 @@ import { sendEmail, buildPasswordResetEmailHtml } from "../services/email-servic
 import { resolveLogoToDataUrl } from "../services/logo-resolver";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { birthdaysCache, getCachedCompanySettings } from "../services/cache";
+import { ensureEmployeeGeocoded } from "../services/geocoding";
 import { todayISO } from "@shared/utils/datetime";
 import { calculateDaysUntilBirthday } from "./birthdays";
 
@@ -55,6 +56,8 @@ router.post("/login", asyncHandler("Anmeldung fehlgeschlagen", async (req: Reque
 
   setSessionCookie(res, loginResult.token);
   setCsrfCookie(res, generateCsrfToken());
+
+  ensureEmployeeGeocoded(loginResult.user);
 
   res.json({
     user: sanitizeUser(loginResult.user),

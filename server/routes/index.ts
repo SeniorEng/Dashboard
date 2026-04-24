@@ -218,6 +218,10 @@ router.get("/address-search", requireAuth, asyncHandler("Adresssuche fehlgeschla
     biasLat = req.user.latitude;
     biasLon = req.user.longitude;
   } else {
+    if (req.user) {
+      const { ensureEmployeeGeocoded } = await import("../services/geocoding");
+      ensureEmployeeGeocoded(req.user);
+    }
     const settings = await getCachedCompanySettings();
     if (settings && typeof settings.latitude === "number" && typeof settings.longitude === "number") {
       biasLat = settings.latitude;

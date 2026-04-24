@@ -4,6 +4,7 @@ import { companySettings } from "@shared/schema/company";
 import { users } from "@shared/schema/users";
 import { eq, isNull, and, or, isNotNull } from "drizzle-orm";
 import { log } from "../lib/log";
+import { sessionCache } from "./cache";
 
 const NOMINATIM_BASE = "https://nominatim.openstreetmap.org/search";
 const USER_AGENT = "CareConnect/1.0 (care-management-app)";
@@ -106,12 +107,49 @@ export async function geocodeEmployee(userId: number): Promise<void> {
   const [user] = await db.select().from(users).where(eq(users.id, userId));
   if (!user) return;
 
+  if (user.latitude != null && user.longitude != null) return;
+
   const result = await geocodeAddress(user.strasse, user.hausnummer, user.plz, user.stadt);
   if (result) {
     await db.update(users)
       .set({ latitude: result.latitude, longitude: result.longitude })
       .where(eq(users.id, userId));
+    sessionCache.invalidateByUserId(userId);
   }
+}
+
+const inFlightEmployeeGeocodes = new Set<number>();
+
+interface EmployeeAddressLike {
+  id: number;
+  strasse?: string | null;
+  hausnummer?: string | null;
+  plz?: string | null;
+  stadt?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+}
+
+/**
+ * Stößt im Hintergrund eine Geocodierung für eine:n Mitarbeiter:in an, falls
+ * eine Adresse hinterlegt ist, aber noch keine Koordinaten existieren. Mehrfach-
+ * Aufrufe für dieselbe Person innerhalb der Prozesslaufzeit werden dedupliziert.
+ * Der Aufruf ist nicht-blockierend: er kehrt sofort zurück.
+ */
+export function ensureEmployeeGeocoded(user: EmployeeAddressLike | null | undefined): void {
+  if (!user) return;
+  if (user.latitude != null && user.longitude != null) return;
+  if (!user.strasse || !user.plz || !user.stadt) return;
+  if (inFlightEmployeeGeocodes.has(user.id)) return;
+
+  inFlightEmployeeGeocodes.add(user.id);
+  geocodeEmployee(user.id)
+    .catch(err => {
+      log(`Background employee geocoding failed for user ${user.id}: ${err}`, "geocoding");
+    })
+    .finally(() => {
+      inFlightEmployeeGeocodes.delete(user.id);
+    });
 }
 
 export async function geocodeAllMissing(): Promise<void> {
