@@ -34,7 +34,9 @@ beforeAll(async () => {
   const { db } = await import("../server/lib/db");
   const { services: servicesTable } = await import("@shared/schema");
   const allServices = await db.select().from(servicesTable);
-  const hauswirtschaft = allServices.find((s: any) => /hauswirtschaft/i.test(s.name) || /hauswirtschaft/i.test(s.code ?? ""));
+  const hauswirtschaft = allServices.find(
+    (s) => /hauswirtschaft/i.test(s.name ?? "") || /hauswirtschaft/i.test(s.code ?? "")
+  );
   if (!hauswirtschaft) throw new Error("Service Hauswirtschaft nicht gefunden");
   serviceId = hauswirtschaft.id;
 });
