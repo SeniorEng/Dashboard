@@ -15,7 +15,7 @@ interface AuthLayoutProps {
 export function AuthLayout({ children }: AuthLayoutProps) {
   return (
     <div
-      className={`min-h-screen flex items-center justify-center ${colors.surface.page} p-4`}
+      className={`min-h-screen flex items-center justify-center ${colors.surface.page} pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]`}
     >
       <Card className="w-full max-w-md">{children}</Card>
     </div>
@@ -25,7 +25,7 @@ export function AuthLayout({ children }: AuthLayoutProps) {
 export function AuthLoadingScreen() {
   return (
     <div
-      className={`min-h-screen flex items-center justify-center ${colors.surface.page}`}
+      className={`min-h-screen flex items-center justify-center ${colors.surface.page} pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]`}
     >
       <Loader2 className={`${iconSize.xl} animate-spin text-teal-600`} />
     </div>
