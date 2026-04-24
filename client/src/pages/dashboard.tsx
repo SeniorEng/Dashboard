@@ -21,7 +21,7 @@ import { Plus, ChevronsLeft, ChevronsRight, CalendarCheck, Pencil, Trash2, Loade
 import { parseLocalDate } from "@shared/utils/datetime";
 import { getHolidayMap } from "@shared/utils/holidays";
 import { iconSize } from "@/design-system";
-import { useDayTimeEntries, useUpdateTimeEntry, useDeleteTimeEntry } from "@/features/time-tracking/hooks/use-time-entries";
+import { useDayTimeEntries, useCreateTimeEntry, useUpdateTimeEntry, useDeleteTimeEntry } from "@/features/time-tracking/hooks/use-time-entries";
 import { useTimeEntryForm } from "@/features/time-tracking/hooks/use-time-entry-form";
 import { useTimeEntryConflict } from "@/features/time-tracking/hooks/use-time-entry-conflict";
 import { TimeEntryDialog } from "@/features/time-tracking/components/time-entry-dialog";
@@ -88,9 +88,9 @@ function DayButton({ dayStr, day, index, isSelected, isDayToday, appointmentCoun
           ? isSelected ? "text-white/80" : holidayName ? "text-red-600" : "text-primary"
           : holidayName
             ? isSelected ? "text-white/70" : "text-red-400"
-            : "opacity-0"
-      }`} aria-hidden={!hasAppointments && !holidayName}>
-        {hasAppointments ? appointmentCount : holidayName ? "●" : "\u00A0"}
+            : isSelected ? "text-white/50" : isWeekend ? "text-muted-foreground/30" : "text-muted-foreground/45"
+      }`}>
+        {hasAppointments ? appointmentCount : holidayName ? "●" : 0}
       </span>
     </button>
   );
@@ -224,7 +224,7 @@ function CoverageBanner({ data }: { data: CoverageData }) {
       >
         <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
         <span className="text-sm font-medium flex-1">
-          Ohne Termin: {currentMonthShort} {currentCount} · {nextMonthShort} {nextCount}
+          Kunden ohne Termin · {currentMonthShort}: {currentCount} · {nextMonthShort}: {nextCount}
         </span>
         {expanded ? <ChevronUp className="h-4 w-4 shrink-0" /> : <ChevronDown className="h-4 w-4 shrink-0" />}
       </button>
@@ -340,6 +340,14 @@ export default function Dashboard() {
 
   const updateMutation = useUpdateTimeEntry();
   const deleteMutation = useDeleteTimeEntry();
+  const createMutation = useCreateTimeEntry();
+
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const createForm = useTimeEntryForm();
+  const createValidation = useTimeEntryConflict(
+    showCreateDialog ? createForm.formState : null,
+    showCreateDialog
+  );
 
   const handleOpenEdit = useCallback((entry: TimeEntry) => {
     setEditingEntry(entry);
@@ -373,6 +381,38 @@ export default function Dashboard() {
       onSuccess: () => setDeleteTarget(null),
     });
   }, [deleteTarget, deleteMutation]);
+
+  const handleOpenCreate = useCallback((entryType: TimeEntryType) => {
+    const isFullDayType = FULL_DAY_TYPES.includes(entryType);
+    let startTime: string | undefined;
+    let endTime: string | undefined;
+    if (!isFullDayType) {
+      const now = new Date();
+      const roundedMin = Math.floor(now.getMinutes() / 5) * 5;
+      const sh = String(now.getHours()).padStart(2, "0");
+      const sm = String(roundedMin).padStart(2, "0");
+      const eh = String(Math.min(now.getHours() + 1, 23)).padStart(2, "0");
+      startTime = `${sh}:${sm}`;
+      endTime = `${eh}:${sm}`;
+    }
+    const effectiveTargetUserId = isAdmin && viewAsEmployeeId ? viewAsEmployeeId : null;
+    createForm.reset({
+      entryType,
+      entryDate: dateString,
+      isFullDay: isFullDayType,
+      startTime,
+      endTime,
+      targetUserId: effectiveTargetUserId,
+    });
+    setShowCreateDialog(true);
+  }, [createForm, dateString, isAdmin, viewAsEmployeeId]);
+
+  const handleCreate = useCallback(() => {
+    const data = createForm.toCreateRequest();
+    createMutation.mutate(data, {
+      onSuccess: () => setShowCreateDialog(false),
+    });
+  }, [createForm, createMutation]);
 
   const today = useMemo(() => new Date(), []);
   const todayString = format(today, "yyyy-MM-dd");
@@ -590,8 +630,38 @@ export default function Dashboard() {
             />
           </div>
         ) : !hasAnyContent ? (
-          <div className="text-center py-12 min-h-[200px] text-muted-foreground" data-testid="empty-day">
+          <div className="text-center py-8 min-h-[200px] text-muted-foreground space-y-4" data-testid="empty-day">
             <p>Keine Termine oder Einträge für diesen Tag.</p>
+            {!isMonthClosed && (
+              <div className="flex flex-col sm:flex-row gap-2 justify-center items-stretch sm:items-center max-w-md mx-auto px-4">
+                <Link href={`/new-appointment?date=${dateString}&from=dashboard`} className="w-full sm:w-auto">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full sm:w-auto min-h-[44px]"
+                    data-testid="button-empty-create-appointment"
+                  >
+                    <Plus className={`${iconSize.sm} mr-1`} /> Termin
+                  </Button>
+                </Link>
+                {(["verfuegbar", "pause"] as const).map((type) => {
+                  const cfg = TIME_ENTRY_TYPE_CONFIG[type];
+                  const Icon = cfg.icon;
+                  return (
+                    <Button
+                      key={type}
+                      variant="outline"
+                      size="sm"
+                      className="w-full sm:w-auto min-h-[44px]"
+                      onClick={() => handleOpenCreate(type)}
+                      data-testid={`button-empty-create-${type}`}
+                    >
+                      <Icon className={`${iconSize.sm} mr-1`} /> {cfg.label}
+                    </Button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex flex-col gap-3 animate-in fade-in duration-300">
@@ -631,6 +701,21 @@ export default function Dashboard() {
         supportsDateRange={false}
         submitLabel="Speichern"
         testIdPrefix="dashboard-edit"
+      />
+
+      <TimeEntryDialog
+        open={showCreateDialog}
+        onOpenChange={setShowCreateDialog}
+        title="Neuer Eintrag"
+        formState={createForm.formState}
+        onFieldChange={createForm.updateField}
+        validation={createValidation}
+        onSubmit={handleCreate}
+        isSubmitting={createMutation.isPending}
+        isFullDayType={createForm.isFullDayType}
+        supportsDateRange={createForm.supportsDateRange}
+        submitLabel="Speichern"
+        testIdPrefix="dashboard-create"
       />
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
