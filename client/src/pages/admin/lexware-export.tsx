@@ -15,9 +15,14 @@ interface EmployeeSummaryRow {
   vorname: string;
   stundenHauswirtschaft: number;
   stundenAlltagsbegleitung: number;
+  stundenErstberatung: number;
+  stundenAnfahrt: number;
   stundenSonstiges: number;
   stundenFeiertage: number;
   kilometer: number;
+  kilometerAnfahrt: number;
+  kilometerKunden: number;
+  kilometerSonstige: number;
   tageUrlaub: number;
   tageKrankheit: number;
   isEuRentner: boolean;
@@ -89,13 +94,15 @@ export default function HoursOverview() {
     (acc, r) => ({
       hw: acc.hw + r.stundenHauswirtschaft,
       ab: acc.ab + r.stundenAlltagsbegleitung,
+      eb: acc.eb + r.stundenErstberatung,
+      anfahrt: acc.anfahrt + r.stundenAnfahrt,
       sonstiges: acc.sonstiges + r.stundenSonstiges,
       feiertage: acc.feiertage + r.stundenFeiertage,
       km: acc.km + r.kilometer,
       urlaub: acc.urlaub + r.tageUrlaub,
       krankheit: acc.krankheit + r.tageKrankheit,
     }),
-    { hw: 0, ab: 0, sonstiges: 0, feiertage: 0, km: 0, urlaub: 0, krankheit: 0 }
+    { hw: 0, ab: 0, eb: 0, anfahrt: 0, sonstiges: 0, feiertage: 0, km: 0, urlaub: 0, krankheit: 0 }
   );
 
   return (
@@ -173,6 +180,8 @@ export default function HoursOverview() {
                     <th className="py-2 pr-4 font-medium text-muted-foreground">Name</th>
                     <th className="py-2 pr-4 font-medium text-muted-foreground text-right">HW (Std.)</th>
                     <th className="py-2 pr-4 font-medium text-muted-foreground text-right">AB (Std.)</th>
+                    <th className="py-2 pr-4 font-medium text-muted-foreground text-right">Erstberatung (Std.)</th>
+                    <th className="py-2 pr-4 font-medium text-muted-foreground text-right">Anfahrt (Std.)</th>
                     <th className="py-2 pr-4 font-medium text-muted-foreground text-right">Sonst. (Std.)</th>
                     <th className="py-2 pr-4 font-medium text-muted-foreground text-right">Feiert. (Std.)</th>
                     <th className="py-2 pr-4 font-medium text-muted-foreground text-right">KM</th>
@@ -190,12 +199,18 @@ export default function HoursOverview() {
                 </thead>
                 <tbody>
                   {data.rows.map((row) => {
-                    const totalHours = row.stundenHauswirtschaft + row.stundenAlltagsbegleitung + row.stundenSonstiges;
+                    const totalHours =
+                      row.stundenHauswirtschaft +
+                      row.stundenAlltagsbegleitung +
+                      row.stundenErstberatung +
+                      row.stundenAnfahrt +
+                      row.stundenSonstiges;
                     const euWeeklyLimit = 15;
                     const weeksInMonth = new Date(parseInt(selectedYear), parseInt(selectedMonth), 0).getDate() / 7;
                     const maxMonthlyHours = euWeeklyLimit * weeksInMonth;
                     const isOverLimit = row.isEuRentner && totalHours >= maxMonthlyHours;
                     const hasCarryover = row.uebertragNeuCents !== null && row.uebertragNeuCents > 0;
+                    const kmTooltip = `Anfahrt: ${formatKm(row.kilometerAnfahrt)} km · Mit Kunden: ${formatKm(row.kilometerKunden)} km · Sonstige: ${formatKm(row.kilometerSonstige)} km`;
 
                     return (
                       <tr key={row.employeeId} className={`border-b last:border-0 ${isOverLimit ? "bg-red-50" : hasCarryover ? "bg-amber-50" : ""}`} data-testid={`row-employee-${row.employeeId}`}>
@@ -222,11 +237,13 @@ export default function HoursOverview() {
                             </div>
                           )}
                         </td>
-                        <td className="py-2 pr-4 text-right font-mono">{formatHours(row.stundenHauswirtschaft)}</td>
-                        <td className="py-2 pr-4 text-right font-mono">{formatHours(row.stundenAlltagsbegleitung)}</td>
-                        <td className="py-2 pr-4 text-right font-mono">{formatHours(row.stundenSonstiges)}</td>
+                        <td className="py-2 pr-4 text-right font-mono" data-testid={`text-hw-${row.employeeId}`}>{formatHours(row.stundenHauswirtschaft)}</td>
+                        <td className="py-2 pr-4 text-right font-mono" data-testid={`text-ab-${row.employeeId}`}>{formatHours(row.stundenAlltagsbegleitung)}</td>
+                        <td className="py-2 pr-4 text-right font-mono" data-testid={`text-erstberatung-${row.employeeId}`}>{formatHours(row.stundenErstberatung)}</td>
+                        <td className="py-2 pr-4 text-right font-mono" data-testid={`text-anfahrt-${row.employeeId}`}>{formatHours(row.stundenAnfahrt)}</td>
+                        <td className="py-2 pr-4 text-right font-mono" data-testid={`text-sonstiges-${row.employeeId}`}>{formatHours(row.stundenSonstiges)}</td>
                         <td className="py-2 pr-4 text-right font-mono">{formatHours(row.stundenFeiertage)}</td>
-                        <td className="py-2 pr-4 text-right font-mono">{formatKm(row.kilometer)}</td>
+                        <td className="py-2 pr-4 text-right font-mono" title={kmTooltip} data-testid={`text-km-${row.employeeId}`}>{formatKm(row.kilometer)}</td>
                         <td className="py-2 pr-4 text-right font-mono">{formatDays(row.tageUrlaub)}</td>
                         <td className="py-2 pr-4 text-right font-mono">{formatDays(row.tageKrankheit)}</td>
                         {hasMinijobber && (
@@ -255,6 +272,8 @@ export default function HoursOverview() {
                       <td className="py-2 pr-4">Gesamt</td>
                       <td className="py-2 pr-4 text-right font-mono">{formatHours(totals.hw)}</td>
                       <td className="py-2 pr-4 text-right font-mono">{formatHours(totals.ab)}</td>
+                      <td className="py-2 pr-4 text-right font-mono">{formatHours(totals.eb)}</td>
+                      <td className="py-2 pr-4 text-right font-mono">{formatHours(totals.anfahrt)}</td>
                       <td className="py-2 pr-4 text-right font-mono">{formatHours(totals.sonstiges)}</td>
                       <td className="py-2 pr-4 text-right font-mono">{formatHours(totals.feiertage)}</td>
                       <td className="py-2 pr-4 text-right font-mono">{formatKm(totals.km)}</td>

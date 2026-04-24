@@ -234,9 +234,7 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
       >
         <div className="space-y-2">
           <SummaryRow label="Anfahrt" value={`${formatKm(completedTravelKm)} km`} color="text-gray-700" testId="text-anfahrt-km" />
-          {completedCustomerKm > 0 && (
-            <SummaryRow label="Km mit Kunden" value={`${formatKm(completedCustomerKm)} km`} color="text-gray-700" testId="text-customer-km" />
-          )}
+          <SummaryRow label="Km mit Kunden" value={`${formatKm(completedCustomerKm)} km`} color="text-gray-700" testId="text-customer-km" />
           <SummaryRow label="Sonstige Fahrten" value={`${formatKm(timeEntryKm)} km`} color="text-gray-700" testId="text-time-entry-km" />
           <div className="border-t pt-2 mt-2 flex justify-between items-center">
             <span className="text-sm font-medium text-gray-700">Gesamt</span>
