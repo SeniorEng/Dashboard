@@ -15,6 +15,7 @@ import type { TimeEntryFormState } from "../hooks/use-time-entry-form";
 import type { UseTimeEntryConflictResult } from "../hooks/use-time-entry-conflict";
 import { TIME_ENTRY_TYPE_CONFIG } from "../constants";
 import { parseLocalDate } from "@shared/utils/datetime";
+import { entryTypeSupportsKilometers } from "@shared/domain/time-entries";
 
 export interface EmployeeOption {
   value: string;
@@ -171,7 +172,7 @@ export function TimeEntryFormContent({
         </div>
       )}
 
-      {!isFullDayType && formState.entryType !== "verfuegbar" && formState.entryType !== "blocker" && (
+      {entryTypeSupportsKilometers(formState.entryType, isFullDayType) && (
         <div className="space-y-2">
           <Label>Kilometer (optional)</Label>
           <Input

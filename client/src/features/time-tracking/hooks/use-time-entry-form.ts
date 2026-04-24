@@ -10,7 +10,7 @@
 import { useState, useCallback } from "react";
 import type { TimeEntryType, CreateTimeEntryRequest } from "@/lib/api/types";
 import { todayISO, currentTimeHHMM } from "@shared/utils/datetime";
-import { FULL_DAY_ENTRY_TYPES } from "@shared/domain/time-entries";
+import { FULL_DAY_ENTRY_TYPES, entryTypeSupportsKilometers } from "@shared/domain/time-entries";
 
 function getCurrentTimeRounded(): string {
   const time = currentTimeHHMM();
@@ -126,27 +126,33 @@ export function useTimeEntryForm(initialState?: Partial<TimeEntryFormState>) {
     });
   }, []);
 
-  const toCreateRequest = useCallback((): CreateTimeEntryRequest => ({
-    entryType: formState.entryType,
-    entryDate: formState.entryDate,
-    endDate: formState.endDate,
-    startTime: formState.isFullDay ? undefined : formState.startTime || undefined,
-    endTime: formState.isFullDay ? undefined : formState.endTime || undefined,
-    isFullDay: formState.isFullDay,
-    kilometers: formState.isFullDay ? undefined : (formState.kilometers ?? undefined),
-    notes: formState.notes || undefined,
-    targetUserId: formState.targetUserId ?? undefined,
-  }), [formState]);
+  const toCreateRequest = useCallback((): CreateTimeEntryRequest => {
+    const supportsKm = entryTypeSupportsKilometers(formState.entryType, formState.isFullDay);
+    return {
+      entryType: formState.entryType,
+      entryDate: formState.entryDate,
+      endDate: formState.endDate,
+      startTime: formState.isFullDay ? undefined : formState.startTime || undefined,
+      endTime: formState.isFullDay ? undefined : formState.endTime || undefined,
+      isFullDay: formState.isFullDay,
+      kilometers: supportsKm ? (formState.kilometers ?? undefined) : undefined,
+      notes: formState.notes || undefined,
+      targetUserId: formState.targetUserId ?? undefined,
+    };
+  }, [formState]);
 
-  const toUpdateRequest = useCallback(() => ({
-    entryType: formState.entryType,
-    entryDate: formState.entryDate,
-    startTime: formState.isFullDay ? null : formState.startTime,
-    endTime: formState.isFullDay ? null : formState.endTime,
-    isFullDay: formState.isFullDay,
-    kilometers: formState.isFullDay ? null : (formState.kilometers ?? null),
-    notes: formState.notes || null,
-  }), [formState]);
+  const toUpdateRequest = useCallback(() => {
+    const supportsKm = entryTypeSupportsKilometers(formState.entryType, formState.isFullDay);
+    return {
+      entryType: formState.entryType,
+      entryDate: formState.entryDate,
+      startTime: formState.isFullDay ? null : formState.startTime,
+      endTime: formState.isFullDay ? null : formState.endTime,
+      isFullDay: formState.isFullDay,
+      kilometers: supportsKm ? (formState.kilometers ?? null) : null,
+      notes: formState.notes || null,
+    };
+  }, [formState]);
 
   const isFullDayType = FULL_DAY_TYPES.includes(formState.entryType);
   const supportsDateRange = isFullDayType;

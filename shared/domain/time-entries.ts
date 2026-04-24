@@ -53,6 +53,13 @@ export function getAppointmentEndMinutes(appt: {
 
 export const FULL_DAY_ENTRY_TYPES = ["urlaub", "krankheit"] as const;
 
+export const ENTRY_TYPES_WITHOUT_KILOMETERS = ["pause", "verfuegbar", "blocker"] as const;
+
+export function entryTypeSupportsKilometers(entryType: string, isFullDay: boolean): boolean {
+  if (isFullDay) return false;
+  return !ENTRY_TYPES_WITHOUT_KILOMETERS.includes(entryType as typeof ENTRY_TYPES_WITHOUT_KILOMETERS[number]);
+}
+
 export function getEntryDuration(entry: { durationMinutes: number | null; startTime: string | null; endTime: string | null }): number {
   if (entry.durationMinutes && entry.durationMinutes > 0) {
     return entry.durationMinutes;
