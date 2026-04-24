@@ -364,6 +364,53 @@ describe("EB-9: Admin-Prospect PATCH (vollständig)", () => {
   });
 });
 
+describe("EB-11: Termin-Validierung – Person darf nicht entfernt werden", () => {
+  it("EB-11.1 – PATCH prospectId:null auf Erstberatung wird mit 400 abgewiesen", async () => {
+    const newProspectRes = await apiPost<any>("/api/prospects/inline", {
+      vorname: "Validation",
+      nachname: "EB111-" + uniqueId(),
+      telefon: "+4917600111111",
+    });
+    expect(newProspectRes.status).toBe(201);
+    const tempProspectId = newProspectRes.data.id;
+    cleanupProspectIds.push(tempProspectId);
+
+    const timeSlots = ["07:00", "16:00", "17:00", "06:30", "18:00"];
+    const dates = [getFutureDate(120), getFutureDate(121), getFutureDate(122), getFutureDate(123), getFutureDate(124)];
+    let tempErstberatungId: number | null = null;
+    outer: for (const date of dates) {
+      for (const time of timeSlots) {
+        const createRes = await apiPost<any>("/api/appointments/prospect-erstberatung", {
+          prospectId: tempProspectId,
+          date,
+          scheduledStart: time,
+          erstberatungDauer: 60,
+          assignedEmployeeId: auth.user.id,
+        });
+        if (createRes.status === 201) {
+          const appt = createRes.data.appointment || createRes.data;
+          tempErstberatungId = appt.id;
+          cleanupIds.push(tempErstberatungId!);
+          break outer;
+        }
+      }
+    }
+    expect(tempErstberatungId, "Erstberatung muss für den Test erstellt werden").toBeTruthy();
+
+    const patchRes = await apiPatch<any>(`/api/appointments/${tempErstberatungId}`, {
+      prospectId: null,
+    });
+    expect(patchRes.status).toBe(400);
+    expect(patchRes.data?.message).toBe(
+      "Ein Termin muss entweder mit einem Kunden oder einem Interessenten verknüpft sein.",
+    );
+
+    const verifyRes = await apiGet<any>(`/api/appointments/${tempErstberatungId}`);
+    expect(verifyRes.status).toBe(200);
+    expect(verifyRes.data.prospectId).toBe(tempProspectId);
+  });
+});
+
 describe("EB-10: Erstberatungs-Termin PATCH (Scheduling-Felder)", () => {
   it("EB-10.1 – Erstberatungs-Termin scheduledStart aktualisieren", async () => {
     expect(erstberatungId, "erstberatungId muss gesetzt sein").toBeTruthy();
