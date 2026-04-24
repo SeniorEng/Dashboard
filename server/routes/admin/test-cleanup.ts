@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
-import { inArray, eq, and, gte, lte, isNull, sql } from "drizzle-orm";
+import { inArray, eq, and, gte, lte, isNull } from "drizzle-orm";
 import { asyncHandler } from "../../lib/errors";
 import { requireSuperAdmin } from "../../middleware/auth";
 import { db } from "../../lib/db";
@@ -123,7 +123,7 @@ router.post(
       return;
     }
     const { startOffsetDays, endOffsetDays } = purgeCalendarRangeSchema.parse(req.body);
-    const userId = (req as any).user?.id;
+    const userId = req.user?.id;
     if (!userId) {
       res.status(401).json({ error: "UNAUTHORIZED" });
       return;
