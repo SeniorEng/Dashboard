@@ -50,8 +50,6 @@ const VALID_ENTRY_TYPES: TimeEntryType[] = [
   "pause",
   "bueroarbeit",
   "vertrieb",
-  "schulung",
-  "besprechung",
   "sonstiges",
   "verfuegbar",
   "blocker",

@@ -17,6 +17,16 @@ const CHUNK_RELOAD_COUNT_KEY = "errorBoundary:chunkReloadCount";
 const CHUNK_RELOAD_MAX_ATTEMPTS = 1;
 const STABILITY_RESET_MS = 1000;
 
+let errorBoundaryCaughtSinceMount = false;
+
+function markErrorBoundaryCaught(): void {
+  errorBoundaryCaughtSinceMount = true;
+}
+
+function clearErrorBoundaryCaughtFlag(): void {
+  errorBoundaryCaughtSinceMount = false;
+}
+
 function isChunkLoadError(error: Error): boolean {
   return (
     error.name === "ChunkLoadError" ||
@@ -80,7 +90,11 @@ function attemptChunkRecoveryReload(boundaryName: string): boolean {
 
 export function useResetChunkReloadCountAfterStableRender(): void {
   useEffect(() => {
+    clearErrorBoundaryCaughtFlag();
     const timer = window.setTimeout(() => {
+      if (errorBoundaryCaughtSinceMount) {
+        return;
+      }
       resetChunkReloadCount();
     }, STABILITY_RESET_MS);
     return () => window.clearTimeout(timer);
@@ -99,6 +113,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error("[ErrorBoundary]", error?.message || String(error), error?.stack, errorInfo?.componentStack);
+    markErrorBoundaryCaught();
 
     if (isChunkLoadError(error)) {
       attemptChunkRecoveryReload("ErrorBoundary");
@@ -162,6 +177,7 @@ export class PageErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error("[PageErrorBoundary]", this.props.pageName || "", error?.message || String(error), error?.stack, errorInfo?.componentStack);
+    markErrorBoundaryCaught();
 
     if (isChunkLoadError(error)) {
       attemptChunkRecoveryReload("PageErrorBoundary");
