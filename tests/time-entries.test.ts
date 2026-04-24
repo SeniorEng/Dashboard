@@ -713,6 +713,121 @@ describe("TE-BIZ-13: Monatsübersicht", () => {
     const res = await apiGet<any>(`/api/time-entries/by-date/${dateStr}`);
     expect(res.status).toBe(200);
   });
+
+  it("TE-BIZ-13.3 – Prospect-Erstberatung erscheint in Monatsübersicht (geplant)", async () => {
+    const apptDate = await findFreeFutureWeekdayGlobal(620);
+    const d = new Date(apptDate);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+
+    const prospectRes = await apiPost<any>("/api/admin/prospects", {
+      vorname: "Test",
+      nachname: `ProspectTime_${Date.now()}`,
+      telefon: "+49 30 12345678",
+      status: "neu",
+    });
+    expect(prospectRes.status).toBe(201);
+    const prospectId = prospectRes.data.id;
+
+    try {
+      const apptRes = await apiPost<any>("/api/appointments/prospect-erstberatung", {
+        prospectId,
+        date: apptDate,
+        scheduledStart: "10:00",
+        erstberatungDauer: 60,
+        assignedEmployeeId: auth.user.id,
+      });
+      expect(apptRes.status).toBe(201);
+      const apptId = apptRes.data.appointment.id;
+      apptCleanupIds.push(apptId);
+
+      const pageRes = await apiGet<any>(`/api/time-entries/page-data/${year}/${month}`);
+      expect(pageRes.status).toBe(200);
+
+      const appts: any[] = pageRes.data?.overview?.appointments ?? [];
+      const found = appts.find((a) => a.id === apptId);
+      expect(found, "Prospect-Erstberatung muss in Monatsübersicht erscheinen").toBeDefined();
+      expect(found.customerName).toContain("ProspectTime_");
+      expect(found.customerId).toBeNull();
+      expect(found.prospectId).toBe(prospectId);
+
+      const overview = pageRes.data?.overview;
+      expect(overview).toBeDefined();
+      expect(
+        overview.plannedServiceHours?.erstberatungMinutes ?? 0,
+        "Geplante Erstberatungs-Minuten müssen den Prospect-Termin enthalten"
+      ).toBeGreaterThanOrEqual(60);
+    } finally {
+      try { await apiDelete(`/api/admin/prospects/${prospectId}`); } catch {}
+    }
+  });
+
+  it("TE-BIZ-13.4 – Dokumentierte Prospect-Erstberatung wird in Anfahrt-km und Erstberatungs-Stunden aggregiert", async () => {
+    const apptDate = await findFreeFutureWeekdayGlobal(680);
+    const d = new Date(apptDate);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+
+    const svcRes = await apiGet<any[]>("/api/services/all");
+    const erstberatungSvc = svcRes.data?.find?.((s: any) => s.code === "erstberatung");
+    expect(erstberatungSvc, "Erstberatungs-Service muss im Service-Katalog existieren").toBeDefined();
+
+    const prospectRes = await apiPost<any>("/api/admin/prospects", {
+      vorname: "Test",
+      nachname: `ProspectTimeDoc_${Date.now()}`,
+      telefon: "+49 30 12345678",
+      status: "neu",
+    });
+    expect(prospectRes.status).toBe(201);
+    const prospectId = prospectRes.data.id;
+
+    try {
+      const apptRes = await apiPost<any>("/api/appointments/prospect-erstberatung", {
+        prospectId,
+        date: apptDate,
+        scheduledStart: "10:00",
+        erstberatungDauer: 60,
+        assignedEmployeeId: auth.user.id,
+      });
+      expect(apptRes.status).toBe(201);
+      const apptId = apptRes.data.appointment.id;
+      apptCleanupIds.push(apptId);
+
+      const overviewBefore = await apiGet<any>(`/api/time-entries/overview/${year}/${month}`);
+      expect(overviewBefore.status).toBe(200);
+      const completedKmBefore = overviewBefore.data.completedTravel?.totalKilometers ?? 0;
+      const completedErstberatungBefore = overviewBefore.data.completedServiceHours?.erstberatungMinutes ?? 0;
+
+      const docRes = await apiPost<any>(`/api/appointments/${apptId}/document`, {
+        performedByEmployeeId: auth.user.id,
+        actualStart: "10:00",
+        travelOriginType: "home",
+        travelKilometers: 13,
+        services: [
+          { serviceId: erstberatungSvc.id, actualDurationMinutes: 60, details: "Erstberatung Test" },
+        ],
+      });
+      expect(docRes.status, `Dokumentation fehlgeschlagen: ${JSON.stringify(docRes.data)}`).toBe(200);
+      expect(docRes.data.status).toBe("completed");
+
+      const overviewAfter = await apiGet<any>(`/api/time-entries/overview/${year}/${month}`);
+      expect(overviewAfter.status).toBe(200);
+
+      const completedKmAfter = overviewAfter.data.completedTravel?.totalKilometers ?? 0;
+      const completedErstberatungAfter = overviewAfter.data.completedServiceHours?.erstberatungMinutes ?? 0;
+
+      expect(
+        completedKmAfter - completedKmBefore,
+        "Anfahrt-km der Prospect-Erstberatung müssen in completedTravel.totalKilometers aggregiert werden"
+      ).toBeCloseTo(13, 1);
+      expect(
+        completedErstberatungAfter - completedErstberatungBefore,
+        "Dauer der Prospect-Erstberatung muss in completedServiceHours.erstberatungMinutes aggregiert werden"
+      ).toBe(60);
+    } finally {
+      try { await apiDelete(`/api/admin/prospects/${prospectId}`); } catch {}
+    }
+  });
 });
 
 describe("TE-BIZ-14: Ungültige Eintragstypen", () => {

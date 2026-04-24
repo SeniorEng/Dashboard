@@ -5,6 +5,7 @@ import {
   employeeMonthClosings,
   appointments,
   customers,
+  prospects,
   users,
   type EmployeeTimeEntry,
   type InsertTimeEntry,
@@ -368,10 +369,11 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     const results = await db
       .select({
         ...getTableColumns(appointments),
-        customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as('customer_name'),
+        customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name}, ${prospects.vorname} || ' ' || ${prospects.nachname}, '')`.as('customer_name'),
       })
       .from(appointments)
-      .innerJoin(customers, eq(appointments.customerId, customers.id))
+      .leftJoin(customers, eq(appointments.customerId, customers.id))
+      .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
       .where(
         and(
           or(
@@ -382,18 +384,19 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
             and(
               ne(appointments.status, 'completed'),
               sqlBuilder`(
-                ${appointments.assignedEmployeeId} = ${userId} 
-                OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId} OR ${customers.backupEmployeeId2} = ${userId}))
+                ${appointments.assignedEmployeeId} = ${userId}
+                OR (${appointments.assignedEmployeeId} IS NULL AND ${appointments.customerId} IS NOT NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId} OR ${customers.backupEmployeeId2} = ${userId}))
               )`
             )
           ),
+          sqlBuilder`(${appointments.customerId} IS NOT NULL OR ${appointments.prospectId} IS NOT NULL)`,
           gte(appointments.date, startDate),
           lte(appointments.date, endDate),
           isNull(appointments.deletedAt)
         )
       )
       .orderBy(asc(appointments.date), asc(appointments.scheduledStart));
-    
+
     return results.map(r => ({
       ...r,
       customerName: String(r.customerName),
@@ -404,12 +407,14 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
     const results = await db
       .select({
         ...getTableColumns(appointments),
-        customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as('customer_name'),
+        customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name}, ${prospects.vorname} || ' ' || ${prospects.nachname}, '')`.as('customer_name'),
       })
       .from(appointments)
-      .innerJoin(customers, eq(appointments.customerId, customers.id))
+      .leftJoin(customers, eq(appointments.customerId, customers.id))
+      .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
       .where(
         and(
+          sqlBuilder`(${appointments.customerId} IS NOT NULL OR ${appointments.prospectId} IS NOT NULL)`,
           gte(appointments.date, startDate),
           lte(appointments.date, endDate),
           isNull(appointments.deletedAt)
