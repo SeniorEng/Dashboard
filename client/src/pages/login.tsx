@@ -39,7 +39,11 @@ export default function LoginPage() {
     staleTime: 300000,
   });
 
-  const displayLogo = branding?.pdfLogoUrl || branding?.logoUrl || fallbackLogo;
+  const remoteLogo = branding?.pdfLogoUrl || branding?.logoUrl || null;
+  const [logoSrc, setLogoSrc] = useState<string>(fallbackLogo);
+  useEffect(() => {
+    if (remoteLogo) setLogoSrc(remoteLogo);
+  }, [remoteLogo]);
 
   const loginMutation = useMutation({
     mutationFn: async ({ loginEmail, loginPassword }: { loginEmail: string; loginPassword: string }) => {
@@ -97,10 +101,11 @@ export default function LoginPage() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center pb-2">
           <img 
-            src={displayLogo} 
+            src={logoSrc} 
             alt={branding?.companyName || "EngelDesk"} 
             className="h-28 w-auto mx-auto mb-4"
             data-testid="img-login-logo"
+            onError={() => { if (logoSrc !== fallbackLogo) setLogoSrc(fallbackLogo); }}
           />
         </CardHeader>
         <CardContent>
@@ -214,7 +219,11 @@ function SetupPage() {
     staleTime: 300000,
   });
 
-  const displayLogo = branding?.pdfLogoUrl || branding?.logoUrl || fallbackLogo;
+  const remoteLogo = branding?.pdfLogoUrl || branding?.logoUrl || null;
+  const [logoSrc, setLogoSrc] = useState<string>(fallbackLogo);
+  useEffect(() => {
+    if (remoteLogo) setLogoSrc(remoteLogo);
+  }, [remoteLogo]);
 
   const setupMutation = useMutation({
     mutationFn: async () => {
@@ -244,10 +253,11 @@ function SetupPage() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center pb-2">
           <img 
-            src={displayLogo} 
+            src={logoSrc} 
             alt={branding?.companyName || "EngelDesk"} 
             className="h-28 w-auto mx-auto mb-4"
             data-testid="img-setup-logo"
+            onError={() => { if (logoSrc !== fallbackLogo) setLogoSrc(fallbackLogo); }}
           />
           <CardTitle className="text-xl font-bold text-gray-900">Ersteinrichtung</CardTitle>
           <CardDescription>
