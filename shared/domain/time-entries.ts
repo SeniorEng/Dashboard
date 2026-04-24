@@ -6,8 +6,6 @@ export const ENTRY_TYPE_LABELS: Record<string, string> = {
   pause: "Pause",
   bueroarbeit: "Büroarbeit",
   vertrieb: "Vertrieb",
-  schulung: "Schulung",
-  besprechung: "Besprechung",
   sonstiges: "Sonstiges",
   verfuegbar: "Verfügbar",
   blocker: "Blocker",

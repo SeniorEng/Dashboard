@@ -58,11 +58,9 @@ export function PlanungTab({ selectedYear, selectedMonth, periodLabel }: Planung
       const urlaub = Number(t.urlaubMinutes || 0);
       const krank = Number(t.krankMinutes || 0);
       const buero = Number(t.bueroarbeitMinutes || 0);
-      const bespr = Number(t.besprechungMinutes || 0);
       const vertr = Number(t.vertriebMinutes || 0);
       const sonst = Number(t.sonstigesMinutes || 0);
-      const weiter = Number(t.weiterbildungMinutes || 0);
-      return hw + ab + eb + pause + urlaub + krank + buero + bespr + vertr + sonst + weiter;
+      return hw + ab + eb + pause + urlaub + krank + buero + vertr + sonst;
     }), 1);
   }, [trends]);
 
@@ -256,10 +254,9 @@ export function PlanungTab({ selectedYear, selectedMonth, periodLabel }: Planung
                   const eb = Number(t.ebMinutes || 0);
                   const pause = Number(t.pauseMinutes || 0);
                   const buero = Number(t.bueroarbeitMinutes || 0);
-                  const bespr = Number(t.besprechungMinutes || 0);
                   const vertr = Number(t.vertriebMinutes || 0);
-                  const sonst = Number(t.sonstigesMinutes || 0) + Number(t.weiterbildungMinutes || 0) + Number(t.krankMinutes || 0) + Number(t.urlaubMinutes || 0);
-                  const totalMin = hw + ab + eb + pause + buero + bespr + vertr + sonst;
+                  const sonst = Number(t.sonstigesMinutes || 0) + Number(t.krankMinutes || 0) + Number(t.urlaubMinutes || 0);
+                  const totalMin = hw + ab + eb + pause + buero + vertr + sonst;
                   const totalHours = totalMin > 0 ? (totalMin / 60).toFixed(1) : "0";
                   const termine = Number(t.completedHauswirtschaft || 0) + Number(t.completedAlltagsbegleitung || 0) + Number(t.completedErstberatungen || 0);
                   return (
@@ -272,7 +269,7 @@ export function PlanungTab({ selectedYear, selectedMonth, periodLabel }: Planung
                             { value: ab, color: "bg-teal-500" },
                             { value: eb, color: "bg-amber-500" },
                             { value: pause, color: "bg-slate-400" },
-                            { value: buero + bespr, color: "bg-indigo-500" },
+                            { value: buero, color: "bg-indigo-500" },
                             { value: vertr, color: "bg-sky-500" },
                             { value: sonst, color: "bg-purple-500" },
                           ]}

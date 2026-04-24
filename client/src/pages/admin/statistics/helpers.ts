@@ -38,10 +38,8 @@ export const ENTRY_TYPE_LABELS: Record<string, string> = {
   krank: "Krank",
   pause: "Pause",
   bueroarbeit: "Büroarbeit",
-  besprechung: "Besprechung",
   vertrieb: "Vertrieb",
   sonstiges: "Sonstiges",
-  weiterbildung: "Weiterbildung",
 };
 
 export const ENTRY_TYPE_COLORS: Record<string, string> = {
@@ -50,10 +48,8 @@ export const ENTRY_TYPE_COLORS: Record<string, string> = {
   krank: "#ef4444",
   pause: "#94a3b8",
   bueroarbeit: "#6366f1",
-  besprechung: "#8b5cf6",
   vertrieb: "#0ea5e9",
   sonstiges: "#a3a3a3",
-  weiterbildung: "#ec4899",
 };
 
 export interface MarginData {
@@ -115,10 +111,8 @@ export interface MonthlyTrend {
   urlaubMinutes: number;
   krankMinutes: number;
   bueroarbeitMinutes: number;
-  besprechungMinutes: number;
   vertriebMinutes: number;
   sonstigesMinutes: number;
-  weiterbildungMinutes: number;
 }
 
 export interface EmployeeOverview {

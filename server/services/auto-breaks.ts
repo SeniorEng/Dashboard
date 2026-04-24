@@ -91,7 +91,7 @@ export async function generateAutoBreaksForMonth(
         workByDate[date].hasAutoBreak = true;
       }
     } else if (
-      ["bueroarbeit", "vertrieb", "schulung", "besprechung", "sonstiges"].includes(
+      ["bueroarbeit", "vertrieb", "sonstiges"].includes(
         entry.entryType
       )
     ) {
@@ -225,7 +225,7 @@ async function fetchDayData(userId: number, date: string) {
   return { dayAppointments, dayEntries };
 }
 
-const WORK_ENTRY_TYPES = ["bueroarbeit", "vertrieb", "schulung", "besprechung", "sonstiges"];
+const WORK_ENTRY_TYPES = ["bueroarbeit", "vertrieb", "sonstiges"];
 
 function sumAppointmentWork(dayAppointments: { status: string; durationPromised: number | null }[]): number {
   let minutes = 0;

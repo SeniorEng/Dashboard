@@ -128,11 +128,9 @@ export function KundenTab({ selectedYear, selectedMonth }: KundenTabProps) {
       const urlaub = Number(t.urlaubMinutes || 0);
       const krank = Number(t.krankMinutes || 0);
       const buero = Number(t.bueroarbeitMinutes || 0);
-      const bespr = Number(t.besprechungMinutes || 0);
       const vertr = Number(t.vertriebMinutes || 0);
       const sonst = Number(t.sonstigesMinutes || 0);
-      const weiter = Number(t.weiterbildungMinutes || 0);
-      return hw + ab + eb + pause + urlaub + krank + buero + bespr + vertr + sonst + weiter;
+      return hw + ab + eb + pause + urlaub + krank + buero + vertr + sonst;
     }), 1);
   }, [trends]);
 
@@ -392,7 +390,7 @@ export function KundenTab({ selectedYear, selectedMonth }: KundenTabProps) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
         {(() => {
           const entryTypes = growth?.hoursByEntryType || [];
-          const paidUnproductiveTypes = ['bueroarbeit', 'besprechung', 'vertrieb', 'sonstiges', 'weiterbildung'];
+          const paidUnproductiveTypes = ['bueroarbeit', 'vertrieb', 'sonstiges'];
 
           const productiveMin = serviceSegments.reduce((sum: number, s: DonutSegment) => sum + s.value, 0);
           const paidUnproductiveMin = entryTypes

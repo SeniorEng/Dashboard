@@ -530,8 +530,6 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       pauseMinutes: 0,
       bueroarbeitMinutes: 0,
       vertriebMinutes: 0,
-      schulungMinutes: 0,
-      besprechungMinutes: 0,
       sonstigesMinutes: 0,
     };
     
@@ -553,12 +551,6 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
           break;
         case 'vertrieb':
           timeEntrySummary.vertriebMinutes += duration;
-          break;
-        case 'schulung':
-          timeEntrySummary.schulungMinutes += duration;
-          break;
-        case 'besprechung':
-          timeEntrySummary.besprechungMinutes += duration;
           break;
         case 'sonstiges':
           timeEntrySummary.sonstigesMinutes += duration;
@@ -659,7 +651,7 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       const duration = getEntryDuration(entry);
       if (entry.entryType === 'pause') {
         workByDate[date].breakMinutes += duration;
-      } else if (['bueroarbeit', 'vertrieb', 'schulung', 'besprechung', 'sonstiges'].includes(entry.entryType)) {
+      } else if (['bueroarbeit', 'vertrieb', 'sonstiges'].includes(entry.entryType)) {
         workByDate[date].workMinutes += duration;
       }
     }

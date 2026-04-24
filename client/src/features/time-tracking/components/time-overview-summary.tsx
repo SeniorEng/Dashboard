@@ -29,8 +29,6 @@ interface TimeOverview {
     pauseMinutes?: number;
     bueroarbeitMinutes?: number;
     vertriebMinutes?: number;
-    schulungMinutes?: number;
-    besprechungMinutes?: number;
     sonstigesMinutes?: number;
   };
 }
@@ -109,8 +107,6 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
   const sonstigesMinutes =
     (timeOverview?.timeEntries?.bueroarbeitMinutes || 0) +
     (timeOverview?.timeEntries?.vertriebMinutes || 0) +
-    (timeOverview?.timeEntries?.schulungMinutes || 0) +
-    (timeOverview?.timeEntries?.besprechungMinutes || 0) +
     (timeOverview?.timeEntries?.sonstigesMinutes || 0);
   const completedTotal = cHw + cAb + cEb + cTravel + sonstigesMinutes;
 

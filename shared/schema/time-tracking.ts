@@ -16,9 +16,7 @@ export const TIME_ENTRY_TYPES = [
   "pause",         // Break
   "bueroarbeit",   // Office/admin work
   "vertrieb",      // Sales
-  "schulung",      // Training
-  "besprechung",   // Meeting
-  "sonstiges",     // Other
+  "sonstiges",     // Other (covers former 'schulung' and 'besprechung')
   "verfuegbar",    // Available (organizational only, not counted as work time)
   "blocker",       // Blocked time (no appointments allowed, not counted as work time)
 ] as const;

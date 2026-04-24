@@ -401,7 +401,7 @@ describe("TE-BIZ-8: Verschiedene Eintragstypen", () => {
     typeDate = await findFreeFutureWeekdayForTypes(550);
   });
 
-  it("TE-BIZ-8.1 – Schulung-Eintrag erstellen (201)", async () => {
+  it("TE-BIZ-8.1 – Legacy 'schulung' wird abgelehnt (400)", async () => {
     const res = await apiPost<any>("/api/time-entries", {
       entryDate: typeDate,
       entryType: "schulung",
@@ -409,9 +409,7 @@ describe("TE-BIZ-8: Verschiedene Eintragstypen", () => {
       endTime: "12:00",
       isFullDay: false,
     });
-    expect(res.status).toBe(201);
-    expect(res.data.entryType).toBe("schulung");
-    cleanupIds.push(res.data.id);
+    expect(res.status).toBe(400);
   });
 
   it("TE-BIZ-8.2 – Pause-Eintrag erstellen (201)", async () => {
@@ -427,7 +425,7 @@ describe("TE-BIZ-8: Verschiedene Eintragstypen", () => {
     cleanupIds.push(res.data.id);
   });
 
-  it("TE-BIZ-8.3 – Besprechung-Eintrag erstellen (201)", async () => {
+  it("TE-BIZ-8.3 – Legacy 'besprechung' wird abgelehnt (400)", async () => {
     const res = await apiPost<any>("/api/time-entries", {
       entryDate: typeDate,
       entryType: "besprechung",
@@ -435,9 +433,7 @@ describe("TE-BIZ-8: Verschiedene Eintragstypen", () => {
       endTime: "14:00",
       isFullDay: false,
     });
-    expect(res.status).toBe(201);
-    expect(res.data.entryType).toBe("besprechung");
-    cleanupIds.push(res.data.id);
+    expect(res.status).toBe(400);
   });
 });
 
@@ -495,7 +491,7 @@ describe("TE-BIZ-11: Überlappungserkennung", () => {
 
     const res2 = await apiPost<any>("/api/time-entries", {
       entryDate: date,
-      entryType: "schulung",
+      entryType: "sonstiges",
       startTime: "11:00",
       endTime: "13:00",
       isFullDay: false,

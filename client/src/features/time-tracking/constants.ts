@@ -17,8 +17,6 @@ export const TIME_ENTRY_TYPE_CONFIG: Record<TimeEntryType, { label: string; icon
   pause: { label: "Pause", icon: Coffee, color: "text-amber-700", bgColor: "bg-amber-100" },
   bueroarbeit: { label: "Büroarbeit", icon: Briefcase, color: "text-blue-700", bgColor: "bg-blue-100" },
   vertrieb: { label: "Vertrieb", icon: Briefcase, color: "text-purple-700", bgColor: "bg-purple-100" },
-  schulung: { label: "Schulung", icon: FileText, color: "text-indigo-700", bgColor: "bg-indigo-100" },
-  besprechung: { label: "Besprechung", icon: FileText, color: "text-teal-700", bgColor: "bg-teal-100" },
   sonstiges: { label: "Sonstiges", icon: FileText, color: "text-gray-700", bgColor: "bg-gray-100" },
   verfuegbar: { label: "Verfügbar", icon: CalendarCheck, color: "text-emerald-700", bgColor: "bg-emerald-100" },
   blocker: { label: "Blocker", icon: Ban, color: "text-orange-700", bgColor: "bg-orange-100" },

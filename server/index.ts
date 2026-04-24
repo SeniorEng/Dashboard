@@ -198,6 +198,13 @@ async function runStartupTasks() {
       log(`Erstberatung-Kunden-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { migrateSchulungBesprechungToSonstiges } = await import("./startup/migrate-schulung-besprechung-to-sonstiges");
+    try {
+      await migrateSchulungBesprechungToSonstiges();
+    } catch (err) {
+      log(`Schulung/Besprechung-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { syncAllBudgetAllocations } = await import("./startup/sync-budget-allocations");
     try {
       const synced = await syncAllBudgetAllocations();

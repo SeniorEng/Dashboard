@@ -6,8 +6,6 @@ export type TimeEntryType =
   | "pause"
   | "bueroarbeit"
   | "vertrieb"
-  | "schulung"
-  | "besprechung"
   | "sonstiges"
   | "verfuegbar"
   | "blocker";
@@ -89,8 +87,6 @@ export interface TimeEntrySummary {
   pauseMinutes: number;
   bueroarbeitMinutes: number;
   vertriebMinutes: number;
-  schulungMinutes: number;
-  besprechungMinutes: number;
   sonstigesMinutes: number;
 }
 

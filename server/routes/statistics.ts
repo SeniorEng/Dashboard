@@ -244,10 +244,8 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
         COALESCE(te.urlaub_minutes, 0)::int AS "urlaubMinutes",
         COALESCE(te.krank_minutes, 0)::int AS "krankMinutes",
         COALESCE(te.bueroarbeit_minutes, 0)::int AS "bueroarbeitMinutes",
-        COALESCE(te.besprechung_minutes, 0)::int AS "besprechungMinutes",
         COALESCE(te.vertrieb_minutes, 0)::int AS "vertriebMinutes",
-        COALESCE(te.sonstiges_minutes, 0)::int AS "sonstigesMinutes",
-        COALESCE(te.weiterbildung_minutes, 0)::int AS "weiterbildungMinutes"
+        COALESCE(te.sonstiges_minutes, 0)::int AS "sonstigesMinutes"
       FROM generate_series(1, 12) AS m(month)
       LEFT JOIN (
         SELECT
@@ -283,10 +281,8 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
           COALESCE(SUM(t.duration_minutes) FILTER (WHERE t.entry_type = 'urlaub'), 0) AS urlaub_minutes,
           COALESCE(SUM(t.duration_minutes) FILTER (WHERE t.entry_type = 'krankheit'), 0) AS krank_minutes,
           COALESCE(SUM(t.duration_minutes) FILTER (WHERE t.entry_type = 'bueroarbeit'), 0) AS bueroarbeit_minutes,
-          COALESCE(SUM(t.duration_minutes) FILTER (WHERE t.entry_type = 'besprechung'), 0) AS besprechung_minutes,
           COALESCE(SUM(t.duration_minutes) FILTER (WHERE t.entry_type = 'vertrieb'), 0) AS vertrieb_minutes,
-          COALESCE(SUM(t.duration_minutes) FILTER (WHERE t.entry_type = 'sonstiges'), 0) AS sonstiges_minutes,
-          COALESCE(SUM(t.duration_minutes) FILTER (WHERE t.entry_type = 'schulung'), 0) AS weiterbildung_minutes
+          COALESCE(SUM(t.duration_minutes) FILTER (WHERE t.entry_type = 'sonstiges'), 0) AS sonstiges_minutes
         FROM employee_time_entries t
         WHERE t.deleted_at IS NULL
           AND EXTRACT(YEAR FROM t.entry_date::date) = ${year}
@@ -396,7 +392,7 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
           WHERE t.deleted_at IS NULL
             AND EXTRACT(YEAR FROM t.entry_date::date) = ${year}
             ${cockpitTimeMonthFilter}
-            AND t.entry_type IN ('bueroarbeit','besprechung','vertrieb','sonstiges','schulung')
+            AND t.entry_type IN ('bueroarbeit','vertrieb','sonstiges')
         ), 0)::int AS "overheadMinutes",
         COUNT(*) FILTER (WHERE a.status IN ('completed','documented'))::int AS "completedAppointments"
       FROM appointments a
@@ -413,7 +409,7 @@ router.get("/overview", asyncHandler("Statistiken konnten nicht geladen werden",
           WHERE t.deleted_at IS NULL
             AND EXTRACT(YEAR FROM t.entry_date::date) = ${prevMonthYear!}
             AND EXTRACT(MONTH FROM t.entry_date::date) = ${prevMonth!}
-            AND t.entry_type IN ('bueroarbeit','besprechung','vertrieb','sonstiges','schulung')
+            AND t.entry_type IN ('bueroarbeit','vertrieb','sonstiges')
         ), 0)::int AS "overheadMinutes",
         COUNT(*) FILTER (WHERE a.status IN ('completed','documented'))::int AS "completedAppointments"
       FROM appointments a
