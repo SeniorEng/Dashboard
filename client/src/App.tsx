@@ -3,7 +3,11 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ErrorBoundary, PageErrorBoundary } from "@/components/error-boundary";
+import {
+  ErrorBoundary,
+  PageErrorBoundary,
+  useResetChunkReloadCountAfterStableRender,
+} from "@/components/error-boundary";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { ViewAsEmployeeProvider } from "@/hooks/use-view-as-employee";
 import { SessionTimeoutWarning } from "@/components/session-timeout-warning";
@@ -298,6 +302,7 @@ function OnboardingWrapper() {
 }
 
 function App() {
+  useResetChunkReloadCountAfterStableRender();
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
