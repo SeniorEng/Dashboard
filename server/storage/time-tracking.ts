@@ -389,7 +389,6 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
               )`
             )
           ),
-          sqlBuilder`(${appointments.customerId} IS NOT NULL OR ${appointments.prospectId} IS NOT NULL)`,
           gte(appointments.date, startDate),
           lte(appointments.date, endDate),
           isNull(appointments.deletedAt)
@@ -414,7 +413,6 @@ class TimeTrackingStorage implements ITimeTrackingStorage {
       .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
       .where(
         and(
-          sqlBuilder`(${appointments.customerId} IS NOT NULL OR ${appointments.prospectId} IS NOT NULL)`,
           gte(appointments.date, startDate),
           lte(appointments.date, endDate),
           isNull(appointments.deletedAt)
