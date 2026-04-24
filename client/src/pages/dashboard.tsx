@@ -17,17 +17,16 @@ import {
 } from "@/components/ui/alert-dialog";
 import { format, addDays, startOfWeek, subWeeks, isSameDay } from "date-fns";
 import { de } from "date-fns/locale";
-import { Plus, ChevronsLeft, ChevronsRight, CalendarCheck, Clock, Pencil, Trash2, Loader2, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, ChevronsLeft, ChevronsRight, CalendarCheck, Pencil, Trash2, Loader2, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { getHolidayMap } from "@shared/utils/holidays";
 import { iconSize } from "@/design-system";
-import { useDayTimeEntries, useCreateTimeEntry, useUpdateTimeEntry, useDeleteTimeEntry } from "@/features/time-tracking/hooks/use-time-entries";
+import { useDayTimeEntries, useUpdateTimeEntry, useDeleteTimeEntry } from "@/features/time-tracking/hooks/use-time-entries";
 import { useTimeEntryForm } from "@/features/time-tracking/hooks/use-time-entry-form";
 import { useTimeEntryConflict } from "@/features/time-tracking/hooks/use-time-entry-conflict";
 import { TimeEntryDialog } from "@/features/time-tracking/components/time-entry-dialog";
 import { TIME_ENTRY_TYPE_CONFIG } from "@/features/time-tracking/constants";
 import { useMonthClosingStatus } from "@/features/time-tracking/hooks/use-month-closing";
-import { useAdminEmployees } from "@/features/appointments/hooks/use-active-employees";
 import { useAuth } from "@/hooks/use-auth";
 import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
 import { ErrorState } from "@/components/patterns/error-state";
@@ -323,51 +322,24 @@ export default function Dashboard() {
   const { data: appointments, isLoading, error, refetch } = useAppointments(dateString);
   const { data: dayTimeEntries } = useDayTimeEntries(dateString);
   const { data: coverageData } = useAppointmentCoverage();
-  const { data: adminEmployees = [] } = useAdminEmployees({ enabled: isAdmin });
-  const employeeOptions = useMemo(() =>
-    adminEmployees.filter(e => e.isActive).map(e => ({
-      value: e.id.toString(),
-      label: e.displayName,
-    })).sort((a, b) => a.label.localeCompare(b.label, "de")),
-    [adminEmployees]
-  );
 
   const selectedYear = selectedDate.getFullYear();
   const selectedMonth = selectedDate.getMonth() + 1;
   const { data: monthClosingData } = useMonthClosingStatus(selectedYear, selectedMonth);
   const isMonthClosed = !!(monthClosingData?.closing && !monthClosingData.closing.reopenedAt);
 
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TimeEntry | null>(null);
 
-  const createForm = useTimeEntryForm();
   const editForm = useTimeEntryForm();
-  const createValidation = useTimeEntryConflict(
-    showCreateDialog ? createForm.formState : null,
-    showCreateDialog
-  );
   const editValidation = useTimeEntryConflict(
     showEditDialog && editingEntry ? { ...editForm.formState, excludeEntryId: editingEntry.id } : null,
     showEditDialog
   );
 
-  const createMutation = useCreateTimeEntry();
   const updateMutation = useUpdateTimeEntry();
   const deleteMutation = useDeleteTimeEntry();
-
-  const handleOpenCreate = useCallback(() => {
-    createForm.reset({ entryDate: dateString, entryType: "pause" });
-    setShowCreateDialog(true);
-  }, [createForm, dateString]);
-
-  const handleCreate = useCallback(() => {
-    const req = createForm.toCreateRequest();
-    createMutation.mutate(req, {
-      onSuccess: () => setShowCreateDialog(false),
-    });
-  }, [createForm, createMutation]);
 
   const handleOpenEdit = useCallback((entry: TimeEntry) => {
     setEditingEntry(entry);
@@ -574,20 +546,13 @@ export default function Dashboard() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleOpenCreate}
-              disabled={isMonthClosed}
-              data-testid="button-new-entry"
-              title={isMonthClosed ? "Monat ist abgeschlossen" : undefined}
-            >
-              <Clock className={`${iconSize.sm} mr-1`} />
-              Eintrag
-            </Button>
-            <Link href={`/new-appointment?date=${dateString}`}>
-              <Button size="sm" className="shadow-lg shadow-primary/20" data-testid="button-new-appointment">
-                <Plus className={`${iconSize.sm} mr-1`} /> Termin
+            <Link href={`/new-appointment?date=${dateString}&from=dashboard`}>
+              <Button
+                size="sm"
+                className="shadow-lg shadow-primary/20"
+                data-testid="button-new-entry"
+              >
+                <Plus className={`${iconSize.sm} mr-1`} /> Neuer Eintrag
               </Button>
             </Link>
           </div>
@@ -649,25 +614,6 @@ export default function Dashboard() {
           </div>
         )}
       </div>
-
-      <TimeEntryDialog
-        open={showCreateDialog}
-        onOpenChange={(open) => {
-          setShowCreateDialog(open);
-        }}
-        title="Neuer Eintrag"
-        formState={createForm.formState}
-        onFieldChange={createForm.updateField}
-        validation={createValidation}
-        onSubmit={handleCreate}
-        isSubmitting={createMutation.isPending}
-        isFullDayType={createForm.isFullDayType}
-        supportsDateRange={createForm.supportsDateRange}
-        submitLabel="Erstellen"
-        testIdPrefix="dashboard-create"
-        isAdmin={isAdmin}
-        employeeOptions={employeeOptions}
-      />
 
       <TimeEntryDialog
         open={showEditDialog}

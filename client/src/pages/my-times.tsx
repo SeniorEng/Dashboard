@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
-import { useSearch } from "wouter";
+import { useSearch, useLocation } from "wouter";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -8,7 +8,6 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import {
   useTimesPageData,
-  useCreateTimeEntry,
   useDeleteTimeEntry,
   useUpdateTimeEntry,
   useTimeEntryConflict,
@@ -23,7 +22,6 @@ import {
   MONTH_NAMES,
   type DayTimeEntry,
 } from "@/features/time-tracking";
-import { useAdminEmployees } from "@/features/appointments/hooks/use-active-employees";
 import type { TimeEntryType } from "@/lib/api/types";
 import { todayISO } from "@shared/utils/datetime";
 import { iconSize, componentStyles } from "@/design-system";
@@ -31,19 +29,11 @@ import { iconSize, componentStyles } from "@/design-system";
 export default function MyTimes() {
   const { toast } = useToast();
   const { user } = useAuth();
-  const isAdmin = user?.isAdmin ?? false;
+  const [, setLocation] = useLocation();
   const searchString = useSearch();
   const todayStr = useMemo(() => todayISO(), []);
   const dayDetailRef = useRef<HTMLDivElement>(null);
   const missingBreaksRef = useRef<HTMLDivElement>(null);
-  const { data: adminEmployees = [] } = useAdminEmployees({ enabled: isAdmin });
-  const employeeOptions = useMemo(() =>
-    adminEmployees.filter(e => e.isActive).map(e => ({
-      value: e.id.toString(),
-      label: e.displayName,
-    })).sort((a, b) => a.label.localeCompare(b.label, "de")),
-    [adminEmployees]
-  );
 
   const [selectedYear, setSelectedYear] = useState(() => {
     const params = new URLSearchParams(searchString);
@@ -65,7 +55,6 @@ export default function MyTimes() {
     if (m >= 1 && m <= 12) setSelectedMonth(m);
   }, [searchString]);
 
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
 
   const { data: pageData, isLoading } = useTimesPageData(selectedYear, selectedMonth);
@@ -73,24 +62,10 @@ export default function MyTimes() {
   const timeOverview = pageData?.overview;
   const vacationSummary = pageData?.vacationSummary;
   const isMonthLocked = !!(closingData?.closing && !closingData.closing.reopenedAt) && !user?.isAdmin;
-  const createMutation = useCreateTimeEntry();
   const deleteMutation = useDeleteTimeEntry();
   const updateMutation = useUpdateTimeEntry();
 
-  const createForm = useTimeEntryForm({ entryDate: selectedDate || todayStr });
   const editForm = useTimeEntryForm();
-
-  const createValidation = useTimeEntryConflict(
-    showCreateDialog ? {
-      entryDate: createForm.formState.entryDate,
-      entryType: createForm.formState.entryType,
-      startTime: createForm.formState.startTime,
-      endTime: createForm.formState.endTime,
-      isFullDay: createForm.formState.isFullDay,
-      targetUserId: createForm.formState.targetUserId ?? undefined,
-    } : null,
-    showCreateDialog
-  );
 
   const editValidation = useTimeEntryConflict(
     showEditDialog && editForm.formState.id ? {
@@ -140,50 +115,23 @@ export default function MyTimes() {
     setSelectedDate(date);
   }, []);
 
-  const handleOpenCreateDialog = useCallback(() => {
+  const navigateToNewEntry = useCallback((date?: string, entryType?: TimeEntryType) => {
     if (isMonthLocked) return;
-    createForm.reset({ entryDate: selectedDate || todayStr });
-    setShowCreateDialog(true);
-  }, [createForm, selectedDate, todayStr, isMonthLocked]);
+    const params = new URLSearchParams();
+    params.set("date", date || selectedDate || todayStr);
+    params.set("tab", "eintrag");
+    params.set("from", "my-times");
+    if (entryType) params.set("entryType", entryType);
+    setLocation(`/new-appointment?${params.toString()}`);
+  }, [setLocation, selectedDate, todayStr, isMonthLocked]);
+
+  const handleOpenNewEntry = useCallback(() => {
+    navigateToNewEntry();
+  }, [navigateToNewEntry]);
 
   const handleAddBreak = useCallback((date: string) => {
-    if (isMonthLocked) return;
-    createForm.reset({ entryDate: date, entryType: "pause" as any });
-    setShowCreateDialog(true);
-  }, [createForm, isMonthLocked]);
-
-  const handleCreateDialogChange = useCallback((open: boolean) => {
-    if (open && isMonthLocked) return;
-    setShowCreateDialog(open);
-    if (open) {
-      createForm.reset({ entryDate: selectedDate || todayStr });
-    }
-  }, [createForm, selectedDate, todayStr, isMonthLocked]);
-
-  const handleCreate = useCallback(() => {
-    if (isMonthLocked) return;
-    const req = createForm.toCreateRequest();
-    if ((req.entryType === "urlaub" || req.entryType === "krankheit") && req.endDate) {
-      if (req.endDate < req.entryDate) {
-        toast({ title: "Fehler", description: "Enddatum muss nach Startdatum liegen", variant: "destructive" });
-        return;
-      }
-    }
-    createMutation.mutate(req, {
-      onSuccess: (data: unknown) => {
-        const result = data as { _multiDay?: { count: number; message: string } };
-        if (result._multiDay && result._multiDay.count > 1) {
-          toast({ title: `${result._multiDay.count} Einträge erstellt` });
-        } else {
-          toast({ title: "Eintrag erstellt" });
-        }
-        setShowCreateDialog(false);
-      },
-      onError: (error: Error) => {
-        toast({ title: "Fehler", description: error.message, variant: "destructive" });
-      },
-    });
-  }, [createForm, createMutation, toast, isMonthLocked]);
+    navigateToNewEntry(date, "pause");
+  }, [navigateToNewEntry]);
 
   const handleEditEntry = useCallback((entry: DayTimeEntry) => {
     if (isMonthLocked) return;
@@ -254,7 +202,7 @@ export default function MyTimes() {
               <Button
                 size="sm"
                 className={componentStyles.pageHeaderActionBtn}
-                onClick={handleOpenCreateDialog}
+                onClick={handleOpenNewEntry}
                 disabled={isMonthLocked}
                 title={isMonthLocked ? "Monat ist abgeschlossen" : undefined}
                 data-testid="button-new-entry"
@@ -287,22 +235,6 @@ export default function MyTimes() {
               </SelectContent>
             </Select>
           </div>
-
-          <TimeEntryDialog
-            open={showCreateDialog}
-            onOpenChange={handleCreateDialogChange}
-            title="Neuen Zeiteintrag erstellen"
-            formState={createForm.formState}
-            onFieldChange={createForm.updateField}
-            validation={createValidation}
-            onSubmit={handleCreate}
-            isSubmitting={createMutation.isPending}
-            isFullDayType={createForm.isFullDayType}
-            supportsDateRange={createForm.supportsDateRange}
-            testIdPrefix=""
-            isAdmin={isAdmin}
-            employeeOptions={employeeOptions}
-          />
 
           <TimeEntryDialog
             open={showEditDialog}
@@ -357,7 +289,7 @@ export default function MyTimes() {
                 appointments={selectedDayAppointments}
                 onEditEntry={handleEditEntry}
                 onDeleteEntry={handleDeleteEntry}
-                onAddEntry={handleOpenCreateDialog}
+                onAddEntry={handleOpenNewEntry}
                 isAdmin={!!user?.isAdmin}
                 isDeleting={deleteMutation.isPending}
                 isMonthLocked={isMonthLocked}

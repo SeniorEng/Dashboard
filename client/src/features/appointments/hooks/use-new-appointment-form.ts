@@ -25,7 +25,14 @@ export function useNewAppointmentForm() {
   const isAdmin = user?.isAdmin ?? false;
   const canErstberatung = canCreateErstberatung(user?.roles ?? [], isAdmin);
   const wantsErstberatung = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("type") === "erstberatung";
-  const initialTab = copyFromId ? "kundentermin" : (wantsErstberatung && canErstberatung ? "erstberatung" : "kundentermin");
+  const requestedTab = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("tab") : null;
+  const initialTab = copyFromId
+    ? "kundentermin"
+    : requestedTab === "eintrag"
+      ? "eintrag"
+      : requestedTab === "erstberatung" && canErstberatung
+        ? "erstberatung"
+        : (wantsErstberatung && canErstberatung ? "erstberatung" : "kundentermin");
   const [activeTab, setActiveTab] = useState<string>(initialTab);
 
   const { data: customers = [], isLoading: customersLoading } = useCustomerList();

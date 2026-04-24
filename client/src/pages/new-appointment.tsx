@@ -32,11 +32,110 @@ import type { Prospect } from "@shared/schema";
 import { useLocation } from "wouter";
 import { useUpdateProspect } from "@/features/prospects";
 import { api, unwrapResult } from "@/lib/api/client";
+import { useAuth } from "@/hooks/use-auth";
+import { useToast } from "@/hooks/use-toast";
+import { useAdminEmployees } from "@/features/appointments/hooks/use-active-employees";
+import {
+  useTimeEntryForm,
+  useTimeEntryConflict,
+  useCreateTimeEntry,
+  TimeEntryFormContent,
+} from "@/features/time-tracking";
+import type { TimeEntryType } from "@/lib/api/types";
+import { todayISO } from "@shared/utils/datetime";
+
+const VALID_ENTRY_TYPES: TimeEntryType[] = [
+  "urlaub",
+  "krankheit",
+  "pause",
+  "bueroarbeit",
+  "vertrieb",
+  "schulung",
+  "besprechung",
+  "sonstiges",
+  "verfuegbar",
+  "blocker",
+];
 
 export default function NewAppointment() {
   const [, setLocation] = useLocation();
   const form = useNewAppointmentForm();
   const updateProspectMutation = useUpdateProspect();
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const isAdmin = user?.isAdmin ?? false;
+
+  const urlParams = useMemo(
+    () => (typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams()),
+    [],
+  );
+  const fromParam = urlParams.get("from");
+  const requestedDate = urlParams.get("date") && /^\d{4}-\d{2}-\d{2}$/.test(urlParams.get("date")!) ? urlParams.get("date")! : todayISO();
+  const requestedEntryTypeRaw = urlParams.get("entryType");
+  const requestedEntryType: TimeEntryType | undefined = requestedEntryTypeRaw && (VALID_ENTRY_TYPES as string[]).includes(requestedEntryTypeRaw)
+    ? (requestedEntryTypeRaw as TimeEntryType)
+    : undefined;
+
+  const handleBackNavigation = useCallback(() => {
+    if (fromParam === "my-times") {
+      setLocation("/my-times");
+    } else {
+      setLocation(`/?date=${requestedDate}`);
+    }
+  }, [fromParam, requestedDate, setLocation]);
+
+  const { data: adminEmployees = [] } = useAdminEmployees({ enabled: isAdmin });
+  const entryEmployeeOptions = useMemo(
+    () =>
+      adminEmployees
+        .filter((e) => e.isActive)
+        .map((e) => ({ value: e.id.toString(), label: e.displayName }))
+        .sort((a, b) => a.label.localeCompare(b.label, "de")),
+    [adminEmployees],
+  );
+
+  const entryForm = useTimeEntryForm({
+    entryDate: requestedDate,
+    entryType: requestedEntryType ?? "pause",
+  });
+  const entryValidation = useTimeEntryConflict(
+    form.activeTab === "eintrag"
+      ? {
+          entryDate: entryForm.formState.entryDate,
+          entryType: entryForm.formState.entryType,
+          startTime: entryForm.formState.startTime,
+          endTime: entryForm.formState.endTime,
+          isFullDay: entryForm.formState.isFullDay,
+          targetUserId: entryForm.formState.targetUserId ?? undefined,
+        }
+      : null,
+    form.activeTab === "eintrag",
+  );
+  const createEntryMutation = useCreateTimeEntry();
+
+  const handleEntrySubmit = useCallback(() => {
+    const req = entryForm.toCreateRequest();
+    if ((req.entryType === "urlaub" || req.entryType === "krankheit") && req.endDate) {
+      if (req.endDate < req.entryDate) {
+        toast({ title: "Fehler", description: "Enddatum muss nach Startdatum liegen", variant: "destructive" });
+        return;
+      }
+    }
+    createEntryMutation.mutate(req, {
+      onSuccess: (data: unknown) => {
+        const result = data as { _multiDay?: { count: number; message: string } };
+        if (result?._multiDay && result._multiDay.count > 1) {
+          toast({ title: `${result._multiDay.count} Einträge erstellt` });
+        } else {
+          toast({ title: "Eintrag erstellt" });
+        }
+        handleBackNavigation();
+      },
+      onError: (error: Error) => {
+        toast({ title: "Fehler", description: error.message, variant: "destructive" });
+      },
+    });
+  }, [entryForm, createEntryMutation, toast, handleBackNavigation]);
 
   const [editingEbContact, setEditingEbContact] = useState(false);
   const [ebEditTelefon, setEbEditTelefon] = useState("");
@@ -152,12 +251,12 @@ export default function NewAppointment() {
           variant="ghost"
           size="sm"
           className="pl-0 text-muted-foreground hover:text-foreground mb-4"
-          onClick={() => setLocation("/")}
+          onClick={handleBackNavigation}
           data-testid="button-back"
         >
           <ChevronLeft className={`${iconSize.sm} mr-1`} /> Zurück
         </Button>
-        <h1 className={componentStyles.pageTitle}>Neuer Termin</h1>
+        <h1 className={componentStyles.pageTitle}>Neuer Eintrag</h1>
         {form.copyFromId && form.copyFromCustomerName && (
           <div className="mt-3 flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800" data-testid="banner-copy-info">
             <Copy className={iconSize.sm} />
@@ -167,22 +266,19 @@ export default function NewAppointment() {
       </div>
 
       <Tabs value={form.activeTab} onValueChange={form.setActiveTab} className="w-full">
-        {form.canErstberatung ? (
-          <TabsList className="grid w-full grid-cols-2 mb-6">
-            <TabsTrigger value="kundentermin" data-testid="tab-kundentermin">
-              <User className={`${iconSize.sm} mr-2`} /> Kundentermin
-            </TabsTrigger>
+        <TabsList className={`grid w-full mb-6 ${form.canErstberatung ? "grid-cols-3" : "grid-cols-2"}`}>
+          <TabsTrigger value="kundentermin" data-testid="tab-kundentermin">
+            <User className={`${iconSize.sm} mr-2`} /> Kundentermin
+          </TabsTrigger>
+          {form.canErstberatung && (
             <TabsTrigger value="erstberatung" data-testid="tab-erstberatung">
               <Plus className={`${iconSize.sm} mr-2`} /> Erstberatung
             </TabsTrigger>
-          </TabsList>
-        ) : (
-          <TabsList className="grid w-full grid-cols-1 mb-6">
-            <TabsTrigger value="kundentermin" data-testid="tab-kundentermin">
-              <User className={`${iconSize.sm} mr-2`} /> Kundentermin
-            </TabsTrigger>
-          </TabsList>
-        )}
+          )}
+          <TabsTrigger value="eintrag" data-testid="tab-eintrag">
+            <Clock className={`${iconSize.sm} mr-2`} /> Eintrag
+          </TabsTrigger>
+        </TabsList>
 
         {/* Kundentermin Form */}
         <TabsContent value="kundentermin">
@@ -883,6 +979,31 @@ export default function NewAppointment() {
           </Card>
         </TabsContent>
         )}
+
+        {/* Eintrag (Time Entry) Form */}
+        <TabsContent value="eintrag">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Neuer Zeiteintrag</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <TimeEntryFormContent
+                formState={entryForm.formState}
+                onFieldChange={entryForm.updateField}
+                validation={entryValidation}
+                onSubmit={handleEntrySubmit}
+                onCancel={handleBackNavigation}
+                isSubmitting={createEntryMutation.isPending}
+                isFullDayType={entryForm.isFullDayType}
+                supportsDateRange={entryForm.supportsDateRange}
+                submitLabel="Eintrag erstellen"
+                testIdPrefix="entry"
+                isAdmin={isAdmin}
+                employeeOptions={entryEmployeeOptions}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       <AlertDialog open={form.showSeriesConflictDialog} onOpenChange={(open) => { if (!open && !form.isSeriesCreating) form.dismissSeriesConflictDialog(); }}>

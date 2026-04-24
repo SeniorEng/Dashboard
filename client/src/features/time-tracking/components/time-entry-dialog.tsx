@@ -21,6 +21,22 @@ export interface EmployeeOption {
   label: string;
 }
 
+export interface TimeEntryFormContentProps {
+  formState: TimeEntryFormState;
+  onFieldChange: <K extends keyof TimeEntryFormState>(field: K, value: TimeEntryFormState[K]) => void;
+  validation: UseTimeEntryConflictResult;
+  onSubmit: () => void;
+  onCancel: () => void;
+  isSubmitting: boolean;
+  isFullDayType: boolean;
+  supportsDateRange: boolean;
+  submitLabel?: string;
+  cancelLabel?: string;
+  testIdPrefix?: string;
+  isAdmin?: boolean;
+  employeeOptions?: EmployeeOption[];
+}
+
 export interface TimeEntryDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -38,20 +54,21 @@ export interface TimeEntryDialogProps {
   employeeOptions?: EmployeeOption[];
 }
 
-function TimeEntryFormContent({
+export function TimeEntryFormContent({
   formState,
   onFieldChange,
   validation,
   onSubmit,
-  onOpenChange,
+  onCancel,
   isSubmitting,
   isFullDayType,
   supportsDateRange,
   submitLabel = "Speichern",
+  cancelLabel = "Abbrechen",
   testIdPrefix = "",
   isAdmin = false,
   employeeOptions = [],
-}: Omit<TimeEntryDialogProps, "open" | "title">) {
+}: TimeEntryFormContentProps) {
   const prefix = testIdPrefix ? `${testIdPrefix}-` : "";
 
   return (
@@ -190,11 +207,11 @@ function TimeEntryFormContent({
       <div className="flex justify-end gap-2 pt-4">
         <Button
           variant="outline"
-          onClick={() => onOpenChange(false)}
+          onClick={onCancel}
           className="min-h-[44px]"
           data-testid={`${prefix}button-cancel`}
         >
-          Abbrechen
+          {cancelLabel}
         </Button>
         <Button
           className="bg-teal-600 hover:bg-teal-700 min-h-[44px]"
@@ -228,7 +245,7 @@ export function TimeEntryDialog(props: TimeEntryDialogProps) {
             <DrawerTitle>{title}</DrawerTitle>
           </DrawerHeader>
           <div className="px-4 pb-6 overflow-y-auto max-h-[80vh]">
-            <TimeEntryFormContent {...formProps} onOpenChange={onOpenChange} />
+            <TimeEntryFormContent {...formProps} onCancel={() => onOpenChange(false)} />
           </div>
         </DrawerContent>
       </Drawer>
@@ -241,7 +258,7 @@ export function TimeEntryDialog(props: TimeEntryDialogProps) {
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
-        <TimeEntryFormContent {...formProps} onOpenChange={onOpenChange} />
+        <TimeEntryFormContent {...formProps} onCancel={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
   );
