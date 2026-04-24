@@ -436,7 +436,7 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
   const validatedData = insertKundenterminSchema.parse(req.body);
   const user = req.user!;
   
-  if (!user.isAdmin && isWeekend(validatedData.date)) {
+  if (isWeekend(validatedData.date)) {
     return sendBadRequest(res, "Termine können nicht an Samstagen oder Sonntagen erstellt werden.");
   }
 

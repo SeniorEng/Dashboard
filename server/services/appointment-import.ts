@@ -6,6 +6,7 @@ import { budgetLedgerStorage } from "../storage/budget-ledger";
 import { storage } from "../storage";
 import { calculateAppointmentCost } from "../storage/budget/appointment-cost-calculator";
 import { getAvailableForDate } from "../storage/budget/import-availability";
+import { isWeekend } from "@shared/utils/datetime";
 
 export interface ImportRow {
   rowIndex: number;
@@ -304,6 +305,8 @@ export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
 
     if (!row.date) {
       errors.push("Datum fehlt");
+    } else if (isWeekend(row.date)) {
+      errors.push("Termine an Samstagen oder Sonntagen sind nicht erlaubt");
     }
     if (!row.startTime) {
       errors.push("Startzeit fehlt");
@@ -451,6 +454,9 @@ async function importSingleRow(
   durationMinutes: number,
   notes: string,
 ): Promise<void> {
+  if (isWeekend(row.date)) {
+    throw new Error("Termine an Samstagen oder Sonntagen sind nicht erlaubt");
+  }
   await db.transaction(async (tx) => {
     const scheduledEnd = row.endTime || row.startTime;
 

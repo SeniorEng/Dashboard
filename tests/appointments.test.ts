@@ -156,7 +156,7 @@ describe("BIZ-1: Wochenend-Validierung", () => {
     expect(res.status).toBe(400);
   });
 
-  it("BIZ-1.3 – Admin darf Termin am Samstag anlegen", async () => {
+  it("BIZ-1.3 – Termin am Samstag wird auch für Admin abgelehnt", async () => {
     const today = new Date();
     const daysUntilSat = (6 - today.getDay() + 7) % 7 || 7;
     const sat = new Date(today);
@@ -164,8 +164,7 @@ describe("BIZ-1: Wochenend-Validierung", () => {
     const satStr = sat.toISOString().split("T")[0];
 
     const res = await createAppointment(satStr, "10:00", hwServiceId, 60);
-    expect(res.status).toBe(201);
-    if (res.status === 201) createdIds.push(res.data.id);
+    expect(res.status).toBe(400);
   });
 });
 

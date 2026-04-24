@@ -567,7 +567,7 @@ export default function Dashboard() {
 
   const hasAnyContent = sortedTimeline.length > 0 || fullDayEntries.length > 0;
   const isSelectedWeekend = isWeekend(dateString);
-  const canCreateOnSelectedDate = isAdmin || !isSelectedWeekend;
+  const canCreateOnSelectedDate = !isSelectedWeekend;
 
   return (
     <Layout>
