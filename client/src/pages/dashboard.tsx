@@ -19,7 +19,7 @@ import { format, addDays, startOfWeek, subWeeks, isSameDay } from "date-fns";
 import { de } from "date-fns/locale";
 import { Plus, ChevronsLeft, ChevronsRight, ChevronLeft, ChevronRight, CalendarCheck, Pencil, Trash2, Loader2, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { parseLocalDate } from "@shared/utils/datetime";
+import { parseLocalDate, isWeekend } from "@shared/utils/datetime";
 import { getHolidayMap } from "@shared/utils/holidays";
 import { iconSize } from "@/design-system";
 import { useDayTimeEntries, useCreateTimeEntry, useUpdateTimeEntry, useDeleteTimeEntry } from "@/features/time-tracking/hooks/use-time-entries";
@@ -566,6 +566,8 @@ export default function Dashboard() {
   }, [appointments, timelineEntries]);
 
   const hasAnyContent = sortedTimeline.length > 0 || fullDayEntries.length > 0;
+  const isSelectedWeekend = isWeekend(dateString);
+  const canCreateOnSelectedDate = isAdmin || !isSelectedWeekend;
 
   return (
     <Layout>
@@ -716,15 +718,17 @@ export default function Dashboard() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            <Link href={`/new-appointment?date=${dateString}&from=dashboard`}>
-              <Button
-                size="sm"
-                className="shadow-lg shadow-primary/20"
-                data-testid="button-new-entry"
-              >
-                <Plus className={`${iconSize.sm} mr-1`} /> Neuer Eintrag
-              </Button>
-            </Link>
+            {canCreateOnSelectedDate && (
+              <Link href={`/new-appointment?date=${dateString}&from=dashboard`}>
+                <Button
+                  size="sm"
+                  className="shadow-lg shadow-primary/20"
+                  data-testid="button-new-entry"
+                >
+                  <Plus className={`${iconSize.sm} mr-1`} /> Neuer Eintrag
+                </Button>
+              </Link>
+            )}
           </div>
         </div>
 
@@ -762,7 +766,7 @@ export default function Dashboard() {
         ) : !hasAnyContent ? (
           <div className="text-center py-8 min-h-[200px] text-muted-foreground space-y-4" data-testid="empty-day">
             <p>Keine Termine oder Einträge für diesen Tag.</p>
-            {!isMonthClosed && (
+            {!isMonthClosed && canCreateOnSelectedDate && (
               <div className="flex flex-col sm:flex-row gap-2 justify-center items-stretch sm:items-center max-w-md mx-auto px-4">
                 <Link href={`/new-appointment?date=${dateString}&from=dashboard`} className="w-full sm:w-auto">
                   <Button

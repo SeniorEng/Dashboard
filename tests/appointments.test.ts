@@ -104,26 +104,68 @@ afterAll(async () => {
 });
 
 describe("BIZ-1: Wochenend-Validierung", () => {
-  it("BIZ-1.1 – Termin am Samstag wird abgelehnt", async () => {
+  let weekendNonAdminAuth: Awaited<ReturnType<typeof loginAs>> | null = null;
+  let weekendNonAdminId: number | null = null;
+
+  beforeAll(async () => {
+    const emp = await createTestEmployee({ nachnamePrefix: "WeekendMA" });
+    weekendNonAdminId = emp.id;
+    weekendNonAdminAuth = await loginAs(emp.email, emp.password);
+    await apiPatch(`/api/admin/customers/${testCustomerId}/assign`, {
+      primaryEmployeeId: auth.user.id,
+      backupEmployeeId: testEmployeeId,
+      backupEmployeeId2: emp.id,
+    });
+  });
+
+  afterAll(async () => {
+    await deactivateTestEmployee(weekendNonAdminId);
+  });
+
+  it("BIZ-1.1 – Termin am Samstag wird für Mitarbeiter abgelehnt", async () => {
     const today = new Date();
     const daysUntilSat = (6 - today.getDay() + 7) % 7 || 7;
     const sat = new Date(today);
     sat.setDate(sat.getDate() + daysUntilSat);
     const satStr = sat.toISOString().split("T")[0];
 
-    const res = await createAppointment(satStr, "10:00", hwServiceId, 60);
+    const res = await apiPostAs<any>(weekendNonAdminAuth!, "/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date: satStr,
+      scheduledStart: "10:00",
+      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
+      assignedEmployeeId: weekendNonAdminAuth!.user.id,
+    });
     expect(res.status).toBe(400);
   });
 
-  it("BIZ-1.2 – Termin am Sonntag wird abgelehnt", async () => {
+  it("BIZ-1.2 – Termin am Sonntag wird für Mitarbeiter abgelehnt", async () => {
     const today = new Date();
     const daysUntilSun = (7 - today.getDay()) % 7 || 7;
     const sun = new Date(today);
     sun.setDate(sun.getDate() + daysUntilSun);
     const sunStr = sun.toISOString().split("T")[0];
 
-    const res = await createAppointment(sunStr, "10:00", hwServiceId, 60);
+    const res = await apiPostAs<any>(weekendNonAdminAuth!, "/api/appointments/kundentermin", {
+      customerId: testCustomerId,
+      date: sunStr,
+      scheduledStart: "10:00",
+      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
+      assignedEmployeeId: weekendNonAdminAuth!.user.id,
+    });
     expect(res.status).toBe(400);
+  });
+
+  it("BIZ-1.3 – Admin darf Termin am Samstag anlegen", async () => {
+    const today = new Date();
+    const daysUntilSat = (6 - today.getDay() + 7) % 7 || 7;
+    const sat = new Date(today);
+    sat.setDate(sat.getDate() + daysUntilSat + 7);
+    const satStr = sat.toISOString().split("T")[0];
+
+    const res = await createAppointment(satStr, "10:00", hwServiceId, 60);
+    expect(res.status).toBe(201);
+    if (res.status === 201) createdIds.push(res.data.id);
   });
 });
 
