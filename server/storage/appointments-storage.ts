@@ -35,15 +35,26 @@ export async function getAppointmentsByDate(date: string): Promise<Appointment[]
   return await db.select().from(appointments).where(and(eq(appointments.date, date), isNull(appointments.deletedAt), ne(appointments.status, "cancelled")));
 }
 
-function applyVisibilityFilters(conditions: ReturnType<typeof and>[], customerIds?: number[], employeeId?: number, assignedOnly?: boolean) {
-  const employeeCondition = employeeId
-    ? assignedOnly
-      ? eq(appointments.assignedEmployeeId, employeeId)
-      : or(
-          eq(appointments.assignedEmployeeId, employeeId),
-          eq(appointments.performedByEmployeeId, employeeId)
-        )!
-    : undefined;
+function buildEmployeeCondition(employeeId: number | number[] | undefined, assignedOnly?: boolean) {
+  if (employeeId === undefined) return undefined;
+  const ids = Array.isArray(employeeId) ? employeeId : [employeeId];
+  if (ids.length === 0) return undefined;
+
+  const assignedExpr = ids.length === 1
+    ? eq(appointments.assignedEmployeeId, ids[0])
+    : inArray(appointments.assignedEmployeeId, ids);
+
+  if (assignedOnly) return assignedExpr;
+
+  const performedExpr = ids.length === 1
+    ? eq(appointments.performedByEmployeeId, ids[0])
+    : inArray(appointments.performedByEmployeeId, ids);
+
+  return or(assignedExpr, performedExpr)!;
+}
+
+function applyVisibilityFilters(conditions: ReturnType<typeof and>[], customerIds?: number[], employeeId?: number | number[], assignedOnly?: boolean) {
+  const employeeCondition = buildEmployeeCondition(employeeId, assignedOnly);
 
   if (assignedOnly && employeeCondition) {
     conditions.push(employeeCondition);
@@ -56,7 +67,7 @@ function applyVisibilityFilters(conditions: ReturnType<typeof and>[], customerId
   }
 }
 
-export async function getAppointmentCountsByDates(dates: string[], customerIds?: number[], employeeId?: number, assignedOnly?: boolean): Promise<Record<string, number>> {
+export async function getAppointmentCountsByDates(dates: string[], customerIds?: number[], employeeId?: number | number[], assignedOnly?: boolean): Promise<Record<string, number>> {
   if (dates.length === 0) return {};
 
   const conditions = [inArray(appointments.date, dates), isNull(appointments.deletedAt), ne(appointments.status, "cancelled")];
@@ -130,7 +141,7 @@ export async function deleteAppointment(id: number, tx?: DbOrTx): Promise<boolea
   return result.length > 0;
 }
 
-export async function getAppointmentsWithCustomers(date?: string, customerIds?: number[], employeeId?: number, assignedOnly?: boolean): Promise<AppointmentWithCustomer[]> {
+export async function getAppointmentsWithCustomers(date?: string, customerIds?: number[], employeeId?: number | number[], assignedOnly?: boolean): Promise<AppointmentWithCustomer[]> {
   const conditions = [isNull(appointments.deletedAt), ne(appointments.status, "cancelled")];
   if (date) {
     conditions.push(eq(appointments.date, date));
@@ -194,22 +205,16 @@ export async function getAppointmentWithCustomer(id: number): Promise<Appointmen
   return mapAppointmentRow(results[0]);
 }
 
-export async function getUndocumentedAppointments(beforeDate: string, customerIds?: number[], employeeId?: number, assignedOnly?: boolean): Promise<AppointmentWithCustomer[]> {
+export async function getUndocumentedAppointments(beforeDate: string, customerIds?: number[], employeeId?: number | number[], assignedOnly?: boolean): Promise<AppointmentWithCustomer[]> {
   const conditions = [
     lt(appointments.date, beforeDate),
     ne(appointments.status, "completed"),
     isNull(appointments.deletedAt)
   ];
 
-  if (assignedOnly && employeeId) {
-    conditions.push(eq(appointments.assignedEmployeeId, employeeId));
-  } else if (employeeId) {
-    conditions.push(
-      or(
-        eq(appointments.assignedEmployeeId, employeeId),
-        eq(appointments.performedByEmployeeId, employeeId)
-      )!
-    );
+  const employeeCondition = buildEmployeeCondition(employeeId, assignedOnly);
+  if (employeeCondition) {
+    conditions.push(employeeCondition);
   } else if (customerIds && customerIds.length > 0) {
     conditions.push(inArray(appointments.customerId, customerIds));
   }

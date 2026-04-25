@@ -4,7 +4,7 @@ import { documentStorage } from "../../storage/documents";
 import { renderTemplateForCustomer, wrapInPrintableHtml, extractInputPlaceholders } from "../../services/template-engine";
 import { generateAndStorePdf, getDocumentPdfBuffer, createSigningLinkAndRespond } from "../../services/document-pdf";
 import { asyncHandler } from "../../lib/errors";
-import { requireIntParam, requireCustomerAccess } from "../../lib/params";
+import { requireIntParam, requireCustomerAccess, requireCustomerReadAccess } from "../../lib/params";
 
 const router = Router();
 
@@ -30,7 +30,7 @@ router.get("/generated-documents/:docId/download", asyncHandler("PDF konnte nich
   }
 
   if (doc.customerId) {
-    if (!await requireCustomerAccess(req, res, doc.customerId)) return;
+    if (!await requireCustomerReadAccess(req, res, doc.customerId)) return;
   }
 
   const pdfBuffer = await getDocumentPdfBuffer(doc.objectPath);
@@ -50,7 +50,7 @@ router.get("/document-requirements/:billingType", asyncHandler("Dokumentenanford
 router.get("/:id/documents", asyncHandler("Kundendokumente konnten nicht geladen werden", async (req, res) => {
   const customerId = requireIntParam(req.params.id, res);
   if (customerId === null) return;
-  if (!await requireCustomerAccess(req, res, customerId)) return;
+  if (!await requireCustomerReadAccess(req, res, customerId)) return;
 
   const docs = await documentStorage.getCurrentCustomerDocuments(customerId);
   res.json(docs);
@@ -60,7 +60,7 @@ router.get("/:id/documents/:documentTypeId/history", asyncHandler("Dokumentenhis
   const customerId = requireIntParam(req.params.id, res);
   const documentTypeId = requireIntParam(req.params.documentTypeId, res);
   if (customerId === null || documentTypeId === null) return;
-  if (!await requireCustomerAccess(req, res, customerId)) return;
+  if (!await requireCustomerReadAccess(req, res, customerId)) return;
 
   const docs = await documentStorage.getCustomerDocumentHistory(customerId, documentTypeId);
   res.json(docs);
@@ -88,7 +88,7 @@ router.post("/:id/documents", asyncHandler("Kundendokument konnte nicht hochgela
 router.get("/:id/document-templates", asyncHandler("Vorlagen konnten nicht geladen werden", async (req, res) => {
   const customerId = requireIntParam(req.params.id, res);
   if (customerId === null) return;
-  if (!await requireCustomerAccess(req, res, customerId)) return;
+  if (!await requireCustomerReadAccess(req, res, customerId)) return;
 
   const templates = await documentStorage.getTemplatesByContext("bestandskunde", "customer");
   const templatesWithInputFields = templates.map(t => ({
@@ -175,7 +175,7 @@ router.post("/:id/documents/generate-pdf", asyncHandler("PDF konnte nicht erstel
 router.get("/:id/generated-documents", asyncHandler("Generierte Dokumente konnten nicht geladen werden", async (req, res) => {
   const customerId = requireIntParam(req.params.id, res);
   if (customerId === null) return;
-  if (!await requireCustomerAccess(req, res, customerId)) return;
+  if (!await requireCustomerReadAccess(req, res, customerId)) return;
 
   const docs = await documentStorage.getGeneratedDocuments(customerId);
   res.json(docs);

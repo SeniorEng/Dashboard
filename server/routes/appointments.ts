@@ -38,6 +38,7 @@ import type { CoverageCheckResponse } from "@shared/api";
 import appointmentDocumentationRouter from "./appointment-documentation";
 import { db } from "../lib/db";
 import { customerManagementStorage } from "../storage/customer-management";
+import { isTeamLead, getTeamLeadVisibleEmployeeIds, getTeamLeadVisibleCustomerIds } from "../lib/team-lead";
 import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
 import { addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
 import { customers, users } from "@shared/schema";
@@ -81,27 +82,51 @@ function isDateMoreThan3MonthsInPast(dateStr: string): boolean {
 }
 
 export async function checkCustomerAccess(
-  user: { id: number; isAdmin: boolean },
+  user: { id: number; isAdmin: boolean; isActive?: boolean; isTeamLead?: boolean; isSuperAdmin?: boolean },
   customerId: number | null,
   res: Response,
   appointmentEmployeeIds?: { assignedEmployeeId?: number | null; performedByEmployeeId?: number | null }
 ): Promise<boolean> {
   if (user.isAdmin) return true;
+
+  const lead = isTeamLead(user as Parameters<typeof isTeamLead>[0]);
+  const teamEmployeeIds = lead ? await getTeamLeadVisibleEmployeeIds(user.id) : [];
+
   if (customerId === null) {
     if (appointmentEmployeeIds &&
         (appointmentEmployeeIds.assignedEmployeeId === user.id ||
          appointmentEmployeeIds.performedByEmployeeId === user.id)) {
       return true;
     }
+    if (lead && appointmentEmployeeIds) {
+      const assigned = appointmentEmployeeIds.assignedEmployeeId;
+      const performed = appointmentEmployeeIds.performedByEmployeeId;
+      if ((assigned !== null && assigned !== undefined && teamEmployeeIds.includes(assigned)) ||
+          (performed !== null && performed !== undefined && teamEmployeeIds.includes(performed))) {
+        return true;
+      }
+    }
     sendForbidden(res, "ACCESS_DENIED", "Sie haben keinen Zugriff auf diesen Termin.");
     return false;
   }
   const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-  if (!assignedCustomerIds.includes(customerId)) {
-    sendForbidden(res, "ACCESS_DENIED", "Sie haben keinen Zugriff auf diesen Termin.");
-    return false;
+  if (assignedCustomerIds.includes(customerId)) return true;
+
+  if (lead) {
+    const teamCustomerIds = await getTeamLeadVisibleCustomerIds(user.id);
+    if (teamCustomerIds.includes(customerId)) return true;
+    if (appointmentEmployeeIds) {
+      const assigned = appointmentEmployeeIds.assignedEmployeeId;
+      const performed = appointmentEmployeeIds.performedByEmployeeId;
+      if ((assigned !== null && assigned !== undefined && teamEmployeeIds.includes(assigned)) ||
+          (performed !== null && performed !== undefined && teamEmployeeIds.includes(performed))) {
+        return true;
+      }
+    }
   }
-  return true;
+
+  sendForbidden(res, "ACCESS_DENIED", "Sie haben keinen Zugriff auf diesen Termin.");
+  return false;
 }
 
 export async function checkAppointmentWriteAccess(user: { id: number; isAdmin: boolean }, appointment: { assignedEmployeeId: number | null; customerId: number | null }, res: Response): Promise<boolean> {
@@ -274,31 +299,44 @@ router.get("/", asyncHandler(ErrorMessages.fetchAppointmentsFailed, async (req, 
   const customerId = req.query.customerId ? parseInt(req.query.customerId as string) : undefined;
   const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : undefined;
   const user = req.user!;
-  
+
   let customerIds: number[] | undefined;
-  let employeeId: number | undefined;
+  let employeeId: number | number[] | undefined;
   let assignedOnly = false;
-  
+  const lead = !user.isAdmin && isTeamLead(user);
+
   if (user.isAdmin && viewAsEmployeeId) {
     customerIds = await storage.getPrimaryCustomerIds(viewAsEmployeeId);
     employeeId = viewAsEmployeeId;
+  } else if (lead) {
+    customerIds = await getTeamLeadVisibleCustomerIds(user.id);
+    employeeId = await getTeamLeadVisibleEmployeeIds(user.id);
   } else if (!user.isAdmin) {
     customerIds = await storage.getPrimaryCustomerIds(user.id);
     employeeId = user.id;
   }
-  
+
   if (customerId) {
-    if (employeeId) {
+    if (lead) {
+      const teamCustomerIds = customerIds ?? await getTeamLeadVisibleCustomerIds(user.id);
+      if (!teamCustomerIds.includes(customerId)) {
+        return res.json([]);
+      }
+    } else if (employeeId !== undefined && !Array.isArray(employeeId)) {
       const allAssignedIds = await storage.getAssignedCustomerIds(employeeId);
       if (!allAssignedIds.includes(customerId)) {
         return res.json([]);
       }
     }
     customerIds = [customerId];
+    if (lead) {
+      // Beim Filter auf einen Kunden des Teams bleibt employeeId-Liste irrelevant
+      employeeId = undefined;
+    }
   }
-  
+
   const appointments = await storage.getAppointmentsWithCustomers(date, customerIds, employeeId, assignedOnly);
-  
+
   res.json(appointments);
 }));
 
@@ -315,12 +353,16 @@ router.get("/counts", asyncHandler("Fehler beim Laden der Terminzähler", async 
   }
 
   let customerIds: number[] | undefined;
-  let employeeId: number | undefined;
-  let assignedOnlyCounts = false;
+  let employeeId: number | number[] | undefined;
+  const assignedOnlyCounts = false;
+  const lead = !user.isAdmin && isTeamLead(user);
 
   if (user.isAdmin && viewAsEmployeeId) {
     customerIds = await storage.getPrimaryCustomerIds(viewAsEmployeeId);
     employeeId = viewAsEmployeeId;
+  } else if (lead) {
+    customerIds = await getTeamLeadVisibleCustomerIds(user.id);
+    employeeId = await getTeamLeadVisibleEmployeeIds(user.id);
   } else if (!user.isAdmin) {
     customerIds = await storage.getPrimaryCustomerIds(user.id);
     employeeId = user.id;
@@ -348,12 +390,16 @@ router.get("/undocumented", asyncHandler("Fehler beim Laden der offenen Dokument
   const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : undefined;
   
   let customerIds: number[] | undefined;
-  let employeeId: number | undefined;
+  let employeeId: number | number[] | undefined;
   let assignedOnlyUndoc = false;
+  const lead = !user.isAdmin && isTeamLead(user);
 
   if (user.isAdmin && viewAsEmployeeId) {
     employeeId = viewAsEmployeeId;
     assignedOnlyUndoc = true;
+  } else if (lead) {
+    customerIds = await getTeamLeadVisibleCustomerIds(user.id);
+    employeeId = await getTeamLeadVisibleEmployeeIds(user.id);
   } else if (!user.isAdmin) {
     customerIds = await storage.getAssignedCustomerIds(user.id);
     employeeId = user.id;

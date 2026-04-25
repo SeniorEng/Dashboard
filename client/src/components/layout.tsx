@@ -13,7 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, BookOpen, Bell, CalendarPlus, UserPlus, WifiOff, Eye, ChevronDown, HelpCircle } from "lucide-react";
+import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, UsersRound, BookOpen, Bell, CalendarPlus, UserPlus, WifiOff, Eye, ChevronDown, HelpCircle } from "lucide-react";
 import { type LayoutVariant, layoutVariants, colors } from "@/design-system";
 import { useUnreadCount } from "@/features/notifications/use-notifications";
 import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
@@ -308,6 +308,9 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
     { href: "/tasks", label: "Aufgaben", icon: CheckSquare, testId: "tasks", match: (loc: string) => loc === "/tasks", badge: hasBadge, badgeType: "task" as const },
     { href: "/service-records", label: "Nachweise", icon: FileSignature, testId: "service-records", match: (loc: string) => loc.startsWith("/service-records") },
     { href: "/my-times", label: "Zeiten", icon: Clock, testId: "my-times", match: (loc: string) => loc === "/my-times" },
+    ...(user?.isTeamLead && !user?.isAdmin
+      ? [{ href: "/team", label: "Team", icon: UsersRound, testId: "team", match: (loc: string) => loc === "/team" }]
+      : []),
   ];
 
   const desktopNavItems = employeeNavItems;

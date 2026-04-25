@@ -18,6 +18,8 @@ export interface User {
   isActive: boolean;
   isAdmin: boolean;
   isSuperAdmin: boolean;
+  isTeamLead: boolean;
+  teamLeadId: number | null;
   isEuRentner: boolean;
   employmentType: string;
   weeklyWorkDays: number;

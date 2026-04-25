@@ -12,8 +12,10 @@ import { generateAndStorePdf } from "../services/document-pdf";
 import { computeDataHash } from "../services/signature-integrity";
 import { customerManagementStorage } from "../storage/customer-management";
 import { asyncHandler } from "../lib/errors";
-import { requireIntParam, requireCustomerAccess } from "../lib/params";
+import { requireIntParam, requireCustomerAccess, requireCustomerReadAccess } from "../lib/params";
 import { authService } from "../services/auth";
+import { isTeamLead, getTeamLeadVisibleCustomerIds } from "../lib/team-lead";
+import { getCustomersByIds } from "../storage/customers-storage";
 import { todayISO, validateGeburtsdatum } from "@shared/utils/datetime";
 import { db } from "../lib/db";
 import { customers, prospects, prospectNotes } from "@shared/schema";
@@ -36,14 +38,27 @@ router.get("/", asyncHandler("Kunden konnten nicht geladen werden", async (req, 
   const user = req.user!;
   const statusFilter = req.query.status as string | undefined;
   const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string) : undefined;
-  
+
   if (user.isAdmin && !viewAsEmployeeId) {
     const searchFilter = req.query.search as string | undefined;
     const allCustomers = await storage.getCustomers({ status: statusFilter, search: searchFilter });
     res.json(allCustomers);
     return;
   }
-  
+
+  if (!user.isAdmin && isTeamLead(user)) {
+    const teamCustomerIds = await getTeamLeadVisibleCustomerIds(user.id);
+    let teamCustomers = await getCustomersByIds(teamCustomerIds);
+    const ownAssigned = await storage.getAssignedCustomerIds(user.id);
+    const ownSet = new Set(ownAssigned);
+    let withFlag = teamCustomers.map((c) => ({ ...c, isCurrentlyAssigned: ownSet.has(c.id) }));
+    if (statusFilter) {
+      withFlag = withFlag.filter((c) => c.status === statusFilter);
+    }
+    res.json(withFlag);
+    return;
+  }
+
   const employeeId = (user.isAdmin && viewAsEmployeeId) ? viewAsEmployeeId : user.id;
   let customersWithAccess = await storage.getCustomersForEmployee(employeeId);
   if (statusFilter) {
@@ -55,7 +70,7 @@ router.get("/", asyncHandler("Kunden konnten nicht geladen werden", async (req, 
 router.get("/:id", asyncHandler("Kunde konnte nicht geladen werden", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
-  if (!await requireCustomerAccess(req, res, id)) return;
+  if (!await requireCustomerReadAccess(req, res, id)) return;
   
   const customer = await storage.getCustomer(id);
   if (!customer) {
@@ -68,7 +83,7 @@ router.get("/:id", asyncHandler("Kunde konnte nicht geladen werden", async (req,
 router.get("/:id/details", asyncHandler("Kundendetails konnten nicht geladen werden", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
-  if (!await requireCustomerAccess(req, res, id)) return;
+  if (!await requireCustomerReadAccess(req, res, id)) return;
   
   const [contacts, insurance, contract] = await Promise.all([
     customerManagementStorage.getCustomerContacts(id),
@@ -296,7 +311,7 @@ router.post("/:id/signatures", asyncHandler("Unterschriften konnten nicht gespei
 router.get("/:id/timeline", asyncHandler("Timeline konnte nicht geladen werden", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
-  if (!await requireCustomerAccess(req, res, id)) return;
+  if (!await requireCustomerReadAccess(req, res, id)) return;
 
   const customer = await storage.getCustomer(id);
   if (!customer) {

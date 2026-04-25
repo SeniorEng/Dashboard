@@ -3,6 +3,7 @@ import appointmentsRouter from "./appointments";
 import customersRouter from "./customers";
 import authRouter from "./auth";
 import adminRouter from "./admin";
+import teamRouter from "./team";
 import timeEntriesRouter from "./time-entries";
 import birthdaysRouter from "./birthdays";
 import birthdayCardsRouter from "./birthday-cards";
@@ -94,6 +95,7 @@ router.use("/auth", authRouter);
 router.use(csrfProtection);
 
 router.use("/admin", adminRouter);
+router.use("/team", teamRouter);
 
 router.get("/insurance-providers", requireAuth, asyncHandler("Pflegekassen konnten nicht geladen werden", async (req, res) => {
   const activeOnly = req.query.all !== "true";

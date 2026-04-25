@@ -12,7 +12,8 @@ import {
   employeeTimeEntries,
   customerAssignmentHistory,
 } from "@shared/schema";
-import { timeToMinutes, addDays as addDaysShared, minutesToTimeDisplay, todayISO } from "@shared/utils/datetime";
+import { timeToMinutes, minutesToTimeDisplay, todayISO } from "@shared/utils/datetime";
+import { loadEmployeesWeeklyAvailability, buildDateRange } from "../../services/employee-availability";
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
 import { auditService } from "../../services/audit";
@@ -104,10 +105,6 @@ function collectBlockedSlots(
   return blockedSlots;
 }
 
-function addDaysISO(dateStr: string, days: number): string {
-  return addDaysShared(dateStr, days);
-}
-
 function isValidCalendarDate(dateStr: string): boolean {
   const [y, m, d] = dateStr.split("-").map(Number);
   const date = new Date(Date.UTC(y, m - 1, d));
@@ -122,10 +119,7 @@ router.get("/employees/weekly-availability", asyncHandler("Wochen-Verfügbarkeit
   const days = Math.min(Math.max(parseInt(daysParam as string) || 5, 1), 7);
   const showAllEmployees = allEmployeesParam === "true";
 
-  const dates: string[] = [];
-  for (let i = 0; i < days; i++) {
-    dates.push(addDaysISO(startDate, i));
-  }
+  const dates = buildDateRange(startDate, days);
 
   let employeeIds: number[];
   if (showAllEmployees) {
@@ -142,184 +136,11 @@ router.get("/employees/weekly-availability", asyncHandler("Wochen-Verfügbarkeit
     employeeIds = erstberatungEmployeeIds.map(e => e.userId);
   }
 
-  if (employeeIds.length === 0) {
-    return res.json({ dates, employees: [] });
-  }
-
-  const [employeeData, availabilityEntries, absenceEntries, rangeAppointments, timeEntries, blockerEntries] = await Promise.all([
-    db.select({
-      id: users.id,
-      displayName: users.displayName,
-      vorname: users.vorname,
-      nachname: users.nachname,
-    })
-    .from(users)
-    .where(and(
-      inArray(users.id, employeeIds),
-      eq(users.isActive, true)
-    ))
-    .orderBy(asc(users.displayName)),
-
-    db.select({
-      userId: employeeTimeEntries.userId,
-      entryDate: employeeTimeEntries.entryDate,
-      startTime: employeeTimeEntries.startTime,
-      endTime: employeeTimeEntries.endTime,
-    })
-    .from(employeeTimeEntries)
-    .where(and(
-      inArray(employeeTimeEntries.userId, employeeIds),
-      inArray(employeeTimeEntries.entryDate, dates),
-      eq(employeeTimeEntries.entryType, "verfuegbar"),
-      isNull(employeeTimeEntries.deletedAt)
-    ))
-    .orderBy(asc(employeeTimeEntries.startTime)),
-
-    db.select({
-      userId: employeeTimeEntries.userId,
-      entryDate: employeeTimeEntries.entryDate,
-      entryType: employeeTimeEntries.entryType,
-    })
-    .from(employeeTimeEntries)
-    .where(and(
-      inArray(employeeTimeEntries.userId, employeeIds),
-      inArray(employeeTimeEntries.entryDate, dates),
-      inArray(employeeTimeEntries.entryType, ["urlaub", "krankheit"]),
-      isNull(employeeTimeEntries.deletedAt)
-    )),
-
-    db.select({
-      assignedEmployeeId: appointments.assignedEmployeeId,
-      date: appointments.date,
-      scheduledStart: appointments.scheduledStart,
-      scheduledEnd: appointments.scheduledEnd,
-      durationPromised: appointments.durationPromised,
-      customerName: sql`COALESCE(
-        ${customers.vorname} || ' ' || ${customers.nachname},
-        ${customers.name},
-        ${prospects.vorname} || ' ' || ${prospects.nachname},
-        'Erstberatung'
-      )`.as("customer_name"),
-      status: appointments.status,
-    })
-    .from(appointments)
-    .leftJoin(customers, eq(appointments.customerId, customers.id))
-    .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
-    .where(and(
-      inArray(appointments.assignedEmployeeId, employeeIds),
-      inArray(appointments.date, dates),
-      isNull(appointments.deletedAt),
-      sql`${appointments.status} != 'cancelled'`
-    ))
-    .orderBy(asc(appointments.scheduledStart)),
-
-    db.select({
-      userId: employeeTimeEntries.userId,
-      entryDate: employeeTimeEntries.entryDate,
-      startTime: employeeTimeEntries.startTime,
-      endTime: employeeTimeEntries.endTime,
-      entryType: employeeTimeEntries.entryType,
-    })
-    .from(employeeTimeEntries)
-    .where(and(
-      inArray(employeeTimeEntries.userId, employeeIds),
-      inArray(employeeTimeEntries.entryDate, dates),
-      inArray(employeeTimeEntries.entryType, ["arbeitszeit", "pause", "fahrt"]),
-      isNull(employeeTimeEntries.deletedAt)
-    )),
-
-    db.select({
-      userId: employeeTimeEntries.userId,
-      entryDate: employeeTimeEntries.entryDate,
-      startTime: employeeTimeEntries.startTime,
-      endTime: employeeTimeEntries.endTime,
-      isFullDay: employeeTimeEntries.isFullDay,
-    })
-    .from(employeeTimeEntries)
-    .where(and(
-      inArray(employeeTimeEntries.userId, employeeIds),
-      inArray(employeeTimeEntries.entryDate, dates),
-      eq(employeeTimeEntries.entryType, "blocker"),
-      isNull(employeeTimeEntries.deletedAt)
-    ))
-    .orderBy(asc(employeeTimeEntries.startTime)),
-  ]);
-
-  const result = employeeData.map(emp => {
-    const empName = emp.displayName || `${emp.vorname || ""} ${emp.nachname || ""}`.trim();
-    
-    const daysData: Record<string, {
-      availability: { startTime: string | null; endTime: string | null }[];
-      appointments: { scheduledStart: string | null; scheduledEnd: string | null; durationMinutes: number; customerName: string; status: string }[];
-      absence: "urlaub" | "krankheit" | null;
-      blockers: "fullday" | { startTime: string; endTime: string }[] | null;
-      freeSlots: { start: string; end: string }[];
-    }> = {};
-
-    for (const date of dates) {
-      const dayAvail = availabilityEntries
-        .filter(a => a.userId === emp.id && a.entryDate === date)
-        .map(a => ({
-          startTime: a.startTime?.slice(0, 5) || null,
-          endTime: a.endTime?.slice(0, 5) || null,
-        }));
-
-      const dayAppointments = rangeAppointments
-        .filter(a => a.assignedEmployeeId === emp.id && a.date === date)
-        .map(a => {
-          const start = a.scheduledStart?.slice(0, 5) || null;
-          let end = a.scheduledEnd?.slice(0, 5) || null;
-          if (!end && start && a.durationPromised) {
-            end = minutesToHHMM(timeToMinutes(start) + a.durationPromised);
-          }
-          return {
-            scheduledStart: start,
-            scheduledEnd: end,
-            durationMinutes: a.durationPromised,
-            customerName: String(a.customerName),
-            status: a.status as string,
-          };
-        });
-
-      const dayTimeEntries = timeEntries
-        .filter(t => t.userId === emp.id && t.entryDate === date && t.startTime && t.endTime);
-
-      const dayBlockers = blockerEntries
-        .filter(b => b.userId === emp.id && b.entryDate === date);
-
-      const absence = absenceEntries.find(a => a.userId === emp.id && a.entryDate === date);
-
-      const hasFullDayBlocker = dayBlockers.some(b => b.isFullDay);
-
-      const blockedSlots = collectBlockedSlots(dayAppointments, dayTimeEntries, dayBlockers);
-
-      const freeSlots = (absence || hasFullDayBlocker) ? [] : computeFreeSlots(dayAvail, blockedSlots);
-
-      const blockerSlots = dayBlockers
-        .filter(b => b.startTime && b.endTime && !b.isFullDay)
-        .map(b => ({
-          startTime: b.startTime!.slice(0, 5),
-          endTime: b.endTime!.slice(0, 5),
-        }));
-
-      daysData[date] = {
-        availability: dayAvail,
-        appointments: dayAppointments,
-        absence: absence ? absence.entryType as "urlaub" | "krankheit" : null,
-        blockers: hasFullDayBlocker ? "fullday" : blockerSlots.length > 0 ? blockerSlots : null,
-        freeSlots,
-      };
-    }
-
-    return {
-      id: emp.id,
-      displayName: empName,
-      days: daysData,
-    };
-  });
-
-  res.json({ dates, employees: result });
+  const result = await loadEmployeesWeeklyAvailability(employeeIds, dates);
+  res.json(result);
 }));
+
+// Legacy implementation removed — see loadEmployeesWeeklyAvailability in server/services/employee-availability.ts.
 
 router.get("/employees/availability", asyncHandler("Verfügbarkeiten konnten nicht geladen werden", async (req: Request, res: Response) => {
   const { date } = req.query;
