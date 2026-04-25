@@ -277,6 +277,33 @@ describe("Task #201 – Teamleiter-Sichten", () => {
       expect(ids).not.toContain(setup.appointmentLead);
       expect(ids).not.toContain(setup.appointmentOutsider);
     });
+
+    it("Teamleiter mit ?customerId=... darf NICHT Outsider-Termin auf gemeinsamem Kunden sehen", async () => {
+      // Outsider wird (zusätzlich) zu customerMember zugeordnet, sodass beide
+      // Teams (Lead/Member und Outsider) auf demselben Kunden Termine haben.
+      await assignEmployeeToCustomer(setup.customerMember, setup.outsider.id);
+      const sharedDate = nextWeekday(8);
+      const aOutsiderOnShared = await createApptForCustomer(
+        setup.customerMember,
+        setup.outsider.id,
+        setup.serviceId,
+        sharedDate,
+        "12:00"
+      );
+
+      const res = await apiGetAs<any[]>(
+        setup.leadAuth,
+        `/api/appointments?date=${sharedDate}&customerId=${setup.customerMember}`
+      );
+      expect(res.status).toBe(200);
+      const ids = res.data.map((a: any) => a.id);
+      expect(ids).not.toContain(aOutsiderOnShared);
+      // Sanity: assignedEmployeeId muss zu Lead oder zugeordnetem Mitglied gehören
+      const allowed = new Set([setup.lead.id, setup.member.id]);
+      for (const appt of res.data) {
+        expect(allowed.has(appt.assignedEmployeeId)).toBe(true);
+      }
+    });
   });
 
   describe("GET /api/appointments/counts", () => {

@@ -56,8 +56,13 @@ function buildEmployeeCondition(employeeId: number | number[] | undefined, assig
 function applyVisibilityFilters(conditions: ReturnType<typeof and>[], customerIds?: number[], employeeId?: number | number[], assignedOnly?: boolean) {
   const employeeCondition = buildEmployeeCondition(employeeId, assignedOnly);
 
-  if (assignedOnly && employeeCondition) {
-    conditions.push(employeeCondition);
+  if (assignedOnly) {
+    // Strikte UND-Verknüpfung: nur Termine, die sowohl im Mitarbeiter-Scope
+    // liegen als auch (falls gefiltert) zu den erlaubten Kunden gehören.
+    if (employeeCondition) conditions.push(employeeCondition);
+    if (customerIds && customerIds.length > 0) {
+      conditions.push(inArray(appointments.customerId, customerIds));
+    }
   } else if (customerIds && customerIds.length > 0 && employeeCondition) {
     conditions.push(or(inArray(appointments.customerId, customerIds), employeeCondition)!);
   } else if (customerIds && customerIds.length > 0) {

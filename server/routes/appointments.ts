@@ -322,6 +322,11 @@ router.get("/", asyncHandler(ErrorMessages.fetchAppointmentsFailed, async (req, 
       if (!teamCustomerIds.includes(customerId)) {
         return res.json([]);
       }
+      // Strikte UND-Verknüpfung erzwingen: Termine müssen sowohl auf den
+      // gewählten Kunden lauten ALS AUCH von Lead/Mitglied stammen. Ohne
+      // assignedOnly würde der Storage OR-verknüpfen und Außenstehenden-
+      // Termine auf gemeinsamen Kunden zurückgeben (Task #201).
+      assignedOnly = true;
     } else if (employeeId !== undefined && !Array.isArray(employeeId)) {
       const allAssignedIds = await storage.getAssignedCustomerIds(employeeId);
       if (!allAssignedIds.includes(customerId)) {
@@ -329,10 +334,6 @@ router.get("/", asyncHandler(ErrorMessages.fetchAppointmentsFailed, async (req, 
       }
     }
     customerIds = [customerId];
-    if (lead) {
-      // Beim Filter auf einen Kunden des Teams bleibt employeeId-Liste irrelevant
-      employeeId = undefined;
-    }
   }
 
   const appointments = await storage.getAppointmentsWithCustomers(date, customerIds, employeeId, assignedOnly);

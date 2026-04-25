@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, Palmtree, Thermometer, Ban } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, Palmtree, Thermometer, Ban, Users } from "lucide-react";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
 import { format, startOfWeek, addWeeks, subWeeks, addDays, isSameDay } from "date-fns";
@@ -14,6 +14,8 @@ import { useAuth } from "@/hooks/use-auth";
 interface FreeSlot { start: string; end: string }
 interface BlockerSlot { startTime: string; endTime: string }
 interface DayAppointment {
+  appointmentId: number;
+  customerId: number | null;
   scheduledStart: string | null;
   scheduledEnd: string | null;
   durationMinutes: number | null;
@@ -64,6 +66,18 @@ function dayLoadMinutes(day: DayData): number {
   return sum;
 }
 
+function dayPlannedMinutes(day: DayData): number {
+  let sum = 0;
+  for (const slot of day.availability) {
+    const start = timeToMin(slot.startTime);
+    const end = timeToMin(slot.endTime);
+    if (start !== null && end !== null && end > start) {
+      sum += end - start;
+    }
+  }
+  return sum;
+}
+
 function formatHours(mins: number): string {
   if (mins <= 0) return "0h";
   const h = Math.floor(mins / 60);
@@ -71,6 +85,14 @@ function formatHours(mins: number): string {
   if (h === 0) return `${m}m`;
   if (m === 0) return `${h}h`;
   return `${h}h ${m}m`;
+}
+
+function loadColorClass(istMin: number, sollMin: number): string {
+  if (sollMin <= 0) return istMin > 0 ? "text-amber-700" : "text-muted-foreground";
+  const ratio = istMin / sollMin;
+  if (ratio >= 0.95) return "text-red-700";
+  if (ratio >= 0.7) return "text-amber-700";
+  return "text-emerald-700";
 }
 
 export default function TeamPage() {
@@ -176,12 +198,20 @@ export default function TeamPage() {
                     <span className="ml-2 text-xs text-muted-foreground">(du)</span>
                   )}
                 </h2>
+                <Link
+                  href="/customers"
+                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                  data-testid={`link-employee-customers-${emp.id}`}
+                >
+                  <Users className="h-3 w-3" /> Kunden
+                </Link>
               </div>
 
               <div className="grid grid-cols-5 gap-2">
                 {dates.map((date, idx) => {
                   const day = emp.days[date];
                   const load = day ? dayLoadMinutes(day) : 0;
+                  const planned = day ? dayPlannedMinutes(day) : 0;
                   const dayLabel = DAY_NAMES_SHORT[idx] ?? format(weekDates[idx], "EEE", { locale: de });
 
                   return (
@@ -212,12 +242,37 @@ export default function TeamPage() {
 
                       {!day?.absence && day?.blockers !== "fullday" && (
                         <>
-                          <div className="text-xs text-foreground" data-testid={`text-load-${emp.id}-${date}`}>
-                            Auslastung: <span className="font-medium">{formatHours(load)}</span>
+                          <div
+                            className={`text-xs font-medium ${loadColorClass(load, planned)}`}
+                            data-testid={`text-load-${emp.id}-${date}`}
+                          >
+                            Ist {formatHours(load)} / Soll {formatHours(planned)}
                           </div>
                           <div className="text-xs text-muted-foreground" data-testid={`text-appointments-count-${emp.id}-${date}`}>
                             {day?.appointments.length ?? 0} Termine
                           </div>
+                          {day?.appointments && day.appointments.length > 0 && (
+                            <ul className="mt-1 space-y-0.5" data-testid={`list-appointments-${emp.id}-${date}`}>
+                              {day.appointments.slice(0, 3).map((appt) => (
+                                <li key={appt.appointmentId}>
+                                  <Link
+                                    href={`/appointment/${appt.appointmentId}`}
+                                    className="block text-[10px] text-primary hover:underline truncate"
+                                    data-testid={`link-appointment-${emp.id}-${date}-${appt.appointmentId}`}
+                                    title={`${appt.scheduledStart ?? ""} ${appt.customerName}`}
+                                  >
+                                    {appt.scheduledStart ? `${appt.scheduledStart} ` : ""}
+                                    {appt.customerName}
+                                  </Link>
+                                </li>
+                              ))}
+                              {day.appointments.length > 3 && (
+                                <li className="text-[10px] text-muted-foreground">
+                                  +{day.appointments.length - 3} weitere
+                                </li>
+                              )}
+                            </ul>
+                          )}
                           {day?.freeSlots && day.freeSlots.length > 0 && (
                             <div className="mt-1 text-[10px] text-emerald-700" data-testid={`text-freeslots-${emp.id}-${date}`}>
                               Frei: {day.freeSlots.map((s) => `${s.start}–${s.end}`).join(", ")}

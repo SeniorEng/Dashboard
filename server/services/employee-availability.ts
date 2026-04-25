@@ -93,7 +93,15 @@ export function buildDateRange(startDate: string, days: number): string[] {
 
 export type WeeklyAvailabilityDay = {
   availability: { startTime: string | null; endTime: string | null }[];
-  appointments: { scheduledStart: string | null; scheduledEnd: string | null; durationMinutes: number | null; customerName: string; status: string }[];
+  appointments: {
+    appointmentId: number;
+    customerId: number | null;
+    scheduledStart: string | null;
+    scheduledEnd: string | null;
+    durationMinutes: number | null;
+    customerName: string;
+    status: string;
+  }[];
   absence: "urlaub" | "krankheit" | null;
   blockers: "fullday" | { startTime: string; endTime: string }[] | null;
   freeSlots: { start: string; end: string }[];
@@ -163,6 +171,8 @@ export async function loadEmployeesWeeklyAvailability(
       )),
 
     db.select({
+      appointmentId: appointments.id,
+      customerId: appointments.customerId,
       assignedEmployeeId: appointments.assignedEmployeeId,
       date: appointments.date,
       scheduledStart: appointments.scheduledStart,
@@ -240,6 +250,8 @@ export async function loadEmployeesWeeklyAvailability(
             end = minutesToHHMM(timeToMinutes(start) + a.durationPromised);
           }
           return {
+            appointmentId: a.appointmentId,
+            customerId: a.customerId,
             scheduledStart: start,
             scheduledEnd: end,
             durationMinutes: a.durationPromised,
