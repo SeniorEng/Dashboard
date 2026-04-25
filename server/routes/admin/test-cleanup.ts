@@ -225,6 +225,41 @@ router.post(
 
     const idList = sql.join(safeIds.map((i) => sql`${i}`), sql`, `);
 
+    // Pre-Flight-Sicherheitscheck (gespiegelt aus cleanup-test-data.ts):
+    // Test-User dürfen NICHT mit echten Kunden verflochten sein, sonst würden
+    // wir bei Hard-Delete von monthly_service_records / customer_assignment_history
+    // / aktiven Terminen Daten echter Kunden zerstören.
+    const CUSTOMER_TEST_C = sql`(
+      LOWER(c.vorname) LIKE '%test%' OR LOWER(c.nachname) LIKE '%test%'
+      OR LOWER(c.nachname) LIKE 'auto#_%' ESCAPE '#'
+      OR LOWER(c.nachname) LIKE 'privat-%' OR LOWER(c.nachname) LIKE 'fahrtdienst-%' OR LOWER(c.nachname) LIKE 'integ-%'
+      OR LOWER(c.vorname) LIKE 'sz-%' OR LOWER(c.vorname) LIKE 'pv-%' OR LOWER(c.vorname) LIKE 'fd-%'
+      OR LOWER(c.vorname) LIKE 'eb-%' OR LOWER(c.vorname) LIKE 'pg1-%' OR LOWER(c.vorname) LIKE 'qs-%'
+      OR LOWER(c.vorname) LIKE 'status-%'
+      OR LOWER(c.nachname) LIKE 'mustermann-%' OR LOWER(c.nachname) LIKE 'importtrim-%'
+      OR LOWER(c.nachname) LIKE 'notrim-%' OR LOWER(c.nachname) LIKE 'reconcile-%'
+      OR LOWER(c.nachname) LIKE 'aligned-%'
+    )`;
+    const blockerRes = await db.execute<{ appt: number; msr: number; cah: number }>(sql`
+      SELECT
+        (SELECT COUNT(*)::int FROM appointments a JOIN customers c ON c.id = a.customer_id
+          WHERE a.deleted_at IS NULL AND a.assigned_employee_id IN (${idList})
+            AND NOT ${CUSTOMER_TEST_C}) AS appt,
+        (SELECT COUNT(*)::int FROM monthly_service_records m JOIN customers c ON c.id = m.customer_id
+          WHERE m.employee_id IN (${idList}) AND NOT ${CUSTOMER_TEST_C}) AS msr,
+        (SELECT COUNT(*)::int FROM customer_assignment_history h JOIN customers c ON c.id = h.customer_id
+          WHERE h.employee_id IN (${idList}) AND NOT ${CUSTOMER_TEST_C}) AS cah
+    `);
+    const b = (blockerRes as unknown as { rows: Array<{ appt: number; msr: number; cah: number }> }).rows[0];
+    if (b.appt > 0 || b.msr > 0 || b.cah > 0) {
+      res.status(409).json({
+        error: "BLOCKED_REAL_CUSTOMER_REFS",
+        message: `Test-User sind mit echten Kunden verflochten (${b.appt} aktive Termine, ${b.msr} Monats-LN, ${b.cah} Zuweisungen). Cleanup verweigert, um Datenverlust zu verhindern.`,
+        rejected: ids,
+      });
+      return;
+    }
+
     // Audit-Schutzregeln nur für die Dauer dieses Batches deaktivieren.
     // ENABLE RULE auf bereits aktivierte Regel ist ein No-op, daher in finally
     // immer beide ausführen — selbst wenn DISABLE für die zweite fehlschlug,
@@ -344,7 +379,10 @@ router.post(
       .from(services)
       .where(and(
         inArray(services.id, ids),
-        sql`(LOWER(${services.name}) LIKE '%test%' OR LOWER(${services.name}) LIKE 'auto-%' OR LOWER(${services.name}) LIKE 'integ-%' OR LOWER(${services.name}) LIKE 'fd-%' OR LOWER(${services.name}) LIKE 'pv-%' OR LOWER(${services.name}) LIKE 'sz-%' OR LOWER(${services.name}) LIKE 'eb-%' OR LOWER(${services.name}) LIKE 'pg1-%' OR LOWER(${services.name}) LIKE 'qs-%' OR LOWER(${services.name}) LIKE 'status-%')`,
+        // Eng gefasst (Task #183 Spec): nur unverkennbare Test-Marker im Namen
+        // ODER Code. NICHT generisches "test" Substring, sonst würden Produktiv-
+        // Services mit "test" im Namen versehentlich gelöscht.
+        sql`(LOWER(${services.name}) LIKE '%#_test#_%' ESCAPE '#' OR LOWER(${services.code}) LIKE 'qs-test-%')`,
       ));
     const candidateIds = testServices.map((s) => s.id);
     if (candidateIds.length === 0) {

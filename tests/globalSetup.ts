@@ -111,12 +111,12 @@ function isTestUser(u: User): boolean {
 }
 
 function isTestService(s: Service): boolean {
+  // BEWUSST eng gefasst (Task #183 Spec): nur Services mit unverkennbarem
+  // Test-Marker im Namen ODER Code. NICHT generisches "test" Substring,
+  // sonst würden Produktiv-Services mit "test" im Namen fälschlich gelöscht.
   const n = (s.name || "").toLowerCase();
-  return n.includes("_test_") || n.includes("test") ||
-    n.startsWith("auto-") || n.startsWith("integ-") ||
-    n.startsWith("fd-") || n.startsWith("pv-") || n.startsWith("sz-") ||
-    n.startsWith("eb-") || n.startsWith("pg1-") || n.startsWith("qs-") ||
-    n.startsWith("status-");
+  const c = (s.code || "").toLowerCase();
+  return n.includes("_test_") || c.startsWith("qs-test-");
 }
 
 export async function setup() {
