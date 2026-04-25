@@ -401,6 +401,8 @@ export class AuthService {
       vacationDaysPerYear?: number;
       isActive?: boolean;
       isAdmin?: boolean;
+      isTeamLead?: boolean;
+      teamLeadId?: number | null;
       haustierAkzeptiert?: boolean;
       isEuRentner?: boolean;
       employmentType?: string;
@@ -434,7 +436,7 @@ export class AuthService {
 
     const directFields = [
       "email", "vorname", "nachname",
-      "vacationDaysPerYear", "isActive", "isAdmin",
+      "vacationDaysPerYear", "isActive", "isAdmin", "isTeamLead",
       "haustierAkzeptiert", "isEuRentner", "employmentType",
       "weeklyWorkDays", "monthlyWorkHours", "employmentStatus",
     ] as const;
@@ -451,6 +453,10 @@ export class AuthService {
       if (updates[field] !== undefined) {
         dbUpdates[field] = updates[field];
       }
+    }
+
+    if (updates.teamLeadId !== undefined) {
+      dbUpdates.teamLeadId = updates.teamLeadId ?? null;
     }
 
     if (updates.vorname !== undefined || updates.nachname !== undefined) {

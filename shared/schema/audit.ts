@@ -55,6 +55,9 @@ export const AUDIT_ACTIONS = [
   "customer_hard_deleted",
   "customer_price_changed_invoiced",
   "customer_price_replaced",
+  "user_team_lead_set",
+  "user_team_lead_unset",
+  "user_team_lead_assigned",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];

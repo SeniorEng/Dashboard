@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, date, boolean, unique, index, real } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, date, boolean, unique, index, real, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp, optionalGermanPhoneSchema } from "./common";
 
@@ -29,6 +29,8 @@ export const users = pgTable("users", {
   anonymizedAt: timestamp("anonymized_at"),
   isAdmin: boolean("is_admin").notNull().default(false),
   isSuperAdmin: boolean("is_super_admin").notNull().default(false),
+  isTeamLead: boolean("is_team_lead").notNull().default(false),
+  teamLeadId: integer("team_lead_id").references((): AnyPgColumn => users.id, { onDelete: "set null" }),
   haustierAkzeptiert: boolean("haustier_akzeptiert").notNull().default(true),
   isEuRentner: boolean("is_eu_rentner").notNull().default(false),
   employmentType: text("employment_type").notNull().default("sozialversicherungspflichtig"), // "minijobber" | "sozialversicherungspflichtig"
@@ -44,7 +46,9 @@ export const users = pgTable("users", {
   longitude: real("longitude"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  index("users_team_lead_id_idx").on(table.teamLeadId),
+]);
 
 // Employee roles/capabilities - can have multiple per user
 export const userRoles = pgTable("user_roles", {

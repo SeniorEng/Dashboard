@@ -31,11 +31,13 @@ export function UserForm({
   user,
   onSubmit,
   isLoading,
+  allUsers = [],
 }: {
   mode: "create" | "edit";
   user?: UserData;
   onSubmit: (data: UserFormData & { password?: string }) => void;
   isLoading: boolean;
+  allUsers?: UserData[];
 }) {
   const { user: currentUser } = useAuth();
   const isSuperAdmin = currentUser?.isSuperAdmin ?? false;
@@ -58,6 +60,8 @@ export function UserForm({
     user?.vacationDaysPerYear?.toString() ?? "30"
   );
   const [isAdmin, setIsAdmin] = useState(user?.isAdmin ?? false);
+  const [isTeamLead, setIsTeamLead] = useState(user?.isTeamLead ?? false);
+  const [teamLeadId, setTeamLeadId] = useState<string>(user?.teamLeadId ? String(user.teamLeadId) : "");
   const [haustierAkzeptiert, setHaustierAkzeptiert] = useState(user?.haustierAkzeptiert ?? true);
   const [isEuRentner, setIsEuRentner] = useState(user?.isEuRentner ?? false);
   const [employmentType, setEmploymentType] = useState(user?.employmentType ?? "sozialversicherungspflichtig");
@@ -154,6 +158,13 @@ export function UserForm({
       vacationDaysPerYear: vacationDaysPerYear ? parseInt(vacationDaysPerYear) : undefined,
       ...(mode === "edit" && carryOverDaysTouched ? { carryOverDays: carryOverDays ? parseInt(carryOverDays) : 0 } : {}),
       isAdmin,
+      ...(mode === "edit"
+        ? {
+            isTeamLead,
+            teamLeadId:
+              isAdmin || isTeamLead || !teamLeadId ? null : parseInt(teamLeadId),
+          }
+        : {}),
       haustierAkzeptiert,
       isEuRentner,
       employmentType,
@@ -457,10 +468,77 @@ export function UserForm({
               <Checkbox
                 id="isAdmin"
                 checked={isAdmin}
-                onCheckedChange={(checked) => setIsAdmin(!!checked)}
+                onCheckedChange={(checked) => {
+                  const next = !!checked;
+                  setIsAdmin(next);
+                  if (next) {
+                    setIsTeamLead(false);
+                    setTeamLeadId("");
+                  }
+                }}
                 data-testid="checkbox-is-admin"
               />
               <Label htmlFor="isAdmin">Administrator-Rechte</Label>
+            </div>
+          )}
+
+          {mode === "edit" && (
+            <div className="space-y-3 rounded-lg border p-3">
+              {isSuperAdmin && (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label htmlFor="isTeamLead">Teamleiter</Label>
+                    <p className="text-xs text-gray-500">
+                      Koordiniert ein Team von Mitarbeitern (folgt in weiteren Schritten).
+                    </p>
+                  </div>
+                  <Switch
+                    id="isTeamLead"
+                    checked={isTeamLead}
+                    disabled={isAdmin}
+                    onCheckedChange={(checked) => {
+                      setIsTeamLead(checked);
+                      if (checked) setTeamLeadId("");
+                    }}
+                    data-testid="switch-is-team-lead"
+                  />
+                </div>
+              )}
+              {!isAdmin && !isTeamLead && (
+                <div className="space-y-2">
+                  <Label htmlFor="teamLeadSelect">Teamleiter dieses Mitarbeiters</Label>
+                  <Select
+                    value={teamLeadId || "__none__"}
+                    onValueChange={(v) => setTeamLeadId(v === "__none__" ? "" : v)}
+                  >
+                    <SelectTrigger id="teamLeadSelect" data-testid="select-team-lead">
+                      <SelectValue placeholder="Kein Teamleiter" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__" data-testid="select-team-lead-none">
+                        — Kein Teamleiter —
+                      </SelectItem>
+                      {allUsers
+                        .filter(
+                          (u) =>
+                            u.isTeamLead &&
+                            u.isActive &&
+                            !u.isAnonymized &&
+                            u.id !== user?.id,
+                        )
+                        .map((u) => (
+                          <SelectItem
+                            key={u.id}
+                            value={String(u.id)}
+                            data-testid={`select-team-lead-${u.id}`}
+                          >
+                            {u.displayName}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
           )}
           

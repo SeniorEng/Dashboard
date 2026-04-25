@@ -168,6 +168,30 @@ export function requireAdminPermission(permissionKey: AdminPermissionKey) {
   };
 }
 
+export function requireTeamLeadOrAdmin(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  if (!req.user) {
+    res.status(401).json({
+      error: "UNAUTHORIZED",
+      message: "Bitte melden Sie sich an",
+    });
+    return;
+  }
+
+  if (req.user.isAdmin || (req.user.isTeamLead && req.user.isActive)) {
+    next();
+    return;
+  }
+
+  res.status(403).json({
+    error: "FORBIDDEN",
+    message: "Nur Teamleiter oder Administratoren können diese Aktion ausführen",
+  });
+}
+
 export function requireRoles(...requiredRoles: EmployeeRole[]) {
   return (req: Request, res: Response, next: NextFunction): void => {
     if (!req.user) {

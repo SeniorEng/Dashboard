@@ -17,6 +17,9 @@ export interface UserData {
   isActive: boolean;
   isAnonymized: boolean;
   isAdmin: boolean;
+  isSuperAdmin?: boolean;
+  isTeamLead: boolean;
+  teamLeadId: number | null;
   haustierAkzeptiert: boolean;
   isEuRentner: boolean;
   employmentType: string;
@@ -45,6 +48,8 @@ export interface UserFormData {
   vacationDaysPerYear?: number;
   carryOverDays?: number | null;
   isAdmin: boolean;
+  isTeamLead?: boolean;
+  teamLeadId?: number | null;
   haustierAkzeptiert: boolean;
   isEuRentner: boolean;
   employmentType: string;

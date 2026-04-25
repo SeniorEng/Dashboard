@@ -412,6 +412,7 @@ export default function AdminUsers() {
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("aktiv");
   const [roleFilter, setRoleFilter] = useState<string>("alle");
+  const [teamLeadFilter, setTeamLeadFilter] = useState<string>("alle");
   const [searchQuery, setSearchQuery] = useState("");
 
   const { data: users, isLoading } = useQuery<UserData[]>({
@@ -536,12 +537,30 @@ export default function AdminUsers() {
     },
   });
 
+  const teamLeadsList = useMemo(
+    () =>
+      (users ?? [])
+        .filter((u) => u.isTeamLead && u.isActive && !u.isAnonymized)
+        .sort((a, b) => a.displayName.localeCompare(b.displayName, "de")),
+    [users],
+  );
+
+  const userById = useMemo(() => {
+    const map = new Map<number, UserData>();
+    (users ?? []).forEach((u) => map.set(u.id, u));
+    return map;
+  }, [users]);
+
   const filteredUsers = useMemo(() => {
     if (!users) return [];
     return users.filter((user) => {
       if (statusFilter === "aktiv" && !user.isActive) return false;
       if (statusFilter === "inaktiv" && user.isActive) return false;
       if (roleFilter !== "alle" && !user.roles.includes(roleFilter)) return false;
+      if (teamLeadFilter !== "alle") {
+        const tlId = parseInt(teamLeadFilter);
+        if (Number.isNaN(tlId) || user.teamLeadId !== tlId) return false;
+      }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const nameMatch = user.displayName.toLowerCase().includes(q);
@@ -550,7 +569,7 @@ export default function AdminUsers() {
       }
       return true;
     });
-  }, [users, statusFilter, roleFilter, searchQuery]);
+  }, [users, statusFilter, roleFilter, teamLeadFilter, searchQuery]);
 
   const handleCreateSubmit = (data: UserFormData & { password?: string }) => {
     createMutation.mutate(data as UserFormData & { password: string });
@@ -629,6 +648,19 @@ export default function AdminUsers() {
                   <option key={role} value={role}>{ROLE_LABELS[role]}</option>
                 ))}
               </select>
+              <select
+                value={teamLeadFilter}
+                onChange={(e) => setTeamLeadFilter(e.target.value)}
+                className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white text-gray-700"
+                data-testid="filter-team-lead"
+              >
+                <option value="alle">Alle Teams</option>
+                {teamLeadsList.map((tl) => (
+                  <option key={tl.id} value={String(tl.id)}>
+                    Team {tl.displayName}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -681,8 +713,26 @@ export default function AdminUsers() {
                             <span className={`text-xs px-2 py-0.5 rounded ${user.isAdmin ? 'bg-teal-100 text-teal-700' : 'bg-gray-100 text-gray-600'}`}>
                               {user.isAdmin ? 'Admin' : 'Mitarbeiter'}
                             </span>
+                            {user.isTeamLead && !user.isAdmin && (
+                              <span
+                                className="text-xs px-2 py-0.5 rounded bg-indigo-100 text-indigo-700"
+                                data-testid={`badge-team-lead-${user.id}`}
+                              >
+                                Teamleiter
+                              </span>
+                            )}
                           </div>
                         </div>
+                        {!user.isAnonymized && (
+                          <div className="text-xs text-gray-500 mb-2" data-testid={`text-team-${user.id}`}>
+                            Team:{" "}
+                            <span className="font-medium text-gray-700">
+                              {user.teamLeadId
+                                ? userById.get(user.teamLeadId)?.displayName ?? "—"
+                                : "—"}
+                            </span>
+                          </div>
+                        )}
                         
                         {!user.isAnonymized && (
                           <div>
@@ -856,6 +906,7 @@ export default function AdminUsers() {
                 user={editingUser}
                 onSubmit={handleEditSubmit}
                 isLoading={updateMutation.isPending}
+                allUsers={users ?? []}
               />
               {isSuperAdmin && editingUser.isAdmin && (
                 <AdminPermissionsSection userId={editingUser.id} />
