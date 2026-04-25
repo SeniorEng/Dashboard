@@ -245,6 +245,17 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
     }
   }
 
+  if (req.body.isTeamLead !== undefined && !req.user!.isSuperAdmin) {
+    const currentUser = await authService.getUser(id);
+    if (currentUser && currentUser.isTeamLead !== req.body.isTeamLead) {
+      res.status(403).json({
+        error: "FORBIDDEN",
+        message: "Nur der Hauptadministrator kann die Teamleiter-Markierung vergeben oder entziehen",
+      });
+      return;
+    }
+  }
+
   const { whatsappEnabled, carryOverDays: carryOverDaysRaw, ...bodyWithoutExtras } = req.body;
 
   const result = updateUserSchema.safeParse({ ...bodyWithoutExtras, carryOverDays: carryOverDaysRaw });
@@ -292,6 +303,14 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
   }
   const nextTeamLeadId = effectiveTeamLeadId;
 
+  if (nextIsTeamLead && (nextIsAdmin || nextIsSuperAdmin)) {
+    res.status(400).json({
+      error: "VALIDATION_ERROR",
+      message: "Ein Administrator kann nicht gleichzeitig Teamleiter sein",
+    });
+    return;
+  }
+
   if (nextTeamLeadId !== null && nextTeamLeadId === id) {
     res.status(400).json({
       error: "VALIDATION_ERROR",
@@ -318,7 +337,14 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
 
   if (nextTeamLeadId !== null) {
     const lead = await authService.getUser(nextTeamLeadId);
-    if (!lead || !lead.isTeamLead || !lead.isActive || lead.isAnonymized) {
+    if (
+      !lead ||
+      !lead.isTeamLead ||
+      !lead.isActive ||
+      lead.isAnonymized ||
+      lead.isAdmin ||
+      lead.isSuperAdmin
+    ) {
       res.status(400).json({
         error: "VALIDATION_ERROR",
         message: "Der ausgewählte Teamleiter ist nicht (mehr) verfügbar",

@@ -3,6 +3,9 @@ import {
   apiPost,
   apiPatch,
   apiGet,
+  apiPut,
+  apiPatchAs,
+  loginAs,
   createTestEmployee,
   deactivateTestEmployee,
   resetAuthCache,
@@ -130,6 +133,41 @@ describe("Task #200 – Teamleiter-Fundament", () => {
       const res = await patchUser(empId, { teamLeadId: otherId });
       expect(res.status).toBe(400);
       expect(res.data.message).toMatch(/nicht.*verfügbar/i);
+    });
+
+    it("Invariante: Admin und Teamleiter gleichzeitig wird abgelehnt", async () => {
+      const empId = await makeEmployee("TLBoth");
+      const res = await patchUser(empId, { isAdmin: true, isTeamLead: true });
+      expect(res.status).toBe(400);
+      expect(res.data.message).toMatch(/gleichzeitig|Administrator/i);
+    });
+
+    it("Fall 4e: Admin als Teamleiter zuweisen wird abgelehnt", async () => {
+      const adminId = await makeAdmin("TLAdminAsLead");
+      const empId = await makeEmployee("TLNeedsAdminLead");
+      // Admin kann gar nicht isTeamLead sein, aber falls jemand das versucht zu umgehen:
+      const res = await patchUser(empId, { teamLeadId: adminId });
+      expect(res.status).toBe(400);
+      expect(res.data.message).toMatch(/nicht.*verfügbar/i);
+    });
+
+    it("Authz: nicht-SuperAdmin darf isTeamLead nicht setzen", async () => {
+      const adminEmp = await createTestEmployee({ isAdmin: true, nachnamePrefix: "TLAuthzAdmin" });
+      createdIds.push(adminEmp.id);
+      const targetId = await makeEmployee("TLAuthzTarget");
+      // Test-Admin braucht "users"-Permission, damit unser feinkörniger
+      // isTeamLead-Authz-Check überhaupt greift (sonst blockt die globale
+      // Bereichs-Middleware bereits davor).
+      await apiPut(`/api/admin/users/${adminEmp.id}/permissions`, {
+        permissions: ["users"],
+      });
+
+      const adminAuth = await loginAs(adminEmp.email, adminEmp.password);
+      const res = await apiPatchAs<any>(adminAuth, `/api/admin/users/${targetId}`, {
+        isTeamLead: true,
+      });
+      expect(res.status).toBe(403);
+      expect(res.data.message).toMatch(/Hauptadministrator/i);
     });
 
     it("Fall 4d: zugewiesener Teamleiter ist anonymisiert → abgelehnt", async () => {
