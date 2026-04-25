@@ -54,6 +54,39 @@ function buildFallbackTimeGrid(stepMinutes = 5): string[] {
   return out;
 }
 
+function ymdLocal(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function isWeekendLocal(d: Date): boolean {
+  const dow = d.getDay();
+  return dow === 0 || dow === 6;
+}
+
+function addDaysStr(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + days);
+  return ymdLocal(dt);
+}
+
+interface SlotOpts {
+  /** Inclusive lower bound (YYYY-MM-DD). Candidates < minDate are skipped. */
+  minDate?: string;
+  /** Inclusive upper bound (YYYY-MM-DD). Candidates > maxDate are skipped. */
+  maxDate?: string;
+  /**
+   * "past" (default): offset goes backwards from today (today, today-1, today-2 …)
+   *                   — used for tests that need a date BEFORE a price's validFrom.
+   * "future": offset goes forward (today, today+1, today+2 …)
+   *           — used for tests that need a date AT/AFTER a price's validFrom.
+   */
+  direction?: "past" | "future";
+}
+
 async function findFreeSlotAndCreate(
   customerId: number,
   serviceId: number,
@@ -61,11 +94,16 @@ async function findFreeSlotAndCreate(
   offsetRange: [number, number],
   times: string[],
   employeeId?: number,
+  opts: SlotOpts = {},
 ): Promise<{ id: number; date: string; time: string }> {
+  const direction = opts.direction ?? "past";
+  const sign = direction === "future" ? +1 : -1;
   let lastStatus: number | undefined;
   let lastBody: any;
   let attempts = 0;
   const triedDates = new Set<string>();
+  const skipped: string[] = [];
+
   const tryAt = async (dateStr: string, time: string) => {
     attempts++;
     const res = await apiPost<any>("/api/appointments/kundentermin", {
@@ -84,11 +122,28 @@ async function findFreeSlotAndCreate(
     return null;
   };
 
+  // Build the ordered list of candidate date strings (skipping weekends and bound violations).
+  const candidateDates: string[] = [];
   for (let offset = offsetRange[0]; offset <= offsetRange[1]; offset++) {
     const d = new Date();
-    d.setDate(d.getDate() - offset);
-    getWeekday(d);
-    const dateStr = d.toISOString().split("T")[0];
+    d.setDate(d.getDate() + sign * offset);
+    if (isWeekendLocal(d)) {
+      // Step further in the same direction until we hit a weekday so the API does not 400.
+      while (isWeekendLocal(d)) d.setDate(d.getDate() + sign);
+    }
+    const dateStr = ymdLocal(d);
+    if (opts.minDate && dateStr < opts.minDate) {
+      skipped.push(`${dateStr}<minDate`);
+      continue;
+    }
+    if (opts.maxDate && dateStr > opts.maxDate) {
+      skipped.push(`${dateStr}>maxDate`);
+      continue;
+    }
+    if (!candidateDates.includes(dateStr)) candidateDates.push(dateStr);
+  }
+
+  for (const dateStr of candidateDates) {
     triedDates.add(dateStr);
     for (const time of times) {
       const ok = await tryAt(dateStr, time);
@@ -100,11 +155,7 @@ async function findFreeSlotAndCreate(
   // Robust gegen accumulated test data (stale appointments belegen die ursprünglich
   // angefragten Zeitslots). Die Tests prüfen Inhalt/Aggregation, nicht die exakte Uhrzeit.
   const fallback = buildFallbackTimeGrid(5).filter((t) => !times.includes(t));
-  for (let offset = offsetRange[0]; offset <= offsetRange[1]; offset++) {
-    const d = new Date();
-    d.setDate(d.getDate() - offset);
-    getWeekday(d);
-    const dateStr = d.toISOString().split("T")[0];
+  for (const dateStr of candidateDates) {
     for (const time of fallback) {
       const ok = await tryAt(dateStr, time);
       if (ok) return ok;
@@ -113,8 +164,8 @@ async function findFreeSlotAndCreate(
 
   throw new Error(
     `Kein freier Slot gefunden (customer=${customerId} service=${serviceId} dur=${durationMinutes}min, ` +
-    `attempts=${attempts}, dates=${[...triedDates].join(",")}, ` +
-    `lastStatus=${lastStatus}, lastBody=${JSON.stringify(lastBody)})`
+    `direction=${direction}, attempts=${attempts}, dates=${[...triedDates].join(",")}, ` +
+    `skipped=${skipped.join(",")}, lastStatus=${lastStatus}, lastBody=${JSON.stringify(lastBody)})`
   );
 }
 
@@ -788,7 +839,7 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
 
   it("CP-2 – Kundenspezifischen Preis ab heute setzen", async () => {
     expect(cpCustomerId).toBeDefined();
-    cpValidFrom = new Date().toISOString().split("T")[0];
+    cpValidFrom = ymdLocal(new Date());
 
     const res = await apiPost<any>(`/api/customers/${cpCustomerId}/service-prices`, {
       serviceId: hwServiceId,
@@ -827,7 +878,9 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
 
     cpApptAfter = await findFreeSlotAndCreate(
       cpCustomerId, hwServiceId, 60,
-      [0, 0], ["03:00", "03:30", "04:00", "23:00", "23:30"],
+      [0, 10], ["03:00", "03:30", "04:00", "23:00", "23:30"],
+      undefined,
+      { direction: "future", minDate: cpValidFrom },
     );
     expect(
       cpApptAfter.date >= cpValidFrom,
@@ -888,7 +941,7 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
 
   it("CP-8 – Preis mit 0 Cent wird abgelehnt (Zod min(1))", async () => {
     expect(cpCustomerId).toBeDefined();
-    const today = new Date().toISOString().split("T")[0];
+    const today = ymdLocal(new Date());
     const res = await apiPost<any>(`/api/customers/${cpCustomerId}/service-prices`, {
       serviceId: abServiceId,
       priceCents: 0,
@@ -929,6 +982,8 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
     const cpApptPostDelete = await findFreeSlotAndCreate(
       cpCustomerId, hwServiceId, 60,
       [35, 60], ["11:00", "11:30", "12:00", "12:30"],
+      undefined,
+      { direction: "past", maxDate: addDaysStr(cpValidFrom, -1) },
     );
     const apptDateStr = cpApptPostDelete.date;
     expect(
@@ -1315,7 +1370,7 @@ describe("IP: Individuelle Preise – Zwei Kunden mit verschiedenen Preisen für
     customerId: number,
     preise: Record<string, number>,
   ): Promise<void> {
-    const today = new Date().toISOString().split("T")[0];
+    const today = ymdLocal(new Date());
     for (const [code, priceCents] of Object.entries(preise)) {
       const svc = allBillableServices.find(s => s.code === code);
       if (!svc) continue;
@@ -1342,23 +1397,34 @@ describe("IP: Individuelle Preise – Zwei Kunden mit verschiedenen Preisen für
     const customerId = custRes.data.id;
     cleanupCustomerIds.push(customerId);
 
+    // Dedicated employee per customer so Kunde A and Kunde B don't compete for the
+    // same time-slots on the shared testEmployeeId.
+    const dedicatedEmp = await createTestEmployee({ nachnamePrefix: "IPEmp" });
+
     await apiPatch<any>(`/api/admin/customers/${customerId}/assign`, {
       primaryEmployeeId: auth.user.id,
-      backupEmployeeId: testEmployeeId,
+      backupEmployeeId: dedicatedEmp.id,
       backupEmployeeId2: null,
     });
 
     await setCustomPricesForCustomer(customerId, preise);
 
+    // Termine MUSS in der Gegenwart/Zukunft liegen, da die Kundenpreise validFrom = heute haben.
+    const today = ymdLocal(new Date());
+
     const hwAppt = await findFreeSlotAndCreate(
       customerId, hwServiceId, 60,
-      [0, 5], hwSlots,
+      [0, 10], hwSlots,
+      dedicatedEmp.id,
+      { direction: "future", minDate: today },
     );
     await documentAppointment(hwAppt.id, hwAppt.time, hwServiceId, 60, `IP-HW-${nachname}`, 10, 5);
 
     const abAppt = await findFreeSlotAndCreate(
       customerId, abServiceId, 90,
-      [0, 5], abSlots,
+      [0, 10], abSlots,
+      dedicatedEmp.id,
+      { direction: "future", minDate: today },
     );
     await documentAppointment(abAppt.id, abAppt.time, abServiceId, 90, `IP-AB-${nachname}`, 0, 0);
 
