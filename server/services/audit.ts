@@ -1,5 +1,6 @@
 import { db } from "../lib/db";
 import { auditLog, type AuditAction, type AuditEntityType, type AuditLogFilter } from "@shared/schema";
+import type { ActorRole } from "../lib/team-lead";
 import { eq, and, gte, lte, desc, sql } from "drizzle-orm";
 import { users } from "@shared/schema";
 
@@ -85,7 +86,7 @@ class AuditService {
   async appointmentUpdated(
     userId: number,
     appointmentId: number,
-    metadata: { customerId: number; changedFields: string[] },
+    metadata: { customerId: number; changedFields: string[]; actor?: { role: ActorRole } },
     ipAddress?: string
   ): Promise<void> {
     await this.log(userId, "appointment_updated", "appointment", appointmentId, metadata, ipAddress);
@@ -103,7 +104,7 @@ class AuditService {
   async customerUpdated(
     userId: number,
     customerId: number,
-    metadata: { changedFields: string[]; oldValues: Record<string, unknown>; newValues: Record<string, unknown> },
+    metadata: { changedFields: string[]; oldValues: Record<string, unknown>; newValues: Record<string, unknown>; actor?: { role: ActorRole } },
     ipAddress?: string
   ): Promise<void> {
     await this.log(userId, "customer_updated", "customer", customerId, metadata, ipAddress);

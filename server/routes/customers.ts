@@ -14,7 +14,7 @@ import { customerManagementStorage } from "../storage/customer-management";
 import { asyncHandler } from "../lib/errors";
 import { requireIntParam, requireCustomerAccess, requireCustomerReadAccess } from "../lib/params";
 import { authService } from "../services/auth";
-import { isTeamLead, getTeamLeadVisibleCustomerIds } from "../lib/team-lead";
+import { isTeamLead, getTeamLeadVisibleCustomerIds, actorRole } from "../lib/team-lead";
 import { getCustomersByIds } from "../storage/customers-storage";
 import { todayISO, validateGeburtsdatum } from "@shared/utils/datetime";
 import { db } from "../lib/db";
@@ -219,6 +219,89 @@ router.patch("/:id/contract", asyncHandler("Vertragsdaten konnten nicht aktualis
   }, req.ip);
 
   res.json({ vereinbarteLeistungen });
+}));
+
+const assignmentSchema = z.object({
+  primaryEmployeeId: z.number().int().positive().nullable(),
+  backupEmployeeId: z.number().int().positive().nullable(),
+  backupEmployeeId2: z.number().int().positive().nullable(),
+});
+
+router.patch("/:id/assignment", asyncHandler("Zuordnung konnte nicht aktualisiert werden", async (req, res) => {
+  const user = req.user!;
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
+  // Schreibrecht: Admin oder Teamleiter, dessen Team-Sicht diesen Kunden enthält.
+  if (!user.isAdmin) {
+    if (!isTeamLead(user)) {
+      res.status(403).json({ error: "FORBIDDEN", message: "Nur Admins oder Teamleiter dürfen Kunden-Zuordnungen ändern." });
+      return;
+    }
+    const teamCustomerIds = await getTeamLeadVisibleCustomerIds(user.id);
+    if (!teamCustomerIds.includes(id)) {
+      res.status(403).json({ error: "FORBIDDEN", message: "Dieser Kunde ist nicht in Ihrem Team-Bereich." });
+      return;
+    }
+  }
+
+  const parsed = assignmentSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Daten", details: parsed.error.issues });
+    return;
+  }
+  const { primaryEmployeeId, backupEmployeeId, backupEmployeeId2 } = parsed.data;
+
+  const customer = await storage.getCustomer(id);
+  if (!customer) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+    return;
+  }
+
+  const assignedIds = [primaryEmployeeId, backupEmployeeId, backupEmployeeId2].filter((v): v is number => v != null);
+  if (new Set(assignedIds).size !== assignedIds.length) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Hauptansprechpartner, 1. Vertretung und 2. Vertretung müssen unterschiedlich sein" });
+    return;
+  }
+
+  for (const [empId, label] of [
+    [primaryEmployeeId, "Hauptansprechpartner"] as const,
+    [backupEmployeeId, "Vertretung"] as const,
+    [backupEmployeeId2, "2. Vertretung"] as const,
+  ]) {
+    if (empId == null) continue;
+    const emp = await authService.getUser(empId);
+    if (!emp || !emp.isActive) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: `${label} nicht gefunden oder nicht aktiv` });
+      return;
+    }
+  }
+
+  const oldValues = {
+    primaryEmployeeId: customer.primaryEmployeeId,
+    backupEmployeeId: customer.backupEmployeeId,
+    backupEmployeeId2: customer.backupEmployeeId2,
+  };
+  const newValues = { primaryEmployeeId, backupEmployeeId, backupEmployeeId2 };
+  const changedFields = (Object.keys(newValues) as (keyof typeof newValues)[])
+    .filter((k) => oldValues[k] !== newValues[k]);
+
+  const updated = await customerManagementStorage.updateCustomerAssignment(
+    id, primaryEmployeeId, backupEmployeeId, user.id, backupEmployeeId2,
+  );
+
+  birthdaysCache.invalidateAll();
+
+  if (changedFields.length > 0) {
+    await auditService.customerUpdated(user.id, id, {
+      changedFields,
+      oldValues,
+      newValues,
+      actor: { role: actorRole(user) },
+    }, req.ip);
+  }
+
+  res.json(updated);
 }));
 
 router.post("/", asyncHandler("Kunde konnte nicht erstellt werden", async (req, res) => {

@@ -38,7 +38,7 @@ import type { CoverageCheckResponse } from "@shared/api";
 import appointmentDocumentationRouter from "./appointment-documentation";
 import { db } from "../lib/db";
 import { customerManagementStorage } from "../storage/customer-management";
-import { isTeamLead, getTeamLeadVisibleEmployeeIds, getTeamLeadVisibleCustomerIds } from "../lib/team-lead";
+import { isTeamLead, getTeamLeadVisibleEmployeeIds, getTeamLeadVisibleCustomerIds, getTeamMemberIds, actorRole } from "../lib/team-lead";
 import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
 import { addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
 import { customers, users } from "@shared/schema";
@@ -138,6 +138,34 @@ export async function checkAppointmentWriteAccess(user: { id: number; isAdmin: b
     return false;
   }
   return true;
+}
+
+/**
+ * Schreibrecht für PATCH /api/appointments/:id (Reassign / Bearbeiten).
+ * Im Gegensatz zu `checkAppointmentWriteAccess` dürfen aktive Teamleiter Termine
+ * bearbeiten, deren assigned- oder performed-Mitarbeiter im Team-Bereich liegt.
+ * Diese erweiterte Sicht gilt NICHT für start/end/reopen/delete (Task #202 OOS).
+ */
+export async function checkAppointmentReassignAccess(
+  user: { id: number; isAdmin: boolean; isActive?: boolean; isTeamLead?: boolean; isSuperAdmin?: boolean },
+  appointment: { assignedEmployeeId: number | null; performedByEmployeeId?: number | null; customerId: number | null },
+  res: Response,
+): Promise<boolean> {
+  if (user.isAdmin) return true;
+  if (appointment.assignedEmployeeId === user.id) return true;
+
+  if (isTeamLead(user as Parameters<typeof isTeamLead>[0])) {
+    const teamEmployeeIds = await getTeamLeadVisibleEmployeeIds(user.id);
+    const assigned = appointment.assignedEmployeeId;
+    const performed = appointment.performedByEmployeeId ?? null;
+    if ((assigned !== null && assigned !== undefined && teamEmployeeIds.includes(assigned)) ||
+        (performed !== null && performed !== undefined && teamEmployeeIds.includes(performed))) {
+      return true;
+    }
+  }
+
+  sendForbidden(res, "ACCESS_DENIED", "Nur der zugewiesene Mitarbeiter darf diesen Termin bearbeiten.");
+  return false;
 }
 
 router.use(requireAuth);
@@ -531,6 +559,30 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
         "Der ausgewählte Mitarbeiter ist diesem Kunden nicht zugeordnet. Bitte weisen Sie den Mitarbeiter zuerst dem Kunden zu."
       );
     }
+  } else if (isTeamLead(user) && validatedData.assignedEmployeeId && validatedData.assignedEmployeeId !== user.id) {
+    // Teamleiter dürfen Termine im Namen ihrer Team-Mitarbeiter anlegen.
+    assignedEmployeeId = validatedData.assignedEmployeeId;
+
+    const memberIds = await getTeamMemberIds(user.id);
+    if (!memberIds.includes(assignedEmployeeId)) {
+      return sendForbidden(
+        res,
+        "NOT_TEAM_MEMBER",
+        "Der ausgewählte Mitarbeiter ist nicht Teil Ihres Teams.",
+      );
+    }
+
+    const isAssignedEmployee =
+      customer.primaryEmployeeId === assignedEmployeeId ||
+      customer.backupEmployeeId === assignedEmployeeId ||
+      customer.backupEmployeeId2 === assignedEmployeeId;
+
+    if (!isAssignedEmployee) {
+      return sendBadRequest(
+        res,
+        "Der ausgewählte Mitarbeiter ist diesem Kunden nicht zugeordnet. Bitte weisen Sie den Mitarbeiter zuerst dem Kunden zu.",
+      );
+    }
   } else {
     assignedEmployeeId = user.id;
     
@@ -737,7 +789,7 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
     return sendNotFound(res, ErrorMessages.appointmentNotFound);
   }
   
-  if (!await checkAppointmentWriteAccess(req.user!, existingAppointment, res)) return;
+  if (!await checkAppointmentReassignAccess(req.user!, existingAppointment, res)) return;
   
   const isLocked = await storage.isAppointmentLocked(id);
   if (isLocked) {
@@ -834,7 +886,11 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
     await auditService.appointmentUpdated(
       req.user!.id,
       id,
-      { customerId: existingAppointment.customerId!, changedFields },
+      {
+        customerId: existingAppointment.customerId!,
+        changedFields,
+        actor: { role: actorRole(req.user!) },
+      },
       ip
     );
   }
