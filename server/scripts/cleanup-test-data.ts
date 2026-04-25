@@ -164,6 +164,11 @@ interface Snapshot {
   realInvoices: number;
   softDeletedAppointmentsRealCust: number;
   softDeletedTimeEntriesRealUser: number;
+  // Erweiterung: high-value Tabellen mit Customer-FK auf echte Kunden,
+  // die Phase 4 (User-Cleanup) potenziell anfassen könnte.
+  realAppointmentSeries: number;
+  realMonthlyServiceRecords: number;
+  realCustomerAssignmentHistory: number;
 }
 
 // Aliase für JOIN-Versionen (gleiche Bedingung, aber mit Tabellen-Alias).
@@ -183,15 +188,7 @@ const USER_TEST_U = sql`(
 )`;
 
 async function takeSnapshot(label: string): Promise<Snapshot> {
-  const r = await db.execute<{
-    realCustomers: number;
-    realProspects: number;
-    realUsers: number;
-    realServices: number;
-    realInvoices: number;
-    softDeletedAppointmentsRealCust: number;
-    softDeletedTimeEntriesRealUser: number;
-  }>(sql`
+  const r = await db.execute<Snapshot & Record<string, unknown>>(sql`
     SELECT
       (SELECT COUNT(*)::int FROM customers WHERE NOT ${CUSTOMER_TEST_CONDITION}) AS "realCustomers",
       (SELECT COUNT(*)::int FROM prospects WHERE NOT ${PROSPECT_TEST_CONDITION}) AS "realProspects",
@@ -199,7 +196,10 @@ async function takeSnapshot(label: string): Promise<Snapshot> {
       (SELECT COUNT(*)::int FROM services WHERE NOT ${SERVICE_TEST_CONDITION}) AS "realServices",
       (SELECT COUNT(*)::int FROM invoices i JOIN customers c ON c.id = i.customer_id WHERE NOT ${CUSTOMER_TEST_C}) AS "realInvoices",
       (SELECT COUNT(*)::int FROM appointments a JOIN customers c ON c.id = a.customer_id WHERE a.deleted_at IS NOT NULL AND NOT ${CUSTOMER_TEST_C}) AS "softDeletedAppointmentsRealCust",
-      (SELECT COUNT(*)::int FROM employee_time_entries e JOIN users u ON u.id = e.user_id WHERE e.deleted_at IS NOT NULL AND NOT ${USER_TEST_U}) AS "softDeletedTimeEntriesRealUser"
+      (SELECT COUNT(*)::int FROM employee_time_entries e JOIN users u ON u.id = e.user_id WHERE e.deleted_at IS NOT NULL AND NOT ${USER_TEST_U}) AS "softDeletedTimeEntriesRealUser",
+      (SELECT COUNT(*)::int FROM appointment_series s JOIN customers c ON c.id = s.customer_id WHERE NOT ${CUSTOMER_TEST_C}) AS "realAppointmentSeries",
+      (SELECT COUNT(*)::int FROM monthly_service_records m JOIN customers c ON c.id = m.customer_id WHERE NOT ${CUSTOMER_TEST_C}) AS "realMonthlyServiceRecords",
+      (SELECT COUNT(*)::int FROM customer_assignment_history h JOIN customers c ON c.id = h.customer_id WHERE NOT ${CUSTOMER_TEST_C}) AS "realCustomerAssignmentHistory"
   `);
   const row = (r as unknown as { rows: Snapshot[] }).rows[0];
   log(`\n[${label}] Whitelist-Counts (echte Daten, dürfen nicht abnehmen):`);
@@ -210,6 +210,9 @@ async function takeSnapshot(label: string): Promise<Snapshot> {
   log(`   Rechnungen echter Kunden:                  ${row.realInvoices}`);
   log(`   weich-gelöschte Termine echter Kunden:     ${row.softDeletedAppointmentsRealCust}`);
   log(`   weich-gelöschte Zeit-Einträge echter User: ${row.softDeletedTimeEntriesRealUser}`);
+  log(`   Termin-Serien echter Kunden:               ${row.realAppointmentSeries}`);
+  log(`   Monats-LN echter Kunden:                   ${row.realMonthlyServiceRecords}`);
+  log(`   Zuweisungs-Historie echter Kunden:         ${row.realCustomerAssignmentHistory}`);
   return row;
 }
 
@@ -217,6 +220,7 @@ function assertWhitelistUnchanged(before: Snapshot, after: Snapshot): void {
   const fields: Array<keyof Snapshot> = [
     "realCustomers", "realProspects", "realUsers", "realServices",
     "realInvoices", "softDeletedAppointmentsRealCust", "softDeletedTimeEntriesRealUser",
+    "realAppointmentSeries", "realMonthlyServiceRecords", "realCustomerAssignmentHistory",
   ];
   const diffs = fields.filter((k) => before[k] !== after[k]);
   if (diffs.length > 0) {
@@ -410,6 +414,28 @@ async function purgeTestUsers(apply: boolean): Promise<void> {
     throw new Error(`ABBRUCH: ${blocker} Termine echter Kunden sind Test-Mitarbeitern zugewiesen. Bitte erst manuell umhängen.`);
   }
 
+  // Sicherheitscheck 2: monthly_service_records / customer_assignment_history
+  // mit NOT-NULL employee_id, die Test-User mit ECHTEN Kunden verbinden.
+  // Phase 4 würde diese Rows hart löschen — das wäre Datenverlust für echte Kunden.
+  const blocker2Res = await db.execute<{ msr: number; cah: number }>(sql`
+    SELECT
+      (SELECT COUNT(*)::int FROM monthly_service_records m
+        JOIN users u ON u.id = m.employee_id
+        JOIN customers c ON c.id = m.customer_id
+        WHERE ${USER_TEST_U} AND NOT ${CUSTOMER_TEST_C}) AS msr,
+      (SELECT COUNT(*)::int FROM customer_assignment_history h
+        JOIN users u ON u.id = h.employee_id
+        JOIN customers c ON c.id = h.customer_id
+        WHERE ${USER_TEST_U} AND NOT ${CUSTOMER_TEST_C}) AS cah
+  `);
+  const b2 = (blocker2Res as unknown as { rows: Array<{ msr: number; cah: number }> }).rows[0];
+  if (b2.msr > 0 || b2.cah > 0) {
+    throw new Error(
+      `ABBRUCH: Test-Mitarbeiter sind in echten Kundendaten verflochten — ${b2.msr} monthly_service_records + ${b2.cah} customer_assignment_history Einträge ` +
+      `gehören echten Kunden, sind aber von Test-Usern erzeugt. Bitte manuell auf einen echten Mitarbeiter umhängen, sonst würde Phase 4 echte Daten zerstören.`,
+    );
+  }
+
   const idsRes = await db.execute<{ id: number; email: string }>(sql`SELECT id, email FROM users WHERE ${USER_TEST_CONDITION} ORDER BY id`);
   const all = (idsRes as unknown as { rows: Array<{ id: number; email: string }> }).rows;
   log(`Gefunden: ${all.length} Test-Mitarbeiter`);
@@ -451,7 +477,10 @@ async function purgeTestUsers(apply: boolean): Promise<void> {
       await tx.execute(sql`DELETE FROM monthly_service_records WHERE employee_id IN (${idList})`);
       await tx.execute(sql`DELETE FROM customer_assignment_history WHERE employee_id IN (${idList})`);
       await tx.execute(sql`DELETE FROM tasks WHERE created_by_user_id IN (${idList}) OR assigned_to_user_id IN (${idList})`);
-      await tx.execute(sql`DELETE FROM appointment_series WHERE assigned_employee_id IN (${idList})`);
+      // KEIN DELETE auf appointment_series via assigned_employee_id — das würde
+      // Serien echter Kunden löschen, denen mal ein Test-Mitarbeiter zugewiesen
+      // war. Series von Test-Kunden sind in Phase 1 bereits weg; verbleibende
+      // Series gehören echten Kunden und bekommen unten nur SET NULL.
       await tx.execute(sql`DELETE FROM employee_compensation_history WHERE created_by_user_id IN (${idList})`);
 
       // SET NULL on nullable FK refs (NO ACTION rules); rows belonging to test customers

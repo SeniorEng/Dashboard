@@ -249,7 +249,10 @@ router.post(
         await tx.execute(sql`DELETE FROM monthly_service_records WHERE employee_id IN (${idList})`);
         await tx.execute(sql`DELETE FROM customer_assignment_history WHERE employee_id IN (${idList})`);
         await tx.execute(sql`DELETE FROM tasks WHERE created_by_user_id IN (${idList}) OR assigned_to_user_id IN (${idList})`);
-        await tx.execute(sql`DELETE FROM appointment_series WHERE assigned_employee_id IN (${idList})`);
+        // KEIN DELETE auf appointment_series via assigned_employee_id — würde
+        // Serien echter Kunden treffen, denen mal ein Test-Mitarbeiter zugewiesen
+        // war. Series der Test-Kunden sind bereits über purge-customers weg;
+        // verbleibende Series gehören echten Kunden und bekommen unten SET NULL.
         await tx.execute(sql`DELETE FROM employee_compensation_history WHERE created_by_user_id IN (${idList})`);
 
         // SET NULL on nullable FK refs (NO ACTION rules) — Test-User-Spuren
