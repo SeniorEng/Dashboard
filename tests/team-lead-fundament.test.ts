@@ -250,6 +250,18 @@ describe("Task #200 – Teamleiter-Fundament", () => {
       const deact = await apiPost<any>(`/api/admin/users/${leadId}/deactivate`, {});
       expect(deact.status).toBe(200);
     });
+
+    it("PATCH isActive=false eines Teamleiters mit Reports wird ebenfalls blockiert", async () => {
+      const leadId = await makeEmployee("TLPatchDeact");
+      const memberId = await makeEmployee("TLPatchDeactRep");
+      await patchUser(leadId, { isTeamLead: true });
+      const assign = await patchUser(memberId, { teamLeadId: leadId });
+      expect(assign.status).toBe(200);
+
+      const res = await patchUser(leadId, { isActive: false });
+      expect(res.status).toBe(400);
+      expect(res.data.message).toMatch(/Teamleiter.*nicht deaktiviert/i);
+    });
   });
 
   describe("Auto-Bereinigung: Bei Wechsel zu Admin/Teamleiter wird teamLeadId entfernt", () => {

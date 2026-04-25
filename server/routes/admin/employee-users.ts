@@ -364,6 +364,26 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
       return;
     }
   }
+
+  // Deactivation-Block auch im PATCH-Pfad: ein Teamleiter mit aktiven
+  // Reports darf weder über /deactivate noch über PATCH isActive=false
+  // deaktiviert werden.
+  if (
+    result.data.isActive === false &&
+    currentUserBefore.isActive &&
+    currentUserBefore.isTeamLead &&
+    nextIsTeamLead
+  ) {
+    const { countActiveReports } = await import("../../lib/team-lead");
+    const reportCount = await countActiveReports(id);
+    if (reportCount > 0) {
+      res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: `Teamleiter kann nicht deaktiviert werden: ${reportCount} aktive Mitarbeiter sind ihm noch zugeordnet. Bitte zuerst die Zuordnungen entfernen oder umhängen.`,
+      });
+      return;
+    }
+  }
   // ---------- /Teamleiter-Validierung ----------
 
   const { roles, carryOverDays, ...rest } = result.data;
