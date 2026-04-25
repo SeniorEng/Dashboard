@@ -29,6 +29,7 @@ interface AffectedInvoice {
 
 type PendingChange =
   | { kind: "save"; serviceId: number; priceCents: number; validFrom?: string; invoices: AffectedInvoice[] }
+  | { kind: "edit"; priceId: number; priceCents: number; invoices: AffectedInvoice[] }
   | { kind: "delete"; priceId: number; invoices: AffectedInvoice[] };
 
 interface CatalogService {
@@ -193,6 +194,48 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
     },
   });
 
+  const editMutation = useMutation({
+    mutationFn: async ({
+      priceId,
+      priceCents,
+      confirmInvoiceOverride,
+    }: {
+      priceId: number;
+      priceCents: number;
+      confirmInvoiceOverride?: boolean;
+    }) => {
+      const body: Record<string, unknown> = { priceCents };
+      if (confirmInvoiceOverride) body.confirmInvoiceOverride = true;
+      const result = await api.patch(`/customers/${customerId}/service-prices/${priceId}`, body);
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      invalidateRelated(queryClient, "customer-service-prices");
+      setEditingServiceId(null);
+      setEditPrice("");
+      setEditValidFrom("");
+      setPendingChange(null);
+      toast({ title: "Kundenpreis aktualisiert" });
+    },
+    onError: (error: Error, variables) => {
+      if (
+        error instanceof ApiError
+        && error.code === "INVOICED_PERIOD_AFFECTED"
+        && !variables.confirmInvoiceOverride
+      ) {
+        const invoices = (error.details?.invoices as AffectedInvoice[] | undefined) || [];
+        setPendingChange({
+          kind: "edit",
+          priceId: variables.priceId,
+          priceCents: variables.priceCents,
+          invoices,
+        });
+        return;
+      }
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async ({ priceId, confirmInvoiceOverride }: { priceId: number; confirmInvoiceOverride?: boolean }) => {
       const url = confirmInvoiceOverride
@@ -231,6 +274,12 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
         serviceId: pendingChange.serviceId,
         priceCents: pendingChange.priceCents,
         validFrom: pendingChange.validFrom,
+        confirmInvoiceOverride: true,
+      });
+    } else if (pendingChange.kind === "edit") {
+      editMutation.mutate({
+        priceId: pendingChange.priceId,
+        priceCents: pendingChange.priceCents,
         confirmInvoiceOverride: true,
       });
     } else {
@@ -277,9 +326,24 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
       toast({ title: "Ungültiger Preis", variant: "destructive" });
       return;
     }
+    const newPriceCents = Math.round(euros * 100);
+    const existingCustomPrice = priceMap.get(serviceId);
+    if (!editValidFrom && existingCustomPrice && newPriceCents !== existingCustomPrice.priceCents) {
+      editMutation.mutate({
+        priceId: existingCustomPrice.id,
+        priceCents: newPriceCents,
+      });
+      return;
+    }
+    if (!editValidFrom && existingCustomPrice && newPriceCents === existingCustomPrice.priceCents) {
+      setEditingServiceId(null);
+      setEditPrice("");
+      setEditValidFrom("");
+      return;
+    }
     saveMutation.mutate({
       serviceId,
-      priceCents: Math.round(euros * 100),
+      priceCents: newPriceCents,
       validFrom: editValidFrom || undefined,
     });
   }
@@ -435,7 +499,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
                       size="sm"
                       className="h-7 w-7 p-0"
                       onClick={() => handleSave(service.id)}
-                      disabled={saveMutation.isPending}
+                      disabled={saveMutation.isPending || editMutation.isPending}
                       data-testid={`btn-save-price-${service.id}`}
                     >
                       <Check className="h-3.5 w-3.5 text-green-600" />
